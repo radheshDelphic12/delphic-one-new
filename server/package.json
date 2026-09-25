@@ -1,0 +1,53 @@
+{
+  "name": "server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "generate": "prisma generate",
+    "seed": "node prisma/seed.js",
+    "seed:accounts": "node prisma/seed-accounts.js",
+    "seed:jira": "node prisma/seed-jira.js",
+    "seed:vendors": "node prisma/seed-vendors.js",
+    "seed:admin": "node prisma/seed-admin.js",
+    "erp:phase0:backfill": "node prisma/erp/phase0-backfill.js",
+    "studio": "prisma studio",
+    "test": "jest --runInBand",
+    "erp:seed:locations": "node prisma/erp/seed-locations-calendars.js",
+    "erp:seed:multi-org": "node prisma/erp/seed-multi-org-demo.js",
+    "erp:seed:verticals": "node prisma/erp/seed-verticals-demo.js",
+    "erp:seed:it-timesheets": "node prisma/erp/seed-it-timesheets-demo.js",
+    "erp:backfill:project-calendars": "node prisma/erp/backfill-project-calendars.js",
+    "staging:bootstrap": "node scripts/staging-bootstrap.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^10.0.10",
+    "pdfkit": "^0.15.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.4",
+    "prisma": "^5.18.0",
+    "supertest": "^7.0.0"
+  }
+}

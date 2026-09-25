@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+!server/.env.erp.example
+*.log
+npm-debug.log*
+.DS_Store
+uploads/
+uploads_test/
+coverage/
+.vscode/
+*.local
+
+# Local database dumps / restore safety snapshots / pre-deploy backups
+*.dump
+backups/

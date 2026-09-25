@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-requirement_dashboard}
+    ports:
+      - '${POSTGRES_PORT:-5434}:5432'
+    # Default max_connections (100) gets tight once more than one app/DB
+    # shares this instance (the ERP branch's second DB, jest, a host-run dev
+    # server all pointed at :5434). Each client caps its own pool via
+    # connection_limit below, but this is the ceiling across all of them —
+    # see docs/guides/DATABASE-CONNECTION-POOLING.md.
+    command: postgres -c max_connections=200
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4000
+      HOST_API_PORT: ${API_PORT:-4000}
+      HOST_CLIENT_PORT: ${CLIENT_PORT:-8081}
+      HOST_DB_PORT: ${POSTGRES_PORT:-5434}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-requirement_dashboard}?connection_limit=${DB_POOL_SIZE:-10}&pool_timeout=${DB_POOL_TIMEOUT:-20}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local_dev_access_secret_do_not_use_in_prod_01}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-local_dev_refresh_secret_do_not_use_in_prod_01}
+      JWT_ACCESS_EXPIRES: 1h
+      JWT_REFRESH_EXPIRES: 7d
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8081}
+      UPLOAD_DIR: /app/server/uploads
+      MAX_UPLOAD_MB: 10
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - uploads:/app/server/uploads
+    ports:
+      - '${API_PORT:-4000}:4000'
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      HOST_CLIENT_PORT: ${CLIENT_PORT:-8081}
+      HOST_API_PORT: ${API_PORT:-4000}
+    ports:
+      - '${CLIENT_PORT:-8081}:80'
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "{\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"level\":\"info\",\"msg\":\"ports_map\",\"service\":\"delphic-client\",\"client\":\"http://localhost:$${HOST_CLIENT_PORT:-8081}\",\"api\":\"http://localhost:$${HOST_API_PORT:-4000}\",\"nginx_listen\":80}"
+        nginx -g 'daemon off;'
+
+volumes:
+  pg_data:
+  uploads:

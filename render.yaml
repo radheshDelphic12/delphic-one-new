@@ -1,0 +1,63 @@
+# Render blueprint - STAGING only. Production deploys separately (EC2 via .github/workflows/deploy.yml).
+#
+# One Docker web service (Dockerfile) serves BOTH tiers behind nginx:
+#   /            React SPA (built by Vite)
+#   /api, /uploads   proxied to the Express API on 127.0.0.1:4000
+# Same origin means no CORS surprises and one URL to test.
+#
+# Secrets are `sync: false`: Render prompts for them once in the dashboard and they
+# are never stored in git. Use the Neon DIRECT host (no "-pooler") for DATABASE_URL -
+# prisma migrate can hang through the pooler.
+services:
+  - type: web
+    name: delphic-staging
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    repo: https://github.com/deepanshu-chauhan-delphic/delphic-one
+    branch: staging
+    autoDeploy: true
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 10000
+      # Neon staging database - paste in the Render dashboard, e.g.
+      # postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require&connect_timeout=30
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES
+        value: 1h
+      - key: JWT_REFRESH_EXPIRES
+        value: 7d
+      # Exact public URL of THIS service (check it after the first deploy; Render adds a
+      # suffix if the name is taken).
+      - key: CORS_ORIGIN
+        value: https://delphic-staging.onrender.com
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: UPLOAD_DIR
+        value: /app/server/uploads
+      - key: MAX_UPLOAD_MB
+        value: "10"
+      # Free plan sleeps when idle, so in-process cron jobs would not run reliably anyway.
+      - key: ENABLE_JOBS
+        value: "false"
+      - key: LOG_LEVEL
+        value: info
+      # Boot step (scripts/staging-bootstrap.js): migrations always run; demo data seeds
+      # when "true". Safe to leave on: only an EMPTY database gets the base import, the
+      # rest is idempotent. Set to "false" once you no longer want demo data topped up.
+      - key: SEED_STAGING
+        value: "true"
+      # Optional, add later in the dashboard for real email/invite delivery:
+      #   NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465), NOTIFICATIONS_EMAIL_FROM.
+      # Unset = queued mail is marked "skipped".
+      # Build-time: "true" hides the dev quick-login bar (leave "false" for internal testing).
+      - key: VITE_DISABLE_QUICK_LOGIN
+        value: "false"

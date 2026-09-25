@@ -1,0 +1,1624 @@
+Summary,Issue key,Issue id,Issue Type,Status,Project key,Project name,Project type,Project lead,Project lead id,Project description,Priority,Resolution,Assignee,Assignee Id,Reporter,Reporter Id,Creator,Creator Id,Created,Updated,Last Viewed,Resolved,Due date,Votes,Description,Environment,Watchers,Watchers,Watchers,Watchers,Watchers,Watchers,Watchers Id,Watchers Id,Watchers Id,Watchers Id,Watchers Id,Watchers Id,Original estimate,Remaining Estimate,Time Spent,Work Ratio,Σ Original Estimate,Σ Remaining Estimate,Σ Time Spent,Security Level,Inward issue link (Polaris work item link),Outward issue link (Polaris work item link),Outward issue link (Polaris work item link),Custom field (Acknowledgement Mail Sent),Custom field (Acknowledgement Status),Custom field (Budget),Custom field (CCTC),Custom field (CV Received),Custom field (Can install tracker ?),Custom field (Can use own Laptop ?),Custom field (Checked Laptop Deduction),Custom field (Checked Service Bond),Custom field (Client),Custom field (Client),Custom field (Communication Rating),Custom field (Company),Custom field (Company's Linkedin URL ),Custom field (Contact Number),Custom field (Current Location),Custom field (Currently working as),Custom field (Date of Internal Interview),Custom field (Date of Posting),Custom field (Date of Sourcing),Custom field (Designation),Custom field (Designation),Custom field (Development),Custom field (ECTC),Custom field (Email),Custom field (End Date),Custom field (Experience),Custom field (Internal Interview Date),Custom field (Internal Interview Qualified),Custom field (Interview Summary),Custom field (Interview Summary),Custom field (Last Working Date),Custom field (Link),Custom field (Location),Custom field (Minimum Monthly Rate (for Client)),Custom field (Monthly Rate),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee),Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Multi-Assignee)Id,Custom field (Need to Work),Custom field (Notice Period),Custom field (Number of Positions),Custom field (People & Culture - Requirement Checked),Custom field (Priority),Custom field (Rank),Custom field (Requirement Type),Custom field (Resource's Linkedin URL),Custom field (Share to Vendor),Custom field (Stages),Custom field (Start date),Team Id,Team Name,Custom field (Time of Sourcing),Custom field (Total Profiles),Custom field (Total Screened Profiles),Custom field (Vendor - Community Posting (Anurag)),Custom field (Vendor - Requirement Checked (Rajini)),Custom field (Vendor - Requirement Checked (Sudipto)),Custom field (Vendor Budget),Custom field (Vendor POC Contact Number),Custom field (Vendor POC Name),Custom field (Work Experience (in yrs)),Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Comment,Status Category,Status Category Changed
+Sr ServiceNow Developer – SPM,OUT-22320,57649,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,31/Aug/26 12:04 PM,31/Aug/26 12:04 PM,,,,0,"Sr ServiceNow Developer – SPM
+
+Experience: 7 to 10 years
+Work Mode: Remote
+Notice: Immediate
+Coding: Mandatory
+Mandatory Skills:
+
+# Strategic Portfolio Management
+# ServiceNow SPM suite
+# ServiceNow ITBM
+# Scripting, Business Rules, UI Policies and Integrations, Proficiency in JavaScript, Glide
+scripting, and ServiceNow Studio
+Job Requirements:
+• Experience with Strategic Portfolio Management (Demand Management, Innovation
+Management, Project Portfolio Management (PPM) and Application Portfolio
+Management (APM))
+• Familiarity with AI-driven insights and predictive analytics in project planning .
+• Exposure to Scaled Agile Framework (Safe) and Agile
+Key responsibilities:
+• Implement and configure SPM modules including Project Portfolio Management (PPM),
+Demand Management, Resource Management, Agile Development, and Financial
+Planning.
+• Customize project templates, scoring models, and portfolio dashboards.
+• Design scalable technical architectures following ServiceNow best practices.
+Certifications:
+• _Certified in CIS - SPM_",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,1.8 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,7+,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,Yes,,1.0,,Highest,0|i03w7z:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,,,,,,,,,,,,,,,,,,To Do,31/Aug/26 12:04 PM
+Data Engineer,OUT-22319,57648,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,31/Aug/26 12:02 PM,31/Aug/26 12:02 PM,,,,0,"Job Title: Data Engineer
+
+Experience: 6+ Years
+Employment Type: C2C
+Priority: P1
+Location: Remote
+Shift Timing: 11:00 AM – 9:00 PM IST
+Budget: ₹130K
+
+Job Summary
+
+We are seeking an experienced Data Engineer with 6+ years of experience in designing, developing, and supporting modern data engineering solutions. The ideal candidate will have strong expertise in Azure, Databricks, PySpark, SQL, Python, AI/ML, and production support. Experience in the Healthcare, Claims, or Payer domain is highly preferred.
+
+Key Skills & Requirements
+Data Engineering & Cloud
+6+ years of experience in Data Engineering.
+Strong hands-on experience with Microsoft Azure and Azure Data Services.
+Expertise in Azure Data Factory (ADF), including pipelines, triggers, monitoring, and troubleshooting.
+Strong experience with Azure Databricks.
+Hands-on experience with Delta Tables, PySpark, and Spark SQL.
+Experience with workflow orchestration tools such as Apache Airflow.
+Database & SQL
+Experience with Oracle and Snowflake databases.
+Strong understanding of SQL-based RDBMS platforms.
+Advanced SQL skills, including:
+Complex joins
+Query optimization and performance tuning
+Analytical functions
+Programming & AI/ML
+Strong proficiency in Python (Mandatory).
+Knowledge of additional programming languages such as Java or Scala is preferred.
+Hands-on exposure to AI/ML technologies (Mandatory).
+Experience with AI tools, AI Builder, ML pipelines, or analytics-driven use cases.
+Production Support & Quality
+Experience in production support and issue resolution.
+Strong knowledge of incident management, RCA, and SLA adherence.
+Experience in data validation, reconciliation, and testing.
+Exposure to QA automation and data testing frameworks is preferred.
+Preferred Qualifications
+Experience working with Optum is preferred.
+Strong experience in the Healthcare, Claims, or Payer domain.
+Candidates with Optum experience should clearly mention the duration and role on their resume.
+Must-Have Skills
+Azure
+Azure Data Factory (ADF)
+Databricks / PySpark / Spark SQL
+Python
+Advanced SQL
+AI/ML
+Good-to-Have Skills
+Apache Airflow
+Oracle and Snowflake
+Healthcare / Claims / Payer domain
+Optum experience
+Production Support & QA Automation",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,1.3 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,6,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,Yes,,1.0,,Highest,0|i03w7r:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,,,,,,,,,,,,,,,,,,To Do,31/Aug/26 12:02 PM
+Senior ServiceNow Developer – SecOps,OUT-22318,57647,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,31/Aug/26 11:44 AM,31/Aug/26 11:44 AM,,,,0,"Senior ServiceNow Developer – SecOps
+Experience: 6–10 Years
+Notice Period: Immediate
+Location: Remote
+About the Role
+We are expanding our high-performing team and looking for Senior ServiceNow Developers with
+6 to 10 years of hands-on platform experience.
+Key Responsibilities
+
+* End-to-End Development: Hands-on coding, building, and deploying robust solutions
+across the ServiceNow platform.
+* Integration Engineering: Design and maintain complex integrations, ensuring
+scalability as our heavily integrated ecosystem continues to grow.
+* User Experience Delivery: Build advanced, user-centric interfaces utilizing Service
+Portal and Workspace.
+* Multitasking & Initiative: Manage multiple initiatives and competing priorities
+simultaneously, acting as a proactive self-starter.
+* Stakeholder Engagement: Collaborate effectively with stakeholders, leveraging strong
+communication, high EQ, and business acumen.
+Core Technical Requirements
+* Experience: 6–10 years of hands-on ServiceNow development and coding.
+* Platform Mastery: In-depth technical familiarity with workflows, data models, APIs,
+Flow Designer, IntegrationHub, and system integrations.
+Security Operations (SecOps) Expertise (Mandatory):
+* Strong hands-on experience in ServiceNow Security Operations (SecOps).
+* Experience with Security Incident Response (SIR), Vulnerability Response (VR),
+Threat Intelligence, and integrations with security tools.
+* Strong knowledge of security workflows, automation, orchestration, and third-party
+integrations.
+* Ability to develop scalable security solutions on the ServiceNow platform.
+* CSA,CAD and CIS-Security Operations certification is Mandatory
+
+Nice-to-Have Skills
+
+* Significant background or experience in the Finance sector.
+* Exposure to modern technologies such as AI Ops and Agentic AI.",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,1.6 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,6+,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,Yes,,1.0,,Highest,0|i03w7j:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,,,,,,,,,,,,,,,,,,To Do,31/Aug/26 11:44 AM
+Workday PRISM-certified (Certificate Not Mandatory),OUT-22317,57614,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Biswajit Dey,712020:05dfacdd-8b81-44e0-8c65-67aa8bd8e871,28/Aug/26 9:26 AM,31/Aug/26 11:13 AM,28/Aug/26 9:46 AM,,,0,,,Biswajit Dey,Shivani Sinha,,,,,712020:05dfacdd-8b81-44e0-8c65-67aa8bd8e871,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,,,,,,,,,,,,,,1.3LPM,,,,,,,ApaarInfosystem,,,Delphic,,,,,,,,,,,,,,0-4yrs,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,Yes,,1.0,,Highest,0|i03w7b:,Perm,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,28/Aug/26 10:08 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,,,,,,,,,,,,,,,,,To Do,28/Aug/26 9:26 AM
+AI Engineer ,OUT-22314,57515,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,27/Aug/26 9:38 AM,27/Aug/26 2:51 PM,,,,0,"_AI Engineer || 2-10 PM|| 1.4 + GST || 5-7 Years || Remote_ 
+
+Position Summary
+
+The AI Engineer will design and implement intelligent document processing, OCR, AI-enabled automation, and advanced analytical capabilities supporting the IPV transformation. This role will leverage AI technologies to improve ingestion, processing efficiency, anomaly detection, and future AI-driven operational capabilities.
+Key Responsibilities
+
+Design AI-powered ingestion solutions for PDFs and broker documents.
+Implement Azure AI Document Intelligence capabilities.
+Develop OCR and document extraction frameworks.
+Build anomaly detection and data quality intelligence models.
+Develop AI-enabled workflow enhancements.
+Support future Agentic AI use cases and innovation roadmaps.
+Improve data extraction accuracy and operational efficiencies.
+Integrate AI services into Dataiku workflows.
+Collaborate with data engineers and architects on scalable AI architectures.
+Support model governance and monitoring.
+Required Skills
+
+Python
+Azure AI Services
+Azure AI Document Intelligence
+Machine Learning
+NLP
+OCR Solutions
+API Integration
+Data Engineering Concepts
+MLOps
+Preferred Skills
+
+Dataiku
+Generative AI
+Agentic AI Frameworks
+Energy Trading Domain Knowledge
+Databricks",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,1.4 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,5 yrs ,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03w6n:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 2:51 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Mamoon and Harshit profile has shared ,,,,,,,,,,,,,,,,,In Progress,27/Aug/26 9:38 AM
+Security Gap analysis or red teaming,OUT-22306,57379,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Diksha Yadav,63804f3f213a315af3473e76,Diksha Yadav,63804f3f213a315af3473e76,25/Aug/26 2:08 PM,27/Aug/26 2:24 PM,,,,0,"
+
+Roles : Security Gap analysis or red teaming
+
+Requirements : 
+Establish where the Customer’s current RTS/IAD implementation stands against the requirements of CEN/TS 18099.
+Produce a control-by-control gap analysis mapping current RTS signals and IAD capture checks to CEN/TS 18099 requirements, classifying which requirements are fully met (if evidence is conclusive), partially met, or not met, and at what assurance level as they are discovered throughout the audit.
+Through continuous adversarial testing, identify weaknesses in the current signal collection and IAD pipeline that a motivated attacker could exploit to defeat injection-attack detection, and assess their relevance to certification readiness.",,Diksha Yadav,Prashant Singh Hada,,,,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,,,,,,,,,,,,,,,,,,0,,,,,,,Girnarsoft_Pragya,pragya,,Delphic,,,,,,,,,,,,,,5,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,Yes,,1.0,,Highest,0|i03w4v:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"25/Aug/26 2:46 PM;712020:3b446a8d-8374-4088-846f-225155343891;shared with koli info
+shared with bluethink","26/Aug/26 8:31 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with moderna-
+shared with VVP",27/Aug/26 2:24 PM;712020:3b446a8d-8374-4088-846f-225155343891;No update from vvp yet,,,,,,,,,,,,,,,To Do,25/Aug/26 2:08 PM
+.NET + Python + AI Developer,OUT-22304,57313,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,25/Aug/26 11:44 AM,31/Aug/26 9:37 AM,,,,0,"h1. Job Description – .NET + Python + AI Developer
+
+*Experience:* 6+ Years
+*Location:* Pan India – Hybrid
+*Shift:* 11:00 AM – 9:00 PM IST
+*Engagement:* C2C / C2H / FTE
+*Priority:* P1
+*Compensation:*
+
+* 6–8 Years: 160–170K
+
+h3. Job Summary
+
+We are looking for an experienced *.NET + Python + AI Developer* with strong hands-on expertise in *.NET, Python, Generative AI, RAG, and LLMs*. The ideal candidate should be capable of building scalable applications and integrating AI capabilities into enterprise solutions.
+
+h3. Key Responsibilities
+
+* Design, develop, and maintain applications using *.NET / C# and Python*.
+* Build and integrate *GenAI/LLM-powered solutions* using RAG architectures.
+* Develop AI-enabled features such as intelligent search, document processing, and contextual responses.
+* Integrate LLMs and AI services with existing .NET applications and APIs.
+* Work with cross-functional teams to understand requirements and deliver scalable solutions.
+* Troubleshoot, optimize, and maintain production applications.
+
+h3. Must-Have Skills
+
+* *.NET / C#*
+* *Python*
+* *Generative AI / LLM*
+* *RAG (Retrieval-Augmented Generation)*
+
+h3. Good to Have
+
+* REST APIs / Microservices
+* Azure AI / OpenAI or similar cloud AI services
+* Vector databases and AI frameworks such as LangChain
+
+h3. Project-Specific Exposure
+
+* *Barcode:* .NET + AI/Python + RAG
+* *ISHA:* Python + RAG + LLM
+* *Medication:* AI + RAG + LLM + Python + .NET",,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,1.5 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,6,,,,,,,Hybrid-1-2days-aweek-HCLlocations,,,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,Yes,,1.0,,Highest,0|i03w4f:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,25/Aug/26 1:26 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,"25/Aug/26 2:23 PM;712020:3b446a8d-8374-4088-846f-225155343891;Need vendors for ,net informed dheeraj",25/Aug/26 4:03 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;did posting no CVs received yet.,26/Aug/26 11:07 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with a new vendor,26/Aug/26 2:35 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No relevant CVs received.,27/Aug/26 2:29 PM;712020:3b446a8d-8374-4088-846f-225155343891;No profile yet,27/Aug/26 2:36 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;Less CVs received.,27/Aug/26 3:17 PM;63804f3f213a315af3473e76;[~accountid:712020:9388b521-3985-43aa-80a7-8fe219fc219d] any update for this req?,27/Aug/26 3:24 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Job posting has been done. Mostly received orofile for .NET Developer - SQL&API,31/Aug/26 8:57 AM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;shared with vendor(AFORV),31/Aug/26 9:37 AM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;shared with vendor(Mekanism),,,,,,,To Do,25/Aug/26 11:44 AM
+.NET Developer – SQL & API*,OUT-22302,57247,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,25/Aug/26 9:40 AM,31/Aug/26 9:37 AM,,,,0,"h2. Job Title**.NET Developer – SQL & API**
+
+h2. Experience*5+ Years*
+
+h2. Job Type
+
+C2C / C2H / FTE
+
+h2. Work Mode
+
+Hybrid – Pan India
+
+h2. Work Hours 11:00 AM – 9:00 PM IST
+
+h2. Compensation
+
+* *4–6 Years:* 140–150K
+* *6–8 Years:* 150–160K
+
+h2. Job Summary
+
+We are looking for an experienced *.NET Developer* with strong expertise in *.NET, SQL, and API development* to design, develop, and maintain scalable enterprise applications. The ideal candidate should have strong hands-on coding experience and a good understanding of database and REST API development.
+
+h2. Key Responsibilities
+
+* Develop and maintain applications using *.NET / .NET Core and C#*.
+* Design, develop, and integrate *RESTful APIs*.
+* Write complex and optimized *SQL queries, stored procedures, and database objects*.
+* Troubleshoot, debug, and optimize application performance.
+* Collaborate with cross-functional teams to understand requirements and deliver solutions.
+* Follow coding standards, security practices, and software development best practices.
+* Participate in code reviews, testing, and production support.
+
+h2. Must-Have Skills
+
+* *.NET / .NET Core & C#*
+* *Strong SQL / Database*
+* *REST API Development & Integration*
+* Strong problem-solving and debugging skills
+* 5+ years of relevant software development experience
+
+h2. Good to Have
+
+* Experience with *Azure/AWS cloud services*
+* Knowledge of *Microservices architecture*
+* Experience with *Git, CI/CD, and Agile methodologies*",,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.4- 1.6 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,4-8 yrs ,,,,,,,Hybrid-1-2days-aweek-HCLlocations,,,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,Yes,,1.0,,Highest,0|i03w3z:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,25/Aug/26 10:02 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;Scheduled interview for 25th AUG.,25/Aug/26 1:34 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,25/Aug/26 2:22 PM;712020:3b446a8d-8374-4088-846f-225155343891;Need vendors,25/Aug/26 4:04 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for 26th AUG.,26/Aug/26 11:07 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with a new vendor,26/Aug/26 2:33 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;issue regarding the notice period,26/Aug/26 2:34 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;scheduled 1 interview for 27 AUG.,26/Aug/26 3:09 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for tomorrow,27/Aug/26 2:30 PM;712020:3b446a8d-8374-4088-846f-225155343891;No profiles,27/Aug/26 3:25 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for monday ,31/Aug/26 8:56 AM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;shared with vendor(AFORV),31/Aug/26 9:37 AM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;shared with vendor(Mekanism),,,,,,To Do,25/Aug/26 9:40 AM
+"Senior Adobe Commerce Developer (Adobe Commerce, AEM & MuleSoft",OUT-22297,57178,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,24/Aug/26 3:09 PM,27/Aug/26 2:53 PM,,,,0,"Sr. Commerce Developer
+
+*Senior Adobe Commerce Developer (Adobe Commerce, AEM & MuleSoft)*
+
+*Location*
+
+Remote
+
+*Experience*
+
+8+ Years
+
+----
+
+*Job Summary*
+
+We are seeking a highly skilled *Senior Adobe Commerce Developer* with strong expertise in *Adobe Commerce (Magento 2)* and working knowledge of *Adobe Experience Manager (AEM)* and *MuleSoft integration platforms*. The ideal candidate will be responsible for designing, developing, and supporting enterprise eCommerce solutions while collaborating with cross-functional teams to deliver seamless digital commerce experiences.
+
+This role requires hands-on development experience in Adobe Commerce, a solid understanding of AEM-driven customer experiences, and the ability to work with MuleSoft-based integrations across enterprise applications such as ERP, CRM, OMS, payment gateways, and third-party services.
+
+----
+
+*Key Responsibilities*
+
+*Adobe Commerce Development*
+
+* Design, develop, customize, and maintain Adobe Commerce (Magento 2) applications.
+* Develop custom modules, extensions, themes, and integrations.
+* Implement commerce features including:
+** Product Catalog Management
+** Pricing & Promotions
+** Shopping Cart
+** Checkout
+** Order Management
+** Customer Management
+** Search & Navigation
+* Optimize platform performance, scalability, security, and reliability.
+* Perform code reviews and ensure adherence to coding standards and best practices.
+* Troubleshoot and resolve production issues and application defects.
+
+*AEM Collaboration & Integration*
+
+* Work closely with AEM teams to support integrated commerce and content experiences.
+* Understand AEM concepts including:
+** Components
+** Templates
+** Experience Fragments
+** Content Fragments
+** Digital Asset Management (DAM)
+* Support headless and hybrid commerce implementations integrating AEM with Adobe Commerce.
+* Collaborate on personalized customer experience initiatives leveraging Adobe technologies.
+
+*MuleSoft & Enterprise Integrations*
+
+* Develop and support integrations between Adobe Commerce and enterprise applications using MuleSoft.
+* Collaborate with integration architects to design API-led connectivity solutions.
+* Implement REST, SOAP, GraphQL, and event-driven integrations.
+* Support integration with:
+** ERP Systems (SAP, Oracle, etc.)
+** CRM Platforms (Salesforce, Dynamics)
+** OMS Systems
+** Payment Providers
+** Shipping & Tax Services
+* Troubleshoot and optimize MuleSoft API integrations.
+
+*Technical Leadership*
+
+* Provide technical guidance and mentorship to junior developers.
+* Participate in solution design and architecture discussions.
+* Estimate effort and support sprint planning activities.
+* Ensure high code quality through unit testing and automated testing practices.
+* Collaborate with DevOps teams on CI/CD implementations.
+
+----
+
+*Required Qualifications*
+
+* Bachelor's degree in Computer Science, Information Technology, Engineering, or related field.
+* 8+ years of software development experience.
+* 5+ years of hands-on Adobe Commerce (Magento 2) development experience.
+* Strong expertise in:
+** PHP
+** MySQL
+** JavaScript
+** HTML5
+** CSS3
+** GraphQL
+** REST APIs
+* Experience developing custom Adobe Commerce modules and integrations.
+* Strong understanding of Adobe Commerce architecture and framework.
+* Experience with Git-based source control and CI/CD pipelines.
+* Ability to work in Agile/Scrum environments.
+
+----
+
+*Preferred Qualifications*
+
+* Experience with Adobe Experience Manager (AEM) integrations.
+* Experience with MuleSoft Anypoint Platform.
+* Adobe Commerce Cloud implementation experience.
+* Experience with headless commerce architectures.
+* Knowledge of Adobe Experience Cloud ecosystem.
+* Familiarity with cloud platforms such as Azure, AWS, or GCP.
+* Adobe Commerce Developer Certification.
+* MuleSoft Developer Certification.
+
+----
+
+*Technical Skills*
+
+*Adobe Commerce*
+
+* Adobe Commerce / Magento 2
+* Checkout Customization
+* Catalog & Pricing
+* Multi-store Implementations
+* GraphQL APIs
+* Commerce Cloud
+
+*AEM*
+
+* AEM Author & Publish Concepts
+* Experience Fragments
+* Content Fragments
+* DAM
+* AEM-Commerce Integration
+
+*MuleSoft*
+
+* Anypoint Platform
+* API-led Connectivity
+* REST APIs
+* Mule Applications
+* System, Process & Experience APIs
+* API Security
+
+*Development*
+
+* PHP
+* JavaScript/TypeScript
+* MySQL
+* GraphQL
+* REST/SOAP
+* Git
+* Jenkins/Azure DevOps
+* Docker/Kubernetes (Preferred)
+
+----
+
+*Key Competencies*
+
+* Strong problem-solving and debugging skills.
+* Excellent communication and stakeholder collaboration.
+* Ability to lead technical discussions and solution design workshops.
+* Customer-focused mindset with a strong understanding of eCommerce business processes.
+* Experience working in global, distributed teams.
+
+----
+
+*Nice to Have*
+
+* Experience with Adobe Experience Platform (AEP).
+* Adobe Analytics and Adobe Target exposure.
+* Experience with Headless Commerce using React, Next.js, or SPA frameworks.
+* Knowledge of B2B Commerce capabilities.
+* Experience in retail, consumer products, eCommerce implementations.",,Prashant Singh Hada,Shivani Sinha,Tanvi Saxena,,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,1.5,,,,,,,Hub-AI,,,Delphic,,,,,,,,,,,,,,8+,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03w2v:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,24/Aug/26 3:22 PM;712020:3b446a8d-8374-4088-846f-225155343891;Checking with Blue Think ,25/Aug/26 7:40 AM;712020:3b446a8d-8374-4088-846f-225155343891;One profile from their end,25/Aug/26 11:41 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,25/Aug/26 2:07 PM;712020:3b446a8d-8374-4088-846f-225155343891;abhijeet,26/Aug/26 11:07 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for tomorrow,27/Aug/26 2:52 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Abhijeet (Vendor Profile ) is shared,,,,,,,,,,,,In Progress,25/Aug/26 2:07 PM
+"Mobile App QA Engineer – Adobe Analytics, AEP, CJA & Adobe Assurance",OUT-22296,57177,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,24/Aug/26 2:44 PM,27/Aug/26 4:13 PM,,,,0,"Mobile App QA Engineer – Adobe Analytics, AEP, CJA & Adobe Assurance
+Budget: 1.30 Lacs + GST/ Month
+4–8 Years
+4+ Years QA; 2+ Years Adobe Analytics / AEP Testing
+We are seeking an experienced Mobile App Testing Engineer with strong expertise in Adobe Analytics, Adobe Experience Platform (AEP), Customer Journey Analytics (CJA), and Adobe Assurance.
+
+The role is responsible for validating analytics implementations across iOS and Android applications and ensuring accurate customer journey measurement and reporting.
+
+Key Responsibilities
+Validate Adobe Analytics tracking implementation across mobile applications.
+Perform end-to-end verification of analytics data flow from mobile SDKs to AEP and CJA.
+Use Adobe Assurance to debug SDK implementations and validate Experience Edge calls.
+Verify event ingestion, XDM schemas, datasets, identity stitching, and reporting accuracy.
+Inspect network requests using Charles Proxy, Proxyman, Postman, or similar tools.
+Create and execute test plans, regression suites, integration tests, and UAT scenarios.
+Collaborate with developers, analytics engineers, and product teams to resolve defects.
+
+Important Screening Note:
+
+* Please prioritize candidates with hands-on Adobe Analytics, AEP, CJA and Adobe Assurance experience.
+* Mobile application testing experience across iOS and Android is important.
+* Candidates should have practical experience validating SDK events, Experience Edge calls, XDM schemas, datasets and identity stitching.",,Prashant Singh Hada,Shivani Sinha,Tanvi Saxena,,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,1.3 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,4+,,,,,,,Remote,,,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,Yes,,1.0,,Highest,0|i03w2n:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"24/Aug/26 3:21 PM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with amwebtech-
+shared with cubexo-
+Sahredd with angular minds","25/Aug/26 7:47 AM;712020:3b446a8d-8374-4088-846f-225155343891;Am web tech- No profile
+cubexo- no profile
+angular minds - no profile","25/Aug/26 8:26 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with vvpp- one profile
+shared with Logiquad- no profile
+shared with ibotix-no profile
+Shared with panorama- checking with  team
+shared with koli- One profile",25/Aug/26 9:49 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done ,"26/Aug/26 9:02 AM;712020:3b446a8d-8374-4088-846f-225155343891;One profile from koliinfo
+shared  with mekanism",27/Aug/26 2:26 PM;712020:3b446a8d-8374-4088-846f-225155343891;One profile from  pannorma,27/Aug/26 3:17 PM;712020:3b446a8d-8374-4088-846f-225155343891;Shortlisted,,,,,,,,,,,In Progress,27/Aug/26 3:16 PM
+Data Analyst,OUT-22290,57075,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,21/Aug/26 4:36 PM,27/Aug/26 2:55 PM,24/Aug/26 1:43 PM,,,0,"*Job Summary-Dat Analyst*
+
+*Contract Type:* Contractor (6–12 months, extendable)
+*Experience:* 6–7 Years
+*Location:* Remote/Hybrid (as applicable)
+
+This profile should attract candidates who can effectively support ITAM analytics, software asset reporting, and executive-level dashboarding initiatives.
+
+
+
+We are seeking a highly skilled *Data Analyst / Business Intelligence Contractor* with *6 to 7 years of experience* in data analysis, reporting, and dashboard development. The ideal candidate will have strong hands-on experience with *BI platforms such as Tableau, Power BI, and Cognos*, along with a solid understanding of *IT Asset Management (ITAM)* processes and metrics. This role will be responsible for transforming complex datasets into actionable insights and developing executive-level dashboards that support strategic decision-making.
+
+*Key Responsibilities*
+
+* Analyze large and complex datasets from multiple sources to identify trends, risks, opportunities, and business insights.
+* Design, develop, and maintain interactive dashboards and reports using *Tableau, Power BI, and Cognos*.
+* Create and publish *executive dashboards, KPI scorecards, and business performance reports* for leadership teams.
+* Collaborate with ITAM, Finance, Procurement, Software Asset Management (SAM), and business stakeholders to define reporting requirements.
+* Develop data models, visualizations, and reporting frameworks that support ITAM operations and software compliance initiatives.
+* Perform data validation, reconciliation, and quality checks to ensure accuracy and consistency of reporting outputs.
+* Automate recurring reporting processes and improve dashboard performance.
+* Translate business requirements into analytical models and meaningful visualizations.
+* Present analytical findings and recommendations to leadership and business stakeholders.
+* Support ad hoc analysis, reporting requests, and strategic initiatives.
+
+*Required Qualifications*
+
+* Bachelor's degree in Data Analytics, Computer Science, Information Systems, Statistics, Engineering, or a related field.
+* *6 to 7 years of experience* in data analysis, business intelligence, and reporting.
+* Advanced proficiency in *Tableau, Microsoft Power BI, and Cognos*.
+* Strong experience with SQL and data extraction, transformation, and analysis.
+* Experience building *executive and leadership dashboards* with clear storytelling and data visualization best practices.
+* Strong knowledge of data modeling, KPI development, and performance metrics.
+* Experience working with enterprise data warehouses and multiple data sources.
+* Excellent analytical, problem-solving, and communication skills.
+
+*Preferred Qualifications*
+
+* Experience in *IT Asset Management (ITAM)* and/or *Software Asset Management (SAM)*.
+* Familiarity with ITAM tools such as *Flexera One, ServiceNow, Tanium, Lansweeper, Snow Software*, or similar platforms.
+* Understanding of software licensing, compliance reporting, technology spend analysis, and software/hardware inventory management.
+* Experience with cloud platform reporting (Azure, AWS, GCP).
+* Knowledge of Python or R for advanced analytics and data manipulation.
+
+*Key Skills*
+
+* Data Analysis & Visualization
+* Tableau
+* Microsoft Power BI
+* IBM Cognos Analytics
+* SQL
+* Dashboard Development
+* Executive Reporting
+* IT Asset Management (ITAM)
+* Software Asset Management (SAM)
+* KPI & Metrics Design
+* Data Modeling
+* Data Quality Management
+* Stakeholder Management
+* Business Intelligence
+
+*Success Criteria*
+
+* Deliver high-quality executive dashboards with actionable business insights.
+* Improve visibility into ITAM and software asset management performance metrics.
+* Reduce manual reporting effort through automation and dashboard optimization.
+* Provide timely, accurate, and data-driven recommendations to leadership teams.",,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,OUT-22305,OUT-22315,,,1.5 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,6,,,,,,,Remote_1-2daysmonthonsite,,,Chahak Pandya,Diksha Yadav,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,63804f3f213a315af3473e76,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,Yes,,1.0,,Highest,0|i03w1b:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"24/Aug/26 11:28 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with cubexo- no profile
+Shared with golden eagle- checking
+shared with bluethink-",24/Aug/26 3:13 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for 25th AUG.,25/Aug/26 9:10 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,25/Aug/26 10:08 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;doing screening calls.,"25/Aug/26 11:49 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;As of now,received 1 strong profilr but budget issues, most of the candidated does not have relevant  exp or haven’t even started serving their notice period. ",25/Aug/26 1:19 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;issues regarding notice period ,25/Aug/26 1:29 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 profile shortlisted.,"25/Aug/26 3:22 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;less exp candidate, budget isues. i’ve asked for referrals",26/Aug/26 9:16 AM;712020:3b446a8d-8374-4088-846f-225155343891;shared with avenior-,26/Aug/26 10:37 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;interview has been scheduled for tomorrow,26/Aug/26 2:36 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No strong profiles received today.,27/Aug/26 8:36 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,"27/Aug/26 9:51 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 profile - Shortlisted today 
+
+{noformat}{noformat}",27/Aug/26 2:55 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Shanmukesh (Vendor Profile is shared ),,,,In Progress,25/Aug/26 1:27 PM
+Python + AI/ML Engineer ,OUT-22280,56937,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Diksha Yadav,63804f3f213a315af3473e76,Diksha Yadav,63804f3f213a315af3473e76,20/Aug/26 11:23 AM,27/Aug/26 3:25 PM,24/Aug/26 1:43 PM,,,0,,,Diksha Yadav,Sarthak Solanki,Shivani Sinha,,,,63804f3f213a315af3473e76,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,,,,,,,,,,,,,1L ,,,,,,,bench,delphic,,Delphic,,,,,,,,,,,,,,6+,,,,,,,"Indore,",,,Sarthak Solanki,Shivani Sinha,,,,,,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,,Yes,,1.0,,Highest,0|i03vz3:,Perm,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"20/Aug/26 3:02 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;did posting, no strong candidate received yet.",21/Aug/26 2:09 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;The candidates screened so far have less experience and aren’t comfortable in relocating  Indore. I’m still screening and working to find suitable candidates.,21/Aug/26 3:40 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;Not receiving relevant CVs.,26/Aug/26 2:34 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;less experienced candidate,26/Aug/26 2:44 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No relevant candidates.,27/Aug/26 3:19 PM;63804f3f213a315af3473e76;[~accountid:712020:bf29b759-0312-4089-99ad-f56191f124a0]  [~accountid:712020:9388b521-3985-43aa-80a7-8fe219fc219d]  any update for this req?,27/Aug/26 3:20 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;[~accountid:63804f3f213a315af3473e76] NO relevant CVs received on this position. ,27/Aug/26 3:25 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Less experienced candidates for this profile,,,,,,,,,,To Do,20/Aug/26 11:23 AM
+ServiceNow Developer,OUT-22277,56870,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,20/Aug/26 8:52 AM,24/Aug/26 12:53 PM,21/Aug/26 12:57 PM,,,0,"Notice Period - Immediate joiners only
+Role Overview
+We require experienced ServiceNow Developers who can work independently on an enterprise-scale
+platform across multiple modules. The role covers hands-on configuration and development, integration
+with external systems, workflow automation and troubleshooting, with minimal supervision. Candidates
+must be available to join immediately and deliver from day one.
+Mandatory Skills
+▪ Strong ServiceNow development experience across multiple modules
+▪ Integrations — REST and SOAP APIs, IntegrationHub
+▪ JavaScript and ServiceNow scripting — Client Scripts, Business Rules, Script Includes
+▪ UI Builder and Service Portal / widget development
+▪ Flow Designer and ServiceNow platform best practices
+▪ Strong troubleshooting ability and proven independent delivery
+▪ Enterprise-scale implementation experience and hands-on Agile delivery
+Good to Have — Added Advantage
+▪ Agentic AI on the ServiceNow platform
+▪ Virtual Agent
+▪ Now Assist
+▪ AI-driven workflow automation
+▪ ServiceNow certifications — CSA, CAD or relevant CIS credential",,Chahak Pandya,Prashant Singh Hada,Sarthak Solanki,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,,,,,,,,,,,,OUT-22291,,,,,1.30 - 2.00 LPM,,,,,,,GirnarSoft,GirnarSoft_Garv,,Delphic,,,,,,,,,,,,,,5 - 15 ,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Tanvi Saxena,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,Yes,,2.0,,Highest,0|i03vyf:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"20/Aug/26 2:03 PM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with Bluethink- checking- no profile 
+Shared with OakTree - no response from  Poc","20/Aug/26 3:22 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;CV received, no strong candidate has found as of now.",21/Aug/26 1:53 PM;712020:3b446a8d-8374-4088-846f-225155343891;Prashant and dheeraj will look for vendors,21/Aug/26 1:59 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;2 interviews scheduled.,,,,,,,,,,,,,,In Progress,24/Aug/26 11:22 AM
+Senior Data Engineering cum Architecture. ,OUT-22273,56865,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,20/Aug/26 7:40 AM,27/Aug/26 2:56 PM,21/Aug/26 12:58 PM,,,0,"Dataiku, Python & SQL are mandatory skills.
+
+
+
+* Proven experience architecting and implementing enterprise-scale data engineering solutions, including data pipelines, ETL/ELT frameworks, and data lake/warehouse architectures
+* Hands-on expertise with Dataiku for building, deploying, and operationalizing end-to-end data pipelines and ML workflows
+* Strong programming proficiency in Python for data transformation, automation, and pipeline orchestration
+* Advanced SQL skills for complex query optimization, data modeling, and working across relational/cloud data platforms
+* Solid working experience with AWS and Azure cloud ecosystems (e.g., S3/ADLS, Glue/Data Factory, Redshift/Synapse, IAM/security configurations) for building and managing scalable data infrastructure
+* Demonstrated ability to work at an Architect level — defining data architecture standards, evaluating tooling, and guiding technical decisions across cross-functional teams",,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.8 LPM,,,,,,,tridhya-tech,,,Delphic,,,,,,,,,,,,,,7+,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03vxj:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"20/Aug/26 10:24 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with shieninfo- one profile
+Shared with engineer masters- got one profile
+shared with  bluethinnk- 1 profile
+Shared with zacdata- 1 profile
+Shared with Nsqure- They will check with partners
+shared with moderna0 1 profile
+shared with mekanism- 1 profile",20/Aug/26 1:25 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;interview has been scheduled for tomorrow,"20/Aug/26 3:22 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;less CV received, no relevant candidate found.",21/Aug/26 8:36 AM;712020:3b446a8d-8374-4088-846f-225155343891;Mekanism- mangesh selected ,"21/Aug/26 1:30 PM;712020:3b446a8d-8374-4088-846f-225155343891;Got one profile from VVPSoft Tech
+One profile from ARNA Tech
+",27/Aug/26 2:56 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Vijay (Vendor Profile ) has shared,,,,,,,,,,,,In Progress,21/Aug/26 8:35 AM
+Analytics Engineer,OUT-22270,56797,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,19/Aug/26 12:02 PM,19/Aug/26 1:29 PM,21/Aug/26 12:59 PM,,,0,"h2. *Primary Skills*
+
+DBT, Snowflake, SQL
+*Secondary Skill*
+
+Python
+*Experience*
+
+4–8 Years
+*Work Mode*
+
+Remote 
+*Initial Requirement*
+
+*Work from client location in Mumbai for 1 week*
+
+*Key Skills*
+
+DBT • Snowflake • SQL • Python • Kafka • SnapLogic • Git/GitHub • GitHub Actions • Data Quality • Data Governance
+
+h2. *Role Overview*
+
+Analytics Engineer focused on scalable DBT data models, Snowflake data warehousing, real-time ingestion, ETL/ELT workflows, data quality, governance, documentation, and stakeholder collaboration.
+
+h2. *Core Responsibilities*
+
+* Build and maintain scalable data models in DBT using modular SQL, Jinja templating, tests, and DBT best practices.
+
+* Work hands-on with Snowflake, including dimensional/data-vault modeling, performance optimization, query tuning, security, and role-based access.
+
+* Use Kafka or similar event-streaming tools for real-time data ingestion.
+
+* Use SnapLogic for ETL/ELT workflow design, orchestration, and monitoring.
+
+* Use Git/GitHub for version control and collaboration.
+
+* Build CI/CD automation with GitHub Actions or equivalent for DBT testing, deployment, and documentation.
+
+* Implement data validation, testing, lineage tracking, and data-quality controls.
+
+* Partner with business and technical stakeholders to define data needs and explain complex concepts clearly.
+
+* Maintain DBT documentation for models, metrics, and transformations and proactively resolve data gaps.
+
+h2. *Required Qualifications / Experience*
+
+* 4–8 years total experience.
+
+* Strong SQL and DBT expertise.
+
+* Hands-on Snowflake experience.
+
+* Dimensional and data-vault modeling knowledge.
+
+* Performance optimization and query tuning.
+
+* Kafka or similar event-streaming experience.
+
+* Familiarity with SnapLogic.
+
+* Git/GitHub and CI/CD experience for DBT.
+
+* Strong data-quality, testing, governance, lineage, documentation, and stakeholder skills.
+
+h2. *Good to Have*
+
+* Python for data engineering/analytics automation.
+
+* Experience with real-time data pipelines and enterprise ETL/ELT.
+
+* Strong understanding of business-facing analytics and data products.
+
+h2. *Mandatory Screening / Submission Checks*
+
+* Strong DBT + SQL – mandatory.
+
+* Hands-on Snowflake.
+
+* Kafka/event streaming exposure.
+
+* SnapLogic exposure.
+
+* Git/GitHub + CI/CD.
+
+* Data quality/testing/lineage.
+
+* Availability for 1 week at client location in Mumbai initially.",,Chahak Pandya,Tanvi Saxena,,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,1.50 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,4+,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03vwv:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,19/Aug/26 1:29 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Shared Mamoon Profile,,,,,,,,,,,,,,,,,In Progress,19/Aug/26 1:29 PM
+ .NET Architect,OUT-22265,56790,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,19/Aug/26 11:10 AM,27/Aug/26 3:23 PM,24/Aug/26 1:44 PM,,,0,"h1. .NET Architect
+
+_Experience:_ 10+ Years
+_Job Type:_ C2C
+_Priority:_ P1
+_Shift:_ 11 AM – 9 Pm
+Location - hybrid  noida, pune ,Hyderabad, chennai, banglore 
+
+h2. Job Summary
+
+We are looking for an experienced _.NET Architect_ with 10+ years of experience in designing and implementing scalable enterprise applications using Microsoft technologies. The ideal candidate will have strong expertise in _.NET Core, C#, Azure, React, REST APIs, Microservices, and Azure DevOps_.
+
+h2. Key Responsibilities
+
+* Define and implement enterprise application architecture using _.NET Core and Azure_.
+* Design scalable, secure, and high-performance cloud-native solutions.
+* Lead architecture reviews, technical design discussions, and code quality initiatives.
+* Design _REST APIs and microservices-based architectures_.
+* Architect solutions using _Azure App Services, Azure Functions, and Azure PaaS_.
+* Establish and manage _CI/CD pipelines using Azure DevOps_.
+* Drive application security, performance optimization, and modernization initiatives.
+* Mentor development teams and provide technical leadership.
+* Collaborate with Product Owners, BAs, QA, DevOps, and business stakeholders.
+* Ensure adherence to coding standards, design patterns, SOLID principles, and architectural best practices.
+
+h2. Required Skills
+
+* _.NET Core /_ [http://ASP.NET|http://ASP.NET|smart-link]  _Core_
+* _C#_
+* _Azure Cloud Services_
+* _Microservices Architecture_
+* _REST APIs_
+* _Azure App Services & Azure Functions_
+* _Azure DevOps / CI/CD_
+* _React.js_
+* Strong knowledge of _Design Patterns, SOLID, API Design, Security, and Performance Optimization_
+
+h2. Azure Expertise
+
+* Azure App Services
+* Azure Functions
+* Azure Storage
+* Azure Key Vault
+* Azure Monitor / Application Insights
+* Azure Networking and IAM fundamentals
+
+h2. Good to Have
+
+* Docker & Kubernetes
+* Azure API Management (APIM)
+* Azure Service Bus / Event Grid
+* Entity Framework Core
+* SQL Server
+* SonarQube
+* Terraform / Infrastructure as Code
+* GenAI / AI integration exposure
+
+h2. Qualifications
+
+* Bachelor's/Master's degree in Computer Science, IT, or related field.
+* Azure certifications such as _Azure Solutions Architect Expert_ or _Azure Developer Associate_ are preferred.
+* Strong experience in technical leadership, architecture governance, mentoring, and stakeholder management.",,Chahak Pandya,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,,,,,,,OUT-22289,,,,1.80 LPM,,,,,,,Devlabs,,,Delphic,,,,,,,,,,,,,,10+,,,,,,,Hybrid-1-2days-aweek-HCLlocations,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03vvr:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"19/Aug/26 2:36 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;started working on this position, no strong profile received yet.",19/Aug/26 2:48 PM;712020:3b446a8d-8374-4088-846f-225155343891;Informed dheeraj to look for onsite vendors,19/Aug/26 3:02 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done today,20/Aug/26 10:22 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for tomorrow,20/Aug/26 3:04 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for 21AUG,"21/Aug/26 2:01 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Interview was scheduled today , the candidate has been rejected.",24/Aug/26 2:51 PM;712020:3b446a8d-8374-4088-846f-225155343891;One vendor in pipeline form dheeraj,26/Aug/26 11:29 AM;712020:3b446a8d-8374-4088-846f-225155343891;Informed dheeraj to look for onsite vendors- still no vendor,26/Aug/26 2:38 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;working on it. mostly schedule 1 interview for 27AUG,27/Aug/26 2:31 PM;712020:3b446a8d-8374-4088-846f-225155343891;No vendors,27/Aug/26 2:37 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for today. ,"27/Aug/26 3:21 PM;63804f3f213a315af3473e76;[~accountid:712020:bf29b759-0312-4089-99ad-f56191f124a0] Do we have anything for share ? Profile shortlist or Rejected ? 
+Any Fresh profile?",27/Aug/26 3:23 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;[~accountid:63804f3f213a315af3473e76] interview is going on ,,,,,To Do,26/Aug/26 11:33 AM
+Python / AI Developer,OUT-22262,56755,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,19/Aug/26 10:05 AM,27/Aug/26 2:56 PM,21/Aug/26 1:02 PM,,,0,"Job Description
+Exp : 9+ years of
+
+If you enjoy solving real customer problems and building AI products from prototype to production, this could be a great opportunity.
+
+We are looking for a Python/AI Developer who is comfortable developing backend applications as well as working with modern Generative AI technologies. The ideal candidate should be able to take ownership of customer-facing AI solutions, from understanding requirements and designing the solution to development and production delivery.
+
+Key Requirements
+Strong hands-on experience with Python development.
+Good experience with Django and/or FastAPI.
+Strong understanding of Large Language Models (LLMs) and experience working with models such as:
+GPT
+Claude
+Gemini
+Hands-on experience with Retrieval-Augmented Generation (RAG).
+Experience working with Vector Databases.
+Good understanding of Agentic AI and experience with frameworks such as:
+LangGraph
+CrewAI
+Experience with at least one major cloud platform:
+AWS
+GCP
+Experience designing and developing production-ready AI applications.
+Ability to understand customer requirements and translate them into practical technical solutions.
+Strong customer-facing communication and solution-design skills.
+Ability to take ownership of AI solutions from prototype through production.
+Preferred Technical Skills
+
+Backend: Python, Django, FastAPI
+Generative AI: LLMs, GPT, Claude, Gemini
+RAG: RAG pipelines, document retrieval, contextual search
+Vector Databases: Pinecone, Milvus, FAISS, Weaviate, etc.
+Agentic AI: LangGraph, CrewAI
+Cloud: AWS / GCP
+Architecture: REST APIs, Microservices, AI application architecture
+
+Ideal Candidate
+
+The ideal candidate should be more than just a Python developer. They should have hands-on experience building AI-powered applications, understand how LLMs and RAG work in production, and be comfortable discussing technical solutions directly with customers.
+
+Core combination to look for:
+
+Python + FastAPI/Django + LLM + RAG + Vector DB + Agentic AI + AWS/GCP + Customer-facing solution design",,Chahak Pandya,Tanvi Saxena,,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,1 LPM,,,,,,,Sinontech,,,Delphic,,,,,,,,,,,,,,9+,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03vv3:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 2:56 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Shared Harshit cv,,,,,,,,,,,,,,,,,In Progress,19/Aug/26 10:05 AM
+DevOps Engineer – Healthcare Automation,OUT-22252,56615,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,17/Aug/26 3:34 PM,27/Aug/26 2:59 PM,24/Aug/26 1:46 PM,,,0,"h1. DevOps Engineer – Healthcare Automation
+
+*Experience:* 6+ Years
+*Engagement:* C2C
+*Priority:* P1
+*Compensation:* 140K–150K
+*Location:* Remote
+*Shift:* 11 AM – 9 PM IST
+
+h2. Role Overview
+
+We are looking for a skilled *DevOps Engineer* to design, implement, and manage scalable, secure, and compliant cloud infrastructure for healthcare automation platforms. The ideal candidate will have strong expertise in *Azure/AWS, Kubernetes, Terraform, CI/CD, observability, API integrations, and event-driven architectures*, with exposure to healthcare technologies such as *SMART on FHIR, FHIR, HL7, and payer APIs*.
+
+h2. Key Responsibilities
+
+* Design and manage cloud-native, multi-tenant infrastructure on *Azure/AWS*.
+* Implement *Infrastructure-as-Code using Terraform* with reusable and governed modules.
+* Manage *Kubernetes (AKS/EKS), Docker, autoscaling, service mesh, and resilient workloads*.
+* Build CI/CD and GitOps pipelines using *Azure DevOps, Jenkins, GitHub Actions, ArgoCD, or Flux*.
+* Implement *canary/blue-green deployments, automated rollbacks, and security scanning (SAST/DAST)*.
+* Manage *API gateways* such as Azure API Management or Kong, including authentication, throttling, and rate limiting.
+* Support *REST, SMART on FHIR, FHIR, and payer API integrations*.
+* Implement observability using *OpenTelemetry, logs, metrics, tracing, SLOs/SLIs, and automated alerting*.
+* Build and maintain event-driven systems using *Kafka or Azure Event Hub*, including retries, idempotency, and dead-letter queues.
+* Implement security and compliance using *OPA, Key Vault/Secrets Manager, OAuth2, OIDC, encryption, and audit logging*.
+* Support internal developer platforms and self-service infrastructure provisioning.
+* Support *MLOps/LLMOps*, including deployment and monitoring of AI/ML inference services.
+
+h2. Required Skills
+
+* *Azure/AWS Cloud*
+* *Docker & Kubernetes (AKS/EKS)*
+* *Terraform*
+* *CI/CD:* Azure DevOps, Jenkins, or GitHub Actions
+* *Python & Bash scripting*
+* *REST APIs & API Gateways*
+* *Microservices & Event-Driven Architecture*
+* *Kafka / Azure Event Hub*
+* *Observability:* OpenTelemetry, Prometheus/Grafana or equivalent
+
+h2. Preferred Skills
+
+* *SMART on FHIR / Healthcare Integrations*
+* *FHIR, HL7, X12*
+* Healthcare or revenue-cycle systems
+* *ArgoCD / Flux, Istio, OPA*
+* MLOps / LLMOps
+* HIPAA-compliant cloud environments
+
+h2. Soft Skills
+
+* Strong troubleshooting and problem-solving abilities.
+* Excellent collaboration with engineering, product, and security teams.
+* Ability to work effectively in regulated and compliance-driven environments. ",,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,1.5 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,6,,,,,,,Remote_1-2daysmonthonsite,,,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,Yes,,1.0,,Highest,0|i03vsv:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,18/Aug/26 9:42 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;[~accountid:712020:9388b521-3985-43aa-80a7-8fe219fc219d] is working on it. shared the profiles to shivani.,"18/Aug/26 10:05 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Screened 12–13 DevOps profiles and shortlisted 3–4 strong candidates. However, they lack healthcare automation experience. I found one strong profile (Dhananjay Kumar) with relevant healthcare automation experience, but the candidate is not comfortable with the budget.",18/Aug/26 11:34 AM;712020:3b446a8d-8374-4088-846f-225155343891;One profile from blutris,18/Aug/26 3:49 PM;63804f3f213a315af3473e76;Blutris will share more profile [~accountid:712020:3b446a8d-8374-4088-846f-225155343891] . No interview scheduled from recruitment side but profiles they have for screening. ,19/Aug/26 3:27 PM;712020:3b446a8d-8374-4088-846f-225155343891;Bluetris will share  more profile,20/Aug/26 12:57 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Budget issue / No experience in healthcare automation,21/Aug/26 2:03 PM;712020:3b446a8d-8374-4088-846f-225155343891;No new profile from thier side,21/Aug/26 3:33 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Received 1 relevant profile - No. was invalid,24/Aug/26 3:24 PM;712020:3b446a8d-8374-4088-846f-225155343891;Ask to share more profile- they are cheking on bench,25/Aug/26 3:07 PM;712020:3b446a8d-8374-4088-846f-225155343891;One profile from  bluetri- siddharth,27/Aug/26 2:59 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Siddharth and Brijesh (Vendor Profile ) Shared,,,,,,,In Progress,18/Aug/26 11:33 AM
+Senior AI Backend Engineer (Ruby on Rails + Agentic AI),OUT-22250,56613,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,17/Aug/26 3:17 PM,27/Aug/26 2:59 PM,18/Aug/26 3:27 PM,,,0,"Need Senior AI Backend Engineer (Ruby on Rails + Agentic AI)
+
+We are looking for an experienced Senior AI Backend Engineer with strong expertise in Ruby on Rails, Microservices Architecture, and Agentic AI / LLM-based application development.
+
+Position Details
+Role: Senior AI Backend Engineer (Ruby on Rails + Agentic AI)
+Experience: 5+ Years
+Location: Remote
+Shift Timing: Normal IST Working Hours
+Contract Duration: Minimum 6 Months
+
+Required Skills
+5+ years of experience in backend development using Ruby on Rails or other object-oriented programming languages.
+Strong experience designing multi-tenant microservices, distributed systems, and scalable backend architectures.
+Expertise in REST APIs, SDK design, backend architecture, and service-oriented systems.
+Hands-on experience with AWS, Docker, PostgreSQL, DevOps, and CI/CD practices.
+Strong understanding of OOP, Design Patterns, System Design, and scalable application development.
+Experience building real-time, highly interactive applications.
+Working knowledge of Angular (2+), AngularJS, TypeScript, JavaScript, HTML5, and CSS.
+Knowledge of automation tools such as Ansible is an added advantage.
+
+AI & Generative AI Experience
+Hands-on experience building Agentic AI or LLM-powered applications.
+Experience with AI orchestration frameworks, autonomous workflows, and multi-agent systems.
+Familiarity with LangChain, LangGraph, CrewAI, Semantic Kernel, or similar frameworks is preferred.
+Experience integrating LLMs, Vector Databases, AI APIs, and Retrieval-Augmented Generation (RAG) solutions into production environments.
+Ability to design scalable AI systems that combine deterministic workflows with AI-driven decision-making.
+
+Key Responsibilities
+Design and develop scalable AI-native backend platforms and microservices.
+Build AI agents for automation, personalization, customer engagement, and workflow orchestration.
+Define backend architecture, APIs, data models, and service interactions.
+Develop clean, maintainable, and testable code while following engineering best practices.
+Lead architecture discussions, code reviews, and technical governance.
+Implement comprehensive testing, including unit, integration, performance, and AI behavior testing.
+Collaborate closely with Product, Architecture, and Engineering teams.
+Mentor developers and drive adoption of modern AI engineering practices.
+Troubleshoot and optimize distributed systems and AI workflows.",,Chahak Pandya,Diksha Yadav,Prashant Singh Hada,Tanvi Saxena,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.30 LPM,,,,,,,tridhya-tech,,,Delphic,,,,,,,,,,,,,,5+,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,Yes,,1.0,,Highest,0|i03vsf:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"18/Aug/26 11:46 AM;712020:3b446a8d-8374-4088-846f-225155343891;Got on profile from VVP - rejected in internal interview
+Shared with Gems Essence -  they don’t  have any profile
+Shared with Golden Eagle- Got one profile, *shortlisted from nikhil*   side, sharing with client",18/Aug/26 3:51 PM;63804f3f213a315af3473e76;[~accountid:712020:180b6eb2-dca6-4aec-b67b-23a22e971f04] (Krupali) checking for vendor. Meeting scheduled by Dheeraj ,19/Aug/26 3:31 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;schedule the meeting for tomorrow at 1:00 PM.,27/Aug/26 2:59 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Shared Deepak (Vendor Profile),,,,,,,,,,,,,,In Progress,18/Aug/26 4:27 PM
+workday integration consultant  (Certificate Not Mandatory),OUT-22240,56411,Requirement,Shared & Need to Share More,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,14/Aug/26 9:33 AM,31/Aug/26 11:13 AM,24/Aug/26 1:47 PM,,,0,,,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,OUT-22309,OUT-22310,,,1.3 LPM,,,,,,,ApaarInfosystem,,,Delphic,,,,,,,,,,,,,,0-4 years,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03vq7:,Perm,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"18/Aug/26 2:59 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;already have so many profiles on this position, scheduled 1 interview tomorrow and have follow ups also.",18/Aug/26 5:21 PM;712020:3b446a8d-8374-4088-846f-225155343891;2 int for 19 aug,19/Aug/26 8:16 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for today and  2 interviews for tomorrow,19/Aug/26 9:57 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;2 internal interviews have been scheduled for 20 AUG,20/Aug/26 9:11 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Ticket created,24/Aug/26 3:00 PM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with some new vendors-waiting for the profils,24/Aug/26 3:17 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for 25th AUG.,25/Aug/26 4:01 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview for 26th AUG.,26/Aug/26 7:53 AM;712020:3b446a8d-8374-4088-846f-225155343891;Not  getting profile with certifications ,26/Aug/26 2:38 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;2 profiles have been shortlisted today.,27/Aug/26 2:33 PM;712020:3b446a8d-8374-4088-846f-225155343891;No new profiles yet,27/Aug/26 2:37 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 interview scheduled for monday.,27/Aug/26 3:22 PM;63804f3f213a315af3473e76;[~accountid:712020:9388b521-3985-43aa-80a7-8fe219fc219d]  update for this req ?,27/Aug/26 3:27 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Screened a few profile . don’t have certification,,,,In Progress,26/Aug/26 1:41 PM
+Data Engineer,OUT-22233,56244,Requirement,Shared & Need to Share More,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,12/Aug/26 3:35 PM,27/Aug/26 2:41 PM,24/Aug/26 1:47 PM,,,0,"h2. Data Engineer (ETL)
+
+*Experience:* 7–8 Years
+*Employment:* C2C / C2H
+*Location:* Pan India – Hybrid
+*Shift:* 11:00 AM – 9:00 PM IST
+*Priority:* P1
+
+h3. Job Summary
+
+We are looking for a strong *Data Engineer* with hands-on experience in *ETL/ELT, Python, PySpark, Azure Databricks, Snowflake, and SQL*. The ideal candidate should also have experience with *Terraform, CI/CD, Azure services, and AI/ML/LLM technologies*.
+
+h3. Must-Have Skills
+
+* Strong Data Engineering and *ETL/ELT* experience
+* *Python, Apache Spark, PySpark/Spark SQL*
+* *Azure Databricks (Unity Catalog), Snowflake*
+* Strong *SQL* skills
+* *Terraform* and Infrastructure as Code
+* *CI/CD:* GitHub Actions, Git, Artifactory, Sonar
+* Experience with *Azure Functions & Service Bus*
+* Hands-on *AI/ML and LLM* experience
+
+h3. Key Responsibilities
+
+* Design, develop, and optimize scalable *ETL/ELT pipelines*.
+* Build data solutions using *Python, PySpark, Databricks, and Snowflake*.
+* Develop and optimize complex SQL queries and data transformations.
+* Implement cloud infrastructure using *Terraform*.
+* Build and maintain CI/CD pipelines using GitHub Actions and related tools.
+* Integrate Azure Functions, Service Bus, and other Azure services.
+* Ensure data quality, performance, security, and reliability.
+* Leverage *AI/ML and LLM capabilities* in data engineering solutions.
+
+h3. Preferred
+
+* Experience with Azure cloud-native data platforms.
+* Strong understanding of data architecture, orchestration, monitoring, and optimization.
+* Experience working in Agile environments.",,Chahak Pandya,Diksha Yadav,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,63804f3f213a315af3473e76,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,,,,,OUT-22294,,,,,1.60 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,7+,,,,,,,Hybrid-Pan-India,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03von:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,18/Aug/26 2:41 PM;712020:3b446a8d-8374-4088-846f-225155343891;Checking for onsite vendor ,19/Aug/26 3:30 PM;63804f3f213a315af3473e76;[~accountid:712020:ec9d4891-6015-4d98-9edb-e2d531338090]  check vendor,20/Aug/26 3:44 PM;63804f3f213a315af3473e76;Still no vendor frm Garv side ,21/Aug/26 2:10 PM;63804f3f213a315af3473e76;[~accountid:712020:ec9d4891-6015-4d98-9edb-e2d531338090]  Any update for vendor ?,21/Aug/26 2:15 PM;712020:ec9d4891-6015-4d98-9edb-e2d531338090;[~accountid:63804f3f213a315af3473e76] No not yet,24/Aug/26 3:01 PM;712020:3b446a8d-8374-4088-846f-225155343891;[~accountid:712020:ec9d4891-6015-4d98-9edb-e2d531338090] any new vendor,26/Aug/26 11:34 AM;712020:3b446a8d-8374-4088-846f-225155343891;No new vendor,26/Aug/26 11:41 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;JAYAPRAKASHNARAYANAN V - He is available and ready for the client meeting tomorrow by 12 PM.,26/Aug/26 2:39 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;Not received exp candidates profile.,27/Aug/26 2:41 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;did screening but no strong candidate found yet.,,,,,,,,In Progress,26/Aug/26 11:29 AM
+Senior Business Systems Analyst,OUT-22225,56172,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,12/Aug/26 10:52 AM,17/Aug/26 11:43 AM,,,,0,"Role: Senior Business Systems Analyst
+Type: Contract
+Max Rate: 1.6 LPM
+Work Mode: Remote
+Years of Experience Required : 8+ Years
+
+Job description:
+We need an experienced, senior-level BSA who can operate independently and take ownership of the following areas without requiring significant handholding:
+Requirements gathering and analysis for integration points between SuccessFactors and S/4HANA
+Cross-module integration analysis within S/4HANA (e.g., FI/CO, MM, SD, or other relevant modules as applicable to our landscape)
+Process flow documentation (current state and future state)
+Functional and technical documentation of integration designs and data flows
+Preparation and delivery of presentations to stakeholders and leadership
+Test planning, test case creation, and execution (unit, integration, and end-to-end/UAT testing)
+Data migration validation, including reconciliation and data quality checks between source and target systems
+Close collaboration with GIS and HRIS teams to align on requirements, timelines, and issue resolution
+Identifying gaps, risks, and dependencies across integration points, and proactively driving them to closure
+Key Requirements:
+8+ years of BSA experience, with significant hands-on experience in SAP S/4HANA implementations
+Proven experience with SuccessFactors–S/4HANA integration (e.g., Employee Central integration, org data replication, or similar)
+Strong understanding of cross-module data flows within S/4HANA
+Demonstrated ability to independently lead workstreams, including testing strategy and data migration validation
+Excellent documentation skills (functional specs, process flow diagrams, integration design documents)
+Strong stakeholder communication skills
+Experience working in a matrixed environment with GIS and HRIS teams
+Prior experience in DT/large-scale transformation programs preferred",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,OUT-21423,,,,,1.5 LPM,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,8+,,,,,,,Remote,,,Prashant Singh Hada,,,,,,,712020:3b446a8d-8374-4088-846f-225155343891,,,,,,,Yes,,1.0,,Highest,0|i03vmv:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,,,,,,,,,,,,,,,,,,In Progress,13/Aug/26 9:19 AM
+Lead Data Scientist,OUT-22222,56169,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,12/Aug/26 9:51 AM,27/Aug/26 3:27 PM,,,,0,"_Experience:_ 6–8 Years
+*_Location:_* *Remote ( once in a month in noida , pune , hyderabad ,chennai , banglore )*
+_Working Hours:_ 11:00 AM – 9:00 PM
+
+h2. Role Overview
+
+We are seeking an experienced _Lead Data Scientist_ with 6–8 years of hands-on experience in machine learning, NLP, Generative AI, and advanced data science. The ideal candidate will have strong expertise in Python/R, statistical modeling, deep learning, LLM applications, RAG, and Agentic AI. The candidate will lead model development, experimentation, validation, benchmarking, and deployment-ready AI solutions.
+
+h2. Key Responsibilities
+
+* Lead the design, development, validation, and optimization of machine learning and AI models.
+* Develop advanced _NLP and Generative AI_ solutions using Transformers, LangChain, RAG, and Agentic AI frameworks.
+* Design and implement _prompt engineering, text processing, entity extraction, and dialogue management_ solutions.
+* Perform feature engineering, model selection, ensemble modeling, and hyperparameter optimization.
+* Develop model explainability frameworks and establish robust model benchmarking practices.
+* Conduct model validation, performance testing, bias testing, and error analysis.
+* Build and optimize deep learning models using _TensorFlow and PyTorch_.
+* Work with large datasets using _Python, R, and SQL_ for data analysis and model development.
+* Collaborate with engineering and business teams to translate business problems into scalable AI/ML solutions.
+* Mentor data scientists and contribute to technical architecture and best practices.
+* Stay current with emerging developments in _LLMs, Agentic AI, NLP, RAG, and Generative AI_.
+
+h2. Required Skills
+
+* 6–8 years of experience in Data Science, Machine Learning, or AI.
+* Strong programming experience in _Python, R, and SQL_.
+* Hands-on experience with _TensorFlow, PyTorch, and Scikit-learn_.
+* Strong experience with _NLP, Transformers, text processing, and entity extraction_.
+* Practical experience with _LangChain, RAG, Prompt Engineering, and Agentic AI_.
+* Strong understanding of feature engineering, model validation, ensemble methods, and benchmarking.
+* Experience with model explainability, bias testing, and performance evaluation.
+* Strong analytical, problem-solving, and communication skills.
+
+h2. Good to Have
+
+* Experience building production-grade LLM/RAG applications.
+* Experience with conversational AI and dialogue management.
+* Experience mentoring junior/mid-level data scientists.
+* Knowledge of MLOps, model deployment, and cloud-based AI platforms.",,Chahak Pandya,Tanvi Saxena,,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,1.30 LPM,,,,,,,Devlabs,,,Delphic,,,,,,,,,,,,,,6+,,,,,,,Remote_1-2daysmonthonsite,,,Shivani Sinha,Tanvi Saxena,,,,,,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,Yes,,1.0,,Highest,0|i03vm7:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 3:27 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Harshit profile has shared,,,,,,,,,,,,,,,,,In Progress,12/Aug/26 10:19 AM
+AEM Assets Developer,OUT-22217,56132,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,11/Aug/26 3:41 PM,27/Aug/26 3:27 PM,,,,0,"I have this requirement from our client. See if you have these developers in your pool:
+
+Looking for several AEM Assets Developers.
+
+Good experience with AEM Assets / DAM, including managing digital assets, metadata, and workflows.
+Experience with AEM 6.x, Java, OSGi, and Sling.
+Knowledge of Dynamic Media, bulk asset uploads, data migration, and metadata schemas.
+Experience managing user roles and permissions in AEM.
+Experience with config-as-code and Repoinit.
+Experience with Cloudinary or other cloud-based DAM platforms",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,1000/hr,,,,,,,Protonshub,,,Delphic,,,,,,,,,,,,,,3,,,,,,,Remote,,,Prashant Singh Hada,,,,,,,712020:3b446a8d-8374-4088-846f-225155343891,,,,,,,Yes,,1.0,,Highest,0|i03vl3:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 3:27 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Aashutosh (Vendor Profile) has shared,,,,,,,,,,,,,,,,,In Progress,17/Aug/26 7:56 AM
+Senior Data Platform Engineer / AI Platform Engineer,OUT-22213,56064,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,11/Aug/26 12:39 PM,11/Aug/26 1:18 PM,,,,0,"Senior Data Platform Engineer / AI Platform Engineer
+About the Role
+We are looking for a highly skilled Data Platform Engineer to build and scale modern data platforms powering AI applications and large-scale supply chain use cases. The ideal candidate has strong software engineering fundamentals and hands-on experience designing production-grade data platforms, distributed systems, and cloud-native infrastructure.
+This role is best suited for engineers who have transitioned from Software Engineering, Backend Engineering, DevOps, or Platform Engineering into Data Engineering, AI Platform Engineering, or MLOps.
+Responsibilities
+Design, build, and maintain scalable data platforms capable of processing large volumes of structured and unstructured data.
+Develop reliable, high-performance data pipelines using modern lakehouse architectures.
+Build and optimize batch and real-time data processing workflows.
+Own infrastructure for data platforms, ensuring scalability, reliability, observability, and security.
+Collaborate with AI/ML teams to enable production-ready model training and inference pipelines.
+Improve developer productivity through automation, CI/CD, Infrastructure as Code, and platform tooling.
+Design resilient distributed systems capable of supporting mission-critical supply chain workloads.
+Monitor, troubleshoot, and continuously optimize platform performance and cost.
+Required Qualifications
+3–5+ years of professional experience in Software Engineering, Data Engineering, Platform Engineering, DevOps, MLOps, or related domains.
+Prior experience in Software Engineering, Backend Engineering, Cloud Engineering, or Platform Engineering (1–2+ years preferred).
+Strong programming skills in Python.
+Strong SQL skills.
+Experience with Databricks.
+Hands-on experience with Apache Spark / PySpark.
+Experience building production-grade ETL/ELT pipelines.
+Experience with cloud platforms (AWS preferred).
+Experience with Docker and Kubernetes.
+Experience building CI/CD pipelines.
+Strong understanding of distributed systems and production infrastructure.
+Experience using Git and modern software development practices.
+Preferred Qualifications
+Experience with Kafka or other streaming platforms.
+Experience with Airflow.
+Experience with Delta Lake or modern lakehouse architectures.
+Experience with MLflow, SageMaker, Feature Store, or Model Registry.
+Experience with Terraform or Infrastructure as Code.
+Experience with Jenkins, ArgoCD, Prometheus, or Grafana.
+Experience building AI Platform or MLOps infrastructure.
+Exposure to GenAI or LLM-based systems is a plus.
+Experience working with supply chain, logistics, manufacturing, or enterprise data platforms is highly desirable.
+Ideal Candidate Profile
+We're looking for engineers who have built real production systems—not just analytics dashboards.
+Strong candidates typically have experience in one or more of the following career paths:
+Software Engineer → Data Engineer
+Backend Engineer → Data Platform Engineer
+DevOps Engineer → MLOps Engineer
+Cloud Engineer → AI Platform Engineer
+Platform Engineer → Data Engineer
+Candidates from product companies or engineering-driven organizations are encouraged to apply. Exceptional candidates from consulting or services companies are also welcome if they have hands-on ownership of production-grade platforms.
+What Success Looks Like
+Builds scalable, reliable, and maintainable data platforms.
+Thinks like a software engineer while solving data engineering problems.
+Comfortable owning infrastructure, automation, and platform reliability.
+Writes clean, production-quality code.
+Can independently design systems that support AI and large-scale supply chain data workloads.",,Chahak Pandya,,,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,,,,,,,,,,,,,,OUT-21159,,,,,1.30 LPM,,,,,,,DinaApps,,,Delphic,,,,,,,,,,,,,,3+,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03vk7:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,11/Aug/26 12:41 PM;712020:07b19da2-e557-418b-a72b-435fd3d74c4f;Also shared Sujal Parmar,,,,,,,,,,,,,,,,,In Progress,11/Aug/26 12:39 PM
+QA Engineer ,OUT-22192,55915,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,Chahak Pandya,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,10/Aug/26 10:07 AM,27/Aug/26 3:22 PM,,,,0,"h1. We are looking for 2 Senior QAs to start in 7-10 days. Pharma Domain experience is mandatory.
+Work timing - 1.00 - 10.00 p.m (Mon-Fri)
+Remote working.
+Experience - 6+ years
+
+h1. Database Testing
+
+* ETL Testing
+* SQL
+* Data Validation
+* Understanding Pharma best practices is required (GxP).Good Laboratory (GLP), Clinical (GCP), or Manufacturing (GMP) Practices
+* Understanding of FDA 21 CFR Part 11 guidelines regarding electronic records and digital signatures
+* Excellent communication skills
+*Role Overview*
+
+The QA Engineer will be responsible for ensuring the quality, accuracy, and reliability of complex enterprise applications involving data processing, forecasting, and workflow-driven systems. The role requires strong expertise in functional testing, data validation, integration testing, and business workflow validation.
+*Key Responsibilities*
+
+* Perform end-to-end testing of application modules and workflows
+* Validate business processes across multiple interconnected modules
+* Execute smoke, SIT, regression, and exploratory testing
+* Validate data accuracy and perform reconciliation across systems
+* Test integration flows and ensure data consistency between systems
+* Validate business rules, calculations, and hierarchical data structures
+* Log, track, and manage defects across the lifecycle
+* Support UAT and collaborate with business stakeholders
+* Create and maintain test cases, reports, and traceability matrices
+* Validate UI/UX behavior and user experience
+*Required Skills & Experience*
+
+* Strong knowledge of Software Testing Life Cycle (STLC)
+* Experience in Agile/Scrum environments
+* Hands-on experience in functional, regression, and integration testing
+* Experience in testing data-heavy applications
+* Good knowledge of SQL for data validation
+* Understanding of APIs, data pipelines, or ETL processes
+* Strong analytical and problem-solving skills
+* Ability to work with business stakeholders and technical teams
+* Good communication and documentation skills
+*Key Success Metrics*
+
+* High defect detection rate in pre-UAT phases
+* Minimal defects leakage into production
+* Accurate validation of complex data and calculations
+* Timely test execution and defect closure
+* Complete traceability across requirements, test cases, and defects
+*Nice-to-Have Skills*
+
+* Experience with enterprise or data-driven applications
+* Exposure to forecasting, planning, or analytics systems
+* Familiarity with test management tools (e.g., Jira, qTest)
+* Basic knowledge of test automation",,Chahak Pandya,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,1.20 LPM,,,,,,,tridhya-tech,,,Delphic,,,,,,,,,,,,,,6+,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,2.0,,Highest,0|i03vfj:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,10/Aug/26 2:59 PM;712020:3b446a8d-8374-4088-846f-225155343891;Brandsmasher- Yash,17/Aug/26 4:28 PM;712020:3b446a8d-8374-4088-846f-225155343891;VVP- Manish,18/Aug/26 10:08 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Screening QA profiles,"18/Aug/26 10:28 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;interview was scheduled but not a strong profile, so screening more strong profiles.","18/Aug/26 4:25 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Screened 10+ profiles today. Most candidates either lacked relevant experience or pharma experience. A few had pharma experience but expected 30+ LPA, which was beyond the budget.",20/Aug/26 3:27 PM;712020:3b446a8d-8374-4088-846f-225155343891;Got one more profile from vvp,21/Aug/26 2:52 PM;712020:3b446a8d-8374-4088-846f-225155343891;scheduled int for monday,21/Aug/26 3:24 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;not received profile relevant to pharma experience ,21/Aug/26 3:34 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;No profiles received today,27/Aug/26 3:22 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Manish (Vendor Profile ) Has shared,,,,,,,,In Progress,17/Aug/26 4:27 PM
+Python,OUT-22180,55775,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,07/Aug/26 10:32 AM,27/Aug/26 3:28 PM,,,,0,,,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,0,,,,,,,tridhya-tech,,,Delphic,,,,,,,,,,,,,,5 yrs ,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03vcv:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 3:28 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Harshit profile has shared,,,,,,,,,,,,,,,,,In Progress,07/Aug/26 10:32 AM
+Lead Engineer,OUT-22160,55467,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,04/Aug/26 11:13 AM,27/Aug/26 3:28 PM,,,,0,"_Role: Lead Engineer_
+Work timing: Start at 2PM IST (Monday - Friday, 8hrs a day)
+Exp- 7 years
+Duration: 6 months
+Rate per hour:1.6 lacs 
+
+Key Skills:
+BE- 80%
+AWS with Lambda - this is a dealbreaker
+Node.js - latest one
+API’s,
+GitHub
+Claude AI/GPT etc
+DB: SQL/ NoSQL, GraphQL
+
+FE: 20%
+JS + React, Typescript
+
+Key Responsibilities:
+Facilitate effective communication with client project stakeholders regarding project status and recommendations.
+Craft client code that is not just efficient, but also performant, testable, scalable, secure, and of the highest quality.
+Actively participate in accurate planning and estimation efforts, utilizing project methods and tools.
+Proficiently gather requirements and organize/present developed features for clients.
+Execute complex activities within the current methodology and quality standards, showcasing success across diverse engagements.
+Promote client success across the team by collaborating with engineers, designers, and managers to understand user pain points, anticipate potential problems, and iterate on solutions that drive client success.
+Engage in agile software development, including daily stand-ups, sprint planning, team retrospectives, and other governance activities.
+Actively participate in the Engineering Practice community, mentoring others through Communities of Practice (CoPs) or on project teams, and supporting the growth of technical capabilities.
+Independently drive project delivery within defined architecture, demonstrating autonomy and accountability in all stages from conceptualization to deployment.
+Minimum Qualifications:
+Experience/expertise in the following areas specified below:
+Design and implement scalable backend services and APIs using Node.js
+Utilize serverless services, namely AWS services such as Lambda, API Gateway, DynamoDB, or RDS for robust backend infrastructure
+Collaborate with cross-functional teams to define and execute on technical requirements
+Optimize system performance and troubleshoot complex issues
+Mentor and guide junior team members, fostering a culture of learning and growth
+Stay updated with the latest Node.js and AWS technologies to drive continuous improvement
+Experience in Agile software development methodologies.
+Expertise in applying Object-Oriented Programming principles (abstraction, encapsulation).
+High-level design proficiency following UML / C4 / ArchiMate.
+Experience in creating and implementing well-tested, scalable, and performant enterprise-level systems.
+Practice and initiative mentoring other engineers and decision-makers throughout the organization.
+Good understanding of SOLID principles.
+Familiarity with OWASP.
+Proficiency in the English language.
+Additional Experience Desired:
+Ability to optimize backend performance and troubleshoot complex issues.
+Familiarity with modern frontend build tools and CI/CD pipelines.
+Excellent problem-solving skills and a proactive attitude towards challenges.
+Strong verbal and written communication skills.
+Professional software engineering experience, working on multi-discipline teams
+Experience in backend development with expertise in node.js
+Proficiency in designing and implementing RESTful APIs and microservices architecture.
+Strong knowledge of AWS services like Lambda, API Gateway, DynamoDB/RDS, and S3.
+Experience with containerization using Docker and orchestration with Kubernetes (optional).
+Excellent problem-solving skills and a proactive attitude towards challenges.
+and
+Object-Relational Mappers (ORMs)
+Architectural (Microservices, Serverless etc) and Design (Factory, Singleton, Observer etc) Patterns
+Unit Testing",,Tanvi Saxena,,,,,,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,,,,2 LPM,,,,,,,Orangebits,,,Delphic,,,,,,,,,,,,,,8+,,,,,,,Remote,,,,,,,,,,,,,,,,,Yes,,1.0,,Highest,0|i03v8f:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,27/Aug/26 3:28 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Vipul profile has shared,,,,,,,,,,,,,,,,,In Progress,04/Aug/26 12:40 PM
+Senior Integration Engineer (FHIR/HL7/APIs),OUT-22158,55433,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,04/Aug/26 8:12 AM,27/Aug/26 2:42 PM,24/Aug/26 1:48 PM,,,0,"Job Title: Senior Integration Engineer (FHIR/HL7/APIs)
+Experience: 8–12+ Years
+Location: Remote
+Employment Type: C2C
+
+
+Job Summary
+
+We are looking for a Senior Integration Engineer with strong expertise in FHIR, HL7, REST APIs, Java, Spring Boot, and Apache Camel to design and deliver scalable healthcare interoperability solutions. The ideal candidate will have extensive experience integrating EMR/EHR systems, leading integration initiatives, and building secure, high-performance healthcare APIs.
+
+Key Responsibilities
+Design, develop, and maintain healthcare integrations using HL7 v2.x, FHIR R4, REST APIs, and Apache Camel.
+Build scalable integration services using Java, Spring Boot, and Microservices.
+Develop integration workflows, mappings, routing, and transformations.
+Integrate with EMR/EHR platforms, HIEs, payer systems, and third-party healthcare applications.
+Troubleshoot production issues and optimize integration performance.
+Participate in solution architecture, code reviews, and technical design discussions.
+Mentor junior engineers and drive engineering best practices.
+Support CI/CD pipelines, cloud deployments, and DevOps initiatives.
+Ensure compliance with HIPAA and healthcare interoperability standards.
+Required Skills
+8+ years of software engineering experience with 5+ years in healthcare integrations.
+Strong hands-on experience with:
+HL7 v2.x & FHIR R4
+Java/J2EE & Spring Boot
+RESTful APIs
+Apache Camel
+Microservices Architecture
+Experience integrating with EMR/EHR, HIE, payer, or healthcare platforms.
+Strong debugging, troubleshooting, and performance tuning skills.
+Knowledge of Enterprise Integration Patterns (EIP) and middleware technologies.
+Preferred Skills
+Experience with EMR platforms such as Epic, Cerner/Oracle Health, Allscripts, Meditech, or Athenahealth.
+Cloud experience with AWS, Azure, or GCP.
+Hands-on experience with Docker, Kubernetes, CI/CD, and DevOps practices.
+Prior experience leading or mentoring integration teams.
+Knowledge of HIPAA-compliant application development.
+Good to Have
+HL7/FHIR Certification.
+MuleSoft or Apigee certification.
+AWS/Azure/GCP certifications.
+Healthcare interoperability or HIPAA compliance training.
+Must-Have Skills
+HL7 v2.x & FHIR R4
+Java & Spring Boot
+REST APIs & Apache Camel
+Healthcare/EMR Integrations
+Good-to-Have Skills
+Cloud (AWS/Azure/GCP)
+Docker, Kubernetes & CI/CD",,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Tanvi Saxena,,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.8 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,8+,,,,,,,Hyderabad,,,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,,,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,,,,,Yes,,1.0,,Highest,0|i03v7z:,C2C,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,18/Aug/26 2:42 PM;712020:3b446a8d-8374-4088-846f-225155343891;Need vendor for this  req- told dheeraj,20/Aug/26 3:40 PM;63804f3f213a315af3473e76;one vendor call we can schedule for Monday ,21/Aug/26 2:53 PM;712020:3b446a8d-8374-4088-846f-225155343891;No vendor from  dheeraj's side,24/Aug/26 3:02 PM;712020:3b446a8d-8374-4088-846f-225155343891;Still no vendor from dheeraj,26/Aug/26 11:35 AM;712020:3b446a8d-8374-4088-846f-225155343891;No new vendor,26/Aug/26 2:40 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No CVs received.,27/Aug/26 2:31 PM;712020:3b446a8d-8374-4088-846f-225155343891;Still no vendors,27/Aug/26 2:42 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;NO relevant candidated.,,,,,,,,,,To Do,04/Aug/26 8:12 AM
+".NET Core, Angular & Azure",OUT-22110,54840,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,28/Jul/26 2:13 PM,27/Aug/26 3:24 PM,24/Aug/26 1:48 PM,,,0,"h1. Software Engineer – .NET Core, Angular & Azure
+
+*Employment Type:* C2C / C2H / Full-Time
+*Experience:* 5+ Years
+*Salary Range:* 130K – 160 k
+*Work Model:* Hybrid (1 day/week at client location) noida , pune , gurgaon, chennai , banglore , indore , ahemdabad
+
+ 
+*Working Hours:* 11:00 AM – 9:00 PM
+
+h2. Job Summary
+
+We are seeking an experienced Software Engineer with strong expertise in .NET Core, Angular, and Microsoft Azure to join our growing engineering team. The ideal candidate will have hands-on experience designing and developing scalable web applications using Microservices architecture and modern cloud-native technologies.
+
+The role requires strong backend and frontend development skills, experience with containerization and orchestration technologies, and the ability to build secure, high-performance applications. Exposure to Generative AI technologies is highly desirable.
+
+h2. Key Responsibilities
+
+* Design, develop, test, and maintain scalable backend services using .NET Core (C#).
+* Build responsive and interactive user interfaces using Angular, TypeScript, HTML, and CSS.
+* Develop and support Microservices-based applications and distributed systems.
+* Design and optimize databases, stored procedures, and queries using Microsoft SQL Server.
+* Deploy, monitor, and manage applications on Microsoft Azure.
+* Implement containerized solutions using Docker and Kubernetes.
+* Develop and maintain RESTful APIs and integration services.
+* Collaborate with Product Owners, QA Engineers, DevOps teams, and other stakeholders.
+* Participate in code reviews and ensure adherence to coding standards and best practices.
+* Troubleshoot and resolve production and application performance issues.
+* Support CI/CD implementation and deployment automation initiatives.
+* Stay updated with emerging technologies and industry best practices.
+* Explore and integrate Generative AI capabilities where applicable.
+
+h2. Required Qualifications
+
+* Bachelor's degree in Computer Science, Information Technology, or a related field.
+* 5+ years of hands-on experience with .NET Core / C# development.
+* 5+ years of experience with Angular, TypeScript, HTML5, and CSS3.
+* 4+ years of experience with Microsoft SQL Server.
+* 3+ years of experience working with Microservices architecture.
+* 3+ years of experience with Microsoft Azure services.
+* 3+ years of hands-on experience with Docker and Kubernetes.
+* 3+ years of experience implementing CI/CD pipelines.
+* 3+ years of experience developing and consuming REST APIs and integration solutions.
+* Strong understanding of software design patterns, scalability, and security best practices.
+* Excellent analytical, problem-solving, and debugging skills.
+* Strong communication and collaboration abilities.
+* Ability to work independently and take ownership of deliverables.
+
+h2. Preferred Qualifications
+
+* 1+ year of experience or exposure to Generative AI technologies (OpenAI, Azure OpenAI, LLM integrations, AI-powered applications, etc.).
+* Experience with Azure DevOps, GitHub Actions, or similar DevOps platforms.
+* Knowledge of cloud-native application development and monitoring tools.
+* Familiarity with Agile/Scrum development methodologies.
+
+h2. Technical Skills
+
+h3. Backend
+
+* .NET Core
+* C#
+* [http://ASP.NET|http://ASP.NET|smart-link]  Core
+* REST APIs
+* Microservices
+
+h3. Frontend
+
+* Angular
+* TypeScript
+* HTML5
+* CSS3
+
+h3. Database
+
+* Microsoft SQL Server
+* Stored Procedures
+* Query Optimization
+
+h3. Cloud & DevOps
+
+* Microsoft Azure
+* Docker
+* Kubernetes
+* CI/CD Pipelines
+* Azure DevOps / GitHub Actions
+
+h3. Additional
+
+* Generative AI (Preferred)
+* Git Version Control
+* Agile/Scrum",,Diksha Yadav,Prashant Singh Hada,Sarthak Solanki,Tanvi Saxena,,,63804f3f213a315af3473e76,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.4 LPM,,,,,,,Devlabs,devlabz.simran,,Delphic,,,,,,,,,,,,,,5 yrs ,,,,,,,Hybrid-Pan-India,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Tanvi Saxena,,,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,Yes,,1.0,,Highest,0|i03uxb:,C2H,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"30/Jul/26 9:41 AM;712020:3b446a8d-8374-4088-846f-225155343891;Vendor adroit- Ashish, Himanshu",18/Aug/26 9:45 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;bench or vendor profile required.,18/Aug/26 2:44 PM;712020:3b446a8d-8374-4088-846f-225155343891;No vendor is ready to share details before onbaording ,"21/Aug/26 2:56 PM;712020:3b446a8d-8374-4088-846f-225155343891;Already told dheeraj  to look for vendors, Searching for vendors who can  provide details before interview",24/Aug/26 3:03 PM;712020:3b446a8d-8374-4088-846f-225155343891;No  new vendor,26/Aug/26 11:36 AM;712020:3b446a8d-8374-4088-846f-225155343891;shared with a new vendor..,27/Aug/26 2:32 PM;712020:3b446a8d-8374-4088-846f-225155343891;No profiles yet,27/Aug/26 3:24 PM;63804f3f213a315af3473e76;[~accountid:712020:3b446a8d-8374-4088-846f-225155343891]  Please ask Dheeraj to Focus on this req Vendor for next week .,,,,,,,,,,To Do,18/Aug/26 9:21 AM
+Sr.Data Engineers,OUT-22035,54121,Requirement,Shared,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,17/Jul/26 8:58 AM,27/Aug/26 3:30 PM,24/Aug/26 1:48 PM,,,0,"|*Job Title*|Senior Data Engineer –Data Engineering|
+|*Job Purpose*|As a Senior Data Engineering, you will be responsible for handling large, complex, multi-dimensional datasets, including structured, unstructured, and real-time data. You will develop complex data transformation ETLs and work extensively with Python, Py Spark, Apache Spark, as well as cloud services from both AWS and Azure. Additionally, you will demonstrate strong expertise in cloud services related to the data domain and have a solid understanding of On-Prem/Cloud Data warehouse databases. You will also exhibit technical leadership capabilities, leading and delivering projects independently.|
+|*Experience*|4+ Years|
+|*Qualification*|A Bachelor's Degree in Computer Science, or a similar discipline (or comparable practical experience) is required.|
+|*Responsibilities*|Handle large, complex, multi-dimensional datasets, including structured, unstructured, and real-time data.
+Develop complex data transformation ETLs using Python, Py Spark, and Apache Spark.
+Utilize cloud services from both AWS and Azure related to the data domain, demonstrating a strong understanding of their respective ecosystems.
+Have a solid understanding of On-Prem/Cloud Data warehouse databases and their architecture.
+Provide technical leadership, leading and delivering projects independently while ensuring high-quality results.
+Stay updated with emerging trends in data tools, analysis techniques, and data usage, understanding their potential impact.
+Understand the concepts and principles of data modelling and create, maintain, and update relevant data models for specific business needs.
+*Possess knowledge of cloud data engineering tools/components/technologies from both AWS and Azure, such as AWS Glue, EMR, Azure Data Factory, etc.*
+Have an additional advantage with knowledge of Snowflake, Dataiku, Alteryx, or similar technologies.
+Collaborate effectively with cross-functional teams, including data scientists, analysts, and business stakeholders, to understand requirements and deliver optimal data engineering solutions.
+Ensure the scalability, reliability, and efficiency of data pipelines and processes.
+Troubleshoot and resolve issues related to data engineering, performance, and scalability.
+Document and maintain clear and comprehensive technical specifications, design documents, and best practices.
+Collaborate with team members to complete tasks and achieve project objectives.
+Excellent Communication skills should be effective in conveying complicated design concepts and communicate with stakeholders independently|",,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.2LPM,,,,,,,tridhya-tech,,,Delphic,,,,,,,,,,,,,,4+,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,6.0,,Highest,0|i03ugn:,C2H,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,20/Jul/26 2:41 PM;712020:3b446a8d-8374-4088-846f-225155343891;Vendor bluethink- ankit,"20/Aug/26 10:17 AM;712020:3b446a8d-8374-4088-846f-225155343891;One profile of vvp is running  - Praveen + share  1 more profile
+Shared with Golden Eagle they will share 2 profiles 
+Shared with zacdata- 2 profiles
+Shared with shieninof-  no profiles
+Shared with Nsqure- they will check with partner
+Shared with bluethink- 2 profiles
+Shared with Moderna- 1 profile
+Shared with bluethink- 3 profiles from their end",20/Aug/26 2:59 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;scheduled 5 interviews for 21st AUG.,21/Aug/26 8:30 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;budget issue,"21/Aug/26 1:37 PM;712020:3b446a8d-8374-4088-846f-225155343891;one profile from Arna Softech
+two profile  from golden eagle",21/Aug/26 2:05 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;1 candidate shortlisted.,21/Aug/26 2:11 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;1 interview has been scheduled for monday,24/Aug/26 2:03 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Ticket has been created for today’s shortlisted profile,24/Aug/26 3:04 PM;712020:3b446a8d-8374-4088-846f-225155343891;Golden eagle’s profile in final round,"24/Aug/26 3:23 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;[https://delphictech.atlassian.net/browse/OUT-22285|https://delphictech.atlassian.net/browse/OUT-22285|smart-link] 
+
+[https://delphictech.atlassian.net/browse/OUT-22294|https://delphictech.atlassian.net/browse/OUT-22294|smart-link] 
+
+[https://delphictech.atlassian.net/browse/OUT-22295|https://delphictech.atlassian.net/browse/OUT-22295|smart-link] 
+
+Keeping these profiles as backup","27/Aug/26 3:30 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;Dhanush, Mangesh, Praveen , Nayan (Vendor Profile) has shared,
+Harshit and shashank profile also shared",,,,,,,In Progress,20/Jul/26 2:41 PM
+Workday finance Certified  (Certificate Not Mandatory),OUT-21999,53957,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,13/Jul/26 2:24 PM,31/Aug/26 11:13 AM,28/Aug/26 9:38 AM,,,0,,,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,,,1.3 LPM,,,,,,,ApaarInfosystem,,,Delphic,,,,,,,,,,,,,,0-4 years,,,,,,,Remote,,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03u8n:,Perm,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,07/Aug/26 3:01 PM;712020:3b446a8d-8374-4088-846f-225155343891;satvik,18/Aug/26 5:21 PM;712020:3b446a8d-8374-4088-846f-225155343891;One int for 19 aug,"19/Aug/26 10:02 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;started working on it, no strong profile has been found as of now.","19/Aug/26 3:05 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;screening calls have been made, but eligible candidate not found yet.",20/Aug/26 1:43 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Received 10-12 applications. Candidates are not Eligible,"24/Aug/26 3:05 PM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with new vendor waiting for the profile, then discuss for meeting ",24/Aug/26 3:10 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,25/Aug/26 11:23 AM;712020:bf29b759-0312-4089-99ad-f56191f124a0;CVs received but not relevant because of certification.,26/Aug/26 7:53 AM;712020:3b446a8d-8374-4088-846f-225155343891;Not  getting profile with certifications ,26/Aug/26 8:59 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;job posting has been done,"26/Aug/26 2:41 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;working on it, until now no certification candidate found.",27/Aug/26 2:33 PM;712020:3b446a8d-8374-4088-846f-225155343891;No profiles  from vendors ,27/Aug/26 2:46 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;no certified candidates found yet.,27/Aug/26 3:27 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;didn’t receive CVs,,,,To Do,24/Aug/26 7:56 AM
+AI/ML Engineer  (Agentic AI Focus),OUT-21959,53821,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,08/Jul/26 9:53 AM,27/Aug/26 3:29 PM,31/Aug/26 9:14 AM,,,0,"# Core Programming & Systems Skills
+
+* Python (expert level) for ML, orchestration, and agent logic
+* Strong understanding of async programming, concurrency, and task scheduling
+
+# Foundations of Agentic AI
+
+* Design and implementation of autonomous AI agents capable of: 
+
+
+o Multi-step reasoning and planning
+o Goal decomposition and task orchestration
+o Dynamic decision-making under uncertainty
+
+* Experience with agent architectures: 
+
+
+o ReAct, Plan-and-Execute, Reflexive agents
+o Hierarchical / multi-agent systems
+o Tool-augmented and function-calling agents
+
+* Understanding of stateful vs stateless agents and memory management
+
+# Large Language Models (LLMs)
+
+* Hands-on experience with LLMs (OpenAI, Azure OpenAI, Anthropic, open-source models)
+* Prompt-engineering techniques for:
+
+
+o Reasoning (Chain-of-Thought, Self-Reflection)
+o Planning and critique loops
+o Instruction following and tool use
+
+* Experience with:
+
+
+o Few-shot and zero-shot prompting
+o Model selection trade-offs (latency, cost, context length)
+
+* Knowledge of fine-tuning / adapters (LoRA) is a plus
+
+# Agent Frameworks & Tooling
+
+* Practical experience with agent frameworks, such as: 
+
+
+o LangGraph / LangChain (agents, tools, memory)
+o Semantic Kernel
+o AutoGen, CrewAI, or similar
+
+* Ability to build custom agent orchestration layers beyond frameworks
+* Tool abstraction and execution safety (timeouts, retries, sandboxing)
+
+
+Classification: Internal
+
+# Memory, Context & Knowledge Augmentation
+
+* Design of agent memory systems: 
+
+
+o Short-term (conversation/state memory)
+o Long-term (episodic, semantic memory)
+
+* Retrieval-Augmented Generation (RAG):
+
+
+o Vector databases (FAISS, Pinecone, Azure AI Search, etc.)
+o Embedding selection and chunking strategies
+
+* Techniques for context management and compression
+* Knowledge graph–augmented or hybrid memory (plus)
+
+# Planning, Reasoning & Control
+
+* Experience implementing:
+
+
+o Task planners (step planning, re-planning)
+o Constraint-based execution
+o Feedback and self-correction loops
+
+* Understanding of:
+
+
+o Tool reliability scoring
+o Guardrails and action validation
+o Failure detection and graceful recovery
+
+# MLOps & AgentOps
+
+* Deployment of agents into production environments
+* Observability for agents:
+
+
+o Tracing agent decisions and tool calls
+o Logging prompts, responses, and errors
+
+* Model and prompt versioning
+* CI/CD for agent systems
+* Experience with Docker, Kubernetes, serverless deployments (Azure/AWS)
+
+# Evaluation & Testing of Agentic Systems
+
+* Designing evaluation frameworks for agents: 
+
+
+o Task success rate
+o Cost, latency, and reliability
+o Safety and hallucination detection
+
+* Offline test harnesses and simulation environments
+
+
+Classification: Internal
+
+* A/B testing of prompts, tools, and agent strategies
+
+# Security, Safety & Responsible AI
+
+* Secure tool execution and privilege control
+* Prompt-injection and jailbreak risk mitigation
+* Data privacy and isolation in agent memory
+* Responsible AI practices:
+
+
+o Bias awareness
+o Explainability of agent decisions
+o Human-in-the-loop escalation patterns
+10. Data & Integration Skills
+
+* Integration with:
+
+
+o Enterprise systems (CRM, ERP, databases)
+o Web services, internal APIs, and SaaS tools
+
+* Working knowledge of:
+
+
+o SQL / NoSQL databases
+o Event-driven systems and message queues (plus)
+11. Cloud & Platform Expertise
+
+* Strong experience with at least one cloud platform:
+
+
+o Azure (preferred for enterprise agentic AI), AWS, or GCP
+
+* Managed AI services, identity & access, secrets management
+* Cost optimization for LLM-driven systems
+
+
+12. Bonus / Advanced Skills (Nice to Have)
+
+* Multi-agent collaboration and negotiation
+* Human-AI collaboration patterns (copilots, supervisors)
+* Reinforcement learning for agent policy optimization
+* Experience building enterprise copilots or autonomous workflows",,Diksha Yadav,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,63804f3f213a315af3473e76,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,2.2 LPM,,,,,,,Devlabs,,,Delphic,,,,,,,,,,,,,,6,,,,,,,hyderabad(hybrid),,,Chahak Pandya,Garv Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,Yes,,1.0,,Highest,0|i03tzr:,C2H,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,21/Jul/26 11:13 AM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;[https://delphictech.atlassian.net/browse/OUT-22005|https://delphictech.atlassian.net/browse/OUT-22005|smart-link]  Backout,31/Jul/26 9:47 PM;712020:180b6eb2-dca6-4aec-b67b-23a22e971f04;[https://delphictech.atlassian.net/browse/OUT-22024|https://delphictech.atlassian.net/browse/OUT-22024|smart-link] Rejected,"18/Aug/26 2:44 PM;712020:3b446a8d-8374-4088-846f-225155343891;
+
+shared with  [+sanathanaars+|mailto:anusha@sanathanaars.co], they will share profile tomorrow
+(they getting issue with their  database not able to get the profile )","19/Aug/26 3:14 PM;712020:3b446a8d-8374-4088-846f-225155343891;Received one profile from new vendor, meeting schedule for tomorrow ","20/Aug/26 3:34 PM;712020:3b446a8d-8374-4088-846f-225155343891;he got link from HCL, they will hare new profiles","21/Aug/26 10:34 AM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;One candidate (Aravind) is confused b/w Remote or hybrir, need time to think",21/Aug/26 1:25 PM;712020:3b446a8d-8374-4088-846f-225155343891;[Aventra.ai|http://Aventra.ai] checking for profiles,21/Aug/26 2:05 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;got one Strong profile today but he not okay with hybrid ,24/Aug/26 12:56 PM;712020:3b446a8d-8374-4088-846f-225155343891;They shared one profile int scheduled,24/Aug/26 3:23 PM;712020:9388b521-3985-43aa-80a7-8fe219fc219d;Did nor receive any CV today,24/Aug/26 3:25 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;less experienced CVs received.,26/Aug/26 11:37 AM;712020:3b446a8d-8374-4088-846f-225155343891;Shared with avenior,26/Aug/26 2:42 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No CVs recevied.,27/Aug/26 8:51 AM;712020:ec9d4891-6015-4d98-9edb-e2d531338090;shared with Letitbex AI ,27/Aug/26 2:32 PM;712020:3b446a8d-8374-4088-846f-225155343891;No profiles,27/Aug/26 3:24 PM;63804f3f213a315af3473e76;[~accountid:712020:ec9d4891-6015-4d98-9edb-e2d531338090] any update from this vendor?,27/Aug/26 3:29 PM;712020:ec9d4891-6015-4d98-9edb-e2d531338090;[~accountid:63804f3f213a315af3473e76] yes 3 but with high budget 2.5 lpm with notice period ,To Do,31/Jul/26 9:47 PM
+GenAI / Cloud / Terraform Engineer,OUT-21815,53094,Requirement,Open,OUT,Outsourcing,business,Paras Gulati,6400dafa4307e46ad144cb7f,,,,,,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Tanvi Saxena,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,17/Jun/26 1:26 PM,27/Aug/26 3:29 PM,24/Aug/26 1:51 PM,,,0,"GenAI / Cloud / Terraform Engineer
+
+Experience: 8+ Years
+Employment Type: C2C
+Location: Hyderabad (Hybrid  – 3 Days/Week)
+Work Hours: 11:00 AM – 9:00 PM
+
+Role Overview
+
+We are seeking a highly skilled GenAI / Cloud / Terraform Engineer to design, develop, and deploy enterprise-scale AI solutions leveraging Generative AI, Azure Cloud, and Infrastructure as Code (IaC). The ideal candidate will have strong expertise in LLMs, RAG architectures, AI agents, cloud-native development, and Terraform automation.
+
+This role focuses on building reusable AI capabilities, operationalizing AI-powered applications, and developing scalable cloud-based AI platforms that enhance enterprise productivity and automation.
+
+Experience Required
+Total Experience: 6+ Years
+Generative AI: 3+ Years
+Cloud Platforms (Azure Preferred): 5+ Years
+Terraform: 2+ Years
+Key Responsibilities
+Design and develop AI/ML solutions using enterprise-approved technologies and frameworks.
+Build reusable AI capabilities such as:
+Copilots
+AI Agents
+APIs
+Domain-specific automation components
+AI-powered services
+Develop and operationalize AI solutions including:
+Coding Assistants
+Search Assistants
+Recommendation Engines
+Workflow Automation Platforms
+Design and implement Retrieval-Augmented Generation (RAG) solutions.
+Build AI-powered use cases including:
+Text-to-Code
+Diagram-to-Code
+Enterprise Search
+Recommendations
+Intelligent Automation
+Implement AI-based search solutions, chatbots, and APIs.
+Design and develop agentic AI systems with:
+Tool Invocation
+Function Calling
+Multi-Step Reasoning
+Autonomous Task Execution
+Deploy and manage AI workloads on cloud platforms.
+Create reusable Infrastructure as Code (IaC) components using Terraform.
+Ensure scalability, observability, security, and reliability of AI solutions.
+Collaborate with engineering, architecture, and business teams to deliver enterprise-grade AI capabilities.
+Required Technical Skills
+Generative AI & LLMs
+
+Strong expertise in:
+
+Generative AI
+Large Language Models (LLMs)
+OpenAI-based solutions
+Retrieval-Augmented Generation (RAG)
+Agentic AI Systems
+AI-powered automation solutions
+
+Experience developing:
+
+AI Agents
+Copilots
+Plugins
+Reusable AI Services
+Enterprise AI Skills
+Agent Frameworks
+
+Hands-on experience with one or more of the following:
+
+LangGraph
+AutoGen
+CrewAI
+AI Evaluation & Quality
+
+Experience implementing evaluation frameworks such as:
+
+RAGAS
+DeepEval
+
+Experience measuring:
+
+Reliability
+Accuracy
+Hallucination Rates
+Memory Retention
+Agent Performance
+MCP & AI Integration
+Experience developing and implementing MCP (Model Context Protocol) Servers.
+Experience integrating MCP servers with AI agents and copilots.
+Understanding of AI tool integration and agent communication patterns.
+Vector Databases & Retrieval Systems
+Experience with vector databases and semantic search architectures.
+Strong understanding of:
+Embeddings
+Indexing Techniques
+Similarity Search
+Retrieval Systems
+Model Fine-Tuning
+
+Hands-on experience with:
+
+LoRA
+QLoRA
+
+for adapting and improving LLM behavior.
+
+Programming Skills
+
+Strong proficiency in one or more of the following:
+
+Python
+.NET / C#
+Node.js
+Cloud & Infrastructure
+Cloud Platforms
+
+Strong experience with:
+
+Microsoft Azure (Preferred)
+
+Exposure to:
+
+Amazon Web Services
+
+Experience deploying, managing, and scaling AI workloads in cloud environments.
+
+Terraform & Infrastructure as Code
+Strong hands-on experience with Terraform.
+Experience creating reusable Terraform modules and frameworks.
+Infrastructure provisioning and automation expertise.
+Experience standardizing Infrastructure as Code practices across teams.
+Security & Engineering Practices
+Strong adherence to secure coding practices.
+Experience implementing enterprise-grade security standards.
+Understanding of cloud security and AI governance principles.
+Monitoring & Observability
+
+Experience with monitoring, logging, and alerting platforms such as:
+
+Splunk
+
+Knowledge of:
+
+Application Monitoring
+Logging
+Alerting
+Performance Optimization
+Troubleshooting
+Preferred Qualifications
+Experience building enterprise AI platforms, AI skill catalogs, or reusable AI frameworks.
+Experience developing internal developer platforms for AI workloads.
+Experience creating reusable Terraform frameworks and platform automation solutions.
+Experience standardizing Infrastructure as Code templates across teams.
+Advanced degree in Computer Science, Engineering, Artificial Intelligence, or a related field.
+Experience supporting enterprise-scale AI deployments and cloud-native architectures.
+
+ ",,Diksha Yadav,Garv Gulati,Paras Gulati,Prashant Singh Hada,Sarthak Solanki,Tanvi Saxena,63804f3f213a315af3473e76,712020:ec9d4891-6015-4d98-9edb-e2d531338090,6400dafa4307e46ad144cb7f,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,,,,,,,,,,,,,,2.3 LPM,,,,,,,Devlabs,,,Delphic,,,,,,,,,,,,,,8 yrs,,,,,,,hyderabad(hybrid),,,Chahak Pandya,Garv Gulati,Paras Gulati,Prashant Singh Hada,Sarthak Solanki,Shivani Sinha,Tanvi Saxena,712020:07b19da2-e557-418b-a72b-435fd3d74c4f,712020:ec9d4891-6015-4d98-9edb-e2d531338090,6400dafa4307e46ad144cb7f,712020:3b446a8d-8374-4088-846f-225155343891,712020:bf29b759-0312-4089-99ad-f56191f124a0,712020:9388b521-3985-43aa-80a7-8fe219fc219d,712020:180b6eb2-dca6-4aec-b67b-23a22e971f04,Yes,,1.0,,Highest,0|i03t3r:,C2H,,,,,f7a890be-884d-49fe-974b-b45d349a6ec4,Team SynergiX,,,,,,,,,,,"17/Jun/26 2:22 PM;63804f3f213a315af3473e76;crewAi and other requireqment like LORA , he don’t have  expierence [~accountid:712020:180b6eb2-dca6-4aec-b67b-23a22e971f04]  but can learn for interview- Vishal","18/Aug/26 2:43 PM;712020:3b446a8d-8374-4088-846f-225155343891;shared with  [sanathanaars|mailto:anusha@sanathanaars.co], they will share profile tomorrow
+still - they getting issue with their  database not able to fetch the profile ",20/Aug/26 11:29 AM;6400dafa4307e46ad144cb7f;[~accountid:712020:3b446a8d-8374-4088-846f-225155343891]  what is the update here ?,"20/Aug/26 12:35 PM;712020:3b446a8d-8374-4088-846f-225155343891;[~accountid:6400dafa4307e46ad144cb7f] Today  we have onboarded a new vendor for AI/ML and GenAI ,  Hyderabad location; shared the req with them. they are checking with the team  ","21/Aug/26 1:24 PM;712020:3b446a8d-8374-4088-846f-225155343891;One profile received from aventra,ai, scheduling for monday","24/Aug/26 1:17 PM;712020:3b446a8d-8374-4088-846f-225155343891;Rejected   in internal, ask to share more",24/Aug/26 3:20 PM;63804f3f213a315af3473e76;Recruitment Team not receiving profile ,26/Aug/26 9:22 AM;712020:3b446a8d-8374-4088-846f-225155343891;shared with avenior,26/Aug/26 2:43 PM;712020:bf29b759-0312-4089-99ad-f56191f124a0;No new CVs recevied.,27/Aug/26 8:51 AM;712020:ec9d4891-6015-4d98-9edb-e2d531338090;shared with Letitbex AI ,27/Aug/26 2:32 PM;712020:3b446a8d-8374-4088-846f-225155343891;NO profiles,27/Aug/26 3:25 PM;63804f3f213a315af3473e76;[~accountid:712020:ec9d4891-6015-4d98-9edb-e2d531338090] Profile Received from this vendor?,27/Aug/26 3:29 PM;712020:ec9d4891-6015-4d98-9edb-e2d531338090;[~accountid:63804f3f213a315af3473e76] no,,,,,To Do,31/Jul/26 9:47 PM

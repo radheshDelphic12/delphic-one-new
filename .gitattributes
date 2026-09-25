@@ -1,0 +1,6 @@
+# Shell scripts and container entrypoints must use LF or they fail on Linux
+# with: bash: $'\r': command not found
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
+docker-compose*.yml text eol=lf

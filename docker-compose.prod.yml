@@ -1,0 +1,57 @@
+# Production overlay for docker-compose.yml.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Required env vars (no defaults): POSTGRES_PASSWORD, JWT_ACCESS_SECRET,
+# JWT_REFRESH_SECRET, CORS_ORIGIN. Generate secrets with: openssl rand -hex 32
+
+services:
+  db:
+    # !reset is required: Compose APPENDS sequences, so a plain empty list would
+    # leave the base file's 5434:5432 publish in place.
+    ports: !reset []
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  server:
+    environment:
+      NODE_ENV: production
+      # connection_limit is explicit rather than Prisma's default guess. This
+      # is sized for a single server instance; if/when this ever runs more
+      # than one app instance (or PgBouncer sits in front), see
+      # docs/guides/DATABASE-CONNECTION-POOLING.md before raising it.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-requirement_dashboard}?connection_limit=${DB_POOL_SIZE:-20}&pool_timeout=${DB_POOL_TIMEOUT:-20}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN}
+    # !override replaces the base publish instead of adding a second one.
+    ports: !override
+      - '127.0.0.1:${API_PORT:-4000}:4000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/v1/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  client:
+    ports: !override
+      - '127.0.0.1:${CLIENT_PORT:-8081}:80'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

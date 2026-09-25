@@ -1,0 +1,34 @@
+{
+  "name": "requirement-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "platform": "bash start-platform.sh",
+    "platform:restore": "bash start-platform.sh --restore",
+    "platform:seed": "bash start-platform.sh --seed",
+    "platform:fresh": "bash start-platform.sh --fresh",
+    "platform:down": "bash start-platform.sh --down",
+    "migrate": "npm run migrate --workspace server",
+    "seed": "npm run seed --workspace server",
+    "seed:accounts": "npm run seed:accounts --workspace server",
+    "seed:jira": "npm run seed:jira --workspace server",
+    "seed:vendors": "npm run seed:vendors --workspace server",
+    "seed:admin": "npm run seed:admin --workspace server",
+    "build:client": "npm run build --workspace client",
+    "lint": "eslint server/src client/src",
+    "lint:fix": "eslint server/src client/src --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.11.0"
+  }
+}

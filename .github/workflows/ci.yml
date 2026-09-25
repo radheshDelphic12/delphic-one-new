@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging, dev]
+  pull_request:
+    branches: [main, staging, dev]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build client
+        run: npm run build --workspace client
+        env:
+          VITE_DISABLE_QUICK_LOGIN: 'true'
+
+      - name: Syntax-check server
+        run: node --check server/src/index.js
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: requirement_dashboard_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma Client
+        run: npm run generate --workspace server
+
+      - name: Apply migrations
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5434/requirement_dashboard_test
+        run: npx prisma migrate deploy
+
+      - name: Run server tests
+        working-directory: server
+        run: npm test
+
+  docker-smoke:
+    name: Docker compose smoke (login)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start stack
+        run: docker compose up -d --build
+        env:
+          JWT_ACCESS_SECRET: ci_access_secret_32chars_minimum_xx
+          JWT_REFRESH_SECRET: ci_refresh_secret_32chars_minimum_x
+          CORS_ORIGIN: http://localhost:8081
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/api/v1/health >/dev/null; then
+              echo "API healthy"
+              exit 0
+            fi
+            echo "waiting for API… ($i)"
+            sleep 5
+          done
+          echo "API did not become healthy"
+          docker compose logs --no-color
+          exit 1
+
+      - name: Seed demo users
+        run: docker compose exec -T server node prisma/seed.js
+
+      - name: Login smoke
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:4000/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@delphic.in","password":"Password123!"}')
+          echo "$RESP" | grep -q '"success":true'
+          echo "$RESP" | grep -q 'access_token'
+          echo "Login OK"
+
+      - name: Client proxy smoke
+        run: |
+          curl -sf -o /dev/null -w "%{http_code}" http://localhost:8081/ | grep -E '200|304'
+          curl -sf -X POST http://localhost:8081/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@delphic.in","password":"Password123!"}' \
+            | grep -q '"success":true'
+          echo "Client proxy login OK"
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

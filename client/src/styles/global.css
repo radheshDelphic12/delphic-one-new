@@ -1,0 +1,472 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Lean design tokens — spacing, typography, font, colors, hover only.
+   Layout, sizing, and component structure stay in Tailwind classNames. */
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-heading: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;
+  --radius-lg: 1rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+
+  --color-bg: 248 249 253;
+  --color-sidebar: 243 245 250;
+  --color-surface: 255 255 255;
+  --color-border: 232 235 242;
+  --color-border-subtle: 237 240 247;
+  --color-text: 15 23 42;
+  --color-text-muted: 100 116 139;
+
+  --color-primary: 16 90 169;
+  --color-primary-soft: 238 245 252;
+  --color-primary-contrast: 255 255 255;
+
+  --color-success: 22 163 74;
+  --color-warning: 217 119 6;
+  --color-danger: 220 38 38;
+  --color-info: 14 165 233;
+}
+
+* {
+  border-color: rgb(var(--color-border));
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-text));
+}
+
+h1,
+h2,
+h3,
+.font-heading {
+  font-family: var(--font-heading);
+}
+
+/* Color + hover only — sizing/layout via Tailwind on the element */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.btn-primary {
+  @apply btn bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800;
+}
+
+.btn-secondary {
+  @apply btn bg-white text-tertiary-700 border border-tertiary-200 hover:bg-tertiary-50;
+}
+
+.btn-danger {
+  @apply btn bg-danger-600 text-white hover:bg-danger-700;
+}
+
+.btn-ghost {
+  @apply btn bg-transparent text-tertiary-600 hover:bg-tertiary-100 hover:text-tertiary-900;
+}
+
+/* Figma canvas — pale lavender-grey with soft purple/blue glow */
+.dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(99 102 241 / 0.09), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(59 130 246 / 0.06), transparent 52%);
+}
+
+@keyframes alert-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 1rem));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes alert-slide-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(calc(100% + 1rem));
+  }
+}
+
+.alert-banner--enter {
+  animation: alert-slide-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.alert-banner--exit {
+  animation: alert-slide-out 0.26s ease-in forwards;
+}
+
+/* Subtle zoom-on-hover for interactive tiles / cards / items across the app.
+   Pair with `relative` so the lifted element sits above its neighbours. */
+.hover-zoom {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease;
+}
+
+.hover-zoom:hover {
+  transform: scale(1.02);
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-zoom {
+    transition: box-shadow 0.18s ease;
+  }
+
+  .hover-zoom:hover {
+    transform: none;
+  }
+}
+
+/* Home Lottie preloader — fixed white overlay, fades + scales + blurs out */
+.site-preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition: opacity 300ms ease, transform 300ms ease, filter 300ms ease;
+}
+
+.site-preloader--out {
+  opacity: 0;
+  transform: scale(1.04);
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+.site-preloader__lottie {
+  width: 180px;
+  height: 230px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-preloader {
+    transition: opacity 300ms ease;
+  }
+
+  .site-preloader--out {
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Login page — brand plane, entrance, soft visual drift */
+.font-login {
+  font-family: 'Plus Jakarta Sans', var(--font-heading), system-ui, sans-serif;
+}
+
+.login-page__grain {
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+@keyframes login-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Sign-in showcase: dashboard preview motion. All of it is decorative and is
+   switched off under prefers-reduced-motion (see the block below). */
+@keyframes auth-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes auth-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes auth-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes auth-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auth-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-4px);
+  }
+
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+.auth-float {
+  animation: auth-float 7s ease-in-out infinite;
+}
+
+.auth-float--slow {
+  animation-duration: 9s;
+  animation-delay: -3s;
+}
+
+.auth-spark {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: auth-draw 1.6s 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.auth-live-dot {
+  animation: auth-blink 1.8s ease-in-out infinite;
+}
+
+.auth-row-in {
+  animation: auth-row-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.auth-shake {
+  animation: auth-shake 0.3s ease-in-out;
+}
+
+/* Floating-label inputs: browsers paint autofilled values without firing
+   :placeholder-shown, so lift the label ourselves when Chrome/Safari autofill. */
+.float-input:-webkit-autofill ~ .float-label {
+  top: 0.375rem;
+  font-size: 11px;
+}
+
+.login-page__enter {
+  animation: login-enter 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.login-page__enter--1 {
+  animation-delay: 0.04s;
+}
+
+.login-page__enter--2 {
+  animation-delay: 0.14s;
+}
+
+.login-page__enter--3 {
+  animation-delay: 0.24s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-page__enter,
+  .auth-float,
+  .auth-live-dot,
+  .auth-row-in,
+  .auth-shake {
+    animation: none;
+  }
+
+  .auth-spark {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Org chart — classic pure-CSS tree connectors (parent/child branch lines).
+   Structural nesting is plain <ul>/<li>; this file only draws the lines.
+   Adapted from the well-known "CSS org chart" pattern so no chart library
+   is needed for something this shape-constrained. */
+.org-tree,
+.org-tree ul {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 2.25rem;
+  position: relative;
+  margin: 0;
+  gap: 0;
+}
+
+.org-tree ul {
+  padding-top: 2rem;
+}
+
+.org-tree li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  position: relative;
+  padding: 2rem 0.75rem 0 0.75rem;
+  min-width: 0;
+}
+
+.org-tree > li {
+  padding-top: 0;
+}
+
+.org-node-card,
+.org-entity-card {
+  position: relative;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.org-node-card:hover,
+.org-entity-card:hover {
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+.org-node-card__meta {
+  min-height: 2.5rem;
+}
+
+/* Horizontal sibling connector, split in two so the vertical drop from the
+   parent can land exactly between them. */
+.org-tree li::before,
+.org-tree li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  border-top: 1px solid #c5cedb;
+  width: 50%;
+  height: 2rem;
+}
+
+.org-tree li::before {
+  left: 0;
+}
+
+.org-tree li::after {
+  right: 0;
+}
+
+.org-tree li:only-child {
+  padding-top: 0;
+}
+
+.org-tree li:only-child::before,
+.org-tree li:only-child::after {
+  display: none;
+}
+
+.org-tree li:first-child::before,
+.org-tree li:last-child::after {
+  border: 0 none;
+}
+
+.org-tree li:last-child::before {
+  border-right: 1px solid #c5cedb;
+  border-radius: 0 0.5rem 0 0;
+}
+
+.org-tree li:first-child::after {
+  border-left: 1px solid #c5cedb;
+  border-radius: 0.5rem 0 0 0;
+}
+
+.org-tree > li::before,
+.org-tree > li::after {
+  display: none;
+}
+
+/* Vertical drop from a parent node down into its children row. */
+.org-tree ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 1px solid #c5cedb;
+  width: 0;
+  height: 2rem;
+}
+
+@media (max-width: 768px) {
+  .org-tree,
+  .org-tree ul {
+    justify-content: flex-start;
+    min-width: 620px;
+  }
+
+  .org-node-card,
+  .org-entity-card {
+    width: 15rem;
+  }
+}
+
+/* Print-to-PDF for a single card (payslip, invoice, …): everything except
+   the marked area is hidden, and that area is promoted to fill the page.
+   Browser's own "Save as PDF" print target covers the download action. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 1.5rem;
+  }
+}

@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  # Deploy only after CI has passed for a push to main, and deploy exactly the
+  # commit CI tested (not whatever main points at by the time this runs).
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+# To pause deploys, set the repository variable DEPLOY_ENABLED=false (anything
+# other than exactly "false" — including unset — deploys). A manual run
+# (workflow_dispatch) deploys the head of main.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ vars.DEPLOY_ENABLED != 'false' &&
+          (github.event_name == 'workflow_dispatch' ||
+           (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')) }}
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: DEPLOY_SHA
+          command_timeout: 40m
+          script: |
+            set -euo pipefail
+            cd /opt/delphic
+            # The box is a mirror of main — discard any drift so the pull never
+            # aborts on "local changes would be overwritten". Real config lives in
+            # .env / ./backups/ which are git-ignored and untouched.
+            git fetch --prune origin
+            git merge-base --is-ancestor "${DEPLOY_SHA}" origin/main || { echo "${DEPLOY_SHA} is not on main"; exit 1; }
+            git reset --hard "${DEPLOY_SHA}"
+            git log --oneline -1
+            chmod +x start-delphic.sh setup-vm.sh scripts/db-backup.sh
+            # start-delphic.sh --prod takes a verified pre-deploy backup, then
+            # rehearses the migrations on a copy of it before touching the live DB.
+            ./start-delphic.sh --prod --no-boot
+            # client assets are baked into the image; force a fresh client layer
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache client
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d client
+            curl -sf http://127.0.0.1:4000/api/v1/health | grep -q '"status":"ok"'

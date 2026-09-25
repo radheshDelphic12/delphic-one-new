@@ -1,0 +1,2475 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  bda
+  sales
+  recruiter
+  admin
+  // Low-privilege catch-all for staff outside the 4 business roles above
+  // (IT, general/back-office). Self-service only: own attendance, leave,
+  // timesheets, expenses, payroll — no recruitment, reports, or admin caps.
+  // See client/src/lib/permissions.js's `employee` capability set.
+  employee
+}
+
+// --- Multi-company ERP platform (Phase 0 — tenancy scaffold) ---
+// See docs/architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md.
+// Additive-only: existing behavior is unchanged until Phase 1 wires org_id
+// into request context / authorize(). Every model below and every `org_id`
+// column added to existing models in this migration is currently unused by
+// app code.
+
+enum OrgStatus {
+  active
+  inactive
+}
+
+enum EmploymentStatus {
+  active
+  on_leave
+  terminated
+  // Added 2026-09-15 for the org-chart lifecycle indicators (client brief
+  // Phase 3.2) — a membership can exist before day one (offer accepted,
+  // onboarding not started) or be counting down after resignation.
+  pending_onboarding
+  notice_period
+}
+
+// --- Multi-company ERP platform (Phase 2 — directory + calendar + attendance + leave) ---
+
+enum CalendarKind {
+  internal
+  client
+  custom
+}
+
+enum AttendanceStatus {
+  present
+  absent
+  half_day
+  leave
+  holiday
+  wfh
+}
+
+enum AttendanceSource {
+  web
+  mobile
+  manual
+}
+
+enum LeaveRequestStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+enum LeaveHalfDaySession {
+  FIRST_HALF
+  SECOND_HALF
+}
+
+// --- Multi-company ERP platform (Phase 3 — project-centric timesheets) ---
+
+enum TimesheetEntryStatus {
+  submitted
+  approved
+  rejected
+}
+
+enum RegularizationTicketStatus {
+  pending
+  approved
+  rejected
+}
+
+// --- Multi-company ERP platform (Phase 4 — payroll) ---
+
+// One-way, same posture as TimesheetLock: a run is a financial freeze, not a
+// draft that quietly recomputes. A mistaken run needs a documented manual
+// correction (not built yet), never a silent re-process.
+enum PayrollRunStatus {
+  draft
+  processed
+}
+
+// --- Multi-company ERP platform (Phase 5 — billing + real-time project revenue) ---
+
+enum BillingRateType {
+  hourly
+  monthly
+}
+
+// Forward-only: draft -> sent -> paid (see billing.service.transitionInvoice).
+// No void/backward move yet — same documented-gap posture as PayrollRun.
+enum ClientInvoiceStatus {
+  draft
+  sent
+  paid
+}
+
+// --- Multi-company ERP platform (Phase 7 — expenses + vendor payments) ---
+
+// pending -> approved -> reimbursed (money actually paid out), or
+// pending -> rejected. Both approved and rejected are decided the same way
+// (expenses.service.decideClaim); reimbursed is a separate follow-up step
+// only reachable from approved (expenses.service.reimburseClaim).
+enum ExpenseClaimStatus {
+  pending
+  approved
+  rejected
+  reimbursed
+}
+
+enum VendorType {
+  contractor
+  external_resource
+  third_party
+}
+
+// pending -> approved -> paid, or pending -> rejected. Same shape as
+// ExpenseClaimStatus, kept as its own enum since the two are decided by
+// different people over different things (see schema comments below).
+enum VendorPaymentStatus {
+  pending
+  approved
+  paid
+  rejected
+}
+
+// --- Multi-company ERP platform (Phase 8 — accounting ledger + tax) ---
+
+enum LedgerAccountKind {
+  asset
+  liability
+  equity
+  revenue
+  expense
+}
+
+// pending -> filed -> paid. Deliberately no "rejected"/void state — a filed
+// tax record is a compliance fact, not a workflow decision like an expense
+// claim; corrections happen by filing an offsetting record, not editing.
+enum TaxRecordStatus {
+  pending
+  filed
+  paid
+}
+
+enum AccountType {
+  client
+  vendor
+}
+
+enum AccountStage {
+  lead
+  meeting_scheduled
+  active
+  rescheduled
+  dropped
+}
+
+enum CompanySize {
+  startup
+  small
+  mid
+  enterprise
+}
+
+enum MeetingMode {
+  online
+  offline
+}
+
+enum Currency {
+  INR
+  USD
+  AED
+  SAR
+  EUR
+  GBP
+}
+
+enum ProfileCurrency {
+  INR
+  USD
+  AED
+  SAR
+}
+
+enum ReqType {
+  managed_services
+  recruitment
+  project
+}
+
+enum RequirementStatus {
+  open
+  in_progress
+  on_hold
+  closed
+  dropped
+}
+
+enum WorkMode {
+  remote
+  onsite
+  hybrid
+}
+
+enum EngagementType {
+  full_time
+  part_time
+  contract
+}
+
+enum BudgetType {
+  monthly
+  hourly
+  annual
+  fixed_project
+}
+
+enum Priority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum SeatStatus {
+  open
+  interviewing
+  offer
+  bgv
+  closed
+  dropped
+}
+
+enum AssignmentRole {
+  sales
+  recruiter
+  vendor_team
+}
+
+enum Gender {
+  male
+  female
+  other
+  prefer_not_to_say
+}
+
+enum ProfileSource {
+  direct
+  vendor
+  linkedin
+}
+
+enum SubmissionStage {
+  sourced
+  internal_screening
+  submitted_to_client
+  interview_scheduled
+  interview_result
+  offer_sent
+  bgv
+  closed
+  backout
+  rejected
+}
+
+enum RateType {
+  monthly
+  hourly
+  annual
+}
+
+enum BgvStatus {
+  pending
+  in_progress
+  cleared
+  failed
+}
+
+enum RoundType {
+  internal_r1
+  internal_r2
+  client_r1
+  client_r2
+  client_r3
+  hr_cto_ceo
+}
+
+enum RoundResult {
+  pending
+  pass
+  fail
+  no_show
+  rescheduled
+}
+
+enum InterviewRoundStatus {
+  scheduled
+  completed
+  cancelled
+}
+
+enum NotificationType {
+  account_activated
+  requirement_created
+  requirement_assigned
+  requirement_unassigned
+  requirement_status_changed
+  interview_scheduled
+  interview_rescheduled
+  interview_cancelled
+  interview_reminder
+  interview_feedback_submitted
+  candidate_submitted_to_client
+  candidate_rejected
+  candidate_backout
+  candidate_offer
+  timesheet_submitted
+  timesheet_entry_decided
+  timesheet_regularization_requested
+  timesheet_regularization_decided
+}
+
+enum NotificationEntityType {
+  account
+  requirement
+  submission
+  interview_round
+  profile
+}
+
+enum HistoryEntityType {
+  account
+  requirement
+  seat
+  submission
+}
+
+enum DocumentEntityType {
+  account
+  requirement
+  profile
+  submission
+  // Multi-company ERP (Phase 4) — a generated payslip PDF attaches here via
+  // the existing polymorphic entity_type/entity_id, same as every other
+  // entity; no dedicated FK column on Payslip. Generation itself isn't
+  // built yet (see payroll.service.js).
+  payslip
+  // Multi-company ERP (Phase 7) — an expense claim's receipt / a vendor
+  // payment's invoice attach here the same way, no dedicated FK column on
+  // either model.
+  expense_claim
+  vendor_payment
+}
+
+enum CommentEntityType {
+  account
+  requirement
+  submission
+  profile
+}
+
+model User {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  email               String   @unique
+  password_hash       String
+  role                UserRole
+  phone               String?
+  active              Boolean  @default(true)
+  is_superadmin       Boolean  @default(false)
+  // Group-superadmin (multi-company ERP, Phase 1): read access to the
+  // cross-org super dashboard only — separate from any per-org admin power.
+  // Unused until Phase 1's authorizeGroupSuperadmin lands.
+  is_group_superadmin Boolean  @default(false)
+  department_id       String?  @db.Uuid
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+
+  department                   Department?                     @relation(fields: [department_id], references: [id])
+  owned_accounts               Account[]                       @relation("AccountOwner")
+  origin_accounts              Account[]                       @relation("AccountOriginOwner")
+  classified_accounts          Account[]                       @relation("AccountClassifiedBy")
+  meeting_attendances          AccountMeetingAttendee[]
+  sales_requirements           Requirement[]                   @relation("RequirementSalesOwner")
+  assignments                  RequirementAssignment[]         @relation("AssignmentUser")
+  assignments_made             RequirementAssignment[]         @relation("AssignmentAssignedBy")
+  profiles_added               Profile[]                       @relation("ProfileAddedBy")
+  submissions_created          Submission[]                    @relation("SubmissionSubmittedBy")
+  stage_history_changes        StageHistory[]
+  documents_uploaded           Document[]
+  comments                     Comment[]
+  interview_round_assignments  InterviewRoundInterviewer[]
+  interview_rounds_scheduled   InterviewRound[]                @relation("InterviewRoundScheduler")
+  notifications                Notification[]                  @relation("NotificationUser")
+  notifications_authored       Notification[]                  @relation("NotificationActor")
+  notification_preferences     NotificationPreference[]
+  org_memberships              OrgMembership[]                 @relation("OrgMembershipPerson")
+  org_group_memberships        OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
+  attendance_regularizations   AttendanceRecord[]              @relation("AttendanceRegularizedBy")
+  hr_poc_for                   OrgMembership[]                 @relation("OrgMembershipHrPoc")
+  sourcing_poc_for             OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
+  timesheet_approvals          TimesheetEntry[]                @relation("TimesheetApprover")
+  timesheet_locks_made         TimesheetLock[]
+  regularization_requests      TimesheetRegularizationTicket[] @relation("RegularizationRequestedBy")
+  regularization_decisions     TimesheetRegularizationTicket[] @relation("RegularizationDecidedBy")
+  salary_structures_created    SalaryStructure[]               @relation("SalaryStructureCreatedBy")
+  salary_structures_updated    SalaryStructure[]               @relation("SalaryStructureUpdatedBy")
+  payroll_runs_processed       PayrollRun[]                    @relation("PayrollRunProcessedBy")
+  billing_rates_created        BillingRate[]                   @relation("BillingRateCreatedBy")
+  client_invoices_created      ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
+  group_billing_charges_raised GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
+  expense_claims_decided       ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
+  vendor_payments_created      VendorPayment[]                 @relation("VendorPaymentCreatedBy")
+  vendor_payments_decided      VendorPayment[]                 @relation("VendorPaymentDecidedBy")
+  ledger_entries_created       LedgerEntry[]                   @relation("LedgerEntryCreatedBy")
+  tax_records_created          TaxRecord[]                     @relation("TaxRecordCreatedBy")
+  external_accesses_granted    ExternalAccess[]                @relation("ExternalAccessGrantedBy")
+  vendor_commissions_decided   VendorCommission[]              @relation("VendorCommissionDecidedBy")
+  vendor_commissions_created   VendorCommission[]              @relation("VendorCommissionCreatedBy")
+  assigned_tasks_created       AssignedTask[]                  @relation("AssignedTaskCreatedBy")
+  project_cost_rates_created   ProjectMemberAssignment[]       @relation("ProjectMemberAssignmentCreatedBy")
+
+  @@index([department_id])
+  @@map("users")
+}
+
+model Department {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String   @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  // Multi-company ERP: departments belong to the active organization.
+  org_id String @db.Uuid
+  org    Org    @relation(fields: [org_id], references: [id])
+
+  users           User[]
+  org_memberships OrgMembership[]
+  designations    Designation[]
+
+  @@index([org_id])
+  @@map("departments")
+}
+
+// New in Phase 2 — no legacy rows, so org_id is required from the start.
+model Designation {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String      @db.Uuid
+  org           Org         @relation(fields: [org_id], references: [id])
+  name          String
+  department_id String?     @db.Uuid
+  department    Department? @relation(fields: [department_id], references: [id])
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @default(now()) @updatedAt
+
+  org_memberships OrgMembership[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("designations")
+}
+
+// Company holiday/working-day calendars for attendance + leave — distinct
+// from the existing interview/client-meeting calendar (modules/interviews),
+// which this does not replace (HLD §3).
+model Calendar {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String       @db.Uuid
+  org         Org          @relation(fields: [org_id], references: [id])
+  name        String
+  kind        CalendarKind @default(internal)
+  // Which office location this calendar's holidays apply to — null for a
+  // client-specific calendar that isn't tied to a physical location (e.g. a
+  // US client calendar followed by IT staff based in India). Added
+  // 2026-09-15 for the client brief's location-mapping requirement.
+  location_id String?      @db.Uuid
+  location    Location?    @relation(fields: [location_id], references: [id])
+  is_default  Boolean      @default(false)
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @default(now()) @updatedAt
+
+  holidays         CalendarHoliday[]
+  employees        EmployeeCalendar[]
+  project_mappings ProjectCalendar[]
+
+  @@index([org_id])
+  @@index([location_id])
+  @@map("calendars")
+}
+
+// Mapping 1 of the two deliberately separate project mappings: which holiday /
+// working-day calendar a PROJECT follows (Project <-> Calendar). One row per
+// project. Mapping 2 — who works on the project (Employee <-> Project) — is
+// ProjectMemberAssignment; neither table knows about the other. A project with
+// no row here falls back to the Ahmedabad calendar (see
+// calendars.service.defaultCalendar), so the mapping is always effectively set.
+model ProjectCalendar {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id])
+  account_id  String   @unique @db.Uuid
+  account     Account  @relation("ProjectCalendarAccount", fields: [account_id], references: [id], onDelete: Cascade)
+  calendar_id String   @db.Uuid
+  calendar    Calendar @relation(fields: [calendar_id], references: [id])
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@index([org_id])
+  @@index([calendar_id])
+  @@map("project_calendars")
+}
+
+// Default (Ahmedabad, Indore, Gurgaon) and custom office locations — an
+// Org-scoped directory, per the client brief's location-mapping requirement
+// (added 2026-09-15).
+model Location {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id])
+  name       String
+  city       String?
+  country    String?
+  is_default Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  calendars       Calendar[]
+  org_memberships OrgMembership[]
+  expense_claims  ExpenseClaim[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("locations")
+}
+
+// Shift timings + configurable check-in grace period, per the client
+// brief's attendance/shift requirement (added 2026-09-15). Times are
+// minutes-from-midnight (not a DateTime) so a shift isn't tied to a
+// specific calendar date.
+model Shift {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String   @db.Uuid
+  org           Org      @relation(fields: [org_id], references: [id])
+  name          String
+  start_minutes Int
+  end_minutes   Int
+  grace_minutes Int      @default(15)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  org_memberships OrgMembership[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("shifts")
+}
+
+model CalendarHoliday {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  calendar_id String   @db.Uuid
+  calendar    Calendar @relation(fields: [calendar_id], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  label       String
+
+  @@unique([calendar_id, date])
+  @@index([calendar_id])
+  @@map("calendar_holidays")
+}
+
+// Which calendar an employee's attendance/leave working-days follow.
+// Changed 2026-09-15 (client brief): an employee on more than one
+// concurrent client engagement follows more than one calendar at once, so
+// this is many-per-membership now, one row per (membership, project) —
+// `account_id: null` is the employee's default/base calendar. Was a strict
+// one-to-one (`org_membership_id @unique`) in the original Phase 2 build;
+// dropping that constraint is additive (relaxes a rule, doesn't touch data
+// — no rows existed with more than one mapping under the old constraint).
+// Known gap: `account_id: null` isn't itself unique per membership, so the
+// service layer (not the DB) must prevent two default-calendar rows.
+model EmployeeCalendar {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  calendar_id       String        @db.Uuid
+  calendar          Calendar      @relation(fields: [calendar_id], references: [id])
+  account_id        String?       @db.Uuid
+  account           Account?      @relation("EmployeeCalendarAccount", fields: [account_id], references: [id])
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@unique([org_membership_id, calendar_id, account_id])
+  @@index([org_membership_id])
+  @@index([calendar_id])
+  @@map("employee_calendars")
+}
+
+// org_id is denormalized here (also reachable via org_membership_id ->
+// OrgMembership.org_id) so the (org_id, date) composite index the HLD calls
+// for on every time-series table (§8) is a real index, not a join.
+model AttendanceRecord {
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String           @db.Uuid
+  org                 Org              @relation(fields: [org_id], references: [id])
+  org_membership_id   String           @db.Uuid
+  org_membership      OrgMembership    @relation(fields: [org_membership_id], references: [id])
+  date                DateTime         @db.Date
+  check_in_at         DateTime?
+  check_out_at        DateTime?
+  status              AttendanceStatus @default(present)
+  source              AttendanceSource @default(web)
+  // Minutes worked beyond the assigned Shift's duration (incl. grace),
+  // computed automatically at check-out — client brief's overtime
+  // requirement. Null when no Shift is assigned or before check-out.
+  overtime_minutes    Int?
+  // Minutes past the assigned Shift's start at check-in, set only when the
+  // arrival is beyond the shift's grace period (0 = on time / within grace).
+  // Null when no Shift is assigned. Added 2026-09-20 — grace previously only
+  // fed the overtime calculation, so lateness was never recorded.
+  late_minutes        Int?
+  regularized_by      String?          @db.Uuid
+  regularized_by_user User?            @relation("AttendanceRegularizedBy", fields: [regularized_by], references: [id])
+  regularized_reason  String?
+  created_at          DateTime         @default(now())
+  updated_at          DateTime         @default(now()) @updatedAt
+
+  @@unique([org_membership_id, date])
+  @@index([org_id, date])
+  @@index([org_membership_id, date])
+  @@map("attendance_records")
+}
+
+model LeaveType {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id])
+  name         String
+  paid         Boolean  @default(true)
+  annual_quota Int?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  balances LeaveBalance[]
+  requests LeaveRequest[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("leave_types")
+}
+
+model LeaveBalance {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id])
+  leave_type_id     String        @db.Uuid
+  leave_type        LeaveType     @relation(fields: [leave_type_id], references: [id])
+  year              Int
+  // Admin-set entitlement for this employee/type/year. null = follow the leave
+  // type's annual_quota (or the legacy `accrued` value if one was ever set).
+  allocated         Decimal?      @db.Decimal(5, 1)
+  accrued           Decimal       @default(0) @db.Decimal(5, 1)
+  // Legacy running counter from before balances were computed live from the
+  // approved requests (Jan 1 -> today). No longer written or read.
+  used              Decimal       @default(0) @db.Decimal(5, 1)
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@unique([org_membership_id, leave_type_id, year])
+  @@index([org_membership_id])
+  @@map("leave_balances")
+}
+
+model LeaveRequest {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String               @db.Uuid
+  org               Org                  @relation(fields: [org_id], references: [id])
+  org_membership_id String               @db.Uuid
+  org_membership    OrgMembership        @relation("LeaveRequestOwner", fields: [org_membership_id], references: [id])
+  leave_type_id     String               @db.Uuid
+  leave_type        LeaveType            @relation(fields: [leave_type_id], references: [id])
+  from_date         DateTime             @db.Date
+  to_date           DateTime             @db.Date
+  is_half_day       Boolean              @default(false)
+  half_day_session  LeaveHalfDaySession?
+  status            LeaveRequestStatus   @default(pending)
+  reason            String?
+  approver_id       String?              @db.Uuid
+  approver          OrgMembership?       @relation("LeaveRequestApprover", fields: [approver_id], references: [id])
+  decided_at        DateTime?
+  decision_reason   String?
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @default(now()) @updatedAt
+
+  @@index([org_id, from_date])
+  @@index([org_membership_id])
+  @@map("leave_requests")
+}
+
+// One row per (employee, day, project) — client brief §Phase 2.1: an
+// employee split across projects in one day logs hours per project, not one
+// blended entry. `account_id` is the client/project, `requirement_id` an
+// optional more-specific engagement under that account (reuses the existing
+// recruitment domain rather than inventing a new "project" concept, per the
+// original HLD's own reasoning).
+model TimesheetEntry {
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String               @db.Uuid
+  org                 Org                  @relation(fields: [org_id], references: [id])
+  org_membership_id   String               @db.Uuid
+  org_membership      OrgMembership        @relation(fields: [org_membership_id], references: [id])
+  date                DateTime             @db.Date
+  // Optional since Phase 1 of the timesheet refactor: a non-IT employee logs
+  // plain Date/Hours/Notes with no project. No-project entries are always
+  // non-billable general time and never feed revenue, project cost or budget.
+  account_id          String?              @db.Uuid
+  account             Account?             @relation("TimesheetAccount", fields: [account_id], references: [id])
+  requirement_id      String?              @db.Uuid
+  requirement         Requirement?         @relation("TimesheetRequirement", fields: [requirement_id], references: [id])
+  hours               Decimal              @db.Decimal(4, 1)
+  billable            Boolean              @default(true)
+  // Task category for the IT itemized timesheet view (e.g. "Code Review",
+  // "Project Management", "AI Coordination") — free text, not an enum: real
+  // usage mixes project-specific and general labels ad hoc. Optional so
+  // every non-IT caller of this same table is unaffected.
+  module_name         String?
+  notes               String?
+  // Set at creation from the project's calendar (calendars.service.holidayFor):
+  // a holiday no longer blocks logging hours, it's allowed and flagged instead —
+  // holiday_label snapshots the name at log time so it reads correctly even if
+  // the calendar changes later.
+  is_holiday_overtime Boolean              @default(false)
+  holiday_label       String?
+  status              TimesheetEntryStatus @default(submitted)
+  approved_by         String?              @db.Uuid
+  approver            User?                @relation("TimesheetApprover", fields: [approved_by], references: [id])
+  approved_at         DateTime?
+  decision_reason     String?
+  created_at          DateTime             @default(now())
+  updated_at          DateTime             @default(now()) @updatedAt
+
+  regularization_tickets TimesheetRegularizationTicket[]
+
+  @@index([org_id, date])
+  @@index([org_membership_id, date])
+  @@index([account_id])
+  @@map("timesheet_entries")
+}
+
+// Freezes every TimesheetEntry for an org on a given date — an org-wide
+// daily lock (client brief: "Admins can lock timesheets daily"), not
+// per-employee. A locked day's entries can only change via a
+// TimesheetRegularizationTicket below.
+model TimesheetLock {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String   @db.Uuid
+  org            Org      @relation(fields: [org_id], references: [id])
+  date           DateTime @db.Date
+  // Null + is_auto = written by the weekly auto-lock job (Saturday 00:00),
+  // not by an admin.
+  locked_by      String?  @db.Uuid
+  locked_by_user User?    @relation(fields: [locked_by], references: [id])
+  is_auto        Boolean  @default(false)
+  locked_at      DateTime @default(now())
+
+  @@unique([org_id, date])
+  @@index([org_id, date])
+  @@map("timesheet_locks")
+}
+
+// Post-lock change request + approval — client brief: "any post-lock
+// changes require a raised ticket and approval." `requested_change` is a
+// small JSON patch (hours/notes/billable only — applied field-by-field on
+// approval, not trusted as an arbitrary write) so the ticket records
+// exactly what was asked for even before it's decided.
+model TimesheetRegularizationTicket {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Null for a "missed the weekly deadline" request where no entry exists yet
+  // — approval then CREATES the entry from date/account/target_hours below.
+  timesheet_entry_id String?                    @db.Uuid
+  timesheet_entry    TimesheetEntry?            @relation(fields: [timesheet_entry_id], references: [id], onDelete: Cascade)
+  org_id             String?                    @db.Uuid
+  org_membership_id  String?                    @db.Uuid
+  org_membership     OrgMembership?             @relation("RegularizationMembership", fields: [org_membership_id], references: [id])
+  date               DateTime?                  @db.Date
+  account_id         String?                    @db.Uuid
+  account            Account?                   @relation("RegularizationAccount", fields: [account_id], references: [id])
+  target_hours       Decimal?                   @db.Decimal(4, 1)
+  requested_by       String                     @db.Uuid
+  requester          User                       @relation("RegularizationRequestedBy", fields: [requested_by], references: [id])
+  requested_change   Json
+  reason             String
+  status             RegularizationTicketStatus @default(pending)
+  decided_by         String?                    @db.Uuid
+  decider            User?                      @relation("RegularizationDecidedBy", fields: [decided_by], references: [id])
+  decided_at         DateTime?
+  decision_reason    String?
+  created_at         DateTime                   @default(now())
+
+  @@index([timesheet_entry_id])
+  @@index([org_id, status])
+  @@index([org_membership_id])
+  @@map("timesheet_regularization_tickets")
+}
+
+enum TaskStatus {
+  pending
+  in_progress
+  completed
+}
+
+// Admin → employee work assignment (Admin/Superadmin Monitoring & Task
+// Control Hub). Assignee is an OrgMembership, not a bare User, so a task
+// stays scoped to the org it was created in even if the person later joins
+// another company in the group. Surfaced on the assignee's own IT timesheet
+// as an "Assigned Items" list — logging against it is still an ordinary
+// TimesheetEntry (module_name free-texted from the task's), this model only
+// tracks the assignment itself.
+model AssignedTask {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String        @db.Uuid
+  org                    Org           @relation(fields: [org_id], references: [id])
+  account_id             String        @db.Uuid
+  account                Account       @relation(fields: [account_id], references: [id])
+  assignee_membership_id String        @db.Uuid
+  assignee               OrgMembership @relation(fields: [assignee_membership_id], references: [id])
+  created_by             String        @db.Uuid
+  creator                User          @relation("AssignedTaskCreatedBy", fields: [created_by], references: [id])
+  title                  String
+  description            String?
+  module_name            String?
+  status                 TaskStatus    @default(pending)
+  due_date               DateTime?     @db.Date
+  created_at             DateTime      @default(now())
+  updated_at             DateTime      @default(now()) @updatedAt
+
+  @@index([assignee_membership_id, status])
+  @@index([org_id])
+  @@map("assigned_tasks")
+}
+
+// Versioned per employee by effective_from — a payroll run uses the latest
+// row with effective_from <= the period's last day. `ctc` is treated as
+// MONTHLY gross throughout this module (not annual); `components` is the
+// itemized breakdown and is validated on write to sum to `ctc`.
+model SalaryStructure {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id])
+  effective_from    DateTime      @db.Date
+  ctc               Decimal       @db.Decimal(12, 2)
+  components        Json
+  created_by        String        @db.Uuid
+  creator           User          @relation("SalaryStructureCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime      @default(now())
+  // Set when an admin edits the structure in place (payroll → Salary
+  // Structures → Edit). Processed payslips keep their own frozen figures.
+  updated_at        DateTime?
+  updated_by        String?       @db.Uuid
+  updater           User?         @relation("SalaryStructureUpdatedBy", fields: [updated_by], references: [id])
+
+  @@index([org_id])
+  @@index([org_membership_id, effective_from])
+  @@map("salary_structures")
+}
+
+// One run per (org, period) — draft -> processed is one-way (see
+// PayrollRunStatus). `skipped` records memberships processing couldn't cover
+// (no salary structure as of the period, or not employed during it) so a
+// partial run is visible, not silently incomplete.
+model PayrollRun {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String           @db.Uuid
+  org          Org              @relation(fields: [org_id], references: [id])
+  period_month Int
+  period_year  Int
+  status       PayrollRunStatus @default(draft)
+  run_at       DateTime?
+  processed_by String?          @db.Uuid
+  processor    User?            @relation("PayrollRunProcessedBy", fields: [processed_by], references: [id])
+  skipped      Json?
+  created_at   DateTime         @default(now())
+
+  payslips Payslip[]
+
+  @@unique([org_id, period_month, period_year])
+  @@index([org_id])
+  @@map("payroll_runs")
+}
+
+// Computed when its run is processed; the run's one-way freeze is what makes
+// a payslip immutable, not a status field of its own. `breakdown` carries
+// the full attendance/leave arithmetic behind gross/deductions/net — see
+// payroll.service.js `computePayslip` for the exact formula and its
+// documented assumptions (5-day work week — no weekly-off calendar exists
+// yet; overtime pay excluded, tracked informationally only).
+model Payslip {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  payroll_run_id    String        @db.Uuid
+  payroll_run       PayrollRun    @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id])
+  gross             Decimal       @db.Decimal(12, 2)
+  deductions        Decimal       @db.Decimal(12, 2)
+  net               Decimal       @db.Decimal(12, 2)
+  breakdown         Json
+  generated_at      DateTime      @default(now())
+
+  @@unique([payroll_run_id, org_membership_id])
+  @@index([org_id])
+  @@index([org_membership_id])
+  @@map("payslips")
+}
+
+// Versioned per (account, requirement?) by effective_from, same pattern as
+// SalaryStructure. A requirement-specific rate (requirement_id set) is more
+// specific than an account-wide default (requirement_id null) when both
+// apply on a given date — see billing.service.resolveRate.
+model BillingRate {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String          @db.Uuid
+  org            Org             @relation(fields: [org_id], references: [id])
+  account_id     String          @db.Uuid
+  account        Account         @relation("BillingRateAccount", fields: [account_id], references: [id])
+  requirement_id String?         @db.Uuid
+  requirement    Requirement?    @relation("BillingRateRequirement", fields: [requirement_id], references: [id])
+  rate_type      BillingRateType
+  rate           Decimal         @db.Decimal(12, 2)
+  currency       Currency        @default(INR)
+  effective_from DateTime        @db.Date
+  created_by     String          @db.Uuid
+  creator        User            @relation("BillingRateCreatedBy", fields: [created_by], references: [id])
+  created_at     DateTime        @default(now())
+
+  @@index([org_id])
+  @@index([account_id, requirement_id, effective_from])
+  @@map("billing_rates")
+}
+
+enum ProjectResourceType {
+  company_employee
+  contractor
+  vendor_resource
+}
+
+// Per-project developer pay rate (Module C: project costing). Deliberately
+// carries ONLY the cost side — the billable/client-charge side already
+// exists as BillingRate above and keeps computing DailyProjectRevenue
+// exactly as it does today; adding a second, independent "what we charge
+// the client" number here would let the two silently disagree. This is an
+// ADDITIONAL cost layer on top of a person's existing salary cost
+// (DailyEmployeeProfitability), not a replacement — see computeDayForOrg.
+model ProjectMemberAssignment {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String              @db.Uuid
+  org               Org                 @relation(fields: [org_id], references: [id])
+  account_id        String              @db.Uuid
+  account           Account             @relation(fields: [account_id], references: [id])
+  org_membership_id String              @db.Uuid
+  org_membership    OrgMembership       @relation(fields: [org_membership_id], references: [id])
+  // Optional: an assignment is first an ALLOCATION (Employee <-> Project),
+  // a cost rate is an extra layer set only where a per-project pay rate exists.
+  cost_rate_per_hr  Decimal?            @db.Decimal(10, 2)
+  // Only company_employee is offered in the UI for now; the other two are
+  // schema-ready for contractors / vendor resources.
+  resource_type     ProjectResourceType @default(company_employee)
+  created_by        String              @db.Uuid
+  creator           User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime            @default(now())
+  updated_at        DateTime            @default(now()) @updatedAt
+
+  @@unique([account_id, org_membership_id])
+  @@index([org_id])
+  @@map("project_member_assignments")
+}
+
+// One row per (project, day) — the client brief's real-time revenue metric.
+// Computed from that day's APPROVED TimesheetEntry hours only (never
+// draft/rejected) × the applicable BillingRate. Idempotent by design:
+// recomputing a date upserts the existing row rather than duplicating —
+// enforced in billing.service (not a DB unique constraint, since
+// requirement_id is nullable and Postgres treats NULL as distinct under a
+// unique index, which would let account-level rows duplicate silently).
+model DailyProjectRevenue {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String       @db.Uuid
+  org            Org          @relation(fields: [org_id], references: [id])
+  account_id     String       @db.Uuid
+  account        Account      @relation("DailyRevenueAccount", fields: [account_id], references: [id])
+  requirement_id String?      @db.Uuid
+  requirement    Requirement? @relation("DailyRevenueRequirement", fields: [requirement_id], references: [id])
+  date           DateTime     @db.Date
+  billable_hours Decimal      @db.Decimal(6, 2)
+  rate           Decimal      @db.Decimal(12, 2)
+  revenue        Decimal      @db.Decimal(12, 2)
+  computed_at    DateTime     @default(now())
+
+  @@index([org_id, date])
+  @@index([account_id, requirement_id, date])
+  @@map("daily_project_revenues")
+}
+
+// One per (client account, period) — generated from that period's
+// DailyProjectRevenue rows. draft -> sent -> paid, forward-only; no
+// void/backward move yet (documented gap, same posture as PayrollRun).
+model ClientInvoice {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String              @db.Uuid
+  org               Org                 @relation(fields: [org_id], references: [id])
+  client_account_id String              @db.Uuid
+  client_account    Account             @relation("ClientInvoiceAccount", fields: [client_account_id], references: [id])
+  period_month      Int
+  period_year       Int
+  amount            Decimal             @db.Decimal(14, 2)
+  currency          Currency            @default(INR)
+  status            ClientInvoiceStatus @default(draft)
+  line_items        Json
+  sent_at           DateTime?
+  paid_at           DateTime?
+  created_by        String              @db.Uuid
+  creator           User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime            @default(now())
+
+  @@unique([client_account_id, period_month, period_year])
+  @@index([org_id])
+  @@map("client_invoices")
+}
+
+// Intra-group billing — a charge against one member org's books, raised at
+// the group level (e.g. a management fee or shared-services allocation).
+// Deliberately not OrgMembership-gated: only a group-superadmin raises one
+// (authorizeGroupSuperadmin); any admin of the charged org can read their
+// own org's charges. `kind` is free text — the HLD doesn't enumerate charge
+// kinds, so this isn't an invented enum.
+model GroupBillingCharge {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String   @db.Uuid
+  org_group    OrgGroup @relation(fields: [org_group_id], references: [id])
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id])
+  period_month Int
+  period_year  Int
+  kind         String
+  amount       Decimal  @db.Decimal(14, 2)
+  currency     Currency @default(INR)
+  raised_by    String   @db.Uuid
+  raiser       User     @relation("GroupBillingChargeRaisedBy", fields: [raised_by], references: [id])
+  created_at   DateTime @default(now())
+
+  @@index([org_group_id])
+  @@index([org_id, period_month, period_year])
+  @@map("group_billing_charges")
+}
+
+// Nightly-batch fact table (Phase 6) — the only table the super dashboard
+// reads (HLD §7: never joins live OLTP tables). One row per
+// (org_membership, day): `revenue` is that day's DailyProjectRevenue
+// (Phase 5) allocated across everyone who logged approved+billable hours on
+// each project that day, pro-rata by hours; `cost` is salary prorated to
+// the day (`SalaryStructure.ctc / days_in_month`, no overhead allocation
+// yet — see profitability.service.js). `breakdown` carries the full
+// allocation + cost math for audit. Computed by
+// profitability.service.computeDayForOrg, scheduled nightly
+// (jobs/profitabilityCompute.js) and callable on demand.
+model DailyEmployeeProfitability {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id])
+  date              DateTime      @db.Date
+  revenue           Decimal       @db.Decimal(12, 2)
+  cost              Decimal       @db.Decimal(12, 2)
+  margin            Decimal       @db.Decimal(12, 2)
+  breakdown         Json
+  computed_at       DateTime      @default(now())
+
+  @@unique([org_membership_id, date])
+  @@index([org_id, date])
+  @@map("daily_employee_profitability")
+}
+
+// Office expense / reimbursement claim, scoped by Location. A receipt
+// attaches via the existing polymorphic Document model
+// (entity_type: 'expense_claim') — no dedicated FK column here, same
+// reasoning as Payslip's PDF (see DocumentEntityType).
+model ExpenseClaim {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String             @db.Uuid
+  org               Org                @relation(fields: [org_id], references: [id])
+  org_membership_id String             @db.Uuid
+  org_membership    OrgMembership      @relation(fields: [org_membership_id], references: [id])
+  location_id       String             @db.Uuid
+  location          Location           @relation(fields: [location_id], references: [id])
+  category          String
+  amount            Decimal            @db.Decimal(12, 2)
+  currency          Currency           @default(INR)
+  status            ExpenseClaimStatus @default(pending)
+  decided_by        String?            @db.Uuid
+  decider           User?              @relation("ExpenseClaimDecidedBy", fields: [decided_by], references: [id])
+  decided_at        DateTime?
+  decision_reason   String?
+  reimbursed_at     DateTime?
+  created_at        DateTime           @default(now())
+
+  @@index([org_id])
+  @@index([org_membership_id])
+  @@map("expense_claims")
+}
+
+// Money going OUT for services from a contractor / external resource /
+// third-party — deliberately NOT the recruitment domain's
+// Account(type=vendor), which is candidates/money coming IN from a
+// sourcing vendor (see the HLD's module-map note). `vendor_name` is free
+// text, not an Account link — these aren't recruitment-domain vendors. An
+// invoice attaches via the existing polymorphic Document model
+// (entity_type: 'vendor_payment'), same reasoning as ExpenseClaim's receipt.
+model VendorPayment {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String              @db.Uuid
+  org             Org                 @relation(fields: [org_id], references: [id])
+  vendor_name     String
+  vendor_type     VendorType
+  amount          Decimal             @db.Decimal(14, 2)
+  currency        Currency            @default(INR)
+  period_month    Int
+  period_year     Int
+  status          VendorPaymentStatus @default(pending)
+  created_by      String              @db.Uuid
+  creator         User                @relation("VendorPaymentCreatedBy", fields: [created_by], references: [id])
+  decided_by      String?             @db.Uuid
+  decider         User?               @relation("VendorPaymentDecidedBy", fields: [decided_by], references: [id])
+  decided_at      DateTime?
+  decision_reason String?
+  paid_at         DateTime?
+  created_at      DateTime            @default(now())
+
+  @@index([org_id])
+  @@index([org_id, period_month, period_year])
+  @@map("vendor_payments")
+}
+
+// Minimal double-entry ledger — enough to produce a P&L/balance sheet and
+// support a CA audit, not a Tally/QuickBooks replacement (see HLD §12).
+// One chart-of-accounts row per org; balances are derived by summing
+// LedgerEntry rows, no stored running-balance column.
+model LedgerAccount {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String            @db.Uuid
+  org        Org               @relation(fields: [org_id], references: [id])
+  name       String
+  kind       LedgerAccountKind
+  is_active  Boolean           @default(true)
+  created_at DateTime          @default(now())
+
+  entries LedgerEntry[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("ledger_accounts")
+}
+
+// One row per debit/credit line. A journal entry is a set of >=2 LedgerEntry
+// rows sharing the same transaction_id whose debits and credits balance to
+// zero (enforced in accounting.service.postJournalEntry, not the DB) — this
+// table has no separate "JournalEntry" header row, the grouping key does
+// that job. source_ref is an optional pointer at the originating record
+// (e.g. { type: 'vendor_payment', id }); posting is manual/API-driven for
+// now, not auto-generated from billing/expense events yet (see Implementation
+// Plan's Phase 8 "not built" note).
+model LedgerEntry {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  ledger_account_id String        @db.Uuid
+  ledger_account    LedgerAccount @relation(fields: [ledger_account_id], references: [id])
+  transaction_id    String        @db.Uuid
+  date              DateTime      @db.Date
+  debit             Decimal       @default(0) @db.Decimal(14, 2)
+  credit            Decimal       @default(0) @db.Decimal(14, 2)
+  memo              String?
+  source_ref        Json?
+  created_by        String        @db.Uuid
+  creator           User          @relation("LedgerEntryCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime      @default(now())
+
+  @@index([org_id])
+  @@index([ledger_account_id])
+  @@index([org_id, transaction_id])
+  @@index([org_id, date])
+  @@map("ledger_entries")
+}
+
+// jurisdiction/kind are free text, not enums — which tax regimes apply is an
+// explicit open question (HLD §10 open questions), so this stays flexible
+// until that's decided rather than guessing at an enum now.
+model TaxRecord {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String          @db.Uuid
+  org          Org             @relation(fields: [org_id], references: [id])
+  period_month Int
+  period_year  Int
+  jurisdiction String
+  kind         String
+  amount       Decimal         @db.Decimal(14, 2)
+  currency     Currency        @default(INR)
+  status       TaxRecordStatus @default(pending)
+  filed_at     DateTime?
+  paid_at      DateTime?
+  created_by   String          @db.Uuid
+  creator      User            @relation("TaxRecordCreatedBy", fields: [created_by], references: [id])
+  created_at   DateTime        @default(now())
+
+  @@index([org_id])
+  @@index([org_id, period_month, period_year])
+  @@map("tax_records")
+}
+
+// --- Multi-company ERP platform (Phase 9 — external Legal/CA access) ---
+
+// Scoped, time-boxed, read-only guest access for non-employees (Legal/CA).
+// Deliberately NOT an OrgMembership — no role-in-a-company, no
+// password/login to manage — this has its own bearer-token auth path
+// (middleware/auth.js's authenticateExternal), separate from JWT user auth.
+// The plaintext token is only ever returned once, in the create response;
+// only its SHA-256 hash is stored, same posture as a password hash.
+// scope is a JSON allow-list of resource names the grant may read, e.g.
+// { "resources": ["accounting"] } — checked by requireExternalScope.
+// last_used_at/use_count are a coarse usage signal, not a per-view audit
+// trail — HLD §10 flags whether CA/Legal access needs one as still open.
+model ExternalAccess {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id])
+  email        String
+  scope        Json
+  token_hash   String    @unique
+  granted_by   String    @db.Uuid
+  grantor      User      @relation("ExternalAccessGrantedBy", fields: [granted_by], references: [id])
+  expires_at   DateTime
+  revoked_at   DateTime?
+  last_used_at DateTime?
+  use_count    Int       @default(0)
+  created_at   DateTime  @default(now())
+
+  @@index([org_id])
+  @@index([org_id, email])
+  @@map("external_accesses")
+}
+
+// --- Workspace isolation: Delphic Global vs. subsidiary workspaces ---
+
+enum VendorCommissionStatus {
+  pending
+  approved
+  paid
+  rejected
+}
+
+// Commission owed to a candidate-sourcing vendor (Account.type = vendor)
+// once their sourced candidate's Submission reaches 'closed'. Deliberately
+// a separate model from VendorPayment (below) — that model is documented
+// as NOT linked to the recruitment Account(type=vendor) (money going out
+// to a contractor/external resource/third party); this one IS, by design,
+// since it's the payout for exactly that sourcing relationship. One row
+// per closed, vendor-sourced placement — creation is Delphic-only
+// (gated by is_master_workspace, see the Org model) and manual (an admin
+// picks an eligible closed submission and enters an amount; nothing here
+// auto-fires off a submission's stage change).
+model VendorCommission {
+  id                String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String                 @db.Uuid
+  org               Org                    @relation(fields: [org_id], references: [id])
+  vendor_account_id String                 @db.Uuid
+  vendor_account    Account                @relation("VendorCommissionAccount", fields: [vendor_account_id], references: [id])
+  submission_id     String                 @unique @db.Uuid
+  submission        Submission             @relation(fields: [submission_id], references: [id])
+  amount            Decimal                @db.Decimal(14, 2)
+  currency          Currency               @default(INR)
+  status            VendorCommissionStatus @default(pending)
+  decided_by        String?                @db.Uuid
+  decider           User?                  @relation("VendorCommissionDecidedBy", fields: [decided_by], references: [id])
+  decided_at        DateTime?
+  decision_reason   String?
+  paid_at           DateTime?
+  created_by        String                 @db.Uuid
+  creator           User                   @relation("VendorCommissionCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime               @default(now())
+
+  @@index([org_id])
+  @@index([vendor_account_id])
+  @@map("vendor_commissions")
+}
+
+// --- Multi-company ERP platform (Phase 0) ---
+
+model OrgGroup {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  orgs                  Org[]
+  memberships           OrgGroupMembership[]
+  group_billing_charges GroupBillingCharge[]
+
+  @@map("org_groups")
+}
+
+// Parent holding-company access. A group superadmin is scoped to one or more
+// holding groups instead of receiving implicit access to every tenant in the
+// database.
+model OrgGroupMembership {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String   @db.Uuid
+  user         User     @relation("OrgGroupMembershipUser", fields: [user_id], references: [id], onDelete: Cascade)
+  org_group_id String   @db.Uuid
+  org_group    OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  created_at   DateTime @default(now())
+
+  @@unique([user_id, org_group_id])
+  @@index([org_group_id])
+  @@map("org_group_memberships")
+}
+
+model Org {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id        String    @db.Uuid
+  org_group           OrgGroup  @relation(fields: [org_group_id], references: [id])
+  name                String
+  slug                String    @unique
+  logo_url            String?
+  timezone            String    @default("Asia/Kolkata")
+  default_currency    Currency  @default(INR)
+  status              OrgStatus @default(active)
+  // True only for Delphic Global. Gates the recruitment pipeline
+  // (accounts/requirements/profiles/submissions/pipeline), Reports,
+  // Analytics, and Financials — the strategic/recruitment layer that other
+  // group companies don't use. Everything else (People/Attendance/Payroll/
+  // Finance/Calendar) stays available to every org regardless of this flag.
+  // Defaults false (fail-closed for new orgs); backfilled true for
+  // slug='delphic' by this column's own migration.
+  is_master_workspace Boolean   @default(false)
+  // Manually set by a group superadmin (Phase 3 group dashboard) — no
+  // valuation methodology exists yet, so this is an admin-entered figure,
+  // not a computed one. Null until set.
+  valuation           Decimal?  @db.Decimal(16, 2)
+  // Dynamic valuation (Super Admin dashboard): 'manual' keeps the figure
+  // above; 'revenue_multiple' / 'ebitda_multiple' compute one from live
+  // financials x valuation_multiple (a default per method applies when null).
+  valuation_method    String    @default("manual")
+  valuation_multiple  Decimal?  @db.Decimal(8, 2)
+  // Feature switches for the vertical modules a company uses — 'trading',
+  // 'leads', 'contracts', 'projects'. Core ERP is always on. Drives the
+  // sidebar and is enforced by requireModule() on the vertical APIs.
+  enabled_modules     String[]  @default([])
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
+
+  memberships OrgMembership[]
+
+  // Vertical modules + email + planning.
+  email_outbox       EmailOutbox[]
+  trading_partners   TradingPartner[]
+  trade_items        TradeItem[]
+  partner_item_rates PartnerItemRate[]
+  trade_transactions TradeTransaction[]
+  leads              Lead[]
+  contracts          Contract[]
+  self_projects      SelfProject[]
+  project_finance    ProjectFinanceEntry[]
+  project_documents  ProjectDocument[]
+  financial_plans    FinancialPlan[]
+  resource_mappings  ResourceMapping[]
+
+  // Backfilled onto every existing tenant-scoped table in this same
+  // migration (nullable — Phase 1 flips these to NOT NULL once app code
+  // always supplies org_id on write).
+  accounts                 Account[]
+  requirements             Requirement[]
+  profiles                 Profile[]
+  submissions              Submission[]
+  interview_rounds         InterviewRound[]
+  stage_history_entries    StageHistory[]
+  documents                Document[]
+  comments                 Comment[]
+  notifications            Notification[]
+  notification_preferences NotificationPreference[]
+  audit_logs               AuditLog[]
+
+  // Multi-company ERP (Phase 2) — new tables, org_id required from creation.
+  designations       Designation[]
+  calendars          Calendar[]
+  project_calendars  ProjectCalendar[]
+  attendance_records AttendanceRecord[]
+  leave_types        LeaveType[]
+  leave_requests     LeaveRequest[]
+  departments        Department[]
+  locations          Location[]
+  shifts             Shift[]
+  timesheet_entries  TimesheetEntry[]
+  timesheet_locks    TimesheetLock[]
+
+  // Multi-company ERP (Phase 4).
+  salary_structures SalaryStructure[]
+  payroll_runs      PayrollRun[]
+  payslips          Payslip[]
+
+  // Multi-company ERP (Phase 5).
+  billing_rates          BillingRate[]
+  daily_project_revenues DailyProjectRevenue[]
+  client_invoices        ClientInvoice[]
+  group_billing_charges  GroupBillingCharge[]
+
+  // Multi-company ERP (Phase 6).
+  daily_employee_profitability DailyEmployeeProfitability[]
+
+  // Multi-company ERP (Phase 7).
+  expense_claims  ExpenseClaim[]
+  vendor_payments VendorPayment[]
+
+  // Multi-company ERP (Phase 8).
+  ledger_accounts LedgerAccount[]
+  ledger_entries  LedgerEntry[]
+  tax_records     TaxRecord[]
+
+  // Multi-company ERP (Phase 9).
+  external_accesses ExternalAccess[]
+
+  // Workspace isolation — recruitment-sourcing vendor commission ledger
+  // (Delphic Global only, see is_master_workspace above).
+  vendor_commissions VendorCommission[]
+  assigned_tasks     AssignedTask[]
+  project_cost_rates ProjectMemberAssignment[]
+
+  @@index([org_group_id])
+  @@map("orgs")
+}
+
+// Person (User) <-> Org join. "Different roles in different companies" lives
+// here: one User row, one OrgMembership row per company they work at.
+model OrgMembership {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id         String           @db.Uuid
+  person            User             @relation("OrgMembershipPerson", fields: [person_id], references: [id])
+  org_id            String           @db.Uuid
+  org               Org              @relation(fields: [org_id], references: [id])
+  role              UserRole
+  employee_code     String?
+  department_id     String?          @db.Uuid
+  department        Department?      @relation(fields: [department_id], references: [id])
+  // Multi-company ERP (Phase 2) — nullable, unused until a designation is set.
+  designation_id    String?          @db.Uuid
+  designation       Designation?     @relation(fields: [designation_id], references: [id])
+  // Added 2026-09-15 (client brief) — all nullable, unused until set.
+  location_id       String?          @db.Uuid
+  location          Location?        @relation(fields: [location_id], references: [id])
+  shift_id          String?          @db.Uuid
+  shift             Shift?           @relation(fields: [shift_id], references: [id])
+  // Reporting line for the org-chart module (Phase 10, not built yet) — a
+  // self-relation, so a manager is just another OrgMembership in this org.
+  manager_id        String?          @db.Uuid
+  manager           OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
+  direct_reports    OrgMembership[]  @relation("OrgMembershipManager")
+  // HR contact for general queries, and the recruiter who onboarded this
+  // person (for recruiter-performance tracking) — both point at User, not
+  // OrgMembership, since an HR/sourcing POC may not share this org.
+  hr_poc_id         String?          @db.Uuid
+  hr_poc            User?            @relation("OrgMembershipHrPoc", fields: [hr_poc_id], references: [id])
+  sourcing_poc_id   String?          @db.Uuid
+  sourcing_poc      User?            @relation("OrgMembershipSourcingPoc", fields: [sourcing_poc_id], references: [id])
+  employment_status EmploymentStatus @default(active)
+  joined_at         DateTime         @default(now()) @db.Date
+  left_at           DateTime?        @db.Date
+  // Set when employment_status = notice_period — the org chart's
+  // resignation indicator reads this (Phase 10, not built yet).
+  notice_end_date   DateTime?        @db.Date
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @default(now()) @updatedAt
+
+  employee_calendars      EmployeeCalendar[]
+  attendance_records      AttendanceRecord[]
+  leave_balances          LeaveBalance[]
+  leave_requests          LeaveRequest[]                  @relation("LeaveRequestOwner")
+  leave_requests_approved LeaveRequest[]                  @relation("LeaveRequestApprover")
+  timesheet_entries       TimesheetEntry[]
+  salary_structures       SalaryStructure[]
+  payslips                Payslip[]
+  daily_profitability     DailyEmployeeProfitability[]
+  expense_claims          ExpenseClaim[]
+  assigned_tasks          AssignedTask[]
+  project_cost_rates      ProjectMemberAssignment[]
+  regularization_requests TimesheetRegularizationTicket[] @relation("RegularizationMembership")
+
+  @@unique([person_id, org_id])
+  @@index([org_id])
+  @@index([person_id])
+  @@index([manager_id])
+  @@map("org_memberships")
+}
+
+model Account {
+  id    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type  AccountType?
+  name  String
+  stage AccountStage @default(lead)
+
+  industry         String?
+  company_size     CompanySize?
+  website          String?
+  location_city    String?
+  location_country String?
+  gst_or_tax_id    String?
+
+  location     String?
+  linkedin_url String?
+
+  poc_name        String?
+  poc_email       String?
+  poc_phone       String?
+  poc_designation String?
+
+  additional_contacts Json @default("[]")
+
+  source           String?
+  meeting_mode     MeetingMode?
+  meeting_date     DateTime?
+  meeting_location String?
+  meeting_notes    String?
+
+  vendor_specializations String[]
+  vendor_rate_range      Json?
+  vendor_payment_terms   String?
+  vendor_agreement_url   String?
+
+  client_billing_currency Currency?
+  client_payment_terms    String?
+  client_agreement_url    String?
+
+  // Project cost budget — Module C (project costing). Currency follows
+  // client_billing_currency above (no separate field). Remaining budget is
+  // computed live (budget_amount - cost incurred from approved+billable
+  // TimesheetEntry hours × ProjectMemberAssignment.cost_rate_per_hr), never
+  // stored, so it can't drift from the underlying entries.
+  budget_amount Decimal? @db.Decimal(14, 2)
+
+  // Project profile (a "Project" is an active client Account — see
+  // calendars.service.createProject). `name` is the project name; client_name
+  // is the company it is delivered for. service_category reuses ReqType
+  // (managed_services | project; recruitment is not offered for now).
+  // Billing type/rate is NOT stored here — it's the effective BillingRate row,
+  // so there is one source of truth. Nothing is billed before
+  // agreement_start_date. benchmark_hours is the monthly-billing benchmark.
+  client_name          String?
+  // The project's client, picked from this org's Lead accounts (stage = lead,
+  // client or unclassified — the Lead pipeline). client_name above is kept as
+  // a snapshot of the picked lead's name, and is the only value legacy
+  // projects created before this link have.
+  client_account_id    String?   @db.Uuid
+  client_account       Account?  @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
+  client_projects      Account[] @relation("ProjectClientAccount")
+  service_category     ReqType?
+  agreement_start_date DateTime? @db.Date
+  benchmark_hours      Int       @default(160)
+
+  owner_id           String    @db.Uuid
+  owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])
+  // Immutable "brought by" — the BDA/admin who first added this client/vendor.
+  // Set once at creation and never changed; owner_id may later be reassigned.
+  origin_owner_id    String?   @db.Uuid
+  origin_owner       User?     @relation("AccountOriginOwner", fields: [origin_owner_id], references: [id])
+  classified_at      DateTime?
+  classified_by      String?   @db.Uuid
+  classified_by_user User?     @relation("AccountClassifiedBy", fields: [classified_by], references: [id])
+  is_locked          Boolean   @default(false)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+
+  // Superadmin soft-delete (see AuditLog + the $use filter in config/db.js).
+  deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid
+  delete_reason String?
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  requirements               Requirement[]
+  vendor_profiles            Profile[]                       @relation("ProfileVendorAccount")
+  meeting_attendees          AccountMeetingAttendee[]
+  employee_calendar_mappings EmployeeCalendar[]              @relation("EmployeeCalendarAccount")
+  timesheet_entries          TimesheetEntry[]                @relation("TimesheetAccount")
+  billing_rates              BillingRate[]                   @relation("BillingRateAccount")
+  daily_project_revenues     DailyProjectRevenue[]           @relation("DailyRevenueAccount")
+  client_invoices            ClientInvoice[]                 @relation("ClientInvoiceAccount")
+  vendor_commissions         VendorCommission[]              @relation("VendorCommissionAccount")
+  assigned_tasks             AssignedTask[]
+  project_cost_rates         ProjectMemberAssignment[]
+  regularization_tickets     TimesheetRegularizationTicket[] @relation("RegularizationAccount")
+  project_calendar           ProjectCalendar?                @relation("ProjectCalendarAccount")
+
+  @@index([type, stage])
+  @@index([owner_id])
+  @@index([origin_owner_id])
+  @@index([deleted_at])
+  @@index([org_id])
+  @@index([client_account_id])
+  @@map("accounts")
+}
+
+model AccountMeetingAttendee {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  account_id String   @db.Uuid
+  account    Account  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  user_id    String   @db.Uuid
+  user       User     @relation(fields: [user_id], references: [id])
+  created_at DateTime @default(now())
+
+  @@unique([account_id, user_id])
+  @@index([account_id])
+  @@map("account_meeting_attendees")
+}
+
+model Requirement {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  account_id String            @db.Uuid
+  account    Account           @relation(fields: [account_id], references: [id])
+  title      String
+  req_type   ReqType
+  status     RequirementStatus @default(open)
+
+  description     String?
+  job_description String?
+  jd_document_url String?
+  designation     String?
+  department      String?
+  seats_total     Int     @default(1)
+
+  primary_tech_stack      String[]
+  secondary_tech_stack    String[]
+  domain_experience       String?
+  experience_min          Decimal? @db.Decimal(4, 1)
+  experience_max          Decimal? @db.Decimal(4, 1)
+  certifications_required String[]
+
+  work_mode                WorkMode?
+  work_location            String?
+  time_zone_preference     String?
+  engagement_type          EngagementType?
+  contract_duration_months Int?
+  start_date_target        DateTime?       @db.Date
+  notice_period_max_days   Int?
+
+  budget_min      Decimal?    @db.Decimal(14, 2)
+  budget_max      Decimal?    @db.Decimal(14, 2)
+  budget_currency Currency    @default(INR)
+  budget_type     BudgetType?
+  billing_notes   String?
+
+  priority Priority @default(medium)
+  sla_days Int?
+
+  sales_owner_id String    @db.Uuid
+  sales_owner    User      @relation("RequirementSalesOwner", fields: [sales_owner_id], references: [id])
+  is_locked      Boolean   @default(false)
+  closed_at      DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+
+  // Superadmin soft-delete (see AuditLog + the $use filter in config/db.js).
+  deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid
+  delete_reason String?
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  seats                  RequirementSeat[]
+  assignments            RequirementAssignment[]
+  timesheet_entries      TimesheetEntry[]        @relation("TimesheetRequirement")
+  billing_rates          BillingRate[]           @relation("BillingRateRequirement")
+  daily_project_revenues DailyProjectRevenue[]   @relation("DailyRevenueRequirement")
+
+  @@index([account_id])
+  @@index([status, priority])
+  @@index([sales_owner_id])
+  @@index([deleted_at])
+  @@index([org_id])
+  @@map("requirements")
+}
+
+model RequirementSeat {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirement_id String      @db.Uuid
+  requirement    Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  seat_label     String?
+  seat_status    SeatStatus  @default(open)
+  closed_at      DateTime?
+  joined_at      DateTime?   @db.Date
+  is_locked      Boolean     @default(false)
+
+  submissions Submission[]
+
+  @@index([requirement_id])
+  @@index([seat_status])
+  @@map("requirement_seats")
+}
+
+model RequirementAssignment {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirement_id   String         @db.Uuid
+  requirement      Requirement    @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  user_id          String         @db.Uuid
+  user             User           @relation("AssignmentUser", fields: [user_id], references: [id])
+  role_on_req      AssignmentRole
+  assigned_at      DateTime       @default(now())
+  unassigned_at    DateTime?
+  assigned_by      String         @db.Uuid
+  assigned_by_user User           @relation("AssignmentAssignedBy", fields: [assigned_by], references: [id])
+
+  @@index([requirement_id])
+  @@index([user_id])
+  @@map("requirement_assignments")
+}
+
+model Profile {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name                String
+  email               String?
+  phone               String?
+  date_of_birth       DateTime? @db.Date
+  gender              Gender?
+  current_location    String?
+  willing_to_relocate Boolean?
+  preferred_locations String[]
+
+  current_company           String?
+  current_designation       String?
+  total_experience_years    Decimal  @db.Decimal(4, 1)
+  relevant_experience_years Decimal? @db.Decimal(4, 1)
+
+  primary_skills    String[]
+  secondary_skills  String[]
+  certifications    String[]
+  domain_experience String[]
+  education         Json?
+
+  current_ctc           Decimal?        @db.Decimal(14, 2)
+  current_ctc_currency  ProfileCurrency @default(INR)
+  expected_ctc          Decimal?        @db.Decimal(14, 2)
+  expected_ctc_currency ProfileCurrency @default(INR)
+  ctc_negotiable        Boolean         @default(false)
+  ctc_notes             String?
+  notice_period_days    Int?
+  is_serving_notice     Boolean         @default(false)
+  last_working_day      DateTime?       @db.Date
+  earliest_join_date    DateTime?       @db.Date
+  preferred_work_mode   WorkMode?
+
+  resume_url      String?
+  linkedin_url    String?
+  portfolio_url   String?
+  other_documents Json    @default("[]")
+
+  source            ProfileSource
+  vendor_account_id String?       @db.Uuid
+  vendor_account    Account?      @relation("ProfileVendorAccount", fields: [vendor_account_id], references: [id])
+  vendor_profile_id String?
+  added_by          String        @db.Uuid
+  added_by_user     User          @relation("ProfileAddedBy", fields: [added_by], references: [id])
+  recruiter_notes   String?
+
+  on_bench   Boolean  @default(false)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  // Superadmin soft-delete (see AuditLog + the $use filter in config/db.js).
+  deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid
+  delete_reason String?
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  submissions Submission[]
+
+  @@index([source])
+  @@index([added_by])
+  @@index([is_active])
+  @@index([source, on_bench])
+  @@index([deleted_at])
+  @@index([org_id])
+  @@map("profiles")
+}
+
+model Submission {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirement_seat_id String          @db.Uuid
+  seat                RequirementSeat @relation(fields: [requirement_seat_id], references: [id], onDelete: Cascade)
+  profile_id          String          @db.Uuid
+  profile             Profile         @relation(fields: [profile_id], references: [id])
+  stage               SubmissionStage @default(sourced)
+
+  proposed_rate          Decimal?         @db.Decimal(14, 2)
+  proposed_rate_type     RateType?
+  proposed_rate_currency ProfileCurrency? @default(INR)
+  vendor_rate            Decimal?         @db.Decimal(14, 2)
+  vendor_rate_type       RateType?
+  vendor_rate_currency   ProfileCurrency?
+  margin                 Decimal?         @db.Decimal(14, 2)
+  margin_percentage      Decimal?         @db.Decimal(6, 2)
+  final_agreed_rate      Decimal?         @db.Decimal(14, 2)
+  final_agreed_rate_type RateType?
+
+  submission_notes String?
+  client_feedback  String?
+  relevancy_score  Int?
+
+  backout_stage    String?
+  backout_reason   String?
+  rejection_stage  String?
+  rejection_reason String?
+
+  offer_date            DateTime?        @db.Date
+  offer_ctc             Decimal?         @db.Decimal(14, 2)
+  offer_ctc_currency    ProfileCurrency?
+  expected_joining_date DateTime?        @db.Date
+  actual_joining_date   DateTime?        @db.Date
+
+  bgv_initiated_date DateTime?  @db.Date
+  bgv_status         BgvStatus?
+  bgv_completed_date DateTime?  @db.Date
+  bgv_notes          String?
+
+  submitted_by      String   @db.Uuid
+  submitted_by_user User     @relation("SubmissionSubmittedBy", fields: [submitted_by], references: [id])
+  is_locked         Boolean  @default(false)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  // Superadmin soft-delete (see AuditLog + the $use filter in config/db.js).
+  deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid
+  delete_reason String?
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  interview_rounds  InterviewRound[]
+  vendor_commission VendorCommission?
+
+  @@index([requirement_seat_id])
+  @@index([profile_id])
+  @@index([stage])
+  @@index([deleted_at])
+  @@index([org_id])
+  @@map("submissions")
+}
+
+model InterviewRound {
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  submission_id     String      @db.Uuid
+  submission        Submission  @relation(fields: [submission_id], references: [id], onDelete: Cascade)
+  round_number      Int
+  round_type        RoundType
+  round_name        String?
+  scheduled_at      DateTime?
+  duration_minutes  Int?
+  interviewer_name  String?
+  interviewer_email String?
+  meeting_link      String?
+  result            RoundResult @default(pending)
+  feedback          String?
+  rating            Int?
+  completed_at      DateTime?
+
+  status                  InterviewRoundStatus @default(scheduled)
+  cancelled_at            DateTime?
+  cancellation_reason     String?
+  reminder_sent_at        DateTime?
+  reminder_1h_sent_at     DateTime?
+  online_meeting_provider String?
+  external_event_id       String?
+
+  scheduled_by String? @db.Uuid
+  scheduler    User?   @relation("InterviewRoundScheduler", fields: [scheduled_by], references: [id], onDelete: SetNull)
+
+  // Superadmin soft-delete (see AuditLog + the $use filter in config/db.js).
+  deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid
+  delete_reason String?
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  interviewers InterviewRoundInterviewer[]
+
+  @@index([submission_id])
+  @@index([status, scheduled_at])
+  @@index([scheduled_by])
+  @@index([deleted_at])
+  @@index([org_id])
+  @@map("interview_rounds")
+}
+
+model InterviewRoundInterviewer {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interview_round_id String         @db.Uuid
+  interview_round    InterviewRound @relation(fields: [interview_round_id], references: [id], onDelete: Cascade)
+  user_id            String         @db.Uuid
+  user               User           @relation(fields: [user_id], references: [id])
+  created_at         DateTime       @default(now())
+
+  @@unique([interview_round_id, user_id])
+  @@index([interview_round_id])
+  @@map("interview_round_interviewers")
+}
+
+model Notification {
+  id          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String                  @db.Uuid
+  user        User                    @relation("NotificationUser", fields: [user_id], references: [id], onDelete: Cascade)
+  type        NotificationType
+  title       String
+  body        String
+  entity_type NotificationEntityType?
+  entity_id   String?                 @db.Uuid
+  actor_id    String?                 @db.Uuid
+  actor       User?                   @relation("NotificationActor", fields: [actor_id], references: [id], onDelete: SetNull)
+  metadata    Json                    @default("{}")
+  read_at     DateTime?
+  created_at  DateTime                @default(now())
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@index([user_id, read_at])
+  @@index([user_id, created_at])
+  @@index([org_id])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String           @db.Uuid
+  user       User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  type       NotificationType
+  in_app     Boolean          @default(true)
+  email      Boolean          @default(false)
+  created_at DateTime         @default(now())
+  updated_at DateTime         @default(now()) @updatedAt
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@unique([user_id, type])
+  @@index([org_id])
+  @@map("notification_preferences")
+}
+
+model StageHistory {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entity_type     HistoryEntityType
+  entity_id       String            @db.Uuid
+  from_stage      String?
+  to_stage        String
+  changed_by      String            @db.Uuid
+  changed_by_user User              @relation(fields: [changed_by], references: [id])
+  reason          String?
+  changed_at      DateTime          @default(now())
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  // entity_id is polymorphic (no FK), so org_id is set directly here rather
+  // than derived by a join — lets profitability/reporting filter by org
+  // without resolving entity_type first.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@index([entity_type, entity_id])
+  @@index([org_id])
+  @@map("stage_history")
+}
+
+// Append-only trail for superadmin record deletion / restore. `snapshot` holds the
+// full row pre-image so a delete can be reviewed or reversed even without a DB dump.
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id    String   @db.Uuid
+  action      String // 'soft_delete' | 'restore'
+  entity_type String
+  entity_id   String   @db.Uuid
+  reason      String
+  snapshot    Json
+  created_at  DateTime @default(now())
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@index([entity_type, entity_id])
+  @@index([actor_id])
+  @@index([org_id])
+  @@map("audit_logs")
+}
+
+model Document {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entity_type      DocumentEntityType
+  entity_id        String             @db.Uuid
+  label            String
+  file_url         String
+  file_type        String?
+  file_size_bytes  Int?
+  uploaded_by      String             @db.Uuid
+  uploaded_by_user User               @relation(fields: [uploaded_by], references: [id])
+  uploaded_at      DateTime           @default(now())
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@index([entity_type, entity_id])
+  @@index([org_id])
+  @@map("documents")
+}
+
+model Comment {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entity_type CommentEntityType
+  entity_id   String            @db.Uuid
+  user_id     String            @db.Uuid
+  user        User              @relation(fields: [user_id], references: [id])
+  body        String
+  created_at  DateTime          @default(now())
+
+  // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
+  org_id String? @db.Uuid
+  org    Org?    @relation(fields: [org_id], references: [id])
+
+  @@index([entity_type, entity_id])
+  @@index([org_id])
+  @@map("comments")
+}
+
+// --- Vertical modules, email outbox, planning (multi-company brief, 2026-09) ---
+
+enum EmailStatus {
+  queued
+  sent
+  failed
+  skipped
+}
+
+// Durable outbound-email queue. Business code only ever enqueues a row (never
+// talks SMTP) and a job drains it, so a mail outage cannot fail a request and
+// every send is auditable. `ics` carries an optional calendar-invite attachment.
+model EmailOutbox {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String?     @db.Uuid
+  org        Org?        @relation(fields: [org_id], references: [id])
+  kind       String
+  to_email   String
+  to_name    String?
+  subject    String
+  body_text  String
+  body_html  String?
+  ics        String?
+  status     EmailStatus @default(queued)
+  attempts   Int         @default(0)
+  last_error String?
+  sent_at    DateTime?
+  created_at DateTime    @default(now())
+
+  @@index([status, created_at])
+  @@index([org_id])
+  @@map("email_outbox")
+}
+
+enum PartnerKind {
+  supplier
+  consumer
+}
+
+enum PartnerStatus {
+  lead
+  onboarding
+  active
+  inactive
+}
+
+enum TradingStatus {
+  not_trading
+  trading
+  paused
+}
+
+enum TradeTxnType {
+  purchase
+  sale
+}
+
+enum TradeTxnStatus {
+  open
+  completed
+  cancelled
+}
+
+// Gulati: supplier / consumer master. `status` is the onboarding funnel,
+// `trading_status` is whether goods are actually moving.
+model TradingPartner {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id               String        @db.Uuid
+  org                  Org           @relation(fields: [org_id], references: [id])
+  kind                 PartnerKind
+  name                 String
+  contact_name         String?
+  email                String?
+  phone                String?
+  city                 String?
+  gst_or_tax_id        String?
+  status               PartnerStatus @default(lead)
+  trading_status       TradingStatus @default(not_trading)
+  onboarding_checklist Json          @default("{}")
+  onboarded_at         DateTime?
+  owner_id             String?       @db.Uuid
+  notes                String?
+  created_at           DateTime      @default(now())
+  updated_at           DateTime      @default(now()) @updatedAt
+
+  rates        PartnerItemRate[]
+  transactions TradeTransaction[]
+
+  @@index([org_id, kind, status])
+  @@map("trading_partners")
+}
+
+model TradeItem {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id])
+  name       String
+  sku        String?
+  unit       String   @default("unit")
+  category   String?
+  hsn_code   String?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  rates        PartnerItemRate[]
+  transactions TradeTransaction[]
+
+  @@unique([org_id, name])
+  @@map("trade_items")
+}
+
+// Rate-card line: what a partner buys/sells an item at, from a date. The
+// newest row whose effective window covers a date wins.
+model PartnerItemRate {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String         @db.Uuid
+  org            Org            @relation(fields: [org_id], references: [id])
+  partner_id     String         @db.Uuid
+  partner        TradingPartner @relation(fields: [partner_id], references: [id], onDelete: Cascade)
+  item_id        String         @db.Uuid
+  item           TradeItem      @relation(fields: [item_id], references: [id])
+  rate           Decimal        @db.Decimal(14, 2)
+  currency       Currency       @default(INR)
+  effective_from DateTime       @db.Date
+  effective_to   DateTime?      @db.Date
+  created_by     String         @db.Uuid
+  created_at     DateTime       @default(now())
+
+  @@index([org_id, partner_id, item_id, effective_from])
+  @@map("partner_item_rates")
+}
+
+model TradeTransaction {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String         @db.Uuid
+  org        Org            @relation(fields: [org_id], references: [id])
+  partner_id String         @db.Uuid
+  partner    TradingPartner @relation(fields: [partner_id], references: [id])
+  item_id    String         @db.Uuid
+  item       TradeItem      @relation(fields: [item_id], references: [id])
+  txn_type   TradeTxnType
+  quantity   Decimal        @db.Decimal(14, 3)
+  rate       Decimal        @db.Decimal(14, 2)
+  amount     Decimal        @db.Decimal(16, 2)
+  currency   Currency       @default(INR)
+  status     TradeTxnStatus @default(open)
+  txn_date   DateTime       @db.Date
+  reference  String?
+  created_by String         @db.Uuid
+  created_at DateTime       @default(now())
+
+  @@index([org_id, txn_date])
+  @@index([org_id, partner_id])
+  @@map("trade_transactions")
+}
+
+enum LeadCategory {
+  self_project
+  client_project
+  other
+}
+
+// For a self_project lead: what is the deal built on?
+enum SelfProjectBasis {
+  investor
+  customer_deal
+  project_type
+}
+
+enum LeadStage {
+  new
+  contacted
+  qualified
+  proposal
+  won
+  lost
+}
+
+// Generic company lead (Zephyr, Acconcy). Separate from the recruitment
+// Account pipeline on purpose: different stages, no client/vendor typing.
+model Lead {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String            @db.Uuid
+  org                   Org               @relation(fields: [org_id], references: [id])
+  name                  String
+  category              LeadCategory      @default(other)
+  self_project_basis    SelfProjectBasis?
+  investor_name         String?
+  customer_deal_ref     String?
+  project_type          String?
+  contact_name          String?
+  email                 String?
+  phone                 String?
+  source                String?
+  estimated_value       Decimal?          @db.Decimal(16, 2)
+  expected_monthly      Decimal?          @db.Decimal(14, 2)
+  currency              Currency          @default(INR)
+  stage                 LeadStage         @default(new)
+  owner_id              String?           @db.Uuid
+  notes                 String?
+  converted_project_id  String?           @db.Uuid
+  converted_contract_id String?           @db.Uuid
+  created_at            DateTime          @default(now())
+  updated_at            DateTime          @default(now()) @updatedAt
+
+  @@index([org_id, stage])
+  @@index([org_id, category])
+  @@map("leads")
+}
+
+enum ContractKind {
+  construction
+  recurring
+  service
+}
+
+enum ContractStatus {
+  draft
+  active
+  completed
+  terminated
+}
+
+enum BillingFrequency {
+  one_time
+  monthly
+  quarterly
+  annual
+}
+
+// Zephyr construction contracts and Acconcy recurring-revenue contracts.
+// For recurring ones `recurring_amount` is billed per `billing_frequency`
+// period; MRR normalises that to a month.
+model Contract {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String           @db.Uuid
+  org               Org              @relation(fields: [org_id], references: [id])
+  kind              ContractKind
+  title             String
+  counterparty_name String
+  lead_id           String?          @db.Uuid
+  project_id        String?          @db.Uuid
+  project           SelfProject?     @relation(fields: [project_id], references: [id])
+  value             Decimal          @default(0) @db.Decimal(16, 2)
+  currency          Currency         @default(INR)
+  status            ContractStatus   @default(draft)
+  start_date        DateTime         @db.Date
+  end_date          DateTime?        @db.Date
+  billing_frequency BillingFrequency @default(one_time)
+  recurring_amount  Decimal?         @db.Decimal(14, 2)
+  progress_percent  Int              @default(0)
+  billed_to_date    Decimal          @default(0) @db.Decimal(16, 2)
+  site_location     String?
+  notes             String?
+  created_by        String           @db.Uuid
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([org_id, kind])
+  @@map("contracts")
+}
+
+enum SelfProjectStatus {
+  planning
+  active
+  on_hold
+  completed
+  cancelled
+}
+
+enum FinanceEntryType {
+  revenue
+  expense
+  salary
+  other
+}
+
+enum ProjectDocCategory {
+  legal
+  site
+  permit
+  approval
+  title
+  other
+}
+
+model SelfProject {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String            @db.Uuid
+  org               Org               @relation(fields: [org_id], references: [id])
+  name              String
+  project_type      String?
+  status            SelfProjectStatus @default(planning)
+  location          String?
+  investor_name     String?
+  customer_deal_ref String?
+  lead_id           String?           @db.Uuid
+  budget            Decimal?          @db.Decimal(16, 2)
+  currency          Currency          @default(INR)
+  start_date        DateTime?         @db.Date
+  end_date          DateTime?         @db.Date
+  notes             String?
+  created_by        String            @db.Uuid
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @default(now()) @updatedAt
+
+  contracts Contract[]
+  finance   ProjectFinanceEntry[]
+  documents ProjectDocument[]
+
+  @@index([org_id, status])
+  @@map("self_projects")
+}
+
+model ProjectFinanceEntry {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String           @db.Uuid
+  org         Org              @relation(fields: [org_id], references: [id])
+  project_id  String           @db.Uuid
+  project     SelfProject      @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  entry_type  FinanceEntryType
+  category    String?
+  amount      Decimal          @db.Decimal(16, 2)
+  currency    Currency         @default(INR)
+  entry_date  DateTime         @db.Date
+  description String?
+  created_by  String           @db.Uuid
+  created_at  DateTime         @default(now())
+
+  @@index([org_id, entry_date])
+  @@index([project_id, entry_type])
+  @@map("project_finance_entries")
+}
+
+model ProjectDocument {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String             @db.Uuid
+  org             Org                @relation(fields: [org_id], references: [id])
+  project_id      String             @db.Uuid
+  project         SelfProject        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  category        ProjectDocCategory
+  title           String
+  reference_no    String?
+  issued_on       DateTime?          @db.Date
+  expires_on      DateTime?          @db.Date
+  notes           String?
+  file_url        String?
+  file_type       String?
+  file_size_bytes Int?
+  uploaded_by     String             @db.Uuid
+  created_at      DateTime           @default(now())
+
+  @@index([org_id, project_id])
+  @@index([org_id, expires_on])
+  @@map("project_documents")
+}
+
+// Budget line for a month, compared with derived actuals in the plan view.
+// `category` of '' means the whole line kind.
+model FinancialPlan {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String           @db.Uuid
+  org            Org              @relation(fields: [org_id], references: [id])
+  period_month   Int
+  period_year    Int
+  line_kind      FinanceEntryType
+  category       String           @default("")
+  planned_amount Decimal          @db.Decimal(16, 2)
+  notes          String?
+  created_by     String           @db.Uuid
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @default(now()) @updatedAt
+
+  @@unique([org_id, period_year, period_month, line_kind, category])
+  @@map("financial_plans")
+}
+
+// "Face" resource = the person who fronts the client relationship for a piece
+// of work; "working" resource = the person who does it (logs the timesheets).
+// Revenue earned by the working resource is attributed to the face resource
+// in the resource-wise revenue report.
+model ResourceMapping {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String    @db.Uuid
+  org                   Org       @relation(fields: [org_id], references: [id])
+  face_membership_id    String    @db.Uuid
+  working_membership_id String    @db.Uuid
+  account_id            String?   @db.Uuid
+  effective_from        DateTime  @db.Date
+  effective_to          DateTime? @db.Date
+  created_by            String    @db.Uuid
+  created_at            DateTime  @default(now())
+
+  @@index([org_id, working_membership_id])
+  @@index([org_id, face_membership_id])
+  @@map("resource_mappings")
+}
