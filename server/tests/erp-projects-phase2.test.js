@@ -280,8 +280,9 @@ describe('Project Client Name — a client account, never free text', () => {
     expect(created.status).toBe(201);
 
     // Free text is no longer stored.
-    await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), token).send({ project_name: 'Tax Portal', client_name: 'Typed Name' });
-    expect((await prisma.account.findUnique({ where: { id: project.id } })).client_name).toBeNull();
+    const unlinked = (await addProject(token, { name: 'No Client', service_category: 'project' })).body.data;
+    await authed(request(app).patch(`/api/v1/billing/projects/${unlinked.id}`), token).send({ project_name: 'No Client', client_name: 'Typed Name' });
+    expect((await prisma.account.findUnique({ where: { id: unlinked.id } })).client_name).toBeNull();
   });
 
   test('edit pre-loads the linked lead, keeps it once it leaves the Lead stage, and can clear it', async () => {
