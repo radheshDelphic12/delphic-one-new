@@ -290,9 +290,30 @@ function clientFields(row) {
   };
 }
 
+// A project's display name. Finance renames write project_name only, so the
+// account's own name (which may be a client other projects link to) is kept.
+function projectName(row) {
+  return row.project_name || row.name;
+}
+
+// Another client account in the org already showing this project name.
+function projectNameTaken(orgId, name, exceptId = null) {
+  const equals = { equals: name, mode: 'insensitive' };
+  return prisma.account.findFirst({
+    where: {
+      org_id: orgId,
+      type: 'client',
+      OR: [{ project_name: equals }, { project_name: null, name: equals }],
+      ...(exceptId ? { NOT: { id: exceptId } } : {}),
+    },
+    select: { id: true },
+  });
+}
+
 const PROJECT_SELECT = {
   id: true,
   name: true,
+  project_name: true,
   client_name: true,
   client_account_id: true,
   client_account: CLIENT_ACCOUNT_SELECT,
@@ -305,7 +326,7 @@ function serializeProject(row, fallback) {
   const effective = mapped || (fallback ? { id: fallback.id, name: fallback.name, kind: fallback.kind } : null);
   return {
     id: row.id,
-    name: row.name,
+    name: projectName(row),
     ...clientFields(row),
     service_category: row.service_category,
     calendar: effective,
@@ -328,11 +349,7 @@ async function listProjects(orgId) {
 
 async function createProject(orgId, ownerId, { name, client_account_id, service_category, calendar_id }) {
   if (!CATEGORY_SCOPE.includes(service_category)) return { error: 'category_not_available' };
-  const duplicate = await prisma.account.findFirst({
-    where: { org_id: orgId, type: 'client', name: { equals: name, mode: 'insensitive' } },
-    select: { id: true },
-  });
-  if (duplicate) return { error: 'name_taken' };
+  if (await projectNameTaken(orgId, name)) return { error: 'name_taken' };
 
   let client = null;
   if (client_account_id) {
@@ -441,6 +458,8 @@ module.exports = {
   setProjectCalendar,
   listLeadClientOptions,
   resolveLeadClient,
+  projectName,
+  projectNameTaken,
   clientFields,
   CLIENT_ACCOUNT_SELECT,
   countWorkingDays,

@@ -1570,17 +1570,21 @@ model Account {
   budget_amount Decimal? @db.Decimal(14, 2)
 
   // Project profile (a "Project" is an active client Account — see
-  // calendars.service.createProject). `name` is the project name; client_name
-  // is the company it is delivered for. service_category reuses ReqType
+  // calendars.service.createProject). project_name is the name shown for the
+  // project and the only name Finance edits; null means it still matches the
+  // account's own `name`, which Finance never renames (the same row can be a
+  // real client account other projects link to). client_name is the company
+  // it is delivered for. service_category reuses ReqType
   // (managed_services | project; recruitment is not offered for now).
   // Billing type/rate is NOT stored here — it's the effective BillingRate row,
   // so there is one source of truth. Nothing is billed before
   // agreement_start_date. benchmark_hours is the monthly-billing benchmark.
+  project_name         String?
   client_name          String?
-  // The project's client, picked from this org's Lead accounts (stage = lead,
-  // client or unclassified — the Lead pipeline). client_name above is kept as
-  // a snapshot of the picked lead's name, and is the only value legacy
-  // projects created before this link have.
+  // The project's client, picked from this org's client accounts (client or
+  // unclassified, any stage). client_name above is kept as a snapshot of the
+  // picked account's name, and is the only value legacy projects created
+  // before this link have.
   client_account_id    String?   @db.Uuid
   client_account       Account?  @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
   client_projects      Account[] @relation("ProjectClientAccount")

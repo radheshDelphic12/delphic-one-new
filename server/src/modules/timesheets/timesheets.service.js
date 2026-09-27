@@ -486,10 +486,10 @@ async function pendingApprovals(orgId, actor) {
 async function myProjects(orgId, orgMembershipId) {
   const rows = await prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, org_membership_id: orgMembershipId },
-    include: { account: { select: { id: true, name: true } } },
+    include: { account: { select: { id: true, name: true, project_name: true } } },
     orderBy: { created_at: 'asc' },
   });
-  return rows.map((r) => r.account);
+  return rows.map((r) => ({ id: r.account.id, name: r.account.project_name || r.account.name }));
 }
 
 // --- Weekly auto-lock -------------------------------------------------------

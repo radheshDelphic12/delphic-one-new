@@ -374,7 +374,7 @@ function serializeProfile(account, rates, calendar) {
   const rate = currentAccountRate(rates, todayUtc());
   return {
     id: account.id,
-    project_name: account.name,
+    project_name: calendarsService.projectName(account),
     ...calendarsService.clientFields(account),
     // Left blank on purpose (client brief) — linking a requirement comes later.
     requirement: '',
@@ -392,6 +392,7 @@ function serializeProfile(account, rates, calendar) {
 const PROFILE_SELECT = {
   id: true,
   name: true,
+  project_name: true,
   client_name: true,
   client_account_id: true,
   client_account: calendarsService.CLIENT_ACCOUNT_SELECT,
@@ -434,7 +435,7 @@ async function getProjectProfile(orgId, accountId) {
 // never overwritten) starting on the agreement start date — or today, if no
 // agreement date is set — so nothing already billed is rewritten.
 async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
-  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, agreement_start_date: true, client_account_id: true } });
+  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, client_account_id: true } });
   if (!existing) return { error: 'account_not_found' };
 
   let client;
@@ -444,14 +445,17 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
     client = resolved.account;
   }
 
-  if (patch.project_name && patch.project_name.toLowerCase() !== existing.name.toLowerCase()) {
-    const clash = await prisma.account.findFirst({ where: { org_id: orgId, type: 'client', name: { equals: patch.project_name, mode: 'insensitive' }, NOT: { id: accountId } }, select: { id: true } });
-    if (clash) return { error: 'name_taken' };
+  const currentName = calendarsService.projectName(existing);
+  const renamed = patch.project_name !== undefined && patch.project_name !== currentName;
+  if (renamed && patch.project_name.toLowerCase() !== currentName.toLowerCase()) {
+    if (await calendarsService.projectNameTaken(orgId, patch.project_name, accountId)) return { error: 'name_taken' };
   }
 
+  // Only project fields are written — never the account's own name, which the
+  // Accounts section owns and linked projects show as their client name.
   const data = {};
-  if (patch.project_name !== undefined) data.name = patch.project_name;
-  // null clears the client; an id links the lead and snapshots its name.
+  if (renamed) data.project_name = patch.project_name;
+  // null clears the client; an id links the client account and snapshots its name.
   if (patch.client_account_id !== undefined) {
     data.client_account_id = client?.id || null;
     data.client_name = client?.name || null;

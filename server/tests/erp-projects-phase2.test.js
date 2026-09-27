@@ -305,6 +305,34 @@ describe('Project Client Name — a client account, never free text', () => {
     expect(cleared.body.data).toMatchObject({ client_account_id: null, client_name: null });
   });
 
+  test('a Finance edit never renames the account: project name and client name stay separate', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    // A legacy project: an active client account that is also another project's client.
+    const acme = await lead(org, admin, 'Acme Corp', { stage: 'active' });
+    const portal = (await addProject(token, { name: 'Tax Portal', client_account_id: acme.id, service_category: 'project' })).body.data;
+
+    const rename = await authed(request(app).patch(`/api/v1/billing/projects/${acme.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 150 });
+    expect(rename.status).toBe(200);
+    expect(rename.body.data.project_name).toBe('Acme Website');
+    expect((await prisma.account.findUnique({ where: { id: acme.id } })).name).toBe('Acme Corp');
+
+    // The linked project's client name is untouched, as is the client picker.
+    const linked = (await authed(request(app).get(`/api/v1/billing/projects/${portal.id}`), token)).body.data;
+    expect(linked).toMatchObject({ project_name: 'Tax Portal', client_name: 'Acme Corp' });
+    const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
+    expect(options.map((o) => o.name)).toContain('Acme Corp');
+
+    // Re-saving an unchanged name writes nothing; an edit elsewhere keeps the client link.
+    await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Tax Portal', benchmark_hours: 140 });
+    const after = await prisma.account.findUnique({ where: { id: portal.id } });
+    expect(after).toMatchObject({ name: 'Tax Portal', project_name: null, client_account_id: acme.id, client_name: 'Acme Corp' });
+
+    // The new project name is taken for other projects, and Add Project checks it too.
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(409);
+    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(409);
+  });
+
   test('legacy projects keep their free-text client name until a lead is linked', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
