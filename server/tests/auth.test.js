@@ -41,7 +41,7 @@ describe('auth', () => {
   });
 
   test('GET /users/me with a valid token returns the right user', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: true });
     const { access_token } = await loginAs(user);
 
     const res = authed(request(app).get('/api/v1/users/me'), access_token);
