@@ -99,8 +99,14 @@ jobs:
           docker compose logs --no-color
           exit 1
 
+      # On an empty DB the backfill migration is a no-op, so the Delphic org the
+      # seed needs doesn't exist yet. phase0-backfill.js is idempotent: before the
+      # seed it creates the org, after it gives the seeded users memberships.
       - name: Seed demo users
-        run: docker compose exec -T server node prisma/seed.js
+        run: |
+          docker compose exec -T server node prisma/erp/phase0-backfill.js
+          docker compose exec -T server node prisma/seed.js
+          docker compose exec -T server node prisma/erp/phase0-backfill.js
 
       - name: Login smoke
         run: |
