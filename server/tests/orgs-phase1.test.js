@@ -20,7 +20,7 @@ afterAll(async () => {
 });
 
 describe('multi-company ERP Phase 1 — backward compatibility', () => {
-  test('a user with no OrgMembership logs in and behaves exactly as before', async () => {
+  test('a user with no OrgMembership can log in, but membership-gated routes 403', async () => {
     const user = await createUser({ role: 'recruiter' });
     const { access_token, memberships, active_org } = await loginAs(user);
 
@@ -31,9 +31,11 @@ describe('multi-company ERP Phase 1 — backward compatibility', () => {
     expect(decoded.org_id).toBeNull();
     expect(decoded.role).toBe('recruiter');
 
-    // Ordinary authorize() gates still work unchanged with no org context.
-    const res = authed(request(app).get('/api/v1/users/me'), access_token);
-    expect((await res).status).toBe(200);
+    // /users/* requires an active membership (every production user has one
+    // after the Phase 0 backfill), so a membership-less caller is rejected.
+    const res = await authed(request(app).get('/api/v1/users/me'), access_token);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('No active org membership');
   });
 
   test('refresh for a membership-less user keeps working', async () => {
@@ -86,7 +88,7 @@ describe('multi-company ERP Phase 1 — org context', () => {
     expect(adminOnly.status).toBe(403); // admin (per-org role) is not group-superadmin
   });
 
-  test('an ended membership is ignored — falls back to the JWT role claim, does not 403', async () => {
+  test('a token for an ended membership is rejected — no fallback to the JWT role claim', async () => {
     const user = await createUser({ role: 'recruiter' });
     const org = await createOrg();
     await createOrgMembership(user.id, org.id, { role: 'admin', employment_status: 'terminated' });
@@ -98,7 +100,8 @@ describe('multi-company ERP Phase 1 — org context', () => {
       { expiresIn: '1h' }
     );
     const res = await authed(request(app).get('/api/v1/users/me'), token);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('Active organization membership required');
   });
 
   test('GET /orgs/me/memberships lists every active org for the caller', async () => {
@@ -163,8 +166,12 @@ describe('multi-company ERP Phase 1 — group superadmin', () => {
         is_group_superadmin: true,
       },
     });
-    await createOrg({ name: 'Delphic', slug: 'delphic' });
-    await createOrg({ name: 'Acconcy', slug: 'acconcy' });
+    // Both companies under one holding group the superadmin explicitly belongs
+    // to — GET /orgs lists only the orgs in the caller's groups.
+    const group = await prisma.orgGroup.create({ data: { name: 'Delphic Group' } });
+    await prisma.orgGroupMembership.create({ data: { user_id: gsa.id, org_group_id: group.id } });
+    await createOrg({ name: 'Delphic', slug: 'delphic', org_group_id: group.id });
+    await createOrg({ name: 'Acconcy', slug: 'acconcy', org_group_id: group.id });
 
     const { access_token } = await loginAs(gsa);
     const res = await authed(request(app).get('/api/v1/orgs'), access_token);
@@ -182,6 +189,8 @@ describe('multi-company ERP Phase 1 — group superadmin', () => {
         is_group_superadmin: true,
       },
     });
+    const group = await prisma.orgGroup.create({ data: { name: 'Delphic Group' } });
+    await prisma.orgGroupMembership.create({ data: { user_id: gsa.id, org_group_id: group.id } });
     const { access_token } = await loginAs(gsa);
 
     const before = await authed(request(app).get('/api/v1/orgs'), access_token);

@@ -112,14 +112,12 @@ describe('org context — write-side org_id auto-injection', () => {
     expect(row.org_id).toBe(org.id);
   });
 
-  test('a department created by a membership-less caller is left with a null org_id (unchanged behavior)', async () => {
+  test('a membership-less caller cannot create a department (departments are org-scoped)', async () => {
     const admin = await createUser({ role: 'admin' });
     const { access_token } = await loginAs(admin);
     const res = await authed(request(app).post('/api/v1/departments'), access_token).send({ name: 'Legacy Dept Test' });
-    expect(res.status).toBe(201);
-
-    const row = await prisma.department.findUnique({ where: { id: res.body.data.id } });
-    expect(row.org_id).toBeNull();
+    expect(res.status).toBe(403);
+    expect(await prisma.department.count({ where: { name: 'Legacy Dept Test' } })).toBe(0);
   });
 
   test('an explicit org_id set by a service is never overridden by the injection', async () => {
