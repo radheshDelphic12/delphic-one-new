@@ -12,6 +12,7 @@ import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
 import { NAV_ITEMS } from './navItems.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
+import HeaderAttendance from './HeaderAttendance.jsx';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -300,6 +301,7 @@ export default function AppLayout() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {user?.active_org && can('viewAttendance') && <HeaderAttendance key={user.active_org.id} user={user} />}
                 <NotificationBell />
               </div>
             </div>
