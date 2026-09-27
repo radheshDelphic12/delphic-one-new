@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { CalendarClock, CheckCircle2, Clock3, LogIn, LogOut, Wrench } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -9,9 +8,9 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
-import Modal from '../../components/ui/Modal.jsx';
-import { useLeaveDay } from '../../lib/useLeaveDay.js';
+import { ATTENDANCE_CHANGED, useTodayAttendance } from '../../lib/useTodayAttendance.js';
 import LeaveDayNotice from '../time/LeaveDayNotice.jsx';
+import CheckoutPrompt from './CheckoutPrompt.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -116,14 +115,17 @@ export default function AttendancePage() {
   const [from, setFrom] = useState(() => isoDate(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(() => isoDate(new Date()));
   const [status, setStatus] = useState('');
-  const [today, setToday] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
   const [regularize, setRegularize] = useState(null);
-  const [checkoutPromptOpen, setCheckoutPromptOpen] = useState(false);
-  const navigate = useNavigate();
-  const isIt = user?.department?.name?.toLowerCase() === 'it';
-  // Approved leave = no check-in/out (the server enforces the same rule).
-  const leaveToday = useLeaveDay(isoDate(new Date()));
+  const {
+    today,
+    leaveToday,
+    busy: actionLoading,
+    checkIn,
+    requestCheckOut,
+    confirmCheckOut,
+    promptOpen: checkoutPromptOpen,
+    closePrompt,
+  } = useTodayAttendance(user);
 
   async function loadAttendance() {
     setLoading(true);
@@ -138,39 +140,15 @@ export default function AttendancePage() {
     }
   }
 
-  async function loadToday() {
-    if (tab !== 'mine') return;
-    try {
-      const { data } = await apiClient.get('/attendance/me', { params: { from: isoDate(new Date()), to: isoDate(new Date()), limit: 1 } });
-      setToday(data.data?.[0] || null);
-    } catch {
-      setToday(null);
-    }
-  }
-
   useEffect(() => {
     loadAttendance();
-    loadToday();
   }, [tab, from, to]);
 
-  async function attendanceAction(action) {
-    setActionLoading(true);
-    try {
-      const { data } = await apiClient.post(`/attendance/${action}`);
-      setToday(data.data);
-      await loadAttendance();
-    } catch (err) {
-      pushError(apiErrorMessage(err, `Failed to check ${action === 'check-in' ? 'in' : 'out'}`), 'Something went wrong');
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
-  // IT staff are reminded to log their timesheet before checking out.
-  function requestCheckOut() {
-    if (isIt) setCheckoutPromptOpen(true);
-    else attendanceAction('check-out');
-  }
+  // A check-in/out from here or the header refreshes the table.
+  useEffect(() => {
+    window.addEventListener(ATTENDANCE_CHANGED, loadAttendance);
+    return () => window.removeEventListener(ATTENDANCE_CHANGED, loadAttendance);
+  });
 
   function handleRegularized(updated) {
     setRows((current) => current.map((row) => row.id === updated.id ? { ...row, ...updated } : row));
@@ -220,7 +198,7 @@ export default function AttendancePage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3"><Clock3 className="h-5 w-5 text-primary-700" /><div><h3 className="font-semibold text-tertiary-900">Today</h3><p className="text-sm text-tertiary-600">{today ? `${formatDateTime(today.check_in_at)} to ${formatDateTime(today.check_out_at)}` : 'No attendance recorded yet.'}</p></div></div>
             <div className="flex gap-2">
-              {!today?.check_in_at && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => attendanceAction('check-in')} disabled={actionLoading || leaveToday.is_leave_day}><LogIn className="h-4 w-4" /> Check in</button>}
+              {!today?.check_in_at && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={checkIn} disabled={actionLoading || leaveToday.is_leave_day}><LogIn className="h-4 w-4" /> Check in</button>}
               {today?.check_in_at && !today?.check_out_at && <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={requestCheckOut} disabled={actionLoading || leaveToday.is_leave_day}><LogOut className="h-4 w-4" /> Check out</button>}
               {today?.check_out_at && <span className="inline-flex items-center gap-2 rounded-xl bg-green-50 px-3 py-2 text-sm font-medium text-green-700"><CheckCircle2 className="h-4 w-4" /> Complete</span>}
             </div>
@@ -228,19 +206,7 @@ export default function AttendancePage() {
           <div className="mt-3"><LeaveDayNotice leave={leaveToday} what="check-in, check-out, timesheet and project hours" /></div>
         </section>
       )}
-      <Modal
-        open={checkoutPromptOpen}
-        title="Before you check out"
-        onClose={() => setCheckoutPromptOpen(false)}
-        footer={
-          <>
-            <button type="button" className="btn-secondary" onClick={() => { setCheckoutPromptOpen(false); navigate('/attendance?section=it-timesheet'); }}>Log Timesheet First</button>
-            <button type="button" className="btn-primary" onClick={() => { setCheckoutPromptOpen(false); attendanceAction('check-out'); }}>Confirm Checkout</button>
-          </>
-        }
-      >
-        <p className="text-tertiary-700">Please make sure you have logged your timesheet before checking out.</p>
-      </Modal>
+      <CheckoutPrompt open={checkoutPromptOpen} onClose={closePrompt} onConfirm={confirmCheckOut} />
       {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       <RegularizeDrawer row={regularize} open={Boolean(regularize)} onClose={() => setRegularize(null)} onSaved={handleRegularized} />
     </div>
