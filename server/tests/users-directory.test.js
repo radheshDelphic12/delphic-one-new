@@ -7,10 +7,10 @@ let inactiveSales;
 
 beforeEach(async () => {
   await cleanDatabase();
-  const recruiter = await createUser({ role: 'recruiter', name: 'Rhea Recruiter' });
-  const sales = await createUser({ role: 'sales', name: 'Sam Sales' });
-  bda = await createUser({ role: 'bda', name: 'Garv Gulati' });
-  inactiveSales = await createUser({ role: 'sales', name: 'Prashanth Old', active: false });
+  const recruiter = await createUser({ withOrg: true, role: 'recruiter', name: 'Rhea Recruiter' });
+  const sales = await createUser({ withOrg: true, role: 'sales', name: 'Sam Sales' });
+  bda = await createUser({ withOrg: true, role: 'bda', name: 'Garv Gulati' });
+  inactiveSales = await createUser({ withOrg: true, role: 'sales', name: 'Prashanth Old', active: false });
   ({ access_token: recruiterToken } = await loginAs(recruiter));
   ({ access_token: salesToken } = await loginAs(sales));
 });

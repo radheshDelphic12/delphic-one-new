@@ -17,12 +17,24 @@ function unique(prefix) {
   return `${prefix}${Date.now()}${counter}`;
 }
 
-async function createUser({ role, active = true, name, is_superadmin = false }) {
+// The one org `createUser({ withOrg: true })` puts users in. Created lazily
+// because cleanDatabase() truncates orgs between tests.
+async function getTestOrg() {
+  const existing = await prisma.org.findUnique({ where: { slug: 'test-org' } });
+  return existing || createOrg({ name: 'Test Org', slug: 'test-org' });
+}
+
+// withOrg: also give the user an active membership in the test org, as
+// production users have after the Phase 0 backfill. Routes gated by
+// requireOrgMembership (e.g. /users/*) 403 without one.
+async function createUser({ role, active = true, name, is_superadmin = false, withOrg = false }) {
   const email = `${unique('user')}@test.local`;
   const password_hash = await bcrypt.hash(PASSWORD, 4);
-  return prisma.user.create({
+  const user = await prisma.user.create({
     data: { name: name || `${role} tester`, email, password_hash, role, active, is_superadmin },
   });
+  if (withOrg) await createOrgMembership(user.id, (await getTestOrg()).id, { role });
+  return user;
 }
 
 async function loginAs(user) {
