@@ -248,30 +248,32 @@ async function defaultCalendar(orgId, db = prisma) {
   return pickDefaultProjectCalendar(calendars);
 }
 
-// A project's client must be one of this org's Lead accounts — the same set
-// the Lead pipeline shows: stage = lead, typed client or not yet classified
-// (vendors in the lead stage are sourcing partners, not clients).
-function leadClientWhere(orgId) {
-  return { org_id: orgId, stage: 'lead', OR: [{ type: 'client' }, { type: null }] };
+// A project's client can be any of this org's client accounts, whatever their
+// pipeline stage — typed client or not yet classified. Vendors are sourcing
+// partners, not clients, and projects made via Add Project (always given a
+// service_category) are never offered as a client.
+function clientOptionWhere(orgId) {
+  return { org_id: orgId, service_category: null, OR: [{ type: 'client' }, { type: null }] };
 }
 
 async function listLeadClientOptions(orgId) {
   return prisma.account.findMany({
-    where: leadClientWhere(orgId),
-    select: { id: true, name: true, type: true },
+    where: clientOptionWhere(orgId),
+    select: { id: true, name: true, type: true, stage: true },
     orderBy: { name: 'asc' },
   });
 }
 
 // Resolves the client to link. `keepId` is the project's current link: re-saving
-// an unchanged client is allowed even if that lead has since moved on in the
-// pipeline, so editing other fields never fails on it.
-async function resolveLeadClient(orgId, clientAccountId, keepId = null) {
+// an unchanged client is always allowed, so editing other fields never fails on
+// it. `projectId` is the project being edited — it can't be its own client.
+async function resolveLeadClient(orgId, clientAccountId, keepId = null, projectId = null) {
   if (clientAccountId && clientAccountId === keepId) {
     return { account: await prisma.account.findUnique({ where: { id: clientAccountId }, select: { id: true, name: true } }) };
   }
+  if (projectId && clientAccountId === projectId) return { error: 'client_not_lead' };
   const account = await prisma.account.findFirst({
-    where: { id: clientAccountId, ...leadClientWhere(orgId) },
+    where: { id: clientAccountId, ...clientOptionWhere(orgId) },
     select: { id: true, name: true },
   });
   return account ? { account } : { error: 'client_not_lead' };

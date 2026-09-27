@@ -34,7 +34,7 @@ router.get(
   })
 );
 
-// Client-name picker for Add / Edit Project: this org's Lead accounts.
+// Client-name picker for Add / Edit Project: this org's client accounts.
 router.get(
   '/projects/client-options',
   authorize('admin'),
@@ -47,7 +47,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = createProjectSchema.parse(req.body);
     const result = await service.createProject(req.user.org_id, req.user.id, body);
-    if (result.error === 'client_not_lead') return fail(res, 422, 'Client must be one of this company\'s Lead accounts');
+    if (result.error === 'client_not_lead') return fail(res, 422, 'Client must be one of this company\'s client accounts');
     if (result.error === 'category_not_available') return fail(res, 422, 'Recruitment projects are not available yet — choose Manage Services or Projects');
     if (result.error === 'name_taken') return fail(res, 409, 'A project with that name already exists');
     if (result.error === 'calendar_not_found') return fail(res, 404, 'Calendar not found');

@@ -34,7 +34,7 @@ const ERRORS = {
   org_not_found: [404, 'Org not found'],
   membership_not_found: [404, 'Employee not found in this org'],
   name_taken: [409, 'A project with that name already exists'],
-  client_not_lead: [422, 'Client must be one of this company\'s Lead accounts'],
+  client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
 };
 
 function failFor(res, error, result) {

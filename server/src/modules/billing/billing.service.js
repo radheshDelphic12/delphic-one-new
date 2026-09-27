@@ -439,7 +439,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
 
   let client;
   if (patch.client_account_id) {
-    const resolved = await calendarsService.resolveLeadClient(orgId, patch.client_account_id, existing.client_account_id);
+    const resolved = await calendarsService.resolveLeadClient(orgId, patch.client_account_id, existing.client_account_id, accountId);
     if (resolved.error) return resolved;
     client = resolved.account;
   }

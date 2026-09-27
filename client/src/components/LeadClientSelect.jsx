@@ -3,22 +3,24 @@ import SearchableSelect from './ui/SearchableSelect.jsx';
 import { useLeadClientOptions } from '../lib/lookups.js';
 
 /**
- * Project "Client name" picker — this org's Lead accounts only.
+ * Project "Client name" picker — this org's client accounts, any stage.
  *
  * Args:
  *   value: selected account id ('' for none).
  *   onChange: called with the next account id ('' when cleared).
  *   current: the project's already-linked client ({ id, name }) in edit mode.
- *     It stays selectable even once that account has left the Lead stage, so
- *     an edit pre-loads it instead of showing a blank field.
+ *     It stays selectable even if it's no longer offered (e.g. reclassified as
+ *     a vendor), so an edit pre-loads it instead of showing a blank field.
+ *   excludeId: the project being edited — it can't be its own client.
  *   enabled: fetch the options only while the form is open.
  */
-export default function LeadClientSelect({ value, onChange, current = null, enabled = true }) {
-  const leads = useLeadClientOptions(enabled);
+export default function LeadClientSelect({ value, onChange, current = null, excludeId = null, enabled = true }) {
+  const clients = useLeadClientOptions(enabled);
   const options = useMemo(() => {
-    if (!current || leads.some((o) => o.value === current.id)) return leads;
-    return [{ value: current.id, label: current.name, hint: 'No longer a lead' }, ...leads];
-  }, [leads, current]);
+    const list = excludeId ? clients.filter((o) => o.value !== excludeId) : clients;
+    if (!current || list.some((o) => o.value === current.id)) return list;
+    return [{ value: current.id, label: current.name, hint: 'No longer a client' }, ...list];
+  }, [clients, current, excludeId]);
 
   return (
     <SearchableSelect
@@ -27,9 +29,9 @@ export default function LeadClientSelect({ value, onChange, current = null, enab
       options={options}
       allowClear
       className="mt-1"
-      placeholder="Select a lead account"
-      searchPlaceholder="Search leads…"
-      noResultsMessage="No Lead accounts found — add one under Accounts first"
+      placeholder="Select a client"
+      searchPlaceholder="Search clients…"
+      noResultsMessage="No client accounts found — add one under Accounts first"
       ariaLabel="Client name"
     />
   );

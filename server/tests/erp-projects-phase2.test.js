@@ -230,42 +230,54 @@ describe('Finance → Projects profile', () => {
   });
 });
 
-describe('Project Client Name — a Lead account, never free text', () => {
-  test('client-options lists only this org\'s Lead accounts (client or unclassified); admin only', async () => {
+describe('Project Client Name — a client account, never free text', () => {
+  test('client-options lists all of this org\'s client accounts (client or unclassified, any stage) but no vendors or projects; admin only', async () => {
     const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
     await lead(org, admin, 'Lead Co');
     await lead(org, admin, 'Unclassified Lead', { type: null });
     await lead(org, admin, 'Vendor Lead', { type: 'vendor' });
     await lead(org, admin, 'Active Client', { stage: 'active' });
+    await lead(org, admin, 'Dropped Client', { stage: 'dropped' });
+    await lead(org, admin, 'Meeting Client', { stage: 'meeting_scheduled', type: null });
+    await addProject(token, { name: 'Some Project', service_category: 'project' });
     const other = await seedOrgAdmin({ name: 'Other', slug: 'other' });
     await lead(other.org, other.admin, 'Other Org Lead');
 
     const res = await authed(request(app).get('/api/v1/calendars/projects/client-options'), token);
     expect(res.status).toBe(200);
-    expect(res.body.data.map((a) => a.name)).toEqual(['Lead Co', 'Unclassified Lead']);
+    expect(res.body.data.map((a) => a.name)).toEqual(['Active Client', 'Dropped Client', 'Lead Co', 'Meeting Client', 'Unclassified Lead']);
 
     const emp = await seedEmployee(org);
     expect((await authed(request(app).get('/api/v1/calendars/projects/client-options'), emp.token)).status).toBe(403);
   });
 
-  test('create and edit refuse any account that is not a Lead of this org', async () => {
+  test('create and edit refuse vendors, projects, other orgs\' accounts and the project itself; accept a client in any stage', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const active = await lead(org, admin, 'Active Client', { stage: 'active' });
     const vendor = await lead(org, admin, 'Vendor Lead', { type: 'vendor' });
+    const otherProject = (await addProject(token, { name: 'Other Project', service_category: 'project' })).body.data;
     const other = await seedOrgAdmin({ name: 'Other', slug: 'other' });
     const foreign = await lead(other.org, other.admin, 'Other Org Lead');
 
-    for (const bad of [active, vendor, foreign]) {
+    for (const bad of [vendor, otherProject, foreign]) {
       const res = await addProject(token, { name: `P ${bad.name}`, client_account_id: bad.id, service_category: 'project' });
       expect(res.status).toBe(422);
-      expect(res.body.message).toContain('Lead');
+      expect(res.body.message).toContain('client accounts');
     }
     expect(await prisma.account.count({ where: { name: { startsWith: 'P ' } } })).toBe(0);
 
     const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
-    const patch = await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), token).send({ client_account_id: active.id });
-    expect(patch.status).toBe(422);
+    const url = `/api/v1/billing/projects/${project.id}`;
+    expect((await authed(request(app).patch(url), token).send({ client_account_id: vendor.id })).status).toBe(422);
+    expect((await authed(request(app).patch(url), token).send({ client_account_id: project.id })).status).toBe(422);
+    const patch = await authed(request(app).patch(url), token).send({ client_account_id: active.id });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.client_name).toBe('Active Client');
+
+    const created = await addProject(token, { name: 'Gaming', client_account_id: active.id, service_category: 'project' });
+    expect(created.status).toBe(201);
 
     // Free text is no longer stored.
     await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), token).send({ project_name: 'Tax Portal', client_name: 'Typed Name' });
