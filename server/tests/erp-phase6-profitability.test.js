@@ -229,6 +229,10 @@ describe('Phase 6 — super dashboard (cross-org, group-superadmin only)', () =>
   test('a group-superadmin with no org membership at all can still use it — not gated by requireOrgMembership', async () => {
     const groupSuper = await createUser({ role: 'admin' });
     await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    // No org membership, but an explicit holding-group membership: without one
+    // authorizeGroupSuperadmin only falls back when exactly one group exists.
+    const group = await prisma.orgGroup.create({ data: { name: 'Delphic Group' } });
+    await prisma.orgGroupMembership.create({ data: { user_id: groupSuper.id, org_group_id: group.id } });
     const { access_token } = await loginAs(groupSuper);
 
     const res = await authed(request(app).get('/api/v1/super-dashboard/rollup?from=2026-09-01&to=2026-09-30'), access_token);
