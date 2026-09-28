@@ -35,7 +35,7 @@ async function seedOrgEmployee(org) {
 
 describe('designations — org-scoped directory', () => {
   test('a membership-less user gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/designations'), access_token);
     expect(res.status).toBe(403);
@@ -113,7 +113,7 @@ describe('org context — write-side org_id auto-injection', () => {
   });
 
   test('a membership-less caller cannot create a department (departments are org-scoped)', async () => {
-    const admin = await createUser({ role: 'admin' });
+    const admin = await createUser({ role: 'admin', withOrg: false });
     const { access_token } = await loginAs(admin);
     const res = await authed(request(app).post('/api/v1/departments'), access_token).send({ name: 'Legacy Dept Test' });
     expect(res.status).toBe(403);

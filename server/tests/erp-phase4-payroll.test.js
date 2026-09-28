@@ -44,7 +44,7 @@ async function markPresent(orgId, membershipId, dates) {
 
 describe('Phase 4 — payroll routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/payroll/payslips/me'), access_token);
     expect(res.status).toBe(403);

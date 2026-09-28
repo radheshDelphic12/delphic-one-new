@@ -30,6 +30,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
   const [loading, setLoading] = useState(false);
   const [membershipId, setMembershipId] = useState('');
   const [rate, setRate] = useState('');
+  const [allocation, setAllocation] = useState('');
   const [saving, setSaving] = useState(false);
 
   function load(accId) {
@@ -57,10 +58,16 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/billing/cost-assignments', { account_id: accountId, org_membership_id: membershipId, cost_rate_per_hr: rate ? Number(rate) : undefined });
-      pushInfo('Employee assigned to the project');
+      await apiClient.post('/billing/cost-assignments', {
+        account_id: accountId,
+        org_membership_id: membershipId,
+        cost_rate_per_hr: rate ? Number(rate) : undefined,
+        allocation_percent: allocation === '' ? undefined : Number(allocation),
+      });
+      pushInfo('Assigned to the project');
       setMembershipId('');
       setRate('');
+      setAllocation('');
       load(accountId);
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to assign the employee'), 'Something went wrong');
@@ -84,7 +91,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
       <div>
         <h3 className="font-heading text-sm font-semibold text-tertiary-900">Project team (Employee ↔ Project), cost rates &amp; budget</h3>
         <p className="mt-0.5 text-xs text-tertiary-500">
-          Assign employees to this project (IT staff can only log hours on projects assigned to them). Optionally set an hourly cost rate — additional to salary — to track budget burn as approved hours accrue.
+          Assign employees and contractors to this project (they can only log hours on projects assigned to them). Allocation % is the share of their monthly salary / vendor rate charged to this project in the P&amp;L — leave it empty to split evenly across their projects. Optionally set an hourly cost rate — additional to salary — to track budget burn as approved hours accrue.
         </p>
       </div>
 
@@ -128,8 +135,16 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
             <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100 bg-white shadow-card">
               {assignments.map((a) => (
                 <li key={a.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                  <span className="font-medium text-tertiary-800">{a.org_membership?.person?.name || 'Unknown'}</span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-tertiary-800">{a.org_membership?.person?.name || 'Unknown'}</span>
+                    {a.org_membership?.worker_type === 'contractor' && (
+                      <span className="rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">
+                        Contractor{a.org_membership.vendor_account ? ` · ${a.org_membership.vendor_account.name}` : ''}
+                      </span>
+                    )}
+                  </span>
                   <span className="flex items-center gap-3 text-tertiary-600">
+                    <span>{a.allocation_percent != null ? `${Number(a.allocation_percent)}% allocated` : <span className="text-tertiary-400">even split</span>}</span>
                     {a.cost_rate_per_hr != null ? `${money(a.cost_rate_per_hr)}/hr` : <span className="text-tertiary-400">no cost rate</span>}
                     <button type="button" aria-label="Remove from project" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => unassign(a)}>
                       <Trash2 className="h-3.5 w-3.5" />
@@ -141,14 +156,9 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
           )}
 
           <form onSubmit={saveRate} className="flex flex-wrap items-end gap-2">
-            <label className="text-xs font-medium text-tertiary-600">
-              Resource type
-              {/* Contractor / Vendor Resource are supported by the data model but not offered yet. */}
-              <select disabled value="company_employee" onChange={() => {}} className="mt-1 block w-40 rounded-xl border bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">
-                <option value="company_employee">Company Employee</option>
-              </select>
-            </label>
-            <div className="w-56"><SearchableSelect value={membershipId} onChange={setMembershipId} options={membershipOptions} placeholder="Select employee" searchPlaceholder="Search people…" /></div>
+            {/* Resource type follows the person's user type (People → Full-Time Employee / Contractor). */}
+            <div className="w-56"><SearchableSelect value={membershipId} onChange={setMembershipId} options={membershipOptions} placeholder="Select employee or contractor" searchPlaceholder="Search people…" /></div>
+            <input type="number" min="0" max="100" step="1" placeholder="Allocation % (optional)" value={allocation} onChange={(e) => setAllocation(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
             <input type="number" min="0" step="0.01" placeholder="Cost rate/hr (optional)" value={rate} onChange={(e) => setRate(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
             <button type="submit" className="btn-primary inline-flex items-center gap-1.5" disabled={saving || !membershipId}>
               <Plus className="h-4 w-4" /> {saving ? 'Saving…' : 'Assign'}

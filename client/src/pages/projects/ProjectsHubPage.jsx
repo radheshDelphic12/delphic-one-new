@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, FileText, FolderKanban, Plus, TrendingUp, Wallet } from 'lucide-react';
-import apiClient from '../../lib/apiClient.js';
+import apiClient, { openAuthenticatedFile } from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -80,6 +80,7 @@ function ProjectsTab() {
 }
 
 function DocumentsTab() {
+  const { pushError } = useAlerts();
   const [category, setCategory] = useState('');
   const { data, loading } = useLiveData(() => apiClient.get('/projects/documents/register', { params: category ? { category } : {} }).then((r) => r.data.data), { deps: [category] });
   const cols = [
@@ -89,7 +90,7 @@ function DocumentsTab() {
     { key: 'reference_no', header: 'Reference', render: (r) => r.reference_no || '-' },
     { key: 'expires_on', header: 'Expires', render: (r) => (r.expires_on ? dateLabel(r.expires_on) : '-') },
     { key: 'status', header: 'Status', render: (r) => <Pill value={r.status} /> },
-    { key: 'file', header: 'File', render: (r) => (r.file_url ? <a className="text-primary-700 hover:underline" href={r.file_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open</a> : <span className="text-tertiary-400">Not uploaded</span>) },
+    { key: 'file', header: 'File', render: (r) => (r.file_url ? <button type="button" className="text-primary-700 hover:underline" onClick={(e) => { e.stopPropagation(); openAuthenticatedFile(r.file_url).catch((err) => pushError(err.message, 'Could not open file')); }}>Open</button> : <span className="text-tertiary-400">Not uploaded</span>) },
   ];
   return (
     <div className="space-y-4">

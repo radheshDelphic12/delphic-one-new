@@ -399,49 +399,50 @@ model User {
   created_at          DateTime @default(now())
   updated_at          DateTime @default(now()) @updatedAt
 
-  department                   Department?                     @relation(fields: [department_id], references: [id])
-  owned_accounts               Account[]                       @relation("AccountOwner")
-  origin_accounts              Account[]                       @relation("AccountOriginOwner")
-  classified_accounts          Account[]                       @relation("AccountClassifiedBy")
-  meeting_attendances          AccountMeetingAttendee[]
-  sales_requirements           Requirement[]                   @relation("RequirementSalesOwner")
-  assignments                  RequirementAssignment[]         @relation("AssignmentUser")
-  assignments_made             RequirementAssignment[]         @relation("AssignmentAssignedBy")
-  profiles_added               Profile[]                       @relation("ProfileAddedBy")
-  submissions_created          Submission[]                    @relation("SubmissionSubmittedBy")
-  stage_history_changes        StageHistory[]
-  documents_uploaded           Document[]
-  comments                     Comment[]
-  interview_round_assignments  InterviewRoundInterviewer[]
-  interview_rounds_scheduled   InterviewRound[]                @relation("InterviewRoundScheduler")
-  notifications                Notification[]                  @relation("NotificationUser")
-  notifications_authored       Notification[]                  @relation("NotificationActor")
-  notification_preferences     NotificationPreference[]
-  org_memberships              OrgMembership[]                 @relation("OrgMembershipPerson")
-  org_group_memberships        OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
-  attendance_regularizations   AttendanceRecord[]              @relation("AttendanceRegularizedBy")
-  hr_poc_for                   OrgMembership[]                 @relation("OrgMembershipHrPoc")
-  sourcing_poc_for             OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
-  timesheet_approvals          TimesheetEntry[]                @relation("TimesheetApprover")
-  timesheet_locks_made         TimesheetLock[]
-  regularization_requests      TimesheetRegularizationTicket[] @relation("RegularizationRequestedBy")
-  regularization_decisions     TimesheetRegularizationTicket[] @relation("RegularizationDecidedBy")
-  salary_structures_created    SalaryStructure[]               @relation("SalaryStructureCreatedBy")
-  salary_structures_updated    SalaryStructure[]               @relation("SalaryStructureUpdatedBy")
-  payroll_runs_processed       PayrollRun[]                    @relation("PayrollRunProcessedBy")
-  billing_rates_created        BillingRate[]                   @relation("BillingRateCreatedBy")
-  client_invoices_created      ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
-  group_billing_charges_raised GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
-  expense_claims_decided       ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
-  vendor_payments_created      VendorPayment[]                 @relation("VendorPaymentCreatedBy")
-  vendor_payments_decided      VendorPayment[]                 @relation("VendorPaymentDecidedBy")
-  ledger_entries_created       LedgerEntry[]                   @relation("LedgerEntryCreatedBy")
-  tax_records_created          TaxRecord[]                     @relation("TaxRecordCreatedBy")
-  external_accesses_granted    ExternalAccess[]                @relation("ExternalAccessGrantedBy")
-  vendor_commissions_decided   VendorCommission[]              @relation("VendorCommissionDecidedBy")
-  vendor_commissions_created   VendorCommission[]              @relation("VendorCommissionCreatedBy")
-  assigned_tasks_created       AssignedTask[]                  @relation("AssignedTaskCreatedBy")
-  project_cost_rates_created   ProjectMemberAssignment[]       @relation("ProjectMemberAssignmentCreatedBy")
+  department                      Department?                     @relation(fields: [department_id], references: [id])
+  owned_accounts                  Account[]                       @relation("AccountOwner")
+  origin_accounts                 Account[]                       @relation("AccountOriginOwner")
+  classified_accounts             Account[]                       @relation("AccountClassifiedBy")
+  meeting_attendances             AccountMeetingAttendee[]
+  sales_requirements              Requirement[]                   @relation("RequirementSalesOwner")
+  assignments                     RequirementAssignment[]         @relation("AssignmentUser")
+  assignments_made                RequirementAssignment[]         @relation("AssignmentAssignedBy")
+  profiles_added                  Profile[]                       @relation("ProfileAddedBy")
+  submissions_created             Submission[]                    @relation("SubmissionSubmittedBy")
+  stage_history_changes           StageHistory[]
+  documents_uploaded              Document[]
+  comments                        Comment[]
+  interview_round_assignments     InterviewRoundInterviewer[]
+  interview_rounds_scheduled      InterviewRound[]                @relation("InterviewRoundScheduler")
+  notifications                   Notification[]                  @relation("NotificationUser")
+  notifications_authored          Notification[]                  @relation("NotificationActor")
+  notification_preferences        NotificationPreference[]
+  org_memberships                 OrgMembership[]                 @relation("OrgMembershipPerson")
+  org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
+  attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
+  hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
+  sourcing_poc_for                OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
+  timesheet_approvals             TimesheetEntry[]                @relation("TimesheetApprover")
+  timesheet_locks_made            TimesheetLock[]
+  regularization_requests         TimesheetRegularizationTicket[] @relation("RegularizationRequestedBy")
+  regularization_decisions        TimesheetRegularizationTicket[] @relation("RegularizationDecidedBy")
+  salary_structures_created       SalaryStructure[]               @relation("SalaryStructureCreatedBy")
+  salary_structures_updated       SalaryStructure[]               @relation("SalaryStructureUpdatedBy")
+  payroll_runs_processed          PayrollRun[]                    @relation("PayrollRunProcessedBy")
+  billing_rates_created           BillingRate[]                   @relation("BillingRateCreatedBy")
+  project_vendor_invoices_created ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceCreatedBy")
+  client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
+  group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
+  expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
+  vendor_payments_created         VendorPayment[]                 @relation("VendorPaymentCreatedBy")
+  vendor_payments_decided         VendorPayment[]                 @relation("VendorPaymentDecidedBy")
+  ledger_entries_created          LedgerEntry[]                   @relation("LedgerEntryCreatedBy")
+  tax_records_created             TaxRecord[]                     @relation("TaxRecordCreatedBy")
+  external_accesses_granted       ExternalAccess[]                @relation("ExternalAccessGrantedBy")
+  vendor_commissions_decided      VendorCommission[]              @relation("VendorCommissionDecidedBy")
+  vendor_commissions_created      VendorCommission[]              @relation("VendorCommissionCreatedBy")
+  assigned_tasks_created          AssignedTask[]                  @relation("AssignedTaskCreatedBy")
+  project_cost_rates_created      ProjectMemberAssignment[]       @relation("ProjectMemberAssignmentCreatedBy")
 
   @@index([department_id])
   @@map("users")
@@ -460,6 +461,8 @@ model Department {
   users           User[]
   org_memberships OrgMembership[]
   designations    Designation[]
+  teams           Team[]
+  calendars       Calendar[]
 
   @@index([org_id])
   @@map("departments")
@@ -483,24 +486,50 @@ model Designation {
   @@map("designations")
 }
 
+// HR Settings → Teams: a working group inside the org, optionally under a
+// Department and with a team lead. Same org-scoped shape as Designation;
+// each employee (OrgMembership) belongs to at most one team.
+model Team {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String         @db.Uuid
+  org                Org            @relation(fields: [org_id], references: [id])
+  name               String
+  department_id      String?        @db.Uuid
+  department         Department?    @relation(fields: [department_id], references: [id], onDelete: SetNull)
+  lead_membership_id String?        @db.Uuid
+  lead               OrgMembership? @relation("TeamLead", fields: [lead_membership_id], references: [id], onDelete: SetNull)
+  created_at         DateTime       @default(now())
+  updated_at         DateTime       @default(now()) @updatedAt
+
+  members OrgMembership[] @relation("TeamMembers")
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("teams")
+}
+
 // Company holiday/working-day calendars for attendance + leave — distinct
 // from the existing interview/client-meeting calendar (modules/interviews),
 // which this does not replace (HLD §3).
 model Calendar {
-  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String       @db.Uuid
-  org         Org          @relation(fields: [org_id], references: [id])
-  name        String
-  kind        CalendarKind @default(internal)
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String       @db.Uuid
+  org           Org          @relation(fields: [org_id], references: [id])
+  name          String
+  kind          CalendarKind @default(internal)
   // Which office location this calendar's holidays apply to — null for a
   // client-specific calendar that isn't tied to a physical location (e.g. a
   // US client calendar followed by IT staff based in India). Added
   // 2026-09-15 for the client brief's location-mapping requirement.
-  location_id String?      @db.Uuid
-  location    Location?    @relation(fields: [location_id], references: [id])
-  is_default  Boolean      @default(false)
-  created_at  DateTime     @default(now())
-  updated_at  DateTime     @default(now()) @updatedAt
+  location_id   String?      @db.Uuid
+  location      Location?    @relation(fields: [location_id], references: [id])
+  // Standard calendar for a whole department (e.g. non-IT staff) — used when
+  // an employee has no explicit mapping of their own (see pickCalendarId).
+  department_id String?      @db.Uuid
+  department    Department?  @relation(fields: [department_id], references: [id], onDelete: SetNull)
+  is_default    Boolean      @default(false)
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
 
   holidays         CalendarHoliday[]
   employees        EmployeeCalendar[]
@@ -508,6 +537,7 @@ model Calendar {
 
   @@index([org_id])
   @@index([location_id])
+  @@index([department_id])
   @@map("calendars")
 }
 
@@ -962,6 +992,15 @@ model BillingRate {
   @@map("billing_rates")
 }
 
+// People → user type. A contractor is a non-employee resource supplied (and
+// paid) by a vendor Account: never on payroll, costed at vendor_rate, and
+// limited to a simplified portal (assigned projects, holiday calendar,
+// monthly timesheet) — see middleware/contractorScope.js.
+enum WorkerType {
+  full_time_employee
+  contractor
+}
+
 enum ProjectResourceType {
   company_employee
   contractor
@@ -976,27 +1015,62 @@ enum ProjectResourceType {
 // ADDITIONAL cost layer on top of a person's existing salary cost
 // (DailyEmployeeProfitability), not a replacement — see computeDayForOrg.
 model ProjectMemberAssignment {
-  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String              @db.Uuid
-  org               Org                 @relation(fields: [org_id], references: [id])
-  account_id        String              @db.Uuid
-  account           Account             @relation(fields: [account_id], references: [id])
-  org_membership_id String              @db.Uuid
-  org_membership    OrgMembership       @relation(fields: [org_membership_id], references: [id])
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String              @db.Uuid
+  org                Org                 @relation(fields: [org_id], references: [id])
+  account_id         String              @db.Uuid
+  account            Account             @relation(fields: [account_id], references: [id])
+  org_membership_id  String              @db.Uuid
+  org_membership     OrgMembership       @relation(fields: [org_membership_id], references: [id])
   // Optional: an assignment is first an ALLOCATION (Employee <-> Project),
   // a cost rate is an extra layer set only where a per-project pay rate exists.
-  cost_rate_per_hr  Decimal?            @db.Decimal(10, 2)
+  cost_rate_per_hr   Decimal?            @db.Decimal(10, 2)
   // Only company_employee is offered in the UI for now; the other two are
   // schema-ready for contractors / vendor resources.
-  resource_type     ProjectResourceType @default(company_employee)
-  created_by        String              @db.Uuid
-  creator           User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
-  created_at        DateTime            @default(now())
-  updated_at        DateTime            @default(now()) @updatedAt
+  resource_type      ProjectResourceType @default(company_employee)
+  // Share of this person's monthly cost (salary, or vendor rate for a
+  // contractor) charged to this project. Null = split evenly across all of
+  // the person's project assignments (see projectPnl.service).
+  allocation_percent Decimal?            @db.Decimal(5, 2)
+  created_by         String              @db.Uuid
+  creator            User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
+  created_at         DateTime            @default(now())
+  updated_at         DateTime            @default(now()) @updatedAt
 
   @@unique([account_id, org_membership_id])
   @@index([org_id])
   @@map("project_member_assignments")
+}
+
+// A vendor's invoice against a project for one month (managed-services
+// contractor billing). Payable to the vendor Account, never through payroll.
+// When a vendor has invoiced a project for a month, the invoices replace the
+// estimate from its contractors' vendor_rate in that month's project P&L.
+// The invoice file itself attaches via Document (entity_type
+// 'project_vendor_invoice').
+model ProjectVendorInvoice {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org               Org      @relation(fields: [org_id], references: [id])
+  account_id        String   @db.Uuid
+  account           Account  @relation("ProjectVendorInvoiceProject", fields: [account_id], references: [id])
+  vendor_account_id String   @db.Uuid
+  vendor_account    Account  @relation("ProjectVendorInvoiceVendor", fields: [vendor_account_id], references: [id])
+  period_month      Int
+  period_year       Int
+  invoice_number    String?
+  amount            Decimal  @db.Decimal(14, 2)
+  currency          Currency @default(INR)
+  notes             String?
+  created_by        String   @db.Uuid
+  creator           User     @relation("ProjectVendorInvoiceCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  @@index([org_id, period_year, period_month])
+  @@index([account_id, period_year, period_month])
+  @@index([vendor_account_id])
+  @@map("project_vendor_invoices")
 }
 
 // One row per (project, day) — the client brief's real-time revenue metric.
@@ -1415,6 +1489,7 @@ model Org {
 
   // Multi-company ERP (Phase 2) — new tables, org_id required from creation.
   designations       Designation[]
+  teams              Team[]
   calendars          Calendar[]
   project_calendars  ProjectCalendar[]
   attendance_records AttendanceRecord[]
@@ -1454,9 +1529,10 @@ model Org {
 
   // Workspace isolation — recruitment-sourcing vendor commission ledger
   // (Delphic Global only, see is_master_workspace above).
-  vendor_commissions VendorCommission[]
-  assigned_tasks     AssignedTask[]
-  project_cost_rates ProjectMemberAssignment[]
+  vendor_commissions      VendorCommission[]
+  assigned_tasks          AssignedTask[]
+  project_cost_rates      ProjectMemberAssignment[]
+  project_vendor_invoices ProjectVendorInvoice[]
 
   @@index([org_group_id])
   @@map("orgs")
@@ -1465,43 +1541,56 @@ model Org {
 // Person (User) <-> Org join. "Different roles in different companies" lives
 // here: one User row, one OrgMembership row per company they work at.
 model OrgMembership {
-  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  person_id         String           @db.Uuid
-  person            User             @relation("OrgMembershipPerson", fields: [person_id], references: [id])
-  org_id            String           @db.Uuid
-  org               Org              @relation(fields: [org_id], references: [id])
-  role              UserRole
-  employee_code     String?
-  department_id     String?          @db.Uuid
-  department        Department?      @relation(fields: [department_id], references: [id])
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id            String           @db.Uuid
+  person               User             @relation("OrgMembershipPerson", fields: [person_id], references: [id])
+  org_id               String           @db.Uuid
+  org                  Org              @relation(fields: [org_id], references: [id])
+  role                 UserRole
+  employee_code        String?
+  department_id        String?          @db.Uuid
+  department           Department?      @relation(fields: [department_id], references: [id])
   // Multi-company ERP (Phase 2) — nullable, unused until a designation is set.
-  designation_id    String?          @db.Uuid
-  designation       Designation?     @relation(fields: [designation_id], references: [id])
+  designation_id       String?          @db.Uuid
+  designation          Designation?     @relation(fields: [designation_id], references: [id])
+  // HR Settings → Teams, and how the person works (reuses the Requirement
+  // WorkMode enum). Both optional — unset until HR assigns them.
+  team_id              String?          @db.Uuid
+  team                 Team?            @relation("TeamMembers", fields: [team_id], references: [id], onDelete: SetNull)
+  work_mode            WorkMode?
+  // Full-time employee vs contractor. A contractor's cost is vendor_rate
+  // (monthly, in vendor_rate_currency) payable to vendor_account — the
+  // vendor company — and never goes through payroll.
+  worker_type          WorkerType       @default(full_time_employee)
+  vendor_account_id    String?          @db.Uuid
+  vendor_account       Account?         @relation("MembershipVendorAccount", fields: [vendor_account_id], references: [id], onDelete: SetNull)
+  vendor_rate          Decimal?         @db.Decimal(14, 2)
+  vendor_rate_currency Currency?
   // Added 2026-09-15 (client brief) — all nullable, unused until set.
-  location_id       String?          @db.Uuid
-  location          Location?        @relation(fields: [location_id], references: [id])
-  shift_id          String?          @db.Uuid
-  shift             Shift?           @relation(fields: [shift_id], references: [id])
+  location_id          String?          @db.Uuid
+  location             Location?        @relation(fields: [location_id], references: [id])
+  shift_id             String?          @db.Uuid
+  shift                Shift?           @relation(fields: [shift_id], references: [id])
   // Reporting line for the org-chart module (Phase 10, not built yet) — a
   // self-relation, so a manager is just another OrgMembership in this org.
-  manager_id        String?          @db.Uuid
-  manager           OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
-  direct_reports    OrgMembership[]  @relation("OrgMembershipManager")
+  manager_id           String?          @db.Uuid
+  manager              OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
+  direct_reports       OrgMembership[]  @relation("OrgMembershipManager")
   // HR contact for general queries, and the recruiter who onboarded this
   // person (for recruiter-performance tracking) — both point at User, not
   // OrgMembership, since an HR/sourcing POC may not share this org.
-  hr_poc_id         String?          @db.Uuid
-  hr_poc            User?            @relation("OrgMembershipHrPoc", fields: [hr_poc_id], references: [id])
-  sourcing_poc_id   String?          @db.Uuid
-  sourcing_poc      User?            @relation("OrgMembershipSourcingPoc", fields: [sourcing_poc_id], references: [id])
-  employment_status EmploymentStatus @default(active)
-  joined_at         DateTime         @default(now()) @db.Date
-  left_at           DateTime?        @db.Date
+  hr_poc_id            String?          @db.Uuid
+  hr_poc               User?            @relation("OrgMembershipHrPoc", fields: [hr_poc_id], references: [id])
+  sourcing_poc_id      String?          @db.Uuid
+  sourcing_poc         User?            @relation("OrgMembershipSourcingPoc", fields: [sourcing_poc_id], references: [id])
+  employment_status    EmploymentStatus @default(active)
+  joined_at            DateTime         @default(now()) @db.Date
+  left_at              DateTime?        @db.Date
   // Set when employment_status = notice_period — the org chart's
   // resignation indicator reads this (Phase 10, not built yet).
-  notice_end_date   DateTime?        @db.Date
-  created_at        DateTime         @default(now())
-  updated_at        DateTime         @default(now()) @updatedAt
+  notice_end_date      DateTime?        @db.Date
+  created_at           DateTime         @default(now())
+  updated_at           DateTime         @default(now()) @updatedAt
 
   employee_calendars      EmployeeCalendar[]
   attendance_records      AttendanceRecord[]
@@ -1516,8 +1605,11 @@ model OrgMembership {
   assigned_tasks          AssignedTask[]
   project_cost_rates      ProjectMemberAssignment[]
   regularization_requests TimesheetRegularizationTicket[] @relation("RegularizationMembership")
+  teams_led               Team[]                          @relation("TeamLead")
 
   @@unique([person_id, org_id])
+  @@index([team_id])
+  @@index([vendor_account_id])
   @@index([org_id])
   @@index([person_id])
   @@index([manager_id])
@@ -1627,6 +1719,9 @@ model Account {
   project_cost_rates         ProjectMemberAssignment[]
   regularization_tickets     TimesheetRegularizationTicket[] @relation("RegularizationAccount")
   project_calendar           ProjectCalendar?                @relation("ProjectCalendarAccount")
+  contractor_memberships     OrgMembership[]                 @relation("MembershipVendorAccount")
+  project_vendor_invoices    ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceProject")
+  vendor_invoices_raised     ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceVendor")
 
   @@index([type, stage])
   @@index([owner_id])

@@ -2,6 +2,67 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-09-28 — Recruitment access + per-file uploads (security), HR Teams + Work Mode — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Ex-members / other workspaces locked out of recruitment data.**
+  `requireMasterWorkspace` now 403s a caller with no active membership
+  (previously passed through — an offboarded employee with an active `User`
+  row kept reading candidates and CVs). The same check is repeated in
+  `lib/entityAccess` for account/requirement/profile/submission, so the
+  `documents` and `comments` routers (bare `authenticate`) are covered too.
+  `/dashboard/summary` is now master-workspace only; the client skips the
+  call elsewhere.
+- **`/uploads` is no longer a static mount.** New `modules/uploads` serves a
+  file only through its owning `Document` / `ProjectDocument` row and only to
+  someone allowed to read that record; orphans and traversal attempts 404.
+  Downloads are `attachment` + `no-store`. Project pages open files via
+  `openAuthenticatedFile`.
+- **HR Settings → Teams.** Migration `20260928100000_hr_teams_work_mode`
+  (additive): `teams` table (org-scoped, unique name, optional department +
+  lead) and nullable `team_id` / `work_mode` on `org_memberships`. New
+  `/api/v1/teams` (list for members, CRUD for admins; delete refused while the
+  team has members). `PATCH /orgs/memberships/:id` accepts `team_id` (same-org
+  check) and `work_mode`. UI: Teams tab in HR Settings; Team + Work mode on
+  the employee profile.
+- **Tests:** `recruitment-access-uploads.test.js`, `teams.test.js`. Test
+  helper `createUser` now lazily enrolls users in the test (master) org at
+  login; `withOrg: false` keeps a user membership-less.
+- **Holiday calendars per employee (Time & Attendance).** Migration
+  `20260928130000_calendar_department`: a calendar can be the standard one for
+  a Department. Resolution order is now project calendar → employee's own
+  mapping → department → office location → org default (`pickCalendarId`,
+  shared by timesheets and payroll). New `GET /calendars/me?year=` returns the
+  caller's standard calendar and each assigned project's calendar with that
+  year's holidays; shown in a new **Holiday Calendar** tab for everyone. HR
+  Settings → Calendars gets a department picker.
+- **Contractors (People).** Migration `20260928120000_contractors_vendor_invoices`:
+  `WorkerType` (full_time_employee | contractor) plus `vendor_account_id`
+  (an Account of type vendor in the same org), `vendor_rate` (monthly) and
+  currency on `OrgMembership`. Create user / employee profile get a
+  Full-Time vs Contractor toggle with vendor dropdown and vendor rate
+  (`lib/workerType.js` validates; a contractor's role is always `employee`).
+  Contractors log in with any (personal) email. `middleware/contractorScope.js`,
+  checked inside `authenticate`, limits them to their profile, notifications,
+  `/calendars/me`, timesheets, their tasks and leave day-status — every other
+  API is 403. The client shows them only **My Portal** (projects, holiday
+  calendar, timesheet). Payroll skips contractors (`contractor_paid_by_vendor`).
+- **Project P&L + vendor invoices (Finance).** `ProjectVendorInvoice` (project,
+  vendor, month, amount, optional file via Documents entity
+  `project_vendor_invoice`). `ProjectMemberAssignment.allocation_percent`
+  (null = even split across the person's projects); resource type now follows
+  the person's worker type. `billing/projectPnl.service.js`:
+  profit = client billing (fixed monthly rate, prorated in the start month; or
+  hourly revenue) − salary × allocation − contractor vendor rate × allocation,
+  where a vendor's actual invoice for the month replaces its rate estimate.
+  Routes: `GET /billing/vendors`, `/billing/projects-pnl`,
+  `/billing/projects/:id/pnl`, CRUD on `/billing/projects/:id/vendor-invoices`
+  and `/billing/vendor-invoices/:id`. UI: Finance → **Project P&L** tab with a
+  per-project drawer (breakdown + vendor invoices). Currencies are not
+  converted — `mixed_currency` flags it.
+- **Tests:** `contractors-project-pnl.test.js` (9). Updated `uploads-auth`
+  (orphan files are no longer served) and the org-chart group test (group
+  superadmin created without an org).
+
 ## 2026-09-16 — Multi-company ERP Phases 8-10 (accounting ledger/tax, external CA/Legal access, org chart — all backend) — branch `feature/multi-company-erp`
 
 Plan log: [MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md](../architecture/MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md).

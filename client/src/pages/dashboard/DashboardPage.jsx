@@ -316,7 +316,11 @@ export default function DashboardPage() {
     setDateTo(range.date_to);
   }, [datePreset]);
 
+  // /dashboard/summary is master-workspace only (the lightweight landing page
+  // below needs none of it), so don't call it from any other workspace.
+  const isMasterWorkspace = Boolean(user?.active_org?.is_master_workspace);
   useEffect(() => {
+    if (!isMasterWorkspace) return;
     setLoading(true);
     const params = {};
     if (departmentId) params.department_id = departmentId;
@@ -325,7 +329,7 @@ export default function DashboardPage() {
       .then(({ data }) => setSummary(data.data))
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load dashboard'), 'Something went wrong'))
       .finally(() => setLoading(false));
-  }, [departmentId, pushError]);
+  }, [departmentId, pushError, isMasterWorkspace]);
 
   // IST (Asia/Kolkata, +05:30) start-of-month instant — matches the server
   // `startOfMonth()` the "closed / closures this month" tiles are counted against.

@@ -9,6 +9,8 @@ build/
 npm-debug.log*
 .DS_Store
 uploads/
+# ...but not the source module that serves them.
+!server/src/modules/uploads/
 uploads_test/
 coverage/
 .vscode/

@@ -29,7 +29,7 @@ async function seedEmployeeUnder(org, managerMembershipId, role = 'recruiter') {
 
 describe('Phase 10 — org chart requires an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/org-chart'), access_token);
     expect(res.status).toBe(403);
@@ -112,7 +112,10 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     const adminBMembership = await createOrgMembership(adminB.id, orgB.id, { role: 'admin' });
     await seedEmployeeUnder(orgB, adminBMembership.id);
 
-    const groupSuper = await createUser({ role: 'admin' });
+    // withOrg: false — no membership anywhere, so login doesn't enroll them
+    // in the helper's test org (a second holding group would break the
+    // single-group fallback this test relies on).
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
     await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
     const { access_token: groupSuperToken } = await loginAs(groupSuper);
 

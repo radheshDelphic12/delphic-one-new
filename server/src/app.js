@@ -2,9 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const path = require('path');
 const env = require('./config/env');
-const { authenticate } = require('./middleware/auth');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -30,6 +28,7 @@ const calendarsRoutes = require('./modules/calendars/calendars.routes');
 const attendanceRoutes = require('./modules/attendance/attendance.routes');
 const leaveRoutes = require('./modules/leave/leave.routes');
 const designationsRoutes = require('./modules/designations/designations.routes');
+const teamsRoutes = require('./modules/teams/teams.routes');
 const timesheetsRoutes = require('./modules/timesheets/timesheets.routes');
 const payrollRoutes = require('./modules/payroll/payroll.routes');
 const billingRoutes = require('./modules/billing/billing.routes');
@@ -49,6 +48,7 @@ const projectsRoutes = require('./modules/projects/projects.routes');
 const financialsRoutes = require('./modules/financials/financials.routes');
 const analyticsRoutes = require('./modules/analytics/analytics.routes');
 const invitesRoutes = require('./modules/invites/invites.routes');
+const uploadsRoutes = require('./modules/uploads/uploads.routes');
 
 const app = express();
 
@@ -57,7 +57,9 @@ app.use(helmet());
 app.use(cors({ origin: env.corsOrigin, credentials: true }));
 app.use(express.json());
 app.use(requestLogger);
-app.use('/uploads', authenticate, express.static(path.resolve(env.uploadDir)));
+// Stored files are never served statically — each download is authorized
+// against the record that owns it. See modules/uploads.
+app.use('/uploads', uploadsRoutes);
 
 // Login is stricter than the general API (brute-force); both are per-IP windows.
 // The general limit is generous: the dashboard is request-dense (many widgets per
@@ -105,6 +107,7 @@ app.use('/api/v1/calendars', calendarsRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
 app.use('/api/v1/leave', leaveRoutes);
 app.use('/api/v1/designations', designationsRoutes);
+app.use('/api/v1/teams', teamsRoutes);
 app.use('/api/v1/timesheets', timesheetsRoutes);
 app.use('/api/v1/payroll', payrollRoutes);
 app.use('/api/v1/billing', billingRoutes);

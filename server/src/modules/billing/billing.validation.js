@@ -81,8 +81,30 @@ const costAssignmentSchema = z.object({
   account_id: z.string().uuid(),
   org_membership_id: z.string().uuid(),
   cost_rate_per_hr: z.coerce.number().positive().optional(),
-  resource_type: z.enum(['company_employee']).default('company_employee'),
+  // Share of the person's monthly cost charged to this project; null = even
+  // split across their projects. resource_type follows the person's worker type.
+  allocation_percent: z.coerce.number().min(0).max(100).nullable().optional(),
 });
+
+// Monthly project P&L / vendor invoices.
+const periodQuerySchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+});
+
+const vendorInvoiceSchema = z.object({
+  vendor_account_id: z.string().uuid(),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  invoice_number: z.string().trim().max(100).nullable().optional(),
+  amount: z.coerce.number().positive().max(1e12),
+  currency: CURRENCY.default('INR'),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+
+const updateVendorInvoiceSchema = vendorInvoiceSchema
+  .partial()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
 const listCostAssignmentsQuerySchema = z.object({
   account_id: z.string().uuid(),
@@ -130,4 +152,7 @@ module.exports = {
   listCostAssignmentsQuerySchema,
   accountBudgetQuerySchema,
   updateProjectProfileSchema,
+  periodQuerySchema,
+  vendorInvoiceSchema,
+  updateVendorInvoiceSchema,
 };

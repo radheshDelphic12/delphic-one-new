@@ -4,6 +4,7 @@ const env = require('../config/env');
 const prisma = require('../config/db');
 const orgContext = require('../lib/orgContext');
 const { fail } = require('../utils/response');
+const { contractorMayAccess } = require('./contractorScope');
 
 // Multi-company ERP (Phase 1): the JWT carries an `org_id` for users who have
 // an OrgMembership (everyone, post Phase-0 backfill). Tokens issued before
@@ -18,10 +19,12 @@ async function resolveOrgContext(user, orgId) {
   if (!orgId) return user;
   const membership = await prisma.orgMembership.findUnique({
     where: { person_id_org_id: { person_id: user.id, org_id: orgId } },
-    select: { id: true, role: true, employment_status: true },
+    select: { id: true, role: true, employment_status: true, worker_type: true },
   });
   if (!membership || membership.employment_status !== 'active') return null;
-  return { ...user, role: membership.role, org_id: orgId, org_membership_id: membership.id };
+  // A contractor is always self-service, whatever role is on the row.
+  const role = membership.worker_type === 'contractor' ? 'employee' : membership.role;
+  return { ...user, role, org_id: orgId, org_membership_id: membership.id, worker_type: membership.worker_type };
 }
 
 function authenticate(req, res, next) {
@@ -35,6 +38,9 @@ function authenticate(req, res, next) {
     resolveOrgContext(base, payload.org_id)
       .then((user) => {
         if (!user) return fail(res, 403, 'Active organization membership required');
+        if (user.worker_type === 'contractor' && !contractorMayAccess(req.method, req.originalUrl)) {
+          return fail(res, 403, 'Not available in the contractor portal');
+        }
         req.user = user;
         // Multi-company ERP (HLD §5, layer 1): the rest of this request runs
         // inside an AsyncLocalStorage context carrying the resolved org_id,

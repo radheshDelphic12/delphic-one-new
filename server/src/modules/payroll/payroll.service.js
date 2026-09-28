@@ -199,7 +199,7 @@ async function processRun(orgId, runId, adminUserId) {
       where: { calendar: { org_id: orgId }, date: { gte: period_start, lte: period_end } },
       select: { calendar_id: true, date: true },
     }),
-    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, is_default: true } }),
+    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, department_id: true, is_default: true } }),
     prisma.employeeCalendar.findMany({
       where: { org_membership: { org_id: orgId } },
       select: { org_membership_id: true, account_id: true, calendar_id: true },
@@ -239,6 +239,12 @@ async function processRun(orgId, runId, adminUserId) {
   const payslipRows = [];
 
   for (const membership of memberships) {
+    // Contractors are paid through their vendor (Finance → vendor invoices),
+    // never through payroll — even if a salary structure was set by mistake.
+    if (membership.worker_type === 'contractor') {
+      skipped.push({ org_membership_id: membership.id, reason: 'contractor_paid_by_vendor' });
+      continue;
+    }
     const structure = await prisma.salaryStructure.findFirst({
       where: { org_membership_id: membership.id, effective_from: { lte: period_end } },
       orderBy: { effective_from: 'desc' },
@@ -257,7 +263,7 @@ async function processRun(orgId, runId, adminUserId) {
       leaveRanges: leaveByMembership.get(membership.id) || [],
       holidaySet: holidaysByCalendar.get(
         pickCalendarId(
-          { assignments: assignmentsByMembership.get(membership.id) || [], membershipLocationId: membership.location_id, calendars },
+          { assignments: assignmentsByMembership.get(membership.id) || [], membershipLocationId: membership.location_id, membershipDepartmentId: membership.department_id, calendars },
           null
         )
       ) || noHolidays,

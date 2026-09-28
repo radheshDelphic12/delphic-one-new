@@ -1,7 +1,7 @@
 const { z } = require('zod');
 
 const ALLOWED_EXT = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.xlsx', '.csv'];
-const ALLOWED_ENTITIES = ['account', 'requirement', 'profile', 'submission', 'expense_claim'];
+const ALLOWED_ENTITIES = ['account', 'requirement', 'profile', 'submission', 'expense_claim', 'project_vendor_invoice'];
 
 const createMetaSchema = z.object({
   entity_type: z.enum(ALLOWED_ENTITIES),

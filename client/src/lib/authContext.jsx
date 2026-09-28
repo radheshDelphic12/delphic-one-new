@@ -18,6 +18,8 @@ function withOrgContext(user, memberships, activeOrg) {
     memberships,
     active_org: activeOrg,
     role: membership?.role || user.role,
+    // 'contractor' → the simplified contractor portal (see ContractorPortalPage).
+    worker_type: membership?.worker_type || 'full_time_employee',
   };
 }
 

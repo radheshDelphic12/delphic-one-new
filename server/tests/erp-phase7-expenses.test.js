@@ -39,7 +39,7 @@ async function seedLocation(orgId, name = 'Ahmedabad') {
 
 describe('Phase 7 — expenses routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/expenses/claims/me'), access_token);
     expect(res.status).toBe(403);

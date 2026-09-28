@@ -33,6 +33,11 @@ const createSchema = z.object({
   role: roleEnum,
   phone: z.string().nullable().optional(),
   department_id: optionalUuid,
+  // People → user type. Contractor needs a vendor account and a monthly vendor rate.
+  worker_type: z.enum(['full_time_employee', 'contractor']).optional(),
+  vendor_account_id: z.string().uuid().nullable().optional(),
+  vendor_rate: z.coerce.number().nonnegative().max(1e12).nullable().optional(),
+  vendor_rate_currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).nullable().optional(),
 });
 
 const updateSchema = z.object({

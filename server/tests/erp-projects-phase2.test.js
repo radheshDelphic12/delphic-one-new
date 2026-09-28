@@ -502,17 +502,19 @@ describe('Finance scope reduction', () => {
   });
 });
 
-describe('Project resources — company employees only for now, schema ready for the rest', () => {
-  test('the API only accepts company_employee; the column already holds contractor / vendor_resource', async () => {
+describe('Project resources — resource type follows the person user type', () => {
+  test('a client-sent resource_type is ignored; a full-time employee is always company_employee', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const emp = await seedEmployee(org);
     const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
 
-    const contractor = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({
+    // Contractors are marked on the person (People → user type), not per assignment.
+    const spoofed = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({
       account_id: project.id, org_membership_id: emp.membership.id, resource_type: 'contractor',
     });
-    expect(contractor.status).toBe(422);
+    expect(spoofed.status).toBe(201);
+    expect(spoofed.body.data.resource_type).toBe('company_employee');
 
     const ok = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({ account_id: project.id, org_membership_id: emp.membership.id });
     expect(ok.status).toBe(201);
