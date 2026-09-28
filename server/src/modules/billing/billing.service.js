@@ -380,7 +380,11 @@ function todayUtc() {
 // start date) resolve to the one added last.
 function currentAccountRate(rates, asOf) {
   const accountWide = rates.filter((r) => r.requirement_id === null).sort((a, b) => b.effective_from - a.effective_from || b.created_at - a.created_at);
-  return accountWide.find((r) => r.effective_from <= asOf) || accountWide[accountWide.length - 1] || null;
+  const inForce = accountWide.find((r) => r.effective_from <= asOf);
+  if (inForce) return inForce;
+  // All upcoming: the soonest date, and on that date the rate added last.
+  const soonest = accountWide[accountWide.length - 1];
+  return soonest ? accountWide.find((r) => +r.effective_from === +soonest.effective_from) : null;
 }
 
 function serializeProfile(account, rates, calendar) {

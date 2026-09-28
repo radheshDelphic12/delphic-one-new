@@ -234,8 +234,26 @@ describe('Finance → Projects profile', () => {
     expect(hourly.status).toBe(200);
     expect(hourly.body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
     expect((await authed(request(app).get(url), token)).body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
+
     const rename = await authed(request(app).patch(url), token).send({ project_name: 'Tax Portal 2', client_account_id: newClient.id });
     expect(rename.body.data).toMatchObject({ project_name: 'Tax Portal 2', client_name: 'New Client', client_account_id: newClient.id });
+  });
+
+  test('a saved monthly rate can be edited again, whether the agreement starts in the past or the future', async () => {
+    const { org, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const past = (await addProject(token, { name: 'Past Start', service_category: 'project' })).body.data;
+    const future = (await addProject(token, { name: 'Future Start', service_category: 'project' })).body.data;
+
+    for (const [project, start] of [[past, '2026-01-01'], [future, '2099-01-01']]) {
+      const url = `/api/v1/billing/projects/${project.id}`;
+      await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 80000 } });
+      const edited = await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 95000 } });
+      expect(edited.status).toBe(200);
+      expect(edited.body.data).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+      const row = (await authed(request(app).get('/api/v1/billing/projects'), token)).body.data.find((p) => p.id === project.id);
+      expect(row).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+    }
   });
 });
 
