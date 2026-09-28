@@ -87,7 +87,7 @@ function ShiftDrawer({ open, onClose, onSubmit }) {
 // Handles both create (calendar prop absent) and edit (calendar prop set) —
 // same fields either way, only the title/submit label and create-vs-update
 // call differ.
-function CalendarDrawer({ open, calendar, onClose, onSubmit }) {
+export function CalendarDrawer({ open, calendar, onClose, onSubmit }) {
   const isEditing = Boolean(calendar);
   const [fields, setFields] = useState({ name: '', kind: 'internal', is_default: false, location_id: '', department_id: '' });
   const [locations, setLocations] = useState([]);
@@ -127,7 +127,7 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
  * holiday. Replaces the old bottom-corner popup, which only ever showed a
  * bare list with no way to change anything once added.
  */
-function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
+export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
 
