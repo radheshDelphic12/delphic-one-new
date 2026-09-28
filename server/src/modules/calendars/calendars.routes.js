@@ -36,6 +36,20 @@ router.get(
   })
 );
 
+// The same view for any employee (admin): their standard calendar and, for IT
+// staff / contractors, the calendar each assigned project follows.
+router.get(
+  '/members/:orgMembershipId',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getUTCFullYear();
+    if (year < 2000 || year > 2100) return fail(res, 400, 'Invalid year');
+    const member = await service.memberExists(req.user.org_id, req.params.orgMembershipId);
+    if (!member) return fail(res, 404, 'Org membership not found');
+    return ok(res, await service.myCalendars(req.user.org_id, req.params.orgMembershipId, year));
+  })
+);
+
 // Project <-> Calendar mapping (People → Calendar section). Declared before
 // the '/:id' routes so 'projects' is never read as a calendar id.
 router.get(
@@ -186,6 +200,28 @@ router.post(
     if (result.error === 'membership_not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'account_not_found') return fail(res, 404, 'Account not found');
     return ok(res, result.assignment);
+  })
+);
+
+router.delete(
+  '/:id/assign/:orgMembershipId',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.unassign(req.user.org_id, req.params.id, req.params.orgMembershipId);
+    if (result.error === 'not_found') return fail(res, 404, 'This employee is not directly assigned to that calendar');
+    return ok(res, { deleted: true });
+  })
+);
+
+// Who follows this calendar as their standard calendar — explicitly assigned
+// or inherited through department / office location / org default.
+router.get(
+  '/:id/employees',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.listCalendarEmployees(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Calendar not found');
+    return ok(res, result.employees);
   })
 );
 

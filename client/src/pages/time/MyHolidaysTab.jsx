@@ -3,6 +3,8 @@ import { CalendarDays } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import { useAuth } from '../../lib/authContext.jsx';
+import HolidayCalendarAdmin from './HolidayCalendarAdmin.jsx';
 
 const KIND_LABEL = { internal: 'Standard', client: 'Client calendar', custom: 'Custom' };
 
@@ -45,19 +47,22 @@ function CalendarCard({ title, subtitle, calendar }) {
 /**
  * The signed-in person's own holiday calendars: the standard one that governs
  * them (their mapping → department → office location → company default) and,
- * for each project they're assigned to, the calendar that project follows —
- * a client calendar where the project has one.
+ * for IT staff / contractors, the calendar each assigned project follows — a
+ * client calendar where the project has one. Non-IT staff get one calendar.
  */
 export default function MyHolidaysTab() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
-  const { data, loading } = useLiveData(
+  const { data, loading, refresh } = useLiveData(
     () => apiClient.get('/calendars/me', { params: { year } }).then((r) => r.data.data),
     { deps: [year] }
   );
 
   return (
     <div className="space-y-4">
+      {isAdmin && <HolidayCalendarAdmin onChanged={refresh} />}
       <div className="flex items-center justify-end gap-2">
         <label htmlFor="holiday-year" className="text-xs font-medium text-tertiary-500">Year</label>
         <select id="holiday-year" value={year} onChange={(e) => setYear(Number(e.target.value))} className="rounded-xl border px-3 py-1.5 text-sm">
@@ -70,8 +75,13 @@ export default function MyHolidaysTab() {
         <EmptyState icon={CalendarDays} title="Holiday calendar unavailable" description="Your holiday calendar could not be loaded." />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <CalendarCard title="Standard holidays" subtitle="Applies to your regular working days" calendar={data.standard_calendar} />
-          {data.projects.map((p) => (
+          <CalendarCard
+            title={data.per_project ? 'Standard holidays' : 'Holiday calendar'}
+            subtitle={data.per_project ? 'Applies to your regular working days and projects without their own calendar' : 'Applies to all your working days'}
+            calendar={data.standard_calendar}
+          />
+          {/* Only IT staff / contractors work per project — non-IT follow the one calendar above. */}
+          {data.per_project && data.projects.map((p) => (
             <CalendarCard
               key={p.id}
               title={p.name}
