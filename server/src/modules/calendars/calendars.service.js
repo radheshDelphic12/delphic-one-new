@@ -416,10 +416,21 @@ async function defaultCalendar(orgId, db = prisma) {
 
 // A project's client can be any of this org's client accounts, whatever their
 // pipeline stage — typed client or not yet classified. Vendors are sourcing
-// partners, not clients, and projects made via Add Project (always given a
-// service_category) are never offered as a client.
+// partners, not clients, and projects made via Add Project are never offered.
+// A service_category alone doesn't make a row project-only: Finance sets one
+// on real client accounts when their billing is configured. A project-only row
+// has a category and nothing from the Accounts side — no requirements, contact,
+// industry or classification — which is exactly what Add Project creates.
+const PROJECT_ONLY_WHERE = {
+  service_category: { not: null },
+  requirements: { none: {} },
+  poc_name: null,
+  industry: null,
+  classified_at: null,
+};
+
 function clientOptionWhere(orgId) {
-  return { org_id: orgId, service_category: null, OR: [{ type: 'client' }, { type: null }] };
+  return { org_id: orgId, OR: [{ type: 'client' }, { type: null }], NOT: PROJECT_ONLY_WHERE };
 }
 
 async function listLeadClientOptions(orgId) {
@@ -432,12 +443,13 @@ async function listLeadClientOptions(orgId) {
 
 // Resolves the client to link. `keepId` is the project's current link: re-saving
 // an unchanged client is always allowed, so editing other fields never fails on
-// it. `projectId` is the project being edited — it can't be its own client.
-async function resolveLeadClient(orgId, clientAccountId, keepId = null, projectId = null) {
+// it. A client account worked on as a project in Finance may name itself as
+// its client (MiiCare's own project, client MiiCare); a project-only row can't,
+// as clientOptionWhere never offers it.
+async function resolveLeadClient(orgId, clientAccountId, keepId = null) {
   if (clientAccountId && clientAccountId === keepId) {
     return { account: await prisma.account.findUnique({ where: { id: clientAccountId }, select: { id: true, name: true } }) };
   }
-  if (projectId && clientAccountId === projectId) return { error: 'client_not_lead' };
   const account = await prisma.account.findFirst({
     where: { id: clientAccountId, ...clientOptionWhere(orgId) },
     select: { id: true, name: true },

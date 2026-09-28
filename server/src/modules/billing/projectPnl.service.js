@@ -33,8 +33,9 @@ function periodBounds(month, year) {
   return { start, end, days: end.getUTCDate() };
 }
 
+// Rates sharing an effective_from resolve to the one added last.
 function latestOnOrBefore(rows, date) {
-  return rows.filter((r) => r.effective_from <= date).sort((a, b) => b.effective_from - a.effective_from)[0] || null;
+  return rows.filter((r) => r.effective_from <= date).sort((a, b) => b.effective_from - a.effective_from || b.created_at - a.created_at)[0] || null;
 }
 
 async function projectRevenue(orgId, account, { start, end, days }) {
@@ -44,7 +45,7 @@ async function projectRevenue(orgId, account, { start, end, days }) {
   }
   const rates = await prisma.billingRate.findMany({
     where: { org_id: orgId, account_id: account.id, requirement_id: null },
-    select: { rate_type: true, rate: true, currency: true, effective_from: true },
+    select: { rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
   });
   const rate = latestOnOrBefore(rates, end);
   if (!rate) return { amount: 0, billing_type: null, rate: null, currency: account.client_billing_currency || 'INR', note: 'no_billing_rate' };
@@ -94,7 +95,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     prisma.projectMemberAssignment.groupBy({ by: ['org_membership_id'], where: { org_id: orgId, org_membership_id: { in: membershipIds } }, _count: { _all: true } }),
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: membershipIds }, effective_from: { lte: bounds.end } },
-      select: { org_membership_id: true, ctc: true, effective_from: true },
+      select: { org_membership_id: true, ctc: true, effective_from: true, created_at: true },
     }),
     listVendorInvoices(orgId, accountId, { period_month, period_year }),
     projectRevenue(orgId, account, bounds),

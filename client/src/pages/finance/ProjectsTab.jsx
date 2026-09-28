@@ -110,7 +110,7 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
             </label>
             <div className="block text-xs font-medium text-tertiary-600">
               Client name
-              <LeadClientSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} current={project.client_account} excludeId={project.id} />
+              <LeadClientSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} current={project.client_account} />
               {!project.client_account_id && project.client_name && (
                 <span className="mt-1 block font-normal text-tertiary-500">Saved as text: &ldquo;{project.client_name}&rdquo;. Pick the matching client to link it.</span>
               )}
