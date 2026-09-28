@@ -158,9 +158,25 @@ async function resolveCalendar(orgId, orgMembershipId, accountId = null) {
   return id ? calendars.find((c) => c.id === id) : null;
 }
 
+// IT staff and contractors log time per project, so each assigned project's
+// calendar applies to them; everyone else (non-IT) follows one standard
+// calendar only — their timesheets carry no project. Same IT test as
+// timesheets.service.isItMember.
+function followsProjectCalendars(membership) {
+  return membership?.worker_type === 'contractor' || membership?.person?.department?.name?.toLowerCase() === 'it';
+}
+
+const PER_PROJECT_PERSON_SELECT = { department: { select: { name: true } } };
+
 // Employee view: which calendar governs the caller by default, and which one
 // each of their assigned projects follows, with that year's holidays.
+// `per_project` says whether the project calendars actually apply (IT /
+// contractor) — for non-IT staff only `standard_calendar` does.
 async function myCalendars(orgId, orgMembershipId, year) {
+  const member = await prisma.orgMembership.findFirst({
+    where: { id: orgMembershipId, org_id: orgId },
+    select: { worker_type: true, person: { select: PER_PROJECT_PERSON_SELECT } },
+  });
   const assignments = await prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, org_membership_id: orgMembershipId },
     orderBy: { created_at: 'asc' },
@@ -199,6 +215,7 @@ async function myCalendars(orgId, orgMembershipId, year) {
 
   return {
     year,
+    per_project: followsProjectCalendars(member),
     standard_calendar: standard ? withHolidays(standard.id) : null,
     projects: projects.map(({ calendar_id, ...project }) => ({ ...project, calendar: calendar_id ? withHolidays(calendar_id) : null })),
   };
@@ -266,6 +283,93 @@ async function assign(orgId, calendarId, orgMembershipId, accountId = null) {
         data: { org_membership_id: orgMembershipId, calendar_id: calendarId, account_id: accountId },
       });
   return { assignment };
+}
+
+// Removes an employee's own default-calendar mapping so they fall back to the
+// department → location → org default chain again. Per-project rows stay.
+async function unassign(orgId, calendarId, orgMembershipId) {
+  const existing = await prisma.employeeCalendar.findFirst({
+    where: { calendar_id: calendarId, org_membership_id: orgMembershipId, account_id: null, org_membership: { org_id: orgId } },
+  });
+  if (!existing) return { error: 'not_found' };
+  await prisma.employeeCalendar.delete({ where: { id: existing.id } });
+  return { deleted: true };
+}
+
+// Every active employee aligned to this calendar, with why: as their standard
+// calendar — `assigned` (explicit mapping), or inherited via `department`,
+// `location` or the org `default` (same rule as pickCalendarId) — or, for IT
+// staff / contractors, `project`: only through assigned project(s) that
+// follow it. `projects` lists those projects either way.
+async function listCalendarEmployees(orgId, calendarId) {
+  const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, org_id: orgId } });
+  if (!calendar) return { error: 'not_found' };
+  const [memberships, projectMembers, projectCalendars, assignments, calendars] = await Promise.all([
+    prisma.orgMembership.findMany({
+      where: { org_id: orgId, employment_status: { not: 'terminated' } },
+      orderBy: { joined_at: 'asc' },
+      select: {
+        id: true,
+        employee_code: true,
+        worker_type: true,
+        location_id: true,
+        department_id: true,
+        person: { select: { id: true, name: true, email: true, ...PER_PROJECT_PERSON_SELECT } },
+        department: { select: { id: true, name: true } },
+        location: { select: { id: true, name: true } },
+      },
+    }),
+    prisma.projectMemberAssignment.findMany({
+      where: { org_id: orgId },
+      select: { org_membership_id: true, account: { select: { id: true, name: true, project_name: true } } },
+    }),
+    prisma.projectCalendar.findMany({ where: { org_id: orgId }, select: { account_id: true, calendar_id: true } }),
+    prisma.employeeCalendar.findMany({ where: { org_membership: { org_id: orgId } }, select: { org_membership_id: true, account_id: true, calendar_id: true } }),
+    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, department_id: true, is_default: true } }),
+  ]);
+  const byMembership = new Map();
+  for (const a of assignments) byMembership.set(a.org_membership_id, [...(byMembership.get(a.org_membership_id) || []), a]);
+
+  const projectsByMembership = new Map();
+  for (const p of projectMembers) projectsByMembership.set(p.org_membership_id, [...(projectsByMembership.get(p.org_membership_id) || []), p.account]);
+
+  const employees = [];
+  for (const m of memberships) {
+    const own = byMembership.get(m.id) || [];
+    const input = { assignments: own, membershipLocationId: m.location_id, membershipDepartmentId: m.department_id, calendars, projectCalendars };
+    const perProject = followsProjectCalendars(m);
+    // IT / contractor only: which of their assigned projects follow this calendar.
+    const projects = perProject
+      ? (projectsByMembership.get(m.id) || []).filter((a) => pickCalendarId(input, a.id) === calendarId).map((a) => ({ id: a.id, name: projectName(a) }))
+      : [];
+    const isStandard = pickCalendarId(input, null) === calendarId;
+    if (!isStandard && projects.length === 0) continue;
+    const source = !isStandard
+      ? 'project'
+      : own.some((a) => a.account_id === null && a.calendar_id === calendarId)
+      ? 'assigned'
+      : m.department_id && calendar.department_id === m.department_id
+      ? 'department'
+      : m.location_id && calendar.location_id === m.location_id
+      ? 'location'
+      : 'default';
+    const { id: personId, name, email } = m.person;
+    employees.push({
+      id: m.id,
+      employee_code: m.employee_code,
+      person: { id: personId, name, email },
+      department: m.department,
+      location: m.location,
+      per_project: perProject,
+      source,
+      projects,
+    });
+  }
+  return { employees };
+}
+
+async function memberExists(orgId, orgMembershipId) {
+  return Boolean(await prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { id: true } }));
 }
 
 async function listAssignments(orgId, orgMembershipId) {
@@ -507,10 +611,14 @@ module.exports = {
   updateHoliday,
   removeHoliday,
   assign,
+  unassign,
+  listCalendarEmployees,
   listAssignments,
+  memberExists,
   pickCalendarId,
   resolveCalendar,
   myCalendars,
+  followsProjectCalendars,
   holidayFor,
   buildHolidaysWorkbook,
   DEFAULT_PROJECT_CALENDAR_NAME,

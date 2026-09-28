@@ -337,3 +337,97 @@ describe('automated payroll draft', () => {
     expect(await prisma.payslip.count()).toBe(0);
   });
 });
+
+describe('calendar employee alignment (Holiday Calendar → Manage calendars)', () => {
+  test('lists assigned and inherited employees, and unassigning falls back to the inherited calendar', async () => {
+    const { org, adminToken, membership, empToken } = await seed();
+    const dept = await prisma.department.create({ data: { name: 'Ops', org_id: org.id } });
+    const other = await createUser({ role: 'recruiter' });
+    const otherMembership = await createOrgMembership(other.id, org.id, { role: 'recruiter', department_id: dept.id });
+
+    const base = await makeCalendar(adminToken, { name: 'Base', is_default: true });
+    const opsCal = await makeCalendar(adminToken, { name: 'Ops Calendar', department_id: dept.id });
+    const usCal = await makeCalendar(adminToken, { name: 'US Calendar', kind: 'client' }, [['2026-07-04', 'Independence Day']]);
+
+    const assign = await authed(request(app).post(`/api/v1/calendars/${usCal.id}/assign`), adminToken).send({ org_membership_id: membership.id });
+    expect(assign.status).toBe(200);
+
+    const us = await authed(request(app).get(`/api/v1/calendars/${usCal.id}/employees`), adminToken);
+    expect(us.status).toBe(200);
+    expect(us.body.data.map((e) => [e.id, e.source])).toEqual([[membership.id, 'assigned']]);
+
+    const ops = await authed(request(app).get(`/api/v1/calendars/${opsCal.id}/employees`), adminToken);
+    expect(ops.body.data.map((e) => [e.id, e.source])).toEqual([[otherMembership.id, 'department']]);
+
+    const baseRes = await authed(request(app).get(`/api/v1/calendars/${base.id}/employees`), adminToken);
+    expect(baseRes.body.data.map((e) => e.id)).not.toContain(membership.id);
+    expect(baseRes.body.data.every((e) => e.source === 'default')).toBe(true);
+
+    const mine = await authed(request(app).get('/api/v1/calendars/me?year=2026'), empToken);
+    expect(mine.body.data.standard_calendar.name).toBe('US Calendar');
+
+    expect((await authed(request(app).get(`/api/v1/calendars/${usCal.id}/employees`), empToken)).status).toBe(403);
+    expect((await authed(request(app).delete(`/api/v1/calendars/${usCal.id}/assign/${membership.id}`), empToken)).status).toBe(403);
+
+    const del = await authed(request(app).delete(`/api/v1/calendars/${usCal.id}/assign/${membership.id}`), adminToken);
+    expect(del.status).toBe(200);
+    expect((await authed(request(app).delete(`/api/v1/calendars/${usCal.id}/assign/${membership.id}`), adminToken)).status).toBe(404);
+
+    const after = await authed(request(app).get('/api/v1/calendars/me?year=2026'), empToken);
+    expect(after.body.data.standard_calendar.name).toBe('Base');
+    const baseAfter = await authed(request(app).get(`/api/v1/calendars/${base.id}/employees`), adminToken);
+    expect(baseAfter.body.data.map((e) => e.id)).toContain(membership.id);
+  });
+});
+
+describe('IT staff follow a calendar per project; non-IT follow one calendar', () => {
+  test('per_project flag, project-wise alignment and the admin member view', async () => {
+    const { org, admin, adminToken, membership: nonItMembership, empToken, usClient, inClient } = await seed();
+    const itDept = await prisma.department.create({ data: { name: 'IT', org_id: org.id } });
+    const itUser = await createUser({ role: 'employee' });
+    await prisma.user.update({ where: { id: itUser.id }, data: { department_id: itDept.id } });
+    const itMembership = await createOrgMembership(itUser.id, org.id, { role: 'employee' });
+    const itToken = (await loginAs(itUser)).access_token;
+
+    const base = await makeCalendar(adminToken, { name: 'Ahmedabad', is_default: true });
+    const usCal = await makeCalendar(adminToken, { name: 'US Calendar', kind: 'client' });
+    const inCal = await makeCalendar(adminToken, { name: 'India Client Calendar', kind: 'client' });
+    await prisma.projectCalendar.createMany({
+      data: [
+        { org_id: org.id, account_id: usClient.id, calendar_id: usCal.id },
+        { org_id: org.id, account_id: inClient.id, calendar_id: inCal.id },
+      ],
+    });
+    for (const m of [itMembership, nonItMembership]) {
+      for (const p of [usClient, inClient]) {
+        await prisma.projectMemberAssignment.create({ data: { org_id: org.id, account_id: p.id, org_membership_id: m.id, created_by: admin.id } });
+      }
+    }
+
+    const it = (await authed(request(app).get('/api/v1/calendars/me?year=2026'), itToken)).body.data;
+    expect(it.per_project).toBe(true);
+    expect(it.standard_calendar.name).toBe('Ahmedabad');
+    expect(Object.fromEntries(it.projects.map((p) => [p.id, p.calendar.name]))).toEqual({ [usClient.id]: 'US Calendar', [inClient.id]: 'India Client Calendar' });
+
+    const nonIt = (await authed(request(app).get('/api/v1/calendars/me?year=2026'), empToken)).body.data;
+    expect(nonIt.per_project).toBe(false);
+    expect(nonIt.standard_calendar.name).toBe('Ahmedabad');
+
+    // US Calendar is aligned only to the IT employee, through the US project.
+    const us = (await authed(request(app).get(`/api/v1/calendars/${usCal.id}/employees`), adminToken)).body.data;
+    expect(us).toHaveLength(1);
+    expect(us[0]).toMatchObject({ id: itMembership.id, source: 'project', per_project: true, projects: [{ id: usClient.id, name: 'US Client' }] });
+
+    // Both follow Ahmedabad as their standard calendar; only IT carries projects.
+    const ahm = (await authed(request(app).get(`/api/v1/calendars/${base.id}/employees`), adminToken)).body.data;
+    const byId = Object.fromEntries(ahm.map((e) => [e.id, e]));
+    expect(byId[itMembership.id]).toMatchObject({ source: 'default', projects: [] });
+    expect(byId[nonItMembership.id]).toMatchObject({ source: 'default', per_project: false, projects: [] });
+
+    const member = await authed(request(app).get(`/api/v1/calendars/members/${itMembership.id}?year=2026`), adminToken);
+    expect(member.status).toBe(200);
+    expect(member.body.data.per_project).toBe(true);
+    expect(member.body.data.projects).toHaveLength(2);
+    expect((await authed(request(app).get(`/api/v1/calendars/members/${itMembership.id}`), empToken)).status).toBe(403);
+  });
+});
