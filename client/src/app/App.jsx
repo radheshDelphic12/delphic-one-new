@@ -5,6 +5,7 @@ import AppLayout from '../components/layout/AppLayout.jsx';
 import HomePreloaderGate from '../components/HomePreloaderGate.jsx';
 import LoginPage from '../pages/auth/LoginPage.jsx';
 import DashboardPage from '../pages/dashboard/DashboardPage.jsx';
+import ContractorPortalPage from '../pages/contractor/ContractorPortalPage.jsx';
 import AccountsListPage from '../pages/accounts/AccountsListPage.jsx';
 import AccountDetailPage from '../pages/accounts/AccountDetailPage.jsx';
 import PipelineShell from '../pages/pipeline/PipelineShell.jsx';
@@ -64,6 +65,17 @@ function AccountBoardRedirect() {
 /**
  * Redirect when the current user lacks the required capability.
  */
+/** Home: contractors get their portal instead of the dashboard. */
+function HomePage() {
+  const { user } = useAuth();
+  if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
+  return (
+    <HomePreloaderGate>
+      <DashboardPage />
+    </HomePreloaderGate>
+  );
+}
+
 function RequirePermission({ capability, children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
@@ -122,11 +134,7 @@ export default function App() {
       >
         <Route
           index
-          element={
-            <HomePreloaderGate>
-              <DashboardPage />
-            </HomePreloaderGate>
-          }
+          element={<HomePage />}
         />
         {/* Recruitment pipeline — Delphic Global only (see RequireMasterWorkspace), and only
             for roles with pipeline access (RequirePermission) — keeps a self-service-only

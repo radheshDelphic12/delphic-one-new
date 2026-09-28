@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, LogOut, Menu, MoreVertical, Settings, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Settings, X } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
@@ -66,21 +66,27 @@ function OrgCreateDrawer({ open, onClose }) {
 /**
  * App shell: collapsible icon sidebar with profile actions, canvas header title, and main outlet.
  */
+// A contractor's whole app: the portal (projects, holiday calendar,
+// timesheet) plus notifications and their own settings.
+const CONTRACTOR_NAV = [{ to: '/', label: 'My Portal', end: true, icon: LayoutDashboard }];
+const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
+
 export default function AppLayout() {
   const { user, logout, isGroupSuperadmin } = useAuth();
   const { pathname } = useLocation();
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
+  const isContractor = user?.worker_type === 'contractor';
   const navItems = useMemo(
     () =>
-      NAV_ITEMS.filter((item) => {
+      isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
         return !item.capability || can(item.capability);
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin]
+    [user?.role, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor]
   );
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
@@ -301,14 +307,14 @@ export default function AppLayout() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {user?.active_org && can('viewAttendance') && <HeaderAttendance key={user.active_org.id} user={user} />}
+                {user?.active_org && !isContractor && can('viewAttendance') && <HeaderAttendance key={user.active_org.id} user={user} />}
                 <NotificationBell />
               </div>
             </div>
           </header>
 
           <div className="px-4 pb-6 pt-0 md:px-6">
-            <Outlet />
+            {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : <Outlet />}
           </div>
         </main>
       </div>

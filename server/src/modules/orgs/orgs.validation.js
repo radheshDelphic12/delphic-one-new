@@ -38,6 +38,13 @@ const updateMembershipSchema = z.object({
   sourcing_poc_id: z.string().uuid().nullable().optional(),
   department_id: z.string().uuid().nullable().optional(),
   designation_id: z.string().uuid().nullable().optional(),
+  team_id: z.string().uuid().nullable().optional(),
+  work_mode: z.enum(['remote', 'onsite', 'hybrid']).nullable().optional(),
+  // People → user type. Contractor needs a vendor account and a monthly vendor rate.
+  worker_type: z.enum(['full_time_employee', 'contractor']).optional(),
+  vendor_account_id: z.string().uuid().nullable().optional(),
+  vendor_rate: z.coerce.number().nonnegative().max(1e12).nullable().optional(),
+  vendor_rate_currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).nullable().optional(),
 });
 
 const membershipListQuerySchema = z.object({

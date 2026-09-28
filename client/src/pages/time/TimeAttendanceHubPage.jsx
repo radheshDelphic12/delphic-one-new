@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, CalendarClock, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
+import { CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -10,10 +10,13 @@ import ItTimesheetPage from './ItTimesheetPage.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import TeamMonitoringTab from './TeamMonitoringTab.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
+import MyHolidaysTab from './MyHolidaysTab.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
+  // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
+  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
 ];
 // The ordinary popup-logging timesheet — for everyone EXCEPT IT-department
 // staff, who use the multi-row grid below exclusively (no popup at all).
@@ -72,6 +75,7 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
+      {section === 'holidays' && <MyHolidaysTab />}
       {section === 'timesheets' && <TimesheetsPage />}
       {section === 'it-timesheet' && isIt && (isAdmin ? <ItTimesheetAdminView /> : <ItTimesheetPage />)}
       {section === 'approvals' && isApprover && <ApprovalsTab />}

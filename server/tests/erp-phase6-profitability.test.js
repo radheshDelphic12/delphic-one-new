@@ -92,7 +92,7 @@ async function approvedEntry(orgId, membershipId, accountId, requirementId, date
 
 describe('Phase 6 — profitability routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/profitability/me'), access_token);
     expect(res.status).toBe(403);
@@ -227,7 +227,7 @@ describe('Phase 6 — super dashboard (cross-org, group-superadmin only)', () =>
   });
 
   test('a group-superadmin with no org membership at all can still use it — not gated by requireOrgMembership', async () => {
-    const groupSuper = await createUser({ role: 'admin' });
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
     await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
     // No org membership, but an explicit holding-group membership: without one
     // authorizeGroupSuperadmin only falls back when exactly one group exists.

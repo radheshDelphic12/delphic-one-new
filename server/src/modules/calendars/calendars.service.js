@@ -6,19 +6,32 @@ async function list(orgId) {
     orderBy: { name: 'asc' },
     include: {
       location: { select: { id: true, name: true } },
+      department: { select: { id: true, name: true } },
       _count: { select: { holidays: true, employees: true } },
     },
   });
 }
 
-async function create(orgId, { name, kind, is_default, location_id }) {
+const CALENDAR_INCLUDE = { location: { select: { id: true, name: true } }, department: { select: { id: true, name: true } } };
+
+async function checkCalendarRefs(orgId, { location_id, department_id }) {
   if (location_id) {
     const location = await prisma.location.findFirst({ where: { id: location_id, org_id: orgId } });
-    if (!location) return { error: 'location_not_found' };
+    if (!location) return 'location_not_found';
   }
+  if (department_id) {
+    const department = await prisma.department.findFirst({ where: { id: department_id, org_id: orgId } });
+    if (!department) return 'department_not_found';
+  }
+  return null;
+}
+
+async function create(orgId, { name, kind, is_default, location_id, department_id }) {
+  const refError = await checkCalendarRefs(orgId, { location_id, department_id });
+  if (refError) return { error: refError };
   const calendar = await prisma.calendar.create({
-    data: { org_id: orgId, name, kind, is_default, location_id: location_id || null },
-    include: { location: { select: { id: true, name: true } } },
+    data: { org_id: orgId, name, kind, is_default, location_id: location_id || null, department_id: department_id || null },
+    include: CALENDAR_INCLUDE,
   });
   return { calendar };
 }
@@ -26,14 +39,12 @@ async function create(orgId, { name, kind, is_default, location_id }) {
 async function update(orgId, calendarId, patch) {
   const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, org_id: orgId } });
   if (!calendar) return { error: 'not_found' };
-  if (patch.location_id) {
-    const location = await prisma.location.findFirst({ where: { id: patch.location_id, org_id: orgId } });
-    if (!location) return { error: 'location_not_found' };
-  }
+  const refError = await checkCalendarRefs(orgId, patch);
+  if (refError) return { error: refError };
   const updated = await prisma.calendar.update({
     where: { id: calendarId },
     data: patch,
-    include: { location: { select: { id: true, name: true } } },
+    include: CALENDAR_INCLUDE,
   });
   return { calendar: updated };
 }
@@ -111,11 +122,12 @@ async function buildHolidaysWorkbook(orgId, calendarId) {
 //       account_id = project) — still honoured so existing data keeps working,
 //       no longer offered in the UI
 //   2. the employee's default mapping (EmployeeCalendar, account_id = null)
-//   3. the calendar tied to the employee's office Location (Ahmedabad, Indore, …)
-//   4. the org's default calendar
+//   3. the standard calendar of the employee's Department (e.g. non-IT staff)
+//   4. the calendar tied to the employee's office Location (Ahmedabad, Indore, …)
+//   5. the org's default calendar
 // Pure function over pre-loaded rows so timesheets (one lookup) and payroll
 // (whole-org batch) apply the exact same rule.
-function pickCalendarId({ assignments, membershipLocationId, calendars, projectCalendars = [] }, accountId = null) {
+function pickCalendarId({ assignments, membershipLocationId, membershipDepartmentId = null, calendars, projectCalendars = [] }, accountId = null) {
   if (accountId) {
     const forProject = projectCalendars.find((p) => p.account_id === accountId);
     if (forProject) return forProject.calendar_id;
@@ -124,6 +136,10 @@ function pickCalendarId({ assignments, membershipLocationId, calendars, projectC
   }
   const forDefault = assignments.find((a) => a.account_id === null);
   if (forDefault) return forDefault.calendar_id;
+  if (membershipDepartmentId) {
+    const forDepartment = calendars.find((c) => c.department_id === membershipDepartmentId);
+    if (forDepartment) return forDepartment.id;
+  }
   if (membershipLocationId) {
     const forLocation = calendars.find((c) => c.location_id === membershipLocationId);
     if (forLocation) return forLocation.id;
@@ -133,13 +149,59 @@ function pickCalendarId({ assignments, membershipLocationId, calendars, projectC
 
 async function resolveCalendar(orgId, orgMembershipId, accountId = null) {
   const [membership, assignments, calendars, projectCalendars] = await Promise.all([
-    prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { location_id: true } }),
+    prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { location_id: true, department_id: true } }),
     prisma.employeeCalendar.findMany({ where: { org_membership_id: orgMembershipId }, select: { account_id: true, calendar_id: true } }),
-    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, name: true, location_id: true, is_default: true } }),
+    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, name: true, kind: true, location_id: true, department_id: true, is_default: true } }),
     accountId ? prisma.projectCalendar.findMany({ where: { org_id: orgId, account_id: accountId }, select: { account_id: true, calendar_id: true } }) : [],
   ]);
-  const id = pickCalendarId({ assignments, membershipLocationId: membership?.location_id || null, calendars, projectCalendars }, accountId);
+  const id = pickCalendarId({ assignments, membershipLocationId: membership?.location_id || null, membershipDepartmentId: membership?.department_id || null, calendars, projectCalendars }, accountId);
   return id ? calendars.find((c) => c.id === id) : null;
+}
+
+// Employee view: which calendar governs the caller by default, and which one
+// each of their assigned projects follows, with that year's holidays.
+async function myCalendars(orgId, orgMembershipId, year) {
+  const assignments = await prisma.projectMemberAssignment.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId },
+    orderBy: { created_at: 'asc' },
+    select: {
+      account: { select: { id: true, name: true, project_name: true, client_name: true, service_category: true, agreement_start_date: true } },
+    },
+  });
+  const standard = await resolveCalendar(orgId, orgMembershipId, null);
+  const projects = [];
+  for (const { account } of assignments) {
+    const calendar = await resolveCalendar(orgId, orgMembershipId, account.id);
+    projects.push({
+      id: account.id,
+      name: projectName(account),
+      client_name: account.client_name || null,
+      service_category: account.service_category || null,
+      agreement_start_date: account.agreement_start_date,
+      calendar_id: calendar?.id || null,
+    });
+  }
+
+  const calendarIds = [...new Set([standard?.id, ...projects.map((p) => p.calendar_id)].filter(Boolean))];
+  const [calendars, holidays] = await Promise.all([
+    prisma.calendar.findMany({ where: { id: { in: calendarIds } }, select: { id: true, name: true, kind: true } }),
+    prisma.calendarHoliday.findMany({
+      where: { calendar_id: { in: calendarIds }, date: { gte: new Date(Date.UTC(year, 0, 1)), lte: new Date(Date.UTC(year, 11, 31)) } },
+      orderBy: { date: 'asc' },
+      select: { calendar_id: true, date: true, label: true },
+    }),
+  ]);
+  const withHolidays = (id) => {
+    const calendar = calendars.find((c) => c.id === id);
+    if (!calendar) return null;
+    return { ...calendar, holidays: holidays.filter((h) => h.calendar_id === id).map(({ date, label }) => ({ date, label })) };
+  };
+
+  return {
+    year,
+    standard_calendar: standard ? withHolidays(standard.id) : null,
+    projects: projects.map(({ calendar_id, ...project }) => ({ ...project, calendar: calendar_id ? withHolidays(calendar_id) : null })),
+  };
 }
 
 // The holiday (if any) that blocks work on `date` under the calendar that
@@ -448,6 +510,7 @@ module.exports = {
   listAssignments,
   pickCalendarId,
   resolveCalendar,
+  myCalendars,
   holidayFor,
   buildHolidaysWorkbook,
   DEFAULT_PROJECT_CALENDAR_NAME,

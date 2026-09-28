@@ -10,6 +10,7 @@ const MEMBERSHIP_SELECT = {
   org_id: true,
   role: true,
   employment_status: true,
+  worker_type: true,
   org: { select: { id: true, name: true, slug: true, logo_url: true, status: true, enabled_modules: true, is_master_workspace: true } },
 };
 

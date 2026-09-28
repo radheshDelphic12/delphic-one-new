@@ -8,6 +8,8 @@ const createCalendarSchema = z.object({
   // Ties the calendar's holidays to an office (Ahmedabad, Indore, Gurgaon…);
   // omit for a client calendar that isn't tied to a physical location.
   location_id: z.string().uuid().nullable().optional(),
+  // Makes this the standard calendar for a department (non-IT staff).
+  department_id: z.string().uuid().nullable().optional(),
 });
 
 const updateCalendarSchema = z.object({
@@ -15,6 +17,7 @@ const updateCalendarSchema = z.object({
   kind: z.enum(['internal', 'client', 'custom']).optional(),
   is_default: z.boolean().optional(),
   location_id: z.string().uuid().nullable().optional(),
+  department_id: z.string().uuid().nullable().optional(),
 });
 
 const addHolidaySchema = z.object({

@@ -3,6 +3,7 @@ const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership 
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./orgs.service');
+const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
   createOrgSchema,
   createLocationSchema,
@@ -95,6 +96,8 @@ router.patch(
     const result = await service.updateMembership(req.user.org_id, req.params.id, body);
     if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'manager_not_found') return fail(res, 404, 'Manager membership not found in this org');
+    if (result.error === 'team_not_found') return fail(res, 404, 'Team not found in this org');
+    if (WORKER_ERRORS[result.error]) return fail(res, ...WORKER_ERRORS[result.error]);
     if (result.error === 'self_manager') return fail(res, 422, 'A membership cannot be its own manager');
     return ok(res, result.membership);
   })

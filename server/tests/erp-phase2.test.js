@@ -35,7 +35,7 @@ async function seedOrgEmployee(org, role = 'recruiter') {
 
 describe('Phase 2 — new ERP routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash, on every new module', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
 
     const endpoints = [

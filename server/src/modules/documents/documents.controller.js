@@ -7,6 +7,7 @@ const ERROR_STATUS = {
   file_required: [422, 'file is required'],
   not_found: [404, 'Not found'],
   forbidden: [403, 'Not permitted'],
+  membership_required: [403, 'Active organization membership required'],
   not_editable: [409, 'This expense claim has already been decided — its receipts can no longer be changed'],
   filters_required: [400, 'entity_type and entity_id are required'],
 };

@@ -292,17 +292,28 @@ async function listAllGroupCharges({ org_id }) {
 // Module C — per-project developer cost rate. Upsert: re-posting for the
 // same (account, org_membership) updates the rate instead of erroring, since
 // admins will naturally revise a rate over a project's lifetime.
-async function upsertCostAssignment(orgId, createdByUserId, { account_id, org_membership_id, cost_rate_per_hr, resource_type }) {
+const ASSIGNMENT_INCLUDE = {
+  org_membership: {
+    select: { id: true, worker_type: true, vendor_account: { select: { id: true, name: true } }, person: { select: { id: true, name: true } } },
+  },
+};
+
+async function upsertCostAssignment(orgId, createdByUserId, { account_id, org_membership_id, cost_rate_per_hr, allocation_percent }) {
   const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
   if (!account) return { error: 'account_not_found' };
   const membership = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId } });
   if (!membership) return { error: 'membership_not_found' };
 
+  // Contractors show under contractor billing, employees under internal cost.
+  const resource_type = membership.worker_type === 'contractor' ? 'contractor' : 'company_employee';
+  const update = { resource_type };
+  if (cost_rate_per_hr !== undefined) update.cost_rate_per_hr = cost_rate_per_hr;
+  if (allocation_percent !== undefined) update.allocation_percent = allocation_percent;
   const assignment = await prisma.projectMemberAssignment.upsert({
     where: { account_id_org_membership_id: { account_id, org_membership_id } },
-    create: { org_id: orgId, account_id, org_membership_id, cost_rate_per_hr, resource_type, created_by: createdByUserId },
-    update: cost_rate_per_hr !== undefined ? { cost_rate_per_hr } : {},
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    create: { org_id: orgId, account_id, org_membership_id, cost_rate_per_hr, allocation_percent, resource_type, created_by: createdByUserId },
+    update,
+    include: ASSIGNMENT_INCLUDE,
   });
   return { assignment };
 }
@@ -311,7 +322,7 @@ async function listCostAssignments(orgId, accountId) {
   return prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, account_id: accountId },
     orderBy: { created_at: 'desc' },
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    include: ASSIGNMENT_INCLUDE,
   });
 }
 

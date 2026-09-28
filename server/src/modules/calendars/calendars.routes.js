@@ -24,6 +24,18 @@ router.get(
   })
 );
 
+// The caller's own holiday calendars for a year: their standard calendar
+// plus the calendar each assigned project follows (a client calendar where
+// the project has one). Any member — including contractors.
+router.get(
+  '/me',
+  asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getUTCFullYear();
+    if (year < 2000 || year > 2100) return fail(res, 400, 'Invalid year');
+    return ok(res, await service.myCalendars(req.user.org_id, req.user.org_membership_id, year));
+  })
+);
+
 // Project <-> Calendar mapping (People → Calendar section). Declared before
 // the '/:id' routes so 'projects' is never read as a calendar id.
 router.get(
@@ -75,6 +87,7 @@ router.post(
     const body = createCalendarSchema.parse(req.body);
     const result = await service.create(req.user.org_id, body);
     if (result.error === 'location_not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'department_not_found') return fail(res, 404, 'Department not found');
     return created(res, result.calendar);
   })
 );
@@ -87,6 +100,7 @@ router.patch(
     const result = await service.update(req.user.org_id, req.params.id, body);
     if (result.error === 'not_found') return fail(res, 404, 'Calendar not found');
     if (result.error === 'location_not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'department_not_found') return fail(res, 404, 'Department not found');
     return ok(res, result.calendar);
   })
 );
