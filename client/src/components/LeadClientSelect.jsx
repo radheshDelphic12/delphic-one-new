@@ -11,16 +11,14 @@ import { useLeadClientOptions } from '../lib/lookups.js';
  *   current: the project's already-linked client ({ id, name }) in edit mode.
  *     It stays selectable even if it's no longer offered (e.g. reclassified as
  *     a vendor), so an edit pre-loads it instead of showing a blank field.
- *   excludeId: the project being edited — it can't be its own client.
  *   enabled: fetch the options only while the form is open.
  */
-export default function LeadClientSelect({ value, onChange, current = null, excludeId = null, enabled = true }) {
+export default function LeadClientSelect({ value, onChange, current = null, enabled = true }) {
   const clients = useLeadClientOptions(enabled);
   const options = useMemo(() => {
-    const list = excludeId ? clients.filter((o) => o.value !== excludeId) : clients;
-    if (!current || list.some((o) => o.value === current.id)) return list;
-    return [{ value: current.id, label: current.name, hint: 'No longer a client' }, ...list];
-  }, [clients, current, excludeId]);
+    if (!current || clients.some((o) => o.value === current.id)) return clients;
+    return [{ value: current.id, label: current.name, hint: 'No longer a client' }, ...clients];
+  }, [clients, current]);
 
   return (
     <SearchableSelect

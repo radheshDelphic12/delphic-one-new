@@ -225,6 +225,15 @@ describe('Finance → Projects profile', () => {
 
     const bad = await authed(request(app).patch(url), token).send({ service_category: 'recruitment' });
     expect(bad.status).toBe(422);
+
+    // Switching Monthly → Hourly from the same agreement start date: the newer
+    // rate wins even though both share an effective_from.
+    const switched = await authed(request(app).patch(url), token).send({ agreement_start_date: '2026-09-01', billing: { rate_type: 'monthly', rate: 80000 } });
+    expect(switched.body.data).toMatchObject({ billing_type: 'monthly', rate: 80000 });
+    const hourly = await authed(request(app).patch(url), token).send({ agreement_start_date: '2026-09-01', billing: { rate_type: 'hourly', rate: 500 } });
+    expect(hourly.status).toBe(200);
+    expect(hourly.body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
+    expect((await authed(request(app).get(url), token)).body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
     const rename = await authed(request(app).patch(url), token).send({ project_name: 'Tax Portal 2', client_account_id: newClient.id });
     expect(rename.body.data).toMatchObject({ project_name: 'Tax Portal 2', client_name: 'New Client', client_account_id: newClient.id });
   });
@@ -250,6 +259,39 @@ describe('Project Client Name — a client account, never free text', () => {
 
     const emp = await seedEmployee(org);
     expect((await authed(request(app).get('/api/v1/calendars/projects/client-options'), emp.token)).status).toBe(403);
+  });
+
+  test('a client account whose billing was set up in Finance (so it has a service_category) is still offered and linkable', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const apaar = await lead(org, admin, 'Apaar', { stage: 'active', industry: 'Technology', poc_name: 'Nidhi' });
+    await addProject(token, { name: 'Some Project', service_category: 'project' });
+    const edit = await authed(request(app).patch(`/api/v1/billing/projects/${apaar.id}`), token).send({ service_category: 'managed_services' });
+    expect(edit.status).toBe(200);
+
+    const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
+    expect(options.map((a) => a.name)).toEqual(['Apaar']);
+
+    const created = await addProject(token, { name: 'E branch Pro', client_account_id: apaar.id, service_category: 'project' });
+    expect(created.status).toBe(201);
+    expect(created.body.data.client_name).toBe('Apaar');
+  });
+
+  test('a client account worked on as a project in Finance can name itself as the client', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const miicare = await lead(org, admin, 'MiiCare', { stage: 'active', industry: 'Technology', poc_name: 'Asha' });
+    const res = await authed(request(app).patch(`/api/v1/billing/projects/${miicare.id}`), token).send({
+      project_name: 'Mii Health 2',
+      client_account_id: miicare.id,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ project_name: 'Mii Health 2', client_name: 'MiiCare', client_account_id: miicare.id });
+
+    // Still a client for the next project.
+    const next = await addProject(token, { name: 'Mii Health 3', client_account_id: miicare.id, service_category: 'project' });
+    expect(next.status).toBe(201);
+    expect(next.body.data.client_name).toBe('MiiCare');
   });
 
   test('create and edit refuse vendors, projects, other orgs\' accounts and the project itself; accept a client in any stage', async () => {

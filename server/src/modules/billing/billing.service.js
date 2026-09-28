@@ -44,13 +44,13 @@ async function resolveRate(orgId, accountId, requirementId, date) {
   if (requirementId) {
     const specific = await prisma.billingRate.findFirst({
       where: { org_id: orgId, account_id: accountId, requirement_id: requirementId, effective_from: { lte: date } },
-      orderBy: { effective_from: 'desc' },
+      orderBy: [{ effective_from: 'desc' }, { created_at: 'desc' }],
     });
     if (specific) return specific;
   }
   return prisma.billingRate.findFirst({
     where: { org_id: orgId, account_id: accountId, requirement_id: null, effective_from: { lte: date } },
-    orderBy: { effective_from: 'desc' },
+    orderBy: [{ effective_from: 'desc' }, { created_at: 'desc' }],
   });
 }
 
@@ -376,8 +376,10 @@ function todayUtc() {
 
 // The account-wide rate in force on `asOf`, else (a rate set to start later)
 // the soonest upcoming one so a freshly created project still shows its type.
+// Rates sharing an effective_from (e.g. Monthly → Hourly from the same agreement
+// start date) resolve to the one added last.
 function currentAccountRate(rates, asOf) {
-  const accountWide = rates.filter((r) => r.requirement_id === null).sort((a, b) => b.effective_from - a.effective_from);
+  const accountWide = rates.filter((r) => r.requirement_id === null).sort((a, b) => b.effective_from - a.effective_from || b.created_at - a.created_at);
   return accountWide.find((r) => r.effective_from <= asOf) || accountWide[accountWide.length - 1] || null;
 }
 
@@ -417,7 +419,7 @@ const PROFILE_SELECT = {
 async function listProjectProfiles(orgId) {
   const [accounts, rates, fallback] = await Promise.all([
     prisma.account.findMany({ where: { org_id: orgId, type: 'client', stage: 'active' }, select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
-    prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true } }),
+    prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
   ]);
   const ratesByAccount = new Map();
@@ -433,7 +435,7 @@ async function getProjectProfile(orgId, accountId) {
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: PROFILE_SELECT });
   if (!account) return { error: 'account_not_found' };
   const [rates, fallback] = await Promise.all([
-    prisma.billingRate.findMany({ where: { org_id: orgId, account_id: accountId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true } }),
+    prisma.billingRate.findMany({ where: { org_id: orgId, account_id: accountId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
   ]);
   const profile = serializeProfile(account, rates, account.project_calendar);
@@ -451,7 +453,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
 
   let client;
   if (patch.client_account_id) {
-    const resolved = await calendarsService.resolveLeadClient(orgId, patch.client_account_id, existing.client_account_id, accountId);
+    const resolved = await calendarsService.resolveLeadClient(orgId, patch.client_account_id, existing.client_account_id);
     if (resolved.error) return resolved;
     client = resolved.account;
   }
