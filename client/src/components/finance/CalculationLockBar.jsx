@@ -212,7 +212,7 @@ export default function CalculationLockBar({ kind, scopeKey, period, onChanged, 
 
       {openChanges.length > 0 && (
         <div className="space-y-2">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-danger-700"><AlertTriangle className="h-4 w-4" aria-hidden="true" /> Calculation Change Detected — {openChanges.length} change{openChanges.length === 1 ? '' : 's'} after locking. The locked figures have not changed.</p>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-danger-700"><AlertTriangle className="h-4 w-4" aria-hidden="true" /> Historical Calculation Affected — {openChanges.length} change{openChanges.length === 1 ? '' : 's'} after locking. The locked figures have not changed.</p>
           <ChangeList changes={openChanges} currency={currency} onDismiss={(c) => setAction({ title: 'Dismiss change', body: 'Keep the locked figures and mark this change as reviewed without recalculating.', confirm: 'Dismiss', reasonRequired: true, change: c })} />
         </div>
       )}

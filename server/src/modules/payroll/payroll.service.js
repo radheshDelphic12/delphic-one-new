@@ -80,7 +80,7 @@ function payrollMemberWhere({ org_membership_id, department_id, team_id } = {}) 
   return Object.keys(where).length ? { org_membership: where } : {};
 }
 
-const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
+const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, employment_status: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
 
 async function listSalaryStructures(orgId, filters = {}) {
   return prisma.salaryStructure.findMany({

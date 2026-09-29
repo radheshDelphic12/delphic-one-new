@@ -16,13 +16,32 @@ const prisma = require('../../../config/db');
 const { computeBreakdown } = require('../../payroll/payroll.service');
 const { pickCalendarId } = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds } = require('../period');
+const { teamOn } = require('../../../lib/allocations');
 
 // Employee / Department / Team filters, combinable. Department matches the
-// org membership's department or (legacy) the person's own.
-function membershipFilterWhere({ org_membership_id, department_id, team_id } = {}) {
+// org membership's department or (legacy) the person's own. With a `period`
+// ({ start, end }) the team filter is historical — anyone ON that team at any
+// point in the period (TeamMembershipPeriod) — so a past month's team view
+// never follows people who moved teams later; without one it's the current team.
+function membershipFilterWhere({ org_membership_id, department_id, team_id } = {}, period = null) {
   const and = [];
   if (org_membership_id) and.push({ id: org_membership_id });
-  if (team_id) and.push({ team_id });
+  if (team_id && period) {
+    and.push({
+      OR: [
+        {
+          team_periods: {
+            some: {
+              team_id,
+              AND: [{ OR: [{ start_date: null }, { start_date: { lte: period.end } }] }, { OR: [{ end_date: null }, { end_date: { gte: period.start } }] }],
+            },
+          },
+        },
+        // No team history recorded for this person yet: their current team.
+        { team_id, team_periods: { none: {} } },
+      ],
+    });
+  } else if (team_id) and.push({ team_id });
   if (department_id) and.push({ OR: [{ department_id }, { person: { department_id } }] });
   return and.length ? { AND: and } : {};
 }
@@ -43,6 +62,8 @@ const MEMBER_SELECT = {
   left_at: true,
   department: { select: { id: true, name: true } },
   team: { select: { id: true, name: true } },
+  // The team as it was during the month (a later move doesn't relabel it).
+  team_periods: { select: { team_id: true, start_date: true, end_date: true, team: { select: { name: true } } } },
   person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } },
 };
 
@@ -54,7 +75,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
       org_id: orgId,
       joined_at: { lte: end },
       OR: [{ left_at: null }, { left_at: { gte: start } }],
-      ...membershipFilterWhere(filters),
+      ...membershipFilterWhere(filters, { start, end }),
     },
     select: MEMBER_SELECT,
     orderBy: { joined_at: 'asc' },
@@ -108,6 +129,15 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
   };
 }
 
+// Team on `date` from the membership's team periods; members with no period
+// history yet fall back to their current team.
+function teamDuring(membership, date) {
+  if (!membership.team_periods?.length) return { team_id: membership.team_id || null, team: membership.team?.name || null };
+  const teamId = teamOn(membership.team_periods, date);
+  const period = membership.team_periods.find((p) => p.team_id === teamId);
+  return { team_id: teamId, team: period?.team?.name || null };
+}
+
 // One employee's line. `asOf` = live mode (see computeBreakdown).
 function salaryLine(ctx, membership, asOf = null) {
   const base = {
@@ -117,8 +147,7 @@ function salaryLine(ctx, membership, asOf = null) {
     worker_type: membership.worker_type,
     department_id: membership.department_id || membership.person?.department?.id || null,
     department: membership.department?.name || membership.person?.department?.name || null,
-    team_id: membership.team_id || null,
-    team: membership.team?.name || null,
+    ...teamDuring(membership, asOf || ctx.period.end),
     is_it: isItDepartment(membership),
   };
   if (membership.worker_type === 'contractor') return { ...base, skipped: 'contractor_paid_by_vendor' };

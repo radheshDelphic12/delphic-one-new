@@ -33,6 +33,8 @@ const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const exchangeRates = require('./exchangeRates.service');
+const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -103,12 +105,17 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
   if (!account) return { error: 'account_not_found' };
   const bounds = periodBounds(period_month, period_year);
 
-  const assignments = await prisma.projectMemberAssignment.findMany({
+  // Allocation periods on this project in force during the month (effective-
+  // dated: someone moved off mid-month is only charged for their days here).
+  const spansHere = (await prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, account_id: accountId },
+    orderBy: { start_date: 'asc' },
     select: {
       org_membership_id: true,
       allocation_percent: true,
       cost_rate_per_hr: true,
+      start_date: true,
+      end_date: true,
       org_membership: {
         select: {
           id: true,
@@ -121,10 +128,12 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
         },
       },
     },
-  });
+  })).filter((a) => overlaps(a, bounds.start, bounds.end));
+  // One row per person: their latest span here carries the cost rate.
+  const assignments = [...new Map(spansHere.map((a) => [a.org_membership_id, a])).values()];
   const membershipIds = assignments.map((a) => a.org_membership_id);
-  const [assignmentCounts, salaries, invoices, revenue, rates, hoursRows] = await Promise.all([
-    prisma.projectMemberAssignment.groupBy({ by: ['org_membership_id'], where: { org_id: orgId, org_membership_id: { in: membershipIds } }, _count: { _all: true } }),
+  const [allSpans, salaries, invoices, revenue, rates, hoursRows] = await Promise.all([
+    prisma.projectMemberAssignment.findMany({ where: { org_id: orgId, org_membership_id: { in: membershipIds } }, select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, end_date: true } }),
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: membershipIds }, effective_from: { lte: bounds.end } },
       select: { org_membership_id: true, ctc: true, effective_from: true, created_at: true },
@@ -140,8 +149,11 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
   ]);
   const approvedHours = new Map(hoursRows.map((h) => [h.org_membership_id, Number(h._sum.hours || 0) + Number(h._sum.overtime_hours || 0)]));
   const { toInr, missing } = inrConverter(rates);
-  const countByMembership = new Map(assignmentCounts.map((c) => [c.org_membership_id, c._count._all]));
-  const share = (a) => (a.allocation_percent !== null ? Number(a.allocation_percent) / 100 : 1 / (countByMembership.get(a.org_membership_id) || 1));
+  // Each person's day-weighted share of the month on this project, across
+  // all their allocations (an even split counts the projects active each day).
+  const spansByPerson = byMembership(allSpans);
+  const shareByPerson = new Map(membershipIds.map((id) => [id, periodShares(spansByPerson.get(id) || [], bounds.start, bounds.end).get(accountId) || 0]));
+  const share = (a) => shareByPerson.get(a.org_membership_id) || 0;
 
   const internal = [];
   const contractors = [];
@@ -229,7 +241,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
 // and/or a client.
 async function listProjectsPnl(orgId, { period_month, period_year, project_type = 'all', client_account_id } = {}) {
   const period = { period_month, period_year };
-  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  const where = projectListWhere(orgId);
   if (client_account_id) where.client_account_id = client_account_id;
   if (project_type === 'none') where.service_category = null;
   else if (project_type && project_type !== 'all') where.service_category = project_type;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
@@ -305,9 +305,40 @@ function SalaryStructuresTab({ filters }) {
     }
   }
 
+  // Total monthly CTC: each active employee's structure in force today, once —
+  // the list also holds their past and upcoming versions. Follows the filters.
+  const { currentIds, totalCtc, employees } = useMemo(() => {
+    const today = new Date();
+    const byMember = new Map();
+    for (const row of rows) {
+      if (new Date(row.effective_from) > today) continue;
+      const key = row.org_membership_id || row.org_membership?.id;
+      const held = byMember.get(key);
+      if (!held || new Date(row.effective_from) > new Date(held.effective_from)) byMember.set(key, row);
+    }
+    const current = [...byMember.values()].filter((row) => row.org_membership?.employment_status !== 'terminated');
+    return {
+      currentIds: new Set([...byMember.values()].map((row) => row.id)),
+      totalCtc: current.reduce((sum, row) => sum + Number(row.ctc || 0), 0),
+      employees: current.length,
+    };
+  }, [rows]);
+  const versionLabel = (row) => {
+    if (currentIds.has(row.id)) return ['Current', 'bg-success-50 text-success-700'];
+    if (new Date(row.effective_from) > new Date()) return ['Upcoming', 'bg-primary-50 text-primary-700'];
+    return ['Past', 'bg-tertiary-100 text-tertiary-500'];
+  };
+
   const columns = [
     { key: 'person', header: 'Employee', render: (row) => <MemberCell membership={row.org_membership} /> },
-    { key: 'effective', header: 'Effective from', render: (row) => new Date(row.effective_from).toLocaleDateString() },
+    {
+      key: 'effective',
+      header: 'Effective from',
+      render: (row) => {
+        const [label, tone] = versionLabel(row);
+        return <span className="whitespace-nowrap">{new Date(row.effective_from).toLocaleDateString()}<span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${tone}`}>{label}</span></span>;
+      },
+    },
     { key: 'ctc', header: 'Monthly CTC', render: (row) => <span>{money(row.ctc)}{row.updated_at && <span className="ml-1.5 text-[11px] text-tertiary-400" title={`Edited ${new Date(row.updated_at).toLocaleString()}`}>edited</span>}</span> },
     { key: 'components', header: 'Components', render: (row) => Object.keys(row.components || {}).join(', ') || '—' },
     { key: 'actions', header: 'Actions', render: (row) => <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button> },
@@ -315,7 +346,14 @@ function SalaryStructuresTab({ filters }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {!loading && rows.length > 0 ? (
+          <div className="rounded-xl border border-tertiary-100 bg-white px-4 py-2.5">
+            <p className="text-xs text-tertiary-500">Total monthly CTC · {employees} employee{employees === 1 ? '' : 's'}</p>
+            <p className="font-heading text-lg font-semibold tabular-nums text-tertiary-900">{money(totalCtc)}</p>
+            <p className="text-[11px] text-tertiary-400">Each active employee&apos;s current structure, once · annual {money(totalCtc * 12)}</p>
+          </div>
+        ) : <span />}
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}><Plus className="h-4 w-4" /> New structure</button>
       </div>
       {!loading && rows.length === 0 ? (

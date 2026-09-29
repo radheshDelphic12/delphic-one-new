@@ -51,7 +51,9 @@ async function lookupWorkspace(slug) {
 }
 
 async function login(email, password, orgSlug) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  // department rides along so the client knows it right after sign-in (IT
+  // timesheet, department-gated calendar) — same shape as GET /users/me.
+  const user = await prisma.user.findUnique({ where: { email }, include: { department: { select: { id: true, name: true } } } });
   if (!user || !user.active) return null;
 
   const matches = await bcrypt.compare(password, user.password_hash);
@@ -85,6 +87,9 @@ async function login(email, password, orgSlug) {
       active: user.active,
       is_superadmin: user.is_superadmin,
       is_group_superadmin: user.is_group_superadmin,
+      phone: user.phone,
+      department_id: user.department_id,
+      department: user.department || null,
     },
     memberships,
     active_org: activeMembership?.org || null,

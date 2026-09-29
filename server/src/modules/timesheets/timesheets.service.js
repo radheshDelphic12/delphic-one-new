@@ -21,9 +21,16 @@ async function isItMember(orgMembershipId) {
   return m?.worker_type === 'contractor' || m?.person?.department?.name?.toLowerCase() === 'it';
 }
 
-async function isAssignedToProject(orgId, orgMembershipId, accountId) {
+// Allocations are effective-dated: hours can only go on a project for a day
+// the person was allocated to it (start/end inclusive, null = open).
+async function isAssignedToProject(orgId, orgMembershipId, accountId, date) {
   const row = await prisma.projectMemberAssignment.findFirst({
-    where: { org_id: orgId, org_membership_id: orgMembershipId, account_id: accountId },
+    where: {
+      org_id: orgId,
+      org_membership_id: orgMembershipId,
+      account_id: accountId,
+      ...(date ? { AND: [{ OR: [{ start_date: null }, { start_date: { lte: date } }] }, { OR: [{ end_date: null }, { end_date: { gte: date } }] }] } : {}),
+    },
     select: { id: true },
   });
   return Boolean(row);
@@ -99,7 +106,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id))) return { error: 'project_not_assigned' };
+    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
     if (requirement_id) {
       const requirement = await prisma.requirement.findFirst({ where: { id: requirement_id, account_id, org_id: orgId } });
       if (!requirement) return { error: 'requirement_not_found' };
@@ -350,7 +357,7 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id))) return { error: 'project_not_assigned' };
+    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
   }
 
   const duplicate = await prisma.timesheetRegularizationTicket.findFirst({
@@ -529,13 +536,29 @@ async function pendingApprovals(orgId, actor) {
   return { entries, regularizations };
 }
 
+// Projects the caller can log time on: allocations still open, upcoming, or
+// ended within the last 45 days (late entries for a finished allocation are
+// still allowed — createEntry checks the entry's own date against the span).
 async function myProjects(orgId, orgMembershipId) {
+  const since = new Date(todayIst().getTime() - 45 * 86400000);
   const rows = await prisma.projectMemberAssignment.findMany({
-    where: { org_id: orgId, org_membership_id: orgMembershipId },
+    where: { org_id: orgId, org_membership_id: orgMembershipId, OR: [{ end_date: null }, { end_date: { gte: since } }] },
     include: { account: { select: { id: true, name: true, project_name: true } } },
-    orderBy: { created_at: 'asc' },
+    orderBy: [{ start_date: 'asc' }, { created_at: 'asc' }],
   });
-  return rows.map((r) => ({ id: r.account.id, name: r.account.project_name || r.account.name }));
+  const byProject = new Map();
+  for (const r of rows) {
+    const cur = byProject.get(r.account.id);
+    const ymdOr = (d) => (d ? d.toISOString().slice(0, 10) : null);
+    // Several spans on one project: widest window (null = open).
+    byProject.set(r.account.id, {
+      id: r.account.id,
+      name: r.account.project_name || r.account.name,
+      allocated_from: cur ? (cur.allocated_from && r.start_date ? [cur.allocated_from, ymdOr(r.start_date)].sort()[0] : null) : ymdOr(r.start_date),
+      allocated_to: cur ? (cur.allocated_to && r.end_date ? [cur.allocated_to, ymdOr(r.end_date)].sort()[1] : null) : ymdOr(r.end_date),
+    });
+  }
+  return [...byProject.values()];
 }
 
 // --- Weekly auto-lock -------------------------------------------------------

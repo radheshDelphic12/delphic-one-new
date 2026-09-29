@@ -11,6 +11,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
+import ReportingSection from '../../components/ReportingSection.jsx';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -51,14 +52,26 @@ function optionsFor(rows, label = 'name') {
   return rows.map((row) => ({ value: row.id, label: row[label] }));
 }
 
+// Local calendar day as YYYY-MM-DD.
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
   const { pushError } = useAlerts();
   const [fields, setFields] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Team moves are effective-dated: the old team keeps the days before it.
+  const [todayKey] = useState(localToday);
+  const [teamEffective, setTeamEffective] = useState(localToday);
+  const teamChanged = Boolean(fields && row && fields.team_id !== (row.team?.id || ''));
 
   useEffect(() => {
     if (open && row) {
+      setTeamEffective(localToday());
       setFields({
+        employee_code: row.employee_code || '',
         department_id: row.department?.id || '',
         designation_id: row.designation?.id || '',
         team_id: row.team?.id || '',
@@ -86,6 +99,8 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
     const patch = Object.fromEntries(
       Object.entries(rest).map(([key, value]) => [key, value || null])
     );
+    if (teamChanged) patch.team_effective_date = teamEffective;
+    else delete patch.team_id;
     // Only send the worker fields when something about them changed, so a
     // plain profile edit never trips the contractor validation.
     const workerChanged = worker_type !== (row.worker_type || 'full_time_employee')
@@ -140,6 +155,18 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       {fields && (
         <form id="edit-membership-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-medium text-tertiary-600">
+            Employee code
+            <input
+              value={fields.employee_code}
+              onChange={(event) => setField('employee_code', event.target.value.toUpperCase())}
+              placeholder="e.g. E0174"
+              maxLength={20}
+              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+            />
+            <span className="mt-1 block font-normal text-tertiary-400">New employees get the next number automatically; change it to match HR records.</span>
+          </label>
+          <div className="hidden sm:block" />
+          <label className="text-xs font-medium text-tertiary-600">
             User type
             <select value={fields.worker_type} onChange={(event) => setField('worker_type', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
               {WORKER_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -159,6 +186,13 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
               </label>
             </>
           ) : <div className="hidden sm:block" />}
+          {teamChanged && (
+            <label className="text-xs font-medium text-tertiary-600 sm:col-span-2">
+              Team change effective from
+              <input type="date" required max={todayKey} value={teamEffective} onChange={(event) => setTeamEffective(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm sm:w-56" />
+              <span className="mt-1 block font-normal text-tertiary-400">Before this date they stay on their previous team in capacity, salary and history reports.</span>
+            </label>
+          )}
           {fieldsConfig.map(([key, label, selectOptions]) => (
             <label key={key} className="text-xs font-medium text-tertiary-600">
               {label}
@@ -301,6 +335,7 @@ export default function EmployeeProfilePage() {
         </dl>
       </section>
       {/* Bank, emergency contact, documents — renders only for an admin or the employee themselves. */}
+      <ReportingSection membershipId={row.id} />
       <PersonalDetailsSection membershipId={row.id} />
       <CalendarMappingSection membershipId={row.id} locationName={row.location?.name} canEdit={canEdit} />
       <EditMembershipDrawer

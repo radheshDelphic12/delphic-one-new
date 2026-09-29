@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, CheckCircle2, Clock3, LogIn, LogOut, Wrench } from 'lucide-react';
+import { CalendarClock, CalendarPlus, CheckCircle2, Clock3, LogIn, LogOut, Upload, Wrench } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import { ATTENDANCE_CHANGED, useTodayAttendance } from '../../lib/useTodayAttendance.js';
 import LeaveDayNotice from '../time/LeaveDayNotice.jsx';
 import CheckoutPrompt from './CheckoutPrompt.jsx';
+import { BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -116,6 +117,8 @@ export default function AttendancePage() {
   const [to, setTo] = useState(() => isoDate(new Date()));
   const [status, setStatus] = useState('');
   const [regularize, setRegularize] = useState(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const {
     today,
     leaveToday,
@@ -193,6 +196,12 @@ export default function AttendancePage() {
         <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My attendance</button>
         {isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Team attendance</button>}
       </div>
+      {tab === 'team' && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setManualOpen(true)}><CalendarPlus className="h-4 w-4" /> Add past attendance</button>
+          <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setBulkOpen(true)}><Upload className="h-4 w-4" /> Bulk upload</button>
+        </div>
+      )}
       {tab === 'mine' && (
         <section className="rounded-2xl border border-primary-100 bg-primary-50/50 p-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -208,6 +217,8 @@ export default function AttendancePage() {
       )}
       <CheckoutPrompt open={checkoutPromptOpen} onClose={closePrompt} onConfirm={confirmCheckOut} />
       {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
+      {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
+      {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}
       <RegularizeDrawer row={regularize} open={Boolean(regularize)} onClose={() => setRegularize(null)} onSaved={handleRegularized} />
     </div>
   );

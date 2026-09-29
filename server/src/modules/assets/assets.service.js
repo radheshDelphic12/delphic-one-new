@@ -64,17 +64,26 @@ async function list(orgId, { status } = {}) {
   return rows.map(serialize);
 }
 
+// An asset that belongs to a vendor must say which vendor.
+function vendorOwnerError({ belongs_to, vendor_account_id }) {
+  return belongs_to === 'vendor' && !vendor_account_id ? 'vendor_required' : null;
+}
+
 async function create(orgId, body) {
-  const error = await checkLinks(orgId, body);
+  const error = vendorOwnerError(body) || (await checkLinks(orgId, body));
   if (error) return { error };
   const row = await prisma.asset.create({ data: { org_id: orgId, ...body }, select: SELECT });
   return { asset: serialize(row) };
 }
 
 async function update(orgId, id, patch) {
-  const existing = await prisma.asset.findFirst({ where: { id, org_id: orgId }, select: { id: true } });
+  const existing = await prisma.asset.findFirst({ where: { id, org_id: orgId }, select: { id: true, belongs_to: true, vendor_account_id: true } });
   if (!existing) return { error: 'not_found' };
-  const error = await checkLinks(orgId, patch);
+  const merged = {
+    belongs_to: patch.belongs_to !== undefined ? patch.belongs_to : existing.belongs_to,
+    vendor_account_id: patch.vendor_account_id !== undefined ? patch.vendor_account_id : existing.vendor_account_id,
+  };
+  const error = vendorOwnerError(merged) || (await checkLinks(orgId, patch));
   if (error) return { error };
   const data = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
   const row = await prisma.asset.update({ where: { id }, data, select: SELECT });

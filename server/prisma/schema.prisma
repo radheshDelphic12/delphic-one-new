@@ -509,14 +509,42 @@ model Team {
   manager               OrgMembership? @relation("TeamManager", fields: [manager_membership_id], references: [id], onDelete: SetNull)
   open_positions        Int            @default(0)
   sort_order            Int            @default(0)
+  // Overrides Org.projects_per_resource for this team; null = the org default.
+  projects_per_resource Decimal?       @db.Decimal(4, 2)
   created_at            DateTime       @default(now())
   updated_at            DateTime       @default(now()) @updatedAt
 
-  members OrgMembership[] @relation("TeamMembers")
+  // Current members (OrgMembership.team_id — a pointer to the open period).
+  members        OrgMembership[]        @relation("TeamMembers")
+  // Every membership period, past and present — the source for any date.
+  member_periods TeamMembershipPeriod[]
 
   @@unique([org_id, name])
   @@index([org_id])
   @@map("teams")
+}
+
+// Effective-dated team membership: which team a person was on for each span
+// of days. OrgMembership.team_id is only the CURRENT team (the open period);
+// anything about a past date — team capacity, team allocation, movement
+// history — reads these periods, so a move never rewrites the past.
+// start_date null = since before history was kept; end_date null = still open.
+model TeamMembershipPeriod {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  team_id           String        @db.Uuid
+  team              Team          @relation(fields: [team_id], references: [id])
+  start_date        DateTime?     @db.Date
+  end_date          DateTime?     @db.Date
+  created_by        String?       @db.Uuid
+  created_at        DateTime      @default(now())
+
+  @@index([org_id, team_id])
+  @@index([org_membership_id])
+  @@map("team_membership_periods")
 }
 
 // Company holiday/working-day calendars for attendance + leave — distinct
@@ -1048,12 +1076,20 @@ model ProjectMemberAssignment {
   // contractor) charged to this project. Null = split evenly across all of
   // the person's project assignments (see projectPnl.service).
   allocation_percent Decimal?            @db.Decimal(5, 2)
+  // Effective period of this allocation (both inclusive). An allocation is a
+  // span of days, never "the current project": moving someone ends one row
+  // and starts another, so any past date still resolves to what applied then.
+  // start_date null = from the project's start; end_date null = open-ended.
+  // The same person can hold several rows for one project (left, came back).
+  start_date         DateTime?           @db.Date
+  end_date           DateTime?           @db.Date
   created_by         String              @db.Uuid
   creator            User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
   created_at         DateTime            @default(now())
   updated_at         DateTime            @default(now()) @updatedAt
 
-  @@unique([account_id, org_membership_id])
+  @@index([account_id, org_membership_id])
+  @@index([org_membership_id, start_date])
   @@index([org_id])
   @@map("project_member_assignments")
 }
@@ -1464,15 +1500,15 @@ model OrgGroupMembership {
 }
 
 model Org {
-  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id        String    @db.Uuid
-  org_group           OrgGroup  @relation(fields: [org_group_id], references: [id])
-  name                String
-  slug                String    @unique
-  logo_url            String?
-  timezone            String    @default("Asia/Kolkata")
-  default_currency    Currency  @default(INR)
-  status              OrgStatus @default(active)
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id          String    @db.Uuid
+  org_group             OrgGroup  @relation(fields: [org_group_id], references: [id])
+  name                  String
+  slug                  String    @unique
+  logo_url              String?
+  timezone              String    @default("Asia/Kolkata")
+  default_currency      Currency  @default(INR)
+  status                OrgStatus @default(active)
   // True only for Delphic Global. Gates the recruitment pipeline
   // (accounts/requirements/profiles/submissions/pipeline), Reports,
   // Analytics, and Financials — the strategic/recruitment layer that other
@@ -1480,24 +1516,28 @@ model Org {
   // Finance/Calendar) stays available to every org regardless of this flag.
   // Defaults false (fail-closed for new orgs); backfilled true for
   // slug='delphic' by this column's own migration.
-  is_master_workspace Boolean   @default(false)
+  is_master_workspace   Boolean   @default(false)
   // Manually set by a group superadmin (Phase 3 group dashboard) — no
   // valuation methodology exists yet, so this is an admin-entered figure,
   // not a computed one. Null until set.
-  valuation           Decimal?  @db.Decimal(16, 2)
+  valuation             Decimal?  @db.Decimal(16, 2)
   // Dynamic valuation (Super Admin dashboard): 'manual' keeps the figure
   // above; 'revenue_multiple' / 'ebitda_multiple' compute one from live
   // financials x valuation_multiple (a default per method applies when null).
-  valuation_method    String    @default("manual")
-  valuation_multiple  Decimal?  @db.Decimal(8, 2)
+  valuation_method      String    @default("manual")
+  valuation_multiple    Decimal?  @db.Decimal(8, 2)
   // Feature switches for the vertical modules a company uses — 'trading',
   // 'leads', 'contracts', 'projects'. Core ERP is always on. Drives the
   // sidebar and is enforced by requireModule() on the vertical APIs.
-  enabled_modules     String[]  @default([])
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @default(now()) @updatedAt
+  enabled_modules       String[]  @default([])
+  // People → Capacity: how many concurrent projects one resource can carry.
+  // A team's capacity = its active members × this (or the team's override).
+  projects_per_resource Decimal   @default(1.5) @db.Decimal(4, 2)
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @default(now()) @updatedAt
 
-  memberships OrgMembership[]
+  memberships             OrgMembership[]
+  team_membership_periods TeamMembershipPeriod[]
 
   // Vertical modules + email + planning.
   email_outbox       EmailOutbox[]
@@ -1666,10 +1706,13 @@ model OrgMembership {
   project_cost_rates      ProjectMemberAssignment[]
   regularization_requests TimesheetRegularizationTicket[] @relation("RegularizationMembership")
   teams_led               Team[]                          @relation("TeamLead")
+  team_periods            TeamMembershipPeriod[]
   teams_managed           Team[]                          @relation("TeamManager")
   assets                  Asset[]
 
   @@unique([person_id, org_id])
+  // Employee codes are unique within a company (null = none yet).
+  @@unique([org_id, employee_code])
   @@index([team_id])
   @@index([vendor_account_id])
   @@index([org_id])
@@ -1733,36 +1776,47 @@ model Account {
   // Billing type/rate is NOT stored here — it's the effective BillingRate row,
   // so there is one source of truth. Nothing is billed before
   // agreement_start_date. benchmark_hours is the monthly-billing benchmark.
-  project_name         String?
+  project_name            String?
   // Contract tracking: when the agreement ends, and a manual hold / completed
   // override (null = worked out from the dates — not started / running /
   // about to end / completed).
-  agreement_end_date   DateTime?              @db.Date
-  contract_status      ProjectContractStatus?
-  client_name          String?
+  agreement_end_date      DateTime?              @db.Date
+  contract_status         ProjectContractStatus?
+  client_name             String?
   // The project's client, picked from this org's client accounts (client or
   // unclassified, any stage). client_name above is kept as a snapshot of the
   // picked account's name, and is the only value legacy projects created
   // before this link have.
-  client_account_id    String?                @db.Uuid
-  client_account       Account?               @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
-  client_projects      Account[]              @relation("ProjectClientAccount")
-  service_category     ReqType?
-  agreement_start_date DateTime?              @db.Date
-  benchmark_hours      Int                    @default(160)
+  client_account_id       String?                @db.Uuid
+  client_account          Account?               @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
+  client_projects         Account[]              @relation("ProjectClientAccount")
+  service_category        ReqType?
+  agreement_start_date    DateTime?              @db.Date
+  benchmark_hours         Int                    @default(160)
   // Finance's internal project/contract id (P0001, P0002 …), unique per org.
   // The project NAME is only a label — two contracts with the same name (the
   // same client taking a second resource later) are separate projects with
   // their own resources, dates, rates, billing and P&L; this code (and the
   // row's uuid) is what tells them apart.
-  project_code         String?
+  project_code            String?
+  // True for a project/contract created through Add Project. Projects live in
+  // this table next to client companies (both type 'client'), so this flag is
+  // what keeps them apart: the Accounts catalogue never lists, edits or deletes
+  // a project, and Finance only edits projects — a catalogue client account
+  // listed in Finance is read-only there.
+  is_project              Boolean                @default(false)
   // Whether the client pays for overtime on this contract. The project's own
   // setting is the source of truth: Billing & Sales only ever adds approved
   // overtime for a project where this is on. `overtime_multiplier` scales the
   // hourly-equivalent rate for those hours (1 = straight time, 1.5 = time and
   // a half).
-  overtime_billable    Boolean                @default(false)
-  overtime_multiplier  Decimal                @default(1) @db.Decimal(5, 2)
+  overtime_billable       Boolean                @default(false)
+  overtime_multiplier     Decimal                @default(1) @db.Decimal(5, 2)
+  // Hourly projects: the approximate hours per month the client expects to
+  // use. A forecast only — Billing & Sales shows estimated revenue (these
+  // hours × the hourly rate) beside the actual revenue from approved hours;
+  // billing, locks and invoices never read it. Null = no estimate.
+  estimated_monthly_hours Decimal?               @db.Decimal(7, 2)
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])
@@ -2661,10 +2715,12 @@ enum AssetStatus {
   returned
 }
 
-// Who owns the device: Delphic's own hardware, or the client's.
+// Who owns the device: Delphic's own hardware, the client's, or a vendor's
+// (vendor_account_id is then required — the vendor it belongs to).
 enum AssetOwner {
   delphic
   client
+  vendor
 }
 
 // People → Assets: the hardware register (laptops, Mac Books, cubes …) — who

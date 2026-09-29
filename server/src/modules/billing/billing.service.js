@@ -1,5 +1,9 @@
 const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
+const allocations = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
+
+const { activeOn } = allocations;
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -267,6 +271,8 @@ async function transitionInvoice(orgId, invoiceId, status) {
 const GROUP_CHARGE_INCLUDE = {
   category: { select: { id: true, name: true } },
   location: { select: { id: true, name: true } },
+  // Lets the UI tell group-raised charges (group superadmin edits only) apart.
+  raiser: { select: { is_group_superadmin: true } },
 };
 
 async function createGroupCharge(raisedByUserId, { org_id, period_month, period_year, payment_date, kind, category_id, location_id, notes, amount, currency }) {
@@ -302,6 +308,48 @@ async function createGroupCharge(raisedByUserId, { org_id, period_month, period_
     include: GROUP_CHARGE_INCLUDE,
   });
   return { charge };
+}
+
+// Company admins edit their own company's group charges, but a charge the
+// group raised against the company (raised by a group superadmin) can only be
+// changed by a group superadmin. Keeping the charge's current category is
+// allowed even if it has since been deactivated.
+async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, category_id, location_id, notes, amount, currency }) {
+  const charge = await prisma.groupBillingCharge.findFirst({
+    where: { id: chargeId, org_id: orgId },
+    include: { raiser: { select: { is_group_superadmin: true } } },
+  });
+  if (!charge) return { error: 'not_found' };
+  if (charge.raiser?.is_group_superadmin && charge.raised_by !== editorUserId) {
+    const editor = await prisma.user.findUnique({ where: { id: editorUserId }, select: { is_group_superadmin: true } });
+    if (!editor?.is_group_superadmin) return { error: 'charge_raised_by_group' };
+  }
+
+  const data = {};
+  if (category_id !== undefined && category_id !== charge.category_id) {
+    const category = await prisma.financeCategory.findFirst({ where: { id: category_id, org_id: orgId, kind: 'group_charge', is_active: true }, select: { id: true, name: true } });
+    if (!category) return { error: 'category_not_found' };
+    data.category_id = category.id;
+    data.kind = category.name;
+  }
+  if (location_id !== undefined) {
+    if (location_id) {
+      const location = await prisma.location.findFirst({ where: { id: location_id, org_id: orgId }, select: { id: true } });
+      if (!location) return { error: 'location_not_found' };
+    }
+    data.location_id = location_id || null;
+  }
+  if (payment_date !== undefined) {
+    data.payment_date = payment_date;
+    data.period_month = payment_date.getUTCMonth() + 1;
+    data.period_year = payment_date.getUTCFullYear();
+  }
+  if (notes !== undefined) data.notes = notes || null;
+  if (amount !== undefined) data.amount = amount;
+  if (currency !== undefined) data.currency = currency;
+
+  const updated = await prisma.groupBillingCharge.update({ where: { id: charge.id }, data, include: GROUP_CHARGE_INCLUDE });
+  return { charge: updated };
 }
 
 // Month filter: a charge with a payment date is in the month it was paid;
@@ -340,42 +388,8 @@ async function listAllGroupCharges({ org_id }) {
   });
 }
 
-// Module C — per-project developer cost rate. Upsert: re-posting for the
-// same (account, org_membership) updates the rate instead of erroring, since
-// admins will naturally revise a rate over a project's lifetime.
-const ASSIGNMENT_INCLUDE = {
-  org_membership: {
-    select: { id: true, worker_type: true, vendor_account: { select: { id: true, name: true } }, person: { select: { id: true, name: true } } },
-  },
-};
-
-async function upsertCostAssignment(orgId, createdByUserId, { account_id, org_membership_id, cost_rate_per_hr, allocation_percent }) {
-  const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
-  if (!account) return { error: 'account_not_found' };
-  const membership = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId } });
-  if (!membership) return { error: 'membership_not_found' };
-
-  // Contractors show under contractor billing, employees under internal cost.
-  const resource_type = membership.worker_type === 'contractor' ? 'contractor' : 'company_employee';
-  const update = { resource_type };
-  if (cost_rate_per_hr !== undefined) update.cost_rate_per_hr = cost_rate_per_hr;
-  if (allocation_percent !== undefined) update.allocation_percent = allocation_percent;
-  const assignment = await prisma.projectMemberAssignment.upsert({
-    where: { account_id_org_membership_id: { account_id, org_membership_id } },
-    create: { org_id: orgId, account_id, org_membership_id, cost_rate_per_hr, allocation_percent, resource_type, created_by: createdByUserId },
-    update,
-    include: ASSIGNMENT_INCLUDE,
-  });
-  return { assignment };
-}
-
-async function listCostAssignments(orgId, accountId) {
-  return prisma.projectMemberAssignment.findMany({
-    where: { org_id: orgId, account_id: accountId },
-    orderBy: { created_at: 'desc' },
-    include: ASSIGNMENT_INCLUDE,
-  });
-}
+// Project team allocations (create / change / end) live in
+// modules/allocations — they are effective-dated spans now.
 
 // Remaining budget is computed live from approved+billable TimesheetEntry
 // hours × this project's ProjectMemberAssignment rates — never stored, so it
@@ -389,17 +403,17 @@ async function getAccountBudgetSummary(orgId, accountId) {
   if (!account) return { error: 'account_not_found' };
 
   const [assignments, entries] = await Promise.all([
-    prisma.projectMemberAssignment.findMany({ where: { org_id: orgId, account_id: accountId }, select: { org_membership_id: true, cost_rate_per_hr: true } }),
+    prisma.projectMemberAssignment.findMany({ where: { org_id: orgId, account_id: accountId }, select: { org_membership_id: true, cost_rate_per_hr: true, start_date: true, end_date: true } }),
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, account_id: accountId, status: 'approved', billable: true },
-      select: { org_membership_id: true, hours: true },
+      select: { org_membership_id: true, hours: true, date: true },
     }),
   ]);
-  const rateByMembership = new Map(assignments.map((a) => [a.org_membership_id, Number(a.cost_rate_per_hr)]));
-
+  // Each entry is costed at the rate of the allocation in force on its date.
   let costIncurred = 0;
   for (const entry of entries) {
-    const rate = rateByMembership.get(entry.org_membership_id);
+    const span = assignments.find((a) => a.org_membership_id === entry.org_membership_id && activeOn(a, entry.date));
+    const rate = span?.cost_rate_per_hr !== null && span?.cost_rate_per_hr !== undefined ? Number(span.cost_rate_per_hr) : 0;
     if (rate) costIncurred += Number(entry.hours) * rate;
   }
   costIncurred = round2(costIncurred);
@@ -471,6 +485,11 @@ function serializeProfile(account, rates, calendar) {
     benchmark_hours: account.benchmark_hours,
     overtime_billable: account.overtime_billable,
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
+    estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
+    // Only a real project (Add Project) is editable in Finance; a client
+    // account from the Accounts catalogue listed here is read-only.
+    is_project: Boolean(account.is_project),
+    editable: Boolean(account.is_project),
     calendar: calendar?.calendar || null,
     calendar_is_default: !calendar?.calendar,
   };
@@ -483,6 +502,8 @@ const PROFILE_SELECT = {
   project_code: true,
   overtime_billable: true,
   overtime_multiplier: true,
+  estimated_monthly_hours: true,
+  is_project: true,
   client_name: true,
   client_account_id: true,
   client_account: calendarsService.CLIENT_ACCOUNT_SELECT,
@@ -498,7 +519,7 @@ const PROFILE_SELECT = {
 async function listProjectProfiles(orgId) {
   await calendarsService.ensureProjectCodes(orgId);
   const [accounts, rates, fallback] = await Promise.all([
-    prisma.account.findMany({ where: { org_id: orgId, type: 'client', stage: 'active' }, select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
+    prisma.account.findMany({ where: projectListWhere(orgId), select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
     prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
   ]);
@@ -528,8 +549,11 @@ async function getProjectProfile(orgId, accountId) {
 // never overwritten) starting on the agreement start date — or today, if no
 // agreement date is set — so nothing already billed is rewritten.
 async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
-  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true } });
+  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true, is_project: true } });
   if (!existing) return { error: 'account_not_found' };
+  // Finance never edits the Accounts catalogue: a client account listed here
+  // (legacy, used as a project before projects were separate) is read-only.
+  if (!existing.is_project) return { error: 'catalogue_account_read_only' };
 
   let client;
   if (patch.client_account_id) {
@@ -563,6 +587,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.benchmark_hours !== undefined) data.benchmark_hours = patch.benchmark_hours;
   if (patch.overtime_billable !== undefined) data.overtime_billable = patch.overtime_billable;
   if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
+  if (patch.estimated_monthly_hours !== undefined) data.estimated_monthly_hours = patch.estimated_monthly_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   await prisma.$transaction(async (tx) => {
@@ -585,13 +610,6 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   return getProjectProfile(orgId, accountId);
 }
 
-async function removeCostAssignment(orgId, assignmentId) {
-  const existing = await prisma.projectMemberAssignment.findFirst({ where: { id: assignmentId, org_id: orgId } });
-  if (!existing) return { error: 'not_found' };
-  await prisma.projectMemberAssignment.delete({ where: { id: assignmentId } });
-  return { deleted: true };
-}
-
 module.exports = {
   createRate,
   listRates,
@@ -604,11 +622,9 @@ module.exports = {
   getInvoice,
   transitionInvoice,
   createGroupCharge,
+  updateGroupCharge,
   listMyGroupCharges,
   listAllGroupCharges,
-  upsertCostAssignment,
-  removeCostAssignment,
-  listCostAssignments,
   getAccountBudgetSummary,
   listProjectProfiles,
   getProjectProfile,

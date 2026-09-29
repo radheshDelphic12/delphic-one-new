@@ -43,6 +43,8 @@ const SOURCE_KINDS = {
   leave: ['salary', 'resource_revenue', 'financials'],
   salary_structure: ['salary', 'resource_revenue', 'financials'],
   timesheet: ['billing', 'resource_revenue', 'vendor_payment', 'financials'],
+  // Effective-dated Resource → Project allocation (cost shares, contractor pay).
+  allocation: ['resource_revenue', 'vendor_payment', 'financials'],
 };
 
 const LIVE_STATUSES = ['draft', 'reviewed', 'reopened'];

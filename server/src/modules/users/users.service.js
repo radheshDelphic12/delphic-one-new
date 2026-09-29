@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../config/db');
 const { resolveWorkerFields } = require('../../lib/workerType');
+const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
 
 const PUBLIC_SELECT = {
   id: true,
@@ -54,7 +55,8 @@ async function list(orgId, { role, active, search, department_id, page = 1, limi
     prisma.user.findMany({
       where,
       select: PUBLIC_SELECT,
-      orderBy: { created_at: 'desc' },
+      // People → Users: grouped by department (none last), then by name.
+      orderBy: [{ department: { name: 'asc' } }, { name: 'asc' }],
       take: limit,
       skip: (page - 1) * limit,
     }),
@@ -91,7 +93,7 @@ async function create(orgId, { name, email, password, role, phone, department_id
   if (workerRole) role = workerRole;
 
   const password_hash = await bcrypt.hash(password, 10);
-  const user = await prisma.$transaction(async (tx) => {
+  const user = await withEmployeeCodeRetry(() => prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
         name,
@@ -104,10 +106,17 @@ async function create(orgId, { name, email, password, role, phone, department_id
       select: { id: true },
     });
     await tx.orgMembership.create({
-      data: { person_id: created.id, org_id: orgId, role, department_id: department_id || null, ...workerData },
+      data: {
+        person_id: created.id,
+        org_id: orgId,
+        role,
+        department_id: department_id || null,
+        employee_code: await nextEmployeeCode(tx, orgId),
+        ...workerData,
+      },
     });
     return tx.user.findUnique({ where: { id: created.id }, select: PUBLIC_SELECT });
-  });
+  }));
   return { user };
 }
 

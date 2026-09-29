@@ -29,6 +29,7 @@ const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
 const { monthlyDayRevenue } = require('../../billing/billing.service');
 const { round2, ymd, monthBounds, monthDates, isWeekend, todayIst } = require('../period');
+const { projectListWhere } = require('../../../lib/projectScope');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -47,6 +48,7 @@ const PROJECT_SELECT = {
   client_billing_currency: true,
   overtime_billable: true,
   overtime_multiplier: true,
+  estimated_monthly_hours: true,
 };
 
 function engineFor(serviceCategory) {
@@ -350,6 +352,26 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
   };
 }
 
+// Hourly projects only: what the month should bill if the client uses the
+// hours they told us to expect (Account.estimated_monthly_hours × the month's
+// hourly rate), next to the actual approved hours and base billing. A
+// forecast: read from the project's CURRENT setting (not the lock snapshot)
+// and never part of a lock, invoice or total. Null when there's nothing to estimate.
+function estimateFor(account, raw, totals) {
+  const hours = account?.estimated_monthly_hours;
+  if (hours === null || hours === undefined || raw.billing_type !== 'hourly' || !raw.rate) return null;
+  const estimatedHours = Number(hours);
+  const amount = round2(estimatedHours * raw.rate);
+  return {
+    hours: estimatedHours,
+    amount,
+    actual_hours: totals.approved_hours,
+    actual_amount: totals.base_amount,
+    hours_variance: round2(totals.approved_hours - estimatedHours),
+    amount_variance: round2(totals.base_amount - amount),
+  };
+}
+
 // The amount a lock finalizes: approved base + (only if the project allows
 // it) approved overtime. Used for the lock's version amount and the invoice.
 function lockedAmount(raw) {
@@ -359,7 +381,7 @@ function lockedAmount(raw) {
 // Active client projects matching the Billing & Sales / P&L filters.
 // project_type: managed_services | project | none | all.
 async function listProjects(orgId, { project_type = 'all', client_account_id, account_id } = {}) {
-  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  const where = projectListWhere(orgId);
   if (account_id) where.id = account_id;
   if (client_account_id) where.client_account_id = client_account_id;
   if (project_type === 'none') where.service_category = null;
@@ -367,4 +389,4 @@ async function listProjects(orgId, { project_type = 'all', client_account_id, ac
   return prisma.account.findMany({ where, select: PROJECT_SELECT, orderBy: [{ project_name: 'asc' }, { name: 'asc' }] });
 }
 
-module.exports = { PROJECT_SELECT, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };
+module.exports = { PROJECT_SELECT, estimateFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };

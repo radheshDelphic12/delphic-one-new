@@ -288,8 +288,9 @@ describe('Project Client Name — a client account, never free text', () => {
     await calendar(org, 'Ahmedabad Calendar');
     const apaar = await lead(org, admin, 'Apaar', { stage: 'active', industry: 'Technology', poc_name: 'Nidhi' });
     await addProject(token, { name: 'Some Project', service_category: 'project' });
-    const edit = await authed(request(app).patch(`/api/v1/billing/projects/${apaar.id}`), token).send({ service_category: 'managed_services' });
-    expect(edit.status).toBe(200);
+    // Production data from before projects were separate rows: the client's own
+    // row carries a service_category. It is still a client, not a project.
+    await prisma.account.update({ where: { id: apaar.id }, data: { service_category: 'managed_services' } });
 
     const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
     expect(options.map((a) => a.name)).toEqual(['Apaar']);
@@ -299,7 +300,7 @@ describe('Project Client Name — a client account, never free text', () => {
     expect(created.body.data.client_name).toBe('Apaar');
   });
 
-  test('a client account worked on as a project in Finance can name itself as the client', async () => {
+  test('a catalogue client is not turned into a project in Finance; its projects are added with it as the client', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const miicare = await lead(org, admin, 'MiiCare', { stage: 'active', industry: 'Technology', poc_name: 'Asha' });
@@ -307,13 +308,14 @@ describe('Project Client Name — a client account, never free text', () => {
       project_name: 'Mii Health 2',
       client_account_id: miicare.id,
     });
-    expect(res.status).toBe(200);
-    expect(res.body.data).toMatchObject({ project_name: 'Mii Health 2', client_name: 'MiiCare', client_account_id: miicare.id });
+    expect(res.status).toBe(409);
 
-    // Still a client for the next project.
-    const next = await addProject(token, { name: 'Mii Health 3', client_account_id: miicare.id, service_category: 'project' });
-    expect(next.status).toBe(201);
-    expect(next.body.data.client_name).toBe('MiiCare');
+    for (const name of ['Mii Health 2', 'Mii Health 3']) {
+      const created = await addProject(token, { name, client_account_id: miicare.id, service_category: 'project' });
+      expect(created.status).toBe(201);
+      expect(created.body.data.client_name).toBe('MiiCare');
+    }
+    expect((await prisma.account.findUnique({ where: { id: miicare.id } })).name).toBe('MiiCare');
   });
 
   test('create and edit refuse vendors, projects, other orgs\' accounts and the project itself; accept a client in any stage', async () => {
@@ -372,25 +374,29 @@ describe('Project Client Name — a client account, never free text', () => {
   test('a Finance edit never renames the account: project name and client name stay separate', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
-    // A legacy project: an active client account that is also another project's client.
+    // A client account and a project delivered for it.
     const acme = await lead(org, admin, 'Acme Corp', { stage: 'active' });
     const portal = (await addProject(token, { name: 'Tax Portal', client_account_id: acme.id, service_category: 'project' })).body.data;
 
-    const rename = await authed(request(app).patch(`/api/v1/billing/projects/${acme.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 150 });
+    // The client account itself can't be edited from Finance, so its name is safe…
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${acme.id}`), token).send({ project_name: 'Acme Website' })).status).toBe(409);
+    expect((await prisma.account.findUnique({ where: { id: acme.id } })).name).toBe('Acme Corp');
+    // …and renaming the project writes project_name, never the account's own name.
+    const rename = await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 150 });
     expect(rename.status).toBe(200);
     expect(rename.body.data.project_name).toBe('Acme Website');
-    expect((await prisma.account.findUnique({ where: { id: acme.id } })).name).toBe('Acme Corp');
+    expect((await prisma.account.findUnique({ where: { id: portal.id } })).name).toBe('Tax Portal');
 
-    // The linked project's client name is untouched, as is the client picker.
+    // The project's client name is untouched, as is the client picker.
     const linked = (await authed(request(app).get(`/api/v1/billing/projects/${portal.id}`), token)).body.data;
-    expect(linked).toMatchObject({ project_name: 'Tax Portal', client_name: 'Acme Corp' });
+    expect(linked).toMatchObject({ project_name: 'Acme Website', client_name: 'Acme Corp' });
     const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
     expect(options.map((o) => o.name)).toContain('Acme Corp');
 
     // Re-saving an unchanged name writes nothing; an edit elsewhere keeps the client link.
-    await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Tax Portal', benchmark_hours: 140 });
+    await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 140 });
     const after = await prisma.account.findUnique({ where: { id: portal.id } });
-    expect(after).toMatchObject({ name: 'Tax Portal', project_name: null, client_account_id: acme.id, client_name: 'Acme Corp' });
+    expect(after).toMatchObject({ name: 'Tax Portal', project_name: 'Acme Website', client_account_id: acme.id, client_name: 'Acme Corp' });
 
     // Project names are not unique: another project may take the same name.
     expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(200);

@@ -117,6 +117,7 @@ async function billingOverview(orgId, q, now = new Date()) {
       const view = billingEngine.viewOf(raw, filters);
       if (q.org_membership_id && !view.days.some((d) => d.entries.length)) continue;
       const draft = drafts.get(key);
+      const estimate = billingEngine.estimateFor(account, raw, view.totals);
       rows.push({
         id: key,
         project: raw.project,
@@ -134,6 +135,7 @@ async function billingOverview(orgId, q, now = new Date()) {
         totals: view.totals,
         amount: view.totals.amount,
         amount_inr: toInr(view.totals.amount, raw.currency),
+        estimate: estimate ? { ...estimate, amount_inr: toInr(estimate.amount, raw.currency) } : null,
         source: lock?.version ? 'locked' : 'live',
         live_amount: liveAmount,
         lock: lock ? lockInfo(lock) : { status: draft?.status || 'draft', version: draft?.current_version || 0, reviewed_at: draft?.reviewed_at || null },
@@ -165,6 +167,9 @@ async function billingOverview(orgId, q, now = new Date()) {
     days,
     totals: {
       amount_inr: sum('amount_inr'),
+      // Hourly projects with a client estimate only — a forecast, not billing.
+      estimated_inr: round2(rows.reduce((s, r) => s + (r.estimate?.amount_inr || 0), 0)),
+      estimated_projects: rows.filter((r) => r.estimate).length,
       base_inr: round2(days.reduce((s, d) => s + d.base_inr, 0)),
       overtime_inr: round2(days.reduce((s, d) => s + d.overtime_inr, 0)),
       approved_hours: round2(days.reduce((s, d) => s + d.hours.approved, 0)),
@@ -202,6 +207,7 @@ async function billingProject(orgId, accountId, q, now = new Date()) {
     agreement_start_date: raw.agreement_start_date,
     agreement_end_date: raw.agreement_end_date,
     source: locked ? 'locked' : 'live',
+    estimate: billingEngine.estimateFor(account, raw, view.totals),
     ...view,
     calculation: state,
   };

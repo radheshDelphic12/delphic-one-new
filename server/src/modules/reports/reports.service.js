@@ -423,7 +423,7 @@ async function bdaPerformance({ date_from, date_to, bda_id, department_id }) {
       // fields above, since "currently active clients" is a present-state fact, not a period
       // event. Named *_current so the report doesn't imply they're period-scoped.
       const clients_active_current = await prisma.account.count({
-        where: { owner_id: b.id, type: 'client', stage: 'active' },
+        where: { owner_id: b.id, type: 'client', stage: 'active', is_project: false },
       });
       const vendors_active_current = await prisma.account.count({
         where: { owner_id: b.id, type: 'vendor', stage: 'active' },
@@ -432,6 +432,7 @@ async function bdaPerformance({ date_from, date_to, bda_id, department_id }) {
         where: {
           owner_id: b.id,
           type: 'client',
+          is_project: false,
           stage: { in: ['lead', 'meeting_scheduled', 'rescheduled'] },
           updated_at: { lte: stuckCutoff },
         },
@@ -499,7 +500,7 @@ async function vendorPerformance({ date_from, date_to, vendor_id }) {
 }
 
 async function clientPerformance({ date_from, date_to, client_id }) {
-  const clients = await prisma.account.findMany({ where: { type: 'client', ...(client_id ? { id: client_id } : {}) } });
+  const clients = await prisma.account.findMany({ where: { type: 'client', is_project: false, ...(client_id ? { id: client_id } : {}) } });
   const from = reportFrom(date_from);
   const to = reportTo(date_to);
   const stuckCutoff = new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
@@ -804,6 +805,7 @@ async function clientsWithoutRequirements({ bda_id, origin_owner_id, stage, buck
     // legacy no-bucket path keeps unclassified accounts so `stage = 'lead'`
     // still returns not-yet-classified leads.
     ...(bucket ? { type: 'client' } : { OR: [{ type: 'client' }, { type: null }] }),
+    is_project: false,
     ...(bda_id ? { owner_id: bda_id } : {}),
     ...(origin_owner_id ? { origin_owner_id } : {}),
     ...(effectiveStage ? { stage: effectiveStage } : {}),
