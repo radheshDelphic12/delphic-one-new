@@ -70,7 +70,7 @@ describe('non-IT vs IT timesheet fields', () => {
     expect((await log(dev.token, { date: '2026-09-15', hours: 4 })).status).toBe(422);
     const forbidden = await log(dev.token, { date: '2026-09-15', hours: 4, account_id: notMine.id });
     expect(forbidden.status).toBe(403);
-    expect(forbidden.body.message).toContain("isn't assigned");
+    expect(forbidden.body.message).toContain("aren't allocated to that project");
     expect((await log(dev.token, { date: '2026-09-15', hours: 4, account_id: mine.id })).status).toBe(201);
 
     const list = await authed(request(app).get('/api/v1/timesheets/my-projects'), dev.token);

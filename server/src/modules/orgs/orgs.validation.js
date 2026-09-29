@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const { optionalDate } = require('../../lib/zodDate');
 
 const MODULES = ['trading', 'leads', 'contracts', 'projects'];
 
@@ -39,6 +40,19 @@ const updateMembershipSchema = z.object({
   department_id: z.string().uuid().nullable().optional(),
   designation_id: z.string().uuid().nullable().optional(),
   team_id: z.string().uuid().nullable().optional(),
+  // HR's own code (e.g. E0174). New employees get the next E-number by
+  // default; unique within the company. Blank clears it.
+  employee_code: z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^[A-Za-z0-9-]*$/, 'Letters, digits and dashes only')
+    .nullable()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v ? v.toUpperCase() : null)),
+  // When a team change takes effect (default today; never in the future) —
+  // the old team keeps everything before it (TeamMembershipPeriod).
+  team_effective_date: optionalDate,
   work_mode: z.enum(['remote', 'onsite', 'hybrid']).nullable().optional(),
   // People → user type. Contractor needs a vendor account and a monthly vendor rate.
   worker_type: z.enum(['full_time_employee', 'contractor']).optional(),

@@ -1,4 +1,9 @@
 const prisma = require('../../config/db');
+const { todayIst } = require('../../lib/istDate');
+
+// Allocations are effective-dated; calendar views show the ones still in
+// force today or starting later (an ended allocation is history only).
+const CURRENT_ALLOCATION = () => ({ OR: [{ end_date: null }, { end_date: { gte: todayIst() } }] });
 
 async function list(orgId) {
   return prisma.calendar.findMany({
@@ -177,13 +182,14 @@ async function myCalendars(orgId, orgMembershipId, year) {
     where: { id: orgMembershipId, org_id: orgId },
     select: { worker_type: true, person: { select: PER_PROJECT_PERSON_SELECT } },
   });
-  const assignments = await prisma.projectMemberAssignment.findMany({
-    where: { org_id: orgId, org_membership_id: orgMembershipId },
+  const spans = await prisma.projectMemberAssignment.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, ...CURRENT_ALLOCATION() },
     orderBy: { created_at: 'asc' },
     select: {
       account: { select: { id: true, name: true, project_name: true, client_name: true, service_category: true, agreement_start_date: true } },
     },
   });
+  const assignments = [...new Map(spans.map((a) => [a.account.id, a])).values()];
   const standard = await resolveCalendar(orgId, orgMembershipId, null);
   const projects = [];
   for (const { account } of assignments) {
@@ -320,7 +326,8 @@ async function listCalendarEmployees(orgId, calendarId) {
       },
     }),
     prisma.projectMemberAssignment.findMany({
-      where: { org_id: orgId },
+      where: { org_id: orgId, ...CURRENT_ALLOCATION() },
+      distinct: ['org_membership_id', 'account_id'],
       select: { org_membership_id: true, account: { select: { id: true, name: true, project_name: true } } },
     }),
     prisma.projectCalendar.findMany({ where: { org_id: orgId }, select: { account_id: true, calendar_id: true } }),
@@ -416,21 +423,10 @@ async function defaultCalendar(orgId, db = prisma) {
 
 // A project's client can be any of this org's client accounts, whatever their
 // pipeline stage — typed client or not yet classified. Vendors are sourcing
-// partners, not clients, and projects made via Add Project are never offered.
-// A service_category alone doesn't make a row project-only: Finance sets one
-// on real client accounts when their billing is configured. A project-only row
-// has a category and nothing from the Accounts side — no requirements, contact,
-// industry or classification — which is exactly what Add Project creates.
-const PROJECT_ONLY_WHERE = {
-  service_category: { not: null },
-  requirements: { none: {} },
-  poc_name: null,
-  industry: null,
-  classified_at: null,
-};
-
+// partners, not clients, and projects (Account.is_project, set by Add Project)
+// are never offered.
 function clientOptionWhere(orgId) {
-  return { org_id: orgId, OR: [{ type: 'client' }, { type: null }], NOT: PROJECT_ONLY_WHERE };
+  return { org_id: orgId, OR: [{ type: 'client' }, { type: null }], is_project: false };
 }
 
 async function listLeadClientOptions(orgId) {
@@ -573,6 +569,8 @@ async function createProject(orgId, ownerId, { name, client_account_id, service_
         stage: 'active',
         name,
         project_code: await nextProjectCode(orgId, tx),
+        // A project, not a catalogue client (kept out of Accounts).
+        is_project: true,
         client_account_id: client?.id || null,
         client_name: client?.name || null,
         service_category,

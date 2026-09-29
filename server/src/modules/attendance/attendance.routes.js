@@ -4,7 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
 const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
-const { listQuerySchema, regularizeSchema, createShiftSchema } = require('./attendance.validation');
+const { listQuerySchema, regularizeSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -58,6 +58,42 @@ router.post(
     if (result.error === 'not_found') return fail(res, 404, 'Attendance record not found');
     return ok(res, result.record);
   })
+);
+
+// --- Backfill past attendance (admin): one day, or a whole sheet. ---
+const BACKFILL_ERRORS = {
+  membership_not_found: [404, 'Employee not found in this company'],
+  future_date: [422, "You can't record attendance for a future date"],
+  before_joining: [422, 'That date is before the employee joined'],
+  leave_day: [422, 'The employee is on approved leave that day — record it as "leave" or cancel the leave first'],
+  checkout_without_checkin: [422, 'Give a check-in time along with the check-out time'],
+};
+
+router.post(
+  '/manual',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = manualEntrySchema.parse(req.body);
+    const result = await service.recordManualDay(req.user.org_id, req.user.id, body);
+    if (result.error) {
+      const [code, message] = BACKFILL_ERRORS[result.error] || [500, 'Unexpected error'];
+      return fail(res, code, message);
+    }
+    return result.action === 'created' ? created(res, result.record) : ok(res, result.record);
+  })
+);
+
+// Validates every row; applies the sheet only when no row has an error (and dry_run is false).
+router.post(
+  '/import',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.importAttendance(req.user.org_id, req.user.id, importSchema.parse(req.body))))
+);
+
+router.get(
+  '/import-template',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.importTemplate(req.user.org_id, templateQuerySchema.parse(req.query))))
 );
 
 router.get(

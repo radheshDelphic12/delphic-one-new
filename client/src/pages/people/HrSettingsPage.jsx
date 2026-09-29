@@ -54,7 +54,7 @@ function NameDrawer({ open, title, value, onClose, onSubmit }) {
 // it reports to (used when it has no lead yet; otherwise the lead's own
 // manager), open seats (drawn as vacant circles) and its order among siblings.
 // `team` is null to add one, else the team being edited.
-const EMPTY_TEAM = { name: '', department_id: '', lead_membership_id: '', manager_membership_id: '', open_positions: 0, sort_order: 0 };
+const EMPTY_TEAM = { name: '', department_id: '', lead_membership_id: '', manager_membership_id: '', open_positions: 0, sort_order: 0, projects_per_resource: '' };
 
 function TeamDrawer({ open, team, onClose, onSubmit }) {
   const [fields, setFields] = useState(EMPTY_TEAM);
@@ -70,6 +70,7 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
       manager_membership_id: team.manager_membership_id || '',
       open_positions: team.open_positions ?? 0,
       sort_order: team.sort_order ?? 0,
+      projects_per_resource: team.projects_per_resource ?? '',
     } : EMPTY_TEAM);
     apiClient.get('/departments').then(({ data }) => setDepartments(data.data || [])).catch(() => setDepartments([]));
     apiClient.get('/orgs/memberships').then(({ data }) => setMembers(data.data || [])).catch(() => setMembers([]));
@@ -86,6 +87,8 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
         manager_membership_id: fields.manager_membership_id || null,
         open_positions: Number(fields.open_positions) || 0,
         sort_order: Number(fields.sort_order) || 0,
+        // Blank = the company default (People → Capacity & Allocation).
+        projects_per_resource: fields.projects_per_resource === '' ? null : Number(fields.projects_per_resource),
       });
       onClose();
     } catch {
@@ -120,6 +123,11 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
           <div className="grid grid-cols-2 gap-3">
             <label className={label}>Open positions<input type="number" min="0" max="50" value={fields.open_positions} onChange={(event) => set('open_positions', event.target.value)} className={input} /></label>
             <label className={label}>Display order<input type="number" min="0" max="9999" value={fields.sort_order} onChange={(event) => set('sort_order', event.target.value)} className={input} /></label>
+            <label className={label}>
+              Projects per resource <span className="font-normal text-tertiary-400">(optional)</span>
+              <input type="number" min="0.1" max="20" step="0.1" value={fields.projects_per_resource} onChange={(event) => set('projects_per_resource', event.target.value)} placeholder="Company default" className={input} />
+              <span className="mt-1 block font-normal text-tertiary-400">Team capacity = members × this. Blank uses the company default.</span>
+            </label>
           </div>
           <p className="text-xs text-tertiary-400">Open positions show as vacant (purple) circles — the lead&apos;s seat first when there is no lead. Lower order numbers sit further left.</p>
         </fieldset>
@@ -398,6 +406,7 @@ export default function HrSettingsPage() {
         { key: 'manager', header: 'Reports to', render: (row) => row.manager?.person?.name || <span className="text-tertiary-400">Lead&apos;s manager</span> },
         { key: 'open', header: 'Open positions', render: (row) => row.open_positions || 0 },
         { key: 'order', header: 'Order', render: (row) => row.sort_order ?? 0 },
+        { key: 'capacity', header: 'Projects / resource', render: (row) => (row.projects_per_resource ?? <span className="text-tertiary-400">default</span>) },
         ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1"><button type="button" aria-label="Edit team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingTeam(row)}><Pencil className="h-3.5 w-3.5" /></button><button type="button" aria-label="Delete team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteTeam(row)}><Trash2 className="h-3.5 w-3.5" /></button></span> }] : []),
       ]
     : tab === 'locations'

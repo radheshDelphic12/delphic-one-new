@@ -7,7 +7,10 @@
 //   cost    = employee: attendance-based salary earned in the month
 //             (salary.engine: monthly ctc / the employee's calendar working
 //             days × days present or on paid leave) × their allocation share
-//             of this project (allocation_percent, else an even split).
+//             of this project (allocation_percent, else an even split),
+//             weighted by the working days each allocation was ACTIVE in the
+//             month — someone moved from Project A to B on the 15th costs
+//             A for 1–14 and B from the 15th (lib/allocations).
 //             contractor: the vendor-payment line for this project
 //             (vendorPayment.engine).
 //   margin  = revenue − cost
@@ -23,6 +26,7 @@ const vendorEngine = require('./vendorPayment.engine');
 const billingEngine = require('./billing.engine');
 const exchangeRates = require('../../billing/exchangeRates.service');
 const { round2, monthBounds } = require('../period');
+const { overlaps, periodShares, byMembership } = require('../../../lib/allocations');
 
 // `billingMonth(account)` returns the project's month (locked snapshot or
 // live) — supplied by calculations.service so locks are honoured.
@@ -33,20 +37,21 @@ async function computeResourceRevenue(orgId, { period_month, period_year, asOf =
     exchangeRates.inrRates(orgId),
     prisma.projectMemberAssignment.findMany({
       where: { org_id: orgId, ...(filters.org_membership_id ? { org_membership_id: filters.org_membership_id } : {}) },
-      select: { account_id: true, org_membership_id: true, allocation_percent: true },
+      select: { account_id: true, org_membership_id: true, allocation_percent: true, start_date: true, end_date: true },
     }),
     salaryEngine.computeSalary(orgId, { period_month, period_year, asOf, filters: filters.org_membership_id ? { org_membership_id: filters.org_membership_id } : {} }),
     vendorEngine.computeVendorPayments(orgId, { period_month, period_year, org_membership_id: filters.org_membership_id }),
   ]);
   const toInr = (amount, currency) => (fx.has(currency || 'INR') ? round2(amount * fx.get(currency || 'INR')) : null);
 
-  const assignmentCount = new Map();
-  const allAssignments = await prisma.projectMemberAssignment.groupBy({ by: ['org_membership_id'], where: { org_id: orgId }, _count: { _all: true } });
-  for (const a of allAssignments) assignmentCount.set(a.org_membership_id, a._count._all);
-  const shareOf = new Map(assignments.map((a) => [
-    `${a.org_membership_id}|${a.account_id}`,
-    a.allocation_percent !== null ? Number(a.allocation_percent) / 100 : 1 / (assignmentCount.get(a.org_membership_id) || 1),
-  ]));
+  // Allocations in force during the (live-so-far) month, and each person's
+  // day-weighted share per project over it.
+  const costEnd = asOf && asOf < end ? asOf : end;
+  const inMonth = assignments.filter((a) => overlaps(a, start, costEnd));
+  const shareOf = new Map();
+  for (const [membershipId, spans] of byMembership(inMonth)) {
+    for (const [accountId, share] of periodShares(spans, start, costEnd)) shareOf.set(`${membershipId}|${accountId}`, share);
+  }
   const salaryBy = new Map(salary.lines.map((l) => [l.org_membership_id, l]));
   const vendorBy = new Map(vendor.lines.map((l) => [`${l.org_membership_id}|${l.project.id}`, l]));
 
@@ -106,7 +111,7 @@ async function computeResourceRevenue(orgId, { period_month, period_year, asOf =
       }
     }
     // Assigned people with no hours this month still carry their cost.
-    for (const a of assignments.filter((x) => x.account_id === account.id)) {
+    for (const a of inMonth.filter((x) => x.account_id === account.id)) {
       const s = salaryBy.get(a.org_membership_id);
       const v = vendorBy.get(`${a.org_membership_id}|${account.id}`);
       if (s) lineFor(a.org_membership_id, s.name, 'full_time_employee', project);

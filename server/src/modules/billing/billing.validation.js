@@ -84,6 +84,19 @@ const createGroupChargeSchema = withGroupChargeRules(z.object(groupChargeFields)
 const ownFields = Object.fromEntries(Object.entries(groupChargeFields).filter(([key]) => key !== 'org_id'));
 const createOwnGroupChargeSchema = withGroupChargeRules(z.object(ownFields));
 
+// Finance → Group Charges "Edit": any subset of the fields. A new payment date
+// moves the charge to that day's month (see billing.service.updateGroupCharge).
+const updateGroupChargeSchema = z
+  .object({
+    payment_date: optionalDate,
+    category_id: z.string().uuid().optional(),
+    location_id: z.string().uuid().nullable().optional(),
+    notes: z.string().trim().max(1000).nullable().optional(),
+    amount: z.coerce.number().positive().optional(),
+    currency: CURRENCY.optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+
 // Filters: a month (period_month + period_year — matches the payment date
 // when there is one, else the charge's month), an exact payment date, a
 // payment-date range, category and office.
@@ -114,6 +127,12 @@ const costAssignmentSchema = z.object({
   // Share of the person's monthly cost charged to this project; null = even
   // split across their projects. resource_type follows the person's worker type.
   allocation_percent: z.coerce.number().min(0).max(100).nullable().optional(),
+  // Effective-dated allocation (both inclusive; null = open). `effective_date`
+  // applies a change to the allocation in force from that day on (the old
+  // values stay for the days before) — see allocations.service.assign.
+  start_date: optionalDate.nullable(),
+  end_date: optionalDate.nullable(),
+  effective_date: optionalDate,
 });
 
 // Monthly project P&L / vendor invoices.
@@ -145,6 +164,8 @@ const updateVendorInvoiceSchema = vendorInvoiceSchema
 
 const listCostAssignmentsQuerySchema = z.object({
   account_id: z.string().uuid(),
+  // Ended allocations are history — listed unless include_ended=false.
+  include_ended: z.enum(['true', 'false']).default('true').transform((x) => x === 'true'),
 });
 
 const accountBudgetQuerySchema = z.object({
@@ -169,6 +190,8 @@ const updateProjectProfileSchema = z
     // hourly-equivalent rate. Admin-only (the route is).
     overtime_billable: z.boolean().optional(),
     overtime_multiplier: z.coerce.number().min(1).max(5).optional(),
+    // Hourly projects: the client's approximate hours per month (forecast only); null clears it.
+    estimated_monthly_hours: z.coerce.number().positive().max(10000).nullable().optional(),
     billing: z
       .object({
         rate_type: z.enum(['hourly', 'monthly']),
@@ -198,6 +221,7 @@ module.exports = {
   transitionInvoiceSchema,
   createGroupChargeSchema,
   createOwnGroupChargeSchema,
+  updateGroupChargeSchema,
   listMyGroupChargesQuerySchema,
   listAllGroupChargesQuerySchema,
   costAssignmentSchema,

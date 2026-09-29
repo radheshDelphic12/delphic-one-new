@@ -8,7 +8,8 @@ const link = z.string().uuid().nullable().optional();
 const fields = {
   serial_number: text(120),
   status: z.enum(['issued', 'returned']).optional(),
-  belongs_to: z.enum(['delphic', 'client']).optional(),
+  // Owner of the device. 'vendor' needs vendor_account_id (the vendor's name).
+  belongs_to: z.enum(['delphic', 'client', 'vendor']).optional(),
   // An org membership of this org — employee or contractor; null = unassigned.
   org_membership_id: link,
   vendor_account_id: link,

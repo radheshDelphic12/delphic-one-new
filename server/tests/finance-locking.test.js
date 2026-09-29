@@ -216,6 +216,30 @@ describe('Billing & Sales — Managed Services on the project calendar', () => {
     }
   });
 
+  test('hourly projects show the client\'s estimated hours x rate beside actual billing, which it never changes', async () => {
+    const ctx = await seed();
+    const p = await addProject(ctx, 'Estimated', { rate: 1500, rate_type: 'hourly' });
+    const set = await authed(request(app).patch(`/api/v1/billing/projects/${p.id}`), ctx.adminToken).send({ estimated_monthly_hours: 120 });
+    expect(set.body.data.estimated_monthly_hours).toBe(120);
+    const e = await employee(ctx);
+    await approvedEntries(ctx, e.membership.id, p.id, ['2026-08-03', '2026-08-04']);
+
+    const overview = await authed(request(app).get('/api/v1/analytics/billing'), ctx.adminToken).query(AUG);
+    const row = overview.body.data.projects.find((r) => r.project.id === p.id);
+    expect(row.amount).toBe(16 * 1500);
+    expect(row.estimate).toMatchObject({ hours: 120, amount: 180000, amount_inr: 180000, actual_hours: 16, actual_amount: 24000, hours_variance: -104 });
+    expect(overview.body.data.totals).toMatchObject({ amount_inr: 24000, estimated_inr: 180000, estimated_projects: 1 });
+    const detail = await authed(request(app).get(`/api/v1/analytics/billing/projects/${p.id}`), ctx.adminToken).query(AUG);
+    expect(detail.body.data.estimate).toMatchObject({ hours: 120, amount: 180000 });
+
+    // Monthly projects never get an estimate; clearing it removes it.
+    const monthly = await addProject(ctx, 'Monthly');
+    await authed(request(app).patch(`/api/v1/billing/projects/${monthly.id}`), ctx.adminToken).send({ estimated_monthly_hours: 100 });
+    await authed(request(app).patch(`/api/v1/billing/projects/${p.id}`), ctx.adminToken).send({ estimated_monthly_hours: null });
+    const after = await authed(request(app).get('/api/v1/analytics/billing'), ctx.adminToken).query(AUG);
+    expect(after.body.data.projects.every((r) => r.estimate === null)).toBe(true);
+  });
+
   test('overtime is billed only where the project enables it; the toggle only changes what is shown', async () => {
     const ctx = await seed();
     const on = await addProject(ctx, 'OT on', { rate: 1000, rate_type: 'hourly', overtime: true, multiplier: 1.5 });
@@ -479,6 +503,34 @@ describe('Group Charges, Expenses and their categories', () => {
     expect(day[0]).toMatchObject({ kind: 'Office Rent', category: { id: rent.id }, location: { name: 'Ahmedabad' } });
     expect((await q({ category_id: rent.id })).body.data).toHaveLength(2);
     expect((await q({ category_id: rent.id, location_id: ahmedabad.id })).body.data).toHaveLength(1);
+  });
+
+  test('admins edit their own group charges; a charge raised by the group stays the group superadmin\'s', async () => {
+    const ctx = await seed();
+    const ahmedabad = await prisma.location.create({ data: { org_id: ctx.org.id, name: 'Ahmedabad' } });
+    const cats = (await authed(request(app).get('/api/v1/finance-categories'), ctx.adminToken).query({ kind: 'group_charge' })).body.data;
+    const rent = cats.find((c) => c.name === 'Office Rent');
+    const power = cats.find((c) => c.name === 'Electricity');
+    const own = (await authed(request(app).post('/api/v1/billing/group-charges/mine'), ctx.adminToken).send({ amount: 1000, payment_date: '2026-09-25', category_id: rent.id })).body.data;
+
+    const edit = (id, body, token = ctx.adminToken) => authed(request(app).patch(`/api/v1/billing/group-charges/${id}`), token).send(body);
+    const updated = await edit(own.id, { amount: 1500, currency: 'USD', payment_date: '2026-10-02', category_id: power.id, location_id: ahmedabad.id, notes: 'Oct bill' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toMatchObject({ amount: '1500', currency: 'USD', period_month: 10, period_year: 2026, kind: 'Electricity', location: { name: 'Ahmedabad' }, notes: 'Oct bill' });
+    expect((await edit(own.id, { location_id: null, notes: null })).body.data).toMatchObject({ location_id: null, notes: null });
+    expect((await edit(own.id, {})).status).toBe(422);
+
+    const e = await employee(ctx);
+    expect((await edit(own.id, { amount: 1 }, e.token)).status).toBe(403);
+
+    const groupAdmin = await employee(ctx, { name: 'Group' });
+    await prisma.user.update({ where: { id: groupAdmin.user.id }, data: { is_group_superadmin: true } });
+    const raised = await prisma.groupBillingCharge.create({
+      data: { org_group_id: ctx.org.org_group_id, org_id: ctx.org.id, period_month: 9, period_year: 2026, kind: 'Brand fee', amount: 5000, raised_by: groupAdmin.user.id },
+    });
+    const listed = (await authed(request(app).get('/api/v1/billing/group-charges'), ctx.adminToken)).body.data.find((c) => c.id === raised.id);
+    expect(listed.raiser).toEqual({ is_group_superadmin: true });
+    expect((await edit(raised.id, { amount: 1 })).status).toBe(403);
   });
 
   test('expenses filter by employee, month, category and office together', async () => {

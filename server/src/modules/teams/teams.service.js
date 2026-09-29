@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const allocationsService = require('../allocations/allocations.service');
 
 const SELECT = {
   id: true,
@@ -11,13 +12,27 @@ const SELECT = {
   manager: { select: { id: true, person: { select: { id: true, name: true } } } },
   open_positions: true,
   sort_order: true,
+  projects_per_resource: true,
   created_at: true,
   updated_at: true,
   _count: { select: { members: true } },
 };
 
 function serialize({ _count, ...team }) {
-  return { ...team, member_count: _count.members };
+  return {
+    ...team,
+    projects_per_resource: team.projects_per_resource !== null && team.projects_per_resource !== undefined ? Number(team.projects_per_resource) : null,
+    member_count: _count.members,
+  };
+}
+
+// One source of truth for "who is on the team": the lead is a member too.
+// Setting a lead who isn't on any team puts them on this one (from today);
+// a lead already on another team stays there (they may lead across teams).
+async function joinLeadToTeam(orgId, teamId, leadMembershipId, actorUserId) {
+  if (!leadMembershipId) return;
+  const lead = await prisma.orgMembership.findFirst({ where: { id: leadMembershipId, org_id: orgId }, select: { team_id: true } });
+  if (lead && !lead.team_id) await allocationsService.changeTeam(orgId, actorUserId, leadMembershipId, teamId, null);
 }
 
 // HR Settings → Teams (org-scoped, same shape as designations). A team's
@@ -43,7 +58,7 @@ async function list(orgId) {
   return rows.map(serialize);
 }
 
-async function create(orgId, body) {
+async function create(orgId, body, actorUserId = null) {
   const existing = await prisma.team.findUnique({ where: { org_id_name: { org_id: orgId, name: body.name } } });
   if (existing) return { error: 'name_taken' };
   const refError = await checkRefs(orgId, body);
@@ -57,13 +72,15 @@ async function create(orgId, body) {
       manager_membership_id: body.manager_membership_id || null,
       open_positions: body.open_positions ?? 0,
       sort_order: body.sort_order ?? 0,
+      projects_per_resource: body.projects_per_resource ?? null,
     },
     select: SELECT,
   });
-  return { team: serialize(team) };
+  await joinLeadToTeam(orgId, team.id, team.lead_membership_id, actorUserId);
+  return { team: serialize(await prisma.team.findUnique({ where: { id: team.id }, select: SELECT })) };
 }
 
-async function update(orgId, id, patch) {
+async function update(orgId, id, patch, actorUserId = null) {
   const existing = await prisma.team.findFirst({ where: { id, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (patch.name) {
@@ -72,8 +89,9 @@ async function update(orgId, id, patch) {
   }
   const refError = await checkRefs(orgId, patch);
   if (refError) return { error: refError };
-  const team = await prisma.team.update({ where: { id }, data: patch, select: SELECT });
-  return { team: serialize(team) };
+  await prisma.team.update({ where: { id }, data: patch });
+  if (patch.lead_membership_id) await joinLeadToTeam(orgId, id, patch.lead_membership_id, actorUserId);
+  return { team: serialize(await prisma.team.findUnique({ where: { id }, select: SELECT })) };
 }
 
 // Refuses while anyone is still on the team — same posture as deleting a
@@ -82,6 +100,8 @@ async function remove(orgId, id) {
   const existing = await prisma.team.findFirst({ where: { id, org_id: orgId }, select: { _count: { select: { members: true } } } });
   if (!existing) return { error: 'not_found' };
   if (existing._count.members > 0) return { error: 'in_use', count: existing._count.members };
+  // Past membership is history (team capacity / movement reports read it).
+  if (await prisma.teamMembershipPeriod.count({ where: { team_id: id } })) return { error: 'has_history' };
   await prisma.team.delete({ where: { id } });
   return { deleted: true };
 }

@@ -2,6 +2,16 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-09-29 — Recruitment requirements re-enabled — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Create requirement → Type: Recruitment is selectable again.** The option
+  was hard-disabled as "Recruitment (coming soon)" in `RequirementFormPage`
+  for every role, so no one could raise a recruitment requirement. The API
+  (`requirements.validation.js`) already accepted `recruitment`; only the form
+  blocked it. The finance **project** category picker
+  (`lib/projectCategories.js`) is unchanged — Recruitment stays "coming soon"
+  there because the API still refuses it for new projects.
+
 ## 2026-09-28 — Recruitment access + per-file uploads (security), HR Teams + Work Mode — branch `delphic-one-bugFix-and-newImplementation`
 
 - **Ex-members / other workspaces locked out of recruitment data.**

@@ -4,7 +4,8 @@
 //
 //   contractor's monthly vendor_rate (People → user type Contractor), charged
 //   to each project by its allocation share (ProjectMemberAssignment
-//   .allocation_percent, else an even split across their projects), then per
+//   .allocation_percent, else an even split across their projects) IN FORCE
+//   THAT DAY (allocations are effective-dated — lib/allocations), then per
 //   day on that PROJECT's calendar exactly like monthly client billing:
 //     day = rate × share × min(approved hours / benchmark_hours, 1 / working_days)
 //   plus approved overtime at the hourly equivalent (rate × share /
@@ -20,6 +21,7 @@ const calendarsService = require('../../calendars/calendars.service');
 const exchangeRates = require('../../billing/exchangeRates.service');
 const { markResolved } = require('./billing.engine');
 const { round2, ymd, monthBounds, isWeekend } = require('../period');
+const { overlaps, sharesOn, periodShares } = require('../../../lib/allocations');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -40,7 +42,10 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       person: { select: { name: true } },
       project_cost_rates: {
         select: {
+          account_id: true,
           allocation_percent: true,
+          start_date: true,
+          end_date: true,
           account: { select: { id: true, name: true, project_name: true, project_code: true, benchmark_hours: true, overtime_billable: true, agreement_start_date: true, agreement_end_date: true } },
         },
       },
@@ -73,14 +78,15 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
   for (const c of contractors) {
     const monthlyRate = c.vendor_rate !== null ? Number(c.vendor_rate) : 0;
     const currency = c.vendor_rate_currency || 'INR';
-    const assignments = c.project_cost_rates.filter((a) => a.account);
-    const evenShare = assignments.length ? 1 / assignments.length : 0;
+    // Allocation periods in force at some point this month; one line per project.
+    const spans = c.project_cost_rates.filter((a) => a.account && overlaps(a, start, end));
+    const projects = [...new Map(spans.map((a) => [a.account.id, a.account])).values()];
+    const monthShare = periodShares(spans, start, end);
     const mine = entries.filter((e) => e.org_membership_id === c.id);
 
-    for (const a of assignments) {
-      const account = a.account;
-      const share = a.allocation_percent !== null ? Number(a.allocation_percent) / 100 : evenShare;
-      const rate = monthlyRate * share;
+    for (const account of projects) {
+      const share = monthShare.get(account.id) || 0;
+      const rateOn = (date) => monthlyRate * (sharesOn(spans, date).get(account.id) || 0);
       const benchmark = account.benchmark_hours || DEFAULT_BENCHMARK_HOURS;
       const { working_days, holiday_dates } = await workingDaysFor(account.id);
       const projectEntries = mine.filter((e) => e.account_id === account.id);
@@ -97,18 +103,21 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       }
       let base = 0;
       let overtimeHours = 0;
+      let overtimeAmountRaw = 0;
       let approvedHours = 0;
       for (const [key, d] of perDay) {
         const inContract = (!account.agreement_start_date || d.date >= account.agreement_start_date) && (!account.agreement_end_date || d.date <= account.agreement_end_date);
         const working = !isWeekend(d.date) && !holiday_dates.has(key);
+        const dayRate = rateOn(d.date);
         approvedHours += d.hours;
-        if (!working) { overtimeHours += d.hours + d.overtime; continue; }
-        overtimeHours += d.overtime;
-        if (!inContract || working_days <= 0) continue;
-        base += rate * Math.min(d.hours / benchmark, 1 / working_days);
+        const otHours = working ? d.overtime : d.hours + d.overtime;
+        overtimeHours += otHours;
+        overtimeAmountRaw += otHours * (dayRate / benchmark);
+        if (!working || !inContract || working_days <= 0) continue;
+        base += dayRate * Math.min(d.hours / benchmark, 1 / working_days);
       }
       base = round2(base);
-      const overtimeAmount = account.overtime_billable ? round2(overtimeHours * (rate / benchmark)) : 0;
+      const overtimeAmount = account.overtime_billable ? round2(overtimeAmountRaw) : 0;
       const amount = round2(base + overtimeAmount);
       const pending = projectEntries.filter((e) => e.status === 'submitted').length;
       const rejected = projectEntries.filter((e) => e.status === 'rejected' && !e.resolved).length;

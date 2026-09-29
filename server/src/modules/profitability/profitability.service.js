@@ -55,8 +55,9 @@ async function computeDayForOrg(orgId, date) {
   // company's cost of this person, so the cost-rate figure is recorded in the
   // breakdown for reference only and is NOT added on top (adding it would
   // count the same person's cost twice).
+  // Only the allocation in force on this day (allocations are effective-dated).
   const costAssignments = await prisma.projectMemberAssignment.findMany({
-    where: { org_id: orgId },
+    where: { org_id: orgId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: date } }] }, { OR: [{ end_date: null }, { end_date: { gte: date } }] }] },
     select: { account_id: true, org_membership_id: true, cost_rate_per_hr: true },
   });
   const costRateByKey = new Map(costAssignments.map((a) => [`${a.account_id}|${a.org_membership_id}`, Number(a.cost_rate_per_hr)]));

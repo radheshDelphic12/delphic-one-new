@@ -27,6 +27,9 @@ function billingLabel(row) {
     <span>
       <span className="capitalize">{row.billing_type}</span>
       <span className="ml-1.5 text-xs text-tertiary-500">{row.currency} {money(row.rate)}{suffix}</span>
+      {row.billing_type === 'hourly' && row.estimated_monthly_hours ? (
+        <span className="block text-xs text-tertiary-500">Est. {row.estimated_monthly_hours}h/mo ≈ {row.currency} {money(row.estimated_monthly_hours * row.rate)}</span>
+      ) : null}
     </span>
   );
 }
@@ -60,6 +63,7 @@ function emptyForm(profile) {
     benchmark_hours: profile.benchmark_hours ?? 160,
     overtime_billable: Boolean(profile.overtime_billable),
     overtime_multiplier: profile.overtime_multiplier ?? 1,
+    estimated_monthly_hours: profile.estimated_monthly_hours ?? '',
     billing_type: profile.billing_type || '',
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
@@ -82,6 +86,8 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const monthly = form.billing_type === 'monthly';
+  const hourly = form.billing_type === 'hourly';
+  const estimatedAmount = hourly && Number(form.estimated_monthly_hours) > 0 && form.rate !== '' ? Number(form.estimated_monthly_hours) * Number(form.rate) : null;
 
   async function submit(event) {
     event.preventDefault();
@@ -94,6 +100,8 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
       overtime_billable: form.overtime_billable,
       overtime_multiplier: Number(form.overtime_multiplier) || 1,
     };
+    // The client's hour estimate only applies to hourly billing; leave it alone otherwise.
+    if (hourly) patch.estimated_monthly_hours = Number(form.estimated_monthly_hours) > 0 ? Number(form.estimated_monthly_hours) : null;
     // Only send the client when it changed, so a legacy free-text client isn't wiped by an unrelated edit.
     if (form.client_account_id !== (project.client_account_id || '')) patch.client_account_id = form.client_account_id || null;
     if (form.service_category) patch.service_category = form.service_category;
@@ -196,6 +204,15 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
                   <input type="number" min="1" max="744" value={form.benchmark_hours} onChange={(e) => set('benchmark_hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
                 </label>
               )}
+              {hourly && (
+                <label className="block text-xs font-medium text-tertiary-600">
+                  Estimated hours / month <span className="font-normal text-tertiary-400">(from client, optional)</span>
+                  <input type="number" min="0" max="10000" step="0.5" value={form.estimated_monthly_hours} onChange={(e) => set('estimated_monthly_hours', e.target.value)} placeholder="e.g. 120" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                  <span className="mt-0.5 block font-normal text-tertiary-400">
+                    {estimatedAmount !== null ? `≈ ${form.currency} ${money(estimatedAmount)} estimated revenue / month` : 'Shows estimated revenue in Billing & Sales'}
+                  </span>
+                </label>
+              )}
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <label className="block text-xs font-medium text-tertiary-600">
@@ -225,7 +242,7 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
             <p className="mt-3 text-xs text-tertiary-500">
               {monthly
                 ? `Monthly: the rate covers a ${form.benchmark_hours || 160}-hour benchmark spread over the month's actual working days (Mon–Fri less the project calendar's holidays). Each working day earns its share in proportion to hours logged.`
-                : 'Hourly: logged (approved, billable) hours × the hourly rate.'}
+                : 'Hourly: logged (approved, billable) hours × the hourly rate. The estimated hours are a forecast only — billing and invoices always use approved hours.'}
               {' '}Nothing is billed or invoiced before the agreement start date. Changing the type or rate adds a new rate from the agreement start date (or today if none is set) — earlier billing is never rewritten.
             </p>
           </div>
