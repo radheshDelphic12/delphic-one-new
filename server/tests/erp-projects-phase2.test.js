@@ -103,7 +103,7 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     expect(res.body.data.calendar.id).toBe(office.id);
   });
 
-  test('an explicit calendar wins; Recruitment is refused; a duplicate name is refused; a non-admin cannot add', async () => {
+  test('an explicit calendar wins; Recruitment is refused; a same-named project is a separate project; a non-admin cannot add', async () => {
     const { org, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const us = await calendar(org, 'US Client Calendar');
@@ -115,8 +115,12 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     const recruitment = await addProject(token, { name: 'Hiring', service_category: 'recruitment' });
     expect(recruitment.status).toBe(422);
 
+    // The name is only a label — a second contract with the same name is a
+    // separate project with its own id and project code.
     const dup = await addProject(token, { name: 'tankpros', service_category: 'project' });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+    expect(dup.body.data.id).not.toBe(explicit.body.data.id);
+    expect(dup.body.data.code).not.toBe(explicit.body.data.code);
 
     const emp = await seedEmployee(org);
     expect((await addProject(emp.token, { name: 'Sneaky', service_category: 'project' })).status).toBe(403);
@@ -234,8 +238,26 @@ describe('Finance → Projects profile', () => {
     expect(hourly.status).toBe(200);
     expect(hourly.body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
     expect((await authed(request(app).get(url), token)).body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
+
     const rename = await authed(request(app).patch(url), token).send({ project_name: 'Tax Portal 2', client_account_id: newClient.id });
     expect(rename.body.data).toMatchObject({ project_name: 'Tax Portal 2', client_name: 'New Client', client_account_id: newClient.id });
+  });
+
+  test('a saved monthly rate can be edited again, whether the agreement starts in the past or the future', async () => {
+    const { org, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const past = (await addProject(token, { name: 'Past Start', service_category: 'project' })).body.data;
+    const future = (await addProject(token, { name: 'Future Start', service_category: 'project' })).body.data;
+
+    for (const [project, start] of [[past, '2026-01-01'], [future, '2099-01-01']]) {
+      const url = `/api/v1/billing/projects/${project.id}`;
+      await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 80000 } });
+      const edited = await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 95000 } });
+      expect(edited.status).toBe(200);
+      expect(edited.body.data).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+      const row = (await authed(request(app).get('/api/v1/billing/projects'), token)).body.data.find((p) => p.id === project.id);
+      expect(row).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+    }
   });
 });
 
@@ -370,9 +392,9 @@ describe('Project Client Name — a client account, never free text', () => {
     const after = await prisma.account.findUnique({ where: { id: portal.id } });
     expect(after).toMatchObject({ name: 'Tax Portal', project_name: null, client_account_id: acme.id, client_name: 'Acme Corp' });
 
-    // The new project name is taken for other projects, and Add Project checks it too.
-    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(409);
-    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(409);
+    // Project names are not unique: another project may take the same name.
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(200);
+    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(201);
   });
 
   test('legacy projects keep their free-text client name until a lead is linked', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -11,6 +11,8 @@ import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
 import InvoicingSection from './InvoicingSection.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
+import Pill from '../../components/ui/Pill.jsx';
+import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates } from './projectFilters.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
@@ -29,13 +31,35 @@ function billingLabel(row) {
   );
 }
 
+const formatDay = (ymd) => new Date(`${ymd}T00:00:00`).toLocaleDateString();
+
+function AgreementDates({ row }) {
+  if (!row.agreement_start_date && !row.agreement_end_date) return <span className="text-tertiary-400">Not set</span>;
+  return (
+    <span className="whitespace-nowrap text-sm">
+      {row.agreement_start_date ? formatDay(row.agreement_start_date) : '…'} – {row.agreement_end_date ? formatDay(row.agreement_end_date) : 'open'}
+    </span>
+  );
+}
+
+function ContractPill({ contract }) {
+  const state = CONTRACT_STATES.find((s) => s.key === contract?.state);
+  if (!state) return null;
+  const days = contract.state === 'about_to_end' && contract.days_left !== null ? ` · ${contract.days_left}d left` : '';
+  return <Pill tone={state.tone}>{state.label}{days}</Pill>;
+}
+
 function emptyForm(profile) {
   return {
     project_name: profile.project_name || '',
     client_account_id: profile.client_account_id || '',
     service_category: profile.service_category || '',
     agreement_start_date: profile.agreement_start_date || '',
+    agreement_end_date: profile.agreement_end_date || '',
+    contract_status: profile.contract_status || '',
     benchmark_hours: profile.benchmark_hours ?? 160,
+    overtime_billable: Boolean(profile.overtime_billable),
+    overtime_multiplier: profile.overtime_multiplier ?? 1,
     billing_type: profile.billing_type || '',
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
@@ -64,7 +88,11 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
     const patch = {
       project_name: form.project_name.trim(),
       agreement_start_date: form.agreement_start_date || null,
+      agreement_end_date: form.agreement_end_date || null,
+      contract_status: form.contract_status || null,
       benchmark_hours: Number(form.benchmark_hours) || 160,
+      overtime_billable: form.overtime_billable,
+      overtime_multiplier: Number(form.overtime_multiplier) || 1,
     };
     // Only send the client when it changed, so a legacy free-text client isn't wiped by an unrelated edit.
     if (form.client_account_id !== (project.client_account_id || '')) patch.client_account_id = form.client_account_id || null;
@@ -90,7 +118,7 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
   return (
     <Drawer
       open
-      title={project.project_name}
+      title={project.project_code ? `${project.project_name} · ${project.project_code}` : project.project_name}
       onClose={onClose}
       size="xl"
       tone="edit"
@@ -107,6 +135,9 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
             <label className="block text-xs font-medium text-tertiary-600">
               Project name
               <input required value={form.project_name} onChange={(e) => set('project_name', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              <span className="mt-1 block font-normal text-tertiary-400">
+                A label only — another contract may share it. This project is <span className="font-medium text-tertiary-600">{project.project_code || 'identified by its id'}</span>, with its own resources, dates, rates, billing and P&amp;L.
+              </span>
             </label>
             <div className="block text-xs font-medium text-tertiary-600">
               Client name
@@ -151,9 +182,13 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
               </label>
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
+              <label className="block text-xs font-medium text-tertiary-600">
                 Agreement start date
                 <input type="date" value={form.agreement_start_date} onChange={(e) => set('agreement_start_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Agreement end date
+                <input type="date" min={form.agreement_start_date || undefined} value={form.agreement_end_date} onChange={(e) => set('agreement_end_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
               </label>
               {monthly && (
                 <label className="block text-xs font-medium text-tertiary-600">
@@ -161,6 +196,31 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
                   <input type="number" min="1" max="744" value={form.benchmark_hours} onChange={(e) => set('benchmark_hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
                 </label>
               )}
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <label className="block text-xs font-medium text-tertiary-600">
+                Contract status
+                <select value={form.contract_status} onChange={(e) => set('contract_status', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                  <option value="">Automatic (from the dates)</option>
+                  <option value="on_hold">On hold</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <p className="self-end pb-2 text-xs text-tertiary-500 sm:col-span-2">
+                Automatic: not started before the start date, about to end in its last 30 days, completed after the end date.
+              </p>
+            </div>
+            <div className="mt-3 grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3 sm:grid-cols-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-tertiary-700 sm:col-span-2">
+                <input type="checkbox" checked={form.overtime_billable} onChange={(e) => set('overtime_billable', e.target.checked)} className="h-4 w-4 rounded border-tertiary-300" />
+                Client pays overtime on this contract
+                <span className="font-normal text-tertiary-500">— approved overtime hours{monthly ? ' (and weekend / holiday work)' : ''} are billed; off = never billed, whatever Billing &amp; Sales shows.</span>
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Overtime rate multiplier
+                <input type="number" min="1" max="5" step="0.25" value={form.overtime_multiplier} onChange={(e) => set('overtime_multiplier', e.target.value)} disabled={!form.overtime_billable} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50" />
+                <span className="mt-0.5 block font-normal text-tertiary-400">× the {monthly ? 'monthly rate ÷ benchmark hours' : 'hourly rate'}</span>
+              </label>
             </div>
             <p className="mt-3 text-xs text-tertiary-500">
               {monthly
@@ -197,6 +257,22 @@ export default function ProjectsTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [category, setCategory] = useState('all');
+  const [contract, setContract] = useState('all');
+  const { toInr } = useExchangeRates();
+
+  const matchesContract = (row, key) => key === 'all' || row.contract?.state === key;
+  const visible = useMemo(
+    () => rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract)),
+    [rows, category, contract]
+  );
+
+  // Monthly billing of the filtered projects, in INR. Hourly projects have no
+  // fixed monthly figure; a currency with no exchange rate is left out and named.
+  const monthly = visible.filter((row) => row.billing_type === 'monthly');
+  const monthlyTotal = monthly.reduce((sum, row) => sum + (toInr(row.rate, row.currency) ?? 0), 0);
+  const unconverted = [...new Set(monthly.filter((row) => toInr(row.rate, row.currency) === null).map((row) => row.currency))];
+  const hourlyCount = visible.filter((row) => row.billing_type === 'hourly').length;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -209,12 +285,15 @@ export default function ProjectsTab() {
   useEffect(() => { load(); }, [load]);
 
   const columns = [
+    { key: 'code', header: 'Project ID', render: (row) => <span className="font-mono text-xs text-tertiary-600">{row.project_code || '—'}</span> },
     { key: 'project', header: 'Project name', render: (row) => <span className="font-medium text-tertiary-900">{row.project_name}</span> },
     { key: 'client', header: 'Client name', render: (row) => row.client_name || <span className="text-tertiary-400">—</span> },
     { key: 'requirement', header: 'Requirement', render: (row) => row.requirement || '' },
     { key: 'billing', header: 'Billing type', render: billingLabel },
+    { key: 'overtime', header: 'Overtime', render: (row) => (row.overtime_billable ? <Pill tone="green">Billed {row.overtime_multiplier}×</Pill> : <span className="text-xs text-tertiary-400">Not billed</span>) },
     { key: 'category', header: 'Category', render: (row) => categoryLabel(row.service_category) },
-    { key: 'start', header: 'Agreement start', render: (row) => (row.agreement_start_date ? new Date(`${row.agreement_start_date}T00:00:00`).toLocaleDateString() : <span className="text-tertiary-400">Not set</span>) },
+    { key: 'start', header: 'Agreement', render: (row) => <AgreementDates row={row} /> },
+    { key: 'contract', header: 'Contract', render: (row) => <ContractPill contract={row.contract} /> },
     { key: 'open', header: '', render: (row) => <button type="button" className="btn-ghost text-xs" onClick={() => setSelected(row)}>Open</button> },
   ];
 
@@ -227,7 +306,30 @@ export default function ProjectsTab() {
         {!loading && rows.length === 0 ? (
           <EmptyState title="No projects yet" description="Add a project under People → Calendars, and it will appear here." />
         ) : (
-          <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No projects." onRowClick={setSelected} />
+          <>
+            <CategoryFilter rows={rows} getCategory={(row) => row.service_category} value={category} onChange={setCategory} loading={loading} />
+            <FilterPills
+              label="Contract"
+              options={CONTRACT_FILTERS}
+              rows={rows.filter((row) => matchesCategory(row.service_category, category))}
+              matches={matchesContract}
+              value={contract}
+              onChange={setContract}
+              loading={loading}
+            />
+            {!loading && (
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-tertiary-100 bg-white px-4 py-2.5 text-sm">
+                <span className="text-tertiary-500">Monthly billing total</span>
+                <span className="font-heading text-base font-semibold tabular-nums text-tertiary-900">{moneyIn(monthlyTotal, 'INR')}</span>
+                <span className="text-xs text-tertiary-500">
+                  {monthly.length} monthly project{monthly.length === 1 ? '' : 's'}
+                  {hourlyCount > 0 && ` · ${hourlyCount} hourly not included`}
+                  {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate in Project P&L`}
+                </span>
+              </div>
+            )}
+            <DataTable columns={columns} rows={visible} loading={loading} emptyLabel="No projects in this category." onRowClick={setSelected} />
+          </>
         )}
       </section>
 

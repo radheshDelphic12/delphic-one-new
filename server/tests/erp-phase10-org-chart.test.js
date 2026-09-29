@@ -128,3 +128,21 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     expect(chartB.headcount).toBe(2);
   });
 });
+
+describe('Team view data', () => {
+  test('the chart carries this org\'s teams (with lead) and each member\'s team and worker type', async () => {
+    const { org, access_token, membership: adminMembership } = await seedOrgAdmin();
+    const { membership: lead } = await seedEmployeeUnder(org, adminMembership.id);
+    const { membership: member } = await seedEmployeeUnder(org, lead.id);
+    const team = await prisma.team.create({ data: { org_id: org.id, name: 'Nexosoft', lead_membership_id: lead.id } });
+    await prisma.orgMembership.updateMany({ where: { id: { in: [lead.id, member.id] } }, data: { team_id: team.id } });
+    const other = await createOrg({ name: 'Other', slug: 'other' });
+    await prisma.team.create({ data: { org_id: other.id, name: 'Elsewhere' } });
+
+    const res = await authed(request(app).get('/api/v1/org-chart'), access_token);
+    expect(res.body.data.teams).toEqual([expect.objectContaining({ id: team.id, name: 'Nexosoft', lead_membership_id: lead.id, manager_membership_id: null, open_positions: 0, sort_order: 0 })]);
+    const leadNode = res.body.data.roots[0].direct_reports[0];
+    expect(leadNode).toMatchObject({ team_id: team.id, worker_type: 'full_time_employee' });
+    expect(leadNode.direct_reports[0]).toMatchObject({ id: member.id, team_id: team.id });
+  });
+});

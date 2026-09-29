@@ -49,22 +49,52 @@ const transitionInvoiceSchema = z.object({
   status: z.enum(['sent', 'paid']),
 });
 
-const createGroupChargeSchema = z.object({
+// A group charge belongs to a month (period_*) and, when known, the day it
+// was paid (payment_date) — the period defaults to that day's month. Category
+// is either an admin-managed Group Charge category (category_id) or, for
+// older callers, free text (kind).
+const groupChargeFields = {
   org_id: z.string().uuid(),
-  period_month: z.coerce.number().int().min(1).max(12),
-  period_year: z.coerce.number().int().min(2000).max(2100),
-  kind: z.string().min(1).max(200),
+  period_month: z.coerce.number().int().min(1).max(12).optional(),
+  period_year: z.coerce.number().int().min(2000).max(2100).optional(),
+  payment_date: optionalDate,
+  kind: z.string().trim().min(1).max(200).optional(),
+  category_id: z.string().uuid().optional(),
+  location_id: z.string().uuid().nullable().optional(),
+  notes: z.string().trim().max(1000).optional(),
   amount: z.coerce.number().positive(),
   currency: CURRENCY.default('INR'),
-});
+};
+
+function withGroupChargeRules(schema) {
+  return schema
+    .refine((v) => v.kind || v.category_id, { message: 'Pick a category', path: ['category_id'] })
+    .refine((v) => v.payment_date || (v.period_month && v.period_year), { message: 'Give the payment date or the month', path: ['payment_date'] })
+    .transform((v) => ({
+      ...v,
+      period_month: v.period_month || v.payment_date.getUTCMonth() + 1,
+      period_year: v.period_year || v.payment_date.getUTCFullYear(),
+    }));
+}
+
+const createGroupChargeSchema = withGroupChargeRules(z.object(groupChargeFields));
 
 // Finance → Group Charges "Add Group Expense": an admin records a group
 // expense against their OWN company, so the org comes from the session.
-const createOwnGroupChargeSchema = createGroupChargeSchema.omit({ org_id: true });
+const ownFields = Object.fromEntries(Object.entries(groupChargeFields).filter(([key]) => key !== 'org_id'));
+const createOwnGroupChargeSchema = withGroupChargeRules(z.object(ownFields));
 
+// Filters: a month (period_month + period_year — matches the payment date
+// when there is one, else the charge's month), an exact payment date, a
+// payment-date range, category and office.
 const listMyGroupChargesQuerySchema = z.object({
   period_month: z.coerce.number().int().min(1).max(12).optional(),
   period_year: z.coerce.number().int().min(2000).max(2100).optional(),
+  date: optionalDate,
+  date_from: optionalDate,
+  date_to: optionalDate,
+  category_id: z.string().uuid().optional(),
+  location_id: z.string().uuid().optional(),
 });
 
 const listAllGroupChargesQuerySchema = z.object({
@@ -90,6 +120,13 @@ const costAssignmentSchema = z.object({
 const periodQuerySchema = z.object({
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
+});
+
+// Project P&L list filters: project type (the project's service category;
+// 'none' = not set yet) and client.
+const pnlListQuerySchema = periodQuerySchema.extend({
+  project_type: z.enum(['all', 'managed_services', 'project', 'none']).default('all'),
+  client_account_id: z.string().uuid().optional(),
 });
 
 const vendorInvoiceSchema = z.object({
@@ -124,7 +161,14 @@ const updateProjectProfileSchema = z
     client_account_id: z.string().uuid().nullable().optional(),
     service_category: z.enum(['managed_services', 'project']).optional(),
     agreement_start_date: optionalDate.nullable(),
+    agreement_end_date: optionalDate.nullable(),
+    // Manual override; null = follow the agreement dates.
+    contract_status: z.enum(['on_hold', 'completed']).nullable().optional(),
     benchmark_hours: z.coerce.number().int().min(1).max(744).optional(),
+    // Whether this client pays overtime, and at what multiple of the
+    // hourly-equivalent rate. Admin-only (the route is).
+    overtime_billable: z.boolean().optional(),
+    overtime_multiplier: z.coerce.number().min(1).max(5).optional(),
     billing: z
       .object({
         rate_type: z.enum(['hourly', 'monthly']),
@@ -136,7 +180,15 @@ const updateProjectProfileSchema = z
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
+// Finance → Project P&L: INR value of one unit of each foreign currency; null clears it.
+const exchangeRatesSchema = z.object({
+  rates: z
+    .array(z.object({ currency: z.enum(['USD', 'AED', 'SAR', 'EUR', 'GBP']), rate_to_inr: z.coerce.number().positive().max(100000).nullable() }))
+    .min(1),
+});
+
 module.exports = {
+  exchangeRatesSchema,
   createRateSchema,
   listRatesQuerySchema,
   computeDailyRevenueSchema,
@@ -153,6 +205,7 @@ module.exports = {
   accountBudgetQuerySchema,
   updateProjectProfileSchema,
   periodQuerySchema,
+  pnlListQuerySchema,
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
 };

@@ -101,8 +101,8 @@ describe('Module C — project cost rate assignment', () => {
   });
 });
 
-describe('Module C — cost rate is an ADDITIONAL layer on top of salary, not a replacement', () => {
-  test('daily profitability cost = salary-prorated cost + hours × project cost rate, only for projects with an assignment', async () => {
+describe('Module C — cost rate is recorded against the project, never added on top of salary', () => {
+  test('daily profitability cost = salary-prorated cost only; hours × cost rate is kept in the breakdown for reference', async () => {
     const { org, access_token: adminToken } = await seedOrgAdmin();
     const { membership } = await seedOrgEmployee(org);
     const costedAccount = await seedAccount(org.id, membership.person_id, { name: 'Costed Project' });
@@ -125,9 +125,13 @@ describe('Module C — cost rate is an ADDITIONAL layer on top of salary, not a 
     const row = await prisma.dailyEmployeeProfitability.findUnique({
       where: { org_membership_id_date: { org_membership_id: membership.id, date: new Date('2026-09-10') } },
     });
-    expect(Number(row.cost)).toBe(1600); // 1000 salary + 3*200 project cost
+    // The cost rate is the person's internal cost on the project (used by
+    // Project P&L instead of a salary allocation) — never added on top of the
+    // salary here, which would count the same person twice.
+    expect(Number(row.cost)).toBe(1000);
     expect(row.breakdown.per_day_salary_cost).toBe(1000);
     expect(row.breakdown.project_cost).toBe(600);
+    expect(row.breakdown.project_cost_counted).toBe(false);
     expect(row.breakdown.project_cost_allocations).toHaveLength(1);
     expect(row.breakdown.project_cost_allocations[0]).toMatchObject({ account_id: costedAccount.id, hours: 3, cost_rate_per_hr: 200, cost: 600 });
   });

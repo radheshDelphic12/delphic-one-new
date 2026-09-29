@@ -10,6 +10,8 @@ const createEntrySchema = z.object({
   account_id: z.string().uuid().optional(),
   requirement_id: z.string().uuid().optional(),
   hours: z.coerce.number().positive().max(24),
+  // Extra hours beyond the regular ones, claimed as overtime (project time only).
+  overtime_hours: z.coerce.number().min(0).max(24).default(0),
   billable: z.boolean().default(true),
   notes: z.string().max(1000).optional(),
 });
@@ -19,6 +21,7 @@ const createEntrySchema = z.object({
 // must go through a regularization ticket instead.
 const updateEntrySchema = z.object({
   hours: z.coerce.number().positive().max(24).optional(),
+  overtime_hours: z.coerce.number().min(0).max(24).optional(),
   billable: z.boolean().optional(),
   notes: z.string().max(1000).nullable().optional(),
 });
@@ -42,6 +45,8 @@ const listQuerySchema = z.object({
   account_id: z.string().uuid().optional(),
   status: z.enum(['submitted', 'approved', 'rejected']).optional(),
   department_id: z.string().uuid().optional(),
+  // Everyone NOT in this department (and those with none) — the Non-IT view.
+  exclude_department_id: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(31),
 });
@@ -56,6 +61,7 @@ const monthQuerySchema = z.object({
 // timesheets.service.teamOverview).
 const overviewQuerySchema = z.object({
   department_id: z.string().uuid().optional(),
+  exclude_department_id: z.string().uuid().optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2000).max(2100).optional(),
 });

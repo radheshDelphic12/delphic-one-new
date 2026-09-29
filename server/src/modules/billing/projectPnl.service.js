@@ -6,22 +6,33 @@
 //
 // Revenue — the account-wide BillingRate in force for the month. A monthly
 //   rate is the fixed monthly fee (prorated by calendar days only in the month
-//   the agreement starts); an hourly rate uses that month's computed
-//   DailyProjectRevenue. Nothing is billed before agreement_start_date.
-// Internal cost — each full-time employee assigned to the project: their
-//   monthly salary (SalaryStructure.ctc is monthly) x their allocation share.
+//   the agreement starts); an hourly rate is the month's approved, billable
+//   timesheet hours x the hourly rate in force on each day, worked out live so
+//   a rate set or changed after approval still counts. Nothing is billed
+//   before agreement_start_date.
+// Internal cost — each full-time employee assigned to the project:
+//   * cost rate set on the assignment (ProjectMemberAssignment.cost_rate_per_hr,
+//     the resource's INTERNAL cost per hour on this contract): the month's
+//     approved hours on this project x that rate — e.g. 8h x Rs 500 = Rs 4,000;
+//   * otherwise their monthly salary (SalaryStructure.ctc is monthly) x their
+//     allocation share.
+//   Never both, and neither is ever used for client billing (that is the
+//   project's BillingRate only).
 // Vendor cost — each contractor assigned to the project: vendor_rate x share,
 //   UNLESS their vendor has invoiced this project for the month, in which case
 //   the vendor's actual invoices replace those estimates. Contractor cost is
 //   payable to the vendor account, never payroll.
 // Allocation share — ProjectMemberAssignment.allocation_percent when set,
 //   otherwise an even split across all of that person's project assignments.
-// Amounts are summed as entered; currencies are not converted (mixed_currency
-// flags a month where they differ).
+// Currency — everything is reported in INR: billing, contractor rates and
+// vendor invoices convert with finance's exchange rates (salaries are INR). A
+// currency with no rate set is listed in missing_rates and counts as 0, and
+// profit / margin are left blank until it is set.
 
 const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const { findVendorAccount } = require('../../lib/workerType');
+const exchangeRates = require('./exchangeRates.service');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -57,17 +68,37 @@ async function projectRevenue(orgId, account, { start, end, days }) {
     return { amount: round2(amount), billing_type: 'monthly', rate: Number(rate.rate), currency: rate.currency, prorated_days: billedDays < days ? billedDays : null };
   }
 
-  const daily = await prisma.dailyProjectRevenue.aggregate({
-    where: { org_id: orgId, account_id: account.id, date: { gte: start, lte: end } },
-    _sum: { revenue: true },
+  const from = agreementStart && agreementStart > start ? agreementStart : start;
+  const entries = await prisma.timesheetEntry.findMany({
+    where: { org_id: orgId, account_id: account.id, status: 'approved', billable: true, date: { gte: from, lte: end } },
+    select: { date: true, hours: true },
   });
-  return { amount: round2(Number(daily._sum.revenue || 0)), billing_type: 'hourly', rate: Number(rate.rate), currency: rate.currency };
+  let hours = 0;
+  let amount = 0;
+  for (const e of entries) {
+    const onDay = latestOnOrBefore(rates, e.date);
+    if (onDay?.rate_type !== 'hourly') continue;
+    hours += Number(e.hours);
+    amount += Number(e.hours) * Number(onDay.rate);
+  }
+  return { amount: round2(amount), billing_type: 'hourly', rate: Number(rate.rate), currency: rate.currency, billable_hours: round2(hours) };
 }
 
-async function computeProjectPnl(orgId, accountId, { period_month, period_year }) {
+// Converts to INR with the org's rates, recording any currency without one.
+function inrConverter(fx) {
+  const missing = new Set();
+  const toInr = (amount, currency) => {
+    const cur = currency || 'INR';
+    if (!fx.has(cur)) { missing.add(cur); return 0; }
+    return round2(Number(amount || 0) * fx.get(cur));
+  };
+  return { toInr, missing };
+}
+
+async function computeProjectPnl(orgId, accountId, { period_month, period_year }, fx = null) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, org_id: orgId, type: 'client' },
-    select: { id: true, name: true, project_name: true, client_name: true, agreement_start_date: true, client_billing_currency: true },
+    select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { name: true } }, agreement_start_date: true, client_billing_currency: true },
   });
   if (!account) return { error: 'account_not_found' };
   const bounds = periodBounds(period_month, period_year);
@@ -77,6 +108,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     select: {
       org_membership_id: true,
       allocation_percent: true,
+      cost_rate_per_hr: true,
       org_membership: {
         select: {
           id: true,
@@ -91,7 +123,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     },
   });
   const membershipIds = assignments.map((a) => a.org_membership_id);
-  const [assignmentCounts, salaries, invoices, revenue] = await Promise.all([
+  const [assignmentCounts, salaries, invoices, revenue, rates, hoursRows] = await Promise.all([
     prisma.projectMemberAssignment.groupBy({ by: ['org_membership_id'], where: { org_id: orgId, org_membership_id: { in: membershipIds } }, _count: { _all: true } }),
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: membershipIds }, effective_from: { lte: bounds.end } },
@@ -99,7 +131,15 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     }),
     listVendorInvoices(orgId, accountId, { period_month, period_year }),
     projectRevenue(orgId, account, bounds),
+    fx || exchangeRates.inrRates(orgId),
+    prisma.timesheetEntry.groupBy({
+      by: ['org_membership_id'],
+      where: { org_id: orgId, account_id: accountId, status: 'approved', date: { gte: bounds.start, lte: bounds.end } },
+      _sum: { hours: true, overtime_hours: true },
+    }),
   ]);
+  const approvedHours = new Map(hoursRows.map((h) => [h.org_membership_id, Number(h._sum.hours || 0) + Number(h._sum.overtime_hours || 0)]));
+  const { toInr, missing } = inrConverter(rates);
   const countByMembership = new Map(assignmentCounts.map((c) => [c.org_membership_id, c._count._all]));
   const share = (a) => (a.allocation_percent !== null ? Number(a.allocation_percent) / 100 : 1 / (countByMembership.get(a.org_membership_id) || 1));
 
@@ -117,18 +157,23 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
         vendor_rate: monthly,
         currency: m.vendor_rate_currency || 'INR',
         allocation_percent: allocation,
-        estimated_cost: round2(monthly * share(a)),
+        estimated_cost: toInr(monthly * share(a), m.vendor_rate_currency),
       });
     } else {
       const structure = latestOnOrBefore(salaries.filter((s) => s.org_membership_id === m.id), bounds.end);
       const monthly = structure ? Number(structure.ctc) : 0;
+      const costRate = a.cost_rate_per_hr !== null ? Number(a.cost_rate_per_hr) : null;
+      const hours = round2(approvedHours.get(m.id) || 0);
       internal.push({
         org_membership_id: m.id,
         name: m.person.name,
         monthly_salary: monthly,
         allocation_percent: allocation,
-        cost: round2(monthly * share(a)),
-        missing_salary: !structure,
+        cost_rate_per_hr: costRate,
+        approved_hours: hours,
+        cost_basis: costRate !== null ? 'cost_rate' : 'allocation',
+        cost: costRate !== null ? round2(hours * costRate) : round2(monthly * share(a)),
+        missing_salary: costRate === null && !structure,
       });
     }
   }
@@ -147,7 +192,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
   for (const inv of invoices) {
     if (!vendorsById.has(inv.vendor_account_id)) vendorsById.set(inv.vendor_account_id, { vendor: inv.vendor_account, estimated_cost: 0, invoiced_amount: 0, contractors: [] });
     const v = vendorsById.get(inv.vendor_account_id);
-    v.invoiced_amount = round2(v.invoiced_amount + Number(inv.amount));
+    v.invoiced_amount = round2(v.invoiced_amount + toInr(inv.amount, inv.currency));
   }
   const vendorLines = [...vendorsById.values()].map((v) => {
     const invoiced = Boolean(v.vendor && invoicedVendorIds.has(v.vendor.id));
@@ -157,38 +202,55 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
   const internalCost = round2(internal.reduce((s, r) => s + r.cost, 0));
   const vendorCost = round2(vendorLines.reduce((s, r) => s + r.cost, 0));
   const totalCost = round2(internalCost + vendorCost);
-  const profit = round2(revenue.amount - totalCost);
-  const currencies = new Set([revenue.currency, ...contractors.map((c) => c.currency), ...invoices.map((i) => i.currency)]);
+  const revenueInr = toInr(revenue.amount, revenue.currency);
+  const missingRates = [...missing];
+  const profit = missingRates.length ? null : round2(revenueInr - totalCost);
 
   return {
     pnl: {
-      project: { id: account.id, name: calendarsService.projectName(account), client_name: account.client_name || null },
+      project: { id: account.id, code: account.project_code || null, name: calendarsService.projectName(account), client_account_id: account.client_account_id || null, client_name: account.client_account?.name || account.client_name || null },
       period_month,
       period_year,
-      currency: revenue.currency,
-      mixed_currency: currencies.size > 1,
-      revenue,
+      currency: 'INR',
+      missing_rates: missingRates,
+      // amount is INR; original_amount / original_currency are as billed.
+      revenue: { ...revenue, amount: revenueInr, original_amount: revenue.amount, original_currency: revenue.currency, currency: 'INR' },
       internal: { cost: internalCost, employees: internal },
-      vendor: { cost: vendorCost, vendors: vendorLines, contractors, invoices },
+      vendor: { cost: vendorCost, vendors: vendorLines, contractors, invoices: invoices.map((i) => ({ ...i, amount_inr: toInr(i.amount, i.currency) })) },
       total_cost: totalCost,
       profit,
-      margin_percent: revenue.amount > 0 ? round2((profit / revenue.amount) * 100) : null,
+      margin_percent: profit !== null && revenueInr > 0 ? round2((profit / revenueInr) * 100) : null,
     },
   };
 }
 
-// Every active client project for one month — the Finance summary table.
-async function listProjectsPnl(orgId, period) {
-  const accounts = await prisma.account.findMany({ where: { org_id: orgId, type: 'client', stage: 'active' }, select: { id: true }, orderBy: { name: 'asc' } });
+// Every active client project for one month — the Finance summary table,
+// optionally narrowed to a project type (service category; 'none' = not set)
+// and/or a client.
+async function listProjectsPnl(orgId, { period_month, period_year, project_type = 'all', client_account_id } = {}) {
+  const period = { period_month, period_year };
+  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  if (client_account_id) where.client_account_id = client_account_id;
+  if (project_type === 'none') where.service_category = null;
+  else if (project_type && project_type !== 'all') where.service_category = project_type;
+  const [accounts, fx] = await Promise.all([
+    prisma.account.findMany({ where, select: { id: true, service_category: true }, orderBy: { name: 'asc' } }),
+    exchangeRates.inrRates(orgId),
+  ]);
   const rows = [];
-  for (const { id } of accounts) {
-    const { pnl } = await computeProjectPnl(orgId, id, period);
+  for (const { id, service_category } of accounts) {
+    const { pnl } = await computeProjectPnl(orgId, id, period, fx);
     rows.push({
       project: pnl.project,
+      service_category,
       currency: pnl.currency,
-      mixed_currency: pnl.mixed_currency,
+      missing_rates: pnl.missing_rates,
       revenue: pnl.revenue.amount,
+      original_revenue: pnl.revenue.original_amount,
+      original_currency: pnl.revenue.original_currency,
       billing_type: pnl.revenue.billing_type,
+      billing_rate: pnl.revenue.rate,
+      billable_hours: pnl.revenue.billable_hours ?? null,
       internal_cost: pnl.internal.cost,
       vendor_cost: pnl.vendor.cost,
       total_cost: pnl.total_cost,

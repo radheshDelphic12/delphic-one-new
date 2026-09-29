@@ -13,6 +13,7 @@ function failFor(res, result) {
   if (result.error === 'name_taken') return fail(res, 409, 'Team name already in use');
   if (result.error === 'department_not_found') return fail(res, 404, 'Department not found');
   if (result.error === 'lead_not_found') return fail(res, 404, 'Team lead not found in this organization');
+  if (result.error === 'manager_not_found') return fail(res, 404, 'Reports-to manager not found in this organization');
   if (result.error === 'in_use') return fail(res, 409, `This team still has ${result.count} member(s) — move them to another team first`);
   return null;
 }

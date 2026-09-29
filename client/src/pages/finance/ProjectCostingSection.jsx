@@ -91,8 +91,18 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
       <div>
         <h3 className="font-heading text-sm font-semibold text-tertiary-900">Project team (Employee ↔ Project), cost rates &amp; budget</h3>
         <p className="mt-0.5 text-xs text-tertiary-500">
-          Assign employees and contractors to this project (they can only log hours on projects assigned to them). Allocation % is the share of their monthly salary / vendor rate charged to this project in the P&amp;L — leave it empty to split evenly across their projects. Optionally set an hourly cost rate — additional to salary — to track budget burn as approved hours accrue.
+          Assign employees and contractors (vendor resources) to this project — they can only log hours on projects assigned to them. Neither field below is ever used for client billing; that is the project&apos;s billing rate above.
         </p>
+        <dl className="mt-2 grid gap-2 text-xs text-tertiary-600 sm:grid-cols-2">
+          <div className="rounded-xl bg-tertiary-50 px-3 py-2">
+            <dt className="font-semibold text-tertiary-800">Allocation %</dt>
+            <dd>How much of the person&apos;s working capacity goes to this project (e.g. 60% here, 40% on another). That share of their monthly salary — or a contractor&apos;s vendor rate — is this project&apos;s cost in P&amp;L, Resource Revenue and Vendor Payments. Empty = split evenly across their projects.</dd>
+          </div>
+          <div className="rounded-xl bg-tertiary-50 px-3 py-2">
+            <dt className="font-semibold text-tertiary-800">Internal cost rate / hour</dt>
+            <dd>The person&apos;s internal cost per hour on this contract (e.g. ₹500/h × 8 approved hours = ₹4,000). When set, P&amp;L costs this person by approved hours × this rate <em>instead of</em> the salary allocation, and it drives the budget burn below. Optional.</dd>
+          </div>
+        </dl>
       </div>
 
       {!fixedAccountId && (
@@ -144,8 +154,8 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
                     )}
                   </span>
                   <span className="flex items-center gap-3 text-tertiary-600">
-                    <span>{a.allocation_percent != null ? `${Number(a.allocation_percent)}% allocated` : <span className="text-tertiary-400">even split</span>}</span>
-                    {a.cost_rate_per_hr != null ? `${money(a.cost_rate_per_hr)}/hr` : <span className="text-tertiary-400">no cost rate</span>}
+                    <span title="Share of capacity / monthly cost charged to this project">{a.allocation_percent != null ? `${Number(a.allocation_percent)}% allocated` : <span className="text-tertiary-400">even split</span>}</span>
+                    <span title="Internal cost per approved hour (not client billing)">{a.cost_rate_per_hr != null ? `internal cost ${money(a.cost_rate_per_hr)}/hr` : <span className="text-tertiary-400">no internal cost rate</span>}</span>
                     <button type="button" aria-label="Remove from project" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => unassign(a)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -158,8 +168,8 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
           <form onSubmit={saveRate} className="flex flex-wrap items-end gap-2">
             {/* Resource type follows the person's user type (People → Full-Time Employee / Contractor). */}
             <div className="w-56"><SearchableSelect value={membershipId} onChange={setMembershipId} options={membershipOptions} placeholder="Select employee or contractor" searchPlaceholder="Search people…" /></div>
-            <input type="number" min="0" max="100" step="1" placeholder="Allocation % (optional)" value={allocation} onChange={(e) => setAllocation(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
-            <input type="number" min="0" step="0.01" placeholder="Cost rate/hr (optional)" value={rate} onChange={(e) => setRate(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
+            <input type="number" min="0" max="100" step="1" placeholder="Allocation % (optional)" title="Share of this person's capacity / monthly cost on this project" aria-label="Allocation percent" value={allocation} onChange={(e) => setAllocation(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
+            <input type="number" min="0" step="0.01" placeholder="Internal cost/hr (optional)" title="Internal cost per approved hour — never client billing" aria-label="Internal cost rate per hour" value={rate} onChange={(e) => setRate(e.target.value)} className="w-48 rounded-xl border px-3 py-2 text-sm" />
             <button type="submit" className="btn-primary inline-flex items-center gap-1.5" disabled={saving || !membershipId}>
               <Plus className="h-4 w-4" /> {saving ? 'Saving…' : 'Assign'}
             </button>

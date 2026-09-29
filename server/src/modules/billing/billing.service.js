@@ -264,20 +264,71 @@ async function transitionInvoice(orgId, invoiceId, status) {
   return { invoice: updated };
 }
 
-async function createGroupCharge(raisedByUserId, { org_id, period_month, period_year, kind, amount, currency }) {
+const GROUP_CHARGE_INCLUDE = {
+  category: { select: { id: true, name: true } },
+  location: { select: { id: true, name: true } },
+};
+
+async function createGroupCharge(raisedByUserId, { org_id, period_month, period_year, payment_date, kind, category_id, location_id, notes, amount, currency }) {
   const org = await prisma.org.findUnique({ where: { id: org_id } });
   if (!org) return { error: 'org_not_found' };
 
+  let categoryName = kind || null;
+  if (category_id) {
+    const category = await prisma.financeCategory.findFirst({ where: { id: category_id, org_id, kind: 'group_charge', is_active: true }, select: { id: true, name: true } });
+    if (!category) return { error: 'category_not_found' };
+    categoryName = category.name;
+  }
+  if (location_id) {
+    const location = await prisma.location.findFirst({ where: { id: location_id, org_id }, select: { id: true } });
+    if (!location) return { error: 'location_not_found' };
+  }
+
   const charge = await prisma.groupBillingCharge.create({
-    data: { org_group_id: org.org_group_id, org_id, period_month, period_year, kind, amount, currency, raised_by: raisedByUserId },
+    data: {
+      org_group_id: org.org_group_id,
+      org_id,
+      period_month,
+      period_year,
+      payment_date: payment_date || null,
+      kind: categoryName,
+      category_id: category_id || null,
+      location_id: location_id || null,
+      notes: notes || null,
+      amount,
+      currency,
+      raised_by: raisedByUserId,
+    },
+    include: GROUP_CHARGE_INCLUDE,
   });
   return { charge };
 }
 
-async function listMyGroupCharges(orgId, { period_month, period_year }) {
+// Month filter: a charge with a payment date is in the month it was paid;
+// one without (raised before payment dates existed, or by the group) is in
+// its period month. Date filters only match charges that have a payment date.
+async function listMyGroupCharges(orgId, { period_month, period_year, date, date_from, date_to, category_id, location_id }) {
+  const and = [];
+  if (period_month && period_year) {
+    const start = new Date(Date.UTC(period_year, period_month - 1, 1));
+    const end = new Date(Date.UTC(period_year, period_month, 0));
+    and.push({ OR: [{ payment_date: { gte: start, lte: end } }, { payment_date: null, period_month, period_year }] });
+  } else {
+    if (period_month) and.push({ period_month });
+    if (period_year) and.push({ period_year });
+  }
+  if (date) and.push({ payment_date: date });
+  if (date_from || date_to) and.push({ payment_date: { ...(date_from ? { gte: date_from } : {}), ...(date_to ? { lte: date_to } : {}) } });
+  if (category_id) {
+    const category = await prisma.financeCategory.findFirst({ where: { id: category_id, org_id: orgId }, select: { name: true } });
+    // Older charges carry only the category's name as text.
+    and.push({ OR: [{ category_id }, ...(category ? [{ category_id: null, kind: { equals: category.name, mode: 'insensitive' } }] : [])] });
+  }
+  if (location_id) and.push({ location_id });
   return prisma.groupBillingCharge.findMany({
-    where: { org_id: orgId, ...(period_month ? { period_month } : {}), ...(period_year ? { period_year } : {}) },
-    orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
+    where: { org_id: orgId, ...(and.length ? { AND: and } : {}) },
+    orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { payment_date: 'desc' }, { created_at: 'desc' }],
+    include: GROUP_CHARGE_INCLUDE,
   });
 }
 
@@ -380,13 +431,31 @@ function todayUtc() {
 // start date) resolve to the one added last.
 function currentAccountRate(rates, asOf) {
   const accountWide = rates.filter((r) => r.requirement_id === null).sort((a, b) => b.effective_from - a.effective_from || b.created_at - a.created_at);
-  return accountWide.find((r) => r.effective_from <= asOf) || accountWide[accountWide.length - 1] || null;
+  const inForce = accountWide.find((r) => r.effective_from <= asOf);
+  if (inForce) return inForce;
+  // All upcoming: the soonest date, and on that date the rate added last.
+  const soonest = accountWide[accountWide.length - 1];
+  return soonest ? accountWide.find((r) => +r.effective_from === +soonest.effective_from) : null;
+}
+
+// Contract tracking: a manual hold / completed wins; otherwise the dates decide.
+const ABOUT_TO_END_DAYS = 30;
+function contractState(account, today = todayUtc()) {
+  if (account.contract_status) return { state: account.contract_status, days_left: null };
+  const start = account.agreement_start_date;
+  const end = account.agreement_end_date;
+  if (end && end < today) return { state: 'completed', days_left: null };
+  if (!start || start > today) return { state: 'not_started', days_left: null };
+  const daysLeft = end ? Math.round((end - today) / 86400000) : null;
+  if (daysLeft !== null && daysLeft <= ABOUT_TO_END_DAYS) return { state: 'about_to_end', days_left: daysLeft };
+  return { state: 'running', days_left: daysLeft };
 }
 
 function serializeProfile(account, rates, calendar) {
   const rate = currentAccountRate(rates, todayUtc());
   return {
     id: account.id,
+    project_code: account.project_code || null,
     project_name: calendarsService.projectName(account),
     ...calendarsService.clientFields(account),
     // Left blank on purpose (client brief) — linking a requirement comes later.
@@ -396,7 +465,12 @@ function serializeProfile(account, rates, calendar) {
     rate: rate ? Number(rate.rate) : null,
     currency: rate ? rate.currency : account.client_billing_currency || 'INR',
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
+    agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
+    contract_status: account.contract_status,
+    contract: contractState(account),
     benchmark_hours: account.benchmark_hours,
+    overtime_billable: account.overtime_billable,
+    overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     calendar: calendar?.calendar || null,
     calendar_is_default: !calendar?.calendar,
   };
@@ -406,17 +480,23 @@ const PROFILE_SELECT = {
   id: true,
   name: true,
   project_name: true,
+  project_code: true,
+  overtime_billable: true,
+  overtime_multiplier: true,
   client_name: true,
   client_account_id: true,
   client_account: calendarsService.CLIENT_ACCOUNT_SELECT,
   service_category: true,
   agreement_start_date: true,
+  agreement_end_date: true,
+  contract_status: true,
   benchmark_hours: true,
   client_billing_currency: true,
   project_calendar: { select: { calendar: { select: { id: true, name: true, kind: true } } } },
 };
 
 async function listProjectProfiles(orgId) {
+  await calendarsService.ensureProjectCodes(orgId);
   const [accounts, rates, fallback] = await Promise.all([
     prisma.account.findMany({ where: { org_id: orgId, type: 'client', stage: 'active' }, select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
     prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
@@ -448,7 +528,7 @@ async function getProjectProfile(orgId, accountId) {
 // never overwritten) starting on the agreement start date — or today, if no
 // agreement date is set — so nothing already billed is rewritten.
 async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
-  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, client_account_id: true } });
+  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true } });
   if (!existing) return { error: 'account_not_found' };
 
   let client;
@@ -458,11 +538,11 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
     client = resolved.account;
   }
 
+  // The project name is only a label: another contract may carry the same
+  // name (the same client taking a second resource later is a separate
+  // project). Projects are told apart by their id / project_code.
   const currentName = calendarsService.projectName(existing);
   const renamed = patch.project_name !== undefined && patch.project_name !== currentName;
-  if (renamed && patch.project_name.toLowerCase() !== currentName.toLowerCase()) {
-    if (await calendarsService.projectNameTaken(orgId, patch.project_name, accountId)) return { error: 'name_taken' };
-  }
 
   // Only project fields are written — never the account's own name, which the
   // Accounts section owns and linked projects show as their client name.
@@ -475,7 +555,14 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   }
   if (patch.service_category !== undefined) data.service_category = patch.service_category;
   if (patch.agreement_start_date !== undefined) data.agreement_start_date = patch.agreement_start_date;
+  if (patch.agreement_end_date !== undefined) data.agreement_end_date = patch.agreement_end_date;
+  if (patch.contract_status !== undefined) data.contract_status = patch.contract_status;
+  const start = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
+  const end = patch.agreement_end_date !== undefined ? patch.agreement_end_date : existing.agreement_end_date;
+  if (start && end && end < start) return { error: 'end_before_start' };
   if (patch.benchmark_hours !== undefined) data.benchmark_hours = patch.benchmark_hours;
+  if (patch.overtime_billable !== undefined) data.overtime_billable = patch.overtime_billable;
+  if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   await prisma.$transaction(async (tx) => {

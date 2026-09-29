@@ -7,6 +7,8 @@ const {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
   listSalaryStructuresQuerySchema,
+  payrollFiltersSchema,
+  attendanceSalaryQuerySchema,
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
@@ -69,6 +71,12 @@ router.get(
   })
 );
 
+router.get(
+  '/attendance-salary',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.attendanceSalary(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
+);
+
 router.post(
   '/runs',
   authorize('admin'),
@@ -104,7 +112,7 @@ router.get(
   '/runs/:id/payslips',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.listRunPayslips(req.user.org_id, req.params.id);
+    const result = await service.listRunPayslips(req.user.org_id, req.params.id, payrollFiltersSchema.parse(req.query));
     if (result.error) return failFor(res, result.error);
     return ok(res, result.data);
   })

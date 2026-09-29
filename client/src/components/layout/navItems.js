@@ -30,13 +30,17 @@ import {
  * keeps the sidebar from growing one row per new ERP module.
  */
 export const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard },
+  // Hidden for admins for now: the admin dashboard's figures are not correct
+  // yet. The page and its APIs stay in the codebase (see App.jsx HomePage) —
+  // drop `hiddenForAdmin` to bring it back.
+  { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard, hiddenForAdmin: true },
   { to: '/accounts', label: 'Accounts', icon: Building2, capability: 'viewPipeline', masterOnly: true },
   { to: '/pipeline', label: 'Pipeline', icon: Columns3, capability: 'viewPipeline', masterOnly: true },
   { to: '/requirements', label: 'Requirements', icon: Briefcase, capability: 'viewPipeline', masterOnly: true },
   { to: '/profiles', label: 'Profiles', icon: Users, capability: 'viewProfiles', masterOnly: true },
   { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', masterOnly: true },
-  { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+  // Sales, HR and Management departments only (see lib/departments.js).
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true },
   { to: '/people', label: 'People', icon: Users, capability: 'viewPeople' },
   { to: '/attendance', label: 'Time & Attendance', icon: Clock, capability: 'viewAttendance' },
   { to: '/finance', label: 'Finance', icon: Wallet, capability: 'viewExpenses' },

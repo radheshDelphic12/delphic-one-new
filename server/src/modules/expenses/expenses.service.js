@@ -1,13 +1,49 @@
 const prisma = require('../../config/db');
 
-async function createClaim(orgId, orgMembershipId, { location_id, category, amount, currency }) {
+const CLAIM_INCLUDE = {
+  location: { select: { id: true, name: true } },
+  category_ref: { select: { id: true, name: true } },
+};
+
+// A picked category must be an active Expense category of this org; its name
+// is kept on the claim too so the claim reads correctly if it's renamed.
+async function resolveCategory(orgId, category_id) {
+  return prisma.financeCategory.findFirst({ where: { id: category_id, org_id: orgId, kind: 'expense', is_active: true }, select: { id: true, name: true } });
+}
+
+async function createClaim(orgId, orgMembershipId, { location_id, category, category_id, expense_date, amount, currency }) {
   const location = await prisma.location.findFirst({ where: { id: location_id, org_id: orgId } });
   if (!location) return { error: 'location_not_found' };
+  let name = category;
+  if (category_id) {
+    const picked = await resolveCategory(orgId, category_id);
+    if (!picked) return { error: 'category_not_found' };
+    name = picked.name;
+  }
 
   const claim = await prisma.expenseClaim.create({
-    data: { org_id: orgId, org_membership_id: orgMembershipId, location_id, category, amount, currency },
+    data: { org_id: orgId, org_membership_id: orgMembershipId, location_id, category: name, category_id: category_id || null, expense_date: expense_date || null, amount, currency },
+    include: CLAIM_INCLUDE,
   });
   return { claim };
+}
+
+// Month / category / office / employee filters shared by both lists.
+async function claimFilterWhere(orgId, { period_month, period_year, category_id, location_id, org_membership_id }) {
+  const and = [];
+  if (period_month && period_year) {
+    const start = new Date(Date.UTC(period_year, period_month - 1, 1));
+    const end = new Date(Date.UTC(period_year, period_month, 0));
+    const endExclusive = new Date(Date.UTC(period_year, period_month, 1));
+    and.push({ OR: [{ expense_date: { gte: start, lte: end } }, { expense_date: null, created_at: { gte: start, lt: endExclusive } }] });
+  }
+  if (category_id) {
+    const cat = await prisma.financeCategory.findFirst({ where: { id: category_id, org_id: orgId }, select: { name: true } });
+    and.push({ OR: [{ category_id }, ...(cat ? [{ category_id: null, category: { equals: cat.name, mode: 'insensitive' } }] : [])] });
+  }
+  if (location_id) and.push({ location_id });
+  if (org_membership_id) and.push({ org_membership_id });
+  return and.length ? { AND: and } : {};
 }
 
 // Edit a submitted claim (location, category, amount, currency) while it is still
@@ -24,31 +60,39 @@ async function updateClaim(orgId, claimId, actor, patch) {
     const location = await prisma.location.findFirst({ where: { id: patch.location_id, org_id: orgId } });
     if (!location) return { error: 'location_not_found' };
   }
+  const data = { ...patch };
+  if (patch.category_id) {
+    const picked = await resolveCategory(orgId, patch.category_id);
+    if (!picked) return { error: 'category_not_found' };
+    data.category = picked.name;
+  } else if (patch.category) {
+    data.category_id = null;
+  }
   const updated = await prisma.expenseClaim.update({
     where: { id: claimId },
-    data: patch,
-    include: { location: { select: { id: true, name: true } } },
+    data,
+    include: CLAIM_INCLUDE,
   });
   return { claim: updated };
 }
 
-async function listMyClaims(orgId, orgMembershipId, { status, page, limit }) {
-  const where = { org_id: orgId, org_membership_id: orgMembershipId, ...(status ? { status } : {}) };
+async function listMyClaims(orgId, orgMembershipId, { status, page, limit, ...filters }) {
+  const where = { org_id: orgId, org_membership_id: orgMembershipId, ...(status ? { status } : {}), ...(await claimFilterWhere(orgId, filters)) };
   const [data, total] = await Promise.all([
     prisma.expenseClaim.findMany({
       where,
       orderBy: { created_at: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
-      include: { location: { select: { id: true, name: true } } },
+      include: CLAIM_INCLUDE,
     }),
     prisma.expenseClaim.count({ where }),
   ]);
   return { data, pagination: { page, limit, total } };
 }
 
-async function listClaims(orgId, { org_membership_id, status, page, limit }) {
-  const where = { org_id: orgId, ...(org_membership_id ? { org_membership_id } : {}), ...(status ? { status } : {}) };
+async function listClaims(orgId, { status, page, limit, ...filters }) {
+  const where = { org_id: orgId, ...(status ? { status } : {}), ...(await claimFilterWhere(orgId, filters)) };
   const [data, total] = await Promise.all([
     prisma.expenseClaim.findMany({
       where,
@@ -56,7 +100,7 @@ async function listClaims(orgId, { org_membership_id, status, page, limit }) {
       skip: (page - 1) * limit,
       take: limit,
       include: {
-        location: { select: { id: true, name: true } },
+        ...CLAIM_INCLUDE,
         org_membership: { select: { id: true, person: { select: { id: true, name: true } } } },
       },
     }),

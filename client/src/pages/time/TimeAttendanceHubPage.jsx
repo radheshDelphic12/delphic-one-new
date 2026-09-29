@@ -76,7 +76,19 @@ export default function TimeAttendanceHubPage() {
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
       {section === 'holidays' && <MyHolidaysTab />}
-      {section === 'timesheets' && <TimesheetsPage />}
+      {section === 'timesheets' && (
+        <div className="space-y-8">
+          <TimesheetsPage />
+          {/* Admins also get the records view of everyone outside IT — the
+              people who log through this tab (IT has its own IT Timesheet tab). */}
+          {isAdmin && (
+            <section className="space-y-3 border-t border-tertiary-100 pt-6">
+              <h2 className="font-heading text-base font-semibold text-tertiary-900">Team timesheets (non-IT)</h2>
+              <ItTimesheetAdminView key="non-it" scope="non_it" />
+            </section>
+          )}
+        </div>
+      )}
       {section === 'it-timesheet' && isIt && (isAdmin ? <ItTimesheetAdminView /> : <ItTimesheetPage />)}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
       {section === 'monitoring' && isAdmin && <TeamMonitoringTab />}

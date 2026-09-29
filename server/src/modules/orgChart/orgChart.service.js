@@ -5,6 +5,8 @@ const MEMBER_SELECT = {
   manager_id: true,
   role: true,
   employee_code: true,
+  team_id: true,
+  worker_type: true,
   employment_status: true,
   joined_at: true,
   left_at: true,
@@ -36,12 +38,20 @@ function buildTree(memberships) {
 }
 
 async function getOrgChart(orgId, { include_terminated }) {
-  const memberships = await prisma.orgMembership.findMany({
-    where: { org_id: orgId, ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }) },
-    select: MEMBER_SELECT,
-    orderBy: { joined_at: 'asc' },
-  });
-  return { headcount: memberships.length, roots: buildTree(memberships) };
+  const [memberships, teams] = await Promise.all([
+    prisma.orgMembership.findMany({
+      where: { org_id: orgId, ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }) },
+      select: MEMBER_SELECT,
+      orderBy: { joined_at: 'asc' },
+    }),
+    // HR Settings → Teams, for the team view (a box per team around its lead).
+    prisma.team.findMany({
+      where: { org_id: orgId },
+      select: { id: true, name: true, lead_membership_id: true, manager_membership_id: true, open_positions: true, sort_order: true },
+      orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
+    }),
+  ]);
+  return { headcount: memberships.length, roots: buildTree(memberships), teams };
 }
 
 // Cross-org — mirrors super-dashboard's posture (HLD §7): gated to

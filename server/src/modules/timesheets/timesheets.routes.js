@@ -96,8 +96,8 @@ router.get(
   '/overview',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const { department_id, month, year } = overviewQuerySchema.parse(req.query);
-    const overview = await service.teamOverview(req.user.org_id, { department_id, month, year });
+    const { department_id, exclude_department_id, month, year } = overviewQuerySchema.parse(req.query);
+    const overview = await service.teamOverview(req.user.org_id, { department_id, exclude_department_id, month, year });
     return ok(res, overview);
   })
 );

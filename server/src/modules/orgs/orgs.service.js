@@ -181,7 +181,37 @@ async function updateMembership(orgId, membershipId, patch) {
   return { membership: updated };
 }
 
+// Bank + emergency contact. Kept out of MEMBERSHIP_DETAIL_SELECT on purpose:
+// that read is open to every member of the org; this one is admin-or-self.
+const PERSONAL_SELECT = {
+  id: true,
+  person: { select: { name: true } },
+  bank_account_holder: true,
+  bank_name: true,
+  bank_account_number: true,
+  bank_ifsc: true,
+  bank_branch: true,
+  emergency_contact_name: true,
+  emergency_contact_relation: true,
+  emergency_contact_phone: true,
+  emergency_contact_email: true,
+  personal_details_updated_at: true,
+};
+
+async function getPersonalDetails(orgId, membershipId) {
+  return prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId }, select: PERSONAL_SELECT });
+}
+
+async function updatePersonalDetails(orgId, membershipId, patch) {
+  const existing = await prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId }, select: { id: true } });
+  if (!existing) return null;
+  const data = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  return prisma.orgMembership.update({ where: { id: membershipId }, data: { ...data, personal_details_updated_at: new Date() }, select: PERSONAL_SELECT });
+}
+
 module.exports = {
+  getPersonalDetails,
+  updatePersonalDetails,
   updateSettings,
   listMyMemberships,
   listOrgs,

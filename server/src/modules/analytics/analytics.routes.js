@@ -4,6 +4,7 @@ const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace'
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./analytics.service');
+const live = require('../calculations/live.service');
 
 // Real-time analytics for the operating company. Admin-only: this is the
 // money view (salaries, margins, vendor payables). Master-workspace only —
@@ -13,6 +14,25 @@ router.use(authenticate, requireOrgMembership, requireMasterWorkspace, authorize
 
 const orgId = (req) => req.user.org_id;
 
+// --- Live Analytics (attendance / timesheet based; locked months are served
+//     from their locked version — see calculations/live.service.js). ---
+router.get('/billing', asyncHandler(async (req, res) => ok(res, await live.billingOverview(orgId(req), live.billingQuerySchema.parse(req.query)))));
+router.get(
+  '/billing/projects/:id',
+  asyncHandler(async (req, res) => {
+    const result = await live.billingProject(orgId(req), req.params.id, live.billingQuerySchema.parse(req.query));
+    return result.error ? fail(res, 404, 'Project not found') : ok(res, result);
+  })
+);
+router.get('/salary-attendance', asyncHandler(async (req, res) => ok(res, await live.salaryLive(orgId(req), live.salaryQuerySchema.parse(req.query)))));
+router.get('/resource-revenue', asyncHandler(async (req, res) => ok(res, await live.resourceRevenueLive(orgId(req), live.resourceQuerySchema.parse(req.query)))));
+router.get('/vendor-payments', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentsLive(orgId(req), live.vendorQuerySchema.parse(req.query)))));
+router.get('/vendor-payments/records', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentRecords(orgId(req), live.monthSchema.partial().parse(req.query)))));
+router.get('/financial-month', asyncHandler(async (req, res) => ok(res, await live.financialMonthLive(orgId(req), live.monthSchema.parse(req.query)))));
+
+// --- Previous Live Analytics reports. No longer shown in the UI (replaced by
+//     the attendance/timesheet-based reports above) but kept working, not
+//     deleted, so nothing that still calls them breaks. ---
 router.get('/live-sales', asyncHandler(async (req, res) => ok(res, await service.liveSales(orgId(req), service.liveQuerySchema.parse(req.query)))));
 router.get('/revenue-by-client', asyncHandler(async (req, res) => ok(res, await service.revenueByClient(orgId(req), service.rangeSchema.parse(req.query)))));
 router.get('/revenue-by-resource', asyncHandler(async (req, res) => ok(res, await service.resourceRevenue(orgId(req), service.rangeSchema.parse(req.query)))));
