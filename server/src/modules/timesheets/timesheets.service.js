@@ -9,6 +9,19 @@ const { detectFinanceChange } = require('../../lib/financeChanges');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 
+// A timesheet's project as people know it: the Finance project name when one
+// is set (older client rows renamed into projects keep the client's own name
+// in `name`), else the account name. Every response below goes through this,
+// so no screen shows "Nlineaxis" for the "Objective Eye" project.
+const ACCOUNT_REF = { select: { id: true, name: true, project_name: true } };
+function labelAccount(account) {
+  if (!account) return account;
+  const { project_name: projectName, ...rest } = account;
+  return { ...rest, name: projectName || account.name };
+}
+const labelEntry = (row) => (row ? { ...row, account: labelAccount(row.account) } : row);
+const labelTicket = (row) => (row ? { ...row, account: labelAccount(row.account), timesheet_entry: labelEntry(row.timesheet_entry) } : row);
+
 // IT staff and vendor resources (contractors) log against a fixed set of
 // assigned projects only; everyone else logs plain Date/Hours/Notes with no
 // project (see createEntry). One timesheet model and one approval flow for
@@ -148,7 +161,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (alreadyPendingToday === 0) {
     const person = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person: { select: { name: true } } } });
     await notifyManager(orgId, orgMembershipId, 'timesheet_submitted', actorUserId, {
-      employeeName: person?.person?.name, hours, dateLabel: ymd(date), accountName: account?.name,
+      employeeName: person?.person?.name, hours, dateLabel: ymd(date), accountName: account ? account.project_name || account.name : undefined,
     });
   }
   return { entry };
@@ -173,11 +186,11 @@ async function listMine(orgMembershipId, { from, to, account_id, status, page, l
       orderBy: [{ date: 'desc' }],
       skip: (page - 1) * limit,
       take: limit,
-      include: { account: { select: { id: true, name: true } }, requirement: { select: { id: true, title: true } } },
+      include: { account: ACCOUNT_REF, requirement: { select: { id: true, title: true } } },
     }),
     prisma.timesheetEntry.count({ where }),
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data: data.map(labelEntry), pagination: { page, limit, total } };
 }
 
 // Person filter for the admin views: in one department, or outside one
@@ -209,13 +222,13 @@ async function listTeam(orgId, { from, to, org_membership_id, account_id, status
       take: limit,
       include: {
         org_membership: { select: { id: true, person: { select: { id: true, name: true } } } },
-        account: { select: { id: true, name: true } },
+        account: ACCOUNT_REF,
         requirement: { select: { id: true, title: true } },
       },
     }),
     prisma.timesheetEntry.count({ where }),
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data: data.map(labelEntry), pagination: { page, limit, total } };
 }
 
 // Itemized month view for the IT timesheet: every entry for the member in
@@ -239,7 +252,7 @@ async function monthlyGrouped(orgId, orgMembershipId, year, month) {
     day.total_hours += Number(row.hours) + Number(row.overtime_hours || 0);
     day.entries.push({
       id: row.id,
-      account: row.account,
+      account: labelAccount(row.account),
       hours: Number(row.hours),
       overtime_hours: Number(row.overtime_hours || 0),
       billable: row.billable,
@@ -385,32 +398,34 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
 
   const person = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person: { select: { name: true } } } });
   await notifyManager(orgId, orgMembershipId, 'timesheet_regularization_requested', userId, {
-    employeeName: person?.person?.name, hours, dateLabel: ymd(date), reason, accountName: account?.name,
+    employeeName: person?.person?.name, hours, dateLabel: ymd(date), reason, accountName: account ? account.project_name || account.name : undefined,
   });
   return { ticket };
 }
 
 const TICKET_INCLUDE = {
-  timesheet_entry: { include: { account: { select: { id: true, name: true } } } },
-  account: { select: { id: true, name: true } },
+  timesheet_entry: { include: { account: ACCOUNT_REF } },
+  account: ACCOUNT_REF,
   requester: { select: { id: true, name: true } },
   org_membership: { select: { id: true, person: { select: { id: true, name: true } } } },
 };
 
 async function listTickets(orgId, { status } = {}) {
-  return prisma.timesheetRegularizationTicket.findMany({
+  const rows = await prisma.timesheetRegularizationTicket.findMany({
     where: { status, OR: [{ org_id: orgId }, { timesheet_entry: { org_id: orgId } }] },
     orderBy: { created_at: 'desc' },
     include: TICKET_INCLUDE,
   });
+  return rows.map(labelTicket);
 }
 
 async function listMyTickets(orgId, orgMembershipId) {
-  return prisma.timesheetRegularizationTicket.findMany({
+  const rows = await prisma.timesheetRegularizationTicket.findMany({
     where: { OR: [{ org_membership_id: orgMembershipId }, { timesheet_entry: { org_membership_id: orgMembershipId } }] },
     orderBy: { created_at: 'desc' },
     include: TICKET_INCLUDE,
   });
+  return rows.map(labelTicket);
 }
 
 // Approving applies the correction even though the day is locked. New-style
@@ -519,7 +534,7 @@ async function pendingApprovals(orgId, actor) {
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, status: 'submitted', org_membership: owner },
       orderBy: [{ date: 'desc' }, { created_at: 'asc' }],
-      include: { account: { select: { id: true, name: true } }, org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+      include: { account: ACCOUNT_REF, org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
     }),
     prisma.timesheetRegularizationTicket.findMany({
       where: {
@@ -533,7 +548,7 @@ async function pendingApprovals(orgId, actor) {
       include: TICKET_INCLUDE,
     }),
   ]);
-  return { entries, regularizations };
+  return { entries: entries.map(labelEntry), regularizations: regularizations.map(labelTicket) };
 }
 
 // Projects the caller can log time on: allocations still open, upcoming, or
@@ -616,7 +631,7 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
     }),
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, org_membership_id: { in: memberIds }, date: { gte: from, lt: to } },
-      select: { org_membership_id: true, hours: true, overtime_hours: true, is_holiday_overtime: true, account: { select: { name: true } } },
+      select: { org_membership_id: true, hours: true, overtime_hours: true, is_holiday_overtime: true, account: { select: { name: true, project_name: true } } },
     }),
     prisma.timesheetEntry.count({ where: { org_id: orgId, org_membership_id: { in: memberIds }, status: 'submitted' } }),
     prisma.timesheetRegularizationTicket.count({
@@ -634,7 +649,7 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
     const bucket = byMember.get(e.org_membership_id);
     if (!bucket) continue;
     bucket.hours += Number(e.hours);
-    const name = e.account?.name || 'Unassigned';
+    const name = e.account ? e.account.project_name || e.account.name : 'Unassigned';
     bucket.byProject.set(name, (bucket.byProject.get(name) || 0) + Number(e.hours));
   }
 
