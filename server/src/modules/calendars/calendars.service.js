@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
+const { projectListWhere } = require('../../lib/projectScope');
 
 // Allocations are effective-dated; calendar views show the ones still in
 // force today or starting later (an ended allocation is history only).
@@ -533,7 +534,7 @@ async function listProjects(orgId) {
   await ensureProjectCodes(orgId);
   const [rows, fallback] = await Promise.all([
     prisma.account.findMany({
-      where: { org_id: orgId, type: 'client', stage: 'active' },
+      where: projectListWhere(orgId),
       select: PROJECT_SELECT,
       orderBy: { name: 'asc' },
     }),

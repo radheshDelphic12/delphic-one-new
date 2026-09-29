@@ -56,12 +56,13 @@ describe('Add Project never creates a catalogue client account', () => {
 });
 
 describe('Finance only edits projects, never the Accounts catalogue', () => {
-  test('a catalogue client account listed in Finance is read-only; a project is editable', async () => {
+  test('a plain catalogue client is not listed in Finance and is read-only there; a project is editable', async () => {
     const ctx = await seed();
     const project = (await addProject(ctx, 'Caylent')).body.data;
 
+    // Creating/activating a client must not make it show up as a project.
     const profiles = (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
-    expect(profiles.find((p) => p.id === ctx.client.id)).toMatchObject({ editable: false, is_project: false });
+    expect(profiles.find((p) => p.id === ctx.client.id)).toBeUndefined();
     expect(profiles.find((p) => p.id === project.id)).toMatchObject({ editable: true, is_project: true });
 
     const blocked = await authed(request(app).patch(`/api/v1/billing/projects/${ctx.client.id}`), ctx.token).send({ agreement_start_date: '2026-01-01' });

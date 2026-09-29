@@ -29,6 +29,7 @@ const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
 const { monthlyDayRevenue } = require('../../billing/billing.service');
 const { round2, ymd, monthBounds, monthDates, isWeekend, todayIst } = require('../period');
+const { projectListWhere } = require('../../../lib/projectScope');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -380,7 +381,7 @@ function lockedAmount(raw) {
 // Active client projects matching the Billing & Sales / P&L filters.
 // project_type: managed_services | project | none | all.
 async function listProjects(orgId, { project_type = 'all', client_account_id, account_id } = {}) {
-  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  const where = projectListWhere(orgId);
   if (account_id) where.id = account_id;
   if (client_account_id) where.client_account_id = client_account_id;
   if (project_type === 'none') where.service_category = null;

@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const { activeOn } = allocations;
 
@@ -518,7 +519,7 @@ const PROFILE_SELECT = {
 async function listProjectProfiles(orgId) {
   await calendarsService.ensureProjectCodes(orgId);
   const [accounts, rates, fallback] = await Promise.all([
-    prisma.account.findMany({ where: { org_id: orgId, type: 'client', stage: 'active' }, select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
+    prisma.account.findMany({ where: projectListWhere(orgId), select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
     prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
   ]);

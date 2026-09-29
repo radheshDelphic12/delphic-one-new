@@ -34,6 +34,7 @@ const calendarsService = require('../calendars/calendars.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const exchangeRates = require('./exchangeRates.service');
 const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -240,7 +241,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
 // and/or a client.
 async function listProjectsPnl(orgId, { period_month, period_year, project_type = 'all', client_account_id } = {}) {
   const period = { period_month, period_year };
-  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  const where = projectListWhere(orgId);
   if (client_account_id) where.client_account_id = client_account_id;
   if (project_type === 'none') where.service_category = null;
   else if (project_type && project_type !== 'all') where.service_category = project_type;
