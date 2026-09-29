@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const leaveService = require('../leave/leave.service');
+const { detectFinanceChange } = require('../../lib/financeChanges');
 
 function minutesOfDayInZone(instant, timeZone) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant);
@@ -44,7 +45,22 @@ async function checkIn(orgId, orgMembershipId) {
     : await prisma.attendanceRecord.create({
         data: { org_id: orgId, org_membership_id: orgMembershipId, date, check_in_at, late_minutes, status: 'present', source: 'web' },
       });
+  await detectFinanceChange(orgId, {
+    source_type: 'attendance',
+    source_id: record.id,
+    date,
+    org_membership_id: orgMembershipId,
+    changed_by: await personIdOf(orgMembershipId),
+    description: 'Checked in',
+    old_value: { status: existing?.status || 'no_record' },
+    new_value: { status: 'present', check_in_at },
+  });
   return { record };
+}
+
+async function personIdOf(orgMembershipId) {
+  const m = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person_id: true } });
+  return m?.person_id || null;
 }
 
 // A shift's expected duration in minutes, handling an overnight shift
@@ -145,6 +161,18 @@ async function regularize(orgId, recordId, adminUserId, { status, check_in_at, c
       regularized_by: adminUserId,
       regularized_reason: reason,
     },
+  });
+  // A regularised day in an already-finalized month never rewrites the locked
+  // salary / revenue / financials — it is flagged for review instead.
+  await detectFinanceChange(orgId, {
+    source_type: 'attendance',
+    source_id: recordId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    changed_by: adminUserId,
+    description: `Attendance regularised: ${existing.status} → ${status}${reason ? ` (${reason})` : ''}`.slice(0, 500),
+    old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
+    new_value: { status: record.status, check_in_at: record.check_in_at, check_out_at: record.check_out_at },
   });
   return { record };
 }

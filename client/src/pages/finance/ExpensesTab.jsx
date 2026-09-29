@@ -1,31 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pencil, Plus, Receipt } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { useFinanceCategories, useLocationOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
+import { chargeColumns, chargeQuery } from './GroupChargesTab.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 // Submit (no `claim`) and edit (`claim` set) share the form. Editing is only offered
 // while the claim is pending; receipts attach to the saved claim, so they appear
 // once it exists (right after submitting, the drawer reopens in edit mode for them).
-function ClaimDrawer({ open, claim, locations, onClose, onSubmit }) {
+// The category comes from the admin-managed Expense categories (Finance → Categories).
+function ClaimDrawer({ open, claim, locations, categories, onClose, onSubmit }) {
   const isEditing = Boolean(claim);
-  const [fields, setFields] = useState({ location_id: '', category: '', amount: '', currency: 'INR' });
+  const [fields, setFields] = useState({ location_id: '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR' });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    // An older claim may carry only a free-text category: match it by name.
+    const byName = (name) => categories.find((c) => c.name.toLowerCase() === String(name || '').toLowerCase())?.id || '';
     setFields(claim
-      ? { location_id: claim.location_id, category: claim.category, amount: String(Number(claim.amount)), currency: claim.currency }
-      : { location_id: locations[0]?.id || '', category: '', amount: '', currency: 'INR' });
-  }, [open, claim, locations]);
+      ? {
+        location_id: claim.location_id,
+        category_id: claim.category_id || byName(claim.category),
+        expense_date: claim.expense_date ? String(claim.expense_date).slice(0, 10) : '',
+        amount: String(Number(claim.amount)),
+        currency: claim.currency,
+      }
+      : { location_id: locations[0]?.id || '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR' });
+  }, [open, claim, locations, categories]);
 
   function set(key, value) {
     setFields((current) => ({ ...current, [key]: value }));
@@ -35,7 +49,7 @@ function ClaimDrawer({ open, claim, locations, onClose, onSubmit }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ ...fields, amount: Number(fields.amount) });
+      await onSubmit({ ...fields, expense_date: fields.expense_date || undefined, amount: Number(fields.amount) });
       onClose();
     } finally {
       setSaving(false);
@@ -46,7 +60,7 @@ function ClaimDrawer({ open, claim, locations, onClose, onSubmit }) {
     <Drawer open={open} title={isEditing ? 'Edit expense claim' : 'Submit expense claim'} onClose={onClose} size={isEditing ? 'md' : 'sm'} tone={isEditing ? 'edit' : 'create'} footer={
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="expense-claim-form" className="btn-primary" disabled={saving || !fields.location_id || !fields.category.trim() || !fields.amount}>
+        <button type="submit" form="expense-claim-form" className="btn-primary" disabled={saving || !fields.location_id || !fields.category_id || !fields.amount}>
           {saving ? (isEditing ? 'Saving…' : 'Submitting…') : isEditing ? 'Save changes' : 'Submit claim'}
         </button>
       </>
@@ -61,7 +75,14 @@ function ClaimDrawer({ open, claim, locations, onClose, onSubmit }) {
         </label>
         <label className="block text-xs font-medium text-tertiary-600">
           Category
-          <input required value={fields.category} onChange={(e) => set('category', e.target.value)} placeholder="Travel, supplies, client entertainment…" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          <select required value={fields.category_id} onChange={(e) => set('category_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+            <option value="" disabled>Select category</option>
+            {categories.filter((c) => c.is_active || c.id === fields.category_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Expense date
+          <input type="date" max={todayIso()} value={fields.expense_date} onChange={(e) => set('expense_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-xs font-medium text-tertiary-600">
@@ -85,6 +106,16 @@ function ClaimDrawer({ open, claim, locations, onClose, onSubmit }) {
   );
 }
 
+const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '' };
+
+const VIEW_LABEL = { mine: 'My claims', team: 'Reimbursements', group: 'Group expenses' };
+
+/**
+ * Finance → Expenses. Everyone: their own claims. Admins also get
+ * Reimbursements (every employee's claims, to approve / reimburse) and Group
+ * Expenses (the company's group charges). Filters at the top — Employee,
+ * Month, Category, Office — combine.
+ */
 export default function ExpensesTab() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -95,21 +126,41 @@ export default function ExpensesTab() {
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const expenseCategories = useFinanceCategories('expense', { includeInactive: true });
+  const chargeCategories = useFinanceCategories('group_charge', { includeInactive: true, enabled: isAdmin });
+  const locationOptions = useLocationOptions(true);
+  const memberOptions = useOrgMembershipOptions(isAdmin);
+  const categories = view === 'group' ? chargeCategories : expenseCategories;
+  const setFilter = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
+
+  const params = useMemo(() => {
+    const base = chargeQuery({ month: filters.month, date: '', category_id: filters.category_id, location_id: filters.location_id });
+    if (view === 'team' && filters.org_membership_id) base.org_membership_id = filters.org_membership_id;
+    return base;
+  }, [filters, view]);
 
   async function load() {
     setLoading(true);
     try {
-      const endpoint = view === 'team' ? '/expenses/claims' : '/expenses/claims/me';
-      const { data } = await apiClient.get(endpoint, { params: { limit: 50 } });
-      setRows(data.data || []);
+      if (view === 'group') {
+        const { data } = await apiClient.get('/billing/group-charges', { params });
+        setRows(data.data || []);
+      } else {
+        const endpoint = view === 'team' ? '/expenses/claims' : '/expenses/claims/me';
+        const { data } = await apiClient.get(endpoint, { params: { limit: 100, ...params } });
+        setRows(data.data || []);
+      }
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to load expense claims'), 'Something went wrong');
+      pushError(apiErrorMessage(err, 'Failed to load expenses'), 'Something went wrong');
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [view]);
+  useEffect(() => { load(); }, [view, JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Group charges and claims use different category lists.
+  useEffect(() => { setFilters((f) => ({ ...f, category_id: '' })); }, [view]);
   useEffect(() => {
     apiClient.get('/orgs/locations').then(({ data }) => setLocations(data.data || [])).catch(() => setLocations([]));
   }, []);
@@ -159,10 +210,10 @@ export default function ExpensesTab() {
   }
 
   const columns = [
-    { key: 'created', header: 'Submitted', render: (row) => new Date(row.created_at).toLocaleDateString() },
+    { key: 'date', header: 'Expense date', render: (row) => (row.expense_date ? new Date(row.expense_date).toLocaleDateString(undefined, { timeZone: 'UTC' }) : <span title="Submission date (no expense date recorded)">{new Date(row.created_at).toLocaleDateString()}</span>) },
     ...(view === 'team' ? [{ key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' }] : []),
-    { key: 'location', header: 'Location', render: (row) => row.location?.name || '—' },
-    { key: 'category', header: 'Category' },
+    { key: 'location', header: 'Office', render: (row) => row.location?.name || '—' },
+    { key: 'category', header: 'Category', render: (row) => row.category_ref?.name || row.category },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${Number(row.amount).toLocaleString()}` },
     { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
     {
@@ -186,27 +237,62 @@ export default function ExpensesTab() {
     },
   ];
 
+  const filtered = Object.values(filters).some(Boolean);
+  const total = useMemo(() => {
+    const byCurrency = new Map();
+    for (const row of rows) byCurrency.set(row.currency, (byCurrency.get(row.currency) || 0) + Number(row.amount));
+    return [...byCurrency].map(([c, n]) => `${c} ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`).join(' · ');
+  }, [rows]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-          {['mine', ...(isAdmin ? ['team'] : [])].map((key) => (
+          {['mine', ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
             <button key={key} type="button" role="tab" aria-selected={view === key} className={`border-b-2 px-3 py-2 text-sm font-medium ${view === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setView(key)}>
-              {key === 'mine' ? 'My claims' : 'Team claims'}
+              {VIEW_LABEL[key]}
             </button>
           ))}
         </div>
-        <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
-          <Plus className="h-4 w-4" /> Submit claim
-        </button>
+        {view !== 'group' && (
+          <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
+            <Plus className="h-4 w-4" /> Submit claim
+          </button>
+        )}
       </div>
-      {!loading && rows.length === 0 ? (
+
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+        {view === 'team' && (
+          <label className="block text-xs font-medium text-tertiary-600">Employee<div className="mt-1"><SearchableSelect value={filters.org_membership_id} onChange={(v) => setFilter('org_membership_id', v)} options={memberOptions} placeholder="All employees" allowClear /></div></label>
+        )}
+        <label className="block text-xs font-medium text-tertiary-600">Month<input type="month" value={filters.month} onChange={(e) => setFilter('month', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm" /></label>
+        <label className="block text-xs font-medium text-tertiary-600">Category
+          <select value={filters.category_id} onChange={(e) => setFilter('category_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm">
+            <option value="">All categories</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}{c.is_active ? '' : ' (inactive)'}</option>)}
+          </select>
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">Office
+          <select value={filters.location_id} onChange={(e) => setFilter('location_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm">
+            <option value="">All offices</option>
+            {locationOptions.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+        </label>
+        <div className="flex items-end justify-between gap-2">
+          <button type="button" className="btn-ghost text-xs" onClick={() => setFilters(EMPTY_FILTERS)} disabled={!filtered}>Clear filters</button>
+          {!loading && rows.length > 0 && <span className="pb-1 text-xs font-medium text-tertiary-700">Total {total}</span>}
+        </div>
+      </div>
+
+      {view === 'group' ? (
+        <DataTable columns={chargeColumns} rows={rows} loading={loading} emptyLabel="No group expenses match these filters. Add them under Finance → Group Charges." />
+      ) : !loading && rows.length === 0 && !filtered ? (
         <EmptyState icon={Receipt} title="No expense claims yet" description="Submit a claim for reimbursement." action={<button type="button" className="btn-secondary" onClick={() => setDrawerOpen(true)}>Submit claim</button>} />
       ) : (
-        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No claims." />
+        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No claims match these filters." />
       )}
-      <ClaimDrawer open={drawerOpen} locations={locations} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
-      <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} onClose={() => setEditing(null)} onSubmit={updateClaim} />
+      <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
+      <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} categories={expenseCategories} onClose={() => setEditing(null)} onSubmit={updateClaim} />
     </div>
   );
 }

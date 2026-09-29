@@ -86,7 +86,7 @@ export default function ApprovalsTab() {
             {data.entries.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
                 <span className="text-tertiary-700">
-                  <b className="text-tertiary-900">{e.org_membership?.person?.name}</b> — {String(e.date).slice(0, 10)} · {e.hours}h
+                  <b className="text-tertiary-900">{e.org_membership?.person?.name}</b> — {String(e.date).slice(0, 10)} · {e.hours}h{Number(e.overtime_hours) ? ` + ${Number(e.overtime_hours)}h overtime` : ''}
                   {e.account?.name ? ` · ${e.account.name}` : ''}
                   {e.notes && <span className="block text-xs text-tertiary-500">{e.notes}</span>}
                 </span>

@@ -5,6 +5,7 @@ import AppLayout from '../components/layout/AppLayout.jsx';
 import HomePreloaderGate from '../components/HomePreloaderGate.jsx';
 import LoginPage from '../pages/auth/LoginPage.jsx';
 import DashboardPage from '../pages/dashboard/DashboardPage.jsx';
+import ContractorPortalPage from '../pages/contractor/ContractorPortalPage.jsx';
 import AccountsListPage from '../pages/accounts/AccountsListPage.jsx';
 import AccountDetailPage from '../pages/accounts/AccountDetailPage.jsx';
 import PipelineShell from '../pages/pipeline/PipelineShell.jsx';
@@ -34,6 +35,7 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
   return <div className="flex h-screen items-center justify-center text-tertiary-500">Loading…</div>;
@@ -64,11 +66,39 @@ function AccountBoardRedirect() {
 /**
  * Redirect when the current user lacks the required capability.
  */
+// Where an admin lands instead of the (temporarily hidden) dashboard.
+const ADMIN_HOME = '/finance';
+
+/**
+ * Home: contractors get their portal instead of the dashboard. Admins are sent
+ * to Finance while the admin dashboard is hidden (its numbers are not correct
+ * yet) — DashboardPage itself is untouched and still renders for other roles.
+ */
+function HomePage() {
+  const { user } = useAuth();
+  if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
+  if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
+  return (
+    <HomePreloaderGate>
+      <DashboardPage />
+    </HomePreloaderGate>
+  );
+}
+
 function RequirePermission({ capability, children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!can(user.role, capability)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The meetings / interviews calendar — Sales, HR and Management departments (and admins). */
+function RequireMeetingsCalendar({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!canSeeMeetingsCalendar(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -122,11 +152,7 @@ export default function App() {
       >
         <Route
           index
-          element={
-            <HomePreloaderGate>
-              <DashboardPage />
-            </HomePreloaderGate>
-          }
+          element={<HomePage />}
         />
         {/* Recruitment pipeline — Delphic Global only (see RequireMasterWorkspace), and only
             for roles with pipeline access (RequirePermission) — keeps a self-service-only
@@ -186,7 +212,7 @@ export default function App() {
         <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="calendar" element={<CalendarPage />} />
+        <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
           path="notifications/preferences"

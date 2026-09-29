@@ -23,6 +23,7 @@ const ERRORS = {
   already_decided: [409, 'Already decided'],
   not_approved: [422, 'Must be approved first'],
   not_editable: [409, 'Only a pending claim can be edited — this one has already been decided'],
+  category_not_found: [404, 'Expense category not found (or deactivated)'],
 };
 
 function failFor(res, error) {

@@ -19,14 +19,21 @@ function monthRange({ month, year }) {
   return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${lastDay}` };
 }
 
+const SCOPES = {
+  it: { people: 'IT members', team: 'IT team', all: 'All IT members', empty: 'No one is in the IT department yet.' },
+  non_it: { people: 'Non-IT members', team: 'Non-IT team', all: 'All non-IT members', empty: 'Everyone is in the IT department.' },
+};
+
 /**
- * Admin side of the IT Timesheet tab: a read/manage view of what the IT
- * department has logged — who logged today, hours and project split per
- * person, every entry for the month with approve/reject, and a per-person
- * drill-down + Excel export. IT staff themselves get ItTimesheetPage (the
- * logging grid) instead. Same endpoints as Team Monitoring, pre-scoped to IT.
+ * Admin read/manage view of a group's timesheets — who logged today, hours and
+ * project split per person, every entry for the month with approve/reject, and
+ * a per-person drill-down + Excel export. `scope` picks the group: 'it' (the
+ * IT Timesheet tab — IT staff themselves get ItTimesheetPage instead) or
+ * 'non_it' (everyone outside the IT department, incl. people with none). Same
+ * endpoints as Team Monitoring, pre-scoped by department.
  */
-export default function ItTimesheetAdminView() {
+export default function ItTimesheetAdminView({ scope = 'it' }) {
+  const text = SCOPES[scope];
   const { pushError, pushSuccess } = useAlerts();
   const now = new Date();
   const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
@@ -49,24 +56,29 @@ export default function ItTimesheetAdminView() {
       .catch(() => setItDept(null));
   }, []);
 
+  // IT: only the IT department. Non-IT: everyone outside it — everyone at all
+  // when there is no IT department.
+  const deptParams = scope === 'it' ? { department_id: itDept?.id } : { exclude_department_id: itDept?.id || undefined };
+  const ready = scope === 'it' ? Boolean(itDept) : itDept !== undefined;
+
   function loadOverview() {
-    if (!itDept) return;
+    if (!ready) return;
     setOverviewLoading(true);
     apiClient
-      .get('/timesheets/overview', { params: { department_id: itDept.id, month: period.month, year: period.year } })
+      .get('/timesheets/overview', { params: { ...deptParams, month: period.month, year: period.year } })
       .then(({ data }) => setOverview(data.data))
-      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the IT team overview'), 'Something went wrong'))
+      .catch((err) => pushError(apiErrorMessage(err, `Failed to load the ${text.team} overview`), 'Something went wrong'))
       .finally(() => setOverviewLoading(false));
   }
 
   function loadEntries() {
-    if (!itDept) return;
+    if (!ready) return;
     setEntriesLoading(true);
     apiClient
       .get('/timesheets/entries', {
         params: {
           ...monthRange(period),
-          department_id: itDept.id,
+          ...deptParams,
           org_membership_id: memberFilter || undefined,
           status: statusFilter || undefined,
           page,
@@ -77,7 +89,7 @@ export default function ItTimesheetAdminView() {
         setEntries(data.data || []);
         setTotal(data.pagination?.total ?? 0);
       })
-      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load IT timesheet entries'), 'Something went wrong'))
+      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load timesheet entries'), 'Something went wrong'))
       .finally(() => setEntriesLoading(false));
   }
 
@@ -164,7 +176,7 @@ export default function ItTimesheetAdminView() {
     },
   ];
 
-  if (itDept === null) {
+  if (scope === 'it' && itDept === null) {
     return (
       <EmptyState
         icon={Users}
@@ -187,7 +199,7 @@ export default function ItTimesheetAdminView() {
 
       {overview && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <StatCard label="IT members" value={overview.summary.total_members} />
+          <StatCard label={text.people} value={overview.summary.total_members} />
           <StatCard label="Logged today" value={overview.summary.logged_today} />
           <StatCard label="Missing today" value={overview.summary.missing_today} />
           <StatCard label="Hours this month" value={Math.round(monthHours * 100) / 100} />
@@ -196,8 +208,8 @@ export default function ItTimesheetAdminView() {
       )}
 
       <section>
-        <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">IT team</h3>
-        <DataTable columns={memberColumns} rows={memberRows} loading={overviewLoading} emptyLabel="No one is in the IT department yet." />
+        <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">{text.team}</h3>
+        <DataTable columns={memberColumns} rows={memberRows} loading={overviewLoading} emptyLabel={text.empty} />
       </section>
 
       <section>
@@ -205,7 +217,7 @@ export default function ItTimesheetAdminView() {
           <h3 className="font-heading text-sm font-semibold text-tertiary-900">Timesheet records</h3>
           <div className="flex flex-wrap items-center gap-2">
             <select value={memberFilter} onChange={(e) => setMemberFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
-              <option value="">All IT members</option>
+              <option value="">{text.all}</option>
               {members.map((m) => <option key={m.org_membership_id} value={m.org_membership_id}>{m.name}</option>)}
             </select>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">

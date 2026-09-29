@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Activity, Bell, LogOut, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+import { Activity, Bell, IdCard, LogOut, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -11,9 +11,12 @@ import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
 import { userCan } from '../../lib/permissions.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
+import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 
 const BASE_TABS = [
   { key: 'account', label: 'Account', icon: UserRound },
+  // The employee's own bank account, emergency contact and documents.
+  { key: 'details', label: 'My details', icon: IdCard },
   { key: 'security', label: 'Security', icon: ShieldCheck },
   { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'activity', label: 'Activity', icon: Activity },
@@ -218,6 +221,7 @@ export default function SettingsPage() {
       </div>
 
       {active === 'account' && <AccountTab user={user} onLogout={logout} />}
+      {active === 'details' && <div className="space-y-4"><PersonalDetailsSection self /></div>}
       {active === 'security' && <SecurityTab />}
       {active === 'notifications' && <NotificationPreferencesPage />}
       {active === 'activity' && <ActivityTab />}

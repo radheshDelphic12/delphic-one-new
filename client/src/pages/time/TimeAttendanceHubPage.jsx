@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, CalendarClock, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
+import { CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -10,10 +10,13 @@ import ItTimesheetPage from './ItTimesheetPage.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import TeamMonitoringTab from './TeamMonitoringTab.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
+import MyHolidaysTab from './MyHolidaysTab.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
+  // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
+  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
 ];
 // The ordinary popup-logging timesheet — for everyone EXCEPT IT-department
 // staff, who use the multi-row grid below exclusively (no popup at all).
@@ -72,7 +75,20 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
-      {section === 'timesheets' && <TimesheetsPage />}
+      {section === 'holidays' && <MyHolidaysTab />}
+      {section === 'timesheets' && (
+        <div className="space-y-8">
+          <TimesheetsPage />
+          {/* Admins also get the records view of everyone outside IT — the
+              people who log through this tab (IT has its own IT Timesheet tab). */}
+          {isAdmin && (
+            <section className="space-y-3 border-t border-tertiary-100 pt-6">
+              <h2 className="font-heading text-base font-semibold text-tertiary-900">Team timesheets (non-IT)</h2>
+              <ItTimesheetAdminView key="non-it" scope="non_it" />
+            </section>
+          )}
+        </div>
+      )}
       {section === 'it-timesheet' && isIt && (isAdmin ? <ItTimesheetAdminView /> : <ItTimesheetPage />)}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
       {section === 'monitoring' && isAdmin && <TeamMonitoringTab />}

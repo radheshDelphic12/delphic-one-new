@@ -24,20 +24,32 @@ async function getTestOrg() {
   return existing || createOrg({ name: 'Test Org', slug: 'test-org' });
 }
 
-// withOrg: also give the user an active membership in the test org, as
-// production users have after the Phase 0 backfill. Routes gated by
-// requireOrgMembership (e.g. /users/*) 403 without one.
-async function createUser({ role, active = true, name, is_superadmin = false, withOrg = false }) {
+// Users created with an explicit `withOrg: false` — never auto-enrolled.
+const noOrgUsers = new Set();
+
+// withOrg: true — give the user an active membership in the test org (a
+// master workspace) right away. Default (undefined) — do it lazily in
+// loginAs() if the user still has no membership row by then, as every
+// production user has after the Phase 0 backfill; recruitment routes
+// (requireMasterWorkspace) 403 without one. Lazy, so suites that build their
+// own orgs and memberships never see an extra org. withOrg: false — a
+// membership-less user (e.g. an offboarded employee), never enrolled.
+async function createUser({ role, active = true, name, is_superadmin = false, withOrg }) {
   const email = `${unique('user')}@test.local`;
   const password_hash = await bcrypt.hash(PASSWORD, 4);
   const user = await prisma.user.create({
     data: { name: name || `${role} tester`, email, password_hash, role, active, is_superadmin },
   });
-  if (withOrg) await createOrgMembership(user.id, (await getTestOrg()).id, { role });
+  if (withOrg === true) await createOrgMembership(user.id, (await getTestOrg()).id, { role });
+  if (withOrg === false) noOrgUsers.add(user.id);
   return user;
 }
 
 async function loginAs(user) {
+  if (!noOrgUsers.has(user.id) && !(await prisma.orgMembership.count({ where: { person_id: user.id } }))) {
+    const { role } = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true } });
+    await createOrgMembership(user.id, (await getTestOrg()).id, { role });
+  }
   const res = await request(app).post('/api/v1/auth/login').send({ email: user.email, password: PASSWORD });
   if (res.status !== 200) {
     throw new Error(`login failed for ${user.email}: ${res.status} ${JSON.stringify(res.body)}`);
@@ -138,6 +150,7 @@ async function createOrgMembership(userId, orgId, overrides = {}) {
       employment_status: overrides.employment_status || 'active',
       employee_code: overrides.employee_code,
       department_id: overrides.department_id,
+      ...(overrides.joined_at ? { joined_at: overrides.joined_at } : {}),
     },
   });
 }

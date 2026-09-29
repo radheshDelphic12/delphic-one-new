@@ -3,7 +3,11 @@ const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership 
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
+const pnlService = require('./projectPnl.service');
+const exchangeRates = require('./exchangeRates.service');
+const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
+  exchangeRatesSchema,
   createRateSchema,
   listRatesQuerySchema,
   computeDailyRevenueSchema,
@@ -19,6 +23,10 @@ const {
   listCostAssignmentsQuerySchema,
   accountBudgetQuerySchema,
   updateProjectProfileSchema,
+  periodQuerySchema,
+  pnlListQuerySchema,
+  vendorInvoiceSchema,
+  updateVendorInvoiceSchema,
 } = require('./billing.validation');
 
 const router = express.Router();
@@ -33,8 +41,11 @@ const ERRORS = {
   invalid_transition: [409, 'Invalid status transition'],
   org_not_found: [404, 'Org not found'],
   membership_not_found: [404, 'Employee not found in this org'],
-  name_taken: [409, 'A project with that name already exists'],
-  client_not_lead: [422, 'Client must be one of this company\'s Lead accounts'],
+  category_not_found: [404, 'Group charge category not found (or deactivated)'],
+  location_not_found: [404, 'Office location not found'],
+  client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
+  end_before_start: [422, 'The agreement end date cannot be before its start date'],
+  vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };
 
 function failFor(res, error, result) {
@@ -44,6 +55,85 @@ function failFor(res, error, result) {
   const mapped = ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
 }
+
+// Finance → Projects: monthly P&L (client billing - internal salary allocation
+// - vendor contractor cost) and per-project vendor invoices. See
+// projectPnl.service for the rules.
+const adminInOrg = [requireOrgMembership, authorize('admin')];
+
+router.get(
+  '/vendors',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await pnlService.listVendors(req.user.org_id)))
+);
+
+router.get(
+  '/projects-pnl',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await pnlService.listProjectsPnl(req.user.org_id, pnlListQuerySchema.parse(req.query))))
+);
+
+// INR value of each foreign currency, used to convert the P&L and project totals.
+router.get(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.listRates(req.user.org_id)))
+);
+
+router.put(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.setRates(req.user.org_id, exchangeRatesSchema.parse(req.body).rates)))
+);
+
+router.get(
+  '/projects/:id/pnl',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.computeProjectPnl(req.user.org_id, req.params.id, periodQuerySchema.parse(req.query));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.pnl);
+  })
+);
+
+router.get(
+  '/projects/:id/vendor-invoices',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const period = periodQuerySchema.partial().parse(req.query);
+    return ok(res, await pnlService.listVendorInvoices(req.user.org_id, req.params.id, period));
+  })
+);
+
+router.post(
+  '/projects/:id/vendor-invoices',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.createVendorInvoice(req.user.org_id, req.user.id, req.params.id, vendorInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.invoice);
+  })
+);
+
+router.patch(
+  '/vendor-invoices/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+
+router.delete(
+  '/vendor-invoices/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
 
 // Finance → Projects (project profile: name, client, blank requirement, billing
 // type, agreement start date). Registered first so '/projects' is not shadowed.

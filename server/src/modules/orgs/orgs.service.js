@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { resolveWorkerFields, WORKER_FIELDS } = require('../../lib/workerType');
 
 const MEMBERSHIP_SELECT = {
   id: true,
@@ -7,6 +8,7 @@ const MEMBERSHIP_SELECT = {
   employment_status: true,
   employee_code: true,
   joined_at: true,
+  worker_type: true,
   org: { select: { id: true, name: true, slug: true, logo_url: true, status: true, enabled_modules: true, is_master_workspace: true } },
 };
 
@@ -117,6 +119,12 @@ const MEMBERSHIP_DETAIL_SELECT = {
   sourcing_poc: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   designation: { select: { id: true, name: true } },
+  team: { select: { id: true, name: true } },
+  work_mode: true,
+  worker_type: true,
+  vendor_account: { select: { id: true, name: true } },
+  vendor_rate: true,
+  vendor_rate_currency: true,
 };
 
 async function listMemberships(orgId, { search, include_terminated }) {
@@ -153,15 +161,57 @@ async function updateMembership(orgId, membershipId, patch) {
     if (!manager) return { error: 'manager_not_found' };
   }
 
-  const updated = await prisma.orgMembership.update({
-    where: { id: membershipId },
-    data: patch,
-    select: MEMBERSHIP_DETAIL_SELECT,
+  if (patch.team_id) {
+    const team = await prisma.team.findFirst({ where: { id: patch.team_id, org_id: orgId } });
+    if (!team) return { error: 'team_not_found' };
+  }
+
+  const worker = await resolveWorkerFields(orgId, membership, patch);
+  if (worker.error) return worker;
+  const data = { ...patch };
+  for (const key of WORKER_FIELDS) delete data[key];
+  Object.assign(data, worker.data);
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // A contractor is always a self-service 'employee' in the portal, on the
+    // User row too (the role a membership-less login falls back to).
+    if (data.role) await tx.user.update({ where: { id: membership.person_id }, data: { role: data.role } });
+    return tx.orgMembership.update({ where: { id: membershipId }, data, select: MEMBERSHIP_DETAIL_SELECT });
   });
   return { membership: updated };
 }
 
+// Bank + emergency contact. Kept out of MEMBERSHIP_DETAIL_SELECT on purpose:
+// that read is open to every member of the org; this one is admin-or-self.
+const PERSONAL_SELECT = {
+  id: true,
+  person: { select: { name: true } },
+  bank_account_holder: true,
+  bank_name: true,
+  bank_account_number: true,
+  bank_ifsc: true,
+  bank_branch: true,
+  emergency_contact_name: true,
+  emergency_contact_relation: true,
+  emergency_contact_phone: true,
+  emergency_contact_email: true,
+  personal_details_updated_at: true,
+};
+
+async function getPersonalDetails(orgId, membershipId) {
+  return prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId }, select: PERSONAL_SELECT });
+}
+
+async function updatePersonalDetails(orgId, membershipId, patch) {
+  const existing = await prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId }, select: { id: true } });
+  if (!existing) return null;
+  const data = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  return prisma.orgMembership.update({ where: { id: membershipId }, data: { ...data, personal_details_updated_at: new Date() }, select: PERSONAL_SELECT });
+}
+
 module.exports = {
+  getPersonalDetails,
+  updatePersonalDetails,
   updateSettings,
   listMyMemberships,
   listOrgs,

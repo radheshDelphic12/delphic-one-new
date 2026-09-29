@@ -51,7 +51,7 @@ async function seedAccountAndRequirement(orgId, ownerId, salesOwnerId) {
 
 describe('Phase 3 — new timesheets routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/timesheets/entries/me'), access_token);
     expect(res.status).toBe(403);

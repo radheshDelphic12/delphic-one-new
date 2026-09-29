@@ -3,10 +3,12 @@ const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership 
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./orgs.service');
+const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
   createOrgSchema,
   createLocationSchema,
   membershipListQuerySchema,
+  personalDetailsSchema,
   updateMembershipSchema,
   updateValuationSchema,
   updateOrgSettingsSchema,
@@ -20,6 +22,48 @@ router.get(
   asyncHandler(async (req, res) => {
     const rows = await service.listMyMemberships(req.user.id);
     return ok(res, rows);
+  })
+);
+
+// --- Bank + emergency contact: the employee's own (portal), or anyone's for an admin. ---
+
+const canSeePersonal = (req, membershipId) => req.user.role === 'admin' || membershipId === req.user.org_membership_id;
+
+router.get(
+  '/me/details',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => ok(res, await service.getPersonalDetails(req.user.org_id, req.user.org_membership_id)))
+);
+
+router.put(
+  '/me/details',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const body = personalDetailsSchema.parse(req.body);
+    return ok(res, await service.updatePersonalDetails(req.user.org_id, req.user.org_membership_id, body));
+  })
+);
+
+router.get(
+  '/memberships/:id/details',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    if (!canSeePersonal(req, req.params.id)) return fail(res, 403, 'Only an admin or the employee can see these details');
+    const row = await service.getPersonalDetails(req.user.org_id, req.params.id);
+    if (!row) return fail(res, 404, 'Org membership not found');
+    return ok(res, row);
+  })
+);
+
+router.put(
+  '/memberships/:id/details',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    if (!canSeePersonal(req, req.params.id)) return fail(res, 403, 'Only an admin or the employee can change these details');
+    const body = personalDetailsSchema.parse(req.body);
+    const row = await service.updatePersonalDetails(req.user.org_id, req.params.id, body);
+    if (!row) return fail(res, 404, 'Org membership not found');
+    return ok(res, row);
   })
 );
 
@@ -95,6 +139,8 @@ router.patch(
     const result = await service.updateMembership(req.user.org_id, req.params.id, body);
     if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'manager_not_found') return fail(res, 404, 'Manager membership not found in this org');
+    if (result.error === 'team_not_found') return fail(res, 404, 'Team not found in this org');
+    if (WORKER_ERRORS[result.error]) return fail(res, ...WORKER_ERRORS[result.error]);
     if (result.error === 'self_manager') return fail(res, 422, 'A membership cannot be its own manager');
     return ok(res, result.membership);
   })

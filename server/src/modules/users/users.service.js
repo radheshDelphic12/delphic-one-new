@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../config/db');
+const { resolveWorkerFields } = require('../../lib/workerType');
 
 const PUBLIC_SELECT = {
   id: true,
@@ -75,13 +76,19 @@ async function listDirectory(orgId, { role, active } = {}) {
   });
 }
 
-async function create(orgId, { name, email, password, role, phone, department_id }) {
+// Contractors sign in with their own (personal) email like anyone else —
+// email is the login, nothing ties it to a company domain.
+async function create(orgId, { name, email, password, role, phone, department_id, ...workerPatch }) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return { error: 'email_taken' };
   if (department_id) {
     const department = await prisma.department.findFirst({ where: { id: department_id, org_id: orgId } });
     if (!department) return { error: 'department_not_found' };
   }
+  const worker = await resolveWorkerFields(orgId, {}, workerPatch);
+  if (worker.error) return worker;
+  const { role: workerRole, ...workerData } = worker.data;
+  if (workerRole) role = workerRole;
 
   const password_hash = await bcrypt.hash(password, 10);
   const user = await prisma.$transaction(async (tx) => {
@@ -97,7 +104,7 @@ async function create(orgId, { name, email, password, role, phone, department_id
       select: { id: true },
     });
     await tx.orgMembership.create({
-      data: { person_id: created.id, org_id: orgId, role, department_id: department_id || null },
+      data: { person_id: created.id, org_id: orgId, role, department_id: department_id || null, ...workerData },
     });
     return tx.user.findUnique({ where: { id: created.id }, select: PUBLIC_SELECT });
   });

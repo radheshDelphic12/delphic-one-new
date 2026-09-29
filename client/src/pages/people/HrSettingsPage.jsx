@@ -13,10 +13,20 @@ import ProjectCalendarPanel, { AddProjectModal } from './ProjectCalendarPanel.js
 const TABS = [
   { key: 'departments', label: 'Departments', icon: UsersRound },
   { key: 'designations', label: 'Designations', icon: UsersRound },
+  { key: 'teams', label: 'Teams', icon: UsersRound },
   { key: 'locations', label: 'Locations', icon: MapPin },
   { key: 'shifts', label: 'Shifts', icon: Settings2 },
   { key: 'calendars', label: 'Calendars', icon: CalendarDays },
 ];
+
+const ENDPOINTS = {
+  departments: '/departments',
+  designations: '/designations',
+  teams: '/teams',
+  locations: '/orgs/locations',
+  shifts: '/attendance/shifts',
+  calendars: '/calendars',
+};
 
 function minutesToTime(value) {
   if (value === undefined || value === null) return '';
@@ -40,6 +50,84 @@ function NameDrawer({ open, title, value, onClose, onSubmit }) {
   return <Drawer open={open} title={title} onClose={onClose} size="sm" tone="create" footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="settings-name-form" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'Saving...' : 'Save'}</button></>}><form id="settings-name-form" onSubmit={submit}><label className="block text-xs font-medium text-tertiary-600">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
 }
 
+// Team: name, department, lead, and how it sits on the org chart — the manager
+// it reports to (used when it has no lead yet; otherwise the lead's own
+// manager), open seats (drawn as vacant circles) and its order among siblings.
+// `team` is null to add one, else the team being edited.
+const EMPTY_TEAM = { name: '', department_id: '', lead_membership_id: '', manager_membership_id: '', open_positions: 0, sort_order: 0 };
+
+function TeamDrawer({ open, team, onClose, onSubmit }) {
+  const [fields, setFields] = useState(EMPTY_TEAM);
+  const [departments, setDepartments] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setFields(team ? {
+      name: team.name,
+      department_id: team.department_id || '',
+      lead_membership_id: team.lead_membership_id || '',
+      manager_membership_id: team.manager_membership_id || '',
+      open_positions: team.open_positions ?? 0,
+      sort_order: team.sort_order ?? 0,
+    } : EMPTY_TEAM);
+    apiClient.get('/departments').then(({ data }) => setDepartments(data.data || [])).catch(() => setDepartments([]));
+    apiClient.get('/orgs/memberships').then(({ data }) => setMembers(data.data || [])).catch(() => setMembers([]));
+  }, [open, team]);
+  function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onSubmit({
+        name: fields.name.trim(),
+        department_id: fields.department_id || null,
+        lead_membership_id: fields.lead_membership_id || null,
+        manager_membership_id: fields.manager_membership_id || null,
+        open_positions: Number(fields.open_positions) || 0,
+        sort_order: Number(fields.sort_order) || 0,
+      });
+      onClose();
+    } catch {
+      // onSubmit already showed the error; keep the drawer open to fix it.
+    } finally {
+      setSaving(false);
+    }
+  }
+  const input = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
+  const label = 'block text-xs font-medium text-tertiary-600';
+  const people = members.map((m) => <option key={m.id} value={m.id}>{m.person?.name}</option>);
+  return (
+    <Drawer
+      open={open}
+      title={team ? `Edit ${team.name}` : 'Add team'}
+      onClose={onClose}
+      size="sm"
+      tone={team ? 'edit' : 'create'}
+      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="team-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : team ? 'Save team' : 'Add team'}</button></>}
+    >
+      <form id="team-form" onSubmit={submit} className="space-y-3">
+        <label className={label}>Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className={input} /></label>
+        <label className={label}>Department<select value={fields.department_id} onChange={(event) => set('department_id', event.target.value)} className={input}><option value="">No department</option>{departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label className={label}>Team lead<select value={fields.lead_membership_id} onChange={(event) => set('lead_membership_id', event.target.value)} className={input}><option value="">No lead</option>{people}</select></label>
+        <fieldset className="space-y-3 rounded-xl border border-tertiary-100 p-3">
+          <legend className="px-1 text-xs font-semibold text-tertiary-700">Org chart</legend>
+          <label className={label}>
+            Reports to
+            <select value={fields.manager_membership_id} onChange={(event) => set('manager_membership_id', event.target.value)} className={input}><option value="">The team lead&apos;s manager</option>{people}</select>
+            <span className="mt-1 block font-normal text-tertiary-400">Used when the team has no lead yet. With neither, the team shows on its own above the chart.</span>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className={label}>Open positions<input type="number" min="0" max="50" value={fields.open_positions} onChange={(event) => set('open_positions', event.target.value)} className={input} /></label>
+            <label className={label}>Display order<input type="number" min="0" max="9999" value={fields.sort_order} onChange={(event) => set('sort_order', event.target.value)} className={input} /></label>
+          </div>
+          <p className="text-xs text-tertiary-400">Open positions show as vacant (purple) circles — the lead&apos;s seat first when there is no lead. Lower order numbers sit further left.</p>
+        </fieldset>
+      </form>
+    </Drawer>
+  );
+}
+
 function LocationDrawer({ open, onClose, onSubmit }) {
   const [fields, setFields] = useState({ name: '', city: '', country: '', is_default: false });
   const [saving, setSaving] = useState(false);
@@ -59,21 +147,23 @@ function ShiftDrawer({ open, onClose, onSubmit }) {
 // Handles both create (calendar prop absent) and edit (calendar prop set) —
 // same fields either way, only the title/submit label and create-vs-update
 // call differ.
-function CalendarDrawer({ open, calendar, onClose, onSubmit }) {
+export function CalendarDrawer({ open, calendar, onClose, onSubmit }) {
   const isEditing = Boolean(calendar);
-  const [fields, setFields] = useState({ name: '', kind: 'internal', is_default: false, location_id: '' });
+  const [fields, setFields] = useState({ name: '', kind: 'internal', is_default: false, location_id: '', department_id: '' });
   const [locations, setLocations] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [saving, setSaving] = useState(false);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
   useEffect(() => {
     if (!open) return;
     apiClient.get('/orgs/locations').then(({ data }) => setLocations(data.data || [])).catch(() => setLocations([]));
+    apiClient.get('/departments').then(({ data }) => setDepartments(data.data || [])).catch(() => setDepartments([]));
     setFields(calendar
-      ? { name: calendar.name, kind: calendar.kind, is_default: calendar.is_default, location_id: calendar.location?.id || '' }
-      : { name: '', kind: 'internal', is_default: false, location_id: '' });
+      ? { name: calendar.name, kind: calendar.kind, is_default: calendar.is_default, location_id: calendar.location?.id || '', department_id: calendar.department?.id || '' }
+      : { name: '', kind: 'internal', is_default: false, location_id: '', department_id: '' });
   }, [open, calendar]);
-  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ ...fields, location_id: fields.location_id || null }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title={isEditing ? `Edit ${calendar?.name || 'calendar'}` : 'Add calendar'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="calendar-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add calendar'}</button></>}><form id="calendar-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Kind<select value={fields.kind} onChange={(event) => set('kind', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="internal">Internal</option><option value="client">Client</option><option value="custom">Custom</option></select></label><label className="block text-xs font-medium text-tertiary-600">Office location / zone <span className="font-normal text-tertiary-400">(optional - leave empty for a client calendar)</span><select value={fields.location_id} onChange={(event) => set('location_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No location</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default calendar</label></form></Drawer>;
+  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ ...fields, location_id: fields.location_id || null, department_id: fields.department_id || null }); onClose(); } finally { setSaving(false); } }
+  return <Drawer open={open} title={isEditing ? `Edit ${calendar?.name || 'calendar'}` : 'Add calendar'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="calendar-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add calendar'}</button></>}><form id="calendar-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Kind<select value={fields.kind} onChange={(event) => set('kind', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="internal">Internal</option><option value="client">Client</option><option value="custom">Custom</option></select></label><label className="block text-xs font-medium text-tertiary-600">Office location / zone <span className="font-normal text-tertiary-400">(optional - leave empty for a client calendar)</span><select value={fields.location_id} onChange={(event) => set('location_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No location</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="block text-xs font-medium text-tertiary-600">Standard calendar for department <span className="font-normal text-tertiary-400">(optional - e.g. non-IT staff)</span><select value={fields.department_id} onChange={(event) => set('department_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No department</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label><label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default calendar</label></form></Drawer>;
 }
 
 // Same create/edit dual-purpose pattern as CalendarDrawer above.
@@ -97,7 +187,7 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
  * holiday. Replaces the old bottom-corner popup, which only ever showed a
  * bare list with no way to change anything once added.
  */
-function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
+export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
 
@@ -189,8 +279,7 @@ export default function HrSettingsPage() {
   async function load() {
     setLoading(true);
     try {
-      const endpoint = tab === 'departments' ? '/departments' : tab === 'designations' ? '/designations' : tab === 'locations' ? '/orgs/locations' : tab === 'shifts' ? '/attendance/shifts' : '/calendars';
-      const { data } = await apiClient.get(endpoint);
+      const { data } = await apiClient.get(ENDPOINTS[tab]);
       setRows(data.data || []);
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to load HR settings'), 'Something went wrong');
@@ -199,9 +288,19 @@ export default function HrSettingsPage() {
 
   useEffect(() => { load(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [editingTeam, setEditingTeam] = useState(null);
+  async function updateTeam(payload) {
+    try {
+      const { data } = await apiClient.patch(`/teams/${editingTeam.id}`, payload);
+      setRows((current) => current.map((r) => (r.id === data.data.id ? data.data : r)));
+      pushInfo(`${data.data.name} saved`);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update team'), 'Something went wrong');
+      throw err;
+    }
+  }
   async function createResource(payload) {
-    const endpoint = tab === 'departments' ? '/departments' : tab === 'designations' ? '/designations' : tab === 'locations' ? '/orgs/locations' : tab === 'shifts' ? '/attendance/shifts' : '/calendars';
-    try { const { data } = await apiClient.post(endpoint, payload); setRows((current) => [...current, data.data]); setDrawer(null); pushInfo('HR setting created'); } catch (err) { pushError(apiErrorMessage(err, 'Failed to create HR setting'), 'Something went wrong'); }
+    try { const { data } = await apiClient.post(ENDPOINTS[tab], payload); setRows((current) => [...current, data.data]); setDrawer(null); pushInfo('HR setting created'); } catch (err) { pushError(apiErrorMessage(err, 'Failed to create HR setting'), 'Something went wrong'); }
   }
 
   async function saveCalendarEdit(payload) {
@@ -212,6 +311,16 @@ export default function HrSettingsPage() {
       pushInfo('Calendar updated');
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to update calendar'), 'Something went wrong');
+    }
+  }
+
+  async function deleteTeam(team) {
+    try {
+      await apiClient.delete(`/teams/${team.id}`);
+      setRows((current) => current.filter((r) => r.id !== team.id));
+      pushInfo(`${team.name} deleted`);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete team'), 'Something went wrong');
     }
   }
 
@@ -280,6 +389,17 @@ export default function HrSettingsPage() {
   const names = { departments: 'department', designations: 'designation' };
   const columns = tab === 'departments' || tab === 'designations'
     ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }]
+    : tab === 'teams'
+    ? [
+        { key: 'name', header: 'Team' },
+        { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not set' },
+        { key: 'lead', header: 'Team lead', render: (row) => row.lead?.person?.name || 'Not set' },
+        { key: 'members', header: 'Members', render: (row) => row.member_count ?? 0 },
+        { key: 'manager', header: 'Reports to', render: (row) => row.manager?.person?.name || <span className="text-tertiary-400">Lead&apos;s manager</span> },
+        { key: 'open', header: 'Open positions', render: (row) => row.open_positions || 0 },
+        { key: 'order', header: 'Order', render: (row) => row.sort_order ?? 0 },
+        ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1"><button type="button" aria-label="Edit team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingTeam(row)}><Pencil className="h-3.5 w-3.5" /></button><button type="button" aria-label="Delete team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteTeam(row)}><Trash2 className="h-3.5 w-3.5" /></button></span> }] : []),
+      ]
     : tab === 'locations'
     ? [{ key: 'name', header: 'Location' }, { key: 'city', header: 'City', render: (row) => row.city || 'Not set' }, { key: 'country', header: 'Country', render: (row) => row.country || 'Not set' }, { key: 'default', header: 'Default', render: (row) => row.is_default ? 'Yes' : 'No' }]
     : tab === 'shifts'
@@ -288,6 +408,7 @@ export default function HrSettingsPage() {
         { key: 'name', header: 'Calendar', render: (row) => <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row.name}</button> },
         { key: 'kind', header: 'Kind', render: (row) => <span className="capitalize">{row.kind}</span> },
         { key: 'location', header: 'Zone / Location', render: (row) => row.location?.name || 'Not tied to a location' },
+        { key: 'department', header: 'Department', render: (row) => row.department?.name || '-' },
         { key: 'default', header: 'Default', render: (row) => (row.is_default ? 'Yes' : 'No') },
         { key: 'holidays', header: 'Holidays', render: (row) => <button type="button" className="text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row._count?.holidays ?? 0}</button> },
         {
@@ -316,6 +437,8 @@ export default function HrSettingsPage() {
     <div className="flex flex-wrap justify-end gap-2">{canManage && <button type="button" className={tab === 'calendars' ? 'btn-secondary inline-flex items-center gap-2' : 'btn-primary inline-flex items-center gap-2'} onClick={() => setDrawer(tab)}><Plus className="h-4 w-4" /> Add {names[tab] || tab.slice(0, -1)}</button>}{canManage && tab === 'calendars' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddProjectOpen(true)}><FolderPlus className="h-4 w-4" /> Add Project</button>}</div>
     {!loading && rows.length === 0 ? <EmptyState icon={Settings2} title={`No ${tab} configured`} description="Create the first setting when your organization is ready." action={canManage ? <button type="button" className="btn-secondary" onClick={() => setDrawer(tab)}>Add {names[tab] || tab.slice(0, -1)}</button> : null} /> : <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No ${tab} configured`} />}
     <NameDrawer open={drawer === 'departments' || drawer === 'designations'} title={`Add ${names[tab] || 'setting'}`} onClose={() => setDrawer(null)} value="" onSubmit={(name) => createResource({ name })} />
+    <TeamDrawer open={drawer === 'teams'} team={null} onClose={() => setDrawer(null)} onSubmit={createResource} />
+    <TeamDrawer open={Boolean(editingTeam)} team={editingTeam} onClose={() => setEditingTeam(null)} onSubmit={updateTeam} />
     <LocationDrawer open={drawer === 'locations'} onClose={() => setDrawer(null)} onSubmit={createResource} />
     <ShiftDrawer open={drawer === 'shifts'} onClose={() => setDrawer(null)} onSubmit={createResource} />
     {tab === 'calendars' && <ProjectCalendarPanel refreshKey={projectsRefresh} canManage={canManage} onAdd={() => setAddProjectOpen(true)} />}

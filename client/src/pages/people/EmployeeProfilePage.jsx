@@ -10,15 +10,38 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
+import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 
 const EMPTY_OPTIONS = {
   departments: [],
   designations: [],
+  teams: [],
+  vendors: [],
   locations: [],
   shifts: [],
   managerOptions: [],
   personOptions: [],
 };
+
+const WORK_MODE_OPTIONS = [
+  { value: 'onsite', label: 'Onsite' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'remote', label: 'Remote' },
+];
+
+const WORKER_TYPE_OPTIONS = [
+  { value: 'full_time_employee', label: 'Full-Time Employee' },
+  { value: 'contractor', label: 'Contractor' },
+];
+
+function formatMoney(value, currency) {
+  if (value === null || value === undefined) return 'Not set';
+  return `${currency || 'INR'} ${Number(value).toLocaleString('en-IN')}`;
+}
+
+function workModeLabel(value) {
+  return WORK_MODE_OPTIONS.find((option) => option.value === value)?.label || 'Not set';
+}
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : 'Not set';
@@ -38,11 +61,16 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       setFields({
         department_id: row.department?.id || '',
         designation_id: row.designation?.id || '',
+        team_id: row.team?.id || '',
+        work_mode: row.work_mode || '',
         location_id: row.location?.id || '',
         shift_id: row.shift?.id || '',
         manager_id: row.manager?.id || '',
         hr_poc_id: row.hr_poc?.id || '',
         sourcing_poc_id: row.sourcing_poc?.id || '',
+        worker_type: row.worker_type || 'full_time_employee',
+        vendor_account_id: row.vendor_account?.id || '',
+        vendor_rate: row.vendor_rate ?? '',
       });
     }
   }, [open, row]);
@@ -54,9 +82,22 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
   async function submit(event) {
     event.preventDefault();
     if (!fields || !row) return;
+    const { worker_type, vendor_account_id, vendor_rate, ...rest } = fields;
     const patch = Object.fromEntries(
-      Object.entries(fields).map(([key, value]) => [key, value || null])
+      Object.entries(rest).map(([key, value]) => [key, value || null])
     );
+    // Only send the worker fields when something about them changed, so a
+    // plain profile edit never trips the contractor validation.
+    const workerChanged = worker_type !== (row.worker_type || 'full_time_employee')
+      || vendor_account_id !== (row.vendor_account?.id || '')
+      || String(vendor_rate) !== String(row.vendor_rate ?? '');
+    if (workerChanged) {
+      patch.worker_type = worker_type;
+      if (worker_type === 'contractor') {
+        patch.vendor_account_id = vendor_account_id || null;
+        patch.vendor_rate = vendor_rate === '' ? null : Number(vendor_rate);
+      }
+    }
     setSaving(true);
     try {
       const { data } = await apiClient.patch(`/orgs/memberships/${row.id}`, patch);
@@ -71,6 +112,8 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
   const fieldsConfig = [
     ['department_id', 'Department', options.departments],
     ['designation_id', 'Designation', options.designations],
+    ['team_id', 'Team', options.teams],
+    ['work_mode', 'Work mode', WORK_MODE_OPTIONS],
     ['location_id', 'Location', options.locations],
     ['shift_id', 'Shift', options.shifts],
       ['manager_id', 'Manager', options.managerOptions.filter((person) => person.value !== row?.id)],
@@ -96,6 +139,26 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
     >
       {fields && (
         <form id="edit-membership-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-medium text-tertiary-600">
+            User type
+            <select value={fields.worker_type} onChange={(event) => setField('worker_type', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              {WORKER_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {fields.worker_type === 'contractor' ? (
+            <>
+              <label className="text-xs font-medium text-tertiary-600">
+                Vendor
+                <div className="mt-1">
+                  <SearchableSelect value={fields.vendor_account_id} onChange={(value) => setField('vendor_account_id', value)} options={options.vendors} placeholder="Select vendor" searchPlaceholder="Search vendors" />
+                </div>
+              </label>
+              <label className="text-xs font-medium text-tertiary-600">
+                Vendor rate (per month)
+                <input type="number" min="0" step="0.01" value={fields.vendor_rate} onChange={(event) => setField('vendor_rate', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              </label>
+            </>
+          ) : <div className="hidden sm:block" />}
           {fieldsConfig.map(([key, label, selectOptions]) => (
             <label key={key} className="text-xs font-medium text-tertiary-600">
               {label}
@@ -133,16 +196,20 @@ export default function EmployeeProfilePage() {
       apiClient.get(`/orgs/memberships/${id}`),
       user?.role === 'admin' ? apiClient.get('/departments') : Promise.resolve({ data: { data: [] } }),
       user?.role === 'admin' ? apiClient.get('/designations') : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? apiClient.get('/teams') : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? apiClient.get('/billing/vendors') : Promise.resolve({ data: { data: [] } }),
       apiClient.get('/orgs/locations'),
       apiClient.get('/attendance/shifts'),
       apiClient.get('/orgs/memberships'),
     ])
-      .then(([profile, departments, designations, locations, shifts, people]) => {
+      .then(([profile, departments, designations, teams, vendors, locations, shifts, people]) => {
         if (cancelled) return;
         setRow(profile.data.data);
         setOptions({
           departments: departments.data.data || [],
           designations: designations.data.data || [],
+          teams: teams.data.data || [],
+          vendors: vendors.data.data || [],
           locations: locations.data.data || [],
           shifts: shifts.data.data || [],
           managerOptions: (people.data.data || []).map((membership) => ({
@@ -176,6 +243,8 @@ export default function EmployeeProfilePage() {
   const selectOptions = {
     departments: optionsFor(options.departments),
     designations: optionsFor(options.designations),
+    teams: optionsFor(options.teams),
+    vendors: optionsFor(options.vendors),
     locations: optionsFor(options.locations),
     shifts: optionsFor(options.shifts),
     managerOptions: options.managerOptions,
@@ -210,9 +279,18 @@ export default function EmployeeProfilePage() {
         <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <PeekField label="Role"><span className="capitalize">{row.role}</span></PeekField>
           <PeekField label="Employment status"><Badge value={row.employment_status} /></PeekField>
+          <PeekField label="User type">{row.worker_type === 'contractor' ? 'Contractor' : 'Full-Time Employee'}</PeekField>
+          {row.worker_type === 'contractor' && (
+            <>
+              <PeekField label="Vendor">{row.vendor_account?.name || 'Not set'}</PeekField>
+              <PeekField label="Vendor rate (monthly)">{formatMoney(row.vendor_rate, row.vendor_rate_currency)}</PeekField>
+            </>
+          )}
           <PeekField label="Employee code">{row.employee_code || 'Not assigned'}</PeekField>
           <PeekField label="Department">{row.department?.name || 'Not assigned'}</PeekField>
           <PeekField label="Designation">{row.designation?.name || 'Not assigned'}</PeekField>
+          <PeekField label="Team">{row.team?.name || 'Not assigned'}</PeekField>
+          <PeekField label="Work mode">{workModeLabel(row.work_mode)}</PeekField>
           <PeekField label="Location">{row.location?.name || 'Not assigned'}</PeekField>
           <PeekField label="Shift">{row.shift?.name || 'Not assigned'}</PeekField>
           <PeekField label="Manager">{row.manager?.person?.name || 'Not assigned'}</PeekField>
@@ -222,6 +300,8 @@ export default function EmployeeProfilePage() {
           <PeekField label="Notice end">{formatDate(row.notice_end_date)}</PeekField>
         </dl>
       </section>
+      {/* Bank, emergency contact, documents — renders only for an admin or the employee themselves. */}
+      <PersonalDetailsSection membershipId={row.id} />
       <CalendarMappingSection membershipId={row.id} locationName={row.location?.name} canEdit={canEdit} />
       <EditMembershipDrawer
         open={editOpen}

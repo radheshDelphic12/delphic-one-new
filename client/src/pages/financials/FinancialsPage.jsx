@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { CalendarRange, ClipboardList, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
+import { CalendarRange, ClipboardList, Lock, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -14,10 +14,14 @@ import KpiCard from '../../components/ui/KpiCard.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
+import FinalizedFinancialsTab from './FinalizedFinancialsTab.jsx';
 
 const POLL_MS = 60000;
 const TABS = [
-  { key: 'overview', label: 'Overview', icon: Wallet },
+  // The final, locked state by business category (see FinalizedFinancialsTab).
+  { key: 'finalized', label: 'Financials', icon: Lock },
+  // Live month-by-month trend (not locked) — kept as it was.
+  { key: 'overview', label: 'Live trend', icon: Wallet },
   { key: 'plan', label: 'Plan vs actual', icon: ClipboardList },
   { key: 'projection', label: 'Projection & valuation', icon: TrendingUp },
 ];
@@ -193,11 +197,12 @@ function ProjectionTab() {
 
 export default function FinancialsPage() {
   const [params, setParams] = useSearchParams();
-  const requested = params.get('section') || 'overview';
-  const section = TABS.some((t) => t.key === requested) ? requested : 'overview';
+  const requested = params.get('section') || 'finalized';
+  const section = TABS.some((t) => t.key === requested) ? requested : 'finalized';
   return (
     <div className="space-y-4">
       <SectionTabs tabs={TABS} value={section} onChange={(key) => setParams({ section: key })} />
+      {section === 'finalized' && <FinalizedFinancialsTab />}
       {section === 'overview' && <OverviewTab />}
       {section === 'plan' && <PlanTab />}
       {section === 'projection' && <ProjectionTab />}

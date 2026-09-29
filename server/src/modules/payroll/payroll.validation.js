@@ -28,8 +28,18 @@ const updateSalaryStructureSchema = z
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
-const listSalaryStructuresQuerySchema = z.object({
+// Payroll filters (Employee / Department / Team), combinable.
+const payrollFiltersSchema = z.object({
   org_membership_id: z.string().uuid().optional(),
+  department_id: z.string().uuid().optional(),
+  team_id: z.string().uuid().optional(),
+});
+
+const listSalaryStructuresQuerySchema = payrollFiltersSchema;
+
+const attendanceSalaryQuerySchema = payrollFiltersSchema.extend({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
 });
 
 const createRunSchema = z.object({
@@ -50,6 +60,8 @@ module.exports = {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
   listSalaryStructuresQuerySchema,
+  payrollFiltersSchema,
+  attendanceSalaryQuerySchema,
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,

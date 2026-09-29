@@ -1,14 +1,20 @@
 import { useSearchParams } from 'react-router-dom';
-import { FolderKanban, Receipt, Users2 } from 'lucide-react';
+import { FolderKanban, Receipt, Tags, TrendingUp, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import ExpensesTab from './ExpensesTab.jsx';
 import ProjectsTab from './ProjectsTab.jsx';
 import GroupChargesTab from './GroupChargesTab.jsx';
+import ProjectPnlTab from './ProjectPnlTab.jsx';
+import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
 
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt }];
 const ADMIN_TABS = [
   { key: 'projects', label: 'Projects', icon: FolderKanban },
+  // Monthly profit per project: billing - internal salary - vendor contractors.
+  { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp },
   { key: 'group-charges', label: 'Group Charges', icon: Users2 },
+  // Admin-managed Group Charge + Expense categories (next to Group Charges).
+  { key: 'categories', label: 'Categories', icon: Tags },
 ];
 
 /**
@@ -51,7 +57,9 @@ export default function FinanceHubPage() {
       </div>
       {section === 'expenses' && <ExpensesTab />}
       {section === 'projects' && isAdmin && <ProjectsTab />}
+      {section === 'project-pnl' && isAdmin && <ProjectPnlTab />}
       {section === 'group-charges' && isAdmin && <GroupChargesTab />}
+      {section === 'categories' && isAdmin && <FinanceCategoriesTab />}
     </div>
   );
 }

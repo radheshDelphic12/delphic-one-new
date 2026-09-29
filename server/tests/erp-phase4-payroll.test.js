@@ -44,7 +44,7 @@ async function markPresent(orgId, membershipId, dates) {
 
 describe('Phase 4 — payroll routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/payroll/payslips/me'), access_token);
     expect(res.status).toBe(403);
@@ -176,7 +176,7 @@ describe('Phase 4 — processing a run computes payslips from attendance + leave
     await authed(request(app).post('/api/v1/payroll/salary-structures'), adminToken).send({
       org_membership_id: membership.id,
       effective_from: '2026-09-01',
-      ctc: 30000, // per_day_pay = 30000/30 = 1000
+      ctc: 30000, // per_day_pay = 30000 / 22 working days (Sep 2026, no holidays) = 1363.64
       components: { basic: 30000 },
     });
 
@@ -211,8 +211,10 @@ describe('Phase 4 — processing a run computes payslips from attendance + leave
     const payslip = mine.body.data[0];
     expect(payslip.breakdown.unpaid_days).toBe(2);
     expect(payslip.breakdown.paid_leave_days).toBe(1);
-    expect(Number(payslip.deductions)).toBe(2000); // 2 unpaid days * 1000/day
-    expect(Number(payslip.net)).toBe(28000);
+    // Prorated on the calendar's working days, never a fixed 30.
+    expect(payslip.breakdown.working_days).toBe(22);
+    expect(Number(payslip.deductions)).toBe(2727.27); // 2 unpaid days * 30000/22
+    expect(Number(payslip.net)).toBe(27272.73);
   });
 
   test('a member with no salary structure is skipped, not failed', async () => {
