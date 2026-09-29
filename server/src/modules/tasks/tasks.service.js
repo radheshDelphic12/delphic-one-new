@@ -1,6 +1,12 @@
 const prisma = require('../../config/db');
 
-const ACCOUNT_SELECT = { id: true, name: true };
+const ACCOUNT_SELECT = { id: true, name: true, project_name: true };
+// Show a task's project by its project name (see timesheets.service labelAccount).
+function labelTask(task) {
+  if (!task?.account) return task;
+  const { project_name: projectName, ...account } = task.account;
+  return { ...task, account: { ...account, name: projectName || account.name } };
+}
 const CREATOR_SELECT = { id: true, name: true };
 const ASSIGNEE_SELECT = { id: true, person: { select: { id: true, name: true } } };
 
@@ -14,7 +20,7 @@ async function createTask(orgId, createdByUserId, { account_id, assignee_members
     data: { org_id: orgId, account_id, assignee_membership_id, created_by: createdByUserId, title, description, due_date },
     include: { account: { select: ACCOUNT_SELECT }, creator: { select: CREATOR_SELECT }, assignee: { select: ASSIGNEE_SELECT } },
   });
-  return { task };
+  return { task: labelTask(task) };
 }
 
 async function listTasks(orgId, { status, assignee_membership_id, account_id, page, limit }) {
@@ -34,15 +40,16 @@ async function listTasks(orgId, { status, assignee_membership_id, account_id, pa
     }),
     prisma.assignedTask.count({ where }),
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data: data.map(labelTask), pagination: { page, limit, total } };
 }
 
 async function listMyTasks(orgMembershipId, { status } = {}) {
-  return prisma.assignedTask.findMany({
+  const rows = await prisma.assignedTask.findMany({
     where: { assignee_membership_id: orgMembershipId, ...(status ? { status } : {}) },
     orderBy: [{ status: 'asc' }, { due_date: 'asc' }, { created_at: 'desc' }],
     include: { account: { select: ACCOUNT_SELECT }, creator: { select: CREATOR_SELECT } },
   });
+  return rows.map(labelTask);
 }
 
 // Admin may patch any field; a plain assignee may only move their own task's
@@ -60,7 +67,7 @@ async function updateTask(orgId, taskId, actor, patch) {
     data: patch,
     include: { account: { select: ACCOUNT_SELECT }, creator: { select: CREATOR_SELECT }, assignee: { select: ASSIGNEE_SELECT } },
   });
-  return { task: updated };
+  return { task: labelTask(updated) };
 }
 
 module.exports = { createTask, listTasks, listMyTasks, updateTask };
