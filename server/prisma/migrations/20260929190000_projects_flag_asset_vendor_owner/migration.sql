@@ -1,6 +1,6 @@
 -- Projects vs. client accounts: both are type 'client' rows in accounts; a
 -- project gets is_project = true. Existing projects are the rows Add Project
--- made — the same rule the project Client picker already used: a service
+-- made - the same rule the project Client picker already used: a service
 -- category and nothing from the Accounts side (no requirements, contact,
 -- industry or classification). A real client that Finance gave a category
 -- keeps its Accounts data, so it stays a catalogue account (read-only in Finance).

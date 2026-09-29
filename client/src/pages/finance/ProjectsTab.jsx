@@ -133,12 +133,19 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
       footer={
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="project-profile-form" className="btn-primary" disabled={saving || !form.project_name.trim()}>{saving ? 'Saving…' : 'Save project'}</button>
+          {project.editable && <button type="submit" form="project-profile-form" className="btn-primary" disabled={saving || !form.project_name.trim()}>{saving ? 'Saving…' : 'Save project'}</button>}
         </>
       }
     >
       <div className="space-y-6">
+        {!project.editable && (
+          <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+            <p className="font-medium">Read-only — this is a client account from the Accounts catalogue, not a project.</p>
+            <p className="mt-1 text-xs">Finance can&apos;t change catalogue accounts. To bill work for this client, add a project for it under <Link to="/people?section=hr-settings&amp;tab=calendars" className="underline">People → Calendars → Add Project</Link> and set its billing there. Its team, budget and invoices below still work.</p>
+          </div>
+        )}
         <form id="project-profile-form" onSubmit={submit} className="space-y-4">
+          <fieldset disabled={!project.editable} className="space-y-4 disabled:opacity-70">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-xs font-medium text-tertiary-600">
               Project name
@@ -246,6 +253,7 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
               {' '}Nothing is billed or invoiced before the agreement start date. Changing the type or rate adds a new rate from the agreement start date (or today if none is set) — earlier billing is never rewritten.
             </p>
           </div>
+          </fieldset>
         </form>
 
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
@@ -303,7 +311,12 @@ export default function ProjectsTab() {
 
   const columns = [
     { key: 'code', header: 'Project ID', render: (row) => <span className="font-mono text-xs text-tertiary-600">{row.project_code || '—'}</span> },
-    { key: 'project', header: 'Project name', render: (row) => <span className="font-medium text-tertiary-900">{row.project_name}</span> },
+    { key: 'project', header: 'Project name', render: (row) => (
+      <span>
+        <span className="font-medium text-tertiary-900">{row.project_name}</span>
+        {!row.editable && <span className="ml-2" title="A client account from the Accounts catalogue — read-only in Finance"><Pill tone="gray">Client account · read-only</Pill></span>}
+      </span>
+    ) },
     { key: 'client', header: 'Client name', render: (row) => row.client_name || <span className="text-tertiary-400">—</span> },
     { key: 'requirement', header: 'Requirement', render: (row) => row.requirement || '' },
     { key: 'billing', header: 'Billing type', render: billingLabel },

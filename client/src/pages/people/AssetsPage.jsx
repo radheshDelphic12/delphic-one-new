@@ -18,7 +18,8 @@ const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
 ];
 
-const OWNER_LABEL = { delphic: 'Delphic', client: 'Client' };
+const OWNER_LABEL = { delphic: 'Delphic', client: 'Client', vendor: 'Vendor' };
+const OWNER_TONE = { delphic: 'amber', client: 'purple', vendor: 'cyan' };
 
 function todayYmd() {
   const d = new Date();
@@ -80,7 +81,8 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
     const body = {
       ...values,
       org_membership_id: values.org_membership_id || null,
-      vendor_account_id: values.vendor_account_id || null,
+      // The vendor is only recorded for an asset that belongs to a vendor.
+      vendor_account_id: values.belongs_to === 'vendor' ? values.vendor_account_id || null : null,
       client_account_id: values.client_account_id || null,
       issue_date: values.issue_date || null,
       return_date: values.return_date || null,
@@ -135,7 +137,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
               Mark returned
             </button>
           )}
-          <button type="submit" form="asset-form" className="btn-primary" disabled={saving || !form.asset_type.trim()}>
+          <button type="submit" form="asset-form" className="btn-primary" disabled={saving || !form.asset_type.trim() || (form.belongs_to === 'vendor' && !form.vendor_account_id)}>
             {saving ? 'Saving…' : asset ? 'Save asset' : 'Add asset'}
           </button>
         </>
@@ -169,12 +171,15 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
           <select value={form.belongs_to} onChange={(e) => set('belongs_to', e.target.value)} className={input}>
             <option value="delphic">Delphic</option>
             <option value="client">Client</option>
+            <option value="vendor">Vendor</option>
           </select>
         </label>
-        <div className={label}>
-          Asset belongs to vendor
-          <SearchableSelect value={form.vendor_account_id} onChange={(v) => set('vendor_account_id', v)} options={vendorOptions} allowClear className="mt-1" placeholder="None" searchPlaceholder="Search vendors…" noResultsMessage="No vendor accounts found" ariaLabel="Vendor" />
-        </div>
+        {form.belongs_to === 'vendor' ? (
+          <div className={label}>
+            Vendor name <span className="text-danger-600">*</span>
+            <SearchableSelect value={form.vendor_account_id} onChange={(v) => set('vendor_account_id', v)} options={vendorOptions} className="mt-1" placeholder="Select vendor" searchPlaceholder="Search vendors…" noResultsMessage="No vendor accounts found" ariaLabel="Vendor name" required />
+          </div>
+        ) : <div className="hidden sm:block" />}
         <div className={label}>
           Client name
           <SearchableSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} options={clientOptions} allowClear className="mt-1" placeholder="None" searchPlaceholder="Search clients…" noResultsMessage="No client accounts found" ariaLabel="Client" />
@@ -247,7 +252,7 @@ export default function AssetsPage() {
         <span>{r.org_membership.name}{r.org_membership.employee_code && <span className="ml-1 text-xs text-tertiary-500">{r.org_membership.employee_code}</span>}</span>
       ) : muted()),
     },
-    { key: 'owner', header: 'Belongs to', render: (r) => <Pill tone={r.belongs_to === 'delphic' ? 'amber' : 'purple'}>{OWNER_LABEL[r.belongs_to]}</Pill> },
+    { key: 'owner', header: 'Belongs to', render: (r) => <Pill tone={OWNER_TONE[r.belongs_to] || 'gray'}>{OWNER_LABEL[r.belongs_to] || r.belongs_to}</Pill> },
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor_account?.name || muted() },
     { key: 'client', header: 'Client name', render: (r) => r.client_account?.name || muted() },
     { key: 'issued_on', header: 'Issue date', render: (r) => formatDate(r.issue_date) || muted() },
