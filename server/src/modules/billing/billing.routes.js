@@ -4,8 +4,10 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
+const exchangeRates = require('./exchangeRates.service');
 const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
+  exchangeRatesSchema,
   createRateSchema,
   listRatesQuerySchema,
   computeDailyRevenueSchema,
@@ -22,6 +24,7 @@ const {
   accountBudgetQuerySchema,
   updateProjectProfileSchema,
   periodQuerySchema,
+  pnlListQuerySchema,
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
 } = require('./billing.validation');
@@ -38,8 +41,10 @@ const ERRORS = {
   invalid_transition: [409, 'Invalid status transition'],
   org_not_found: [404, 'Org not found'],
   membership_not_found: [404, 'Employee not found in this org'],
-  name_taken: [409, 'A project with that name already exists'],
+  category_not_found: [404, 'Group charge category not found (or deactivated)'],
+  location_not_found: [404, 'Office location not found'],
   client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
+  end_before_start: [422, 'The agreement end date cannot be before its start date'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };
 
@@ -65,7 +70,20 @@ router.get(
 router.get(
   '/projects-pnl',
   ...adminInOrg,
-  asyncHandler(async (req, res) => ok(res, await pnlService.listProjectsPnl(req.user.org_id, periodQuerySchema.parse(req.query))))
+  asyncHandler(async (req, res) => ok(res, await pnlService.listProjectsPnl(req.user.org_id, pnlListQuerySchema.parse(req.query))))
+);
+
+// INR value of each foreign currency, used to convert the P&L and project totals.
+router.get(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.listRates(req.user.org_id)))
+);
+
+router.put(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.setRates(req.user.org_id, exchangeRatesSchema.parse(req.body).rates)))
 );
 
 router.get(

@@ -7,6 +7,10 @@ const SELECT = {
   department: { select: { id: true, name: true } },
   lead_membership_id: true,
   lead: { select: { id: true, person: { select: { id: true, name: true } } } },
+  manager_membership_id: true,
+  manager: { select: { id: true, person: { select: { id: true, name: true } } } },
+  open_positions: true,
+  sort_order: true,
   created_at: true,
   updated_at: true,
   _count: { select: { members: true } },
@@ -18,7 +22,7 @@ function serialize({ _count, ...team }) {
 
 // HR Settings → Teams (org-scoped, same shape as designations). A team's
 // department and lead must both belong to the same org.
-async function checkRefs(orgId, { department_id, lead_membership_id }) {
+async function checkRefs(orgId, { department_id, lead_membership_id, manager_membership_id }) {
   if (department_id) {
     const department = await prisma.department.findFirst({ where: { id: department_id, org_id: orgId } });
     if (!department) return 'department_not_found';
@@ -27,11 +31,15 @@ async function checkRefs(orgId, { department_id, lead_membership_id }) {
     const lead = await prisma.orgMembership.findFirst({ where: { id: lead_membership_id, org_id: orgId } });
     if (!lead) return 'lead_not_found';
   }
+  if (manager_membership_id) {
+    const manager = await prisma.orgMembership.findFirst({ where: { id: manager_membership_id, org_id: orgId } });
+    if (!manager) return 'manager_not_found';
+  }
   return null;
 }
 
 async function list(orgId) {
-  const rows = await prisma.team.findMany({ where: { org_id: orgId }, select: SELECT, orderBy: { name: 'asc' } });
+  const rows = await prisma.team.findMany({ where: { org_id: orgId }, select: SELECT, orderBy: [{ sort_order: 'asc' }, { name: 'asc' }] });
   return rows.map(serialize);
 }
 
@@ -46,6 +54,9 @@ async function create(orgId, body) {
       name: body.name,
       department_id: body.department_id || null,
       lead_membership_id: body.lead_membership_id || null,
+      manager_membership_id: body.manager_membership_id || null,
+      open_positions: body.open_positions ?? 0,
+      sort_order: body.sort_order ?? 0,
     },
     select: SELECT,
   });

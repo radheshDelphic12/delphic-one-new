@@ -474,24 +474,43 @@ function projectName(row) {
   return row.project_name || row.name;
 }
 
-// Another client account in the org already showing this project name.
-function projectNameTaken(orgId, name, exceptId = null) {
-  const equals = { equals: name, mode: 'insensitive' };
-  return prisma.account.findFirst({
-    where: {
-      org_id: orgId,
-      type: 'client',
-      OR: [{ project_name: equals }, { project_name: null, name: equals }],
-      ...(exceptId ? { NOT: { id: exceptId } } : {}),
-    },
-    select: { id: true },
-  });
+// Project names are NOT unique: the same client can sign a second contract
+// under the same name (a new resource from a later date), and that is a
+// separate project with its own resources, dates, rates, billing and P&L.
+// Projects are identified by their id and an org-unique project_code
+// (P0001, P0002 …) that Finance shows next to the name.
+const PROJECT_CODE_PATTERN = /^P(\d+)$/;
+
+async function nextProjectCode(orgId, db = prisma) {
+  const rows = await db.account.findMany({ where: { org_id: orgId, project_code: { not: null } }, select: { project_code: true } });
+  const max = rows.reduce((m, r) => {
+    const hit = PROJECT_CODE_PATTERN.exec(r.project_code || '');
+    return hit ? Math.max(m, Number(hit[1])) : m;
+  }, 0);
+  return `P${String(max + 1).padStart(4, '0')}`;
+}
+
+// Gives every client account without a code one (accounts classified as a
+// client after the backfill migration, or made in the Accounts section).
+async function ensureProjectCodes(orgId) {
+  const missing = await prisma.account.findMany({ where: { org_id: orgId, type: 'client', project_code: null }, select: { id: true }, orderBy: { created_at: 'asc' } });
+  for (const row of missing) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await prisma.account.update({ where: { id: row.id }, data: { project_code: await nextProjectCode(orgId) } });
+        break;
+      } catch (err) {
+        if (err.code !== 'P2002') throw err; // raced another writer for the same code — take the next one
+      }
+    }
+  }
 }
 
 const PROJECT_SELECT = {
   id: true,
   name: true,
   project_name: true,
+  project_code: true,
   client_name: true,
   client_account_id: true,
   client_account: CLIENT_ACCOUNT_SELECT,
@@ -504,6 +523,7 @@ function serializeProject(row, fallback) {
   const effective = mapped || (fallback ? { id: fallback.id, name: fallback.name, kind: fallback.kind } : null);
   return {
     id: row.id,
+    code: row.project_code || null,
     name: projectName(row),
     ...clientFields(row),
     service_category: row.service_category,
@@ -514,6 +534,7 @@ function serializeProject(row, fallback) {
 }
 
 async function listProjects(orgId) {
+  await ensureProjectCodes(orgId);
   const [rows, fallback] = await Promise.all([
     prisma.account.findMany({
       where: { org_id: orgId, type: 'client', stage: 'active' },
@@ -527,7 +548,6 @@ async function listProjects(orgId) {
 
 async function createProject(orgId, ownerId, { name, client_account_id, service_category, calendar_id }) {
   if (!CATEGORY_SCOPE.includes(service_category)) return { error: 'category_not_available' };
-  if (await projectNameTaken(orgId, name)) return { error: 'name_taken' };
 
   let client = null;
   if (client_account_id) {
@@ -552,6 +572,7 @@ async function createProject(orgId, ownerId, { name, client_account_id, service_
         type: 'client',
         stage: 'active',
         name,
+        project_code: await nextProjectCode(orgId, tx),
         client_account_id: client?.id || null,
         client_name: client?.name || null,
         service_category,
@@ -642,7 +663,8 @@ module.exports = {
   listLeadClientOptions,
   resolveLeadClient,
   projectName,
-  projectNameTaken,
+  nextProjectCode,
+  ensureProjectCodes,
   clientFields,
   CLIENT_ACCOUNT_SELECT,
   countWorkingDays,

@@ -5,17 +5,20 @@ const leaveService = require('../leave/leave.service');
 const { computeDayRevenue } = require('../billing/billing.service');
 const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
+const { detectFinanceChange } = require('../../lib/financeChanges');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 
-// IT staff log against a fixed set of assigned projects only; everyone else
-// logs plain Date/Hours/Notes with no project (see createEntry).
+// IT staff and vendor resources (contractors) log against a fixed set of
+// assigned projects only; everyone else logs plain Date/Hours/Notes with no
+// project (see createEntry). One timesheet model and one approval flow for
+// both — a contractor is an OrgMembership like any employee.
 async function isItMember(orgMembershipId) {
   const m = await prisma.orgMembership.findUnique({
     where: { id: orgMembershipId },
-    select: { person: { select: { department: { select: { name: true } } } } },
+    select: { worker_type: true, person: { select: { department: { select: { name: true } } } } },
   });
-  return m?.person?.department?.name?.toLowerCase() === 'it';
+  return m?.worker_type === 'contractor' || m?.person?.department?.name?.toLowerCase() === 'it';
 }
 
 async function isAssignedToProject(orgId, orgMembershipId, accountId) {
@@ -59,9 +62,9 @@ async function otherHoursOnDay(orgMembershipId, date, excludeEntryId) {
       status: { not: 'rejected' },
       ...(excludeEntryId ? { id: { not: excludeEntryId } } : {}),
     },
-    select: { hours: true },
+    select: { hours: true, overtime_hours: true },
   });
-  return rows.reduce((sum, e) => sum + Number(e.hours), 0);
+  return rows.reduce((sum, e) => sum + Number(e.hours) + Number(e.overtime_hours || 0), 0);
 }
 
 // Revenue is derived from approved billable hours, so approving an entry (or
@@ -82,7 +85,7 @@ async function isLocked(orgId, date) {
   return Boolean(lock);
 }
 
-async function createEntry(orgId, orgMembershipId, { date, account_id, requirement_id, hours, billable, notes }, actorUserId = null) {
+async function createEntry(orgId, orgMembershipId, { date, account_id, requirement_id, hours, overtime_hours = 0, billable, notes }, actorUserId = null) {
   if (await isLocked(orgId, date)) return { error: 'day_locked' };
 
   // Approved Leave Day = no timesheet, no project hours.
@@ -110,7 +113,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
 
   // Multi-project allocation (4h Project A + 4h Project B in one day) is
   // fine; the total for the day still can't exceed 24h.
-  if ((await otherHoursOnDay(orgMembershipId, date)) + hours > 24) return { error: 'exceeds_day_hours' };
+  if ((await otherHoursOnDay(orgMembershipId, date)) + hours + overtime_hours > 24) return { error: 'exceeds_day_hours' };
 
   const alreadyPendingToday = await prisma.timesheetEntry.count({ where: { org_membership_id: orgMembershipId, date, status: 'submitted' } });
 
@@ -122,6 +125,9 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
       account_id: account_id || null,
       requirement_id,
       hours,
+      // Overtime only means something against a project (it's billed per
+      // project, and only where the project allows it).
+      overtime_hours: account_id ? overtime_hours : 0,
       // A no-project entry is general time — never billable, so it can't
       // leak into revenue / project cost / budget.
       billable: account_id ? billable : false,
@@ -167,7 +173,16 @@ async function listMine(orgMembershipId, { from, to, account_id, status, page, l
   return { data, pagination: { page, limit, total } };
 }
 
-async function listTeam(orgId, { from, to, org_membership_id, account_id, status, department_id, page, limit }) {
+// Person filter for the admin views: in one department, or outside one
+// (people with no department count as outside). Legacy User.department_id.
+function departmentWhere(department_id, exclude_department_id) {
+  if (department_id) return { department_id };
+  if (exclude_department_id) return { OR: [{ department_id: null }, { department_id: { not: exclude_department_id } }] };
+  return null;
+}
+
+async function listTeam(orgId, { from, to, org_membership_id, account_id, status, department_id, exclude_department_id, page, limit }) {
+  const person = departmentWhere(department_id, exclude_department_id);
   const date = dateRangeWhere({ from, to });
   const where = {
     org_id: orgId,
@@ -177,7 +192,7 @@ async function listTeam(orgId, { from, to, org_membership_id, account_id, status
     ...(date ? { date } : {}),
     // Legacy User.department_id (same field GET /users/me already returns),
     // not OrgMembership.department_id — see requireItDepartment's own note.
-    ...(department_id ? { org_membership: { person: { department_id } } } : {}),
+    ...(person ? { org_membership: { person } } : {}),
   };
   const [data, total] = await Promise.all([
     prisma.timesheetEntry.findMany({
@@ -206,7 +221,7 @@ async function monthlyGrouped(orgId, orgMembershipId, year, month) {
   const rows = await prisma.timesheetEntry.findMany({
     where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from, lt: to } },
     orderBy: [{ date: 'asc' }, { created_at: 'asc' }],
-    include: { account: { select: { id: true, name: true } } },
+    include: { account: { select: { id: true, name: true, project_name: true, project_code: true } }, approver: { select: { id: true, name: true } } },
   });
 
   const byDate = new Map();
@@ -214,14 +229,17 @@ async function monthlyGrouped(orgId, orgMembershipId, year, month) {
     const key = row.date.toISOString().slice(0, 10);
     if (!byDate.has(key)) byDate.set(key, { date: key, total_hours: 0, entries: [] });
     const day = byDate.get(key);
-    day.total_hours += Number(row.hours);
+    day.total_hours += Number(row.hours) + Number(row.overtime_hours || 0);
     day.entries.push({
       id: row.id,
       account: row.account,
       hours: Number(row.hours),
+      overtime_hours: Number(row.overtime_hours || 0),
       billable: row.billable,
       notes: row.notes,
       status: row.status,
+      approved_by: row.approver,
+      approved_at: row.approved_at,
       decision_reason: row.decision_reason,
       is_holiday_overtime: row.is_holiday_overtime,
       holiday_label: row.holiday_label,
@@ -240,8 +258,10 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   if (existing.status !== 'submitted') return { error: 'already_decided' };
   if (await isLocked(orgId, existing.date)) return { error: 'day_locked' };
 
-  if (patch.hours !== undefined && (await otherHoursOnDay(orgMembershipId, existing.date, entryId)) + Number(patch.hours) > 24) {
-    return { error: 'exceeds_day_hours' };
+  if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
+    const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
+    const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
+    if ((await otherHoursOnDay(orgMembershipId, existing.date, entryId)) + hours + overtime > 24) return { error: 'exceeds_day_hours' };
   }
 
   const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
@@ -266,6 +286,18 @@ async function decideEntry(orgId, entryId, actor, { status, reason }) {
     data: { status, approved_by: actor.id, approved_at: new Date(), decision_reason: reason },
   });
   if (status === 'approved') await refreshRevenue(orgId, existing.date);
+  const hoursLabel = `${Number(existing.hours)}h${Number(existing.overtime_hours || 0) ? ` + ${Number(existing.overtime_hours)}h overtime` : ''}`;
+  await detectFinanceChange(orgId, {
+    source_type: 'timesheet',
+    source_id: entryId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    account_id: existing.account_id,
+    changed_by: actor.id,
+    description: `Timesheet entry ${status} (${hoursLabel})`,
+    old_value: { status: existing.status, hours: Number(existing.hours), overtime_hours: Number(existing.overtime_hours || 0) },
+    new_value: { status, hours: Number(existing.hours), overtime_hours: Number(existing.overtime_hours || 0) },
+  });
   await notify(prisma, {
     type: 'timesheet_entry_decided',
     actorId: actor.id,
@@ -439,7 +471,21 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
     return decided;
   });
 
-  if (status === 'approved') await refreshRevenue(orgId, targetDate);
+  if (status === 'approved') {
+    await refreshRevenue(orgId, targetDate);
+    const entryBefore = ticket.timesheet_entry;
+    await detectFinanceChange(orgId, {
+      source_type: 'timesheet',
+      source_id: ticket.id,
+      date: targetDate,
+      org_membership_id: targetMembershipId,
+      account_id: isNewStyle ? ticket.account_id : entryBefore?.account_id || null,
+      changed_by: actor.id,
+      description: `Timesheet regularisation approved: ${ticket.reason}`.slice(0, 500),
+      old_value: entryBefore ? { hours: Number(entryBefore.hours), status: entryBefore.status } : { hours: 0, status: 'none' },
+      new_value: isNewStyle ? { hours: Number(ticket.target_hours), status: 'approved' } : ticket.requested_change,
+    });
+  }
   await notify(prisma, {
     type: 'timesheet_regularization_decided',
     actorId: actor.id,
@@ -521,7 +567,8 @@ async function lockCompletedWeek(orgId, now = new Date()) {
 // (month-to-date hours + per-project allocation %) for a department (or the
 // whole org). Read-only aggregation over the same TimesheetEntry rows the
 // rest of this module already writes — no separate tracking table.
-async function teamOverview(orgId, { department_id, date, month, year } = {}) {
+async function teamOverview(orgId, { department_id, exclude_department_id, date, month, year } = {}) {
+  const person = departmentWhere(department_id, exclude_department_id);
   const day = date || new Date();
   const dayOnly = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()));
   const rangeMonth = month || dayOnly.getUTCMonth() + 1;
@@ -533,7 +580,7 @@ async function teamOverview(orgId, { department_id, date, month, year } = {}) {
     where: {
       org_id: orgId,
       employment_status: { not: 'terminated' },
-      ...(department_id ? { person: { department_id } } : {}),
+      ...(person ? { person } : {}),
     },
     select: { id: true, person: { select: { id: true, name: true, department: { select: { name: true } } } } },
   });
@@ -546,7 +593,7 @@ async function teamOverview(orgId, { department_id, date, month, year } = {}) {
     }),
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, org_membership_id: { in: memberIds }, date: { gte: from, lt: to } },
-      select: { org_membership_id: true, hours: true, is_holiday_overtime: true, account: { select: { name: true } } },
+      select: { org_membership_id: true, hours: true, overtime_hours: true, is_holiday_overtime: true, account: { select: { name: true } } },
     }),
     prisma.timesheetEntry.count({ where: { org_id: orgId, org_membership_id: { in: memberIds }, status: 'submitted' } }),
     prisma.timesheetRegularizationTicket.count({
@@ -555,9 +602,9 @@ async function teamOverview(orgId, { department_id, date, month, year } = {}) {
   ]);
 
   const loggedTodayIds = new Set(todayEntries.map((e) => e.org_membership_id));
+  // Holiday work plus the overtime hours claimed on ordinary entries.
   const overtimeHours = monthEntries
-    .filter((e) => e.is_holiday_overtime)
-    .reduce((sum, e) => sum + Number(e.hours), 0);
+    .reduce((sum, e) => sum + (e.is_holiday_overtime ? Number(e.hours) : 0) + Number(e.overtime_hours || 0), 0);
 
   const byMember = new Map(memberIds.map((id) => [id, { hours: 0, byProject: new Map() }]));
   for (const e of monthEntries) {

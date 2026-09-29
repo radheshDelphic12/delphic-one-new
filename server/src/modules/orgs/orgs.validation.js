@@ -58,7 +58,25 @@ const updateValuationSchema = z.object({
   valuation: z.coerce.number().nonnegative().nullable(),
 });
 
+// Bank + emergency contact — self-service from the employee portal, or admin.
+// Blank clears a field; an absent one is left as it is.
+const optionalText = (max) => z.string().trim().max(max).nullable().optional().transform((v) => (v === undefined ? undefined : v || null));
+const personalDetailsSchema = z
+  .object({
+    bank_account_holder: optionalText(120),
+    bank_name: optionalText(120),
+    bank_account_number: optionalText(34).refine((v) => !v || /^[A-Za-z0-9 -]{4,34}$/.test(v), 'Enter a valid account number'),
+    bank_ifsc: optionalText(20).transform((v) => (v ? v.toUpperCase() : v)).refine((v) => !v || /^[A-Z0-9]{4,20}$/.test(v), 'Enter a valid IFSC / SWIFT code'),
+    bank_branch: optionalText(120),
+    emergency_contact_name: optionalText(120),
+    emergency_contact_relation: optionalText(60),
+    emergency_contact_phone: optionalText(30).refine((v) => !v || /^[+0-9 ()-]{6,30}$/.test(v), 'Enter a valid phone number'),
+    emergency_contact_email: optionalText(160).refine((v) => !v || z.string().email().safeParse(v).success, 'Enter a valid email'),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+
 module.exports = {
+  personalDetailsSchema,
   MODULES,
   updateOrgSettingsSchema,
   createOrgSchema,

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Paperclip, Plus, Trash2, TrendingUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Paperclip, Plus, Trash2, TrendingUp } from 'lucide-react';
 import apiClient, { openAuthenticatedFile } from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -8,16 +8,13 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { CategoryFilter, matchesCategory, money, useExchangeRates } from './projectFilters.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
-function money(n, currency) {
-  const value = Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-  return currency ? `${currency} ${value}` : value;
-}
-
-function ProfitCell({ value, currency }) {
+function ProfitCell({ value, currency, missing }) {
+  if (value === null) return <span className="text-xs font-medium text-warning-700">Set {missing.join(', ')} rate</span>;
   return <span className={`font-medium tabular-nums ${value < 0 ? 'text-danger-700' : 'text-success-700'}`}>{money(value, currency)}</span>;
 }
 
@@ -170,6 +167,7 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
   useEffect(() => { setPnl(null); load(); }, [projectId, period.period_month, period.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const c = pnl?.currency;
+  const foreign = pnl && pnl.revenue.original_currency && pnl.revenue.original_currency !== 'INR';
   return (
     <Drawer open={Boolean(projectId)} title={pnl ? `${pnl.project.name} — ${MONTHS[period.period_month - 1]} ${period.period_year}` : 'Project P&L'} onClose={onClose} size="xl">
       {!pnl ? (
@@ -177,17 +175,23 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Client billing" value={money(pnl.revenue.amount, c)} />
+            <Stat label={foreign ? `Client billing (${money(pnl.revenue.original_amount, pnl.revenue.original_currency)})` : 'Client billing'} value={money(pnl.revenue.amount, c)} />
             <Stat label="Internal salary" value={money(pnl.internal.cost, c)} />
             <Stat label="Vendor contractors" value={money(pnl.vendor.cost, c)} />
-            <Stat label={`Profit${pnl.margin_percent !== null ? ` (${pnl.margin_percent}%)` : ''}`} value={money(pnl.profit, c)} tone={pnl.profit < 0 ? 'bad' : undefined} />
+            <Stat
+              label={`Profit${pnl.margin_percent !== null ? ` (${pnl.margin_percent}%)` : ''}`}
+              value={pnl.profit === null ? `Set ${pnl.missing_rates.join(', ')} rate` : money(pnl.profit, c)}
+              tone={pnl.profit === null || pnl.profit < 0 ? 'bad' : undefined}
+            />
           </div>
           <p className="text-xs text-tertiary-500">
             Profit = client billing − (internal salary allocations + vendor contractor cost).
-            {pnl.revenue.billing_type === 'monthly' && ` Fixed monthly billing of ${money(pnl.revenue.rate, c)}${pnl.revenue.prorated_days ? `, prorated for ${pnl.revenue.prorated_days} days` : ''}.`}
+            {pnl.revenue.billing_type === 'monthly' && ` Fixed monthly billing of ${money(pnl.revenue.rate, pnl.revenue.original_currency)}${pnl.revenue.prorated_days ? `, prorated for ${pnl.revenue.prorated_days} days` : ''}.`}
+            {pnl.revenue.billing_type === 'hourly' && ` ${pnl.revenue.billable_hours} approved billable hours this month at ${money(pnl.revenue.rate, pnl.revenue.original_currency)}/hr.`}
             {pnl.revenue.note === 'before_agreement_start' && ' The agreement had not started in this month.'}
             {pnl.revenue.note === 'no_billing_rate' && ' No billing terms are set for this project yet (Projects tab → Edit).'}
-            {pnl.mixed_currency && ' Amounts are in more than one currency and are summed without conversion.'}
+            {' All amounts are in INR'}{foreign ? `, converted from ${pnl.revenue.original_currency}` : ''}.
+            {pnl.missing_rates.length > 0 && ` No exchange rate is set for ${pnl.missing_rates.join(', ')} — those amounts count as 0 until it is.`}
           </p>
 
           <section className="space-y-2">
@@ -201,6 +205,7 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
                   { key: 'name', header: 'Employee' },
                   { key: 'salary', header: 'Monthly salary', render: (r) => (r.missing_salary ? <span className="text-warning-700">No salary structure</span> : money(r.monthly_salary)) },
                   { key: 'alloc', header: 'Allocation', render: (r) => `${r.allocation_percent}%` },
+                  { key: 'basis', header: 'Cost basis', render: (r) => (r.cost_basis === 'cost_rate' ? `${r.approved_hours}h × ${money(r.cost_rate_per_hr)}/h internal rate` : 'salary × allocation') },
                   { key: 'cost', header: 'Cost to project', render: (r) => money(r.cost, c) },
                 ]}
               />
@@ -236,16 +241,93 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
   );
 }
 
+/** Finance's INR rate for each foreign currency — what P&L and project totals convert with. */
+function ExchangeRatesPanel({ rates, onSaved }) {
+  const { pushError, pushInfo } = useAlerts();
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm(Object.fromEntries(rates.map((r) => [r.currency, r.rate_to_inr ?? ''])));
+  }, [rates]);
+
+  async function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiClient.put('/billing/exchange-rates', {
+        rates: rates.map((r) => ({ currency: r.currency, rate_to_inr: form[r.currency] === '' ? null : Number(form[r.currency]) })),
+      });
+      pushInfo('Exchange rates saved');
+      onSaved();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to save exchange rates'), 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const set = rates.filter((r) => r.rate_to_inr !== null);
+  return (
+    <details className="rounded-xl border border-tertiary-100 bg-white" open={rates.length > 0 && set.length === 0}>
+      <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-tertiary-800">
+        Exchange rates (INR)
+        <span className="ml-2 text-xs font-normal text-tertiary-500">
+          {set.map((r) => `1 ${r.currency} = ₹${r.rate_to_inr}`).join(' · ') || 'Not set'}
+        </span>
+      </summary>
+      <form onSubmit={save} className="flex flex-wrap items-end gap-3 border-t border-tertiary-100 px-4 py-3">
+        {rates.map((r) => (
+          <label key={r.currency} className="block text-xs font-medium text-tertiary-600">
+            1 {r.currency} =
+            <span className="mt-1 flex items-center rounded-xl border px-2">
+              <span className="text-tertiary-400">₹</span>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={form[r.currency] ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, [r.currency]: e.target.value }))}
+                placeholder="Not set"
+                aria-label={`INR per ${r.currency}`}
+                className="w-24 bg-transparent px-1.5 py-1.5 text-sm outline-none"
+              />
+            </span>
+          </label>
+        ))}
+        <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save rates'}</button>
+        <p className="w-full text-xs text-tertiary-500">Billing, contractor rates and vendor invoices in these currencies are converted to INR in the P&amp;L and project totals. Salaries are INR.</p>
+      </form>
+    </details>
+  );
+}
+
+function Total({ label, value, tone }) {
+  const color = tone === 'bad' ? 'text-danger-700' : tone === 'good' ? 'text-success-700' : 'text-tertiary-900';
+  return (
+    <div>
+      <p className="text-xs text-tertiary-500">{label}</p>
+      <p className={`font-heading text-base font-semibold tabular-nums ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 /**
- * Finance → Project P&L: per-month profitability of every running project.
- * Client billing (fixed monthly or hourly) minus internal salary allocations
- * minus vendor contractor cost (vendor rate, or the vendor's actual invoice).
+ * Finance → Project P&L: per-month profitability of every running project, in
+ * INR. Client billing (fixed monthly or hourly) minus internal salary
+ * allocations minus vendor contractor cost (vendor rate, or the vendor's
+ * actual invoice), with totals for the requirement type filtered to.
  */
 export default function ProjectPnlTab() {
   const now = new Date();
   const [period, setPeriod] = useState({ period_month: now.getMonth() + 1, period_year: now.getFullYear() });
   const [openId, setOpenId] = useState(null);
   const [vendors, setVendors] = useState([]);
+  const [category, setCategory] = useState('all');
+  const [clientId, setClientId] = useState('');
+  const { rates, reload: reloadRates } = useExchangeRates();
   const { data, loading, refresh } = useLiveData(
     () => apiClient.get('/billing/projects-pnl', { params: period }).then((r) => r.data.data),
     { deps: [period.period_month, period.period_year] }
@@ -255,32 +337,95 @@ export default function ProjectPnlTab() {
     apiClient.get('/billing/vendors').then(({ data: res }) => setVendors(res.data || [])).catch(() => setVendors([]));
   }, []);
 
-  const rows = (data || []).map((r) => ({ ...r, id: r.project.id }));
+  const rows = useMemo(() => (data || []).map((r) => ({ ...r, id: r.project.id })), [data]);
+  // Client comes from the project's linked client account.
+  const clientOptions = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) if (r.project.client_account_id) map.set(r.project.client_account_id, r.project.client_name || 'Client');
+    return [...map].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+  const visible = useMemo(
+    () => rows.filter((r) => matchesCategory(r.service_category, category) && (!clientId || r.project.client_account_id === clientId)),
+    [rows, category, clientId]
+  );
+
+  // Totals of the filtered rows. A row whose currency has no exchange rate has
+  // no INR billing or profit yet, so it is left out of those two (and the margin).
+  const totals = useMemo(() => {
+    const complete = visible.filter((r) => r.profit !== null);
+    const sum = (list, key) => list.reduce((s, r) => s + Number(r[key] || 0), 0);
+    const revenue = sum(complete, 'revenue');
+    const profit = sum(complete, 'profit');
+    return {
+      revenue,
+      internal: sum(visible, 'internal_cost'),
+      vendor: sum(visible, 'vendor_cost'),
+      profit,
+      margin: revenue > 0 ? Math.round((profit / revenue) * 10000) / 100 : null,
+      incomplete: visible.length - complete.length,
+      missing: [...new Set(visible.flatMap((r) => r.missing_rates || []))],
+    };
+  }, [visible]);
+
   const columns = [
-    { key: 'project', header: 'Project', render: (r) => <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => setOpenId(r.project.id)}>{r.project.name}</button> },
+    { key: 'project', header: 'Project', render: (r) => <button type="button" className="text-left font-medium text-primary-700 hover:underline" onClick={() => setOpenId(r.project.id)}>{r.project.name}{r.project.code && <span className="block text-xs font-normal text-tertiary-500">{r.project.code}</span>}</button> },
     { key: 'client', header: 'Client', render: (r) => r.project.client_name || '-' },
-    { key: 'revenue', header: 'Billing', render: (r) => money(r.revenue, r.currency) },
+    {
+      key: 'revenue',
+      header: 'Billing',
+      render: (r) => (
+        <span className="tabular-nums">
+          {money(r.revenue, r.currency)}
+          {r.original_currency && r.original_currency !== 'INR' && <span className="block text-xs text-tertiary-500">{money(r.original_revenue, r.original_currency)}</span>}
+          {r.billing_type === 'hourly' && <span className="block text-xs text-tertiary-500">{r.billable_hours} h × {money(r.billing_rate, r.original_currency)}</span>}
+        </span>
+      ),
+    },
     { key: 'internal', header: 'Internal salary', render: (r) => money(r.internal_cost, r.currency) },
     { key: 'vendor', header: 'Vendor cost', render: (r) => money(r.vendor_cost, r.currency) },
-    { key: 'profit', header: 'Profit', render: (r) => <ProfitCell value={r.profit} currency={r.currency} /> },
+    { key: 'profit', header: 'Profit', render: (r) => <ProfitCell value={r.profit} currency={r.currency} missing={r.missing_rates || []} /> },
     { key: 'margin', header: 'Margin', render: (r) => (r.margin_percent !== null ? `${r.margin_percent}%` : '-') },
   ];
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <select aria-label="Month" value={period.period_month} onChange={(e) => setPeriod((p) => ({ ...p, period_month: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
-          {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-        </select>
-        <select aria-label="Year" value={period.period_year} onChange={(e) => setPeriod((p) => ({ ...p, period_year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <CategoryFilter rows={rows} getCategory={(r) => r.service_category} value={category} onChange={setCategory} loading={loading} />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-56"><SearchableSelect value={clientId} onChange={setClientId} options={clientOptions} placeholder="All clients" searchPlaceholder="Search clients…" allowClear ariaLabel="Client" /></div>
+          <select aria-label="Month" value={period.period_month} onChange={(e) => setPeriod((p) => ({ ...p, period_month: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select aria-label="Year" value={period.period_year} onChange={(e) => setPeriod((p) => ({ ...p, period_year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
       </div>
+
+      <ExchangeRatesPanel rates={rates} onSaved={() => { reloadRates(); refresh?.(); }} />
+
+      {totals.missing.length > 0 && (
+        <p className="flex items-start gap-2 rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Set the {totals.missing.join(', ')} exchange rate above. Until then {plural(totals.incomplete, 'project')} can&apos;t be converted to INR and {totals.incomplete === 1 ? 'is' : 'are'} left out of the billing and profit totals.
+        </p>
+      )}
+
+      {!loading && rows.length > 0 && (
+        <div className="grid grid-cols-2 gap-4 rounded-xl border border-tertiary-100 bg-white px-4 py-3 sm:grid-cols-5">
+          <Total label={`Billing · ${plural(visible.length - totals.incomplete, 'project')}`} value={money(totals.revenue, 'INR')} />
+          <Total label="Internal salary" value={money(totals.internal, 'INR')} />
+          <Total label="Vendor cost" value={money(totals.vendor, 'INR')} />
+          <Total label="Profit" value={money(totals.profit, 'INR')} tone={totals.profit < 0 ? 'bad' : 'good'} />
+          <Total label="Margin" value={totals.margin !== null ? `${totals.margin}%` : '-'} />
+        </div>
+      )}
+
       {!loading && rows.length === 0 ? (
         <EmptyState icon={TrendingUp} title="No running projects" description="Active client projects appear here with their monthly profit." />
       ) : (
-        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No running projects" />
+        <DataTable columns={columns} rows={visible} loading={loading} emptyLabel="No projects of this requirement type" />
       )}
       <ProjectPnlDrawer projectId={openId} period={period} vendors={vendors} onClose={() => setOpenId(null)} onChanged={() => refresh?.()} />
     </div>

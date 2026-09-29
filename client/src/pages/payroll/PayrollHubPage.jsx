@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, Pencil, Play, Plus, Printer, Trash2, Wallet } from 'lucide-react';
+import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, Trash2, Wallet } from 'lucide-react';
+import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -268,18 +269,19 @@ function StructureDrawer({ open, structure, onClose, onSubmit }) {
   );
 }
 
-function SalaryStructuresTab() {
+function SalaryStructuresTab({ filters }) {
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const params = cleanParams(filters);
 
   function load() {
     setLoading(true);
-    apiClient.get('/payroll/salary-structures').then(({ data }) => setRows(data.data || [])).catch((err) => pushError(apiErrorMessage(err, 'Failed to load salary structures'), 'Something went wrong')).finally(() => setLoading(false));
+    apiClient.get('/payroll/salary-structures', { params }).then(({ data }) => setRows(data.data || [])).catch((err) => pushError(apiErrorMessage(err, 'Failed to load salary structures'), 'Something went wrong')).finally(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(load, [JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function update(payload) {
     try {
@@ -304,7 +306,7 @@ function SalaryStructuresTab() {
   }
 
   const columns = [
-    { key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' },
+    { key: 'person', header: 'Employee', render: (row) => <MemberCell membership={row.org_membership} /> },
     { key: 'effective', header: 'Effective from', render: (row) => new Date(row.effective_from).toLocaleDateString() },
     { key: 'ctc', header: 'Monthly CTC', render: (row) => <span>{money(row.ctc)}{row.updated_at && <span className="ml-1.5 text-[11px] text-tertiary-400" title={`Edited ${new Date(row.updated_at).toLocaleString()}`}>edited</span>}</span> },
     { key: 'components', header: 'Components', render: (row) => Object.keys(row.components || {}).join(', ') || '—' },
@@ -358,25 +360,26 @@ function NewRunDrawer({ open, onClose, onSubmit }) {
           <label className="block text-xs font-medium text-tertiary-600">Month<input required type="number" min="1" max="12" value={month} onChange={(e) => setMonth(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
           <label className="block text-xs font-medium text-tertiary-600">Year<input required type="number" value={year} onChange={(e) => setYear(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
         </div>
-        <p className="text-xs text-tertiary-500">Creates a draft run for the period. Nothing is paid until it&apos;s processed.</p>
+        <p className="text-xs text-tertiary-500">Creates a draft run for the period. Nothing is paid until it&apos;s processed. Processing uses the attendance-based salary (Payroll → Attendance salary) — the month&apos;s locked version if it has been locked.</p>
       </form>
     </Drawer>
   );
 }
 
-function RunPayslipsDrawer({ open, run, onClose, onOpenPayslip }) {
+function RunPayslipsDrawer({ open, run, filters, onClose, onOpenPayslip }) {
   const { pushError } = useAlerts();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const params = cleanParams(filters || {});
 
   useEffect(() => {
     if (!open || !run) return;
     setLoading(true);
-    apiClient.get(`/payroll/runs/${run.id}/payslips`).then(({ data }) => setRows(data.data || [])).catch((err) => pushError(apiErrorMessage(err, 'Failed to load payslips'), 'Something went wrong')).finally(() => setLoading(false));
-  }, [open, run, pushError]);
+    apiClient.get(`/payroll/runs/${run.id}/payslips`, { params }).then(({ data }) => setRows(data.data || [])).catch((err) => pushError(apiErrorMessage(err, 'Failed to load payslips'), 'Something went wrong')).finally(() => setLoading(false));
+  }, [open, run, pushError, JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const columns = [
-    { key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' },
+    { key: 'person', header: 'Employee', render: (row) => <MemberCell membership={row.org_membership} /> },
     { key: 'gross', header: 'Gross', render: (row) => money(row.gross) },
     { key: 'deductions', header: 'Deductions', render: (row) => money(row.deductions) },
     { key: 'net', header: 'Net', render: (row) => <span className="font-semibold text-primary-700">{money(row.net)}</span> },
@@ -394,7 +397,7 @@ function RunPayslipsDrawer({ open, run, onClose, onOpenPayslip }) {
   );
 }
 
-function PayrollRunsTab() {
+function PayrollRunsTab({ filters }) {
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -477,14 +480,24 @@ function PayrollRunsTab() {
         <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No payroll runs." />
       )}
       <NewRunDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onSubmit={create} />
-      <RunPayslipsDrawer open={Boolean(viewingRun)} run={viewingRun} onClose={() => setViewingRun(null)} onOpenPayslip={openPayslip} />
+      <RunPayslipsDrawer open={Boolean(viewingRun)} run={viewingRun} filters={filters} onClose={() => setViewingRun(null)} onOpenPayslip={openPayslip} />
       <PayslipDrawer open={Boolean(selectedPayslip)} payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} />
     </div>
   );
 }
 
+/** Employee name with code / department / team under it. */
+function MemberCell({ membership }) {
+  if (!membership) return '—';
+  const sub = [membership.employee_code, membership.department?.name || membership.person?.department?.name, membership.team?.name].filter(Boolean).join(' · ');
+  return <span>{membership.person?.name || '—'}{sub && <span className="block text-xs text-tertiary-500">{sub}</span>}</span>;
+}
+
 const BASE_TABS = [{ key: 'my-payslips', label: 'My Payslips', icon: FileText }];
 const ADMIN_TABS = [
+  // Salary from attendance / check-ins on each employee's calendar — what a
+  // run processes (and, once the month is locked, exactly the locked figures).
+  { key: 'attendance-salary', label: 'Attendance Salary', icon: CalendarCheck },
   { key: 'salary-structures', label: 'Salary Structures', icon: Wallet },
   { key: 'runs', label: 'Payroll Runs', icon: Play },
 ];
@@ -501,6 +514,8 @@ export default function PayrollHubPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'my-payslips';
   const section = tabs.some((t) => t.key === requested) ? requested : 'my-payslips';
+  // Employee / Department / Team — one filter bar for every admin tab.
+  const [people, setPeople] = useState(EMPTY_PEOPLE_FILTERS);
 
   return (
     <div className="space-y-4">
@@ -521,9 +536,18 @@ export default function PayrollHubPage() {
           </button>
         ))}
       </div>
+      {isAdmin && section !== 'my-payslips' && (
+        <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Payroll filters">
+          <PeopleFilters value={people} onChange={setPeople} />
+          <div className="flex items-end">
+            <button type="button" className="btn-ghost text-xs" onClick={() => setPeople(EMPTY_PEOPLE_FILTERS)} disabled={!Object.values(people).some(Boolean)}>Clear filters</button>
+          </div>
+        </div>
+      )}
       {section === 'my-payslips' && <MyPayslipsTab />}
-      {section === 'salary-structures' && isAdmin && <SalaryStructuresTab />}
-      {section === 'runs' && isAdmin && <PayrollRunsTab />}
+      {section === 'attendance-salary' && isAdmin && <AttendanceSalaryTab people={people} endpoint="/payroll/attendance-salary" />}
+      {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
+      {section === 'runs' && isAdmin && <PayrollRunsTab filters={people} />}
     </div>
   );
 }

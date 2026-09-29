@@ -103,7 +103,7 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     expect(res.body.data.calendar.id).toBe(office.id);
   });
 
-  test('an explicit calendar wins; Recruitment is refused; a duplicate name is refused; a non-admin cannot add', async () => {
+  test('an explicit calendar wins; Recruitment is refused; a same-named project is a separate project; a non-admin cannot add', async () => {
     const { org, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const us = await calendar(org, 'US Client Calendar');
@@ -115,8 +115,12 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     const recruitment = await addProject(token, { name: 'Hiring', service_category: 'recruitment' });
     expect(recruitment.status).toBe(422);
 
+    // The name is only a label — a second contract with the same name is a
+    // separate project with its own id and project code.
     const dup = await addProject(token, { name: 'tankpros', service_category: 'project' });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+    expect(dup.body.data.id).not.toBe(explicit.body.data.id);
+    expect(dup.body.data.code).not.toBe(explicit.body.data.code);
 
     const emp = await seedEmployee(org);
     expect((await addProject(emp.token, { name: 'Sneaky', service_category: 'project' })).status).toBe(403);
@@ -388,9 +392,9 @@ describe('Project Client Name — a client account, never free text', () => {
     const after = await prisma.account.findUnique({ where: { id: portal.id } });
     expect(after).toMatchObject({ name: 'Tax Portal', project_name: null, client_account_id: acme.id, client_name: 'Acme Corp' });
 
-    // The new project name is taken for other projects, and Add Project checks it too.
-    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(409);
-    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(409);
+    // Project names are not unique: another project may take the same name.
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(200);
+    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(201);
   });
 
   test('legacy projects keep their free-text client name until a lead is linked', async () => {

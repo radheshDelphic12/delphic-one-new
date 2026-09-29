@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { detectFinanceChange } = require('../../lib/financeChanges');
 
 const DEFAULT_LEAVE_TYPES = [
   { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
@@ -340,7 +341,7 @@ async function listTeam(orgId, { status, org_membership_id, from, to, page, limi
   return { data, pagination: { page, limit, total } };
 }
 
-async function decide(orgId, requestId, approverMembershipId, { status, reason }) {
+async function decide(orgId, requestId, approverMembershipId, { status, reason }, actorUserId = null) {
   const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'pending') return { error: 'not_pending' };
@@ -352,13 +353,26 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
 
   // No balance write: what an employee has used is computed live from their
   // approved requests (see summariseUsage), so approving is only the status change.
+  if (status === 'approved') {
+    await detectFinanceChange(orgId, {
+      source_type: 'leave',
+      source_id: requestId,
+      from_date: existing.from_date,
+      to_date: existing.to_date,
+      org_membership_id: existing.org_membership_id,
+      changed_by: actorUserId,
+      description: 'Leave approved',
+      old_value: { status: existing.status },
+      new_value: { status },
+    });
+  }
   return { request };
 }
 
 // Admin authority over a leave that was already granted (or is still pending):
 // withdraw it. The days go back to the balance by themselves — it is computed
 // from the approved requests — and the leave-day rule stops applying.
-async function revoke(orgId, requestId, adminMembershipId, { reason }) {
+async function revoke(orgId, requestId, adminMembershipId, { reason }, actorUserId = null) {
   const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'approved' && existing.status !== 'pending') return { error: 'not_revocable' };
@@ -366,6 +380,19 @@ async function revoke(orgId, requestId, adminMembershipId, { reason }) {
     where: { id: requestId },
     data: { status: 'cancelled', approver_id: adminMembershipId, decided_at: new Date(), decision_reason: reason || 'Withdrawn by admin' },
   });
+  if (existing.status === 'approved') {
+    await detectFinanceChange(orgId, {
+      source_type: 'leave',
+      source_id: requestId,
+      from_date: existing.from_date,
+      to_date: existing.to_date,
+      org_membership_id: existing.org_membership_id,
+      changed_by: actorUserId,
+      description: `Approved leave withdrawn${reason ? `: ${reason}` : ''}`.slice(0, 500),
+      old_value: { status: 'approved' },
+      new_value: { status: 'cancelled' },
+    });
+  }
   return { request };
 }
 

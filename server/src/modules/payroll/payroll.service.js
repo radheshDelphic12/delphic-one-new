@@ -1,5 +1,5 @@
 const prisma = require('../../config/db');
-const { pickCalendarId } = require('../calendars/calendars.service');
+const { detectFinanceChange } = require('../../lib/financeChanges');
 
 function ymd(date) {
   return date.toISOString().slice(0, 10);
@@ -17,6 +17,17 @@ async function createSalaryStructure(orgId, createdByUserId, { org_membership_id
 
   const structure = await prisma.salaryStructure.create({
     data: { org_id: orgId, org_membership_id, effective_from, ctc, components, created_by: createdByUserId },
+  });
+  // A new structure never rewrites a finalized month — it flags any locked
+  // month from its effective date on for review.
+  await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structure.id,
+    from_date: effective_from,
+    org_membership_id,
+    changed_by: createdByUserId,
+    description: `New salary structure from ${effective_from.toISOString().slice(0, 10)} (CTC ${Number(ctc)})`,
+    new_value: { ctc: Number(ctc), effective_from },
   });
   return { structure };
 }
@@ -47,14 +58,35 @@ async function updateSalaryStructure(orgId, actorUserId, structureId, patch) {
     },
     include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
   });
+  const from = existing.effective_from < structure.effective_from ? existing.effective_from : structure.effective_from;
+  await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structureId,
+    from_date: from,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Salary structure edited (CTC ${Number(existing.ctc)} → ${Number(structure.ctc)})`,
+    old_value: { ctc: Number(existing.ctc), effective_from: existing.effective_from },
+    new_value: { ctc: Number(structure.ctc), effective_from: structure.effective_from },
+  });
   return { structure };
 }
 
-async function listSalaryStructures(orgId, { org_membership_id }) {
+// Payroll filters — Employee, Department, Team — combinable. Department
+// matches the membership's department or (legacy) the person's own.
+function payrollMemberWhere({ org_membership_id, department_id, team_id } = {}) {
+  const { membershipFilterWhere } = require('../calculations/engines/salary.engine');
+  const where = membershipFilterWhere({ org_membership_id, department_id, team_id });
+  return Object.keys(where).length ? { org_membership: where } : {};
+}
+
+const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
+
+async function listSalaryStructures(orgId, filters = {}) {
   return prisma.salaryStructure.findMany({
-    where: { org_id: orgId, ...(org_membership_id ? { org_membership_id } : {}) },
+    where: { org_id: orgId, ...payrollMemberWhere(filters) },
     orderBy: [{ org_membership_id: 'asc' }, { effective_from: 'desc' }],
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    include: PAYROLL_MEMBER_INCLUDE,
   });
 }
 
@@ -86,14 +118,23 @@ async function listRuns(orgId, { status }) {
 // assumptions (see schema.prisma's Payslip comment):
 // - 5-day work week — Sat/Sun always paid, non-working. No weekly-off
 //   calendar exists yet to configure this per org.
-// - A day counts as paid when: it's a weekend, it's a holiday on the org's
-//   default Calendar, attendance is present/wfh (full) or half_day (half),
-//   or an approved LeaveRequest with a paid LeaveType covers it.
+// - The month's WORKING days come from the employee's own calendar (Mon–Fri
+//   less that calendar's holidays), so a 19-, 20-, 21- or 22-day month each
+//   gives its own per-day rate: per_day_pay = ctc / working_days. Nothing is
+//   divided by a fixed 30 or by the calendar-day count any more.
+// - A working day counts as paid when attendance is present/wfh (full) or
+//   half_day (half), or an approved LeaveRequest with a paid LeaveType covers
+//   it. Weekends and the calendar's holidays are paid non-working days — they
+//   are already inside the monthly ctc, so they neither add nor deduct.
 // - Everything else on a working day (absent, unpaid leave, or simply no
 //   attendance record and no leave) is an unpaid day — loss of pay.
+// - `asOf` (optional) is the live "salary incurred so far" mode used by Live
+//   Analytics: working days after it are `upcoming_days`, never loss of pay,
+//   and `earned_to_date` is what the days up to it have earned. A full-month
+//   run passes no asOf, so earned_to_date = net.
 // - Overtime is tracked (`overtime_minutes`) but not paid — no overtime pay
 //   policy exists yet (Phase 3's own deferred item).
-function computeBreakdown({ period_start, period_end, days_in_month, ctc, attendanceByDate, leaveRanges, holidaySet }) {
+function computeBreakdown({ period_start, period_end, days_in_month, ctc, attendanceByDate, leaveRanges, holidaySet, asOf = null }) {
   let weekend_days = 0;
   let holiday_days = 0;
   let present_days = 0;
@@ -101,6 +142,7 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
   let paid_leave_days = 0;
   let unpaid_leave_days = 0;
   let unpaid_days = 0;
+  let upcoming_days = 0;
   let overtime_minutes = 0;
 
   for (let d = 1; d <= days_in_month; d += 1) {
@@ -114,6 +156,10 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
     }
     if (holidaySet.has(key)) {
       holiday_days += 1;
+      continue;
+    }
+    if (asOf && day > asOf) {
+      upcoming_days += 1;
       continue;
     }
 
@@ -144,11 +190,12 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
   // half_day counts as a working day but only half-paid, so it's half a
   // day's deduction — not a full loss like unpaid_days/unpaid_leave_days.
   const lop_days = unpaid_leave_days + unpaid_days + half_days * 0.5;
-  const paid_days = working_days - lop_days;
-  const per_day_pay = ctc / days_in_month;
+  const paid_days = working_days - upcoming_days - lop_days;
+  const per_day_pay = working_days > 0 ? Number(ctc) / working_days : 0;
   const deductions = Math.round(per_day_pay * lop_days * 100) / 100;
   const gross = Number(ctc);
   const net = Math.round((gross - deductions) * 100) / 100;
+  const earned_to_date = Math.round(per_day_pay * paid_days * 100) / 100;
 
   return {
     breakdown: {
@@ -163,10 +210,13 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
       paid_leave_days,
       unpaid_leave_days,
       unpaid_days,
+      upcoming_days,
       lop_days,
       paid_days,
       overtime_minutes,
       per_day_pay: Math.round(per_day_pay * 100) / 100,
+      earned_to_date,
+      as_of: asOf ? ymd(asOf) : null,
     },
     gross,
     deductions,
@@ -174,111 +224,36 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
   };
 }
 
+// Processing freezes the run into payslips. The figures come from the ONE
+// attendance-based salary calculation (calculations/engines/salary.engine):
+// if the month's salary calculation has been LOCKED (Live Analytics → Salary
+// → Lock), its locked version is used as-is, so the payslips match exactly
+// what was reviewed and finalized; otherwise the month is computed now.
 async function processRun(orgId, runId, adminUserId) {
   const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
   if (!run) return { error: 'not_found' };
   if (run.status !== 'draft') return { error: 'already_processed' };
 
-  const { period_start, period_end, days_in_month } = periodBounds(run.period_month, run.period_year);
+  // Lazy: salary.engine itself builds on computeBreakdown from this module.
+  const salaryEngine = require('../calculations/engines/salary.engine');
+  const calculations = require('../calculations/calculations.service');
+  const period = { period_month: run.period_month, period_year: run.period_year };
 
-  const memberships = await prisma.orgMembership.findMany({
-    where: {
-      org_id: orgId,
-      joined_at: { lte: period_end },
-      OR: [{ left_at: null }, { left_at: { gte: period_start } }],
-    },
-  });
+  const locked = await calculations.lockedVersion(orgId, 'salary', 'org', period);
+  const result = locked ? locked.snapshot : await salaryEngine.computeSalary(orgId, period);
 
-  const [attendanceRows, leaveRows, holidayRows, calendars, employeeCalendars] = await Promise.all([
-    prisma.attendanceRecord.findMany({ where: { org_id: orgId, date: { gte: period_start, lte: period_end } } }),
-    prisma.leaveRequest.findMany({
-      where: { org_id: orgId, status: 'approved', from_date: { lte: period_end }, to_date: { gte: period_start } },
-      include: { leave_type: { select: { paid: true } } },
-    }),
-    prisma.calendarHoliday.findMany({
-      where: { calendar: { org_id: orgId }, date: { gte: period_start, lte: period_end } },
-      select: { calendar_id: true, date: true },
-    }),
-    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, department_id: true, is_default: true } }),
-    prisma.employeeCalendar.findMany({
-      where: { org_membership: { org_id: orgId } },
-      select: { org_membership_id: true, account_id: true, calendar_id: true },
-    }),
-  ]);
-
-  // Holidays are per-employee, not org-wide: each person's paid-holiday days
-  // come from the calendar that governs them (their own mapping, else their
-  // office location's calendar, else the org default) — an Ahmedabad and a
-  // Gurgaon employee no longer share one holiday list. Project-specific
-  // calendars only constrain timesheets; payroll follows the primary one.
-  const holidaysByCalendar = new Map();
-  for (const h of holidayRows) {
-    if (!holidaysByCalendar.has(h.calendar_id)) holidaysByCalendar.set(h.calendar_id, new Set());
-    holidaysByCalendar.get(h.calendar_id).add(ymd(h.date));
-  }
-  const assignmentsByMembership = new Map();
-  for (const row of employeeCalendars) {
-    if (!assignmentsByMembership.has(row.org_membership_id)) assignmentsByMembership.set(row.org_membership_id, []);
-    assignmentsByMembership.get(row.org_membership_id).push(row);
-  }
-  const noHolidays = new Set();
-
-  const attendanceByMembership = new Map();
-  for (const row of attendanceRows) {
-    if (!attendanceByMembership.has(row.org_membership_id)) attendanceByMembership.set(row.org_membership_id, new Map());
-    attendanceByMembership.get(row.org_membership_id).set(ymd(row.date), row);
-  }
-
-  const leaveByMembership = new Map();
-  for (const row of leaveRows) {
-    if (!leaveByMembership.has(row.org_membership_id)) leaveByMembership.set(row.org_membership_id, []);
-    leaveByMembership.get(row.org_membership_id).push({ from_date: row.from_date, to_date: row.to_date, paid: row.leave_type.paid });
-  }
-
-  const skipped = [];
-  const payslipRows = [];
-
-  for (const membership of memberships) {
-    // Contractors are paid through their vendor (Finance → vendor invoices),
-    // never through payroll — even if a salary structure was set by mistake.
-    if (membership.worker_type === 'contractor') {
-      skipped.push({ org_membership_id: membership.id, reason: 'contractor_paid_by_vendor' });
-      continue;
-    }
-    const structure = await prisma.salaryStructure.findFirst({
-      where: { org_membership_id: membership.id, effective_from: { lte: period_end } },
-      orderBy: { effective_from: 'desc' },
-    });
-    if (!structure) {
-      skipped.push({ org_membership_id: membership.id, reason: 'no_salary_structure' });
-      continue;
-    }
-
-    const { breakdown, gross, deductions, net } = computeBreakdown({
-      period_start,
-      period_end,
-      days_in_month,
-      ctc: structure.ctc,
-      attendanceByDate: attendanceByMembership.get(membership.id) || new Map(),
-      leaveRanges: leaveByMembership.get(membership.id) || [],
-      holidaySet: holidaysByCalendar.get(
-        pickCalendarId(
-          { assignments: assignmentsByMembership.get(membership.id) || [], membershipLocationId: membership.location_id, membershipDepartmentId: membership.department_id, calendars },
-          null
-        )
-      ) || noHolidays,
-    });
-
-    payslipRows.push({
-      org_id: orgId,
-      payroll_run_id: run.id,
-      org_membership_id: membership.id,
-      gross,
-      deductions,
-      net,
-      breakdown,
-    });
-  }
+  // Contractors are paid through their vendor (Finance → vendor invoices),
+  // never through payroll — the engine lists them as skipped.
+  const skipped = (result.skipped || []).map(({ org_membership_id, reason }) => ({ org_membership_id, reason }));
+  const payslipRows = result.lines.map((line) => ({
+    org_id: orgId,
+    payroll_run_id: run.id,
+    org_membership_id: line.org_membership_id,
+    gross: line.gross,
+    deductions: line.deductions,
+    net: line.net,
+    breakdown: { ...line.breakdown, ...(locked ? { calculation_version: locked.version } : {}) },
+  }));
 
   const updated = await prisma.$transaction(async (tx) => {
     if (payslipRows.length) await tx.payslip.createMany({ data: payslipRows });
@@ -288,19 +263,27 @@ async function processRun(orgId, runId, adminUserId) {
     });
   });
 
-  return { run: updated, payslips_generated: payslipRows.length, skipped };
+  return { run: updated, payslips_generated: payslipRows.length, skipped, from_locked_version: locked ? locked.version : null };
 }
 
-async function listRunPayslips(orgId, runId) {
+async function listRunPayslips(orgId, runId, filters = {}) {
   const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
   if (!run) return { error: 'not_found' };
 
   const data = await prisma.payslip.findMany({
-    where: { payroll_run_id: runId, org_id: orgId },
+    where: { payroll_run_id: runId, org_id: orgId, ...payrollMemberWhere(filters) },
     orderBy: { generated_at: 'asc' },
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    include: PAYROLL_MEMBER_INCLUDE,
   });
   return { data };
+}
+
+// Payroll → Attendance salary: the month's attendance-based salary per
+// employee (the same calculation a run processes), honouring the filters.
+// A locked month shows its locked figures.
+async function attendanceSalary(orgId, query) {
+  const live = require('../calculations/live.service');
+  return live.salaryLive(orgId, query);
 }
 
 async function listMyPayslips(orgId, orgMembershipId, { page, limit }) {
@@ -337,6 +320,7 @@ module.exports = {
   listRuns,
   processRun,
   listRunPayslips,
+  attendanceSalary,
   listMyPayslips,
   getPayslip,
   // exported for tests only

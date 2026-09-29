@@ -7,6 +7,7 @@ import { useLeaveDay } from '../../lib/useLeaveDay.js';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Badge from '../../components/ui/Badge.jsx';
+import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
 
@@ -18,7 +19,7 @@ function todayIso() {
 }
 
 function blankRow() {
-  return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', notes: '' };
+  return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
 
 function dateLabel(iso) {
@@ -94,7 +95,7 @@ export default function ItTimesheetPage() {
   useEffect(() => { load(); }, [period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthTotal = useMemo(() => days.reduce((sum, d) => sum + d.total_hours, 0), [days]);
-  const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0), 0), [rows]);
+  const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0) + (Number(r.overtime_hours) || 0), 0), [rows]);
   const openTasks = tasks.filter((t) => t.status !== 'completed');
 
   function setRow(key, field, value) {
@@ -120,6 +121,7 @@ export default function ItTimesheetPage() {
           date,
           account_id: row.account_id,
           hours: Number(row.hours),
+          overtime_hours: Number(row.overtime_hours) || 0,
           notes: row.notes.trim() || undefined,
         });
       }
@@ -202,9 +204,10 @@ export default function ItTimesheetPage() {
           )}
           <div className="space-y-2">
             {rows.map((row) => (
-              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_2.4fr_auto]">
+              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_0.6fr_2.2fr_auto]">
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
-                <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
                 <input placeholder="Description" value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
@@ -269,10 +272,13 @@ export default function ItTimesheetPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}</td>
+                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
                         <td className="px-4 py-1.5 text-tertiary-500">{entry.notes || '—'}</td>
                         <td className="px-4 py-1.5">
-                          <Badge value={entry.status} label={STATUS_LABEL[entry.status] || entry.status} />
+                          <StatusBadge status={entry.status} label={STATUS_LABEL[entry.status]} size="xs" />
+                          {entry.status === 'approved' && entry.approved_by && (
+                            <p className="mt-0.5 text-[11px] text-tertiary-500">by {entry.approved_by.name}{entry.approved_at ? ` · ${new Date(entry.approved_at).toLocaleString()}` : ''}</p>
+                          )}
                           {entry.status === 'rejected' && entry.decision_reason && (
                             <p className="mt-0.5 text-xs text-danger-600">Manager: {entry.decision_reason}</p>
                           )}

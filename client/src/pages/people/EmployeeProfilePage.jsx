@@ -10,6 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
+import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -299,6 +300,8 @@ export default function EmployeeProfilePage() {
           <PeekField label="Notice end">{formatDate(row.notice_end_date)}</PeekField>
         </dl>
       </section>
+      {/* Bank, emergency contact, documents — renders only for an admin or the employee themselves. */}
+      <PersonalDetailsSection membershipId={row.id} />
       <CalendarMappingSection membershipId={row.id} locationName={row.location?.name} canEdit={canEdit} />
       <EditMembershipDrawer
         open={editOpen}

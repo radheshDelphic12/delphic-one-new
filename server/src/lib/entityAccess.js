@@ -102,7 +102,19 @@ async function canAccessProjectVendorInvoice(user, invoiceId) {
   return { ok: true };
 }
 
+// An employee's own documents (ID proofs, letters …): an admin of the same
+// org, or the employee themselves — for reading and uploading alike.
+async function canAccessOrgMembership(user, membershipId) {
+  const membership = await prisma.orgMembership.findUnique({ where: { id: membershipId }, select: { org_id: true } });
+  if (!membership) return { error: 'not_found' };
+  if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
+  if (membership.org_id !== user.org_id) return { error: 'not_found' };
+  if (user.role !== 'admin' && membershipId !== user.org_membership_id) return { error: 'not_found' };
+  return { ok: true };
+}
+
 const CHECKERS = {
+  org_membership: canAccessOrgMembership,
   account: canAccessAccount,
   requirement: canAccessRequirement,
   profile: canAccessProfile,

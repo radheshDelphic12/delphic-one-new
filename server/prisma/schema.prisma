@@ -373,6 +373,10 @@ enum DocumentEntityType {
   // either model.
   expense_claim
   vendor_payment
+  // Finance → Project P&L: a vendor's invoice file for the month.
+  project_vendor_invoice
+  // People: an employee's own documents (ID proofs, letters …).
+  org_membership
 }
 
 enum CommentEntityType {
@@ -490,16 +494,23 @@ model Designation {
 // Department and with a team lead. Same org-scoped shape as Designation;
 // each employee (OrgMembership) belongs to at most one team.
 model Team {
-  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String         @db.Uuid
-  org                Org            @relation(fields: [org_id], references: [id])
-  name               String
-  department_id      String?        @db.Uuid
-  department         Department?    @relation(fields: [department_id], references: [id], onDelete: SetNull)
-  lead_membership_id String?        @db.Uuid
-  lead               OrgMembership? @relation("TeamLead", fields: [lead_membership_id], references: [id], onDelete: SetNull)
-  created_at         DateTime       @default(now())
-  updated_at         DateTime       @default(now()) @updatedAt
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String         @db.Uuid
+  org                   Org            @relation(fields: [org_id], references: [id])
+  name                  String
+  department_id         String?        @db.Uuid
+  department            Department?    @relation(fields: [department_id], references: [id], onDelete: SetNull)
+  lead_membership_id    String?        @db.Uuid
+  lead                  OrgMembership? @relation("TeamLead", fields: [lead_membership_id], references: [id], onDelete: SetNull)
+  // Org chart (Team view): who the team hangs off when it has no lead yet
+  // (else the lead's own manager), seats still to fill (drawn as vacant
+  // circles), and its left-to-right position among its siblings.
+  manager_membership_id String?        @db.Uuid
+  manager               OrgMembership? @relation("TeamManager", fields: [manager_membership_id], references: [id], onDelete: SetNull)
+  open_positions        Int            @default(0)
+  sort_order            Int            @default(0)
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @default(now()) @updatedAt
 
   members OrgMembership[] @relation("TeamMembers")
 
@@ -580,6 +591,7 @@ model Location {
   calendars       Calendar[]
   org_memberships OrgMembership[]
   expense_claims  ExpenseClaim[]
+  group_charges   GroupBillingCharge[]
 
   @@unique([org_id, name])
   @@index([org_id])
@@ -769,6 +781,10 @@ model TimesheetEntry {
   requirement_id      String?              @db.Uuid
   requirement         Requirement?         @relation("TimesheetRequirement", fields: [requirement_id], references: [id])
   hours               Decimal              @db.Decimal(4, 1)
+  // Hours worked BEYOND the regular `hours` above on the same entry, claimed
+  // as overtime by the employee/vendor resource. Approved with the entry.
+  // Only billed to the client when the project has overtime_billable on.
+  overtime_hours      Decimal              @default(0) @db.Decimal(4, 1)
   billable            Boolean              @default(true)
   // Task category for the IT itemized timesheet view (e.g. "Code Review",
   // "Project Management", "AI Coordination") — free text, not an enum: real
@@ -1103,22 +1119,25 @@ model DailyProjectRevenue {
 // DailyProjectRevenue rows. draft -> sent -> paid, forward-only; no
 // void/backward move yet (documented gap, same posture as PayrollRun).
 model ClientInvoice {
-  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String              @db.Uuid
-  org               Org                 @relation(fields: [org_id], references: [id])
-  client_account_id String              @db.Uuid
-  client_account    Account             @relation("ClientInvoiceAccount", fields: [client_account_id], references: [id])
-  period_month      Int
-  period_year       Int
-  amount            Decimal             @db.Decimal(14, 2)
-  currency          Currency            @default(INR)
-  status            ClientInvoiceStatus @default(draft)
-  line_items        Json
-  sent_at           DateTime?
-  paid_at           DateTime?
-  created_by        String              @db.Uuid
-  creator           User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
-  created_at        DateTime            @default(now())
+  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String              @db.Uuid
+  org                    Org                 @relation(fields: [org_id], references: [id])
+  client_account_id      String              @db.Uuid
+  client_account         Account             @relation("ClientInvoiceAccount", fields: [client_account_id], references: [id])
+  period_month           Int
+  period_year            Int
+  amount                 Decimal             @db.Decimal(14, 2)
+  currency               Currency            @default(INR)
+  status                 ClientInvoiceStatus @default(draft)
+  line_items             Json
+  sent_at                DateTime?
+  paid_at                DateTime?
+  // The locked Billing & Sales calculation version this invoice was generated
+  // from (null for an invoice built the older way, from DailyProjectRevenue).
+  calculation_version_id String?             @db.Uuid
+  created_by             String              @db.Uuid
+  creator                User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
+  created_at             DateTime            @default(now())
 
   @@unique([client_account_id, period_month, period_year])
   @@index([org_id])
@@ -1132,20 +1151,31 @@ model ClientInvoice {
 // own org's charges. `kind` is free text — the HLD doesn't enumerate charge
 // kinds, so this isn't an invented enum.
 model GroupBillingCharge {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id String   @db.Uuid
-  org_group    OrgGroup @relation(fields: [org_group_id], references: [id])
-  org_id       String   @db.Uuid
-  org          Org      @relation(fields: [org_id], references: [id])
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String           @db.Uuid
+  org_group    OrgGroup         @relation(fields: [org_group_id], references: [id])
+  org_id       String           @db.Uuid
+  org          Org              @relation(fields: [org_id], references: [id])
   period_month Int
   period_year  Int
   kind         String
-  amount       Decimal  @db.Decimal(14, 2)
-  currency     Currency @default(INR)
-  raised_by    String   @db.Uuid
-  raiser       User     @relation("GroupBillingChargeRaisedBy", fields: [raised_by], references: [id])
-  created_at   DateTime @default(now())
+  amount       Decimal          @db.Decimal(14, 2)
+  currency     Currency         @default(INR)
+  // The day the charge was paid (e.g. Ahmedabad office rent paid 25 Sep) —
+  // what the date filter reads. Null on charges raised before this existed.
+  payment_date DateTime?        @db.Date
+  // Admin-managed category (Finance → Categories). `kind` keeps the name as
+  // text so older charges and renamed categories still read correctly.
+  category_id  String?          @db.Uuid
+  category     FinanceCategory? @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  location_id  String?          @db.Uuid
+  location     Location?        @relation(fields: [location_id], references: [id], onDelete: SetNull)
+  notes        String?
+  raised_by    String           @db.Uuid
+  raiser       User             @relation("GroupBillingChargeRaisedBy", fields: [raised_by], references: [id])
+  created_at   DateTime         @default(now())
 
+  @@index([org_id, payment_date])
   @@index([org_group_id])
   @@index([org_id, period_month, period_year])
   @@map("group_billing_charges")
@@ -1192,6 +1222,12 @@ model ExpenseClaim {
   location_id       String             @db.Uuid
   location          Location           @relation(fields: [location_id], references: [id])
   category          String
+  // Admin-managed expense category; `category` above keeps its name as text.
+  category_id       String?            @db.Uuid
+  category_ref      FinanceCategory?   @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  // When the money was spent. Null on older claims — their month is the
+  // submission date (created_at).
+  expense_date      DateTime?          @db.Date
   amount            Decimal            @db.Decimal(12, 2)
   currency          Currency           @default(INR)
   status            ExpenseClaimStatus @default(pending)
@@ -1215,24 +1251,29 @@ model ExpenseClaim {
 // invoice attaches via the existing polymorphic Document model
 // (entity_type: 'vendor_payment'), same reasoning as ExpenseClaim's receipt.
 model VendorPayment {
-  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String              @db.Uuid
-  org             Org                 @relation(fields: [org_id], references: [id])
-  vendor_name     String
-  vendor_type     VendorType
-  amount          Decimal             @db.Decimal(14, 2)
-  currency        Currency            @default(INR)
-  period_month    Int
-  period_year     Int
-  status          VendorPaymentStatus @default(pending)
-  created_by      String              @db.Uuid
-  creator         User                @relation("VendorPaymentCreatedBy", fields: [created_by], references: [id])
-  decided_by      String?             @db.Uuid
-  decider         User?               @relation("VendorPaymentDecidedBy", fields: [decided_by], references: [id])
-  decided_at      DateTime?
-  decision_reason String?
-  paid_at         DateTime?
-  created_at      DateTime            @default(now())
+  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String              @db.Uuid
+  org                    Org                 @relation(fields: [org_id], references: [id])
+  vendor_name            String
+  vendor_type            VendorType
+  // Set when the payment was generated from a locked vendor-payment
+  // calculation (contractor timesheets × rate): the vendor company Account
+  // and the calculation version it came from.
+  vendor_account_id      String?             @db.Uuid
+  calculation_version_id String?             @db.Uuid
+  amount                 Decimal             @db.Decimal(14, 2)
+  currency               Currency            @default(INR)
+  period_month           Int
+  period_year            Int
+  status                 VendorPaymentStatus @default(pending)
+  created_by             String              @db.Uuid
+  creator                User                @relation("VendorPaymentCreatedBy", fields: [created_by], references: [id])
+  decided_by             String?             @db.Uuid
+  decider                User?               @relation("VendorPaymentDecidedBy", fields: [decided_by], references: [id])
+  decided_at             DateTime?
+  decision_reason        String?
+  paid_at                DateTime?
+  created_at             DateTime            @default(now())
 
   @@index([org_id])
   @@index([org_id, period_month, period_year])
@@ -1533,6 +1574,12 @@ model Org {
   assigned_tasks          AssignedTask[]
   project_cost_rates      ProjectMemberAssignment[]
   project_vendor_invoices ProjectVendorInvoice[]
+  assets                  Asset[]
+  exchange_rates          ExchangeRate[]
+
+  // Finance categories + the calculation lock/version system.
+  finance_categories     FinanceCategory[]
+  financial_calculations FinancialCalculation[]
 
   @@index([org_group_id])
   @@map("orgs")
@@ -1541,56 +1588,69 @@ model Org {
 // Person (User) <-> Org join. "Different roles in different companies" lives
 // here: one User row, one OrgMembership row per company they work at.
 model OrgMembership {
-  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  person_id            String           @db.Uuid
-  person               User             @relation("OrgMembershipPerson", fields: [person_id], references: [id])
-  org_id               String           @db.Uuid
-  org                  Org              @relation(fields: [org_id], references: [id])
-  role                 UserRole
-  employee_code        String?
-  department_id        String?          @db.Uuid
-  department           Department?      @relation(fields: [department_id], references: [id])
+  id                          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id                   String           @db.Uuid
+  person                      User             @relation("OrgMembershipPerson", fields: [person_id], references: [id])
+  org_id                      String           @db.Uuid
+  org                         Org              @relation(fields: [org_id], references: [id])
+  role                        UserRole
+  employee_code               String?
+  department_id               String?          @db.Uuid
+  department                  Department?      @relation(fields: [department_id], references: [id])
   // Multi-company ERP (Phase 2) — nullable, unused until a designation is set.
-  designation_id       String?          @db.Uuid
-  designation          Designation?     @relation(fields: [designation_id], references: [id])
+  designation_id              String?          @db.Uuid
+  designation                 Designation?     @relation(fields: [designation_id], references: [id])
   // HR Settings → Teams, and how the person works (reuses the Requirement
   // WorkMode enum). Both optional — unset until HR assigns them.
-  team_id              String?          @db.Uuid
-  team                 Team?            @relation("TeamMembers", fields: [team_id], references: [id], onDelete: SetNull)
-  work_mode            WorkMode?
+  team_id                     String?          @db.Uuid
+  team                        Team?            @relation("TeamMembers", fields: [team_id], references: [id], onDelete: SetNull)
+  work_mode                   WorkMode?
   // Full-time employee vs contractor. A contractor's cost is vendor_rate
   // (monthly, in vendor_rate_currency) payable to vendor_account — the
   // vendor company — and never goes through payroll.
-  worker_type          WorkerType       @default(full_time_employee)
-  vendor_account_id    String?          @db.Uuid
-  vendor_account       Account?         @relation("MembershipVendorAccount", fields: [vendor_account_id], references: [id], onDelete: SetNull)
-  vendor_rate          Decimal?         @db.Decimal(14, 2)
-  vendor_rate_currency Currency?
+  worker_type                 WorkerType       @default(full_time_employee)
+  vendor_account_id           String?          @db.Uuid
+  vendor_account              Account?         @relation("MembershipVendorAccount", fields: [vendor_account_id], references: [id], onDelete: SetNull)
+  vendor_rate                 Decimal?         @db.Decimal(14, 2)
+  vendor_rate_currency        Currency?
   // Added 2026-09-15 (client brief) — all nullable, unused until set.
-  location_id          String?          @db.Uuid
-  location             Location?        @relation(fields: [location_id], references: [id])
-  shift_id             String?          @db.Uuid
-  shift                Shift?           @relation(fields: [shift_id], references: [id])
+  location_id                 String?          @db.Uuid
+  location                    Location?        @relation(fields: [location_id], references: [id])
+  shift_id                    String?          @db.Uuid
+  shift                       Shift?           @relation(fields: [shift_id], references: [id])
   // Reporting line for the org-chart module (Phase 10, not built yet) — a
   // self-relation, so a manager is just another OrgMembership in this org.
-  manager_id           String?          @db.Uuid
-  manager              OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
-  direct_reports       OrgMembership[]  @relation("OrgMembershipManager")
+  manager_id                  String?          @db.Uuid
+  manager                     OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
+  direct_reports              OrgMembership[]  @relation("OrgMembershipManager")
   // HR contact for general queries, and the recruiter who onboarded this
   // person (for recruiter-performance tracking) — both point at User, not
   // OrgMembership, since an HR/sourcing POC may not share this org.
-  hr_poc_id            String?          @db.Uuid
-  hr_poc               User?            @relation("OrgMembershipHrPoc", fields: [hr_poc_id], references: [id])
-  sourcing_poc_id      String?          @db.Uuid
-  sourcing_poc         User?            @relation("OrgMembershipSourcingPoc", fields: [sourcing_poc_id], references: [id])
-  employment_status    EmploymentStatus @default(active)
-  joined_at            DateTime         @default(now()) @db.Date
-  left_at              DateTime?        @db.Date
+  hr_poc_id                   String?          @db.Uuid
+  hr_poc                      User?            @relation("OrgMembershipHrPoc", fields: [hr_poc_id], references: [id])
+  sourcing_poc_id             String?          @db.Uuid
+  sourcing_poc                User?            @relation("OrgMembershipSourcingPoc", fields: [sourcing_poc_id], references: [id])
+  employment_status           EmploymentStatus @default(active)
+  // Bank account for salary and emergency contact — the employee keeps these
+  // up to date from their own portal (Settings → My details); admins can too.
+  // Never part of the org-wide membership read, which any member can call.
+  bank_account_holder         String?
+  bank_name                   String?
+  bank_account_number         String?
+  bank_ifsc                   String?
+  bank_branch                 String?
+  emergency_contact_name      String?
+  emergency_contact_relation  String?
+  emergency_contact_phone     String?
+  emergency_contact_email     String?
+  personal_details_updated_at DateTime?
+  joined_at                   DateTime         @default(now()) @db.Date
+  left_at                     DateTime?        @db.Date
   // Set when employment_status = notice_period — the org chart's
   // resignation indicator reads this (Phase 10, not built yet).
-  notice_end_date      DateTime?        @db.Date
-  created_at           DateTime         @default(now())
-  updated_at           DateTime         @default(now()) @updatedAt
+  notice_end_date             DateTime?        @db.Date
+  created_at                  DateTime         @default(now())
+  updated_at                  DateTime         @default(now()) @updatedAt
 
   employee_calendars      EmployeeCalendar[]
   attendance_records      AttendanceRecord[]
@@ -1606,6 +1666,8 @@ model OrgMembership {
   project_cost_rates      ProjectMemberAssignment[]
   regularization_requests TimesheetRegularizationTicket[] @relation("RegularizationMembership")
   teams_led               Team[]                          @relation("TeamLead")
+  teams_managed           Team[]                          @relation("TeamManager")
+  assets                  Asset[]
 
   @@unique([person_id, org_id])
   @@index([team_id])
@@ -1672,17 +1734,35 @@ model Account {
   // so there is one source of truth. Nothing is billed before
   // agreement_start_date. benchmark_hours is the monthly-billing benchmark.
   project_name         String?
+  // Contract tracking: when the agreement ends, and a manual hold / completed
+  // override (null = worked out from the dates — not started / running /
+  // about to end / completed).
+  agreement_end_date   DateTime?              @db.Date
+  contract_status      ProjectContractStatus?
   client_name          String?
   // The project's client, picked from this org's client accounts (client or
   // unclassified, any stage). client_name above is kept as a snapshot of the
   // picked account's name, and is the only value legacy projects created
   // before this link have.
-  client_account_id    String?   @db.Uuid
-  client_account       Account?  @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
-  client_projects      Account[] @relation("ProjectClientAccount")
+  client_account_id    String?                @db.Uuid
+  client_account       Account?               @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
+  client_projects      Account[]              @relation("ProjectClientAccount")
   service_category     ReqType?
-  agreement_start_date DateTime? @db.Date
-  benchmark_hours      Int       @default(160)
+  agreement_start_date DateTime?              @db.Date
+  benchmark_hours      Int                    @default(160)
+  // Finance's internal project/contract id (P0001, P0002 …), unique per org.
+  // The project NAME is only a label — two contracts with the same name (the
+  // same client taking a second resource later) are separate projects with
+  // their own resources, dates, rates, billing and P&L; this code (and the
+  // row's uuid) is what tells them apart.
+  project_code         String?
+  // Whether the client pays for overtime on this contract. The project's own
+  // setting is the source of truth: Billing & Sales only ever adds approved
+  // overtime for a project where this is on. `overtime_multiplier` scales the
+  // hourly-equivalent rate for those hours (1 = straight time, 1.5 = time and
+  // a half).
+  overtime_billable    Boolean                @default(false)
+  overtime_multiplier  Decimal                @default(1) @db.Decimal(5, 2)
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])
@@ -1722,7 +1802,10 @@ model Account {
   contractor_memberships     OrgMembership[]                 @relation("MembershipVendorAccount")
   project_vendor_invoices    ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceProject")
   vendor_invoices_raised     ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceVendor")
+  assets_supplied            Asset[]                         @relation("AssetVendor")
+  assets_at_client           Asset[]                         @relation("AssetClient")
 
+  @@unique([org_id, project_code])
   @@index([type, stage])
   @@index([owner_id])
   @@index([origin_owner_id])
@@ -2571,4 +2654,207 @@ model ResourceMapping {
   @@index([org_id, working_membership_id])
   @@index([org_id, face_membership_id])
   @@map("resource_mappings")
+}
+
+enum AssetStatus {
+  issued
+  returned
+}
+
+// Who owns the device: Delphic's own hardware, or the client's.
+enum AssetOwner {
+  delphic
+  client
+}
+
+// People → Assets: the hardware register (laptops, Mac Books, cubes …) — who
+// holds each device, who owns it, the vendor that supplied it and the client
+// it is used for. asset_type is free text picked from presets in the UI so a
+// new kind of device doesn't need a migration.
+model Asset {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String         @db.Uuid
+  org               Org            @relation(fields: [org_id], references: [id])
+  serial_number     String?
+  asset_type        String
+  status            AssetStatus    @default(issued)
+  belongs_to        AssetOwner     @default(delphic)
+  org_membership_id String?        @db.Uuid
+  org_membership    OrgMembership? @relation(fields: [org_membership_id], references: [id], onDelete: SetNull)
+  vendor_account_id String?        @db.Uuid
+  vendor_account    Account?       @relation("AssetVendor", fields: [vendor_account_id], references: [id], onDelete: SetNull)
+  client_account_id String?        @db.Uuid
+  client_account    Account?       @relation("AssetClient", fields: [client_account_id], references: [id], onDelete: SetNull)
+  issue_date        DateTime?      @db.Date
+  return_date       DateTime?      @db.Date
+  device_details    String?
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([org_membership_id])
+  @@map("assets")
+}
+
+// Finance → Project P&L: how many INR one unit of a foreign currency is worth,
+// set by finance. P&L converts billing, contractor rates and vendor invoices to
+// INR with these (salaries are INR), so projects in different currencies add
+// up. INR itself is never stored — it is always 1.
+model ExchangeRate {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id])
+  currency    Currency
+  rate_to_inr Decimal  @db.Decimal(14, 6)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, currency])
+  @@map("exchange_rates")
+}
+
+// Manual project contract state; the rest (not started, running, about to
+// end, ended) is derived from the agreement dates.
+enum ProjectContractStatus {
+  on_hold
+  completed
+}
+
+// --- Finance: admin-managed categories -------------------------------------
+
+// Two separate lists, like HR Settings → Designations: categories for Group
+// Charges (Office Rent, Electricity, Internet …) and for Expenses (Travel,
+// Supplies …). Only admins add / rename / deactivate them; a deactivated
+// category stays on the records that used it but is no longer offered.
+enum FinanceCategoryKind {
+  group_charge
+  expense
+}
+
+model FinanceCategory {
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String              @db.Uuid
+  org        Org                 @relation(fields: [org_id], references: [id])
+  kind       FinanceCategoryKind
+  name       String
+  is_active  Boolean             @default(true)
+  created_by String?             @db.Uuid
+  created_at DateTime            @default(now())
+  updated_at DateTime            @default(now()) @updatedAt
+
+  group_charges  GroupBillingCharge[]
+  expense_claims ExpenseClaim[]
+
+  @@unique([org_id, kind, name])
+  @@index([org_id, kind])
+  @@map("finance_categories")
+}
+
+// --- Finance: calculation locking + versioning (one system for all) --------
+//
+// Operational data -> calculation -> review -> LOCK -> snapshot. One row per
+// (org, kind, scope, month): `billing` is scoped to a project (Account id),
+// the others to the whole org ('org'). A lock writes an immutable
+// FinancialCalculationVersion holding the full computed result; later
+// changes to attendance / timesheets / leave / salary never rewrite it —
+// they raise a FinancialCalculationChange and flip the status to
+// change_detected, and only an explicit recalculation (a NEW version) moves
+// the figures. See modules/calculations/calculations.service.js.
+enum CalculationKind {
+  billing
+  salary
+  resource_revenue
+  vendor_payment
+  financials
+}
+
+enum CalculationStatus {
+  draft
+  reviewed
+  locked
+  change_detected
+  reopened
+}
+
+enum CalculationChangeStatus {
+  open
+  accepted
+  dismissed
+}
+
+model FinancialCalculation {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String            @db.Uuid
+  org                Org               @relation(fields: [org_id], references: [id])
+  kind               CalculationKind
+  scope_key          String
+  scope_label        String?
+  period_month       Int
+  period_year        Int
+  status             CalculationStatus @default(draft)
+  current_version    Int               @default(0)
+  reviewed_by        String?           @db.Uuid
+  reviewed_at        DateTime?
+  locked_by          String?           @db.Uuid
+  locked_at          DateTime?
+  reopened_by        String?           @db.Uuid
+  reopened_at        DateTime?
+  change_detected_at DateTime?
+  created_by         String?           @db.Uuid
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @default(now()) @updatedAt
+
+  versions FinancialCalculationVersion[]
+  changes  FinancialCalculationChange[]
+
+  @@unique([org_id, kind, scope_key, period_year, period_month])
+  @@index([org_id, period_year, period_month])
+  @@index([org_id, status])
+  @@map("financial_calculations")
+}
+
+// Immutable once written — never updated, only added to.
+model FinancialCalculationVersion {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  calculation_id String               @db.Uuid
+  calculation    FinancialCalculation @relation(fields: [calculation_id], references: [id], onDelete: Cascade)
+  version        Int
+  amount         Decimal              @db.Decimal(16, 2)
+  currency       Currency             @default(INR)
+  // The whole computed result (totals, per-line figures, source record ids)
+  // exactly as it stood when locked.
+  snapshot       Json
+  reason         String?
+  created_by     String?              @db.Uuid
+  created_at     DateTime             @default(now())
+
+  @@unique([calculation_id, version])
+  @@map("financial_calculation_versions")
+}
+
+// A change to operational data inside an already-locked period.
+model FinancialCalculationChange {
+  id                String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  calculation_id    String                  @db.Uuid
+  calculation       FinancialCalculation    @relation(fields: [calculation_id], references: [id], onDelete: Cascade)
+  source_type       String
+  source_id         String?
+  org_membership_id String?                 @db.Uuid
+  account_id        String?                 @db.Uuid
+  date              DateTime?               @db.Date
+  description       String
+  old_value         Json?
+  new_value         Json?
+  previous_amount   Decimal?                @db.Decimal(16, 2)
+  potential_amount  Decimal?                @db.Decimal(16, 2)
+  changed_by        String?                 @db.Uuid
+  detected_at       DateTime                @default(now())
+  status            CalculationChangeStatus @default(open)
+  resolved_by       String?                 @db.Uuid
+  resolved_at       DateTime?
+  resolved_version  Int?
+  resolution_note   String?
+
+  @@index([calculation_id, status])
+  @@map("financial_calculation_changes")
 }

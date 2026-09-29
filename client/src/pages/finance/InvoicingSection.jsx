@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus, Printer, RefreshCw } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
+import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useProjectOptions } from '../../lib/lookups.js';
@@ -95,8 +96,50 @@ function ComputeRevenueDrawer({ open, onClose, onSubmit }) {
   );
 }
 
-/** Invoicing — lives under Finance → Projects now that the Accounting tab is switched off. */
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Invoices built from a locked Billing & Sales month carry { lines, project, … };
+// older ones (from computed daily revenue) are a plain array of requirement lines.
+function invoiceLines(row) {
+  const items = row.line_items;
+  if (Array.isArray(items)) return items.map((li) => ({ label: li.requirement_title || 'Services', hours: li.hours, overtime_hours: 0, amount: li.revenue }));
+  return (items?.lines || []).map((li) => ({ label: li.resource, hours: li.hours, overtime_hours: li.overtime_hours, amount: li.revenue }));
+}
+
+/**
+ * Review / download: a standalone, printable invoice ("Save as PDF" in the
+ * print dialog is the download) — same approach as payslips.
+ */
+function printInvoice(row, orgName) {
+  const lines = invoiceLines(row);
+  const meta = Array.isArray(row.line_items) ? {} : row.line_items || {};
+  const win = window.open('', '_blank', 'width=820,height=960');
+  if (!win) return;
+  win.document.write(`<!doctype html><html><head><title>Invoice — ${escapeHtml(row.client_account?.name)} ${row.period_month}/${row.period_year}</title>
+    <style>body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;padding:32px}h1{font-size:18px;margin:0}.sub{color:#64748b;font-size:12px;margin:4px 0 20px}
+    table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;font-size:13px;text-align:left;border-bottom:1px solid #e8ebf2}.r{text-align:right}.total td{font-weight:700;font-size:15px}</style></head><body>
+    <h1>${escapeHtml(orgName || 'Invoice')}</h1>
+    <p class="sub">Invoice for ${escapeHtml(meta.project?.name || row.client_account?.name)}${meta.project?.code ? ` (${escapeHtml(meta.project.code)})` : ''}${meta.project?.client_name ? ` · ${escapeHtml(meta.project.client_name)}` : ''} · Period ${row.period_month}/${row.period_year} · Status ${escapeHtml(row.status)}${meta.calculation_version ? ` · locked billing v${meta.calculation_version}` : ''}</p>
+    <table><thead><tr><th>Item</th><th class="r">Hours</th><th class="r">Overtime hrs</th><th class="r">Amount (${escapeHtml(row.currency)})</th></tr></thead><tbody>
+    ${lines.map((l) => `<tr><td>${escapeHtml(l.label)}</td><td class="r">${escapeHtml(l.hours ?? '')}</td><td class="r">${escapeHtml(l.overtime_hours || '')}</td><td class="r">${escapeHtml(money(l.amount))}</td></tr>`).join('')}
+    <tr class="total"><td colspan="3">Total</td><td class="r">${escapeHtml(row.currency)} ${escapeHtml(money(row.amount))}</td></tr></tbody></table>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
+/**
+ * Invoicing — lives under Finance → Projects now that the Accounting tab is
+ * switched off. The preferred flow: Live Analytics → Billing & Sales → lock
+ * the project month → Generate invoice, which lands here as a draft built from
+ * the locked figures ("from locked v#"). Drafts can be reviewed, downloaded
+ * (print / save as PDF), marked sent (shared) and paid.
+ */
 export default function InvoicingSection() {
+  const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -141,17 +184,19 @@ export default function InvoicingSection() {
   }
 
   const columns = [
-    { key: 'client', header: 'Project', render: (row) => row.client_account?.name || '—' },
+    { key: 'client', header: 'Project', render: (row) => <span>{row.line_items?.project?.name || row.client_account?.name || '—'}{row.line_items?.project?.code && <span className="block text-xs text-tertiary-500">{row.line_items.project.code}{row.line_items.project.client_name ? ` · ${row.line_items.project.client_name}` : ''}</span>}</span> },
     { key: 'period', header: 'Period', render: (row) => `${row.period_month}/${row.period_year}` },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
-    { key: 'lines', header: 'Line items', render: (row) => (row.line_items?.length ?? 0) },
+    { key: 'lines', header: 'Line items', render: (row) => invoiceLines(row).length },
+    { key: 'source', header: 'Source', render: (row) => (row.calculation_version_id ? <span className="text-xs text-success-700">Locked billing v{row.line_items?.calculation_version}</span> : <span className="text-xs text-tertiary-500">Computed revenue</span>) },
     { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
     {
       key: 'actions',
       header: 'Actions',
       render: (row) => (
         <div className="flex gap-2">
-          {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent</button>}
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(row, user?.active_org?.name)}><Printer className="h-3.5 w-3.5" /> View / download</button>
+          {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
           {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'paid')}>Mark paid</button>}
         </div>
       ),

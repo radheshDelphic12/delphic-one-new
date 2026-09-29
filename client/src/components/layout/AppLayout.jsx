@@ -14,6 +14,11 @@ import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
 import HeaderAttendance from './HeaderAttendance.jsx';
 
+// The header's Check in / Check out button is switched off for now (check-in
+// still works from Time & Attendance → Attendance). Set true to bring it back.
+const SHOW_HEADER_ATTENDANCE = false;
+import { canSeeMeetingsCalendar } from '../../lib/departments.js';
+
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
 function OrgCreateDrawer({ open, onClose }) {
@@ -80,13 +85,15 @@ export default function AppLayout() {
   const navItems = useMemo(
     () =>
       isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
+        if (item.hiddenForAdmin && user?.role === 'admin') return false;
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
+        if (item.meetingsCalendar && !canSeeMeetingsCalendar(user)) return false;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
         return !item.capability || can(item.capability);
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor]
   );
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
@@ -307,7 +314,7 @@ export default function AppLayout() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {user?.active_org && !isContractor && can('viewAttendance') && <HeaderAttendance key={user.active_org.id} user={user} />}
+                {SHOW_HEADER_ATTENDANCE && user?.active_org && !isContractor && can('viewAttendance') && <HeaderAttendance key={user.active_org.id} user={user} />}
                 <NotificationBell />
               </div>
             </div>

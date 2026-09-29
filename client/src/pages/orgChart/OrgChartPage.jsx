@@ -7,6 +7,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Avatar from '../../components/ui/Avatar.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import TeamChart from './TeamChart.jsx';
 
 function formatDate(value) {
   return value ? new Date(`${value}`.slice(0, 10)).toLocaleDateString() : null;
@@ -254,6 +255,7 @@ function OrgBranches({ roots, viewMode, branchNamespace, collapsedIds, onToggle 
 }
 
 const VIEW_MODES = [
+  { key: 'team', label: 'Team View' },
   { key: 'role', label: 'Designation / Role View' },
   { key: 'department', label: 'Department View' },
 ];
@@ -274,7 +276,9 @@ export default function OrgChartPage({ groupOrgs }) {
   const { user } = useAuth();
   const { pushError } = useAlerts();
   const [includeTerminated, setIncludeTerminated] = useState(false);
-  const [viewMode, setViewMode] = useState('role');
+  // Team view draws one org's HR teams; the group chart spans companies, so it keeps the tree views.
+  const viewModes = groupOrgs ? VIEW_MODES.filter((m) => m.key !== 'team') : VIEW_MODES;
+  const [viewMode, setViewMode] = useState(groupOrgs ? 'role' : 'team');
   const [collapsedIds, setCollapsedIds] = useState(() => new Set());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(!groupOrgs);
@@ -309,7 +313,7 @@ export default function OrgChartPage({ groupOrgs }) {
   const viewToggle = (
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-tertiary-200 bg-white p-0.5 shadow-sm">
-        {VIEW_MODES.map(({ key, label }) => (
+        {viewModes.map(({ key, label }) => (
           <button
             key={key}
             type="button"
@@ -322,7 +326,9 @@ export default function OrgChartPage({ groupOrgs }) {
           </button>
         ))}
       </div>
-      <p className="text-xs text-tertiary-400">Strictly role-based reporting order remains intact; department view simply re-groups the same employees without changing reporting lines.</p>
+      {viewMode !== 'team' && (
+        <p className="text-xs text-tertiary-400">Strictly role-based reporting order remains intact; department view simply re-groups the same employees without changing reporting lines.</p>
+      )}
     </div>
   );
 
@@ -376,7 +382,10 @@ export default function OrgChartPage({ groupOrgs }) {
       {!loading && data?.roots.length === 0 && (
         <EmptyState icon={UserRound} title="No org chart yet" description="Set a manager on employee records (People → Directory) to build the reporting tree." />
       )}
-      {!loading && data?.roots.length > 0 && (
+      {!loading && data?.roots.length > 0 && viewMode === 'team' && (
+        <TeamChart data={data} companyName={user?.active_org?.name || 'Company'} />
+      )}
+      {!loading && data?.roots.length > 0 && viewMode !== 'team' && (
         <div className="overflow-x-auto pb-4">
           <ul className="org-tree w-max min-w-full">
             <li>

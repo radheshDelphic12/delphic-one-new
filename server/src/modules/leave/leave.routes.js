@@ -119,7 +119,7 @@ router.post(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = decisionSchema.parse(req.body);
-    const result = await service.decide(req.user.org_id, req.params.id, req.user.org_membership_id, body);
+    const result = await service.decide(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
     if (result.error === 'not_pending') return fail(res, 409, 'Leave request is not pending');
     return ok(res, result.request);
@@ -131,7 +131,7 @@ router.post(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = revokeSchema.parse(req.body || {});
-    const result = await service.revoke(req.user.org_id, req.params.id, req.user.org_membership_id, body);
+    const result = await service.revoke(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
     if (result.error === 'not_revocable') return fail(res, 409, 'Only pending or approved leave can be withdrawn');
     return ok(res, result.request);
