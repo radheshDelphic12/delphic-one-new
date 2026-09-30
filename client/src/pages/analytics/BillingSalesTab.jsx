@@ -78,8 +78,13 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
     { key: 'amount', header: 'Amount', render: (d) => <span className="font-medium tabular-nums">{inr(d.amount, data?.currency)}</span> },
   ];
 
+  // Closed: render nothing from the last project. Its data can still be in
+  // state for a render after the row clears, and reading row.project then
+  // crashed the whole page.
+  if (!row) return <Drawer open={false} title="" onClose={onClose} size="xl" />;
+
   return (
-    <Drawer open={Boolean(row)} title={row ? `${row.project.code ? `${row.project.code} · ` : ''}${row.project.name} — ${periodLabel(row)}` : ''} onClose={onClose} size="xl">
+    <Drawer open title={`${row.project.code ? `${row.project.code} · ` : ''}${row.project.name} — ${periodLabel(row)}`} onClose={onClose} size="xl">
       {!data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
         <div className="space-y-4">
           <CalculationLockBar kind="billing" scopeKey={row.project.id} period={period} title="Billing" onChanged={() => { load(); onChanged(); }}>
@@ -93,6 +98,7 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
                 {data.billing_type === 'monthly'
                   ? `Monthly ${inr(data.rate, data.currency)} over this project's ${data.working_days} working days (${data.calendar?.name || 'default calendar'}): a working day earns up to ${inr(data.rate / Math.max(data.working_days, 1), data.currency)}, in proportion to approved hours against the ${data.benchmark_hours}h monthly benchmark.`
                   : data.billing_type === 'hourly' ? `Hourly: approved hours × ${inr(data.rate, data.currency)}.` : 'No billing rate set for this project.'}
+                {data.minimum && ` Committed minimum ${data.minimum.hours}h/month: ${data.minimum.met ? 'met' : `${data.minimum.shortfall_hours}h short so far`} (billing is still approved hours × rate).`}
                 {data.estimate && ` Client estimate: ${data.estimate.hours}h × ${inr(data.rate, data.currency)} = ${inr(data.estimate.amount, data.currency)}; actual so far ${data.estimate.actual_hours}h = ${inr(data.estimate.actual_amount, data.currency)} (${data.estimate.hours_variance >= 0 ? '+' : ''}${data.estimate.hours_variance}h). Forecast only — not billed.`}
                 {' '}Overtime is {data.overtime.enabled ? `billed at ${data.overtime.multiplier}× the hourly-equivalent rate` : 'not billable on this project'}. Only approved hours bill.
                 {data.source === 'locked' && ' Showing the locked version.'}
@@ -157,6 +163,11 @@ export default function BillingSalesTab() {
         {r.estimate && (
           <span className="block text-xs text-tertiary-500" title="Client's approximate hours × hourly rate — a forecast, not billed">
             Est. {inr(r.estimate.amount, r.currency)} · {r.estimate.hours}h
+          </span>
+        )}
+        {r.minimum && !r.minimum.met && (
+          <span className="block text-xs font-medium text-warning-700" title="Approved hours are below the project's committed minimum">
+            {r.minimum.shortfall_hours}h below {r.minimum.hours}h min.
           </span>
         )}
       </span>

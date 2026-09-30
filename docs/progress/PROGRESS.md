@@ -2,6 +2,17 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-09-30 — Older projects editable in Finance → Projects — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Legacy projects were locked as "Client account · read-only".** Rows used
+  as projects before `is_project` existed (e.g. Circle · P0004, client
+  Girnarsoft, monthly billing) weren't flagged by the migration, so Finance
+  refused to edit them. `billing.service` now treats any row matching
+  `lib/projectScope.projectListWhere` as editable (list, single profile and
+  PATCH guard). Edits still write only project fields — the account's own
+  name is never changed. A plain catalogue client with no project data stays
+  unlisted and read-only. Test added in `projects-vs-accounts.test.js`.
+
 ## 2026-09-29 — Recruitment requirements re-enabled — branch `delphic-one-bugFix-and-newImplementation`
 
 - **Create requirement → Type: Recruitment is selectable again.** The option

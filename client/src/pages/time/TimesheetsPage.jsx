@@ -10,6 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
 
@@ -117,7 +118,7 @@ export default function TimesheetsPage() {
   const columns = [
     { key: 'date', header: 'Date', render: (row) => new Date(`${row.date}`.slice(0, 10)).toLocaleDateString() },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Notes', render: (row) => row.notes || <span className="text-tertiary-400">—</span> },
+    { key: 'notes', header: 'Notes', render: (row) => <NoteText text={row.notes} /> },
     {
       key: 'status',
       header: 'Status',

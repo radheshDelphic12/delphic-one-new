@@ -4,7 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
 const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
-const { listQuerySchema, regularizeSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema } = require('./attendance.validation');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -57,6 +57,17 @@ router.post(
     const result = await service.regularize(req.user.org_id, req.params.id, req.user.id, body);
     if (result.error === 'not_found') return fail(res, 404, 'Attendance record not found');
     return ok(res, result.record);
+  })
+);
+
+router.delete(
+  '/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = deleteRecordSchema.parse(req.body || {});
+    const result = await service.deleteRecord(req.user.org_id, req.params.id, req.user.id, body);
+    if (result.error === 'not_found') return fail(res, 404, 'Attendance record not found');
+    return ok(res, { deleted: true, flagged: result.flagged });
   })
 );
 

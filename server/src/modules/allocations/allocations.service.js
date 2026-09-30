@@ -408,7 +408,8 @@ function capacityStatus(members, total, current) {
  * Available = max(0, capacity − allocation); Can allocate = available +
  * projects ending within `window_days` (their people free up).
  */
-async function teamCapacity(orgId, { date, team_id, window_days = DEFAULT_ENDING_WINDOW } = {}) {
+async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFAULT_ENDING_WINDOW } = {}) {
+  const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
   const day = A.toDate(date) || todayIst();
   const windowEnd = A.addDays(day, window_days);
   const [{ projects_per_resource: orgDefault }, ctx, spans] = await Promise.all([
@@ -460,7 +461,7 @@ async function teamCapacity(orgId, { date, team_id, window_days = DEFAULT_ENDING
   }
 
   const out = [...rows.values()]
-    .filter((r) => !team_id || r.team?.id === team_id)
+    .filter((r) => !onlyTeams.size || onlyTeams.has(r.team?.id))
     .filter((r) => r.team || r.projects.size) // "No team" row only when it has allocations
     .map((r) => {
       const projects = [...r.projects.values()].sort((a, b) => (a.agreement_end_date || '9999').localeCompare(b.agreement_end_date || '9999'));

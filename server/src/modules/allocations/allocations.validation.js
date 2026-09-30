@@ -10,6 +10,12 @@ const settingsSchema = z.object({
 const capacityQuerySchema = z.object({
   date: optionalDate,
   team_id: uuid,
+  // Several teams at once: comma-separated ids (Team Capacity's multi-select).
+  team_ids: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined))
+    .pipe(z.array(z.string().uuid()).optional()),
   window_days: z.coerce.number().int().min(1).max(365).default(30),
 });
 

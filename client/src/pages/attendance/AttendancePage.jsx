@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, CalendarPlus, CheckCircle2, Clock3, LogIn, LogOut, Upload, Wrench } from 'lucide-react';
+import { CalendarClock, CalendarPlus, CheckCircle2, Clock3, LogIn, LogOut, Trash2, Upload, Wrench } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -153,6 +153,22 @@ export default function AttendancePage() {
     return () => window.removeEventListener(ATTENDANCE_CHANGED, loadAttendance);
   });
 
+  // Admin: remove a wrong record at any stage (a finalized month is flagged
+  // for recalculation rather than rewritten).
+  async function removeRecord(row) {
+    const reason = window.prompt(`Delete ${row.org_membership?.person?.name || 'this'} attendance for ${String(row.date).slice(0, 10)}? Give a reason (required):`);
+    if (reason === null) return;
+    if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
+    try {
+      const { data } = await apiClient.delete(`/attendance/${row.id}`, { data: { reason: reason.trim() } });
+      const flagged = data.data?.flagged || 0;
+      pushInfo(`Attendance record deleted${flagged ? ` — ${flagged} locked calculation${flagged === 1 ? '' : 's'} flagged for recalculation` : ''}`);
+      setRows((current) => current.filter((r) => r.id !== row.id));
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the attendance record'), 'Something went wrong');
+    }
+  }
+
   function handleRegularized(updated) {
     setRows((current) => current.map((row) => row.id === updated.id ? { ...row, ...updated } : row));
     setRegularize(null);
@@ -175,7 +191,7 @@ export default function AttendancePage() {
       },
     },
     { key: 'overtime', header: 'Overtime', render: (row) => formatMinutes(row.overtime_minutes) },
-    ...(tab === 'team' ? [{ key: 'actions', header: 'Actions', render: (row) => <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={(event) => { event.stopPropagation(); setRegularize(row); }}><Wrench className="h-3.5 w-3.5" /> Correct</button> }] : []),
+    ...(tab === 'team' ? [{ key: 'actions', header: 'Actions', render: (row) => <span className="flex gap-1"><button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={(event) => { event.stopPropagation(); setRegularize(row); }}><Wrench className="h-3.5 w-3.5" /> Correct</button><button type="button" className="btn-ghost inline-flex items-center gap-1 text-danger-600" onClick={(event) => { event.stopPropagation(); removeRecord(row); }}><Trash2 className="h-3.5 w-3.5" /> Delete</button></span> }] : []),
   ];
 
   return (

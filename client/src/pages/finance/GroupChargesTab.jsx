@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Hash, Pencil, Plus, Receipt } from 'lucide-react';
+import { CalendarDays, Hash, Pencil, Plus, Receipt, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { can } from '../../lib/permissions.js';
@@ -230,21 +230,39 @@ export default function GroupChargesTab() {
     }
   }
 
-  // A charge the group raised against this company is the group superadmin's to change.
+  const isSuperadmin = Boolean(user?.is_superadmin);
+  async function remove(row) {
+    if (!window.confirm(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category?.name || row.kind || ''} group expense? This can't be undone.`)) return;
+    try {
+      await apiClient.delete(`/billing/group-charges/${row.id}`);
+      pushInfo('Group expense deleted');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the group expense'), 'Something went wrong');
+    }
+  }
+
+  // A charge the group raised against this company is the group superadmin's
+  // to change — or this company's superadmin, who may also delete any charge.
   const canEditRow = useCallback(
-    (row) => canAdd && (!row.raiser?.is_group_superadmin || row.raised_by === user?.id || isGroupSuperadmin),
-    [canAdd, user?.id, isGroupSuperadmin]
+    (row) => canAdd && (!row.raiser?.is_group_superadmin || row.raised_by === user?.id || isGroupSuperadmin || isSuperadmin),
+    [canAdd, user?.id, isGroupSuperadmin, isSuperadmin]
   );
   const columns = useMemo(() => (canAdd ? [
     ...chargeColumns,
     {
       key: 'actions',
       header: '',
-      render: (row) => (canEditRow(row)
-        ? <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
-        : <span className="text-xs text-tertiary-400">Raised by group</span>),
+      render: (row) => (
+        <span className="flex gap-1">
+          {canEditRow(row)
+            ? <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
+            : <span className="text-xs text-tertiary-400">Raised by group</span>}
+          {isSuperadmin && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs text-danger-600" onClick={() => remove(row)}><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
+        </span>
+      ),
     },
-  ] : chargeColumns), [canAdd, canEditRow]);
+  ] : chargeColumns), [canAdd, canEditRow, isSuperadmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => {
     const now = new Date();

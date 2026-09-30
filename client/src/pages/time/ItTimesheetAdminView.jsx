@@ -8,6 +8,9 @@ import Badge from '../../components/ui/Badge.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { DrillDownDrawer, StatCard } from './TeamMonitoringTab.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
+import NoteText from '../../components/NoteText.jsx';
+import AdminEntryDrawer, { adminDeleteEntry } from './AdminEntryDrawer.jsx';
+import { useProjectOptions } from '../../lib/lookups.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -17,6 +20,26 @@ function monthRange({ month, year }) {
   const mm = String(month).padStart(2, '0');
   const lastDay = new Date(year, month, 0).getDate();
   return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${lastDay}` };
+}
+
+const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const shortDay = (d) => d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+
+// Monday-to-Sunday weeks touching the month, clipped to it: { key, label, from, to }.
+function monthWeeks({ month, year }) {
+  const first = new Date(year, month - 1, 1);
+  const last = new Date(year, month, 0);
+  const weeks = [];
+  let start = new Date(first);
+  while (start <= last) {
+    const end = new Date(start);
+    end.setDate(end.getDate() + (7 - ((start.getDay() + 6) % 7)) - 1); // through Sunday
+    const clippedEnd = end > last ? last : end;
+    weeks.push({ key: ymdLocal(start), label: `${shortDay(start)} – ${shortDay(clippedEnd)}`, from: ymdLocal(start), to: ymdLocal(clippedEnd) });
+    start = new Date(clippedEnd);
+    start.setDate(start.getDate() + 1);
+  }
+  return weeks;
 }
 
 const SCOPES = {
@@ -46,6 +69,12 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [memberFilter, setMemberFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [correcting, setCorrecting] = useState(null);
+  const [weekFilter, setWeekFilter] = useState('');
+  const projectOptions = useProjectOptions(true);
+  const weeks = useMemo(() => monthWeeks(period), [period]);
+  const range = weeks.find((w) => w.key === weekFilter) || monthRange(period);
   const [drillMember, setDrillMember] = useState(null);
   const [rejecting, setRejecting] = useState(null);
 
@@ -77,7 +106,9 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     apiClient
       .get('/timesheets/entries', {
         params: {
-          ...monthRange(period),
+          from: range.from,
+          to: range.to,
+          account_id: projectFilter || undefined,
           ...deptParams,
           org_membership_id: memberFilter || undefined,
           status: statusFilter || undefined,
@@ -94,8 +125,9 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   }
 
   useEffect(() => { loadOverview(); }, [itDept, period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setPage(1); }, [period.month, period.year, memberFilter, statusFilter]);
-  useEffect(() => { loadEntries(); }, [itDept, period.month, period.year, memberFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setWeekFilter(''); }, [period.month, period.year]);
+  useEffect(() => { setPage(1); }, [period.month, period.year, memberFilter, statusFilter, projectFilter, weekFilter]);
+  useEffect(() => { loadEntries(); }, [itDept, period.month, period.year, memberFilter, statusFilter, projectFilter, weekFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decideEntry(id, status, reason) {
     try {
@@ -152,7 +184,7 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     { key: 'member', header: 'Employee', render: (row) => <span className="font-medium text-tertiary-900">{row.org_membership?.person?.name || '—'}</span> },
     { key: 'project', header: 'Project', render: (row) => row.account?.name || 'General' },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Description', render: (row) => <span className="text-tertiary-500">{row.notes || '—'}</span> },
+    { key: 'notes', header: 'Description', render: (row) => <NoteText text={row.notes} className="text-tertiary-500" /> },
     {
       key: 'status',
       header: 'Status',
@@ -166,13 +198,19 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     {
       key: 'actions',
       header: '',
-      render: (row) =>
-        row.status === 'submitted' ? (
-          <span className="flex justify-end gap-2">
-            <button type="button" className="btn-secondary text-xs" onClick={() => decideEntry(row.id, 'approved')}>Approve</button>
-            <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setRejecting(row)}>Reject</button>
-          </span>
-        ) : null,
+      render: (row) => (
+        <span className="flex flex-wrap justify-end gap-2">
+          {row.status === 'submitted' && (
+            <>
+              <button type="button" className="btn-secondary text-xs" onClick={() => decideEntry(row.id, 'approved')}>Approve</button>
+              <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setRejecting(row)}>Reject</button>
+            </>
+          )}
+          {/* Admin correction at any stage — approved entries and locked days included. */}
+          <button type="button" className="btn-ghost text-xs" onClick={() => setCorrecting(row)}>Edit</button>
+          <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => adminDeleteEntry(row, { pushError, pushSuccess, onDone: () => { loadEntries(); loadOverview(); } })}>Delete</button>
+        </span>
+      ),
     },
   ];
 
@@ -220,6 +258,14 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
               <option value="">{text.all}</option>
               {members.map((m) => <option key={m.org_membership_id} value={m.org_membership_id}>{m.name}</option>)}
             </select>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Project" className="max-w-[12rem] rounded-xl border px-2 py-1 text-xs">
+              <option value="">All projects</option>
+              {projectOptions.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-2 py-1 text-xs">
+              <option value="">Whole month</option>
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}</option>)}
+            </select>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
               <option value="">All statuses</option>
               {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -248,6 +294,7 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         onConfirm={(reason) => decideEntry(rejecting.id, 'rejected', reason)}
       />
       <DrillDownDrawer member={drillMember} period={period} onClose={() => setDrillMember(null)} />
+      <AdminEntryDrawer entry={correcting} onClose={() => setCorrecting(null)} onSaved={() => { loadEntries(); loadOverview(); }} />
     </div>
   );
 }

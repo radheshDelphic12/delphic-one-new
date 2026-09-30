@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
@@ -298,6 +298,18 @@ router.patch(
     const result = await service.updateGroupCharge(req.user.org_id, req.user.id, req.params.id, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.charge);
+  })
+);
+
+// Finance → Group Charges "Delete" — superadmin only, on the current company's charges.
+router.delete(
+  '/group-charges/:id',
+  requireOrgMembership,
+  authorizeSuperadmin,
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteGroupCharge(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

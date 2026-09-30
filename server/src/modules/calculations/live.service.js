@@ -116,6 +116,8 @@ async function billingOverview(orgId, q, now = new Date()) {
       }
       const view = billingEngine.viewOf(raw, filters);
       if (q.org_membership_id && !view.days.some((d) => d.entries.length)) continue;
+      // Approval filter: only projects with hours in the chosen state.
+      if (q.status && q.status !== 'all' && !view.days.some((d) => d.entries.length)) continue;
       const draft = drafts.get(key);
       const estimate = billingEngine.estimateFor(account, raw, view.totals);
       rows.push({
@@ -136,6 +138,7 @@ async function billingOverview(orgId, q, now = new Date()) {
         amount: view.totals.amount,
         amount_inr: toInr(view.totals.amount, raw.currency),
         estimate: estimate ? { ...estimate, amount_inr: toInr(estimate.amount, raw.currency) } : null,
+        minimum: billingEngine.minimumFor(account, raw, view.totals),
         source: lock?.version ? 'locked' : 'live',
         live_amount: liveAmount,
         lock: lock ? lockInfo(lock) : { status: draft?.status || 'draft', version: draft?.current_version || 0, reviewed_at: draft?.reviewed_at || null },
@@ -208,6 +211,7 @@ async function billingProject(orgId, accountId, q, now = new Date()) {
     agreement_end_date: raw.agreement_end_date,
     source: locked ? 'locked' : 'live',
     estimate: billingEngine.estimateFor(account, raw, view.totals),
+    minimum: billingEngine.minimumFor(account, raw, view.totals),
     ...view,
     calculation: state,
   };

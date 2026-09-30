@@ -8,7 +8,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
-import { CategoryFilter, matchesCategory, money, useExchangeRates } from './projectFilters.jsx';
+import { CONTRACT_FILTERS, CategoryFilter, FilterPills, matchesCategory, money, useExchangeRates } from './projectFilters.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -166,10 +166,14 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
 
   useEffect(() => { setPnl(null); load(); }, [projectId, period.period_month, period.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Closed: nothing from the last project (its P&L can outlive the id for a
+  // render, and the vendor invoices would then load for a null project).
+  if (!projectId) return <Drawer open={false} title="" onClose={onClose} size="xl" />;
+
   const c = pnl?.currency;
   const foreign = pnl && pnl.revenue.original_currency && pnl.revenue.original_currency !== 'INR';
   return (
-    <Drawer open={Boolean(projectId)} title={pnl ? `${pnl.project.name} — ${MONTHS[period.period_month - 1]} ${period.period_year}` : 'Project P&L'} onClose={onClose} size="xl">
+    <Drawer open title={pnl ? `${pnl.project.name} — ${MONTHS[period.period_month - 1]} ${period.period_year}` : 'Project P&L'} onClose={onClose} size="xl">
       {!pnl ? (
         <p className="text-sm text-tertiary-500">Loading…</p>
       ) : (
@@ -327,6 +331,7 @@ export default function ProjectPnlTab() {
   const [vendors, setVendors] = useState([]);
   const [category, setCategory] = useState('all');
   const [clientId, setClientId] = useState('');
+  const [contract, setContract] = useState('all');
   const { rates, reload: reloadRates } = useExchangeRates();
   const { data, loading, refresh } = useLiveData(
     () => apiClient.get('/billing/projects-pnl', { params: period }).then((r) => r.data.data),
@@ -344,9 +349,14 @@ export default function ProjectPnlTab() {
     for (const r of rows) if (r.project.client_account_id) map.set(r.project.client_account_id, r.project.client_name || 'Client');
     return [...map].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
-  const visible = useMemo(
+  const inTypeAndClient = useMemo(
     () => rows.filter((r) => matchesCategory(r.service_category, category) && (!clientId || r.project.client_account_id === clientId)),
     [rows, category, clientId]
+  );
+  // Contract status (not started / running / about to end / on hold / completed).
+  const visible = useMemo(
+    () => inTypeAndClient.filter((r) => contract === 'all' || r.contract?.state === contract),
+    [inTypeAndClient, contract]
   );
 
   // Totals of the filtered rows. A row whose currency has no exchange rate has
@@ -378,6 +388,7 @@ export default function ProjectPnlTab() {
           {money(r.revenue, r.currency)}
           {r.original_currency && r.original_currency !== 'INR' && <span className="block text-xs text-tertiary-500">{money(r.original_revenue, r.original_currency)}</span>}
           {r.billing_type === 'hourly' && <span className="block text-xs text-tertiary-500">{r.billable_hours} h × {money(r.billing_rate, r.original_currency)}</span>}
+          {r.minimum?.shortfall_hours > 0 && <span className="block text-xs font-medium text-warning-700">{r.minimum.shortfall_hours}h below the {r.minimum.hours}h minimum</span>}
         </span>
       ),
     },
@@ -391,7 +402,18 @@ export default function ProjectPnlTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <CategoryFilter rows={rows} getCategory={(r) => r.service_category} value={category} onChange={setCategory} loading={loading} />
+        <div className="space-y-2">
+          <CategoryFilter rows={rows} getCategory={(r) => r.service_category} value={category} onChange={setCategory} loading={loading} />
+          <FilterPills
+            label="Status"
+            options={CONTRACT_FILTERS}
+            rows={inTypeAndClient}
+            matches={(r, key) => key === 'all' || r.contract?.state === key}
+            value={contract}
+            onChange={setContract}
+            loading={loading}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-56"><SearchableSelect value={clientId} onChange={setClientId} options={clientOptions} placeholder="All clients" searchPlaceholder="Search clients…" allowClear ariaLabel="Client" /></div>
           <select aria-label="Month" value={period.period_month} onChange={(e) => setPeriod((p) => ({ ...p, period_month: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">

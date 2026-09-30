@@ -161,6 +161,7 @@ router.patch(
     if (result.error === 'team_not_found') return fail(res, 404, 'Team not found in this org');
     if (WORKER_ERRORS[result.error]) return fail(res, ...WORKER_ERRORS[result.error]);
     if (result.error === 'self_manager') return fail(res, 422, 'A membership cannot be its own manager');
+    if (result.error === 'lwd_before_notice') return fail(res, 422, 'The last working day cannot be before the notice date');
     if (result.error === 'employee_code_taken') return fail(res, 409, 'Another employee in this company already has that employee code');
     return ok(res, result.membership);
   })

@@ -96,7 +96,18 @@ export default function PeopleListPage() {
     { key: 'role', header: 'Role', render: (row) => <span className="capitalize">{row.role}</span> },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not assigned' },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.employment_status} /> },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => (
+        <span>
+          <Badge value={row.employment_status} />
+          {row.employment_status === 'notice_period' && row.notice_end_date && (
+            <span className="mt-0.5 block text-xs text-warning-700">LWD {formatDate(row.notice_end_date)}</span>
+          )}
+        </span>
+      ),
+    },
     { key: 'joined', header: 'Joined', render: (row) => formatDate(row.joined_at) },
   ];
 

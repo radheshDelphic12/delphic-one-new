@@ -54,7 +54,7 @@ async function updateClaim(orgId, claimId, actor, patch) {
   const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId } });
   if (!claim) return { error: 'not_found' };
   if (actor.role !== 'admin' && claim.org_membership_id !== actor.orgMembershipId) return { error: 'not_found' };
-  if (claim.status !== 'pending') return { error: 'not_editable', status: claim.status };
+  if (claim.status !== 'pending' && !actor.isSuperadmin) return { error: 'not_editable', status: claim.status };
 
   if (patch.location_id) {
     const location = await prisma.location.findFirst({ where: { id: patch.location_id, org_id: orgId } });
@@ -183,9 +183,22 @@ async function markVendorPaymentPaid(orgId, paymentId) {
   return { payment: updated };
 }
 
+// Superadmin delete: the claim and its receipt records (the files stay on disk
+// like any other deleted document's history would).
+async function deleteClaim(orgId, claimId) {
+  const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId }, select: { id: true } });
+  if (!claim) return { error: 'not_found' };
+  await prisma.$transaction([
+    prisma.document.deleteMany({ where: { entity_type: 'expense_claim', entity_id: claimId } }),
+    prisma.expenseClaim.delete({ where: { id: claimId } }),
+  ]);
+  return { deleted: true };
+}
+
 module.exports = {
   createClaim,
   updateClaim,
+  deleteClaim,
   listMyClaims,
   listClaims,
   decideClaim,

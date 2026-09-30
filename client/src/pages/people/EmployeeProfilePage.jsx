@@ -44,6 +44,21 @@ function workModeLabel(value) {
   return WORK_MODE_OPTIONS.find((option) => option.value === value)?.label || 'Not set';
 }
 
+const EMPLOYMENT_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'notice_period', label: 'Serving notice' },
+  { value: 'on_leave', label: 'On long leave' },
+  { value: 'pending_onboarding', label: 'Joining soon' },
+  { value: 'terminated', label: 'Exited' },
+];
+
+// Calendar days from the notice date to the last working day, both included.
+function noticeDays(start, end) {
+  if (!start || !end) return null;
+  const days = Math.round((new Date(String(end).slice(0, 10)) - new Date(String(start).slice(0, 10))) / 86400000) + 1;
+  return days > 0 ? days : null;
+}
+
 function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : 'Not set';
 }
@@ -72,6 +87,9 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       setTeamEffective(localToday());
       setFields({
         employee_code: row.employee_code || '',
+        employment_status: row.employment_status || 'active',
+        notice_start_date: row.notice_start_date ? String(row.notice_start_date).slice(0, 10) : '',
+        notice_end_date: row.notice_end_date ? String(row.notice_end_date).slice(0, 10) : '',
         department_id: row.department?.id || '',
         designation_id: row.designation?.id || '',
         team_id: row.team?.id || '',
@@ -165,7 +183,27 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
             />
             <span className="mt-1 block font-normal text-tertiary-400">New employees get the next number automatically; change it to match HR records.</span>
           </label>
-          <div className="hidden sm:block" />
+          <label className="text-xs font-medium text-tertiary-600">
+            Employment status
+            <select value={fields.employment_status} onChange={(event) => setField('employment_status', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              {EMPLOYMENT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {(fields.employment_status === 'notice_period' || fields.employment_status === 'terminated' || fields.notice_end_date) && (
+            <>
+              <label className="text-xs font-medium text-tertiary-600">
+                Notice given on
+                <input type="date" value={fields.notice_start_date} onChange={(event) => setField('notice_start_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              </label>
+              <label className="text-xs font-medium text-tertiary-600">
+                Last working day (LWD)
+                <input type="date" min={fields.notice_start_date || undefined} value={fields.notice_end_date} onChange={(event) => setField('notice_end_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                {noticeDays(fields.notice_start_date, fields.notice_end_date) !== null && (
+                  <span className="mt-1 block font-normal text-tertiary-400">Notice period: {noticeDays(fields.notice_start_date, fields.notice_end_date)} days</span>
+                )}
+              </label>
+            </>
+          )}
           <label className="text-xs font-medium text-tertiary-600">
             User type
             <select value={fields.worker_type} onChange={(event) => setField('worker_type', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
@@ -331,7 +369,17 @@ export default function EmployeeProfilePage() {
           <PeekField label="HR POC">{row.hr_poc?.name || 'Not assigned'}</PeekField>
           <PeekField label="Sourcing POC">{row.sourcing_poc?.name || 'Not assigned'}</PeekField>
           <PeekField label="Joined">{formatDate(row.joined_at)}</PeekField>
-          <PeekField label="Notice end">{formatDate(row.notice_end_date)}</PeekField>
+          {(row.employment_status === 'notice_period' || row.notice_end_date) && (
+            <>
+              <PeekField label="Notice given on">{formatDate(row.notice_start_date)}</PeekField>
+              <PeekField label="Last working day (LWD)">
+                {formatDate(row.notice_end_date)}
+                {noticeDays(row.notice_start_date, row.notice_end_date) !== null && (
+                  <span className="ml-1.5 text-xs text-tertiary-500">· {noticeDays(row.notice_start_date, row.notice_end_date)}-day notice</span>
+                )}
+              </PeekField>
+            </>
+          )}
         </dl>
       </section>
       {/* Bank, emergency contact, documents — renders only for an admin or the employee themselves. */}
