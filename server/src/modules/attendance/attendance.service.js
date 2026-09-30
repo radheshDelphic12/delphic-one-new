@@ -177,6 +177,26 @@ async function regularize(orgId, recordId, adminUserId, { status, check_in_at, c
   return { record };
 }
 
+// Admin delete of a wrong record. Like a regularisation, a record in an
+// already-finalized month raises a finance change instead of silently
+// rewriting the locked salary / revenue.
+async function deleteRecord(orgId, recordId, adminUserId, { reason }) {
+  const existing = await prisma.attendanceRecord.findFirst({ where: { id: recordId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  await prisma.attendanceRecord.delete({ where: { id: recordId } });
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'attendance',
+    source_id: recordId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    changed_by: adminUserId,
+    description: `Attendance deleted by admin (${existing.status}): ${reason}`.slice(0, 500),
+    old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
+    new_value: null,
+  });
+  return { deleted: true, flagged: change?.flagged || 0 };
+}
+
 // --- Backfill: admin records attendance for past days (single day or a sheet). ---
 
 const TIMED_STATUSES = new Set(['present', 'half_day', 'wfh']);
@@ -384,6 +404,7 @@ async function createShift(orgId, { name, start_minutes, end_minutes, grace_minu
 }
 
 module.exports = {
+  deleteRecord,
   checkIn,
   checkOut,
   listMine,

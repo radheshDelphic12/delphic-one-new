@@ -26,6 +26,21 @@ const updateEntrySchema = z.object({
   notes: z.string().max(1000).nullable().optional(),
 });
 
+// Admin correction of any entry — any status, even on a locked day. The reason
+// is required: it's recorded on the finance change it may raise.
+const adminUpdateEntrySchema = z
+  .object({
+    hours: z.coerce.number().positive().max(24).optional(),
+    overtime_hours: z.coerce.number().min(0).max(24).optional(),
+    account_id: z.string().uuid().nullable().optional(),
+    billable: z.boolean().optional(),
+    notes: z.string().max(4000).nullable().optional(),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .refine((v) => ['hours', 'overtime_hours', 'account_id', 'billable', 'notes'].some((k) => v[k] !== undefined), { message: 'Change at least one field' });
+
+const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+
 // A rejection must always tell the employee why.
 const decideEntrySchema = z
   .object({
@@ -101,6 +116,8 @@ module.exports = {
   updateEntrySchema,
   decideEntrySchema,
   lockDaySchema,
+  adminUpdateEntrySchema,
+  adminDeleteEntrySchema,
   listQuerySchema,
   monthQuerySchema,
   overviewQuerySchema,

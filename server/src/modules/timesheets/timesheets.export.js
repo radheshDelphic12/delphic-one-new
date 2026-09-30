@@ -118,6 +118,8 @@ async function buildMonthlyWorkbook(orgId, orgMembershipId, month, year) {
           if (entry.is_holiday_overtime) cell.fill = OT_FILL;
         });
         row.getCell(5).alignment = { horizontal: 'center' };
+        // Descriptions keep their line breaks and wrap inside the cell.
+        row.getCell(6).alignment = { wrapText: true, vertical: 'top' };
       }
       const endRow = sheet.rowCount;
       sheet.getCell(startRow, 1).value = label;

@@ -11,6 +11,8 @@ const {
   updateEntrySchema,
   decideEntrySchema,
   lockDaySchema,
+  adminUpdateEntrySchema,
+  adminDeleteEntrySchema,
   listQuerySchema,
   monthQuerySchema,
   overviewQuerySchema,
@@ -129,6 +131,31 @@ router.patch(
   })
 );
 
+// Admin correction / removal of any entry — any status, locked day or not.
+// `flagged` counts locked finance calculations the change marked as affected
+// (recalculate them in Live Analytics → Billing & sales, then re-invoice).
+router.patch(
+  '/entries/:id/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = adminUpdateEntrySchema.parse(req.body);
+    const result = await service.adminUpdateEntry(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { entry: result.entry, flagged: result.flagged });
+  })
+);
+
+router.delete(
+  '/entries/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = adminDeleteEntrySchema.parse(req.body || {});
+    const result = await service.adminDeleteEntry(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { deleted: true, flagged: result.flagged });
+  })
+);
+
 // Decided by the employee's reporting manager (or any admin) — authorisation
 // lives in the service, since it depends on the entry's owner.
 router.post(
@@ -216,6 +243,18 @@ router.post(
     const result = await service.lockDay(req.user.org_id, date, req.user.id);
     if (result.error === 'already_locked') return fail(res, 409, 'That day is already locked');
     return created(res, result.lock);
+  })
+);
+
+// Unlock a day so it can be logged / changed normally again.
+router.delete(
+  '/locks/:date',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { date } = lockDaySchema.parse({ date: req.params.date });
+    const result = await service.unlockDay(req.user.org_id, date);
+    if (result.error === 'not_locked') return fail(res, 404, 'That day is not locked');
+    return ok(res, { unlocked: true });
   })
 );
 

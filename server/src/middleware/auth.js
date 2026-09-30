@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const env = require('../config/env');
 const prisma = require('../config/db');
+const { isWorking } = require('../lib/employmentStatus');
 const orgContext = require('../lib/orgContext');
 const { fail } = require('../utils/response');
 const { contractorMayAccess } = require('./contractorScope');
@@ -21,7 +22,7 @@ async function resolveOrgContext(user, orgId) {
     where: { person_id_org_id: { person_id: user.id, org_id: orgId } },
     select: { id: true, role: true, employment_status: true, worker_type: true },
   });
-  if (!membership || membership.employment_status !== 'active') return null;
+  if (!membership || !isWorking(membership.employment_status)) return null;
   // A contractor is always self-service, whatever role is on the row.
   const role = membership.worker_type === 'contractor' ? 'employee' : membership.role;
   return { ...user, role, org_id: orgId, org_membership_id: membership.id, worker_type: membership.worker_type };

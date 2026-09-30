@@ -288,6 +288,80 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   return { entry };
 }
 
+// --- Admin corrections: any entry, any status, locked day or not. Revenue is
+//     recomputed and a finance change is raised, so a locked billing month
+//     shows "Historical Calculation Affected" and can be recalculated and
+//     re-invoiced. Returns how many locked calculations were flagged. ---
+
+const snapshotOf = (e) => ({
+  status: e.status,
+  hours: Number(e.hours),
+  overtime_hours: Number(e.overtime_hours || 0),
+  account_id: e.account_id,
+  billable: e.billable,
+  notes: e.notes,
+});
+
+async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch }) {
+  const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  if (patch.account_id) {
+    const account = await prisma.account.findFirst({ where: { id: patch.account_id, org_id: orgId }, select: { id: true } });
+    if (!account) return { error: 'account_not_found' };
+  }
+  if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
+    const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
+    const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
+    if ((await otherHoursOnDay(existing.org_membership_id, existing.date, entryId)) + hours + overtime > 24) return { error: 'exceeds_day_hours' };
+  }
+  const data = { ...patch };
+  if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
+  const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data });
+  await refreshRevenue(orgId, existing.date);
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'timesheet',
+    source_id: entryId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    account_id: entry.account_id || existing.account_id,
+    changed_by: adminUserId,
+    description: `Timesheet entry corrected by admin: ${reason}`,
+    old_value: snapshotOf(existing),
+    new_value: snapshotOf(entry),
+  });
+  return { entry: labelEntry({ ...entry, account: await accountRef(entry.account_id) }), flagged: change?.flagged || 0 };
+}
+
+async function adminDeleteEntry(orgId, adminUserId, entryId, { reason }) {
+  const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  await prisma.timesheetEntry.delete({ where: { id: entryId } });
+  await refreshRevenue(orgId, existing.date);
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'timesheet',
+    source_id: entryId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    account_id: existing.account_id,
+    changed_by: adminUserId,
+    description: `Timesheet entry deleted by admin: ${reason}`,
+    old_value: snapshotOf(existing),
+    new_value: null,
+  });
+  return { deleted: true, flagged: change?.flagged || 0 };
+}
+
+async function accountRef(accountId) {
+  return accountId ? prisma.account.findUnique({ where: { id: accountId }, ...ACCOUNT_REF }) : null;
+}
+
+async function unlockDay(orgId, date) {
+  const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
+  if (!lock) return { error: 'not_locked' };
+  await prisma.timesheetLock.delete({ where: { id: lock.id } });
+  return { unlocked: true };
+}
+
 // The reporting manager decides their own direct reports' entries; admins can
 // decide anyone's. Nobody (but an admin) approves their own hours. A rejection
 // always carries the manager's reason (enforced in the validation schema).
@@ -686,6 +760,9 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
 }
 
 module.exports = {
+  adminUpdateEntry,
+  adminDeleteEntry,
+  unlockDay,
   isLocked,
   createEntry,
   listMine,

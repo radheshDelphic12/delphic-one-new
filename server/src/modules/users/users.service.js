@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../config/db');
+const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { resolveWorkerFields } = require('../../lib/workerType');
 const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
 
@@ -27,7 +28,7 @@ async function countActiveSuperadmins() {
 // multi-tenancy existed. Never becomes 403/empty — that's the documented,
 // user-confirmed "fail open" convention this whole module follows.
 function activeOrgMembership(orgId) {
-  return orgId ? { org_memberships: { some: { org_id: orgId, employment_status: 'active' } } } : {};
+  return orgId ? { org_memberships: { some: { org_id: orgId, employment_status: { in: WORKING_STATUSES } } } } : {};
 }
 
 async function getById(orgId, id) {

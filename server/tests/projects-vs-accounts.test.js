@@ -73,6 +73,25 @@ describe('Finance only edits projects, never the Accounts catalogue', () => {
     const ok = await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), ctx.token).send({ agreement_start_date: '2026-01-01', billing: { rate_type: 'monthly', rate: 100000, currency: 'INR' } });
     expect(ok.status).toBe(200);
   });
+
+  test('an older client row already billed as a project (predates is_project) is editable, and its account name is kept', async () => {
+    const ctx = await seed();
+    const girnar = await prisma.account.create({ data: { type: 'client', name: unique('Girnarsoft '), stage: 'active', owner_id: ctx.admin.id, org_id: ctx.org.id } });
+    const legacy = await prisma.account.create({ data: { type: 'client', name: 'Circle', stage: 'active', owner_id: ctx.admin.id, org_id: ctx.org.id, industry: 'IT', service_category: 'managed_services', client_account_id: girnar.id } });
+    await prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: legacy.id, rate_type: 'monthly', rate: 190000, currency: 'INR', effective_from: new Date('2026-09-01'), created_by: ctx.admin.id } });
+
+    const profiles = (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
+    expect(profiles.find((p) => p.id === legacy.id)).toMatchObject({ editable: true, is_project: false });
+    const one = await authed(request(app).get(`/api/v1/billing/projects/${legacy.id}`), ctx.token);
+    expect(one.status).toBe(200);
+    expect(one.body.data.editable).toBe(true);
+
+    const res = await authed(request(app).patch(`/api/v1/billing/projects/${legacy.id}`), ctx.token).send({ project_name: 'Circle Phase 2', agreement_end_date: '2026-12-31' });
+    expect(res.status).toBe(200);
+    const after = await prisma.account.findUnique({ where: { id: legacy.id } });
+    expect(after.name).toBe('Circle');
+    expect(after.project_name).toBe('Circle Phase 2');
+  });
 });
 
 describe('Assets can belong to a vendor', () => {

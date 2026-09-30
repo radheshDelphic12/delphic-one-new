@@ -10,6 +10,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -208,7 +209,7 @@ export default function ItTimesheetPage() {
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
                 <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
                 <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
-                <input placeholder="Description" value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                <textarea placeholder="Description" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] resize-y rounded-xl border px-3 py-2 text-sm" />
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -273,7 +274,7 @@ export default function ItTimesheetPage() {
                           )}
                         </td>
                         <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
-                        <td className="px-4 py-1.5 text-tertiary-500">{entry.notes || '—'}</td>
+                        <td className="px-4 py-1.5 text-tertiary-500"><NoteText text={entry.notes} /></td>
                         <td className="px-4 py-1.5">
                           <StatusBadge status={entry.status} label={STATUS_LABEL[entry.status]} size="xs" />
                           {entry.status === 'approved' && entry.approved_by && (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FolderPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -11,6 +12,7 @@ import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
 import InvoicingSection from './InvoicingSection.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
+import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates } from './projectFilters.jsx';
 
@@ -29,6 +31,9 @@ function billingLabel(row) {
       <span className="ml-1.5 text-xs text-tertiary-500">{row.currency} {money(row.rate)}{suffix}</span>
       {row.billing_type === 'hourly' && row.estimated_monthly_hours ? (
         <span className="block text-xs text-tertiary-500">Est. {row.estimated_monthly_hours}h/mo ≈ {row.currency} {money(row.estimated_monthly_hours * row.rate)}</span>
+      ) : null}
+      {row.billing_type === 'hourly' && row.minimum_monthly_hours ? (
+        <span className="block text-xs text-tertiary-500">Min. {row.minimum_monthly_hours}h/mo</span>
       ) : null}
     </span>
   );
@@ -64,6 +69,7 @@ function emptyForm(profile) {
     overtime_billable: Boolean(profile.overtime_billable),
     overtime_multiplier: profile.overtime_multiplier ?? 1,
     estimated_monthly_hours: profile.estimated_monthly_hours ?? '',
+    minimum_monthly_hours: profile.minimum_monthly_hours ?? '',
     billing_type: profile.billing_type || '',
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
@@ -102,6 +108,7 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
     };
     // The client's hour estimate only applies to hourly billing; leave it alone otherwise.
     if (hourly) patch.estimated_monthly_hours = Number(form.estimated_monthly_hours) > 0 ? Number(form.estimated_monthly_hours) : null;
+    if (hourly) patch.minimum_monthly_hours = Number(form.minimum_monthly_hours) > 0 ? Number(form.minimum_monthly_hours) : null;
     // Only send the client when it changed, so a legacy free-text client isn't wiped by an unrelated edit.
     if (form.client_account_id !== (project.client_account_id || '')) patch.client_account_id = form.client_account_id || null;
     if (form.service_category) patch.service_category = form.service_category;
@@ -220,6 +227,13 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
                   </span>
                 </label>
               )}
+              {hourly && (
+                <label className="block text-xs font-medium text-tertiary-600">
+                  Minimum hours / month <span className="font-normal text-tertiary-400">(committed, optional)</span>
+                  <input type="number" min="0" max="10000" step="0.5" value={form.minimum_monthly_hours} onChange={(e) => set('minimum_monthly_hours', e.target.value)} placeholder="e.g. 100" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                  <span className="mt-0.5 block font-normal text-tertiary-400">Months with fewer approved hours are flagged in Project P&amp;L and Billing &amp; Sales. Billing stays approved hours × rate.</span>
+                </label>
+              )}
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <label className="block text-xs font-medium text-tertiary-600">
@@ -282,6 +296,7 @@ export default function ProjectsTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [contract, setContract] = useState('all');
   const { toInr } = useExchangeRates();
@@ -330,11 +345,16 @@ export default function ProjectsTab() {
   return (
     <div className="space-y-6">
       <section className="space-y-2">
-        <p className="text-xs text-tertiary-500">
-          Running projects and contracts. Add a project from <Link to="/people?section=hr-settings&tab=calendars" className="text-primary-700 hover:underline">People → Calendars → Add Project</Link>, then set its billing here.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-tertiary-500">
+            Running projects and contracts. <b>Add project</b> creates one (name, client, type, holiday calendar); open a project to update its billing, dates and contract status. Its calendar can also be changed under <Link to="/people?section=hr-settings&tab=calendars" className="text-primary-700 hover:underline">People → HR Settings → Calendars</Link>.
+          </p>
+          <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddOpen(true)}>
+            <FolderPlus className="h-4 w-4" /> Add project
+          </button>
+        </div>
         {!loading && rows.length === 0 ? (
-          <EmptyState title="No projects yet" description="Add a project under People → Calendars, and it will appear here." />
+          <EmptyState title="No projects yet" description="Use Add project to create the first one, then set its billing here." />
         ) : (
           <>
             <CategoryFilter rows={rows} getCategory={(row) => row.service_category} value={category} onChange={setCategory} loading={loading} />
@@ -368,6 +388,7 @@ export default function ProjectsTab() {
         <InvoicingSection />
       </section>
 
+      <AddProjectModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => load()} />
       <ProjectProfileDrawer project={selected} onClose={() => setSelected(null)} onSaved={load} />
     </div>
   );

@@ -29,6 +29,7 @@ const attendanceRoutes = require('./modules/attendance/attendance.routes');
 const leaveRoutes = require('./modules/leave/leave.routes');
 const designationsRoutes = require('./modules/designations/designations.routes');
 const assetsRoutes = require('./modules/assets/assets.routes');
+const clientErrorsRoutes = require('./modules/clientErrors/clientErrors.routes');
 const teamsRoutes = require('./modules/teams/teams.routes');
 const allocationsRoutes = require('./modules/allocations/allocations.routes');
 const timesheetsRoutes = require('./modules/timesheets/timesheets.routes');
@@ -79,6 +80,7 @@ const apiLimiter = rateLimit({
 });
 
 app.get('/api/v1/health', (req, res) => res.json({ success: true, data: { status: 'ok' } }));
+app.use('/api/v1/client-errors', clientErrorsRoutes);
 
 // Rate limit login and general API traffic outside the Jest suite.
 if (env.nodeEnv !== 'test') {

@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { resolveWorkerFields, WORKER_FIELDS } = require('../../lib/workerType');
 const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
 const allocationsService = require('../allocations/allocations.service');
@@ -17,7 +18,7 @@ const MEMBERSHIP_SELECT = {
 // Powers the org switcher UI: every org the caller currently belongs to.
 async function listMyMemberships(userId) {
   return prisma.orgMembership.findMany({
-    where: { person_id: userId, employment_status: 'active' },
+    where: { person_id: userId, employment_status: { in: WORKING_STATUSES } },
     orderBy: { joined_at: 'asc' },
     select: MEMBERSHIP_SELECT,
   });
@@ -110,6 +111,7 @@ const MEMBERSHIP_DETAIL_SELECT = {
   employee_code: true,
   joined_at: true,
   left_at: true,
+  notice_start_date: true,
   notice_end_date: true,
   role: true,
   employment_status: true,
@@ -241,6 +243,16 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
   Object.assign(data, worker.data);
   // Team is effective-dated: the change goes through TeamMembershipPeriod
   // (which also moves the team_id pointer), never a plain overwrite.
+  // Notice period: LWD can't precede the notice date; exiting records left_at
+  // (the LWD, else today) so reports stop counting the person after it.
+  const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
+  const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
+  if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated' && !membership.left_at) {
+    data.left_at = lwd || new Date(new Date().toISOString().slice(0, 10));
+  }
+  if (data.employment_status && data.employment_status !== 'terminated' && membership.employment_status === 'terminated') data.left_at = null;
+
   const teamChange = data.team_id !== undefined && data.team_id !== membership.team_id;
   const teamEffective = data.team_effective_date;
   delete data.team_id;

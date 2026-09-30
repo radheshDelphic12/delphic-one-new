@@ -3,7 +3,7 @@ import { Plus, Search } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { useLeadClientOptions, useOrgMembershipOptions, useVendorAccountOptions } from '../../lib/lookups.js';
+import { useLeadClientOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -59,7 +59,13 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
   const [form, setForm] = useState(emptyForm(null));
   const [saving, setSaving] = useState(false);
   const members = useOrgMembershipOptions(open);
-  const vendors = useVendorAccountOptions(open);
+  // Every vendor account of this company (Finance's vendor list) — the
+  // /accounts lookup only answers in the master workspace and caps at 100.
+  const [vendors, setVendors] = useState([]);
+  useEffect(() => {
+    if (!open) return;
+    apiClient.get('/billing/vendors').then(({ data }) => setVendors((data.data || []).map((v) => ({ value: v.id, label: v.name })))).catch(() => setVendors([]));
+  }, [open]);
   const clients = useLeadClientOptions(open);
 
   useEffect(() => { if (open) setForm(emptyForm(asset)); }, [open, asset]);
@@ -81,8 +87,8 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
     const body = {
       ...values,
       org_membership_id: values.org_membership_id || null,
-      // The vendor is only recorded for an asset that belongs to a vendor.
-      vendor_account_id: values.belongs_to === 'vendor' ? values.vendor_account_id || null : null,
+      // The vendor that supplied it — recorded for any asset, required when it belongs to the vendor.
+      vendor_account_id: values.vendor_account_id || null,
       client_account_id: values.client_account_id || null,
       issue_date: values.issue_date || null,
       return_date: values.return_date || null,
@@ -174,12 +180,21 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
             <option value="vendor">Vendor</option>
           </select>
         </label>
-        {form.belongs_to === 'vendor' ? (
-          <div className={label}>
-            Vendor name <span className="text-danger-600">*</span>
-            <SearchableSelect value={form.vendor_account_id} onChange={(v) => set('vendor_account_id', v)} options={vendorOptions} className="mt-1" placeholder="Select vendor" searchPlaceholder="Search vendors…" noResultsMessage="No vendor accounts found" ariaLabel="Vendor name" required />
-          </div>
-        ) : <div className="hidden sm:block" />}
+        <div className={label}>
+          Vendor name {form.belongs_to === 'vendor' && <span className="text-danger-600">*</span>}
+          <SearchableSelect
+            value={form.vendor_account_id}
+            onChange={(v) => set('vendor_account_id', v)}
+            options={vendorOptions}
+            allowClear={form.belongs_to !== 'vendor'}
+            className="mt-1"
+            placeholder={form.belongs_to === 'vendor' ? 'Select vendor' : 'None'}
+            searchPlaceholder="Search vendors…"
+            noResultsMessage="No vendor accounts found — add one under Accounts (type: Vendor)"
+            ariaLabel="Vendor name"
+            required={form.belongs_to === 'vendor'}
+          />
+        </div>
         <div className={label}>
           Client name
           <SearchableSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} options={clientOptions} allowClear className="mt-1" placeholder="None" searchPlaceholder="Search clients…" noResultsMessage="No client accounts found" ariaLabel="Client" />

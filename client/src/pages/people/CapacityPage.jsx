@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRightLeft, CalendarClock, Gauge, History, Save, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -9,6 +9,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import ProjectsHover from './ProjectsHover.jsx';
 
 const TABS = [
@@ -113,8 +114,10 @@ function TeamDetailDrawer({ row, date, onClose }) {
 function TeamCapacityReport() {
   const { pushError, pushInfo } = useAlerts();
   const teams = useTeamOptions(true);
-  const [filters, setFilters] = useState(() => ({ date: localToday(), team_id: '', window_days: 30 }));
-  const { data, loading, reload } = useReport('/allocations/reports/team-capacity', filters);
+  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [], window_days: 30 }));
+  // Several teams at once — sent as one comma-separated team_ids.
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const { data, loading, reload } = useReport('/allocations/reports/team-capacity', query);
   const [perResource, setPerResource] = useState('');
   const [open, setOpen] = useState(null);
   const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
@@ -161,7 +164,9 @@ function TeamCapacityReport() {
     <div className="space-y-4">
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
         <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
-        <Filter label="Team"><SearchableSelect value={filters.team_id} onChange={(v) => set('team_id', v)} options={teams} placeholder="All teams" allowClear /></Filter>
+        <Filter label="Teams">
+          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
+        </Filter>
         <Filter label="Ending soon window (days)"><input type="number" min="1" max="365" value={filters.window_days} onChange={(e) => set('window_days', e.target.value)} className={dateInput} /></Filter>
         <Filter label="Projects per resource (company default)">
           <div className="flex gap-2">

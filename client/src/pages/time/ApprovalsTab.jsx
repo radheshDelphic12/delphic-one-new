@@ -5,6 +5,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 /**
  * Approval inbox for a reporting manager: timesheet entries and
@@ -88,7 +89,7 @@ export default function ApprovalsTab() {
                 <span className="text-tertiary-700">
                   <b className="text-tertiary-900">{e.org_membership?.person?.name}</b> — {String(e.date).slice(0, 10)} · {e.hours}h{Number(e.overtime_hours) ? ` + ${Number(e.overtime_hours)}h overtime` : ''}
                   {e.account?.name ? ` · ${e.account.name}` : ''}
-                  {e.notes && <span className="block text-xs text-tertiary-500">{e.notes}</span>}
+                  {e.notes && <NoteText text={e.notes} className="text-xs text-tertiary-500" />}
                 </span>
                 <span className="flex shrink-0 gap-2">
                   <button type="button" className="btn-secondary text-xs" onClick={() => decideEntry(e, 'approved')}>Approve</button>

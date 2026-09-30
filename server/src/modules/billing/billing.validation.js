@@ -192,6 +192,8 @@ const updateProjectProfileSchema = z
     overtime_multiplier: z.coerce.number().min(1).max(5).optional(),
     // Hourly projects: the client's approximate hours per month (forecast only); null clears it.
     estimated_monthly_hours: z.coerce.number().positive().max(10000).nullable().optional(),
+    // Hourly projects: the client's committed minimum hours per month; null clears it.
+    minimum_monthly_hours: z.coerce.number().positive().max(10000).nullable().optional(),
     billing: z
       .object({
         rate_type: z.enum(['hourly', 'monthly']),

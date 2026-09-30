@@ -16,6 +16,9 @@ const regularizeSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+// Admin removal of a wrong attendance record (any day, any status).
+const deleteRecordSchema = z.object({ reason: z.string().trim().min(3).max(500) });
+
 const createShiftSchema = z.object({
   name: z.string().min(1).max(100),
   start_minutes: z.coerce.number().int().min(0).max(1439),
@@ -66,4 +69,5 @@ const templateQuerySchema = z
   .refine((v) => v.to >= v.from, { message: 'to must be on or after from', path: ['to'] })
   .refine((v) => (v.to - v.from) / 86400000 <= 30, { message: 'range cannot exceed 31 days', path: ['to'] });
 
-module.exports = { listQuerySchema, regularizeSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };
+module.exports = { listQuerySchema, regularizeSchema,
+  deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };

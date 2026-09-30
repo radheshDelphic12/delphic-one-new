@@ -1686,8 +1686,10 @@ model OrgMembership {
   personal_details_updated_at DateTime?
   joined_at                   DateTime         @default(now()) @db.Date
   left_at                     DateTime?        @db.Date
-  // Set when employment_status = notice_period — the org chart's
-  // resignation indicator reads this (Phase 10, not built yet).
+  // Notice period: the day notice was given (resignation) and the last
+  // working day (LWD, notice_end_date). Set from the employee profile with
+  // employment_status = notice_period; left_at follows the LWD on exit.
+  notice_start_date           DateTime?        @db.Date
   notice_end_date             DateTime?        @db.Date
   created_at                  DateTime         @default(now())
   updated_at                  DateTime         @default(now()) @updatedAt
@@ -1817,6 +1819,9 @@ model Account {
   // hours × the hourly rate) beside the actual revenue from approved hours;
   // billing, locks and invoices never read it. Null = no estimate.
   estimated_monthly_hours Decimal?               @db.Decimal(7, 2)
+  // Hourly contracts: the minimum hours a month the client committed to.
+  // Months below it are flagged (shortfall) — billing itself is unchanged.
+  minimum_monthly_hours   Decimal?               @db.Decimal(7, 2)
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])

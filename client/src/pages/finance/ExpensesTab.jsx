@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Receipt } from 'lucide-react';
+import { Pencil, Plus, Receipt, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -119,6 +119,8 @@ const VIEW_LABEL = { mine: 'My claims', team: 'Reimbursements', group: 'Group ex
 export default function ExpensesTab() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // A superadmin may correct or remove a claim in any status (approved, reimbursed…).
+  const isSuperadmin = Boolean(user?.is_superadmin);
   const { pushError, pushInfo } = useAlerts();
   const [view, setView] = useState('mine');
   const [rows, setRows] = useState([]);
@@ -189,6 +191,17 @@ export default function ExpensesTab() {
     }
   }
 
+  async function removeClaim(row) {
+    if (!window.confirm(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category_ref?.name || row.category || ''} claim? This can't be undone.`)) return;
+    try {
+      await apiClient.delete(`/expenses/claims/${row.id}`);
+      pushInfo('Expense claim deleted');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the claim'), 'Something went wrong');
+    }
+  }
+
   async function decide(row, status) {
     try {
       await apiClient.post(`/expenses/claims/${row.id}/decision`, { status });
@@ -221,9 +234,12 @@ export default function ExpensesTab() {
       header: 'Actions',
       render: (row) => (
         <div className="flex gap-2">
-          {/* A pending claim can be edited by its owner (My claims) or by an admin. */}
-          {row.status === 'pending' && (view === 'mine' || isAdmin) && (
+          {/* A pending claim can be edited by its owner (My claims) or by an admin; any claim by a superadmin. */}
+          {((row.status === 'pending' && (view === 'mine' || isAdmin)) || isSuperadmin) && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
+          )}
+          {isSuperadmin && (
+            <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs text-danger-600" onClick={() => removeClaim(row)}><Trash2 className="h-3.5 w-3.5" /> Delete</button>
           )}
           {isAdmin && view === 'team' && row.status === 'pending' && (
             <>

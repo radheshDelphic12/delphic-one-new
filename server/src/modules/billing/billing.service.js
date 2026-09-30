@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { contractState } = require('../../lib/contractState');
 const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
@@ -321,8 +322,9 @@ async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, 
   });
   if (!charge) return { error: 'not_found' };
   if (charge.raiser?.is_group_superadmin && charge.raised_by !== editorUserId) {
-    const editor = await prisma.user.findUnique({ where: { id: editorUserId }, select: { is_group_superadmin: true } });
-    if (!editor?.is_group_superadmin) return { error: 'charge_raised_by_group' };
+    // The group superadmin who raised it, or this company's superadmin.
+    const editor = await prisma.user.findUnique({ where: { id: editorUserId }, select: { is_group_superadmin: true, is_superadmin: true } });
+    if (!editor?.is_group_superadmin && !editor?.is_superadmin) return { error: 'charge_raised_by_group' };
   }
 
   const data = {};
@@ -350,6 +352,14 @@ async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, 
 
   const updated = await prisma.groupBillingCharge.update({ where: { id: charge.id }, data, include: GROUP_CHARGE_INCLUDE });
   return { charge: updated };
+}
+
+// Superadmin delete of a group charge entered by mistake (this company's only).
+async function deleteGroupCharge(orgId, chargeId) {
+  const charge = await prisma.groupBillingCharge.findFirst({ where: { id: chargeId, org_id: orgId }, select: { id: true } });
+  if (!charge) return { error: 'not_found' };
+  await prisma.groupBillingCharge.delete({ where: { id: charge.id } });
+  return { deleted: true };
 }
 
 // Month filter: a charge with a payment date is in the month it was paid;
@@ -452,20 +462,7 @@ function currentAccountRate(rates, asOf) {
   return soonest ? accountWide.find((r) => +r.effective_from === +soonest.effective_from) : null;
 }
 
-// Contract tracking: a manual hold / completed wins; otherwise the dates decide.
-const ABOUT_TO_END_DAYS = 30;
-function contractState(account, today = todayUtc()) {
-  if (account.contract_status) return { state: account.contract_status, days_left: null };
-  const start = account.agreement_start_date;
-  const end = account.agreement_end_date;
-  if (end && end < today) return { state: 'completed', days_left: null };
-  if (!start || start > today) return { state: 'not_started', days_left: null };
-  const daysLeft = end ? Math.round((end - today) / 86400000) : null;
-  if (daysLeft !== null && daysLeft <= ABOUT_TO_END_DAYS) return { state: 'about_to_end', days_left: daysLeft };
-  return { state: 'running', days_left: daysLeft };
-}
-
-function serializeProfile(account, rates, calendar) {
+function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project) } = {}) {
   const rate = currentAccountRate(rates, todayUtc());
   return {
     id: account.id,
@@ -486,10 +483,13 @@ function serializeProfile(account, rates, calendar) {
     overtime_billable: account.overtime_billable,
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
-    // Only a real project (Add Project) is editable in Finance; a client
-    // account from the Accounts catalogue listed here is read-only.
+    minimum_monthly_hours: account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null,
+    // Editable when the row is a project: made by Add Project, or an older
+    // client row already used as one (billing, team, timesheets…) — see
+    // lib/projectScope. A plain catalogue client stays read-only. Edits only
+    // write project fields, never the account's own name.
     is_project: Boolean(account.is_project),
-    editable: Boolean(account.is_project),
+    editable,
     calendar: calendar?.calendar || null,
     calendar_is_default: !calendar?.calendar,
   };
@@ -503,6 +503,7 @@ const PROFILE_SELECT = {
   overtime_billable: true,
   overtime_multiplier: true,
   estimated_monthly_hours: true,
+  minimum_monthly_hours: true,
   is_project: true,
   client_name: true,
   client_account_id: true,
@@ -516,6 +517,10 @@ const PROFILE_SELECT = {
   project_calendar: { select: { calendar: { select: { id: true, name: true, kind: true } } } },
 };
 
+async function isProjectRow(orgId, accountId) {
+  return (await prisma.account.count({ where: { id: accountId, ...projectListWhere(orgId) } })) > 0;
+}
+
 async function listProjectProfiles(orgId) {
   await calendarsService.ensureProjectCodes(orgId);
   const [accounts, rates, fallback] = await Promise.all([
@@ -526,7 +531,8 @@ async function listProjectProfiles(orgId) {
   const ratesByAccount = new Map();
   for (const r of rates) ratesByAccount.set(r.account_id, [...(ratesByAccount.get(r.account_id) || []), r]);
   return accounts.map((a) => {
-    const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar);
+    // Every row listed here matches projectListWhere, so all are editable.
+    const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true });
     if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
     return profile;
   });
@@ -535,11 +541,12 @@ async function listProjectProfiles(orgId) {
 async function getProjectProfile(orgId, accountId) {
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: PROFILE_SELECT });
   if (!account) return { error: 'account_not_found' };
-  const [rates, fallback] = await Promise.all([
+  const [rates, fallback, editable] = await Promise.all([
     prisma.billingRate.findMany({ where: { org_id: orgId, account_id: accountId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
+    isProjectRow(orgId, accountId),
   ]);
-  const profile = serializeProfile(account, rates, account.project_calendar);
+  const profile = serializeProfile(account, rates, account.project_calendar, { editable });
   if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
   return { profile };
 }
@@ -551,9 +558,10 @@ async function getProjectProfile(orgId, accountId) {
 async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true, is_project: true } });
   if (!existing) return { error: 'account_not_found' };
-  // Finance never edits the Accounts catalogue: a client account listed here
-  // (legacy, used as a project before projects were separate) is read-only.
-  if (!existing.is_project) return { error: 'catalogue_account_read_only' };
+  // Finance never edits a plain Accounts-catalogue client. An older client row
+  // already worked on as a project (predates is_project) is a project here —
+  // only its project fields are written below, never the account's name.
+  if (!(await isProjectRow(orgId, accountId))) return { error: 'catalogue_account_read_only' };
 
   let client;
   if (patch.client_account_id) {
@@ -588,6 +596,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.overtime_billable !== undefined) data.overtime_billable = patch.overtime_billable;
   if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
   if (patch.estimated_monthly_hours !== undefined) data.estimated_monthly_hours = patch.estimated_monthly_hours;
+  if (patch.minimum_monthly_hours !== undefined) data.minimum_monthly_hours = patch.minimum_monthly_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   await prisma.$transaction(async (tx) => {
@@ -611,6 +620,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
 }
 
 module.exports = {
+  deleteGroupCharge,
   createRate,
   listRates,
   resolveRate,

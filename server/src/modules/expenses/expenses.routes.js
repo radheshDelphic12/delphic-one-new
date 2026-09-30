@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeSuperadmin, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
@@ -45,14 +45,28 @@ router.post(
   })
 );
 
+// A pending claim: its owner or an admin. Any status (approved, reimbursed…):
+// a superadmin, to correct the record.
 router.patch(
   '/claims/:id',
+  loadSuperadminFlag,
   asyncHandler(async (req, res) => {
     const body = updateClaimSchema.parse(req.body);
-    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id };
+    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: req.user.is_superadmin };
     const result = await service.updateClaim(req.user.org_id, req.params.id, actor, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
+  })
+);
+
+// Superadmin only: removes a claim entered by mistake, whatever its status.
+router.delete(
+  '/claims/:id',
+  authorizeSuperadmin,
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteClaim(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

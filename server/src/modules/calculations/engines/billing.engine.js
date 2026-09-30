@@ -49,6 +49,7 @@ const PROJECT_SELECT = {
   overtime_billable: true,
   overtime_multiplier: true,
   estimated_monthly_hours: true,
+  minimum_monthly_hours: true,
 };
 
 function engineFor(serviceCategory) {
@@ -289,12 +290,22 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
     const sum = (key) => round2(dayResources.reduce((s, r) => s + r[key], 0));
     const base = org_membership_id ? sum('base_amount') : day.base_amount;
     const overtime = org_membership_id ? sum('overtime_amount') : day.overtime_amount;
-    const hours = {
+    const allHours = {
       approved: org_membership_id ? sum('regular_hours') : day.hours.approved,
       overtime_approved: org_membership_id ? sum('overtime_hours') : day.hours.overtime_approved,
       pending: org_membership_id ? sum('pending_hours') : day.hours.pending,
       rejected: org_membership_id ? sum('rejected_hours') : day.hours.rejected,
     };
+    // Approval filter: only the chosen state's hours and entries (a pending
+    // entry is 'submitted'). Every date still shows, zero when nothing matches.
+    const hours = status === 'all' ? allHours : {
+      approved: status === 'approved' ? allHours.approved : 0,
+      overtime_approved: status === 'approved' ? allHours.overtime_approved : 0,
+      pending: status === 'pending' ? allHours.pending : 0,
+      rejected: status === 'rejected' ? allHours.rejected : 0,
+    };
+    const entryStatus = status === 'pending' ? 'submitted' : status;
+    const shownEntries = status === 'all' ? dayEntries : dayEntries.filter((e) => e.status === entryStatus);
     const rowStatus = org_membership_id
       ? dayStatus(dayEntries, { inContract: day.in_contract, isWorkingDay: day.is_working_day })
       : day.status;
@@ -303,7 +314,7 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
     // approved hours are ever billed.
     const matches = status === 'all' || rowStatus === status;
     const approvers = [];
-    for (const e of dayEntries) {
+    for (const e of shownEntries) {
       if (e.status === 'approved' && e.approved_by && !approvers.some((a) => a.id === e.approved_by.id)) approvers.push({ ...e.approved_by, at: e.approved_at });
     }
     const billed = status === 'all' || status === 'approved';
@@ -319,7 +330,7 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
       overtime_amount: billed && include_overtime ? overtime : 0,
       amount: billed ? round2(base + (include_overtime ? overtime : 0)) : 0,
       approvers,
-      entries: dayEntries,
+      entries: shownEntries,
     };
     days.push(row);
     for (const r of dayResources) {
@@ -389,4 +400,15 @@ async function listProjects(orgId, { project_type = 'all', client_account_id, ac
   return prisma.account.findMany({ where, select: PROJECT_SELECT, orderBy: [{ project_name: 'asc' }, { name: 'asc' }] });
 }
 
-module.exports = { PROJECT_SELECT, estimateFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };
+// Hourly projects with a committed minimum (Account.minimum_monthly_hours):
+// approved hours against it and the shortfall. Informational — the billed
+// amount is still approved hours × rate. Null when no minimum applies.
+function minimumFor(account, raw, totals) {
+  const hours = account?.minimum_monthly_hours;
+  if (hours === null || hours === undefined || raw.billing_type !== 'hourly') return null;
+  const minimumHours = Number(hours);
+  const shortfall = round2(Math.max(0, minimumHours - totals.approved_hours));
+  return { hours: minimumHours, actual_hours: totals.approved_hours, shortfall_hours: shortfall, met: shortfall === 0 };
+}
+
+module.exports = { PROJECT_SELECT, estimateFor, minimumFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };

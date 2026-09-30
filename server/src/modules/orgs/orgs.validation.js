@@ -53,6 +53,10 @@ const updateMembershipSchema = z.object({
   // When a team change takes effect (default today; never in the future) —
   // the old team keeps everything before it (TeamMembershipPeriod).
   team_effective_date: optionalDate,
+  // Lifecycle: notice period (resignation date → last working day) and exit.
+  employment_status: z.enum(['active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated']).optional(),
+  notice_start_date: optionalDate.nullable(),
+  notice_end_date: optionalDate.nullable(),
   work_mode: z.enum(['remote', 'onsite', 'hybrid']).nullable().optional(),
   // People → user type. Contractor needs a vendor account and a monthly vendor rate.
   worker_type: z.enum(['full_time_employee', 'contractor']).optional(),

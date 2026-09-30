@@ -35,6 +35,7 @@ const { findVendorAccount } = require('../../lib/workerType');
 const exchangeRates = require('./exchangeRates.service');
 const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
+const { contractState } = require('../../lib/contractState');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -246,12 +247,22 @@ async function listProjectsPnl(orgId, { period_month, period_year, project_type 
   if (project_type === 'none') where.service_category = null;
   else if (project_type && project_type !== 'all') where.service_category = project_type;
   const [accounts, fx] = await Promise.all([
-    prisma.account.findMany({ where, select: { id: true, service_category: true }, orderBy: { name: 'asc' } }),
+    prisma.account.findMany({
+      where,
+      select: { id: true, service_category: true, contract_status: true, agreement_start_date: true, agreement_end_date: true, minimum_monthly_hours: true },
+      orderBy: { name: 'asc' },
+    }),
     exchangeRates.inrRates(orgId),
   ]);
   const rows = [];
-  for (const { id, service_category } of accounts) {
+  for (const account of accounts) {
+    const { id, service_category } = account;
     const { pnl } = await computeProjectPnl(orgId, id, period, fx);
+    // Hourly projects with a committed minimum: the month's shortfall, if any.
+    const minimumHours = account.minimum_monthly_hours !== null ? Number(account.minimum_monthly_hours) : null;
+    const minimum = pnl.revenue.billing_type === 'hourly' && minimumHours !== null
+      ? { hours: minimumHours, shortfall_hours: Math.round(Math.max(0, minimumHours - (pnl.revenue.billable_hours || 0)) * 100) / 100 }
+      : null;
     rows.push({
       project: pnl.project,
       service_category,
@@ -263,6 +274,8 @@ async function listProjectsPnl(orgId, { period_month, period_year, project_type 
       billing_type: pnl.revenue.billing_type,
       billing_rate: pnl.revenue.rate,
       billable_hours: pnl.revenue.billable_hours ?? null,
+      minimum,
+      contract: contractState(account),
       internal_cost: pnl.internal.cost,
       vendor_cost: pnl.vendor.cost,
       total_cost: pnl.total_cost,
