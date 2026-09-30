@@ -88,12 +88,14 @@ export function ExpensesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3"><LiveIndicator updatedAt={updatedAt} everyMs={POLL_MS} /><MonthsSelect value={months} onChange={setMonths} /></div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label={`Total spend (${months} mo)`} value={money(data?.total)} icon={Receipt} theme="red" to="/finance?section=expenses" />
+        <KpiCard label="Group expenses" value={money(data?.group_total)} hint="Finance → Group Charges" icon={Receipt} theme="purple" to="/finance?section=group-charges" />
         <KpiCard label="Top category" value={titleCase(data?.by_category[0]?.category) || '-'} hint={data?.by_category[0] ? money(data.by_category[0].amount) : undefined} icon={Receipt} theme="orange" />
         <KpiCard label="Top office" value={data?.by_location[0]?.location || '-'} hint={data?.by_location[0] ? money(data.by_location[0].amount) : undefined} icon={Building2} theme="cyan" />
       </div>
-      <ChartCard title="Office expenses and vendor payments by month" subtitle="Approved / reimbursed claims and approved / paid vendor payments">
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Group expenses in {data.missing_rates.join(', ')} are left out — set the exchange rate in Finance → Projects or Project P&amp;L.</p>}
+      <ChartCard title="Office expenses, group expenses and vendor payments by month" subtitle="Approved / reimbursed claims, group charges (by payment date) and approved / paid vendor payments">
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={(data?.series || []).map((s) => ({ ...s, label: shortMonth(s.month) }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -103,13 +105,15 @@ export function ExpensesTab() {
               <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => money(v)} />
               <Legend />
               <Bar dataKey="office_expenses" name="Office expenses" stackId="a" fill={CHART_COLORS.warning} />
+              <Bar dataKey="group_expenses" name="Group expenses" stackId="a" fill={CHART_COLORS.purple} />
               <Bar dataKey="vendor_payments" name="Vendor payments" stackId="a" fill={CHART_COLORS.danger} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </ChartCard>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <DataTable columns={listCols('Category', 'category')} rows={(data?.by_category || []).map((r) => ({ ...r, id: r.category }))} loading={loading} emptyLabel="No approved claims" />
+        <DataTable columns={listCols('Group expense category', 'category')} rows={(data?.by_group_category || []).map((r) => ({ ...r, id: r.category }))} loading={loading} emptyLabel="No group expenses" />
         <DataTable columns={listCols('Office', 'location')} rows={(data?.by_location || []).map((r) => ({ ...r, id: r.location }))} loading={loading} emptyLabel="No approved claims" />
         <DataTable columns={listCols('Vendor type', 'vendor_type')} rows={(data?.by_vendor_type || []).map((r) => ({ ...r, id: r.vendor_type }))} loading={loading} emptyLabel="No vendor payments" />
       </div>

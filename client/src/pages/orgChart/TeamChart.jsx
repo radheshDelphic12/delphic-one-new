@@ -267,6 +267,11 @@ function Seat({ seat, cx, cy }) {
   );
 }
 
+// People drawn in a box (lead + members), and its open (vacant) seats.
+const seatsOf = (unit) => [...(unit.lead ? [unit.lead] : []), ...(unit.members || [])];
+const headcount = (unit) => seatsOf(unit).filter((s) => !s.vacant).length;
+const vacancies = (unit) => seatsOf(unit).filter((s) => s.vacant).length;
+
 function Box({ unit }) {
   const border = unit.contractor ? 'border-[3px] border-sky-400' : unit.kind === 'reports' ? 'border border-dashed border-slate-500' : 'border border-slate-600';
   return (
@@ -275,9 +280,9 @@ function Box({ unit }) {
       <p
         className="absolute truncate px-2 text-center text-[10.5px] font-bold text-slate-900"
         style={{ left: unit.x, top: unit.labelY - 8, width: unit.width, lineHeight: '16px' }}
-        title={unit.label}
+        title={`${unit.label} — ${headcount(unit)} ${headcount(unit) === 1 ? 'person' : 'people'}${vacancies(unit) ? `, ${vacancies(unit)} open` : ''}`}
       >
-        {unit.label}
+        {unit.label} ({headcount(unit)}{vacancies(unit) ? ` · ${vacancies(unit)} open` : ''})
       </p>
     </>
   );

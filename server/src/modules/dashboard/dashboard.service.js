@@ -204,7 +204,7 @@ async function summaryForAdmin(department_id) {
   ] = await Promise.all([
     prisma.account.count({ where: { stage: 'lead', ...ownerDept } }),
     prisma.account.count({ where: { stage: { in: ['meeting_scheduled', 'rescheduled'] }, ...ownerDept } }),
-    prisma.account.count({ where: { type: 'client', stage: 'active', ...ownerDept } }),
+    prisma.account.count({ where: { type: 'client', stage: 'active', is_project: false, ...ownerDept } }),
     prisma.account.count({ where: { type: 'vendor', stage: 'active', ...ownerDept } }),
     prisma.requirement.count({ where: { status: 'open', ...salesDept } }),
     prisma.requirement.count({ where: { status: 'in_progress', ...salesDept } }),
@@ -269,7 +269,7 @@ async function summaryForBda(userId) {
   ] = await Promise.all([
     prisma.account.count({ where: { ...accountWhere, stage: 'lead' } }),
     prisma.account.count({ where: { ...accountWhere, stage: { in: ['meeting_scheduled', 'rescheduled'] } } }),
-    prisma.account.count({ where: { ...accountWhere, type: 'client', stage: 'active' } }),
+    prisma.account.count({ where: { ...accountWhere, type: 'client', stage: 'active', is_project: false } }),
     prisma.account.count({ where: { ...accountWhere, type: 'vendor', stage: 'active' } }),
     stuckLeads(accountWhere),
     countStuckLeads(accountWhere),

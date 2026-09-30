@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const leaveService = require('../leave/leave.service');
+const calendarsService = require('../calendars/calendars.service');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 
 function minutesOfDayInZone(instant, timeZone) {
@@ -112,7 +113,7 @@ function dateRangeWhere({ from, to }) {
 async function listMine(orgId, orgMembershipId, { from, to, page, limit }) {
   const date = dateRangeWhere({ from, to });
   const where = { org_id: orgId, org_membership_id: orgMembershipId, ...(date ? { date } : {}) };
-  const [data, total] = await Promise.all([
+  const [data, total, calendar_days] = await Promise.all([
     prisma.attendanceRecord.findMany({
       where,
       orderBy: { date: 'desc' },
@@ -120,8 +121,33 @@ async function listMine(orgId, orgMembershipId, { from, to, page, limit }) {
       take: limit,
     }),
     prisma.attendanceRecord.count({ where }),
+    from && to ? calendarDays(orgId, orgMembershipId, from, to) : [],
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data, pagination: { page, limit, total }, calendar_days };
+}
+
+// The attendance sheet's calendar: the employee's company-calendar holidays
+// and approved full-day leave in [from, to], so the sheet shows them even on
+// days with no attendance record. [{ date, kind: 'holiday' | 'leave', label }].
+async function calendarDays(orgId, orgMembershipId, from, to) {
+  const [holidays, leaves] = await Promise.all([
+    calendarsService.companyHolidaysByMember(orgId, [orgMembershipId], from, to),
+    prisma.leaveRequest.findMany({
+      where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', is_half_day: false, from_date: { lte: to }, to_date: { gte: from } },
+      select: { from_date: true, to_date: true, leave_type: { select: { name: true } } },
+    }),
+  ]);
+  const days = new Map();
+  for (const [key, label] of holidays.get(orgMembershipId) || []) days.set(key, { date: key, kind: 'holiday', label });
+  for (const l of leaves) {
+    const start = l.from_date > from ? l.from_date : from;
+    const end = l.to_date < to ? l.to_date : to;
+    for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+      const key = ymd(new Date(t));
+      if (!days.has(key)) days.set(key, { date: key, kind: 'leave', label: l.leave_type.name });
+    }
+  }
+  return [...days.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
 // Admin/team view — every membership in the org, or one via org_membership_id.
@@ -177,6 +203,223 @@ async function regularize(orgId, recordId, adminUserId, { status, check_in_at, c
   return { record };
 }
 
+// Admin delete of a wrong record. Like a regularisation, a record in an
+// already-finalized month raises a finance change instead of silently
+// rewriting the locked salary / revenue.
+async function deleteRecord(orgId, recordId, adminUserId, { reason }) {
+  const existing = await prisma.attendanceRecord.findFirst({ where: { id: recordId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  await prisma.attendanceRecord.delete({ where: { id: recordId } });
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'attendance',
+    source_id: recordId,
+    date: existing.date,
+    org_membership_id: existing.org_membership_id,
+    changed_by: adminUserId,
+    description: `Attendance deleted by admin (${existing.status}): ${reason}`.slice(0, 500),
+    old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
+    new_value: null,
+  });
+  return { deleted: true, flagged: change?.flagged || 0 };
+}
+
+// --- Backfill: admin records attendance for past days (single day or a sheet). ---
+
+const TIMED_STATUSES = new Set(['present', 'half_day', 'wfh']);
+const STATUSES = new Set(['present', 'absent', 'half_day', 'leave', 'holiday', 'wfh']);
+
+function ymd(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+// Offset (ms) of `timeZone` from UTC at `instant`.
+function zoneOffsetMs(instant, timeZone) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .formatToParts(instant)
+      .map((p) => [p.type, p.value])
+  );
+  const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+/** The instant of wall-clock `hh:mm` on calendar day `date` (UTC-midnight Date) in `timeZone`. */
+function wallTimeToInstant(date, hhmm, timeZone) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const guess = new Date(date.getTime() + (h * 60 + m) * 60000);
+  return new Date(guess.getTime() - zoneOffsetMs(guess, timeZone));
+}
+
+function sameInstant(a, b) {
+  return (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+}
+
+async function loadMembershipForBackfill(orgId, orgMembershipId) {
+  return prisma.orgMembership.findFirst({
+    where: { id: orgMembershipId, org_id: orgId },
+    select: { id: true, joined_at: true, shift: true, org: { select: { timezone: true } } },
+  });
+}
+
+// Creates or overwrites one day's record. Returns { record, action } where
+// action is 'created' | 'updated' | 'unchanged', or { error }. With
+// `dryRun` it validates and reports the action without writing.
+async function backfillDay(orgId, adminUserId, membership, { date, status, check_in_time, check_out_time, reason }, { dryRun = false } = {}) {
+  if (date > todayIst()) return { error: 'future_date' };
+  if (membership.joined_at && date < membership.joined_at) return { error: 'before_joining' };
+  if (status !== 'leave' && (await leaveService.leaveDayFor(orgId, membership.id, date))) return { error: 'leave_day' };
+
+  const timed = TIMED_STATUSES.has(status);
+  if (timed && check_out_time && !check_in_time) return { error: 'checkout_without_checkin' };
+  const timeZone = membership.org?.timezone || 'Asia/Kolkata';
+  const check_in_at = timed && check_in_time ? wallTimeToInstant(date, check_in_time, timeZone) : null;
+  let check_out_at = timed && check_out_time ? wallTimeToInstant(date, check_out_time, timeZone) : null;
+  // A check-out earlier than the check-in is an overnight shift ending next day.
+  if (check_in_at && check_out_at && check_out_at <= check_in_at) check_out_at = new Date(check_out_at.getTime() + 86400000);
+
+  const data = {
+    status,
+    check_in_at,
+    check_out_at,
+    late_minutes: check_in_at ? computeLateMinutes(membership.shift, check_in_at, timeZone) : null,
+    overtime_minutes: check_in_at && check_out_at ? computeOvertimeMinutes(membership.shift, check_in_at, check_out_at) : null,
+    regularized_by: adminUserId,
+    regularized_reason: reason,
+  };
+
+  const existing = await prisma.attendanceRecord.findFirst({ where: { org_id: orgId, org_membership_id: membership.id, date } });
+  if (existing && existing.status === status && sameInstant(existing.check_in_at, check_in_at) && sameInstant(existing.check_out_at, check_out_at)) {
+    return { record: existing, action: 'unchanged' };
+  }
+  const action = existing ? 'updated' : 'created';
+  if (dryRun) return { record: null, action };
+
+  const record = existing
+    ? await prisma.attendanceRecord.update({ where: { id: existing.id }, data })
+    : await prisma.attendanceRecord.create({ data: { ...data, org_id: orgId, org_membership_id: membership.id, date, source: 'manual' } });
+  // Same as a regularisation: a locked month is flagged, never rewritten.
+  await detectFinanceChange(orgId, {
+    source_type: 'attendance',
+    source_id: record.id,
+    date,
+    org_membership_id: membership.id,
+    changed_by: adminUserId,
+    description: `Attendance ${existing ? 'corrected' : 'backfilled'}: ${existing?.status || 'no record'} → ${status}${reason ? ` (${reason})` : ''}`.slice(0, 500),
+    old_value: existing ? { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at } : { status: 'no_record' },
+    new_value: { status: record.status, check_in_at: record.check_in_at, check_out_at: record.check_out_at },
+  });
+  return { record, action };
+}
+
+async function recordManualDay(orgId, adminUserId, { org_membership_id, ...entry }) {
+  const membership = await loadMembershipForBackfill(orgId, org_membership_id);
+  if (!membership) return { error: 'membership_not_found' };
+  return backfillDay(orgId, adminUserId, membership, entry);
+}
+
+const IMPORT_ERRORS = {
+  future_date: 'Date is in the future',
+  before_joining: 'Date is before the employee joined',
+  leave_day: 'Employee is on approved leave that day — use status "leave"',
+  checkout_without_checkin: 'Check-out given without a check-in',
+};
+
+// Bulk backfill. Employees are matched by employee code or email. Rows with
+// a blank status are skipped (so a prefilled template can be uploaded as is).
+// Every row is checked first; nothing is written if any row has an error, so a
+// sheet is applied all-or-nothing and can simply be fixed and re-uploaded.
+async function importAttendance(orgId, adminUserId, { rows, reason, dry_run }) {
+  const memberships = await prisma.orgMembership.findMany({
+    where: { org_id: orgId },
+    select: { id: true, employee_code: true, joined_at: true, shift: true, org: { select: { timezone: true } }, person: { select: { name: true, email: true } } },
+  });
+  const byKey = new Map();
+  for (const m of memberships) {
+    if (m.employee_code) byKey.set(m.employee_code.trim().toLowerCase(), m);
+    if (m.person?.email) byKey.set(m.person.email.trim().toLowerCase(), m);
+  }
+
+  const errors = [];
+  const valid = [];
+  const seen = new Set();
+  let skipped = 0;
+  rows.forEach((row, index) => {
+    const line = index + 2; // Row 1 of the sheet is the header.
+    const status = row.status.toLowerCase().replace(/[\s-]+/g, '_');
+    if (!status) { skipped += 1; return; }
+    const fail = (message) => errors.push({ row: line, employee: row.employee, date: row.date, message });
+    const membership = byKey.get(row.employee.toLowerCase());
+    if (!membership) return fail('Employee not found — use their employee code or email');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || Number.isNaN(new Date(`${row.date}T00:00:00.000Z`).getTime())) return fail('Date must be YYYY-MM-DD');
+    if (!STATUSES.has(status)) return fail(`Unknown status "${row.status}" — use present, absent, half_day, leave, holiday or wfh`);
+    const timeOk = (t) => !t || /^([01]?\d|2[0-3]):[0-5]\d$/.test(t);
+    if (!timeOk(row.check_in) || !timeOk(row.check_out)) return fail('Times must be HH:MM (24-hour)');
+    const key = `${membership.id}|${row.date}`;
+    if (seen.has(key)) return fail('Same employee and date appears more than once');
+    seen.add(key);
+    valid.push({ line, row, membership, entry: { date: new Date(`${row.date}T00:00:00.000Z`), status, check_in_time: row.check_in || null, check_out_time: row.check_out || null, reason } });
+  });
+
+  // Business checks (future, before joining, leave day) — without writing.
+  const counts = { created: 0, updated: 0, unchanged: 0 };
+  for (const item of valid) {
+    const result = await backfillDay(orgId, adminUserId, item.membership, item.entry, { dryRun: true });
+    if (result.error) errors.push({ row: item.line, employee: item.row.employee, date: item.row.date, message: IMPORT_ERRORS[result.error] || result.error });
+    else counts[result.action] += 1;
+  }
+
+  const summary = { total: rows.length, skipped, errors: errors.sort((a, b) => a.row - b.row), ...counts, applied: false };
+  if (dry_run || errors.length) return summary;
+
+  for (const item of valid) await backfillDay(orgId, adminUserId, item.membership, item.entry);
+  return { ...summary, applied: true };
+}
+
+// Prefilled sheet rows for a department and date range: one row per employee
+// per day up to today (from their joining date), carrying the status/times
+// already recorded — approved leave shows as "leave" — so the admin only fills gaps.
+async function importTemplate(orgId, { from, to, department_id }) {
+  const today = todayIst();
+  const end = to > today ? today : to;
+  const memberships = await prisma.orgMembership.findMany({
+    where: { org_id: orgId, employment_status: { notIn: ['terminated', 'pending_onboarding'] }, ...(department_id ? { department_id } : {}) },
+    select: { id: true, employee_code: true, joined_at: true, org: { select: { timezone: true } }, person: { select: { name: true, email: true } }, department: { select: { name: true } } },
+    orderBy: { person: { name: 'asc' } },
+  });
+  if (!memberships.length || end < from) return [];
+  const ids = memberships.map((m) => m.id);
+  const [records, leaves, holidays] = await Promise.all([
+    prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: end } } }),
+    prisma.leaveRequest.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, status: 'approved', is_half_day: false, from_date: { lte: end }, to_date: { gte: from } }, select: { org_membership_id: true, from_date: true, to_date: true } }),
+    calendarsService.companyHolidaysByMember(orgId, ids, from, end),
+  ]);
+  const recordByKey = new Map(records.map((r) => [`${r.org_membership_id}|${ymd(r.date)}`, r]));
+  const hhmm = (instant, timeZone) => (instant ? new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant) : '');
+
+  const out = [];
+  for (const m of memberships) {
+    const timeZone = m.org?.timezone || 'Asia/Kolkata';
+    for (let d = new Date(from); d <= end; d = new Date(d.getTime() + 86400000)) {
+      if (m.joined_at && d < m.joined_at) continue;
+      const record = recordByKey.get(`${m.id}|${ymd(d)}`);
+      const onLeave = leaves.some((l) => l.org_membership_id === m.id && l.from_date <= d && l.to_date >= d);
+      // Holidays on the employee's calendar come prefilled as "holiday".
+      const holiday = holidays.get(m.id)?.has(ymd(d));
+      out.push({
+        employee: m.employee_code || m.person?.email || '',
+        name: m.person?.name || '',
+        department: m.department?.name || '',
+        date: ymd(d),
+        day: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+        status: record?.status || (onLeave ? 'leave' : holiday ? 'holiday' : ''),
+        check_in: hhmm(record?.check_in_at, timeZone),
+        check_out: hhmm(record?.check_out_at, timeZone),
+      });
+    }
+  }
+  return out;
+}
+
 // Client brief: configurable shift timings + grace period per employee.
 async function listShifts(orgId) {
   return prisma.shift.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } });
@@ -189,4 +432,18 @@ async function createShift(orgId, { name, start_minutes, end_minutes, grace_minu
   return { shift };
 }
 
-module.exports = { checkIn, checkOut, listMine, listTeam, regularize, listShifts, createShift, computeLateMinutes };
+module.exports = {
+  deleteRecord,
+  checkIn,
+  checkOut,
+  listMine,
+  listTeam,
+  regularize,
+  recordManualDay,
+  importAttendance,
+  importTemplate,
+  listShifts,
+  createShift,
+  computeLateMinutes,
+  wallTimeToInstant,
+};

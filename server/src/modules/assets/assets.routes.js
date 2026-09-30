@@ -11,6 +11,7 @@ router.use(authenticate, requireOrgMembership, authorize('admin'));
 const LINK_ERRORS = {
   employee_not_found: 'Employee not found in this organisation',
   vendor_not_found: 'Vendor account not found',
+  vendor_required: 'Pick the vendor this asset belongs to',
   client_not_found: 'Client account not found',
 };
 

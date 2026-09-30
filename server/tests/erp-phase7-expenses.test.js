@@ -277,3 +277,69 @@ describe('Phase 7 — vendor payments (money going out, not the recruitment Acco
     expect(res.body.data).not.toHaveProperty('account_id');
   });
 });
+
+describe('Expense claims — Manager -> HR -> Finance, admin on behalf, Other, delete by mistake', () => {
+  async function dept(orgId, name) {
+    return prisma.department.create({ data: { org_id: orgId, name } });
+  }
+
+  test('each step is taken by the right person in turn; only then is the claim approved', async () => {
+    const { org, access_token: adminToken } = await seedOrgAdmin();
+    const location = await seedLocation(org.id);
+    const manager = await seedOrgEmployee(org, 'employee');
+    const hr = await seedOrgEmployee(org, 'employee');
+    const fin = await seedOrgEmployee(org, 'employee');
+    const emp = await seedOrgEmployee(org, 'employee');
+    await prisma.orgMembership.update({ where: { id: hr.membership.id }, data: { department_id: (await dept(org.id, 'HR')).id } });
+    await prisma.orgMembership.update({ where: { id: fin.membership.id }, data: { department_id: (await dept(org.id, 'Finance')).id } });
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { manager_id: manager.membership.id } });
+
+    const created = await authed(request(app).post('/api/v1/expenses/claims'), emp.access_token).send({ location_id: location.id, category: 'Travel', amount: 900 });
+    expect(created.body.data).toMatchObject({ status: 'pending', approval_stage: 'manager' });
+    const id = created.body.data.id;
+    const decide = (token) => authed(request(app).post(`/api/v1/expenses/claims/${id}/decision`), token).send({ status: 'approved' });
+    const queue = async (token) => (await authed(request(app).get('/api/v1/expenses/claims/approvals'), token)).body.data.map((c) => c.id);
+
+    // Out of turn: HR and Finance can't take the manager's step; the employee can't approve their own.
+    expect((await decide(hr.access_token)).status).toBe(403);
+    expect((await decide(fin.access_token)).status).toBe(403);
+    expect((await decide(emp.access_token)).status).toBe(403);
+    expect(await queue(manager.access_token)).toEqual([id]);
+    expect(await queue(hr.access_token)).toEqual([]);
+
+    expect((await decide(manager.access_token)).body.data).toMatchObject({ status: 'pending', approval_stage: 'hr' });
+    expect(await queue(hr.access_token)).toEqual([id]);
+    expect((await decide(fin.access_token)).status).toBe(403);
+    expect((await decide(hr.access_token)).body.data).toMatchObject({ status: 'pending', approval_stage: 'finance' });
+    const done = await decide(fin.access_token);
+    expect(done.body.data).toMatchObject({ status: 'approved', approval_stage: null });
+    expect(done.body.data.approvals.map((a) => a.stage)).toEqual(['manager', 'hr', 'finance']);
+
+    // Reimbursing stays an admin action.
+    expect((await authed(request(app).post(`/api/v1/expenses/claims/${id}/reimburse`), adminToken)).status).toBe(200);
+  });
+
+  test('an admin files a claim for an employee; "Other" needs a description; the owner deletes a pending claim raised by mistake', async () => {
+    const { org, access_token: adminToken } = await seedOrgAdmin();
+    const location = await seedLocation(org.id);
+    const emp = await seedOrgEmployee(org, 'employee');
+
+    const noDescription = await authed(request(app).post('/api/v1/expenses/claims'), adminToken).send({ org_membership_id: emp.membership.id, location_id: location.id, category: 'Other', amount: 300 });
+    expect(noDescription.status).toBe(422);
+    const filed = await authed(request(app).post('/api/v1/expenses/claims'), adminToken).send({ org_membership_id: emp.membership.id, location_id: location.id, category: 'Other', description: 'Courier to client', amount: 300 });
+    expect(filed.status).toBe(201);
+    expect(filed.body.data).toMatchObject({ org_membership_id: emp.membership.id, description: 'Courier to client', approval_stage: 'hr' });
+    expect(filed.body.data.submitted_by).toBeTruthy();
+
+    // A non-admin can't file for someone else — it's always their own claim.
+    const other = await seedOrgEmployee(org, 'employee');
+    const own = await authed(request(app).post('/api/v1/expenses/claims'), other.access_token).send({ org_membership_id: emp.membership.id, location_id: location.id, category: 'Travel', amount: 50 });
+    expect(own.body.data.org_membership_id).toBe(other.membership.id);
+
+    // Delete by mistake: someone else can't; the owner can while it's pending; not once decided.
+    expect((await authed(request(app).delete(`/api/v1/expenses/claims/${filed.body.data.id}`), other.access_token)).status).toBe(404);
+    expect((await authed(request(app).delete(`/api/v1/expenses/claims/${filed.body.data.id}`), emp.access_token)).status).toBe(200);
+    await authed(request(app).post(`/api/v1/expenses/claims/${own.body.data.id}/decision`), adminToken).send({ status: 'approved' });
+    expect((await authed(request(app).delete(`/api/v1/expenses/claims/${own.body.data.id}`), other.access_token)).status).toBe(409);
+  });
+});

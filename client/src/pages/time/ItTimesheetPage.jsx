@@ -10,6 +10,9 @@ import Badge from '../../components/ui/Badge.jsx';
 import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
+import WeekHoursView from './WeekHoursView.jsx';
+import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -80,8 +83,11 @@ export default function ItTimesheetPage() {
     }
   }
 
+  const [weekKey, setWeekKey] = useState(0);
+
   async function load() {
     setLoading(true);
+    setWeekKey((k) => k + 1);
     try {
       const { data } = await apiClient.get('/timesheets/my-log', { params: period });
       setDays(data.data || []);
@@ -94,7 +100,33 @@ export default function ItTimesheetPage() {
 
   useEffect(() => { load(); }, [period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const monthTotal = useMemo(() => days.reduce((sum, d) => sum + d.total_hours, 0), [days]);
+  // Filters on the month's log: a Sunday–Saturday week and/or one project.
+  const [weekFilter, setWeekFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  useEffect(() => { setWeekFilter(''); }, [period.month, period.year]);
+  const weeks = useMemo(() => monthWeeks(period), [period]);
+  const logProjects = useMemo(() => {
+    const byId = new Map();
+    for (const d of days) for (const e of d.entries) if (e.account?.id) byId.set(e.account.id, e.account.name);
+    return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [days]);
+  const shownDays = useMemo(() => {
+    const week = weeks.find((w) => w.key === weekFilter);
+    return days
+      .filter((d) => !week || (d.date >= week.from && d.date <= week.to))
+      .map((d) => {
+        if (!projectFilter) return d;
+        const entries = d.entries.filter((e) => e.account?.id === projectFilter);
+        return { ...d, entries, total_hours: Math.round(entries.reduce((s, e) => s + e.hours + (e.overtime_hours || 0), 0) * 100) / 100 };
+      })
+      .filter((d) => d.entries.length > 0);
+  }, [days, weeks, weekFilter, projectFilter]);
+  const filtered = Boolean(weekFilter || projectFilter);
+
+  const monthTotal = useMemo(() => shownDays.reduce((sum, d) => sum + d.total_hours, 0), [shownDays]);
+
+  // Overtime is per day (beyond the shift), so it follows the week filter, not a project.
+  const monthOt = useMemo(() => (projectFilter ? 0 : shownDays.reduce((sum, d) => sum + (d.ot_hours || 0), 0)), [shownDays, projectFilter]);
   const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0) + (Number(r.overtime_hours) || 0), 0), [rows]);
   const openTasks = tasks.filter((t) => t.status !== 'completed');
 
@@ -208,7 +240,7 @@ export default function ItTimesheetPage() {
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
                 <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
                 <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
-                <input placeholder="Description" value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                <textarea placeholder="Description" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] resize-y rounded-xl border px-3 py-2 text-sm" />
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -233,24 +265,37 @@ export default function ItTimesheetPage() {
             <select value={period.year} onChange={(e) => setPeriod((p) => ({ ...p, year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
               {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
+            <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">Whole month</option>
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}</option>)}
+            </select>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Project" className="max-w-[14rem] rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">All projects</option>
+              {logProjects.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">Month total: {monthTotal.toFixed(1)} hrs</span>
+            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
           </div>
         </div>
 
-        {!loading && days.length === 0 ? (
-          <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
+        {!loading && shownDays.length === 0 ? (
+          filtered
+            ? <EmptyState icon={Timer} title="Nothing matches these filters" description="Try another week or project." />
+            : <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
         ) : (
           <div className="space-y-3">
-            {days.map((day) => (
+            {shownDays.map((day) => (
               <div key={day.date} className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
                 <div className="flex items-center justify-between bg-tertiary-50 px-4 py-2">
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>
-                  <span className="text-xs font-medium text-tertiary-600">{day.total_hours} hrs</span>
+                  <span className="text-xs font-medium text-tertiary-600">
+                    {day.total_hours} hrs
+                    {day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
+                  </span>
                 </div>
                 <table className="w-full text-sm">
                   <thead>
@@ -273,7 +318,7 @@ export default function ItTimesheetPage() {
                           )}
                         </td>
                         <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
-                        <td className="px-4 py-1.5 text-tertiary-500">{entry.notes || '—'}</td>
+                        <td className="px-4 py-1.5 text-tertiary-500"><NoteText text={entry.notes} /></td>
                         <td className="px-4 py-1.5">
                           <StatusBadge status={entry.status} label={STATUS_LABEL[entry.status]} size="xs" />
                           {entry.status === 'approved' && entry.approved_by && (
@@ -292,6 +337,8 @@ export default function ItTimesheetPage() {
           </div>
         )}
       </section>
+
+      <WeekHoursView canDeleteOwn reloadKey={weekKey} onChanged={load} />
 
       <RegularisationSection requireProject projectOptions={projectOptions} onChanged={load} />
     </div>

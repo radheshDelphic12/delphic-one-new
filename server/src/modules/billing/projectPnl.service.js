@@ -5,11 +5,12 @@
 //                  - (Internal Employee Salary Allocations + Vendor Contractor Cost)
 //
 // Revenue — the account-wide BillingRate in force for the month. A monthly
-//   rate is the fixed monthly fee (prorated by calendar days only in the month
-//   the agreement starts); an hourly rate is the month's approved, billable
-//   timesheet hours x the hourly rate in force on each day, worked out live so
-//   a rate set or changed after approval still counts. Nothing is billed
-//   before agreement_start_date.
+//   rate is the fixed monthly fee (prorated by calendar days in the months the
+//   agreement starts or ends); an hourly rate is exactly what the billing
+//   engine bills (calculations/engines/billing.engine — the locked snapshot
+//   when the month is locked): approved, billable hours x the hourly rate in
+//   force on each day, plus approved overtime only where the project bills
+//   it. Nothing is billed outside agreement_start_date..agreement_end_date.
 // Internal cost — each full-time employee assigned to the project:
 //   * cost rate set on the assignment (ProjectMemberAssignment.cost_rate_per_hr,
 //     the resource's INTERNAL cost per hour on this contract): the month's
@@ -33,6 +34,9 @@ const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const exchangeRates = require('./exchangeRates.service');
+const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
+const { contractState } = require('../../lib/contractState');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -61,54 +65,87 @@ async function projectRevenue(orgId, account, { start, end, days }) {
   const rate = latestOnOrBefore(rates, end);
   if (!rate) return { amount: 0, billing_type: null, rate: null, currency: account.client_billing_currency || 'INR', note: 'no_billing_rate' };
 
+  const agreementEnd = account.agreement_end_date;
   if (rate.rate_type === 'monthly') {
+    if (agreementEnd && agreementEnd < start) {
+      return { amount: 0, billing_type: 'monthly', rate: Number(rate.rate), currency: rate.currency, note: 'after_agreement_end' };
+    }
+    // Prorated by calendar days in the months the agreement starts or ends.
     const from = agreementStart && agreementStart > start ? agreementStart : start;
-    const billedDays = Math.round((end - from) / 86400000) + 1;
+    const to = agreementEnd && agreementEnd < end ? agreementEnd : end;
+    const billedDays = Math.round((to - from) / 86400000) + 1;
     const amount = billedDays >= days ? Number(rate.rate) : (Number(rate.rate) * billedDays) / days;
     return { amount: round2(amount), billing_type: 'monthly', rate: Number(rate.rate), currency: rate.currency, prorated_days: billedDays < days ? billedDays : null };
   }
 
-  const from = agreementStart && agreementStart > start ? agreementStart : start;
-  const entries = await prisma.timesheetEntry.findMany({
-    where: { org_id: orgId, account_id: account.id, status: 'approved', billable: true, date: { gte: from, lte: end } },
-    select: { date: true, hours: true },
-  });
+  // Hourly: the SAME figure Billing & Sales, the billing lock and the invoice
+  // use — the month's locked snapshot when locked, otherwise the billing
+  // engine live (approved billable hours x the rate in force each day, inside
+  // the agreement start AND end dates, plus approved overtime x rate x
+  // multiplier only when the project bills overtime). Lazy-required: the
+  // engine loads billing.service, which loads this file.
+  const billingEngine = require('../calculations/engines/billing.engine');
+  const calculations = require('../calculations/calculations.service');
+  const period = { period_month: start.getUTCMonth() + 1, period_year: start.getUTCFullYear() };
+  const locked = await calculations.lockedVersion(orgId, 'billing', account.id, period);
+  const raw = locked ? locked.snapshot : await billingEngine.computeProjectMonth(orgId, account.id, period);
+  const overtimeBilled = Boolean(raw.overtime?.enabled);
+  // Hours logged but not billed are reported in `excluded` with the reason,
+  // so no hours disappear silently.
+  const excluded = { pending_approval: 0, non_billable: 0, outside_agreement: 0, no_hourly_rate: 0, overtime: 0, not_supported: 0 };
   let hours = 0;
-  let amount = 0;
-  for (const e of entries) {
-    const onDay = latestOnOrBefore(rates, e.date);
-    if (onDay?.rate_type !== 'hourly') continue;
-    hours += Number(e.hours);
-    amount += Number(e.hours) * Number(onDay.rate);
+  let overtimeHours = 0;
+  for (const d of raw.days) {
+    excluded.pending_approval += d.hours.pending;
+    const regular = d.hours.approved;
+    const ot = d.hours.overtime_approved;
+    if (!raw.supported) { excluded.not_supported += regular + ot; continue; }
+    if (!d.in_contract) { excluded.outside_agreement += regular + ot; continue; }
+    if (d.rate_type !== 'hourly') { excluded.no_hourly_rate += regular + ot; continue; }
+    hours += regular;
+    if (overtimeBilled) overtimeHours += ot;
+    else excluded.overtime += ot;
   }
-  return { amount: round2(amount), billing_type: 'hourly', rate: Number(rate.rate), currency: rate.currency, billable_hours: round2(hours) };
-}
-
-// Converts to INR with the org's rates, recording any currency without one.
-function inrConverter(fx) {
-  const missing = new Set();
-  const toInr = (amount, currency) => {
-    const cur = currency || 'INR';
-    if (!fx.has(cur)) { missing.add(cur); return 0; }
-    return round2(Number(amount || 0) * fx.get(cur));
+  const nonBillable = await prisma.timesheetEntry.aggregate({
+    where: { org_id: orgId, account_id: account.id, billable: false, status: { not: 'rejected' }, date: { gte: start, lte: end } },
+    _sum: { hours: true, overtime_hours: true },
+  });
+  excluded.non_billable = Number(nonBillable._sum.hours || 0) + Number(nonBillable._sum.overtime_hours || 0);
+  for (const k of Object.keys(excluded)) excluded[k] = round2(excluded[k]);
+  const amount = billingEngine.lockedAmount(raw);
+  const overtimeAmount = overtimeBilled ? round2(raw.days.reduce((s, d) => s + d.overtime_amount, 0)) : 0;
+  return {
+    amount,
+    billing_type: 'hourly',
+    rate: Number(rate.rate),
+    currency: raw.currency || rate.currency,
+    billable_hours: round2(hours),
+    overtime_hours: round2(overtimeHours),
+    overtime_amount: overtimeAmount,
+    locked: Boolean(locked),
+    excluded,
   };
-  return { toInr, missing };
 }
 
 async function computeProjectPnl(orgId, accountId, { period_month, period_year }, fx = null) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, org_id: orgId, type: 'client' },
-    select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { name: true } }, agreement_start_date: true, client_billing_currency: true },
+    select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { name: true } }, agreement_start_date: true, agreement_end_date: true, client_billing_currency: true },
   });
   if (!account) return { error: 'account_not_found' };
   const bounds = periodBounds(period_month, period_year);
 
-  const assignments = await prisma.projectMemberAssignment.findMany({
+  // Allocation periods on this project in force during the month (effective-
+  // dated: someone moved off mid-month is only charged for their days here).
+  const spansHere = (await prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, account_id: accountId },
+    orderBy: { start_date: 'asc' },
     select: {
       org_membership_id: true,
       allocation_percent: true,
       cost_rate_per_hr: true,
+      start_date: true,
+      end_date: true,
       org_membership: {
         select: {
           id: true,
@@ -121,10 +158,12 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
         },
       },
     },
-  });
+  })).filter((a) => overlaps(a, bounds.start, bounds.end));
+  // One row per person: their latest span here carries the cost rate.
+  const assignments = [...new Map(spansHere.map((a) => [a.org_membership_id, a])).values()];
   const membershipIds = assignments.map((a) => a.org_membership_id);
-  const [assignmentCounts, salaries, invoices, revenue, rates, hoursRows] = await Promise.all([
-    prisma.projectMemberAssignment.groupBy({ by: ['org_membership_id'], where: { org_id: orgId, org_membership_id: { in: membershipIds } }, _count: { _all: true } }),
+  const [allSpans, salaries, invoices, revenue, rates, hoursRows] = await Promise.all([
+    prisma.projectMemberAssignment.findMany({ where: { org_id: orgId, org_membership_id: { in: membershipIds } }, select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, end_date: true } }),
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: membershipIds }, effective_from: { lte: bounds.end } },
       select: { org_membership_id: true, ctc: true, effective_from: true, created_at: true },
@@ -139,9 +178,12 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     }),
   ]);
   const approvedHours = new Map(hoursRows.map((h) => [h.org_membership_id, Number(h._sum.hours || 0) + Number(h._sum.overtime_hours || 0)]));
-  const { toInr, missing } = inrConverter(rates);
-  const countByMembership = new Map(assignmentCounts.map((c) => [c.org_membership_id, c._count._all]));
-  const share = (a) => (a.allocation_percent !== null ? Number(a.allocation_percent) / 100 : 1 / (countByMembership.get(a.org_membership_id) || 1));
+  const { toInr, missing } = exchangeRates.inrConverter(rates);
+  // Each person's day-weighted share of the month on this project, across
+  // all their allocations (an even split counts the projects active each day).
+  const spansByPerson = byMembership(allSpans);
+  const shareByPerson = new Map(membershipIds.map((id) => [id, periodShares(spansByPerson.get(id) || [], bounds.start, bounds.end).get(accountId) || 0]));
+  const share = (a) => shareByPerson.get(a.org_membership_id) || 0;
 
   const internal = [];
   const contractors = [];
@@ -229,17 +271,27 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
 // and/or a client.
 async function listProjectsPnl(orgId, { period_month, period_year, project_type = 'all', client_account_id } = {}) {
   const period = { period_month, period_year };
-  const where = { org_id: orgId, type: 'client', stage: 'active' };
+  const where = projectListWhere(orgId);
   if (client_account_id) where.client_account_id = client_account_id;
   if (project_type === 'none') where.service_category = null;
   else if (project_type && project_type !== 'all') where.service_category = project_type;
   const [accounts, fx] = await Promise.all([
-    prisma.account.findMany({ where, select: { id: true, service_category: true }, orderBy: { name: 'asc' } }),
+    prisma.account.findMany({
+      where,
+      select: { id: true, service_category: true, contract_status: true, agreement_start_date: true, agreement_end_date: true, minimum_monthly_hours: true },
+      orderBy: { name: 'asc' },
+    }),
     exchangeRates.inrRates(orgId),
   ]);
   const rows = [];
-  for (const { id, service_category } of accounts) {
+  for (const account of accounts) {
+    const { id, service_category } = account;
     const { pnl } = await computeProjectPnl(orgId, id, period, fx);
+    // Hourly projects with a committed minimum: the month's shortfall, if any.
+    const minimumHours = account.minimum_monthly_hours !== null ? Number(account.minimum_monthly_hours) : null;
+    const minimum = pnl.revenue.billing_type === 'hourly' && minimumHours !== null
+      ? { hours: minimumHours, shortfall_hours: Math.round(Math.max(0, minimumHours - (pnl.revenue.billable_hours || 0)) * 100) / 100 }
+      : null;
     rows.push({
       project: pnl.project,
       service_category,
@@ -251,6 +303,9 @@ async function listProjectsPnl(orgId, { period_month, period_year, project_type 
       billing_type: pnl.revenue.billing_type,
       billing_rate: pnl.revenue.rate,
       billable_hours: pnl.revenue.billable_hours ?? null,
+      overtime_hours: pnl.revenue.overtime_hours ?? null,
+      minimum,
+      contract: contractState(account),
       internal_cost: pnl.internal.cost,
       vendor_cost: pnl.vendor.cost,
       total_cost: pnl.total_cost,
@@ -314,7 +369,33 @@ async function listVendors(orgId) {
   return prisma.account.findMany({ where: { org_id: orgId, type: 'vendor' }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
 }
 
+// This month's billing for Finance -> Projects, per project, in INR — the
+// SAME revenue rule and converter as the P&L (fixed monthly fee, or approved
+// billable hours x rate), with any excluded hours and why.
+async function monthBillingByProject(orgId, accounts, { period_month, period_year }, fx) {
+  const bounds = periodBounds(period_month, period_year);
+  const { toInr, rateFor } = exchangeRates.inrConverter(fx);
+  const out = new Map();
+  for (const account of accounts) {
+    const revenue = await projectRevenue(orgId, account, bounds);
+    const converted = rateFor(revenue.currency) !== null;
+    out.set(account.id, {
+      period_month,
+      period_year,
+      billing_type: revenue.billing_type,
+      amount: revenue.amount,
+      currency: revenue.currency,
+      amount_inr: converted ? toInr(revenue.amount, revenue.currency) : null,
+      billable_hours: revenue.billable_hours ?? null,
+      excluded: revenue.excluded || null,
+      note: revenue.note || null,
+    });
+  }
+  return out;
+}
+
 module.exports = {
+  monthBillingByProject,
   computeProjectPnl,
   listProjectsPnl,
   listVendorInvoices,

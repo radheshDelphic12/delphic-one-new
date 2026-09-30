@@ -78,8 +78,13 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
     { key: 'amount', header: 'Amount', render: (d) => <span className="font-medium tabular-nums">{inr(d.amount, data?.currency)}</span> },
   ];
 
+  // Closed: render nothing from the last project. Its data can still be in
+  // state for a render after the row clears, and reading row.project then
+  // crashed the whole page.
+  if (!row) return <Drawer open={false} title="" onClose={onClose} size="xl" />;
+
   return (
-    <Drawer open={Boolean(row)} title={row ? `${row.project.code ? `${row.project.code} · ` : ''}${row.project.name} — ${periodLabel(row)}` : ''} onClose={onClose} size="xl">
+    <Drawer open title={`${row.project.code ? `${row.project.code} · ` : ''}${row.project.name} — ${periodLabel(row)}`} onClose={onClose} size="xl">
       {!data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
         <div className="space-y-4">
           <CalculationLockBar kind="billing" scopeKey={row.project.id} period={period} title="Billing" onChanged={() => { load(); onChanged(); }}>
@@ -93,6 +98,8 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
                 {data.billing_type === 'monthly'
                   ? `Monthly ${inr(data.rate, data.currency)} over this project's ${data.working_days} working days (${data.calendar?.name || 'default calendar'}): a working day earns up to ${inr(data.rate / Math.max(data.working_days, 1), data.currency)}, in proportion to approved hours against the ${data.benchmark_hours}h monthly benchmark.`
                   : data.billing_type === 'hourly' ? `Hourly: approved hours × ${inr(data.rate, data.currency)}.` : 'No billing rate set for this project.'}
+                {data.minimum && ` Committed minimum ${data.minimum.hours}h/month: ${data.minimum.met ? 'met' : `${data.minimum.shortfall_hours}h short so far`} (billing is still approved hours × rate).`}
+                {data.estimate && ` Client estimate: ${data.estimate.hours}h × ${inr(data.rate, data.currency)} = ${inr(data.estimate.amount, data.currency)}; actual so far ${data.estimate.actual_hours}h = ${inr(data.estimate.actual_amount, data.currency)} (${data.estimate.hours_variance >= 0 ? '+' : ''}${data.estimate.hours_variance}h). Forecast only — not billed.`}
                 {' '}Overtime is {data.overtime.enabled ? `billed at ${data.overtime.multiplier}× the hourly-equivalent rate` : 'not billable on this project'}. Only approved hours bill.
                 {data.source === 'locked' && ' Showing the locked version.'}
               </>
@@ -153,10 +160,20 @@ export default function BillingSalesTab() {
         <span className="font-medium">{inr(r.amount, r.currency)}</span>
         {r.currency !== 'INR' && r.amount_inr !== null && <span className="block text-xs text-tertiary-500">{inr(r.amount_inr)}</span>}
         {r.live_amount !== null && r.live_amount !== undefined && <span className="block text-xs text-danger-700">Live now {inr(r.live_amount, r.currency)}</span>}
+        {r.estimate && (
+          <span className="block text-xs text-tertiary-500" title="Client's approximate hours × hourly rate — a forecast, not billed">
+            Est. {inr(r.estimate.amount, r.currency)} · {r.estimate.hours}h
+          </span>
+        )}
+        {r.minimum && !r.minimum.met && (
+          <span className="block text-xs font-medium text-warning-700" title="Approved hours are below the project's committed minimum">
+            {r.minimum.shortfall_hours}h below {r.minimum.hours}h min.
+          </span>
+        )}
       </span>
     ) },
     { key: 'approval', header: 'Approval', render: (r) => <StatusBadge status={r.totals.rejected_days ? 'rejected' : r.totals.pending_days ? 'pending' : r.totals.approved_days ? 'approved' : 'no_entries'} size="xs" /> },
-    { key: 'lock', header: 'Lock', render: (r) => <StatusBadge status={r.lock.status} label={r.lock.version ? `${({ locked: 'Locked', change_detected: 'Change Detected', reviewed: 'Reviewed', reopened: 'Reopened' })[r.lock.status] || 'Draft'} v${r.lock.version}` : undefined} size="xs" /> },
+    { key: 'lock', header: 'Lock', render: (r) => <StatusBadge status={r.lock.status} label={r.lock.version ? `${({ locked: 'Locked', change_detected: 'Historical Calculation Affected', reviewed: 'Reviewed', reopened: 'Reopened' })[r.lock.status] || 'Draft'} v${r.lock.version}` : undefined} size="xs" /> },
   ];
 
   const dayCols = [
@@ -206,13 +223,13 @@ export default function BillingSalesTab() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <KpiCard label={`Billing · ${period.period === 'quarter' ? 'quarter' : periodLabel(period)}`} value={inr(t?.amount_inr)} icon={IndianRupee} theme="green" />
+        <KpiCard label={`Billing · ${period.period === 'quarter' ? 'quarter' : periodLabel(period)}`} value={inr(t?.amount_inr)} hint={t?.estimated_projects ? `Estimated (client hours, ${t.estimated_projects} hourly): ${inr(t.estimated_inr)}` : undefined} icon={IndianRupee} theme="green" />
         <KpiCard label="of which overtime" value={inr(t?.overtime_inr)} hint={filters.include_overtime === 'false' ? 'excluded by filter' : 'only projects that pay overtime'} icon={Timer} theme="purple" />
         <KpiCard label="Approved hours" value={t ? `${t.approved_hours}h` : '…'} hint={t?.overtime_hours ? `+ ${t.overtime_hours}h overtime` : undefined} icon={Clock} theme="blue" />
         <KpiCard label="Pending / rejected hours" value={t ? `${t.pending_hours}h / ${t.rejected_hours}h` : '…'} hint="not billed until approved" icon={Clock} theme="red" />
         <KpiCard label="Locked projects" value={t ? `${t.locked_projects} / ${t.projects}` : '…'} icon={Lock} theme="cyan" />
       </div>
-      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Project P&amp;L) — those projects are left out of the INR totals.</p>}
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Projects or Project P&amp;L) — those projects are left out of the INR totals.</p>}
 
       <section className="space-y-2">
         <h2 className="font-heading text-sm font-semibold text-tertiary-900">Projects &amp; contracts <span className="font-normal text-tertiary-500">— open one to review its dates, lock it and generate the invoice</span></h2>

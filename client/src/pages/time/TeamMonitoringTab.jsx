@@ -10,6 +10,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const TASK_STATUSES = ['pending', 'in_progress', 'completed'];
@@ -150,7 +151,7 @@ export function DrillDownDrawer({ member, period, onClose }) {
               <ul className="divide-y divide-tertiary-100 text-sm">
                 {day.entries.map((entry) => (
                   <li key={entry.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                    <span className="text-tertiary-700">{entry.account?.name || 'General'}{entry.notes ? ` — ${entry.notes}` : ''}</span>
+                    <span className="min-w-0 text-tertiary-700">{entry.account?.name || 'General'}{entry.notes && <NoteText text={entry.notes} className="text-xs text-tertiary-500" />}</span>
                     <span className="flex items-center gap-1.5 shrink-0 text-tertiary-500">
                       {entry.hours}h <Badge value={entry.status} />
                       {entry.is_holiday_overtime && <Badge value="in_progress" label="Holiday OT" />}
@@ -273,6 +274,19 @@ export default function TeamMonitoringTab() {
     }
   }
 
+  // Unlock a day so its entries can be logged / changed normally again.
+  async function unlock(lock) {
+    const day = lock.date?.slice(0, 10);
+    if (!window.confirm(`Unlock ${day}? Employees can then log and edit entries for that day again.`)) return;
+    try {
+      await apiClient.delete(`/timesheets/locks/${day}`);
+      pushSuccess(`Unlocked ${day}`);
+      loadLocks();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to unlock that day'), 'Something went wrong');
+    }
+  }
+
   async function setTaskStatus(task, status) {
     try {
       await apiClient.patch(`/tasks/${task.id}`, { status });
@@ -339,7 +353,7 @@ export default function TeamMonitoringTab() {
           <StatCard label="Logged today" value={overview.summary.logged_today} />
           <StatCard label="Missing today" value={overview.summary.missing_today} />
           <StatCard label="Pending approvals" value={overview.summary.pending_approvals} />
-          <StatCard label="Overtime hours" value={overview.summary.overtime_hours} hint="Holiday work, this month" />
+          <StatCard label="Overtime hours" value={overview.summary.overtime_hours} hint="Beyond the daily shift (weekends / holidays: all hours), this month" />
         </div>
       )}
 
@@ -402,6 +416,7 @@ export default function TeamMonitoringTab() {
             {locks.map((lock) => (
               <span key={lock.id} className="inline-flex items-center gap-1 rounded-full bg-tertiary-100 px-2.5 py-1 text-xs text-tertiary-600">
                 <Lock className="h-3 w-3" /> {lock.date?.slice(0, 10)}{lock.is_auto ? ' · auto' : ''}
+                <button type="button" className="ml-1 rounded-full px-1.5 font-medium text-primary-700 hover:bg-white" onClick={() => unlock(lock)} aria-label={`Unlock ${lock.date?.slice(0, 10)}`}>Unlock</button>
               </span>
             ))}
           </div>

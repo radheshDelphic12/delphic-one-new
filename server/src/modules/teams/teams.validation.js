@@ -9,6 +9,8 @@ const createSchema = z.object({
   manager_membership_id: z.string().uuid().nullable().optional(),
   open_positions: z.coerce.number().int().min(0).max(50).optional(),
   sort_order: z.coerce.number().int().min(0).max(9999).optional(),
+  // People → Capacity: projects one member can carry; null = the org default.
+  projects_per_resource: z.coerce.number().min(0.1).max(20).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial();

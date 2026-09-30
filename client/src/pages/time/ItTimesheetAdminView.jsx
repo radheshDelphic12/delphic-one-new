@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Users } from 'lucide-react';
+import { ClipboardList, FileUp, Plus, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -8,6 +8,12 @@ import Badge from '../../components/ui/Badge.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { DrillDownDrawer, StatCard } from './TeamMonitoringTab.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
+import NoteText from '../../components/NoteText.jsx';
+import AdminEntryDrawer, { adminDeleteEntry } from './AdminEntryDrawer.jsx';
+import { AddTimesheetEntryDrawer, BulkTimesheetDrawer } from './TimesheetBackfill.jsx';
+import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
+import { useProjectOptions } from '../../lib/lookups.js';
+import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -42,10 +48,23 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [total, setTotal] = useState(0);
+  const [filteredTotals, setFilteredTotals] = useState(null);
   const [page, setPage] = useState(1);
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [memberFilter, setMemberFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [correcting, setCorrecting] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Bumped after every correction so the affected-billing banner re-reads.
+  const [changesKey, setChangesKey] = useState(0);
+  const [locks, setLocks] = useState([]);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [weekFilter, setWeekFilter] = useState('');
+  const projectOptions = useProjectOptions(true);
+  const weeks = useMemo(() => monthWeeks(period), [period]);
+  const range = weeks.find((w) => w.key === weekFilter) || monthRange(period);
   const [drillMember, setDrillMember] = useState(null);
   const [rejecting, setRejecting] = useState(null);
 
@@ -61,8 +80,43 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const deptParams = scope === 'it' ? { department_id: itDept?.id } : { exclude_department_id: itDept?.id || undefined };
   const ready = scope === 'it' ? Boolean(itDept) : itDept !== undefined;
 
+  function loadLocks() {
+    apiClient.get('/timesheets/locks').then(({ data }) => setLocks((data.data || []).map((l) => String(l.date).slice(0, 10)))).catch(() => setLocks([]));
+  }
+  useEffect(() => { loadLocks(); }, []);
+
+  // Unlock a whole (Sunday–Saturday) week so its logs can be corrected
+  // normally, or lock it again when done. Locked billing / salary months are
+  // flagged, never rewritten — see the banner above.
+  const weekDays = useMemo(() => {
+    const week = weeks.find((w) => w.key === weekFilter);
+    if (!week) return [];
+    const out = [];
+    for (let d = new Date(`${week.from}T00:00:00Z`); d <= new Date(`${week.to}T00:00:00Z`); d = new Date(d.getTime() + 86400000)) out.push(d.toISOString().slice(0, 10));
+    return out;
+  }, [weeks, weekFilter]);
+  const lockedInWeek = weekDays.filter((d) => locks.includes(d));
+  async function setWeekLocked(lock) {
+    const today = new Date().toISOString().slice(0, 10);
+    const targets = lock ? weekDays.filter((d) => !locks.includes(d) && d <= today) : lockedInWeek;
+    if (!targets.length) return;
+    setLockBusy(true);
+    let failed = 0;
+    for (const date of targets) {
+      try {
+        if (lock) await apiClient.post('/timesheets/locks', { date });
+        else await apiClient.delete(`/timesheets/locks/${date}`);
+      } catch { failed += 1; }
+    }
+    setLockBusy(false);
+    if (failed) pushError(`${failed} day(s) could not be ${lock ? 'locked' : 'unlocked'}`, 'Some days were skipped');
+    else pushSuccess(lock ? 'Week locked' : 'Week unlocked — entries can now be edited and deleted');
+    loadLocks();
+  }
+
   function loadOverview() {
     if (!ready) return;
+    setChangesKey((k) => k + 1);
     setOverviewLoading(true);
     apiClient
       .get('/timesheets/overview', { params: { ...deptParams, month: period.month, year: period.year } })
@@ -77,7 +131,9 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     apiClient
       .get('/timesheets/entries', {
         params: {
-          ...monthRange(period),
+          from: range.from,
+          to: range.to,
+          account_id: projectFilter || undefined,
           ...deptParams,
           org_membership_id: memberFilter || undefined,
           status: statusFilter || undefined,
@@ -88,14 +144,16 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       .then(({ data }) => {
         setEntries(data.data || []);
         setTotal(data.pagination?.total ?? 0);
+        setFilteredTotals(data.totals || null);
       })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load timesheet entries'), 'Something went wrong'))
       .finally(() => setEntriesLoading(false));
   }
 
   useEffect(() => { loadOverview(); }, [itDept, period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setPage(1); }, [period.month, period.year, memberFilter, statusFilter]);
-  useEffect(() => { loadEntries(); }, [itDept, period.month, period.year, memberFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setWeekFilter(''); }, [period.month, period.year]);
+  useEffect(() => { setPage(1); }, [period.month, period.year, memberFilter, statusFilter, projectFilter, weekFilter]);
+  useEffect(() => { loadEntries(); }, [itDept, period.month, period.year, memberFilter, statusFilter, projectFilter, weekFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decideEntry(id, status, reason) {
     try {
@@ -152,7 +210,7 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     { key: 'member', header: 'Employee', render: (row) => <span className="font-medium text-tertiary-900">{row.org_membership?.person?.name || '—'}</span> },
     { key: 'project', header: 'Project', render: (row) => row.account?.name || 'General' },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Description', render: (row) => <span className="text-tertiary-500">{row.notes || '—'}</span> },
+    { key: 'notes', header: 'Description', render: (row) => <NoteText text={row.notes} className="text-tertiary-500" /> },
     {
       key: 'status',
       header: 'Status',
@@ -166,13 +224,19 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     {
       key: 'actions',
       header: '',
-      render: (row) =>
-        row.status === 'submitted' ? (
-          <span className="flex justify-end gap-2">
-            <button type="button" className="btn-secondary text-xs" onClick={() => decideEntry(row.id, 'approved')}>Approve</button>
-            <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setRejecting(row)}>Reject</button>
-          </span>
-        ) : null,
+      render: (row) => (
+        <span className="flex flex-wrap justify-end gap-2">
+          {row.status === 'submitted' && (
+            <>
+              <button type="button" className="btn-secondary text-xs" onClick={() => decideEntry(row.id, 'approved')}>Approve</button>
+              <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setRejecting(row)}>Reject</button>
+            </>
+          )}
+          {/* Admin correction at any stage — approved entries and locked days included. */}
+          <button type="button" className="btn-ghost text-xs" onClick={() => setCorrecting(row)}>Edit</button>
+          <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => adminDeleteEntry(row, { pushError, pushSuccess, onDone: () => { loadEntries(); loadOverview(); } })}>Delete</button>
+        </span>
+      ),
     },
   ];
 
@@ -195,14 +259,21 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         <select value={period.year} onChange={(e) => setPeriod((p) => ({ ...p, year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
           {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add entry</button>
+          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setUploading(true)}><FileUp className="h-3.5 w-3.5" /> Bulk upload CSV</button>
+        </div>
       </div>
 
+      <AffectedCalculationsBanner refreshKey={changesKey} />
+
       {overview && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatCard label={text.people} value={overview.summary.total_members} />
           <StatCard label="Logged today" value={overview.summary.logged_today} />
           <StatCard label="Missing today" value={overview.summary.missing_today} />
           <StatCard label="Hours this month" value={Math.round(monthHours * 100) / 100} />
+          <StatCard label="Overtime this month" value={overview.summary.overtime_hours} hint="Hours beyond each day's shift" />
           <StatCard label="Pending approvals" value={overview.summary.pending_approvals} hint="All months" />
         </div>
       )}
@@ -214,12 +285,34 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
 
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-heading text-sm font-semibold text-tertiary-900">Timesheet records</h3>
+          <h3 className="font-heading text-sm font-semibold text-tertiary-900">
+            Timesheet records
+            {filteredTotals && (
+              <span className="ml-2 text-xs font-normal text-tertiary-500">
+                {total} entr{total === 1 ? 'y' : 'ies'} · {filteredTotals.hours}h{filteredTotals.overtime_hours ? ` + ${filteredTotals.overtime_hours}h OT` : ''}
+              </span>
+            )}
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             <select value={memberFilter} onChange={(e) => setMemberFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
               <option value="">{text.all}</option>
               {members.map((m) => <option key={m.org_membership_id} value={m.org_membership_id}>{m.name}</option>)}
             </select>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Project" className="max-w-[12rem] rounded-xl border px-2 py-1 text-xs">
+              <option value="">All projects</option>
+              {projectOptions.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-2 py-1 text-xs">
+              <option value="">Whole month</option>
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}{w.from && locks.includes(w.from) ? ' · locked' : ''}</option>)}
+            </select>
+            {weekFilter && (lockedInWeek.length > 0 ? (
+              <button type="button" className="btn-secondary text-xs" disabled={lockBusy} onClick={() => setWeekLocked(false)} title="Unlock this week so its entries can be corrected">
+                {lockBusy ? 'Unlocking…' : `Unlock week (${lockedInWeek.length} day${lockedInWeek.length === 1 ? '' : 's'} locked)`}
+              </button>
+            ) : (
+              <button type="button" className="btn-ghost text-xs" disabled={lockBusy} onClick={() => setWeekLocked(true)}>{lockBusy ? 'Locking…' : 'Lock week'}</button>
+            ))}
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
               <option value="">All statuses</option>
               {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -248,6 +341,9 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         onConfirm={(reason) => decideEntry(rejecting.id, 'rejected', reason)}
       />
       <DrillDownDrawer member={drillMember} period={period} onClose={() => setDrillMember(null)} />
+      <AdminEntryDrawer entry={correcting} onClose={() => setCorrecting(null)} onSaved={() => { loadEntries(); loadOverview(); }} />
+      <AddTimesheetEntryDrawer open={adding} onClose={() => setAdding(false)} onSaved={() => { loadEntries(); loadOverview(); }} />
+      <BulkTimesheetDrawer open={uploading} onClose={() => setUploading(false)} onApplied={() => { loadEntries(); loadOverview(); }} />
     </div>
   );
 }

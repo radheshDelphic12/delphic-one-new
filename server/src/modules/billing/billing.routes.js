@@ -1,10 +1,12 @@
 const express = require('express');
-const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const exchangeRates = require('./exchangeRates.service');
+const allocationsService = require('../allocations/allocations.service');
+const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
 const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
   exchangeRatesSchema,
@@ -17,6 +19,7 @@ const {
   transitionInvoiceSchema,
   createGroupChargeSchema,
   createOwnGroupChargeSchema,
+  updateGroupChargeSchema,
   listMyGroupChargesQuerySchema,
   listAllGroupChargesQuerySchema,
   costAssignmentSchema,
@@ -43,8 +46,10 @@ const ERRORS = {
   membership_not_found: [404, 'Employee not found in this org'],
   category_not_found: [404, 'Group charge category not found (or deactivated)'],
   location_not_found: [404, 'Office location not found'],
+  charge_raised_by_group: [403, 'This charge was raised by the group — only a group superadmin can edit it'],
   client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
   end_before_start: [422, 'The agreement end date cannot be before its start date'],
+  catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };
 
@@ -283,6 +288,31 @@ router.post(
   })
 );
 
+// Finance → Group Charges "Edit" — admin of the current company, on that company's charges.
+router.patch(
+  '/group-charges/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = updateGroupChargeSchema.parse(req.body);
+    const result = await service.updateGroupCharge(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+// Finance → Group Charges "Delete" — superadmin only, on the current company's charges.
+router.delete(
+  '/group-charges/:id',
+  requireOrgMembership,
+  authorizeSuperadmin,
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteGroupCharge(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
 router.get(
   '/group-charges',
   requireOrgMembership,
@@ -306,14 +336,18 @@ router.get(
 
 // --- Module C: project costing (developer cost rate + live budget summary). ---
 
+// Project team allocations — effective-dated spans (see allocations.service).
+// POST creates one, or changes the one in force (from `effective_date` when
+// given, else as a correction); DELETE removes one entered by mistake — to
+// take someone OFF a project, end it (POST /allocations/:id/end) so history stays.
 router.post(
   '/cost-assignments',
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = costAssignmentSchema.parse(req.body);
-    const result = await service.upsertCostAssignment(req.user.org_id, req.user.id, body);
-    if (result.error) return failFor(res, result.error);
+    const result = await allocationsService.assign(req.user.org_id, req.user.id, body);
+    if (result.error) return allocationsFailFor(res, result.error);
     return created(res, result.assignment);
   })
 );
@@ -323,8 +357,8 @@ router.delete(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.removeCostAssignment(req.user.org_id, req.params.id);
-    if (result.error) return failFor(res, result.error);
+    const result = await allocationsService.deleteAllocation(req.user.org_id, req.user.id, req.params.id);
+    if (result.error) return allocationsFailFor(res, result.error);
     return ok(res, { deleted: true });
   })
 );
@@ -334,9 +368,8 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const { account_id } = listCostAssignmentsQuerySchema.parse(req.query);
-    const rows = await service.listCostAssignments(req.user.org_id, account_id);
-    return ok(res, rows);
+    const { account_id, include_ended } = listCostAssignmentsQuerySchema.parse(req.query);
+    return ok(res, await allocationsService.listForProject(req.user.org_id, account_id, { include_ended }));
   })
 );
 

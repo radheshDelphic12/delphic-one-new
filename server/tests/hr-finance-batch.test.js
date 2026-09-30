@@ -153,7 +153,7 @@ describe('Finance → Projects — contract tracking', () => {
 
   test('not started / running / about to end / completed follow the dates; on hold and completed can be set by hand', async () => {
     const ctx = await seed();
-    const make = async (name) => prisma.account.create({ data: { org_id: ctx.org.id, name, type: 'client', stage: 'active', service_category: 'project', owner_id: ctx.admin.id } });
+    const make = async (name) => prisma.account.create({ data: { org_id: ctx.org.id, name, type: 'client', stage: 'active', service_category: 'project', is_project: true, owner_id: ctx.admin.id } });
     const patch = (id, body) => authed(request(app).patch(`/api/v1/billing/projects/${id}`), ctx.token).send(body);
     const state = async (id) => (await authed(request(app).get(`/api/v1/billing/projects/${id}`), ctx.token)).body.data.contract;
 

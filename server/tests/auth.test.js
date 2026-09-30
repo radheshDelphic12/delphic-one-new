@@ -89,3 +89,18 @@ describe('auth', () => {
     expect(newLogin.status).toBe(200);
   });
 });
+
+describe('auth — login carries the department', () => {
+  test('the sign-in response includes department (IT timesheet / calendar know it without a reload) and never the hash', async () => {
+    const user = await createUser({ role: 'employee' });
+    const membership = await prisma.orgMembership.findFirst({ where: { person_id: user.id } })
+      || (await loginAs(user), await prisma.orgMembership.findFirst({ where: { person_id: user.id } }));
+    const it = await prisma.department.create({ data: { name: 'IT', org_id: membership.org_id } });
+    await prisma.user.update({ where: { id: user.id }, data: { department_id: it.id } });
+
+    const res = await request(app).post('/api/v1/auth/login').send({ email: user.email, password: PASSWORD });
+    expect(res.status).toBe(200);
+    expect(res.body.data.user).toMatchObject({ department_id: it.id, department: { id: it.id, name: 'IT' } });
+    expect(res.body.data.user).not.toHaveProperty('password_hash');
+  });
+});

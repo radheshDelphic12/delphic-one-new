@@ -49,7 +49,8 @@ describe('teams — org-scoped HR setting', () => {
       name: 'Java Squad',
       department: { id: department.id, name: 'Delivery' },
       lead_membership_id: admin.membership.id,
-      member_count: 0,
+      // The lead is on the team too (they weren't on any team, so they join it).
+      member_count: 1,
     });
 
     const dup = await authed(request(app).post('/api/v1/teams'), admin.token).send({ name: 'Java Squad' });

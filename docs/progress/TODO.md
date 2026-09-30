@@ -4,6 +4,23 @@ Working task list. Check off / move to [PROGRESS.md](PROGRESS.md) as items land.
 
 **Sprint tickets live in [SPRINT-PLAN.md](SPRINT-PLAN.md)** (Aug 21 → Aug 28 deploy).
 
+## Timesheet-based pay + overtime approval (2026-09-30, branch `delphic-one-bugFix-and-newImplementation`, uncommitted)
+
+See PROGRESS.md 2026-09-30 entry.
+
+- [x] `workHours.service`, `TimesheetDayOvertime`, `is_working_day`, Sun→Sat
+      weekly lock, week/hours/admin-entry/OT-decision endpoints, Approvals OT
+      section + `WeekHoursView`, salary/payroll on approved hours, Projects
+      hourly billing total.
+- [ ] Fix local test DB credentials, then run `timesheet-payroll-rules`,
+      `timesheet-workflow`, `project-pnl-fx` and the full server suite.
+- [ ] Apply migration `20261001090000_timesheet_overtime_workday` locally
+      (`prisma migrate deploy`) and smoke-test Approvals → OT + payroll run.
+- [ ] Normalise line endings before committing (most of the diff is CRLF
+      churn); commit when ready.
+- [ ] Decide how `comp_off` OT turns into leave balance (currently only
+      recorded, not credited).
+
 ## Multi-company ERP platform (2026-09-15, branch `feature/multi-company-erp`)
 
 Plan: [MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md](../architecture/MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md) · Design: [MULTI-COMPANY-ERP-PLATFORM-HLD.md](../architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md).

@@ -27,7 +27,7 @@ A finalized result never changes silently. A later change to its source data is
 | Kind | Scope | Amount | Used by |
 |---|---|---|---|
 | `billing` | one project (Account id) + month | approved base + overtime (if the project pays OT) | invoice draft, Resource Revenue, Financials |
-| `salary` | org + month | net salary (attendance-based) | payroll run processing, Resource Revenue, Financials |
+| `salary` | org + month | net salary (approved timesheet hours + approved OT) | payroll run processing, Resource Revenue, Financials |
 | `resource_revenue` | org + month | total resource revenue | reporting |
 | `vendor_payment` | org + month | owed to vendors (INR) | creates pending `VendorPayment` rows, Financials |
 | `financials` | org + month | profit | Financials (finalized view) |
@@ -52,9 +52,16 @@ status to `change_detected`. Nothing is recalculated automatically.
 
 ## Formulas
 
-- **Salary**: per day = monthly CTC ÷ working days of the employee's own calendar (Mon–Fri less that
-  calendar's holidays); loss of pay for absent / unpaid leave / unmarked working days (half day = ½).
-  Live mode (`asOf` = today) reports "incurred to date" and never counts future days as loss of pay.
+- **Salary** (updated 2026-09-30, `timesheets/workHours.service.js`): expected hours = working days
+  of the employee's ONE company calendar (Mon–Fri less its holidays, plus any `is_working_day`
+  exception) × daily shift hours (default 9). Hourly rate = monthly CTC ÷ expected hours. Paid =
+  **approved** timesheet hours up to the shift per day (paid leave = a full shift); short hours are
+  deducted at the hourly rate. Overtime (hours beyond the shift, or any hours on a weekend / company
+  holiday) is paid only when its `TimesheetDayOvertime` row is `approved`; `comp_off` earns time off
+  instead. Pending hours / OT only feed `projected_net`. Check-in / check-out never feeds pay.
+  Project / client calendars never change expected hours.
+- **Timesheet weeks** run Sunday → Saturday and auto-lock Sunday 00:00 IST; still-pending entries get
+  `admin_review` after `TIMESHEET_ADMIN_REVIEW_GRACE_DAYS` (default 3).
 - **Billing (Managed Services)**: existing rule — monthly rate: day = rate × min(hours ÷ benchmark,
   1 ÷ project-calendar working days); hourly: hours × rate. Overtime = approved `overtime_hours`
   (plus weekend/holiday hours on a monthly contract) × hourly-equivalent × `overtime_multiplier`,
@@ -63,7 +70,11 @@ status to `change_detected`. Nothing is recalculated automatically.
 - **Vendor payment**: contractor `vendor_rate` × allocation share, spread over the project calendar
   like monthly billing; overtime at straight time where the project pays overtime.
 - **Resource revenue**: resource's pro-rata share (by hours) of each project's billing; cost =
-  attendance salary × allocation % (or the vendor payment line for a contractor).
+  timesheet-based salary × allocation % (or the vendor payment line for a contractor).
+- **Finance → Projects "Billing · <month>" total**: `projectPnl.monthBillingByProject` — same rule and
+  FX converter as the P&L (monthly fee, or approved billable hours × hourly rate). Unbilled hours are
+  returned in `excluded` by reason (`pending_approval`, `non_billable`, `before_agreement`,
+  `no_hourly_rate`, `overtime`).
 
 ## Project identity
 

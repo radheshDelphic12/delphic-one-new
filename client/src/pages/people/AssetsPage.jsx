@@ -3,7 +3,7 @@ import { Plus, Search } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { useLeadClientOptions, useOrgMembershipOptions, useVendorAccountOptions } from '../../lib/lookups.js';
+import { useLeadClientOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -18,7 +18,8 @@ const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
 ];
 
-const OWNER_LABEL = { delphic: 'Delphic', client: 'Client' };
+const OWNER_LABEL = { delphic: 'Delphic', client: 'Client', vendor: 'Vendor' };
+const OWNER_TONE = { delphic: 'amber', client: 'purple', vendor: 'cyan' };
 
 function todayYmd() {
   const d = new Date();
@@ -58,7 +59,13 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
   const [form, setForm] = useState(emptyForm(null));
   const [saving, setSaving] = useState(false);
   const members = useOrgMembershipOptions(open);
-  const vendors = useVendorAccountOptions(open);
+  // Every vendor account of this company (Finance's vendor list) — the
+  // /accounts lookup only answers in the master workspace and caps at 100.
+  const [vendors, setVendors] = useState([]);
+  useEffect(() => {
+    if (!open) return;
+    apiClient.get('/billing/vendors').then(({ data }) => setVendors((data.data || []).map((v) => ({ value: v.id, label: v.name })))).catch(() => setVendors([]));
+  }, [open]);
   const clients = useLeadClientOptions(open);
 
   useEffect(() => { if (open) setForm(emptyForm(asset)); }, [open, asset]);
@@ -80,6 +87,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
     const body = {
       ...values,
       org_membership_id: values.org_membership_id || null,
+      // The vendor that supplied it — recorded for any asset, required when it belongs to the vendor.
       vendor_account_id: values.vendor_account_id || null,
       client_account_id: values.client_account_id || null,
       issue_date: values.issue_date || null,
@@ -135,7 +143,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
               Mark returned
             </button>
           )}
-          <button type="submit" form="asset-form" className="btn-primary" disabled={saving || !form.asset_type.trim()}>
+          <button type="submit" form="asset-form" className="btn-primary" disabled={saving || !form.asset_type.trim() || (form.belongs_to === 'vendor' && !form.vendor_account_id)}>
             {saving ? 'Saving…' : asset ? 'Save asset' : 'Add asset'}
           </button>
         </>
@@ -169,11 +177,23 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
           <select value={form.belongs_to} onChange={(e) => set('belongs_to', e.target.value)} className={input}>
             <option value="delphic">Delphic</option>
             <option value="client">Client</option>
+            <option value="vendor">Vendor</option>
           </select>
         </label>
         <div className={label}>
-          Asset belongs to vendor
-          <SearchableSelect value={form.vendor_account_id} onChange={(v) => set('vendor_account_id', v)} options={vendorOptions} allowClear className="mt-1" placeholder="None" searchPlaceholder="Search vendors…" noResultsMessage="No vendor accounts found" ariaLabel="Vendor" />
+          Vendor name {form.belongs_to === 'vendor' && <span className="text-danger-600">*</span>}
+          <SearchableSelect
+            value={form.vendor_account_id}
+            onChange={(v) => set('vendor_account_id', v)}
+            options={vendorOptions}
+            allowClear={form.belongs_to !== 'vendor'}
+            className="mt-1"
+            placeholder={form.belongs_to === 'vendor' ? 'Select vendor' : 'None'}
+            searchPlaceholder="Search vendors…"
+            noResultsMessage="No vendor accounts found — add one under Accounts (type: Vendor)"
+            ariaLabel="Vendor name"
+            required={form.belongs_to === 'vendor'}
+          />
         </div>
         <div className={label}>
           Client name
@@ -247,7 +267,7 @@ export default function AssetsPage() {
         <span>{r.org_membership.name}{r.org_membership.employee_code && <span className="ml-1 text-xs text-tertiary-500">{r.org_membership.employee_code}</span>}</span>
       ) : muted()),
     },
-    { key: 'owner', header: 'Belongs to', render: (r) => <Pill tone={r.belongs_to === 'delphic' ? 'amber' : 'purple'}>{OWNER_LABEL[r.belongs_to]}</Pill> },
+    { key: 'owner', header: 'Belongs to', render: (r) => <Pill tone={OWNER_TONE[r.belongs_to] || 'gray'}>{OWNER_LABEL[r.belongs_to] || r.belongs_to}</Pill> },
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor_account?.name || muted() },
     { key: 'client', header: 'Client name', render: (r) => r.client_account?.name || muted() },
     { key: 'issued_on', header: 'Issue date', render: (r) => formatDate(r.issue_date) || muted() },

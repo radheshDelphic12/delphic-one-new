@@ -72,6 +72,27 @@ async function updateSalaryStructure(orgId, actorUserId, structureId, patch) {
   return { structure };
 }
 
+// Admin deletes a structure (e.g. created by mistake). Payroll reads
+// structures at processing time, so draft runs simply fall back to the
+// previous structure; processed payslips keep their frozen figures, and any
+// locked month from its effective date on is flagged for review.
+async function deleteSalaryStructure(orgId, actorUserId, structureId) {
+  const existing = await prisma.salaryStructure.findFirst({ where: { id: structureId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  await prisma.salaryStructure.delete({ where: { id: structureId } });
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structureId,
+    from_date: existing.effective_from,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Salary structure from ${ymd(existing.effective_from)} deleted (CTC ${Number(existing.ctc)})`,
+    old_value: { ctc: Number(existing.ctc), effective_from: existing.effective_from },
+    new_value: null,
+  });
+  return { deleted: true, flagged: change?.flagged || 0 };
+}
+
 // Payroll filters — Employee, Department, Team — combinable. Department
 // matches the membership's department or (legacy) the person's own.
 function payrollMemberWhere({ org_membership_id, department_id, team_id } = {}) {
@@ -80,7 +101,7 @@ function payrollMemberWhere({ org_membership_id, department_id, team_id } = {}) 
   return Object.keys(where).length ? { org_membership: where } : {};
 }
 
-const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
+const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, employment_status: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
 
 async function listSalaryStructures(orgId, filters = {}) {
   return prisma.salaryStructure.findMany({
@@ -114,108 +135,138 @@ async function listRuns(orgId, { status }) {
   });
 }
 
-// One employee's paid/unpaid day breakdown for the period. Documented
-// assumptions (see schema.prisma's Payslip comment):
-// - 5-day work week — Sat/Sun always paid, non-working. No weekly-off
-//   calendar exists yet to configure this per org.
-// - The month's WORKING days come from the employee's own calendar (Mon–Fri
-//   less that calendar's holidays), so a 19-, 20-, 21- or 22-day month each
-//   gives its own per-day rate: per_day_pay = ctc / working_days. Nothing is
-//   divided by a fixed 30 or by the calendar-day count any more.
-// - A working day counts as paid when attendance is present/wfh (full) or
-//   half_day (half), or an approved LeaveRequest with a paid LeaveType covers
-//   it. Weekends and the calendar's holidays are paid non-working days — they
-//   are already inside the monthly ctc, so they neither add nor deduct.
-// - Everything else on a working day (absent, unpaid leave, or simply no
-//   attendance record and no leave) is an unpaid day — loss of pay.
-// - `asOf` (optional) is the live "salary incurred so far" mode used by Live
-//   Analytics: working days after it are `upcoming_days`, never loss of pay,
-//   and `earned_to_date` is what the days up to it have earned. A full-month
-//   run passes no asOf, so earned_to_date = net.
-// - Overtime is tracked (`overtime_minutes`) but not paid — no overtime pay
-//   policy exists yet (Phase 3's own deferred item).
-function computeBreakdown({ period_start, period_end, days_in_month, ctc, attendanceByDate, leaveRanges, holidaySet, asOf = null }) {
+// One employee's salary for the period — from APPROVED TIMESHEET HOURS, never
+// from attendance check-in / check-out (that is presence tracking only).
+//
+// - Expected hours: each company working day (the employee's company calendar:
+//   Mon–Fri less its holidays, plus any weekend it marks as a working day) ×
+//   the daily shift hours. Weekends / company holidays are paid non-working
+//   days — already inside the monthly ctc.
+// - hourly_rate = ctc / expected hours of the month.
+// - A working day is paid for its approved hours up to the shift (a paid
+//   leave day counts as the full shift). Anything short is a deficit, deducted
+//   at the hourly rate. Pending and rejected hours are never paid.
+// - Hours beyond the day's expected hours (incl. any hours on a weekend /
+//   company holiday) are overtime, paid ONLY when the day's overtime is
+//   approved (TimesheetDayOvertime), at the hourly rate × OT_MULTIPLIER.
+//   comp_off overtime earns time off, not pay.
+// - Projection: the same with pending hours / pending OT counted as if
+//   approved — `projected_net`; `pending_amount` = projected_net − net.
+// - `asOf` (optional) = the live "salary incurred so far" mode used by Live
+//   Analytics: working days after it are `upcoming_days`, never a deficit, and
+//   `earned_to_date` is what the days up to it have earned.
+const OT_MULTIPLIER = 1;
+
+function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null }) {
+  const r2 = (n) => Math.round(n * 100) / 100;
   let weekend_days = 0;
   let holiday_days = 0;
-  let present_days = 0;
-  let half_days = 0;
+  let working_days = 0;
+  let upcoming_days = 0;
   let paid_leave_days = 0;
   let unpaid_leave_days = 0;
-  let unpaid_days = 0;
-  let upcoming_days = 0;
-  let overtime_minutes = 0;
+  let present_days = 0;
+  let expected_hours = 0;
+  let paid_hours = 0; // approved normal hours + paid leave, on past working days
+  let paid_hours_to_date = 0;
+  let deficit_hours = 0;
+  let projected_deficit_hours = 0;
+  let approved_hours = 0;
+  let pending_hours = 0;
+  let ot_approved_hours = 0;
+  let ot_pending_hours = 0;
+  let ot_rejected_hours = 0;
+  let comp_off_days = 0;
 
   for (let d = 1; d <= days_in_month; d += 1) {
     const day = new Date(Date.UTC(period_start.getUTCFullYear(), period_start.getUTCMonth(), d));
-    const dow = day.getUTCDay();
     const key = ymd(day);
+    const dow = day.getUTCDay();
+    const isWorking = workingSet.has(key) || (dow !== 0 && dow !== 6 && !holidaySet.has(key));
+    if (!isWorking) {
+      if (dow === 0 || dow === 6) weekend_days += 1;
+      else holiday_days += 1;
+    } else working_days += 1;
+    const expected = isWorking ? shiftHours : 0;
+    expected_hours += expected;
 
-    if (dow === 0 || dow === 6) {
-      weekend_days += 1;
-      continue;
-    }
-    if (holidaySet.has(key)) {
-      holiday_days += 1;
-      continue;
-    }
+    const att = attendanceByDate.get(key);
+    if (att && (att.status === 'present' || att.status === 'wfh' || att.status === 'half_day')) present_days += 1;
+
+    const logged = hoursByDate.get(key) || { approved: 0, pending: 0 };
+    approved_hours += logged.approved;
+    pending_hours += logged.pending;
+    const ot = overtimeByDate.get(key) || null;
+    const otApprovedExcess = Math.max(0, logged.approved - expected);
+    const otProjectedExcess = Math.max(0, logged.approved + logged.pending - expected);
+    const otStatus = ot?.status || (otProjectedExcess > 0 ? 'pending' : null);
+    if (otStatus === 'approved') ot_approved_hours += Math.min(Number(ot.hours), otApprovedExcess);
+    if (otStatus === 'approved' || otStatus === 'pending') ot_pending_hours += Math.max(0, otProjectedExcess - (otStatus === 'approved' ? Math.min(Number(ot.hours), otApprovedExcess) : 0));
+    if (otStatus === 'rejected') ot_rejected_hours += otProjectedExcess;
+    if (otStatus === 'comp_off') comp_off_days += 1;
+
+    if (!isWorking) continue;
     if (asOf && day > asOf) {
       upcoming_days += 1;
       continue;
     }
-
-    const attendance = attendanceByDate.get(key);
-    if (attendance) {
-      overtime_minutes += attendance.overtime_minutes || 0;
-      if (attendance.status === 'present' || attendance.status === 'wfh') {
-        present_days += 1;
-        continue;
-      }
-      if (attendance.status === 'half_day') {
-        half_days += 1;
-        continue;
-      }
-    }
-
     const leaveHit = leaveRanges.find((r) => day >= r.from_date && day <= r.to_date);
+    let paid = Math.min(logged.approved, expected);
+    let projected = Math.min(logged.approved + logged.pending, expected);
     if (leaveHit) {
-      if (leaveHit.paid) paid_leave_days += 1;
-      else unpaid_leave_days += 1;
-      continue;
+      if (leaveHit.paid) { paid_leave_days += 1; paid = expected; projected = expected; } else unpaid_leave_days += 1;
     }
-
-    unpaid_days += 1;
+    paid_hours += paid;
+    paid_hours_to_date += paid;
+    deficit_hours += expected - paid;
+    projected_deficit_hours += expected - projected;
   }
 
-  const working_days = days_in_month - weekend_days - holiday_days;
-  // half_day counts as a working day but only half-paid, so it's half a
-  // day's deduction — not a full loss like unpaid_days/unpaid_leave_days.
-  const lop_days = unpaid_leave_days + unpaid_days + half_days * 0.5;
-  const paid_days = working_days - upcoming_days - lop_days;
+  const hourly_rate = expected_hours > 0 ? Number(ctc) / expected_hours : 0;
   const per_day_pay = working_days > 0 ? Number(ctc) / working_days : 0;
-  const deductions = Math.round(per_day_pay * lop_days * 100) / 100;
-  const gross = Number(ctc);
-  const net = Math.round((gross - deductions) * 100) / 100;
-  const earned_to_date = Math.round(per_day_pay * paid_days * 100) / 100;
+  const ot_amount = r2(ot_approved_hours * hourly_rate * OT_MULTIPLIER);
+  const projected_ot_amount = r2((ot_approved_hours + ot_pending_hours) * hourly_rate * OT_MULTIPLIER);
+  const deductions = r2(hourly_rate * deficit_hours);
+  const gross = r2(Number(ctc) + ot_amount);
+  const net = r2(gross - deductions);
+  const projected_net = r2(Number(ctc) + projected_ot_amount - hourly_rate * projected_deficit_hours);
+  const earned_to_date = r2(hourly_rate * paid_hours_to_date + ot_amount);
+  // Day-based view of the same deficit, for the existing screens.
+  const lop_days = shiftHours > 0 ? r2(deficit_hours / shiftHours) : 0;
 
   return {
     breakdown: {
+      source: 'approved_timesheets',
       period_start: ymd(period_start),
       period_end: ymd(period_end),
       days_in_month,
       working_days,
       weekend_days,
       holiday_days,
-      present_days,
-      half_days,
+      upcoming_days,
+      shift_hours: shiftHours,
+      expected_hours: r2(expected_hours),
+      approved_hours: r2(approved_hours),
+      pending_hours: r2(pending_hours),
+      paid_hours: r2(paid_hours),
+      deficit_hours: r2(deficit_hours),
       paid_leave_days,
       unpaid_leave_days,
-      unpaid_days,
-      upcoming_days,
+      // Presence only (check-in / check-out) — shown, never paid from.
+      present_days,
       lop_days,
-      paid_days,
-      overtime_minutes,
-      per_day_pay: Math.round(per_day_pay * 100) / 100,
+      paid_days: r2(working_days - upcoming_days - lop_days),
+      hourly_rate: r2(hourly_rate),
+      per_day_pay: r2(per_day_pay),
+      ot_approved_hours: r2(ot_approved_hours),
+      ot_pending_hours: r2(ot_pending_hours),
+      ot_rejected_hours: r2(ot_rejected_hours),
+      ot_multiplier: OT_MULTIPLIER,
+      ot_amount,
+      comp_off_days,
       earned_to_date,
+      projected_net,
+      pending_amount: r2(projected_net - net),
       as_of: asOf ? ymd(asOf) : null,
     },
     gross,
@@ -225,7 +276,7 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
 }
 
 // Processing freezes the run into payslips. The figures come from the ONE
-// attendance-based salary calculation (calculations/engines/salary.engine):
+// timesheet-based salary calculation (calculations/engines/salary.engine):
 // if the month's salary calculation has been LOCKED (Live Analytics → Salary
 // → Lock), its locked version is used as-is, so the payslips match exactly
 // what was reviewed and finalized; otherwise the month is computed now.
@@ -312,6 +363,7 @@ async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
 }
 
 module.exports = {
+  deleteSalaryStructure,
   createSalaryStructure,
   updateSalaryStructure,
   listSalaryStructures,

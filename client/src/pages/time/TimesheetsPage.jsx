@@ -10,6 +10,8 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
+import WeekHoursView from './WeekHoursView.jsx';
 
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
 
@@ -88,9 +90,11 @@ export default function TimesheetsPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [entryDrawerOpen, setEntryDrawerOpen] = useState(false);
+  const [weekKey, setWeekKey] = useState(0);
 
   async function loadEntries() {
     setLoading(true);
+    setWeekKey((k) => k + 1);
     try {
       const { data } = await apiClient.get('/timesheets/entries/me', { params: { limit: 50 } });
       setRows(data.data || []);
@@ -117,7 +121,7 @@ export default function TimesheetsPage() {
   const columns = [
     { key: 'date', header: 'Date', render: (row) => new Date(`${row.date}`.slice(0, 10)).toLocaleDateString() },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Notes', render: (row) => row.notes || <span className="text-tertiary-400">—</span> },
+    { key: 'notes', header: 'Notes', render: (row) => <NoteText text={row.notes} /> },
     {
       key: 'status',
       header: 'Status',
@@ -138,6 +142,8 @@ export default function TimesheetsPage() {
           <Plus className="h-4 w-4" /> Log time
         </button>
       </div>
+
+      <WeekHoursView canDeleteOwn reloadKey={weekKey} onChanged={loadEntries} />
 
       {!loading && rows.length === 0 ? (
         <EmptyState icon={Clock} title="No timesheet entries yet" description="Log your hours to get started." />

@@ -82,13 +82,21 @@ async function canAccessSubmission(user, submissionId) {
 async function canAccessExpenseClaim(user, claimId, { forWrite = false } = {}) {
   const claim = await prisma.expenseClaim.findUnique({
     where: { id: claimId },
-    select: { id: true, org_id: true, org_membership_id: true, status: true },
+    select: { id: true, org_id: true, org_membership_id: true, status: true, org_membership: { select: { manager_id: true } } },
   });
   if (!claim) return { error: 'not_found' };
   if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
   const sameOrg = claim.org_id === user.org_id;
   const isOwner = Boolean(user.org_membership_id) && claim.org_membership_id === user.org_membership_id;
-  if (!sameOrg || (user.role !== 'admin' && !isOwner)) return { error: 'not_found' };
+  if (!sameOrg) return { error: 'not_found' };
+  if (user.role !== 'admin' && !isOwner) {
+    // Approvers in the chain (the claimant's manager, HR, Finance) may read the receipts, never change them.
+    if (forWrite) return { error: 'not_found' };
+    const { approverScope } = require('./claimApprovers');
+    const scope = await approverScope(user);
+    const isApprover = scope.hr || scope.finance || claim.org_membership.manager_id === user.org_membership_id;
+    if (!isApprover) return { error: 'not_found' };
+  }
   if (forWrite && claim.status !== 'pending') return { error: 'not_editable' };
   return { ok: true };
 }

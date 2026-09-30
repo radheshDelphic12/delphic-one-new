@@ -91,7 +91,7 @@ export default function FinalizedFinancialsTab() {
         {(data?.months || []).map((m) => (
           <span key={m.period_month} className="inline-flex items-center gap-1.5 rounded-xl border border-tertiary-100 bg-white px-2.5 py-1.5 text-xs">
             <span className="font-medium text-tertiary-800">{MONTHS[m.period_month - 1].slice(0, 3)}</span>
-            <StatusBadge status={m.finalized ? m.status : 'draft'} label={m.finalized ? `${m.status === 'change_detected' ? 'Change Detected' : 'Locked'} v${m.version}` : 'Not finalized'} size="xs" />
+            <StatusBadge status={m.finalized ? m.status : 'draft'} label={m.finalized ? `${m.status === 'change_detected' ? 'Historical Calculation Affected' : 'Locked'} v${m.version}` : 'Not finalized'} size="xs" />
           </span>
         ))}
       </div>

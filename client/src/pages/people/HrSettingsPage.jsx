@@ -54,7 +54,7 @@ function NameDrawer({ open, title, value, onClose, onSubmit }) {
 // it reports to (used when it has no lead yet; otherwise the lead's own
 // manager), open seats (drawn as vacant circles) and its order among siblings.
 // `team` is null to add one, else the team being edited.
-const EMPTY_TEAM = { name: '', department_id: '', lead_membership_id: '', manager_membership_id: '', open_positions: 0, sort_order: 0 };
+const EMPTY_TEAM = { name: '', department_id: '', lead_membership_id: '', manager_membership_id: '', open_positions: 0, sort_order: 0, projects_per_resource: '' };
 
 function TeamDrawer({ open, team, onClose, onSubmit }) {
   const [fields, setFields] = useState(EMPTY_TEAM);
@@ -70,6 +70,7 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
       manager_membership_id: team.manager_membership_id || '',
       open_positions: team.open_positions ?? 0,
       sort_order: team.sort_order ?? 0,
+      projects_per_resource: team.projects_per_resource ?? '',
     } : EMPTY_TEAM);
     apiClient.get('/departments').then(({ data }) => setDepartments(data.data || [])).catch(() => setDepartments([]));
     apiClient.get('/orgs/memberships').then(({ data }) => setMembers(data.data || [])).catch(() => setMembers([]));
@@ -86,6 +87,8 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
         manager_membership_id: fields.manager_membership_id || null,
         open_positions: Number(fields.open_positions) || 0,
         sort_order: Number(fields.sort_order) || 0,
+        // Blank = the company default (People → Capacity & Allocation).
+        projects_per_resource: fields.projects_per_resource === '' ? null : Number(fields.projects_per_resource),
       });
       onClose();
     } catch {
@@ -120,6 +123,11 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
           <div className="grid grid-cols-2 gap-3">
             <label className={label}>Open positions<input type="number" min="0" max="50" value={fields.open_positions} onChange={(event) => set('open_positions', event.target.value)} className={input} /></label>
             <label className={label}>Display order<input type="number" min="0" max="9999" value={fields.sort_order} onChange={(event) => set('sort_order', event.target.value)} className={input} /></label>
+            <label className={label}>
+              Projects per resource <span className="font-normal text-tertiary-400">(optional)</span>
+              <input type="number" min="0.1" max="20" step="0.1" value={fields.projects_per_resource} onChange={(event) => set('projects_per_resource', event.target.value)} placeholder="Company default" className={input} />
+              <span className="mt-1 block font-normal text-tertiary-400">Team capacity = members × this. Blank uses the company default.</span>
+            </label>
           </div>
           <p className="text-xs text-tertiary-400">Open positions show as vacant (purple) circles — the lead&apos;s seat first when there is no lead. Lower order numbers sit further left.</p>
         </fieldset>
@@ -163,7 +171,7 @@ export function CalendarDrawer({ open, calendar, onClose, onSubmit }) {
       : { name: '', kind: 'internal', is_default: false, location_id: '', department_id: '' });
   }, [open, calendar]);
   async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ ...fields, location_id: fields.location_id || null, department_id: fields.department_id || null }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title={isEditing ? `Edit ${calendar?.name || 'calendar'}` : 'Add calendar'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="calendar-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add calendar'}</button></>}><form id="calendar-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Kind<select value={fields.kind} onChange={(event) => set('kind', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="internal">Internal</option><option value="client">Client</option><option value="custom">Custom</option></select></label><label className="block text-xs font-medium text-tertiary-600">Office location / zone <span className="font-normal text-tertiary-400">(optional - leave empty for a client calendar)</span><select value={fields.location_id} onChange={(event) => set('location_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No location</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="block text-xs font-medium text-tertiary-600">Standard calendar for department <span className="font-normal text-tertiary-400">(optional - e.g. non-IT staff)</span><select value={fields.department_id} onChange={(event) => set('department_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No department</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label><label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default calendar</label></form></Drawer>;
+  return <Drawer open={open} title={isEditing ? `Edit ${calendar?.name || 'calendar'}` : 'Add calendar'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="calendar-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add calendar'}</button></>}><form id="calendar-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Kind<select value={fields.kind} onChange={(event) => set('kind', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="internal">Internal</option><option value="client">Client</option><option value="custom">Custom</option></select></label><label className="block text-xs font-medium text-tertiary-600">Office location / zone <span className="font-normal text-tertiary-400">(optional - leave empty for a client calendar)</span><select value={fields.location_id} onChange={(event) => set('location_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No location</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="block text-xs font-medium text-tertiary-600">Standard calendar for department <span className="font-normal text-tertiary-400">(optional - e.g. non-IT staff)</span><select value={fields.department_id} onChange={(event) => set('department_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">No department</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label><label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Standard holiday calendar <span className="text-xs text-tertiary-400">(the one calendar everyone follows unless a department, office or personal calendar applies — replaces the current standard)</span></label></form></Drawer>;
 }
 
 // Same create/edit dual-purpose pattern as CalendarDrawer above.
@@ -171,14 +179,16 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
   const isEditing = Boolean(holiday);
   const [date, setDate] = useState('');
   const [label, setLabel] = useState('');
+  const [workingDay, setWorkingDay] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (!open) return;
     setDate(holiday ? String(holiday.date).slice(0, 10) : '');
     setLabel(holiday?.label || '');
+    setWorkingDay(Boolean(holiday?.is_working_day));
   }, [open, holiday]);
-  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
+  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label, is_working_day: workingDay }); onClose(); } finally { setSaving(false); } }
+  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={workingDay} onChange={(event) => setWorkingDay(event.target.checked)} /><span>Working day exception<span className="block text-xs text-tertiary-500">This date is a WORKING day on this calendar although it would normally be off — e.g. a client that works this Saturday / Sunday. Use it on client/project calendars; the employee&apos;s company calendar is unchanged, and their hours that day go to overtime / comp off.</span></span></label></form></Drawer>;
 }
 
 /**
@@ -233,6 +243,7 @@ export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, o
                           {new Date(`${String(h.date).slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short' })}
                         </span>
                         {' — '}{h.label}
+                        {h.is_working_day && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Working day</span>}
                       </span>
                       <span className="flex shrink-0 gap-1">
                         <button type="button" aria-label="Edit holiday" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-tertiary-50 hover:text-tertiary-700" onClick={() => setEditingHoliday(h)}>
@@ -398,6 +409,7 @@ export default function HrSettingsPage() {
         { key: 'manager', header: 'Reports to', render: (row) => row.manager?.person?.name || <span className="text-tertiary-400">Lead&apos;s manager</span> },
         { key: 'open', header: 'Open positions', render: (row) => row.open_positions || 0 },
         { key: 'order', header: 'Order', render: (row) => row.sort_order ?? 0 },
+        { key: 'capacity', header: 'Projects / resource', render: (row) => (row.projects_per_resource ?? <span className="text-tertiary-400">default</span>) },
         ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1"><button type="button" aria-label="Edit team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingTeam(row)}><Pencil className="h-3.5 w-3.5" /></button><button type="button" aria-label="Delete team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteTeam(row)}><Trash2 className="h-3.5 w-3.5" /></button></span> }] : []),
       ]
     : tab === 'locations'
@@ -409,7 +421,7 @@ export default function HrSettingsPage() {
         { key: 'kind', header: 'Kind', render: (row) => <span className="capitalize">{row.kind}</span> },
         { key: 'location', header: 'Zone / Location', render: (row) => row.location?.name || 'Not tied to a location' },
         { key: 'department', header: 'Department', render: (row) => row.department?.name || '-' },
-        { key: 'default', header: 'Default', render: (row) => (row.is_default ? 'Yes' : 'No') },
+        { key: 'default', header: 'Standard', render: (row) => (row.is_default ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">Standard</span> : '—') },
         { key: 'holidays', header: 'Holidays', render: (row) => <button type="button" className="text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row._count?.holidays ?? 0}</button> },
         {
           key: 'actions',

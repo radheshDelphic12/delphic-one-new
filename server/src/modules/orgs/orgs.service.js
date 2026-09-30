@@ -1,5 +1,8 @@
 const prisma = require('../../config/db');
+const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { resolveWorkerFields, WORKER_FIELDS } = require('../../lib/workerType');
+const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
+const allocationsService = require('../allocations/allocations.service');
 
 const MEMBERSHIP_SELECT = {
   id: true,
@@ -15,7 +18,7 @@ const MEMBERSHIP_SELECT = {
 // Powers the org switcher UI: every org the caller currently belongs to.
 async function listMyMemberships(userId) {
   return prisma.orgMembership.findMany({
-    where: { person_id: userId, employment_status: 'active' },
+    where: { person_id: userId, employment_status: { in: WORKING_STATUSES } },
     orderBy: { joined_at: 'asc' },
     select: MEMBERSHIP_SELECT,
   });
@@ -74,17 +77,17 @@ async function createOrganization(userId, currentOrgId, { name, slug, logo_url, 
   const existing = await prisma.org.findUnique({ where: { slug } });
   if (existing) return { error: 'slug_taken' };
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await withEmployeeCodeRetry(() => prisma.$transaction(async (tx) => {
     const org = await tx.org.create({
       data: { org_group_id: currentOrg.org_group_id, name, slug, logo_url: logo_url || null, timezone, default_currency },
       select: { id: true, name: true, slug: true, logo_url: true, status: true, timezone: true, default_currency: true },
     });
     const membership = await tx.orgMembership.create({
-      data: { person_id: userId, org_id: org.id, role: 'admin' },
-      select: { id: true, org_id: true, role: true, employment_status: true },
+      data: { person_id: userId, org_id: org.id, role: 'admin', employee_code: await nextEmployeeCode(tx, org.id) },
+      select: { id: true, org_id: true, role: true, employment_status: true, employee_code: true },
     });
     return { org, membership };
-  });
+  }));
   return result;
 }
 
@@ -108,6 +111,7 @@ const MEMBERSHIP_DETAIL_SELECT = {
   employee_code: true,
   joined_at: true,
   left_at: true,
+  notice_start_date: true,
   notice_end_date: true,
   role: true,
   employment_status: true,
@@ -126,6 +130,64 @@ const MEMBERSHIP_DETAIL_SELECT = {
   vendor_rate: true,
   vendor_rate_currency: true,
 };
+
+// A person as shown in the reporting view: enough to recognise and link them.
+const PERSON_CARD_SELECT = {
+  id: true,
+  employee_code: true,
+  employment_status: true,
+  person: { select: { name: true, email: true } },
+  designation: { select: { name: true } },
+  department: { select: { name: true } },
+};
+
+function personCard(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.person?.name || null,
+    email: row.person?.email || null,
+    employee_code: row.employee_code,
+    designation: row.designation?.name || null,
+    department: row.department?.name || null,
+    employment_status: row.employment_status,
+  };
+}
+
+// An employee's reporting view: their manager, their direct reports, and
+// their team (lead + members). Directory-level info — the same people the org
+// chart shows every member — so any member of the org may read it.
+async function getReporting(orgId, membershipId) {
+  const me = await prisma.orgMembership.findFirst({
+    where: { id: membershipId, org_id: orgId },
+    select: { id: true, manager_id: true, team_id: true },
+  });
+  if (!me) return null;
+  const active = { employment_status: { not: 'terminated' } };
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+  const [manager, reports, team] = await Promise.all([
+    me.manager_id ? prisma.orgMembership.findFirst({ where: { id: me.manager_id, org_id: orgId }, select: PERSON_CARD_SELECT }) : null,
+    prisma.orgMembership.findMany({ where: { org_id: orgId, manager_id: me.id, ...active }, select: PERSON_CARD_SELECT }),
+    me.team_id
+      ? prisma.team.findFirst({
+        where: { id: me.team_id, org_id: orgId },
+        select: {
+          id: true,
+          name: true,
+          lead: { select: PERSON_CARD_SELECT },
+          members: { where: active, select: PERSON_CARD_SELECT },
+        },
+      })
+      : null,
+  ]);
+  return {
+    manager: personCard(manager),
+    direct_reports: reports.map(personCard).sort(byName),
+    team: team
+      ? { id: team.id, name: team.name, lead: personCard(team.lead), members: team.members.map(personCard).sort(byName) }
+      : null,
+  };
+}
 
 async function listMemberships(orgId, { search, include_terminated }) {
   return prisma.orgMembership.findMany({
@@ -151,7 +213,7 @@ async function getMembership(orgId, membershipId) {
 // HR/Sourcing POC + location/shift/manager/directory mapping — client brief
 // "Stakeholder & HR POC mapping". A manager must be a membership in the
 // same org (can't report to someone at a different company).
-async function updateMembership(orgId, membershipId, patch) {
+async function updateMembership(orgId, membershipId, patch, actorUserId = null) {
   const membership = await prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId } });
   if (!membership) return { error: 'not_found' };
 
@@ -166,18 +228,50 @@ async function updateMembership(orgId, membershipId, patch) {
     if (!team) return { error: 'team_not_found' };
   }
 
+  if (patch.employee_code) {
+    const clash = await prisma.orgMembership.findFirst({
+      where: { org_id: orgId, employee_code: patch.employee_code, NOT: { id: membershipId } },
+      select: { id: true },
+    });
+    if (clash) return { error: 'employee_code_taken' };
+  }
+
   const worker = await resolveWorkerFields(orgId, membership, patch);
   if (worker.error) return worker;
   const data = { ...patch };
   for (const key of WORKER_FIELDS) delete data[key];
   Object.assign(data, worker.data);
+  // Team is effective-dated: the change goes through TeamMembershipPeriod
+  // (which also moves the team_id pointer), never a plain overwrite.
+  // Notice period: LWD can't precede the notice date; exiting records left_at
+  // (the LWD, else today) so reports stop counting the person after it.
+  const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
+  const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
+  if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated' && !membership.left_at) {
+    data.left_at = lwd || new Date(new Date().toISOString().slice(0, 10));
+  }
+  if (data.employment_status && data.employment_status !== 'terminated' && membership.employment_status === 'terminated') data.left_at = null;
+
+  const teamChange = data.team_id !== undefined && data.team_id !== membership.team_id;
+  const teamEffective = data.team_effective_date;
+  delete data.team_id;
+  delete data.team_effective_date;
 
   const updated = await prisma.$transaction(async (tx) => {
+    if (teamChange) {
+      const result = await allocationsService.changeTeam(orgId, actorUserId, membershipId, patch.team_id, teamEffective, tx);
+      if (result.error) throw Object.assign(new Error(result.error), { code: result.error });
+    }
     // A contractor is always a self-service 'employee' in the portal, on the
     // User row too (the role a membership-less login falls back to).
     if (data.role) await tx.user.update({ where: { id: membership.person_id }, data: { role: data.role } });
     return tx.orgMembership.update({ where: { id: membershipId }, data, select: MEMBERSHIP_DETAIL_SELECT });
+  }).catch((err) => {
+    if (err.code === 'future_team_change') return { error: 'future_team_change' };
+    throw err;
   });
+  if (updated.error) return updated;
   return { membership: updated };
 }
 
@@ -210,6 +304,7 @@ async function updatePersonalDetails(orgId, membershipId, patch) {
 }
 
 module.exports = {
+  getReporting,
   getPersonalDetails,
   updatePersonalDetails,
   updateSettings,

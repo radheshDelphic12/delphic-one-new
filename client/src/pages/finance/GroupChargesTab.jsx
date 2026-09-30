@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Hash, Plus, Receipt } from 'lucide-react';
+import { CalendarDays, Hash, Pencil, Plus, Receipt, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { can } from '../../lib/permissions.js';
@@ -32,13 +32,26 @@ function emptyFields() {
   return { payment_date: today(), category_id: '', location_id: '', amount: '', currency: 'INR', notes: '' };
 }
 
+function fieldsFromCharge(charge) {
+  return {
+    payment_date: charge.payment_date ? String(charge.payment_date).slice(0, 10) : '',
+    category_id: charge.category_id || '',
+    location_id: charge.location_id || '',
+    amount: String(charge.amount ?? ''),
+    currency: charge.currency || 'INR',
+    notes: charge.notes || '',
+  };
+}
+
 // Group expense against this company: the day it was paid (its month follows),
 // an admin-managed category, and optionally the office it belongs to.
-function GroupExpenseDrawer({ open, onClose, onSubmit, categories, locations }) {
+// Add (no `charge`) and edit (`charge` set) share the form.
+function GroupExpenseDrawer({ open, charge, onClose, onSubmit, categories, locations }) {
+  const isEditing = Boolean(charge);
   const [fields, setFields] = useState(emptyFields);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { if (open) setFields(emptyFields()); }, [open]);
+  useEffect(() => { if (open) setFields(charge ? fieldsFromCharge(charge) : emptyFields()); }, [open, charge]);
 
   const set = (key, value) => setFields((current) => ({ ...current, [key]: value }));
 
@@ -52,7 +65,7 @@ function GroupExpenseDrawer({ open, onClose, onSubmit, categories, locations }) 
         location_id: fields.location_id || null,
         amount: Number(fields.amount),
         currency: fields.currency,
-        notes: fields.notes.trim() || undefined,
+        notes: fields.notes.trim() || (isEditing ? null : undefined),
       });
       onClose();
     } catch {
@@ -63,11 +76,11 @@ function GroupExpenseDrawer({ open, onClose, onSubmit, categories, locations }) 
   }
 
   return (
-    <Drawer open={open} title="Add group expense" onClose={onClose} size="sm" tone="create" footer={
+    <Drawer open={open} title={isEditing ? 'Edit group charge' : 'Add group expense'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
         <button type="submit" form="group-expense-form" className="btn-primary" disabled={saving || !fields.category_id || !fields.amount || !fields.payment_date}>
-          {saving ? 'Saving…' : 'Add expense'}
+          {saving ? 'Saving…' : isEditing ? 'Save changes' : 'Add expense'}
         </button>
       </>
     }>
@@ -76,7 +89,8 @@ function GroupExpenseDrawer({ open, onClose, onSubmit, categories, locations }) 
           Category
           <select required value={fields.category_id} onChange={(e) => set('category_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
             <option value="" disabled>Select category</option>
-            {categories.filter((c) => c.is_active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {/* The charge's current category stays selectable even if it was deactivated since. */}
+            {categories.filter((c) => c.is_active || c.id === charge?.category_id).map((c) => <option key={c.id} value={c.id}>{c.name}{c.is_active ? '' : ' (inactive)'}</option>)}
           </select>
           <span className="mt-1 block font-normal text-tertiary-400">Manage the list under Finance → Categories.</span>
         </label>
@@ -109,6 +123,7 @@ function GroupExpenseDrawer({ open, onClose, onSubmit, categories, locations }) 
           Notes <span className="font-normal text-tertiary-400">(optional)</span>
           <input value={fields.notes} onChange={(e) => set('notes', e.target.value)} placeholder="e.g. Ahmedabad office rent, September" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
+        {isEditing && !charge.category_id && charge.kind && <p className="text-xs text-tertiary-500">Currently recorded as “{charge.kind}” — pick a category to save.</p>}
         <p className="text-xs text-tertiary-500">Recorded as a group charge on this company, in the month of the payment date.</p>
       </form>
     </Drawer>
@@ -174,12 +189,13 @@ export const chargeColumns = [
  * `POST /billing/group-charges` is `authorizeGroupSuperadmin`).
  */
 export default function GroupChargesTab() {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
   const canAdd = can(user?.role, 'manageGroupCharges');
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [filters, setFilters] = useState(EMPTY_CHARGE_FILTERS);
   const categories = useFinanceCategories('group_charge', { includeInactive: true });
   const locations = useLocationOptions(true);
@@ -202,6 +218,51 @@ export default function GroupChargesTab() {
       throw err;
     }
   }
+
+  async function update(payload) {
+    try {
+      await apiClient.patch(`/billing/group-charges/${editing.id}`, payload);
+      pushInfo('Group charge updated');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the group charge'), 'Something went wrong');
+      throw err;
+    }
+  }
+
+  const isSuperadmin = Boolean(user?.is_superadmin);
+  async function remove(row) {
+    if (!window.confirm(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category?.name || row.kind || ''} group expense? This can't be undone.`)) return;
+    try {
+      await apiClient.delete(`/billing/group-charges/${row.id}`);
+      pushInfo('Group expense deleted');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the group expense'), 'Something went wrong');
+    }
+  }
+
+  // A charge the group raised against this company is the group superadmin's
+  // to change — or this company's superadmin, who may also delete any charge.
+  const canEditRow = useCallback(
+    (row) => canAdd && (!row.raiser?.is_group_superadmin || row.raised_by === user?.id || isGroupSuperadmin || isSuperadmin),
+    [canAdd, user?.id, isGroupSuperadmin, isSuperadmin]
+  );
+  const columns = useMemo(() => (canAdd ? [
+    ...chargeColumns,
+    {
+      key: 'actions',
+      header: '',
+      render: (row) => (
+        <span className="flex gap-1">
+          {canEditRow(row)
+            ? <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
+            : <span className="text-xs text-tertiary-400">Raised by group</span>}
+          {isSuperadmin && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs text-danger-600" onClick={() => remove(row)}><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
+        </span>
+      ),
+    },
+  ] : chargeColumns), [canAdd, canEditRow, isSuperadmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => {
     const now = new Date();
@@ -232,9 +293,10 @@ export default function GroupChargesTab() {
           action={canAdd ? <button type="button" className="btn-secondary" onClick={() => setDrawerOpen(true)}>Add Group Expense</button> : null}
         />
       ) : (
-        <DataTable columns={chargeColumns} rows={rows} loading={loading} emptyLabel="No group charges match these filters." />
+        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No group charges match these filters." />
       )}
       {canAdd && <GroupExpenseDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onSubmit={create} categories={categories} locations={locations} />}
+      {canAdd && <GroupExpenseDrawer open={Boolean(editing)} charge={editing} onClose={() => setEditing(null)} onSubmit={update} categories={categories} locations={locations} />}
     </div>
   );
 }

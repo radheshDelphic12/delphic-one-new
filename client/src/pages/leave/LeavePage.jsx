@@ -94,6 +94,7 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
       <form id="leave-request-form" onSubmit={submit} className="space-y-4">
         <label className="block text-xs font-medium text-tertiary-600">Leave type<select required value={fields.leave_type_id} onChange={(event) => set('leave_type_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">Select leave type</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}{type.paid ? ' (paid)' : ' (unpaid)'}</option>)}</select></label>
         <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-tertiary-600">From<input required type="date" value={fields.from_date} onChange={(event) => set('from_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-tertiary-600">To<input required type="date" value={fields.to_date} onChange={(event) => set('to_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></div>
+        <p className="text-xs text-tertiary-500">Only working days are deducted — weekends and holidays on your calendar inside the dates are not counted. You can&apos;t take a full day off on a date you were marked present.</p>
         <label className="flex items-center gap-2 text-sm text-tertiary-700">
           <input
             type="checkbox"
@@ -233,6 +234,22 @@ export default function LeavePage() {
     }
   }
 
+  // Approval queue: approve every pending request shown, one decision each.
+  const pendingRows = tab === 'team' ? rows.filter((row) => row.status === 'pending') : [];
+  const [bulkBusy, setBulkBusy] = useState(false);
+  async function approveAllPending() {
+    if (!pendingRows.length || !window.confirm(`Approve all ${pendingRows.length} pending leave request${pendingRows.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy(true);
+    let failed = 0;
+    for (const row of pendingRows) {
+      try { await apiClient.post(`/leave/requests/${row.id}/decision`, { status: 'approved' }); } catch { failed += 1; }
+    }
+    setBulkBusy(false);
+    if (failed) pushError(`${pendingRows.length - failed} approved; ${failed} could not be approved.`, 'Some requests were skipped');
+    else pushInfo(`${pendingRows.length} leave request${pendingRows.length === 1 ? '' : 's'} approved`);
+    load();
+  }
+
   function replaceRow(updated) {
     setRows((current) => current.map((row) => row.id === updated.id ? { ...row, ...updated } : row));
     setDecision(null);
@@ -243,6 +260,7 @@ export default function LeavePage() {
     ...(tab === 'team' ? [{ key: 'employee', header: 'Employee', render: (row) => row.org_membership?.person?.name || 'Unknown' }] : []),
     { key: 'type', header: 'Leave type', render: (row) => row.leave_type?.name || 'Unknown' },
     { key: 'dates', header: 'Dates', render: (row) => `${formatRequestDate(row, 'start')} to ${formatRequestDate(row, 'end')}` },
+    { key: 'days', header: 'Days', render: (row) => (row.days ?? '—') },
     { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
     { key: 'reason', header: 'Reason', render: (row) => row.reason || 'Not provided' },
     { key: 'actions', header: 'Actions', render: (row) => tab === 'team' && (row.status === 'pending' || row.status === 'approved') ? <div className="flex gap-1">{row.status === 'pending' && <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setDecision(row)}><Check className="h-3.5 w-3.5" /> Review</button>}<button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setWithdrawing(row)}><Undo2 className="h-3.5 w-3.5" /> Withdraw</button></div> : tab === 'mine' && row.status === 'pending' ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => cancelRequest(row)}><X className="h-3.5 w-3.5" /> Cancel</button> : null },
@@ -252,6 +270,7 @@ export default function LeavePage() {
     <div className="flex flex-col gap-4 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p><h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Leave management</h2><p className="mt-1 text-sm text-tertiary-500">Request time away and review approval status.</p></div><div className="flex gap-2"><select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-xl border px-3 py-2 text-sm"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{tab === 'mine' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setRequestOpen(true)}><FilePlus2 className="h-4 w-4" /> Request leave</button>}</div></div>
     <div className="grid gap-4 md:grid-cols-3"><div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card md:col-span-2"><div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-sm font-semibold text-tertiary-800"><CircleHelp className="h-4 w-4 text-tertiary-400" /> Leave balances</div><span className="text-xs text-tertiary-400">{balances[0]?.as_of ? `1 Jan – ${new Date(`${balances[0].as_of}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : 'Current year'}</span></div>{balancesLoading ? <p className="mt-3 text-sm text-tertiary-500">Loading balances...</p> : balances.length === 0 ? <p className="mt-3 text-sm text-tertiary-500">No leave balance records are available.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2">{balances.map((balance) => <div key={balance.leave_type_id} className="rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3"><div className="flex items-center justify-between gap-2"><span className="text-sm font-medium text-tertiary-800">{balance.leave_type_name} <span className="text-xs text-tertiary-400">({balance.code})</span></span><span className="text-sm font-semibold text-primary-700">{balance.unlimited ? 'Uncapped' : `${balance.remaining} remaining`}</span></div><p className="mt-1 text-xs text-tertiary-500">{balance.used} taken{balance.unlimited ? '' : ` of ${balance.allocated}`}{balance.upcoming > 0 ? ` · ${balance.upcoming} approved ahead` : ''}{balance.pending > 0 ? ` · ${balance.pending} pending` : ''}</p></div>)}</div>}</div><div className="rounded-2xl border border-tertiary-100 bg-white p-4"><p className="text-xs uppercase tracking-wide text-tertiary-500">Visible requests</p><p className="mt-2 text-2xl font-semibold text-tertiary-900">{loading ? '...' : rows.length}</p><p className="mt-4 text-xs uppercase tracking-wide text-tertiary-500">Leave types</p><p className="mt-2 text-2xl font-semibold text-tertiary-900">{loading ? '...' : types.length}</p></div></div>
     <div className="flex gap-1 border-b border-tertiary-200"><button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My requests</button>{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Approval queue</button>}{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'balances' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('balances')}>Balances</button>}</div>
+    {pendingRows.length > 1 && <div className="flex justify-end"><button type="button" className="btn-primary inline-flex items-center gap-1.5 text-sm" disabled={bulkBusy} onClick={approveAllPending}><Check className="h-4 w-4" /> {bulkBusy ? 'Approving…' : `Approve all pending (${pendingRows.length})`}</button></div>}
     {tab === 'balances' ? <LeaveBalancesPanel /> : !loading && rows.length === 0 ? <EmptyState icon={CalendarDays} title="No leave requests" description="There are no leave requests for the selected status." /> : <DataTable columns={columns} rows={rows} loading={loading} maxHeight="calc(100dvh - 25rem)" emptyLabel="No leave requests" />}
     <LeaveRequestDrawer types={types} open={requestOpen} onClose={() => setRequestOpen(false)} onSaved={(created) => { setRows((current) => [created, ...current]); setRequestOpen(false); pushInfo('Leave request submitted'); }} />
     <WithdrawModal row={withdrawing} onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); pushInfo('Leave withdrawn'); load(); }} />

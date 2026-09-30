@@ -193,10 +193,10 @@ describe('Phase 2 — leave', () => {
     expect(decision.body.data.status).toBe('approved');
 
     // Balances are computed live from approved requests (Phase 3): Oct 10-12
-    // 2026 inclusive is 3 days, still ahead of today, so it shows as upcoming.
+    // 2026 is Sat-Mon, so it costs 1 working day, still ahead of today (upcoming).
     const balances = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), empToken);
     const balance = balances.body.data.find((item) => item.leave_type_id === leaveType.id);
-    expect(balance).toMatchObject({ allocated: 18, used: 0, upcoming: 3, pending: 0, remaining: 15 });
+    expect(balance).toMatchObject({ allocated: 18, used: 0, upcoming: 1, pending: 0, remaining: 17 });
     expect(membership.id).toBeTruthy();
 
     const reDecide = await authed(
@@ -285,8 +285,8 @@ describe('Phase 2 — leave', () => {
 
     const created = await authed(request(app).post('/api/v1/leave/requests'), empToken).send({
       leave_type_id: leaveType.id,
-      from_date: '2026-11-01',
-      to_date: '2026-11-01',
+      from_date: '2026-11-02',
+      to_date: '2026-11-02',
     });
 
     const cancelled = await authed(

@@ -13,6 +13,7 @@ import { NAV_ITEMS } from './navItems.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
 import HeaderAttendance from './HeaderAttendance.jsx';
+import ErrorBoundary from '../ErrorBoundary.jsx';
 
 // The header's Check in / Check out button is switched off for now (check-in
 // still works from Time & Attendance → Attendance). Set true to bring it back.
@@ -78,7 +79,7 @@ const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
 
 export default function AppLayout() {
   const { user, logout, isGroupSuperadmin } = useAuth();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
   const isContractor = user?.worker_type === 'contractor';
@@ -321,7 +322,10 @@ export default function AppLayout() {
           </header>
 
           <div className="px-4 pb-6 pt-0 md:px-6">
-            {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : <Outlet />}
+            {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
+            <ErrorBoundary resetKey={`${pathname}${search}`}>
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : <Outlet />}
+            </ErrorBoundary>
           </div>
         </main>
       </div>

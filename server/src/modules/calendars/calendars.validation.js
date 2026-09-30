@@ -23,14 +23,17 @@ const updateCalendarSchema = z.object({
 const addHolidaySchema = z.object({
   date: requiredDate,
   label: z.string().min(1).max(200),
+  // A working-day exception instead of a holiday (e.g. a client working Sunday).
+  is_working_day: z.boolean().optional(),
 });
 
 const updateHolidaySchema = z
   .object({
     date: optionalDate,
     label: z.string().min(1).max(200).optional(),
+    is_working_day: z.boolean().optional(),
   })
-  .refine((v) => v.date !== undefined || v.label !== undefined, { message: 'Provide at least one field to update' });
+  .refine((v) => v.date !== undefined || v.label !== undefined || v.is_working_day !== undefined, { message: 'Provide at least one field to update' });
 
 const assignCalendarSchema = z.object({
   org_membership_id: z.string().uuid(),

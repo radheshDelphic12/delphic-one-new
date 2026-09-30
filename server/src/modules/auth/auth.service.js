@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../../config/db');
+const { WORKING_STATUSES, isWorking } = require('../../lib/employmentStatus');
 const env = require('../../config/env');
 
 // Multi-company ERP (Phase 1): membership select shared by login/refresh so
@@ -20,7 +21,7 @@ const MEMBERSHIP_SELECT = {
 // context" and falls back to today's global-role behavior.
 async function defaultMembershipFor(userId) {
   return prisma.orgMembership.findFirst({
-    where: { person_id: userId, employment_status: 'active' },
+    where: { person_id: userId, employment_status: { in: WORKING_STATUSES } },
     orderBy: { joined_at: 'asc' },
     select: MEMBERSHIP_SELECT,
   });
@@ -51,7 +52,9 @@ async function lookupWorkspace(slug) {
 }
 
 async function login(email, password, orgSlug) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  // department rides along so the client knows it right after sign-in (IT
+  // timesheet, department-gated calendar) — same shape as GET /users/me.
+  const user = await prisma.user.findUnique({ where: { email }, include: { department: { select: { id: true, name: true } } } });
   if (!user || !user.active) return null;
 
   const matches = await bcrypt.compare(password, user.password_hash);
@@ -59,7 +62,7 @@ async function login(email, password, orgSlug) {
 
   const [memberships, defaultMembership] = await Promise.all([
     prisma.orgMembership.findMany({
-      where: { person_id: user.id, employment_status: 'active' },
+      where: { person_id: user.id, employment_status: { in: WORKING_STATUSES } },
       orderBy: { joined_at: 'asc' },
       select: MEMBERSHIP_SELECT,
     }),
@@ -85,6 +88,9 @@ async function login(email, password, orgSlug) {
       active: user.active,
       is_superadmin: user.is_superadmin,
       is_group_superadmin: user.is_group_superadmin,
+      phone: user.phone,
+      department_id: user.department_id,
+      department: user.department || null,
     },
     memberships,
     active_org: activeMembership?.org || null,
@@ -112,7 +118,7 @@ async function refresh(refreshToken) {
       where: { person_id_org_id: { person_id: user.id, org_id: payload.org_id } },
       select: { org_id: true, role: true, employment_status: true },
     });
-    if (membership && membership.employment_status === 'active') {
+    if (membership && isWorking(membership.employment_status)) {
       orgId = membership.org_id;
       role = membership.role;
     }

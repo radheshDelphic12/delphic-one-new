@@ -17,7 +17,7 @@ const STATES = {
   draft: { label: 'Draft', icon: CircleDashed, cls: 'bg-tertiary-100 text-tertiary-700 ring-tertiary-200' },
   reviewed: { label: 'Reviewed', icon: Eye, cls: 'bg-blue-50 text-blue-700 ring-blue-200' },
   locked: { label: 'Locked', icon: Lock, cls: 'bg-green-50 text-green-800 ring-green-200' },
-  change_detected: { label: 'Change Detected', icon: AlertTriangle, cls: 'bg-red-50 text-red-700 ring-red-300' },
+  change_detected: { label: 'Historical Calculation Affected', icon: AlertTriangle, cls: 'bg-red-50 text-red-700 ring-red-300' },
   reopened: { label: 'Reopened', icon: RotateCcw, cls: 'bg-amber-50 text-amber-800 ring-amber-200' },
   // Change resolution
   open: { label: 'Open', icon: AlertTriangle, cls: 'bg-red-50 text-red-700 ring-red-200' },

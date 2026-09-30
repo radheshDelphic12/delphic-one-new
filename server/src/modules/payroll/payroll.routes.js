@@ -53,6 +53,16 @@ router.patch(
   })
 );
 
+router.delete(
+  '/salary-structures/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteSalaryStructure(req.user.org_id, req.user.id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Salary structure not found');
+    return ok(res, result);
+  })
+);
+
 router.get(
   '/salary-structures',
   authorize('admin'),

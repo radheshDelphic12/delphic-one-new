@@ -35,4 +35,22 @@ async function inrRates(orgId) {
   return new Map([['INR', 1], ...rows.map((r) => [r.currency, Number(r.rate_to_inr)])]);
 }
 
-module.exports = { FOREIGN_CURRENCIES, listRates, setRates, inrRates };
+// The one INR conversion every finance screen uses (Project P&L, Finance →
+// Projects, …): amount x the org's rate for that currency, to 2 decimals. A
+// currency with no rate converts to 0 and is recorded in `missing`, so callers
+// can name it instead of guessing. `rateFor` is null for such a currency.
+function inrConverter(fx) {
+  const missing = new Set();
+  const rateFor = (currency) => {
+    const cur = currency || 'INR';
+    return fx.has(cur) ? fx.get(cur) : null;
+  };
+  const toInr = (amount, currency) => {
+    const rate = rateFor(currency);
+    if (rate === null) { missing.add(currency || 'INR'); return 0; }
+    return Math.round(Number(amount || 0) * rate * 100) / 100;
+  };
+  return { toInr, rateFor, missing };
+}
+
+module.exports = { FOREIGN_CURRENCIES, listRates, setRates, inrRates, inrConverter };

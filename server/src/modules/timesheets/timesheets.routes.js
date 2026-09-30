@@ -4,6 +4,9 @@ const requireItDepartment = require('../../middleware/requireItDepartment');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./timesheets.service');
+const workHours = require('./workHours.service');
+const prisma = require('../../config/db');
+const { todayIst } = require('../../lib/istDate');
 const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
 const { buildMonthlyWorkbook } = require('./timesheets.export');
 const {
@@ -11,6 +14,14 @@ const {
   updateEntrySchema,
   decideEntrySchema,
   lockDaySchema,
+  adminUpdateEntrySchema,
+  adminDeleteEntrySchema,
+  adminCreateEntrySchema,
+  importEntriesSchema,
+  bulkApproveSchema,
+  decideOvertimeSchema,
+  weekQuerySchema,
+  hoursQuerySchema,
   listQuerySchema,
   monthQuerySchema,
   overviewQuerySchema,
@@ -25,7 +36,7 @@ router.use(authenticate, requireOrgMembership);
 const ENTRY_ERRORS = {
   day_locked: [409, 'That day is locked (weekly auto-lock) — submit a Timesheet Regularisation request instead'],
   project_required: [422, 'Select a project — IT timesheet entries must be logged against one of your assigned projects'],
-  project_not_assigned: [403, "That project isn't assigned to you — ask your admin to assign you to it"],
+  project_not_assigned: [403, "You aren't allocated to that project on that date — ask your admin to assign you to it (or extend your allocation)"],
   not_approver: [403, "You can only decide timesheets for people who report to you"],
   own_entry: [403, "You can't approve your own timesheet"],
   future_date: [422, "You can't log or regularise a future date"],
@@ -35,7 +46,9 @@ const ENTRY_ERRORS = {
   requirement_not_found: [404, 'Requirement not found for that account'],
   exceeds_day_hours: [422, 'Total hours logged for that day would exceed 24'],
   not_found: [404, 'Timesheet entry not found'],
-  already_decided: [409, 'Entry has already been approved or rejected'],
+  already_decided: [409, 'Entry has already been approved or rejected — approved and rejected timesheets are final; ask for a regularisation'],
+  member_not_found: [404, 'Employee not found'],
+  not_team_member: [403, 'You can only view timesheets of people who report to you'],
 };
 
 function failFor(res, error, result) {
@@ -69,7 +82,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
-    return ok(res, result.data, { pagination: result.pagination });
+    return ok(res, result.data, { pagination: result.pagination, totals: result.totals });
   })
 );
 
@@ -126,6 +139,100 @@ router.patch(
     const result = await service.updateEntry(req.user.org_id, req.user.org_membership_id, req.params.id, body);
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.entry);
+  })
+);
+
+// Admin correction / removal of any entry — any status, locked day or not.
+// `flagged` counts locked finance calculations the change marked as affected
+// (recalculate them in Live Analytics → Billing & sales, then re-invoice).
+router.patch(
+  '/entries/:id/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = adminUpdateEntrySchema.parse(req.body);
+    const result = await service.adminUpdateEntry(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { entry: result.entry, flagged: result.flagged });
+  })
+);
+
+// Admin: delete any entry with a reason. Anyone else: their own entry, only
+// while pending and before the week locks (enforced in the service).
+router.delete(
+  '/entries/:id',
+  asyncHandler(async (req, res) => {
+    if (req.user.role !== 'admin') {
+      const result = await service.deleteOwnEntry(req.user.org_id, req.user.org_membership_id, req.params.id);
+      if (result.error) return failFor(res, result.error, result);
+      return ok(res, { deleted: true });
+    }
+    const body = adminDeleteEntrySchema.parse(req.body || {});
+    const result = await service.adminDeleteEntry(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { deleted: true, flagged: result.flagged });
+  })
+);
+
+router.post(
+  '/entries/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = adminCreateEntrySchema.parse(req.body);
+    const result = await service.adminCreateEntry(req.user.org_id, req.user.id, body);
+    if (result.error) return failFor(res, result.error, result);
+    return created(res, { entry: result.entry, flagged: result.flagged });
+  })
+);
+
+// Admin bulk upload (CSV) of past entries. dry_run validates only; otherwise
+// the sheet is applied only when no row has an error.
+router.post(
+  '/entries/admin/import',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.importEntries(req.user.org_id, req.user.id, importEntriesSchema.parse(req.body))))
+);
+
+// Overtime decision — the employee's reporting manager or an admin.
+router.post(
+  '/overtime/:id/decision',
+  asyncHandler(async (req, res) => {
+    const body = decideOvertimeSchema.parse(req.body);
+    const result = await service.decideOvertime(req.user.org_id, req.params.id, req.user, body);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.overtime);
+  })
+);
+
+// Whose hours the caller may read: their own; a manager their direct
+// reports; an admin anyone in the org.
+async function hoursTarget(req, requested) {
+  const own = req.user.org_membership_id;
+  if (!requested || requested === own) return { id: own };
+  const member = await prisma.orgMembership.findFirst({ where: { id: requested, org_id: req.user.org_id }, select: { id: true, manager_id: true } });
+  if (!member) return { error: 'member_not_found' };
+  if (req.user.role !== 'admin' && member.manager_id !== own) return { error: 'not_team_member' };
+  return { id: member.id };
+}
+
+// Weekly timesheet (Sunday -> Saturday): expected / logged / approved /
+// pending / OT per day, all computed on the server.
+router.get(
+  '/week',
+  asyncHandler(async (req, res) => {
+    const { date, org_membership_id } = weekQuerySchema.parse(req.query);
+    const target = await hoursTarget(req, org_membership_id);
+    if (target.error) return failFor(res, target.error);
+    return ok(res, await workHours.weekView(req.user.org_id, target.id, date || todayIst()));
+  })
+);
+
+router.get(
+  '/hours',
+  asyncHandler(async (req, res) => {
+    const { from, to, org_membership_id } = hoursQuerySchema.parse(req.query);
+    const target = await hoursTarget(req, org_membership_id);
+    if (target.error) return failFor(res, target.error);
+    return ok(res, await workHours.daySummaries(req.user.org_id, target.id, from, to));
   })
 );
 
@@ -202,6 +309,12 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await service.pendingApprovals(req.user.org_id, req.user)))
 );
 
+// "Approve all" — each item is checked exactly as a single approval.
+router.post(
+  '/approvals/bulk',
+  asyncHandler(async (req, res) => ok(res, await service.bulkApprove(req.user.org_id, req.user, bulkApproveSchema.parse(req.body))))
+);
+
 // Projects the caller is allocated to — the IT timesheet's project dropdown.
 router.get(
   '/my-projects',
@@ -216,6 +329,18 @@ router.post(
     const result = await service.lockDay(req.user.org_id, date, req.user.id);
     if (result.error === 'already_locked') return fail(res, 409, 'That day is already locked');
     return created(res, result.lock);
+  })
+);
+
+// Unlock a day so it can be logged / changed normally again.
+router.delete(
+  '/locks/:date',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { date } = lockDaySchema.parse({ date: req.params.date });
+    const result = await service.unlockDay(req.user.org_id, date);
+    if (result.error === 'not_locked') return fail(res, 404, 'That day is not locked');
+    return ok(res, { unlocked: true });
   })
 );
 

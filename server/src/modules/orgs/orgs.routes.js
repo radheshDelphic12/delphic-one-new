@@ -77,6 +77,24 @@ router.get(
   })
 );
 
+// Manager, direct reports and team members — the same directory-level info
+// the org chart shows, so open to any member of the org.
+router.get(
+  '/me/reporting',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => ok(res, await service.getReporting(req.user.org_id, req.user.org_membership_id)))
+);
+
+router.get(
+  '/memberships/:id/reporting',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const row = await service.getReporting(req.user.org_id, req.params.id);
+    if (!row) return fail(res, 404, 'Org membership not found');
+    return ok(res, row);
+  })
+);
+
 router.get(
   '/memberships/:id',
   requireOrgMembership,
@@ -136,12 +154,15 @@ router.patch(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = updateMembershipSchema.parse(req.body);
-    const result = await service.updateMembership(req.user.org_id, req.params.id, body);
+    const result = await service.updateMembership(req.user.org_id, req.params.id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
+    if (result.error === 'future_team_change') return fail(res, 422, 'A team change can be effective today or earlier, not in the future');
     if (result.error === 'manager_not_found') return fail(res, 404, 'Manager membership not found in this org');
     if (result.error === 'team_not_found') return fail(res, 404, 'Team not found in this org');
     if (WORKER_ERRORS[result.error]) return fail(res, ...WORKER_ERRORS[result.error]);
     if (result.error === 'self_manager') return fail(res, 422, 'A membership cannot be its own manager');
+    if (result.error === 'lwd_before_notice') return fail(res, 422, 'The last working day cannot be before the notice date');
+    if (result.error === 'employee_code_taken') return fail(res, 409, 'Another employee in this company already has that employee code');
     return ok(res, result.membership);
   })
 );

@@ -12,6 +12,7 @@ import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx'
 import { userCan } from '../../lib/permissions.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
+import ReportingSection from '../../components/ReportingSection.jsx';
 
 const BASE_TABS = [
   { key: 'account', label: 'Account', icon: UserRound },
@@ -221,7 +222,7 @@ export default function SettingsPage() {
       </div>
 
       {active === 'account' && <AccountTab user={user} onLogout={logout} />}
-      {active === 'details' && <div className="space-y-4"><PersonalDetailsSection self /></div>}
+      {active === 'details' && <div className="space-y-4"><ReportingSection self /><PersonalDetailsSection self /></div>}
       {active === 'security' && <SecurityTab />}
       {active === 'notifications' && <NotificationPreferencesPage />}
       {active === 'activity' && <ActivityTab />}
