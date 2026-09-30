@@ -369,33 +369,50 @@ async function listVendors(orgId) {
   return prisma.account.findMany({ where: { org_id: orgId, type: 'vendor' }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
 }
 
-// This month's billing for Finance -> Projects, per project, in INR — the
-// SAME revenue rule and converter as the P&L (fixed monthly fee, or approved
-// billable hours x rate), with any excluded hours and why.
-async function monthBillingByProject(orgId, accounts, { period_month, period_year }, fx) {
+// This month's CONTRACT billing for Finance -> Projects, per project, in INR:
+// what the agreement says, not what was worked. A monthly rate is the fixed
+// fee; an hourly rate is the client's committed minimum hours
+// (Account.minimum_monthly_hours) x the rate. Both are prorated by calendar
+// days in the months the agreement starts or ends, and 0 outside it. Actual
+// approved hours are the Project P&L's job (projectRevenue above) — e.g. a
+// 60h contract where 55h were worked shows 60h here and 55h in the P&L. An
+// hourly project with no minimum set has no contract amount (null).
+async function monthContractByProject(orgId, accounts, { period_month, period_year }, fx) {
   const bounds = periodBounds(period_month, period_year);
+  const { start, end, days } = bounds;
   const { toInr, rateFor } = exchangeRates.inrConverter(fx);
+  const rates = await prisma.billingRate.findMany({
+    where: { org_id: orgId, account_id: { in: accounts.map((a) => a.id) }, requirement_id: null },
+    select: { account_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
+  });
   const out = new Map();
   for (const account of accounts) {
-    const revenue = await projectRevenue(orgId, account, bounds);
-    const converted = rateFor(revenue.currency) !== null;
-    out.set(account.id, {
-      period_month,
-      period_year,
-      billing_type: revenue.billing_type,
-      amount: revenue.amount,
-      currency: revenue.currency,
-      amount_inr: converted ? toInr(revenue.amount, revenue.currency) : null,
-      billable_hours: revenue.billable_hours ?? null,
-      excluded: revenue.excluded || null,
-      note: revenue.note || null,
-    });
+    const rate = latestOnOrBefore(rates.filter((r) => r.account_id === account.id), end);
+    const currency = rate ? rate.currency : account.client_billing_currency || 'INR';
+    const minimumHours = account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null;
+    const row = { period_month, period_year, billing_type: rate ? rate.rate_type : null, rate: rate ? Number(rate.rate) : null, currency, contract_hours: null, prorated_days: null, amount: null, amount_inr: null, note: null };
+    const from = account.agreement_start_date && account.agreement_start_date > start ? account.agreement_start_date : start;
+    const to = account.agreement_end_date && account.agreement_end_date < end ? account.agreement_end_date : end;
+    if (!rate) row.note = 'no_billing_rate';
+    else if (to < from) row.note = account.agreement_start_date && account.agreement_start_date > end ? 'before_agreement_start' : 'after_agreement_end';
+    else if (rate.rate_type === 'hourly' && minimumHours === null) row.note = 'no_minimum_hours';
+    if (rate && (row.note === 'before_agreement_start' || row.note === 'after_agreement_end')) row.amount = 0;
+    if (rate && !row.note) {
+      const billedDays = Math.round((to - from) / 86400000) + 1;
+      const share = billedDays >= days ? 1 : billedDays / days;
+      if (billedDays < days) row.prorated_days = billedDays;
+      if (rate.rate_type === 'hourly') row.contract_hours = round2(minimumHours * share);
+      const full = rate.rate_type === 'hourly' ? Number(rate.rate) * minimumHours : Number(rate.rate);
+      row.amount = round2(full * share);
+    }
+    if (row.amount !== null && rateFor(currency) !== null) row.amount_inr = toInr(row.amount, currency);
+    out.set(account.id, row);
   }
   return out;
 }
 
 module.exports = {
-  monthBillingByProject,
+  monthContractByProject,
   computeProjectPnl,
   listProjectsPnl,
   listVendorInvoices,

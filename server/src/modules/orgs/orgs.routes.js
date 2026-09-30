@@ -7,6 +7,7 @@ const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
   createOrgSchema,
   createLocationSchema,
+  updateLocationSchema,
   membershipListQuerySchema,
   personalDetailsSchema,
   updateMembershipSchema,
@@ -145,6 +146,35 @@ router.post(
     const result = await service.createLocation(req.user.org_id, body);
     if (result.error === 'name_taken') return fail(res, 409, 'Location name already in use');
     return created(res, result.location);
+  })
+);
+
+// Edit a location; is_default: true makes it THE default (the flag moves).
+router.patch(
+  '/locations/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = updateLocationSchema.parse(req.body);
+    const result = await service.updateLocation(req.user.org_id, req.params.id, body);
+    if (result.error === 'not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'name_taken') return fail(res, 409, 'Location name already in use');
+    return ok(res, result.location);
+  })
+);
+
+router.delete(
+  '/locations/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteLocation(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'in_use') {
+      const uses = [[result.employees, 'employee'], [result.calendars, 'calendar'], [result.claims, 'expense claim']].filter(([n]) => n).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
+      return fail(res, 409, `This location is still used by ${uses.join(', ')} — move them to another location first`);
+    }
+    return ok(res, { deleted: true });
   })
 );
 

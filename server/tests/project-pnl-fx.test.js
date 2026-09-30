@@ -129,7 +129,7 @@ describe('Finance → Projects — same exchange rates as Project P&L', () => {
     const mii = await project(ctx, 'Mii Health 2', { rate_type: 'monthly', rate: 2000, currency: 'USD' });
     const hourly = await project(ctx, 'Hourly AED', { rate_type: 'hourly', rate: 50, currency: 'AED' });
     await prisma.account.updateMany({ where: { id: { in: [mii.id, hourly.id] } }, data: { is_project: true } });
-    await prisma.account.update({ where: { id: hourly.id }, data: { estimated_monthly_hours: 100 } });
+    await prisma.account.update({ where: { id: hourly.id }, data: { minimum_monthly_hours: 100 } });
     const rowsOf = async () => (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
 
     // No rates yet: INR figures are blank, not guessed.
@@ -148,5 +148,32 @@ describe('Finance → Projects — same exchange rates as Project P&L', () => {
     // The single-project read (the drawer) agrees too.
     const one = (await authed(request(app).get(`/api/v1/billing/projects/${mii.id}`), ctx.token)).body.data;
     expect(one).toMatchObject({ exchange_rate: 83.25, rate_inr: 166500 });
+  });
+
+  test('Projects bills the contract (committed minimum hours), P&L bills actual approved hours', async () => {
+    const ctx = await seed();
+    const acme = await project(ctx, 'Acme Contract', { rate_type: 'hourly', rate: 1000, currency: 'INR' });
+    const loose = await project(ctx, 'No Minimum', { rate_type: 'hourly', rate: 1000, currency: 'INR' });
+    await prisma.account.updateMany({ where: { id: { in: [acme.id, loose.id] } }, data: { is_project: true } });
+    await prisma.account.update({ where: { id: acme.id }, data: { minimum_monthly_hours: 60, estimated_monthly_hours: 80 } });
+    const now = new Date();
+    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    await prisma.billingRate.updateMany({ where: { account_id: { in: [acme.id, loose.id] } }, data: { effective_from: day } });
+    // 55h worked: 5h on each of the month's first 11 days.
+    for (let d = 0; d < 11; d += 1) {
+      await prisma.timesheetEntry.create({
+        data: { org_id: ctx.org.id, org_membership_id: ctx.devMembership.id, account_id: acme.id, date: new Date(day.getTime() + d * 86400000), hours: 5, overtime_hours: 0, billable: true, status: 'approved' },
+      });
+    }
+
+    const rows = (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
+    const row = rows.find((r) => r.id === acme.id);
+    expect(row.monthly_amount_inr).toBe(60000);
+    expect(row.this_month).toMatchObject({ billing_type: 'hourly', contract_hours: 60, amount: 60000, amount_inr: 60000, note: null });
+    expect(rows.find((r) => r.id === loose.id).this_month).toMatchObject({ amount: null, amount_inr: null, note: 'no_minimum_hours' });
+
+    const period = `period_month=${now.getUTCMonth() + 1}&period_year=${now.getUTCFullYear()}`;
+    const pnl = (await authed(request(app).get(`/api/v1/billing/projects/${acme.id}/pnl?${period}`), ctx.token)).body.data;
+    expect(pnl.revenue).toMatchObject({ billable_hours: 55, amount: 55000 });
   });
 });

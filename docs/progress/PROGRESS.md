@@ -58,12 +58,14 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
   honour it; the employee's company calendar never changes — their hours that
   day become OT / comp off. My Holidays tab now shows the one company calendar
   plus a collapsed "Client / project exceptions" section.
-- **Finance → Projects billing total includes hourly projects.** Each row
-  gets `this_month` from `projectPnl.monthBillingByProject` (same rule and
-  FX converter as P&L: monthly fee, or approved billable hours × rate). Hours
-  not billed are reported in `excluded` by reason (pending approval,
-  non-billable, before agreement, no hourly rate, overtime) and shown under
-  the total.
+- **Finance → Projects shows the contract; Project P&L shows actuals.** Each
+  Projects row gets `this_month` from `projectPnl.monthContractByProject`:
+  the fixed monthly fee, or the committed `minimum_monthly_hours` × hourly
+  rate, prorated in the agreement's first/last month (same FX converter as
+  P&L). Hourly projects with no minimum have no contract amount
+  (`note: 'no_minimum_hours'`). `monthly_amount_inr` uses minimum hours too.
+  Project P&L is unchanged: approved timesheet hours × rate (e.g. 60h
+  contract, 55h worked → Projects 60h, P&L 55h).
 - **UI copy:** Attendance page states attendance ≠ salary and renames
   "Overtime" to "Time past shift"; Attendance → Salary tab shows expected /
   approved / pending / short / OT columns and Actual vs Projected KPIs.

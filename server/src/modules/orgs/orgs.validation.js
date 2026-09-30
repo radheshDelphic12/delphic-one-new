@@ -14,6 +14,15 @@ const updateOrgSettingsSchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one setting' });
 
+const updateLocationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    city: z.string().max(100).nullable().optional(),
+    country: z.string().max(100).nullable().optional(),
+    is_default: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Change at least one field' });
+
 const createLocationSchema = z.object({
   name: z.string().min(1).max(100),
   city: z.string().max(100).optional(),
@@ -99,6 +108,7 @@ module.exports = {
   updateOrgSettingsSchema,
   createOrgSchema,
   createLocationSchema,
+  updateLocationSchema,
   updateMembershipSchema,
   membershipListQuerySchema,
   updateValuationSchema,

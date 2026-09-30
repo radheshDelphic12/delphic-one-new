@@ -466,13 +466,14 @@ function currentAccountRate(rates, asOf) {
 function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project), fx = null } = {}) {
   const rate = currentAccountRate(rates, todayUtc());
   const currency = rate ? rate.currency : account.client_billing_currency || 'INR';
-  const estimatedHours = account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null;
+  // The contract's hours: the client's committed minimum (not the estimate).
+  const contractHours = account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null;
   // INR figures use the same converter as Project P&L. null = this currency
   // has no exchange rate yet (or there's no rate to convert).
   const { toInr, rateFor } = exchangeRates.inrConverter(fx || new Map([['INR', 1]]));
   const exchangeRate = rateFor(currency);
   const inr = (amount) => (amount === null || exchangeRate === null ? null : toInr(amount, currency));
-  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : estimatedHours !== null ? Number(rate.rate) * estimatedHours : null;
+  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : contractHours !== null ? Number(rate.rate) * contractHours : null;
   return {
     id: account.id,
     project_code: account.project_code || null,
@@ -487,7 +488,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     // INR per 1 unit of `currency` (1 for INR); null when finance hasn't set it.
     exchange_rate: exchangeRate,
     rate_inr: rate ? inr(Number(rate.rate)) : null,
-    // Fixed monthly fee, or hourly rate x estimated hours, in INR.
+    // The contract per month in INR: fixed monthly fee, or hourly rate x minimum hours.
     monthly_amount_inr: inr(monthlyAmount),
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
@@ -545,11 +546,11 @@ async function listProjectProfiles(orgId) {
   ]);
   const ratesByAccount = new Map();
   for (const r of rates) ratesByAccount.set(r.account_id, [...(ratesByAccount.get(r.account_id) || []), r]);
-  // This month's billing (monthly fee, or approved billable hours x rate) —
-  // the P&L's own revenue rule, so hourly projects are included, not skipped.
+  // This month's contract billing (fixed monthly fee, or committed minimum
+  // hours x rate). Actual approved hours are Project P&L's, not this list's.
   const now = todayUtc();
-  const { monthBillingByProject } = require('./projectPnl.service');
-  const billing = await monthBillingByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
+  const { monthContractByProject } = require('./projectPnl.service');
+  const billing = await monthContractByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
   return accounts.map((a) => {
     // Every row listed here matches projectListWhere, so all are editable.
     const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true, fx });
