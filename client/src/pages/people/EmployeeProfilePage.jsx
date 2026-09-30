@@ -88,6 +88,7 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       setFields({
         employee_code: row.employee_code || '',
         employment_status: row.employment_status || 'active',
+        joined_at: row.joined_at ? String(row.joined_at).slice(0, 10) : '',
         notice_start_date: row.notice_start_date ? String(row.notice_start_date).slice(0, 10) : '',
         notice_end_date: row.notice_end_date ? String(row.notice_end_date).slice(0, 10) : '',
         department_id: row.department?.id || '',
@@ -117,6 +118,8 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
     const patch = Object.fromEntries(
       Object.entries(rest).map(([key, value]) => [key, value || null])
     );
+    // Joining date can be changed, not cleared.
+    if (!patch.joined_at) delete patch.joined_at;
     if (teamChanged) patch.team_effective_date = teamEffective;
     else delete patch.team_id;
     // Only send the worker fields when something about them changed, so a
@@ -189,6 +192,11 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
               {EMPLOYMENT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
+          <label className="text-xs font-medium text-tertiary-600">
+            Joining date
+            <input type="date" required value={fields.joined_at} max={fields.notice_end_date || undefined} onChange={(event) => setField('joined_at', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <div className="hidden sm:block" />
           {(fields.employment_status === 'notice_period' || fields.employment_status === 'terminated' || fields.notice_end_date) && (
             <>
               <label className="text-xs font-medium text-tertiary-600">
@@ -252,6 +260,55 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
   );
 }
 
+// HR (non-admin) may change only the joining date — its own endpoint.
+function JoiningDateDrawer({ open, row, onClose, onSaved }) {
+  const { pushError } = useAlerts();
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open && row) setValue(row.joined_at ? String(row.joined_at).slice(0, 10) : '');
+  }, [open, row]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { data } = await apiClient.patch(`/orgs/memberships/${row.id}/joining-date`, { joined_at: value });
+      onSaved(data.data);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the joining date'), 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Drawer
+      open={open}
+      title={row ? `Joining date · ${row.person.name}` : 'Joining date'}
+      onClose={onClose}
+      tone="edit"
+      footer={(
+        <>
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" form="joining-date-form" className="btn-primary" disabled={saving || !value}>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </>
+      )}
+    >
+      <form id="joining-date-form" onSubmit={submit}>
+        <label className="text-xs font-medium text-tertiary-600">
+          Joining date
+          <input type="date" required value={value} max={row?.notice_end_date ? String(row.notice_end_date).slice(0, 10) : undefined} onChange={(event) => setValue(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm sm:w-56" />
+          <span className="mt-1 block font-normal text-tertiary-400">Attendance, timesheets and salary start from this date.</span>
+        </label>
+      </form>
+    </Drawer>
+  );
+}
+
 export default function EmployeeProfilePage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -260,6 +317,7 @@ export default function EmployeeProfilePage() {
   const [options, setOptions] = useState(EMPTY_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  const [joiningOpen, setJoiningOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -306,12 +364,15 @@ export default function EmployeeProfilePage() {
   function handleSaved(updated) {
     setRow(updated);
     setEditOpen(false);
+    setJoiningOpen(false);
   }
 
   if (loading) return <div className="rounded-2xl border border-tertiary-100 bg-white p-8 text-sm text-tertiary-500">Loading employee profile...</div>;
   if (!row) return <div className="rounded-2xl border border-danger-100 bg-danger-50 p-6 text-sm text-danger-700">Employee profile could not be found.</div>;
 
   const canEdit = user?.role === 'admin';
+  // HR department members (not admins) can change the joining date only.
+  const canEditJoining = !canEdit && Boolean(row.can_edit_joining_date);
   const selectOptions = {
     departments: optionsFor(options.departments),
     designations: optionsFor(options.designations),
@@ -368,7 +429,14 @@ export default function EmployeeProfilePage() {
           <PeekField label="Manager">{row.manager?.person?.name || 'Not assigned'}</PeekField>
           <PeekField label="HR POC">{row.hr_poc?.name || 'Not assigned'}</PeekField>
           <PeekField label="Sourcing POC">{row.sourcing_poc?.name || 'Not assigned'}</PeekField>
-          <PeekField label="Joined">{formatDate(row.joined_at)}</PeekField>
+          <PeekField label="Joined">
+            {formatDate(row.joined_at)}
+            {canEditJoining && (
+              <button type="button" className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline" onClick={() => setJoiningOpen(true)}>
+                <Pencil className="h-3 w-3" /> Edit
+              </button>
+            )}
+          </PeekField>
           {(row.employment_status === 'notice_period' || row.notice_end_date) && (
             <>
               <PeekField label="Notice given on">{formatDate(row.notice_start_date)}</PeekField>
@@ -386,6 +454,7 @@ export default function EmployeeProfilePage() {
       <ReportingSection membershipId={row.id} />
       <PersonalDetailsSection membershipId={row.id} />
       <CalendarMappingSection membershipId={row.id} locationName={row.location?.name} canEdit={canEdit} />
+      <JoiningDateDrawer open={joiningOpen} row={row} onClose={() => setJoiningOpen(false)} onSaved={handleSaved} />
       <EditMembershipDrawer
         open={editOpen}
         row={row}
