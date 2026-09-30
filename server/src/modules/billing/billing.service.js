@@ -3,6 +3,7 @@ const { contractState } = require('../../lib/contractState');
 const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
+const exchangeRates = require('./exchangeRates.service');
 
 const { activeOn } = allocations;
 
@@ -462,8 +463,16 @@ function currentAccountRate(rates, asOf) {
   return soonest ? accountWide.find((r) => +r.effective_from === +soonest.effective_from) : null;
 }
 
-function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project) } = {}) {
+function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project), fx = null } = {}) {
   const rate = currentAccountRate(rates, todayUtc());
+  const currency = rate ? rate.currency : account.client_billing_currency || 'INR';
+  const estimatedHours = account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null;
+  // INR figures use the same converter as Project P&L. null = this currency
+  // has no exchange rate yet (or there's no rate to convert).
+  const { toInr, rateFor } = exchangeRates.inrConverter(fx || new Map([['INR', 1]]));
+  const exchangeRate = rateFor(currency);
+  const inr = (amount) => (amount === null || exchangeRate === null ? null : toInr(amount, currency));
+  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : estimatedHours !== null ? Number(rate.rate) * estimatedHours : null;
   return {
     id: account.id,
     project_code: account.project_code || null,
@@ -474,7 +483,12 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     service_category: account.service_category,
     billing_type: rate ? rate.rate_type : null,
     rate: rate ? Number(rate.rate) : null,
-    currency: rate ? rate.currency : account.client_billing_currency || 'INR',
+    currency,
+    // INR per 1 unit of `currency` (1 for INR); null when finance hasn't set it.
+    exchange_rate: exchangeRate,
+    rate_inr: rate ? inr(Number(rate.rate)) : null,
+    // Fixed monthly fee, or hourly rate x estimated hours, in INR.
+    monthly_amount_inr: inr(monthlyAmount),
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
     contract_status: account.contract_status,
@@ -523,16 +537,17 @@ async function isProjectRow(orgId, accountId) {
 
 async function listProjectProfiles(orgId) {
   await calendarsService.ensureProjectCodes(orgId);
-  const [accounts, rates, fallback] = await Promise.all([
+  const [accounts, rates, fallback, fx] = await Promise.all([
     prisma.account.findMany({ where: projectListWhere(orgId), select: PROFILE_SELECT, orderBy: { name: 'asc' } }),
     prisma.billingRate.findMany({ where: { org_id: orgId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
+    exchangeRates.inrRates(orgId),
   ]);
   const ratesByAccount = new Map();
   for (const r of rates) ratesByAccount.set(r.account_id, [...(ratesByAccount.get(r.account_id) || []), r]);
   return accounts.map((a) => {
     // Every row listed here matches projectListWhere, so all are editable.
-    const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true });
+    const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true, fx });
     if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
     return profile;
   });
@@ -541,12 +556,13 @@ async function listProjectProfiles(orgId) {
 async function getProjectProfile(orgId, accountId) {
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: PROFILE_SELECT });
   if (!account) return { error: 'account_not_found' };
-  const [rates, fallback, editable] = await Promise.all([
+  const [rates, fallback, editable, fx] = await Promise.all([
     prisma.billingRate.findMany({ where: { org_id: orgId, account_id: accountId, requirement_id: null }, select: { account_id: true, requirement_id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true } }),
     calendarsService.defaultCalendar(orgId),
     isProjectRow(orgId, accountId),
+    exchangeRates.inrRates(orgId),
   ]);
-  const profile = serializeProfile(account, rates, account.project_calendar, { editable });
+  const profile = serializeProfile(account, rates, account.project_calendar, { editable, fx });
   if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
   return { profile };
 }

@@ -14,7 +14,7 @@ import InvoicingSection from './InvoicingSection.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
-import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates } from './projectFilters.jsx';
+import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates, ExchangeRatesPanel } from './projectFilters.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
@@ -32,9 +32,21 @@ function billingLabel(row) {
       {row.billing_type === 'hourly' && row.estimated_monthly_hours ? (
         <span className="block text-xs text-tertiary-500">Est. {row.estimated_monthly_hours}h/mo ≈ {row.currency} {money(row.estimated_monthly_hours * row.rate)}</span>
       ) : null}
+      <InrLine row={row} suffix={suffix} />
       {row.billing_type === 'hourly' && row.minimum_monthly_hours ? (
         <span className="block text-xs text-tertiary-500">Min. {row.minimum_monthly_hours}h/mo</span>
       ) : null}
+    </span>
+  );
+}
+
+// A foreign-currency rate in INR, from the server (same converter and rates as Project P&L).
+function InrLine({ row, suffix }) {
+  if (!row.billing_type || row.currency === 'INR') return null;
+  if (row.exchange_rate === null) return <span className="block text-xs text-warning-700">No {row.currency} exchange rate set</span>;
+  return (
+    <span className="block text-xs text-tertiary-500" title={`1 ${row.currency} = ₹${row.exchange_rate}`}>
+      ≈ ₹{money(row.rate_inr)}{suffix} <span className="text-tertiary-400">@ ₹{row.exchange_rate}</span>
     </span>
   );
 }
@@ -82,7 +94,7 @@ function emptyForm(profile) {
  * to it (Employee ↔ Project). Its calendar (Project ↔ Calendar) is set under
  * People → HR Settings → Calendars.
  */
-function ProjectProfileDrawer({ project, onClose, onSaved }) {
+function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
   const { pushError, pushInfo } = useAlerts();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -201,6 +213,14 @@ function ProjectProfileDrawer({ project, onClose, onSaved }) {
                 <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={!form.billing_type} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
                   {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
+                {form.billing_type && form.currency !== 'INR' && (() => {
+                  const fx = rates.find((r) => r.currency === form.currency)?.rate_to_inr ?? null;
+                  return (
+                    <span className={`mt-0.5 block font-normal ${fx === null ? 'text-warning-700' : 'text-tertiary-400'}`}>
+                      {fx === null ? `No ${form.currency} exchange rate — set it under Exchange rates (INR)` : `1 ${form.currency} = ₹${fx} (Finance exchange rate)`}
+                    </span>
+                  );
+                })()}
               </label>
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -299,7 +319,7 @@ export default function ProjectsTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [contract, setContract] = useState('all');
-  const { toInr } = useExchangeRates();
+  const { rates, reload: reloadRates } = useExchangeRates();
 
   const matchesContract = (row, key) => key === 'all' || row.contract?.state === key;
   const visible = useMemo(
@@ -307,11 +327,12 @@ export default function ProjectsTab() {
     [rows, category, contract]
   );
 
-  // Monthly billing of the filtered projects, in INR. Hourly projects have no
+  // Monthly billing of the filtered projects, in INR — converted on the server
+  // with the same rates and converter as Project P&L. Hourly projects have no
   // fixed monthly figure; a currency with no exchange rate is left out and named.
   const monthly = visible.filter((row) => row.billing_type === 'monthly');
-  const monthlyTotal = monthly.reduce((sum, row) => sum + (toInr(row.rate, row.currency) ?? 0), 0);
-  const unconverted = [...new Set(monthly.filter((row) => toInr(row.rate, row.currency) === null).map((row) => row.currency))];
+  const monthlyTotal = monthly.reduce((sum, row) => sum + (row.monthly_amount_inr ?? 0), 0);
+  const unconverted = [...new Set(monthly.filter((row) => row.exchange_rate === null).map((row) => row.currency))];
   const hourlyCount = visible.filter((row) => row.billing_type === 'hourly').length;
 
   const load = useCallback(() => {
@@ -374,10 +395,11 @@ export default function ProjectsTab() {
                 <span className="text-xs text-tertiary-500">
                   {monthly.length} monthly project{monthly.length === 1 ? '' : 's'}
                   {hourlyCount > 0 && ` · ${hourlyCount} hourly not included`}
-                  {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate in Project P&L`}
+                  {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate below`}
                 </span>
               </div>
             )}
+            <ExchangeRatesPanel rates={rates} onSaved={() => { reloadRates(); load(); }} />
             <DataTable columns={columns} rows={visible} loading={loading} emptyLabel="No projects in this category." onRowClick={setSelected} />
           </>
         )}
@@ -389,7 +411,7 @@ export default function ProjectsTab() {
       </section>
 
       <AddProjectModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => load()} />
-      <ProjectProfileDrawer project={selected} onClose={() => setSelected(null)} onSaved={load} />
+      <ProjectProfileDrawer project={selected} rates={rates} onClose={() => setSelected(null)} onSaved={load} />
     </div>
   );
 }

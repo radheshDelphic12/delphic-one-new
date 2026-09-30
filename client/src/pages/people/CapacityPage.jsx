@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, CalendarClock, Gauge, History, Save, Users } from 'lucide-react';
+import { CalendarClock, Gauge, History, Save } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { useLeadClientOptions, useOrgMembershipOptions, useProjectOptions, useTeamOptions } from '../../lib/lookups.js';
+import { useLeadClientOptions, useOrgMembershipOptions, useTeamOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -15,7 +15,6 @@ import ProjectsHover from './ProjectsHover.jsx';
 const TABS = [
   { key: 'capacity', label: 'Team Capacity', icon: Gauge },
   { key: 'ending', label: 'Projects Ending Soon', icon: CalendarClock },
-  { key: 'resources', label: 'Resource Allocation', icon: Users },
   { key: 'movements', label: 'Movement History', icon: History },
 ];
 
@@ -216,108 +215,6 @@ function EndingSoonReport() {
   );
 }
 
-/** Move a resource between projects (and/or teams) from a date — the old allocation ends the day before. */
-function MoveResourceDrawer({ open, onClose, onMoved }) {
-  const { pushError, pushInfo } = useAlerts();
-  const people = useOrgMembershipOptions(open);
-  const projects = useProjectOptions(open);
-  const teams = useTeamOptions(open);
-  const empty = { org_membership_id: '', from_account_id: '', to_account_id: '', to_team_id: '', effective_date: localToday(), allocation_percent: '' };
-  const [fields, setFields] = useState(empty);
-  const [saving, setSaving] = useState(false);
-  const set = (key, value) => setFields((f) => ({ ...f, [key]: value }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) setFields(empty); }, [open]);
-
-  async function submit(event) {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      await apiClient.post('/allocations/move', clean({
-        org_membership_id: fields.org_membership_id,
-        effective_date: fields.effective_date,
-        from_account_id: fields.from_account_id,
-        to_account_id: fields.to_account_id,
-        to_team_id: fields.to_team_id || undefined,
-        allocation_percent: fields.allocation_percent === '' ? undefined : Number(fields.allocation_percent),
-      }));
-      pushInfo('Resource moved — earlier dates keep the previous allocation');
-      onMoved();
-    } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to move the resource'), 'Something went wrong');
-    } finally {
-      setSaving(false);
-    }
-  }
-  const ready = fields.org_membership_id && fields.effective_date && (fields.from_account_id || fields.to_account_id || fields.to_team_id);
-  return (
-    <Drawer open={open} title="Move resource" onClose={onClose} size="sm" tone="edit" footer={(
-      <>
-        <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="move-resource" className="btn-primary" disabled={saving || !ready}>{saving ? 'Moving…' : 'Move'}</button>
-      </>
-    )}>
-      <form id="move-resource" onSubmit={submit} className="space-y-3">
-        <Filter label="Resource"><SearchableSelect value={fields.org_membership_id} onChange={(v) => set('org_membership_id', v)} options={people} placeholder="Select person" required /></Filter>
-        <Filter label="Effective from"><input type="date" required value={fields.effective_date} onChange={(e) => set('effective_date', e.target.value)} className={dateInput} /></Filter>
-        <Filter label="Move off project"><SearchableSelect value={fields.from_account_id} onChange={(v) => set('from_account_id', v)} options={projects} placeholder="All their current projects" allowClear /></Filter>
-        <Filter label="Move onto project (optional)"><SearchableSelect value={fields.to_account_id} onChange={(v) => set('to_account_id', v)} options={projects} placeholder="None" allowClear /></Filter>
-        {fields.to_account_id && <Filter label="Allocation % on the new project"><input type="number" min="0" max="100" value={fields.allocation_percent} onChange={(e) => set('allocation_percent', e.target.value)} placeholder="even split" className={dateInput} /></Filter>}
-        <Filter label="Move to team (optional)"><SearchableSelect value={fields.to_team_id} onChange={(v) => set('to_team_id', v)} options={teams} placeholder="Keep current team" allowClear /></Filter>
-        <p className="text-xs text-tertiary-500">
-          Their current allocation ends the day before the effective date and the new one starts on it — earlier dates, timesheets, salary and revenue stay on the old project/team. A team move can&apos;t be in the future. Changes reaching a locked month are flagged there for review, never applied silently.
-        </p>
-      </form>
-    </Drawer>
-  );
-}
-
-function ResourceAllocationReport() {
-  const teams = useTeamOptions(true);
-  const people = useOrgMembershipOptions(true);
-  const projects = useProjectOptions(true);
-  const clients = useLeadClientOptions(true);
-  const [filters, setFilters] = useState({ team_id: '', org_membership_id: '', account_id: '', client_account_id: '', from: '', to: '', status: 'all' });
-  const { data, loading, reload } = useReport('/allocations/reports/resources', filters);
-  const [moveOpen, setMoveOpen] = useState(false);
-  const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
-  const columns = [
-    { key: 'resource', header: 'Resource', render: (r) => <span><span className="font-medium text-tertiary-900">{r.resource.name}</span>{r.resource.worker_type === 'contractor' && <span className="block text-xs text-warning-700">Contractor</span>}</span> },
-    { key: 'team', header: 'Team', render: (r) => r.team?.name || <span className="text-tertiary-400">No team</span> },
-    { key: 'project', header: 'Project', render: (r) => <span>{r.project.name}<span className="block text-xs text-tertiary-500">{[r.project.code, r.project.client_name].filter(Boolean).join(' · ')}</span></span> },
-    { key: 'allocation', header: 'Allocation', render: (r) => (r.allocation_percent != null ? `${r.allocation_percent}%` : <span className="text-tertiary-400">even split</span>) },
-    { key: 'start', header: 'Start date', render: (r) => (r.start_date ? formatDay(r.start_date) : <span className="text-tertiary-400">Project start</span>) },
-    { key: 'end', header: 'End date', render: (r) => (r.end_date ? formatDay(r.end_date) : <span className="text-tertiary-400">Open</span>) },
-    { key: 'status', header: 'Status', render: (r) => <Pill tone={r.status === 'active' ? 'green' : r.status === 'upcoming' ? 'blue' : 'gray'}>{r.status}</Pill> },
-  ];
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Filter label="Team"><SearchableSelect value={filters.team_id} onChange={(v) => set('team_id', v)} options={teams} placeholder="All teams" allowClear /></Filter>
-        <Filter label="Resource"><SearchableSelect value={filters.org_membership_id} onChange={(v) => set('org_membership_id', v)} options={people} placeholder="All resources" allowClear /></Filter>
-        <Filter label="Project"><SearchableSelect value={filters.account_id} onChange={(v) => set('account_id', v)} options={projects} placeholder="All projects" allowClear /></Filter>
-        <Filter label="Client"><SearchableSelect value={filters.client_account_id} onChange={(v) => set('client_account_id', v)} options={clients} placeholder="All clients" allowClear /></Filter>
-        <Filter label="From"><input type="date" value={filters.from} onChange={(e) => set('from', e.target.value)} className={dateInput} /></Filter>
-        <Filter label="To"><input type="date" value={filters.to} onChange={(e) => set('to', e.target.value)} className={dateInput} /></Filter>
-        <Filter label="Status">
-          <select value={filters.status} onChange={(e) => set('status', e.target.value)} className={dateInput}>
-            <option value="all">All</option><option value="active">Active</option><option value="upcoming">Upcoming</option><option value="ended">Ended</option>
-          </select>
-        </Filter>
-        <div className="flex items-end justify-end">
-          <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setMoveOpen(true)}><ArrowRightLeft className="h-4 w-4" /> Move resource</button>
-        </div>
-      </div>
-      <DataTable columns={columns} rows={data?.rows || []} loading={loading} emptyLabel="No allocations match these filters." />
-      <p className="text-xs text-tertiary-500">
-        {filters.from || filters.to ? 'Allocations in force at any point in the date range.' : 'Current and upcoming allocations — pick a date range to see history.'} Add or end allocations per project under Finance → Projects → Project team.
-        {data ? ` ${data.rows.length} allocation(s) across ${data.resources} resource(s).` : ''}
-      </p>
-      <MoveResourceDrawer open={moveOpen} onClose={() => setMoveOpen(false)} onMoved={() => { setMoveOpen(false); reload(); }} />
-    </div>
-  );
-}
-
 function MovementReport() {
   const teams = useTeamOptions(true);
   const people = useOrgMembershipOptions(true);
@@ -361,7 +258,6 @@ export default function CapacityPage() {
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'capacity' && <TeamCapacityReport />}
       {tab === 'ending' && <EndingSoonReport />}
-      {tab === 'resources' && <ResourceAllocationReport />}
       {tab === 'movements' && <MovementReport />}
     </div>
   );

@@ -229,7 +229,7 @@ export default function BillingSalesTab() {
         <KpiCard label="Pending / rejected hours" value={t ? `${t.pending_hours}h / ${t.rejected_hours}h` : '…'} hint="not billed until approved" icon={Clock} theme="red" />
         <KpiCard label="Locked projects" value={t ? `${t.locked_projects} / ${t.projects}` : '…'} icon={Lock} theme="cyan" />
       </div>
-      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Project P&amp;L) — those projects are left out of the INR totals.</p>}
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Projects or Project P&amp;L) — those projects are left out of the INR totals.</p>}
 
       <section className="space-y-2">
         <h2 className="font-heading text-sm font-semibold text-tertiary-900">Projects &amp; contracts <span className="font-normal text-tertiary-500">— open one to review its dates, lock it and generate the invoice</span></h2>

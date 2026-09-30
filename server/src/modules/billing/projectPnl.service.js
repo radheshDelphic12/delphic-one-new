@@ -87,17 +87,6 @@ async function projectRevenue(orgId, account, { start, end, days }) {
   return { amount: round2(amount), billing_type: 'hourly', rate: Number(rate.rate), currency: rate.currency, billable_hours: round2(hours) };
 }
 
-// Converts to INR with the org's rates, recording any currency without one.
-function inrConverter(fx) {
-  const missing = new Set();
-  const toInr = (amount, currency) => {
-    const cur = currency || 'INR';
-    if (!fx.has(cur)) { missing.add(cur); return 0; }
-    return round2(Number(amount || 0) * fx.get(cur));
-  };
-  return { toInr, missing };
-}
-
 async function computeProjectPnl(orgId, accountId, { period_month, period_year }, fx = null) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, org_id: orgId, type: 'client' },
@@ -149,7 +138,7 @@ async function computeProjectPnl(orgId, accountId, { period_month, period_year }
     }),
   ]);
   const approvedHours = new Map(hoursRows.map((h) => [h.org_membership_id, Number(h._sum.hours || 0) + Number(h._sum.overtime_hours || 0)]));
-  const { toInr, missing } = inrConverter(rates);
+  const { toInr, missing } = exchangeRates.inrConverter(rates);
   // Each person's day-weighted share of the month on this project, across
   // all their allocations (an even split counts the projects active each day).
   const spansByPerson = byMembership(allSpans);
