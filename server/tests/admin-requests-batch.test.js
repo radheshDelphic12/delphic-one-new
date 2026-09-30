@@ -88,7 +88,8 @@ describe('Superadmin expense and group-expense corrections', () => {
     expect(edited.status).toBe(200);
     expect(Number(edited.body.data.amount)).toBe(450);
 
-    expect((await authed(request(app).delete(`/api/v1/expenses/claims/${claim.id}`), ctx.plainToken)).status).toBe(403);
+    // A plain admin deletes pending claims only; a decided one needs a superadmin.
+    expect((await authed(request(app).delete(`/api/v1/expenses/claims/${claim.id}`), ctx.plainToken)).status).toBe(409);
     expect((await authed(request(app).delete(`/api/v1/expenses/claims/${claim.id}`), ctx.token)).status).toBe(200);
     expect(await prisma.expenseClaim.count({ where: { id: claim.id } })).toBe(0);
 
@@ -164,7 +165,8 @@ describe('Admin corrections — timesheets and attendance at any stage', () => {
     expect(Number(edited.body.data.entry.hours)).toBe(6);
     expect((await authed(request(app).patch(`/api/v1/timesheets/entries/${entry.id}/admin`), emp.token).send({ hours: 1, reason: 'Trying' })).status).toBe(403);
 
-    expect((await authed(request(app).delete(`/api/v1/timesheets/entries/${other.id}`), emp.token).send({ reason: 'mine' })).status).toBe(403);
+    // An employee may only withdraw their own still-pending entry — never an approved one.
+    expect((await authed(request(app).delete(`/api/v1/timesheets/entries/${entry.id}`), emp.token).send({ reason: 'mine' })).status).toBe(409);
     expect((await authed(request(app).delete(`/api/v1/timesheets/entries/${other.id}`), ctx.token).send({ reason: 'Duplicate entry' })).status).toBe(200);
     expect(await prisma.timesheetEntry.count({ where: { id: other.id } })).toBe(0);
 

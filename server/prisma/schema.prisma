@@ -85,6 +85,16 @@ enum TimesheetEntryStatus {
   rejected
 }
 
+// Decision on a day's overtime (hours logged beyond the employee's daily
+// shift, or any hours on a company non-working day). comp_off = approved as
+// compensatory time off instead of OT pay.
+enum TimesheetOvertimeStatus {
+  pending
+  approved
+  rejected
+  comp_off
+}
+
 enum RegularizationTicketStatus {
   pending
   approved
@@ -127,6 +137,13 @@ enum ExpenseClaimStatus {
   approved
   rejected
   reimbursed
+}
+
+// Expense claim approval chain: the employee's manager, then HR, then Finance.
+enum ExpenseApprovalStage {
+  manager
+  hr
+  finance
 }
 
 enum VendorType {
@@ -428,8 +445,10 @@ model User {
   sourcing_poc_for                OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
   timesheet_approvals             TimesheetEntry[]                @relation("TimesheetApprover")
   timesheet_locks_made            TimesheetLock[]
+  timesheet_overtime_decisions    TimesheetDayOvertime[]
   regularization_requests         TimesheetRegularizationTicket[] @relation("RegularizationRequestedBy")
   regularization_decisions        TimesheetRegularizationTicket[] @relation("RegularizationDecidedBy")
+  expense_claims_submitted        ExpenseClaim[]                  @relation("ExpenseClaimSubmittedBy")
   salary_structures_created       SalaryStructure[]               @relation("SalaryStructureCreatedBy")
   salary_structures_updated       SalaryStructure[]               @relation("SalaryStructureUpdatedBy")
   payroll_runs_processed          PayrollRun[]                    @relation("PayrollRunProcessedBy")
@@ -654,6 +673,10 @@ model CalendarHoliday {
   calendar    Calendar @relation(fields: [calendar_id], references: [id], onDelete: Cascade)
   date        DateTime @db.Date
   label       String
+  // An exception the other way round: this date IS a working day on this
+  // calendar even though it would normally be off (e.g. a client that works
+  // this Sunday). Used on project/client calendars; never a holiday.
+  is_working_day Boolean @default(false)
 
   @@unique([calendar_id, date])
   @@index([calendar_id])
@@ -840,6 +863,33 @@ model TimesheetEntry {
   @@index([org_membership_id, date])
   @@index([account_id])
   @@map("timesheet_entries")
+}
+
+// One employee-day's overtime, kept apart from the entries so billing hours
+// are never rewritten. `hours` = logged (non-rejected) hours beyond the day's
+// expected hours (daily shift on a company working day, 0 on a weekend /
+// company holiday) — re-synced whenever that day's entries change. Only an
+// `approved` row's hours are paid as OT by payroll (capped to the approved
+// excess); `pending` shows as projected, `comp_off` earns time off instead.
+model TimesheetDayOvertime {
+  id                String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String                  @db.Uuid
+  org               Org                     @relation(fields: [org_id], references: [id])
+  org_membership_id String                  @db.Uuid
+  org_membership    OrgMembership           @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date              DateTime                @db.Date
+  hours             Decimal                 @db.Decimal(4, 1)
+  status            TimesheetOvertimeStatus @default(pending)
+  decided_by        String?                 @db.Uuid
+  decider           User?                   @relation(fields: [decided_by], references: [id])
+  decided_at        DateTime?
+  decision_reason   String?
+  created_at        DateTime                @default(now())
+  updated_at        DateTime                @default(now()) @updatedAt
+
+  @@unique([org_membership_id, date])
+  @@index([org_id, date])
+  @@map("timesheet_day_overtime")
 }
 
 // Freezes every TimesheetEntry for an org on a given date — an org-wide
@@ -1273,6 +1323,15 @@ model ExpenseClaim {
   decision_reason   String?
   reimbursed_at     DateTime?
   created_at        DateTime           @default(now())
+  // What the money was for — required when the category is "Other".
+  description       String?
+  // Set when an admin files the claim on the employee's behalf.
+  submitted_by      String?            @db.Uuid
+  submitter         User?              @relation("ExpenseClaimSubmittedBy", fields: [submitted_by], references: [id], onDelete: SetNull)
+  // Manager -> HR -> Finance: the step a pending claim is waiting on (null
+  // once decided). `approvals` logs each step: [{ stage, status, by, name, at, reason }].
+  approval_stage    ExpenseApprovalStage?
+  approvals         Json               @default("[]")
 
   @@index([org_id])
   @@index([org_membership_id])
@@ -1581,6 +1640,7 @@ model Org {
   shifts             Shift[]
   timesheet_entries  TimesheetEntry[]
   timesheet_locks    TimesheetLock[]
+  timesheet_overtime TimesheetDayOvertime[]
 
   // Multi-company ERP (Phase 4).
   salary_structures SalaryStructure[]
@@ -1700,6 +1760,7 @@ model OrgMembership {
   leave_requests          LeaveRequest[]                  @relation("LeaveRequestOwner")
   leave_requests_approved LeaveRequest[]                  @relation("LeaveRequestApprover")
   timesheet_entries       TimesheetEntry[]
+  timesheet_overtime      TimesheetDayOvertime[]
   salary_structures       SalaryStructure[]
   payslips                Payslip[]
   daily_profitability     DailyEmployeeProfitability[]

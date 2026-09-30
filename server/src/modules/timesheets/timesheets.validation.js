@@ -35,9 +35,76 @@ const adminUpdateEntrySchema = z
     account_id: z.string().uuid().nullable().optional(),
     billable: z.boolean().optional(),
     notes: z.string().max(4000).nullable().optional(),
+    // Admin may also approve / reject / re-open an entry at any stage.
+    status: z.enum(['submitted', 'approved', 'rejected']).optional(),
     reason: z.string().trim().min(3).max(500),
   })
-  .refine((v) => ['hours', 'overtime_hours', 'account_id', 'billable', 'notes'].some((k) => v[k] !== undefined), { message: 'Change at least one field' });
+  .refine((v) => ['hours', 'overtime_hours', 'account_id', 'billable', 'notes', 'status'].some((k) => v[k] !== undefined), { message: 'Change at least one field' });
+
+// Admin: add an entry for any employee on any date (a locked week included).
+const adminCreateEntrySchema = z.object({
+  org_membership_id: z.string().uuid(),
+  date: requiredDate,
+  account_id: z.string().uuid().nullable().optional(),
+  hours: z.coerce.number().positive().max(24),
+  overtime_hours: z.coerce.number().min(0).max(24).default(0),
+  billable: z.boolean().optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  status: z.enum(['submitted', 'approved']).default('approved'),
+  reason: z.string().trim().min(3).max(500),
+});
+
+// Admin CSV upload of past entries: one row per employee / date / project.
+const cell = (max) => z.preprocess((v) => (v === null || v === undefined ? '' : String(v)), z.string().trim().max(max)).default('');
+const importEntriesSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  dry_run: z.boolean().default(false),
+  rows: z
+    .array(
+      z.object({
+        employee: cell(200),
+        date: cell(20),
+        project: cell(300),
+        hours: cell(10),
+        overtime_hours: cell(10),
+        billable: cell(10),
+        notes: cell(4000),
+      })
+    )
+    .min(1)
+    .max(5000),
+});
+
+// "Approve all": the ids to approve from the approval inbox.
+const bulkApproveSchema = z
+  .object({
+    entries: z.array(z.string().uuid()).max(1000).default([]),
+    overtime: z.array(z.string().uuid()).max(1000).default([]),
+    regularizations: z.array(z.string().uuid()).max(1000).default([]),
+  })
+  .refine((v) => v.entries.length + v.overtime.length + v.regularizations.length > 0, { message: 'Nothing to approve' });
+
+// A day's overtime: paid (approved), not paid (rejected), or comp off.
+const decideOvertimeSchema = z
+  .object({
+    status: z.enum(['approved', 'rejected', 'comp_off']),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => v.status !== 'rejected' || Boolean(v.reason), { message: 'A reason is required when rejecting', path: ['reason'] });
+
+// Sunday -> Saturday week containing `date` (default today); managers/admins
+// may pass someone else's org_membership_id.
+const weekQuerySchema = z.object({
+  date: optionalDate,
+  org_membership_id: z.string().uuid().optional(),
+});
+
+// Day-by-day hours over a range (max ~2 months).
+const hoursQuerySchema = z.object({
+  from: requiredDate,
+  to: requiredDate,
+  org_membership_id: z.string().uuid().optional(),
+}).refine((v) => v.to >= v.from && (v.to - v.from) / 86400000 <= 62, { message: 'Pick a range of up to 62 days', path: ['to'] });
 
 const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
 
@@ -118,6 +185,12 @@ module.exports = {
   lockDaySchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  adminCreateEntrySchema,
+  importEntriesSchema,
+  bulkApproveSchema,
+  decideOvertimeSchema,
+  weekQuerySchema,
+  hoursQuerySchema,
   listQuerySchema,
   monthQuerySchema,
   overviewQuerySchema,

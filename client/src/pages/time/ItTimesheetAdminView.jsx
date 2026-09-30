@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Users } from 'lucide-react';
+import { ClipboardList, FileUp, Plus, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -10,6 +10,7 @@ import { DrillDownDrawer, StatCard } from './TeamMonitoringTab.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
 import NoteText from '../../components/NoteText.jsx';
 import AdminEntryDrawer, { adminDeleteEntry } from './AdminEntryDrawer.jsx';
+import { AddTimesheetEntryDrawer, BulkTimesheetDrawer } from './TimesheetBackfill.jsx';
 import { useProjectOptions } from '../../lib/lookups.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -71,6 +72,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
   const [correcting, setCorrecting] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [weekFilter, setWeekFilter] = useState('');
   const projectOptions = useProjectOptions(true);
   const weeks = useMemo(() => monthWeeks(period), [period]);
@@ -233,14 +236,19 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         <select value={period.year} onChange={(e) => setPeriod((p) => ({ ...p, year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
           {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add entry</button>
+          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={() => setUploading(true)}><FileUp className="h-3.5 w-3.5" /> Bulk upload CSV</button>
+        </div>
       </div>
 
       {overview && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatCard label={text.people} value={overview.summary.total_members} />
           <StatCard label="Logged today" value={overview.summary.logged_today} />
           <StatCard label="Missing today" value={overview.summary.missing_today} />
           <StatCard label="Hours this month" value={Math.round(monthHours * 100) / 100} />
+          <StatCard label="Overtime this month" value={overview.summary.overtime_hours} hint="Hours beyond each day's shift" />
           <StatCard label="Pending approvals" value={overview.summary.pending_approvals} hint="All months" />
         </div>
       )}
@@ -295,6 +303,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       />
       <DrillDownDrawer member={drillMember} period={period} onClose={() => setDrillMember(null)} />
       <AdminEntryDrawer entry={correcting} onClose={() => setCorrecting(null)} onSaved={() => { loadEntries(); loadOverview(); }} />
+      <AddTimesheetEntryDrawer open={adding} onClose={() => setAdding(false)} onSaved={() => { loadEntries(); loadOverview(); }} />
+      <BulkTimesheetDrawer open={uploading} onClose={() => setUploading(false)} onApplied={() => { loadEntries(); loadOverview(); }} />
     </div>
   );
 }

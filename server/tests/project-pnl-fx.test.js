@@ -98,6 +98,29 @@ describe('Finance — Project P&L in INR', () => {
     expect(pnl.revenue).toMatchObject({ billing_type: 'hourly', billable_hours: 14, amount: 8 * 1500 + 6 * 2000 });
     expect(pnl.profit).toBe(24000 - 50000);
   });
+
+  test('hourly P&L matches the billing engine: nothing after the agreement end, overtime billed only where the project bills it', async () => {
+    const ctx = await seed();
+    const acme = await project(ctx, 'Acme Hourly', { rate_type: 'hourly', rate: 1000, currency: 'INR' });
+    await prisma.account.update({ where: { id: acme.id }, data: { agreement_end_date: new Date('2026-09-10') } });
+    for (const [date, hours, overtime_hours] of [['2026-09-02', 9, 2], ['2026-09-15', 8, 0]]) {
+      await prisma.timesheetEntry.create({
+        data: { org_id: ctx.org.id, org_membership_id: ctx.devMembership.id, account_id: acme.id, date: new Date(date), hours, overtime_hours, billable: true, status: 'approved' },
+      });
+    }
+
+    const noOt = (await authed(request(app).get(pnlUrl(acme.id)), ctx.token)).body.data.revenue;
+    expect(noOt).toMatchObject({ billing_type: 'hourly', billable_hours: 9, overtime_hours: 0, amount: 9000 });
+    expect(noOt.excluded).toMatchObject({ outside_agreement: 8, overtime: 2 });
+
+    await prisma.account.update({ where: { id: acme.id }, data: { overtime_billable: true, overtime_multiplier: 1.5 } });
+    const withOt = (await authed(request(app).get(pnlUrl(acme.id)), ctx.token)).body.data.revenue;
+    expect(withOt).toMatchObject({ billable_hours: 9, overtime_hours: 2, overtime_amount: 3000, amount: 12000 });
+
+    // Billing & Sales shows the very same figure.
+    const sales = (await authed(request(app).get(`/api/v1/analytics/billing/projects/${acme.id}?period_month=9&period_year=2026`), ctx.token)).body.data;
+    expect(sales.totals.amount).toBe(12000);
+  });
 });
 
 describe('Finance → Projects — same exchange rates as Project P&L', () => {

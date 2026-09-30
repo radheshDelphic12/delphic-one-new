@@ -353,7 +353,7 @@ export default function TeamMonitoringTab() {
           <StatCard label="Logged today" value={overview.summary.logged_today} />
           <StatCard label="Missing today" value={overview.summary.missing_today} />
           <StatCard label="Pending approvals" value={overview.summary.pending_approvals} />
-          <StatCard label="Overtime hours" value={overview.summary.overtime_hours} hint="Holiday work, this month" />
+          <StatCard label="Overtime hours" value={overview.summary.overtime_hours} hint="Beyond the daily shift (weekends / holidays: all hours), this month" />
         </div>
       )}
 

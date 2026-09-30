@@ -155,6 +155,9 @@ function PersonCard({ node, hasChildren, collapsed, onToggle, hiddenCount }) {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1">
           <LifecycleBadge node={node} />
+          {hasChildren && !collapsed && hiddenCount > 0 && (
+            <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-medium text-primary-700" title="Everyone reporting up to this person">{hiddenCount} {hiddenCount === 1 ? 'person' : 'people'} under</span>
+          )}
           {collapsed && hiddenCount > 0 && (
             <span className="inline-flex items-center rounded-full bg-tertiary-100 px-2 py-0.5 text-[10px] font-medium text-tertiary-600">+{hiddenCount} hidden</span>
           )}
@@ -213,6 +216,53 @@ function PersonBranch({ node, getChildren, collapsedIds, onToggle }) {
         </ul>
       )}
     </li>
+  );
+}
+
+/**
+ * How many people sit in each category of the current view: per department,
+ * per seniority tier, or per HR team (plus contractors / not in a team).
+ */
+function categoryCounts(roots, viewMode, teams = []) {
+  const people = flattenTree(roots);
+  const tally = new Map();
+  const add = (key, label, order = 0) => {
+    const row = tally.get(key) || { key, label, count: 0, order };
+    row.count += 1;
+    tally.set(key, row);
+  };
+  if (viewMode === 'department') {
+    for (const p of people) add(p.department?.id || '__none__', p.department?.name || 'Unassigned', p.department ? 0 : 1);
+  } else if (viewMode === 'role') {
+    for (const p of people) {
+      const i = tierIndexFor(p);
+      add(ROLE_TIERS[i].key, ROLE_TIERS[i].label, i);
+    }
+  } else {
+    const teamById = new Map(teams.map((t) => [t.id, t]));
+    const leadTeam = new Map(teams.filter((t) => t.lead_membership_id).map((t) => [t.lead_membership_id, t]));
+    for (const p of people) {
+      const team = teamById.get(p.team_id) || leadTeam.get(p.id);
+      if (team) add(team.id, team.name, team.sort_order ?? 0);
+      else if (p.worker_type === 'contractor') add('__contractor__', 'Contractors', 1e6);
+      else add('__none__', 'Not in a team', 1e6 + 1);
+    }
+  }
+  return [...tally.values()].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+}
+
+function CategoryCounts({ roots, viewMode, teams }) {
+  const rows = categoryCounts(roots, viewMode, teams);
+  if (!rows.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5" aria-label="People per category">
+      {rows.map((r) => (
+        <span key={r.key} className="inline-flex items-center gap-1.5 rounded-full border border-tertiary-200 bg-white px-2.5 py-1 text-xs text-tertiary-700">
+          {r.label}
+          <span className="rounded-full bg-primary-50 px-1.5 text-[11px] font-semibold tabular-nums text-primary-700">{r.count}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -379,6 +429,7 @@ export default function OrgChartPage({ groupOrgs }) {
         </div>
       </div>
       {loading && <Skeleton className="h-40 w-full" />}
+      {!loading && data?.roots.length > 0 && <CategoryCounts roots={data.roots} viewMode={viewMode} teams={data.teams || []} />}
       {!loading && data?.roots.length === 0 && (
         <EmptyState icon={UserRound} title="No org chart yet" description="Set a manager on employee records (People → Directory) to build the reporting tree." />
       )}

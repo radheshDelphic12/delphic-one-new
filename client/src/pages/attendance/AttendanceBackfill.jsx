@@ -12,7 +12,7 @@ const TIMED = new Set(['present', 'half_day', 'wfh']);
 const TEMPLATE_COLUMNS = ['employee', 'name', 'department', 'date', 'day', 'status', 'check_in', 'check_out'];
 
 // Local calendar day (not UTC) — "today" as the admin sees it.
-function localToday() {
+export function localToday() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -23,7 +23,7 @@ function monthRange(month) {
   return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, '0')}` };
 }
 
-function csvCell(value) {
+export function csvCell(value) {
   const s = String(value ?? '');
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
@@ -39,7 +39,7 @@ function downloadCsv(filename, rows) {
 }
 
 // Minimal RFC 4180 parser (quoted cells, escaped quotes, CRLF).
-function parseCsv(text) {
+export function parseCsv(text) {
   const rows = [];
   let row = [];
   let cell = '';
@@ -62,7 +62,7 @@ function parseCsv(text) {
 }
 
 // Excel re-saves dates as DD-MM-YYYY / DD/MM/YYYY and times as H:MM:SS — normalise both.
-function normaliseDate(value) {
+export function normaliseDate(value) {
   const v = value.trim();
   const dmy = v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
   if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
@@ -97,7 +97,7 @@ function sheetRows(text) {
 }
 
 // Byte-order mark: makes Excel open the CSV as UTF-8.
-const BOM = String.fromCharCode(0xfeff);
+export const BOM = String.fromCharCode(0xfeff);
 
 const inputClass = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 

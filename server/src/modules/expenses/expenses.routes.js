@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, authorize, authorizeSuperadmin, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
@@ -24,6 +24,11 @@ const ERRORS = {
   not_approved: [422, 'Must be approved first'],
   not_editable: [409, 'Only a pending claim can be edited — this one has already been decided'],
   category_not_found: [404, 'Expense category not found (or deactivated)'],
+  membership_not_found: [404, 'Employee not found in this company'],
+  description_required: [422, 'Describe the expense when the category is Other'],
+  not_deletable: [409, 'Only a pending claim can be deleted — this one has already been decided'],
+  not_your_step: [403, 'This claim is waiting on another approver'],
+  own_claim: [403, "You can't approve your own claim"],
 };
 
 function failFor(res, error) {
@@ -38,8 +43,11 @@ function failFor(res, error) {
 router.post(
   '/claims',
   asyncHandler(async (req, res) => {
-    const body = createClaimSchema.parse(req.body);
-    const result = await service.createClaim(req.user.org_id, req.user.org_membership_id, body);
+    const { org_membership_id, ...body } = createClaimSchema.parse(req.body);
+    // Only an admin files for someone else; everyone else always for themselves.
+    const target = req.user.role === 'admin' && org_membership_id ? org_membership_id : req.user.org_membership_id;
+    const actor = { userId: req.user.id, orgMembershipId: req.user.org_membership_id };
+    const result = await service.createClaim(req.user.org_id, target, body, actor);
     if (result.error) return failFor(res, result.error);
     return created(res, result.claim);
   })
@@ -59,12 +67,14 @@ router.patch(
   })
 );
 
-// Superadmin only: removes a claim entered by mistake, whatever its status.
+// Removes a claim raised by mistake: its owner or an admin while it is still
+// pending; a superadmin whatever its status.
 router.delete(
   '/claims/:id',
-  authorizeSuperadmin,
+  loadSuperadminFlag,
   asyncHandler(async (req, res) => {
-    const result = await service.deleteClaim(req.user.org_id, req.params.id);
+    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: Boolean(req.user.is_superadmin) };
+    const result = await service.deleteClaim(req.user.org_id, req.params.id, actor);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
   })
@@ -89,12 +99,21 @@ router.get(
   })
 );
 
+// Claims waiting on the caller's step of Manager -> HR -> Finance.
+router.get(
+  '/claims/approvals',
+  asyncHandler(async (req, res) => {
+    const { data, scope } = await service.listApprovals(req.user.org_id, req.user);
+    return ok(res, data, { scope });
+  })
+);
+
+// One step of the chain — the claimant's manager, HR, Finance, or an admin.
 router.post(
   '/claims/:id/decision',
-  authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = decideClaimSchema.parse(req.body);
-    const result = await service.decideClaim(req.user.org_id, req.params.id, req.user.id, body);
+    const result = await service.decideClaim(req.user.org_id, req.params.id, req.user, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
   })

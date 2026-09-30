@@ -88,6 +88,8 @@ router.post(
     const result = await service.createRequest(req.user.org_id, req.user.org_membership_id, body);
     if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
     if (result.error === 'overlaps_existing') return fail(res, 409, 'You already have a pending or approved leave request covering some of those dates');
+    if (result.error === 'present_on_date') return fail(res, 409, `You were marked present on ${result.date} — leave can't be applied for a day you attended`);
+    if (result.error === 'no_working_days') return fail(res, 422, 'Those dates are all weekends or holidays on your calendar — there are no working days to take leave for');
     if (result.error === 'insufficient_balance') {
       return fail(res, 422, `Not enough leave balance — ${result.needed} day(s) requested, ${Math.max(result.remaining, 0)} remaining`);
     }

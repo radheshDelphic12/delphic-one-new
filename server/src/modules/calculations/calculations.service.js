@@ -39,10 +39,14 @@ const KINDS = {
 // Which locked calculations a change to each kind of operational data can
 // affect. Financials aggregates everything, so it is affected by all of them.
 const SOURCE_KINDS = {
-  attendance: ['salary', 'resource_revenue', 'financials'],
+  // Check-in / check-out is presence only — pay comes from approved
+  // timesheet hours — so an attendance change never moves a locked figure.
+  attendance: [],
   leave: ['salary', 'resource_revenue', 'financials'],
   salary_structure: ['salary', 'resource_revenue', 'financials'],
-  timesheet: ['billing', 'resource_revenue', 'vendor_payment', 'financials'],
+  // Entries and overtime decisions: billing, and (since salary is approved
+  // timesheet hours + approved OT) salary too.
+  timesheet: ['billing', 'salary', 'resource_revenue', 'vendor_payment', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).
   allocation: ['resource_revenue', 'vendor_payment', 'financials'],
 };

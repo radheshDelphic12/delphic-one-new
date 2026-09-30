@@ -1,14 +1,17 @@
-// Attendance-based salary — the ONE salary calculation. Payroll runs, Live
+// Timesheet-based salary — the ONE salary calculation. Payroll runs, Live
 // Analytics → Salary and Resource Revenue all read it, so a month's salary
 // can't come out differently in two places.
 //
 // Per employee, for one calendar month:
-//   working_days = Mon–Fri of the month less the holidays of the employee's
-//                  own calendar (calendars.service.pickCalendarId — their own
-//                  mapping → department → office location → org default)
-//   per_day      = monthly ctc (SalaryStructure in force at month end) / working_days
-//   loss of pay  = absent / unpaid leave / no record on a working day (half day = 0.5)
-//   net          = ctc − per_day × loss-of-pay days
+//   expected hours = company working days (the employee's ONE company
+//                    calendar — calendars.service.pickCalendarId with no
+//                    project) × daily shift hours
+//   hourly rate    = monthly ctc (SalaryStructure in force at month end) / expected hours
+//   paid           = APPROVED timesheet hours up to the shift per day (+ paid leave)
+//   overtime       = approved OT only (TimesheetDayOvertime), at the hourly rate
+//   net            = ctc − hourly rate × deficit hours + OT amount
+// Check-in / check-out never feeds pay. Pending hours / OT only show as
+// projected_net. See payroll.service.computeBreakdown for the day rules.
 // See payroll.service.computeBreakdown for the day-by-day rules. Contractors
 // are never on payroll (paid through their vendor — see vendorPayment.engine).
 
@@ -16,6 +19,7 @@ const prisma = require('../../../config/db');
 const { computeBreakdown } = require('../../payroll/payroll.service');
 const { pickCalendarId } = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds } = require('../period');
+const { shiftHours } = require('../../timesheets/workHours.service');
 const { teamOn } = require('../../../lib/allocations');
 
 // Employee / Department / Team filters, combinable. Department matches the
@@ -58,6 +62,7 @@ const MEMBER_SELECT = {
   location_id: true,
   department_id: true,
   team_id: true,
+  shift: { select: { start_minutes: true, end_minutes: true } },
   joined_at: true,
   left_at: true,
   department: { select: { id: true, name: true } },
@@ -81,7 +86,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     orderBy: { joined_at: 'asc' },
   });
   const ids = memberships.map((m) => m.id);
-  const [structures, attendance, leaves, holidays, calendars, employeeCalendars] = await Promise.all([
+  const [structures, attendance, leaves, holidays, calendars, employeeCalendars, entries, overtime] = await Promise.all([
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, effective_from: { lte: end } },
       orderBy: [{ effective_from: 'desc' }, { created_at: 'desc' }],
@@ -95,9 +100,18 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
       where: { org_id: orgId, org_membership_id: { in: ids }, status: 'approved', from_date: { lte: end }, to_date: { gte: start } },
       select: { org_membership_id: true, from_date: true, to_date: true, leave_type: { select: { paid: true } } },
     }),
-    prisma.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, date: { gte: start, lte: end } }, select: { calendar_id: true, date: true } }),
+    prisma.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, date: { gte: start, lte: end } }, select: { calendar_id: true, date: true, is_working_day: true } }),
     prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, name: true, location_id: true, department_id: true, is_default: true } }),
     prisma.employeeCalendar.findMany({ where: { org_membership_id: { in: ids } }, select: { org_membership_id: true, account_id: true, calendar_id: true } }),
+    // Approved + pending only: rejected hours never count, not even as a projection.
+    prisma.timesheetEntry.findMany({
+      where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end }, status: { in: ['approved', 'submitted'] } },
+      select: { org_membership_id: true, date: true, hours: true, overtime_hours: true, status: true },
+    }),
+    prisma.timesheetDayOvertime.findMany({
+      where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end } },
+      select: { org_membership_id: true, date: true, hours: true, status: true },
+    }),
   ]);
 
   const group = (rows, key) => {
@@ -109,9 +123,26 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     return map;
   };
   const holidaysByCalendar = new Map();
+  const workingByCalendar = new Map();
   for (const h of holidays) {
-    if (!holidaysByCalendar.has(h.calendar_id)) holidaysByCalendar.set(h.calendar_id, new Set());
-    holidaysByCalendar.get(h.calendar_id).add(ymd(h.date));
+    const target = h.is_working_day ? workingByCalendar : holidaysByCalendar;
+    if (!target.has(h.calendar_id)) target.set(h.calendar_id, new Set());
+    target.get(h.calendar_id).add(ymd(h.date));
+  }
+  // Per member, per day: approved vs pending logged hours (hours + overtime_hours).
+  const hoursByMember = new Map();
+  for (const e of entries) {
+    if (!hoursByMember.has(e.org_membership_id)) hoursByMember.set(e.org_membership_id, new Map());
+    const days = hoursByMember.get(e.org_membership_id);
+    const key = ymd(e.date);
+    const day = days.get(key) || { approved: 0, pending: 0 };
+    day[e.status === 'approved' ? 'approved' : 'pending'] += Number(e.hours) + Number(e.overtime_hours || 0);
+    days.set(key, day);
+  }
+  const overtimeByMember = new Map();
+  for (const o of overtime) {
+    if (!overtimeByMember.has(o.org_membership_id)) overtimeByMember.set(o.org_membership_id, new Map());
+    overtimeByMember.get(o.org_membership_id).set(ymd(o.date), { hours: Number(o.hours), status: o.status });
   }
   const latestStructure = new Map();
   for (const s of structures) if (!latestStructure.has(s.org_membership_id)) latestStructure.set(s.org_membership_id, s);
@@ -126,6 +157,9 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     calendars,
     assignmentsByMember: group(employeeCalendars, 'org_membership_id'),
     holidaysByCalendar,
+    workingByCalendar,
+    hoursByMember,
+    overtimeByMember,
   };
 }
 
@@ -169,8 +203,12 @@ function salaryLine(ctx, membership, asOf = null) {
     days_in_month: end.getUTCDate(),
     ctc: structure.ctc,
     attendanceByDate,
+    hoursByDate: ctx.hoursByMember.get(membership.id) || new Map(),
+    overtimeByDate: ctx.overtimeByMember.get(membership.id) || new Map(),
     leaveRanges,
     holidaySet: ctx.holidaysByCalendar.get(calendarId) || new Set(),
+    workingSet: ctx.workingByCalendar.get(calendarId) || new Set(),
+    shiftHours: shiftHours(membership.shift),
     asOf,
   });
   return {
@@ -183,6 +221,10 @@ function salaryLine(ctx, membership, asOf = null) {
     net,
     earned_to_date: breakdown.earned_to_date,
     per_day: breakdown.per_day_pay,
+    // Actual (approved) vs projected (approved + pending) — never mixed.
+    projected_net: breakdown.projected_net,
+    pending_amount: breakdown.pending_amount,
+    ot_amount: breakdown.ot_amount,
     breakdown,
   };
 }
@@ -214,6 +256,9 @@ async function computeSalary(orgId, { period_month, period_year, asOf = null, fi
       deductions: sum(lines, 'deductions'),
       net: sum(lines, 'net'),
       earned_to_date: sum(lines, 'earned_to_date'),
+      projected_net: sum(lines, 'projected_net'),
+      pending_amount: sum(lines, 'pending_amount'),
+      ot_amount: sum(lines, 'ot_amount'),
       it_net: sum(it, 'net'),
       non_it_net: sum(nonIt, 'net'),
       it_earned_to_date: sum(it, 'earned_to_date'),

@@ -6,6 +6,7 @@ const { computeDayRevenue } = require('../billing/billing.service');
 const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
+const workHours = require('./workHours.service');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 
@@ -157,6 +158,8 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
     },
   });
 
+  await workHours.syncDayOvertime(orgId, orgMembershipId, date);
+
   // Route to the reporting manager — one ping per employee per day, not per row.
   if (alreadyPendingToday === 0) {
     const person = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person: { select: { name: true } } } });
@@ -265,7 +268,16 @@ async function monthlyGrouped(orgId, orgMembershipId, year, month) {
       holiday_label: row.holiday_label,
     });
   }
-  for (const day of byDate.values()) day.total_hours = Math.round(day.total_hours * 100) / 100;
+  // Overtime = logged (non-rejected) hours beyond the day's shift on the
+  // employee's calendar (workHours.loggedOvertime), whether or not it was
+  // typed into the OT field.
+  const overtime = (await workHours.loggedOvertime(orgId, [orgMembershipId], from, new Date(to.getTime() - 86400000))).get(orgMembershipId) || new Map();
+  for (const day of byDate.values()) {
+    day.total_hours = Math.round(day.total_hours * 100) / 100;
+    const ot = overtime.get(day.date);
+    day.expected_hours = ot ? ot.expected : null;
+    day.ot_hours = ot ? ot.ot : 0;
+  }
   return Array.from(byDate.values());
 }
 
@@ -285,7 +297,20 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   }
 
   const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
+  await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
   return { entry };
+}
+
+// Employee: remove their own entry — only while it's pending and its week
+// isn't locked. Approved / rejected / locked entries are final for them.
+async function deleteOwnEntry(orgId, orgMembershipId, entryId) {
+  const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId, org_membership_id: orgMembershipId } });
+  if (!existing) return { error: 'not_found' };
+  if (existing.status !== 'submitted') return { error: 'already_decided' };
+  if (await isLocked(orgId, existing.date)) return { error: 'day_locked' };
+  await prisma.timesheetEntry.delete({ where: { id: entryId } });
+  await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
+  return { deleted: true };
 }
 
 // --- Admin corrections: any entry, any status, locked day or not. Revenue is
@@ -316,8 +341,15 @@ async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch 
   }
   const data = { ...patch };
   if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
+  // Admin can also approve / reject (or re-open) any entry, locked or not.
+  if (data.status && data.status !== existing.status) {
+    Object.assign(data, data.status === 'submitted'
+      ? { approved_by: null, approved_at: null, decision_reason: null }
+      : { approved_by: adminUserId, approved_at: new Date(), decision_reason: `Admin: ${reason}`.slice(0, 500) });
+  }
   const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data });
   await refreshRevenue(orgId, existing.date);
+  await workHours.syncDayOvertime(orgId, existing.org_membership_id, existing.date);
   const change = await detectFinanceChange(orgId, {
     source_type: 'timesheet',
     source_id: entryId,
@@ -337,6 +369,7 @@ async function adminDeleteEntry(orgId, adminUserId, entryId, { reason }) {
   if (!existing) return { error: 'not_found' };
   await prisma.timesheetEntry.delete({ where: { id: entryId } });
   await refreshRevenue(orgId, existing.date);
+  await workHours.syncDayOvertime(orgId, existing.org_membership_id, existing.date);
   const change = await detectFinanceChange(orgId, {
     source_type: 'timesheet',
     source_id: entryId,
@@ -380,6 +413,8 @@ async function decideEntry(orgId, entryId, actor, { status, reason }) {
     data: { status, approved_by: actor.id, approved_at: new Date(), decision_reason: reason },
   });
   if (status === 'approved') await refreshRevenue(orgId, existing.date);
+  // A rejected entry's hours no longer count toward the day's overtime.
+  await workHours.syncDayOvertime(orgId, existing.org_membership_id, existing.date);
   const hoursLabel = `${Number(existing.hours)}h${Number(existing.overtime_hours || 0) ? ` + ${Number(existing.overtime_hours)}h overtime` : ''}`;
   await detectFinanceChange(orgId, {
     source_type: 'timesheet',
@@ -569,6 +604,7 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
 
   if (status === 'approved') {
     await refreshRevenue(orgId, targetDate);
+    await workHours.syncDayOvertime(orgId, targetMembershipId, targetDate);
     const entryBefore = ticket.timesheet_entry;
     await detectFinanceChange(orgId, {
       source_type: 'timesheet',
@@ -622,7 +658,22 @@ async function pendingApprovals(orgId, actor) {
       include: TICKET_INCLUDE,
     }),
   ]);
-  return { entries: entries.map(labelEntry), regularizations: regularizations.map(labelTicket) };
+  const overtime = await prisma.timesheetDayOvertime.findMany({
+    where: { org_id: orgId, status: 'pending', org_membership: owner },
+    orderBy: { date: 'desc' },
+    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+  });
+  const lockedDates = new Set((await prisma.timesheetLock.findMany({
+    where: { org_id: orgId, date: { in: [...new Set(entries.map((e) => ymd(e.date)))].map((d) => new Date(d)) } },
+    select: { date: true },
+  })).map((l) => ymd(l.date)));
+  return {
+    // admin_review: the week locked and the manager didn't decide within the
+    // grace period — an admin should now take it.
+    entries: entries.map((e) => ({ ...labelEntry(e), admin_review: lockedDates.has(ymd(e.date)) && workHours.needsAdminReview(e.date) })),
+    regularizations: regularizations.map(labelTicket),
+    overtime: overtime.map((o) => ({ ...o, hours: Number(o.hours) })),
+  };
 }
 
 // Projects the caller can log time on: allocations still open, upcoming, or
@@ -652,14 +703,13 @@ async function myProjects(orgId, orgMembershipId) {
 
 // --- Weekly auto-lock -------------------------------------------------------
 
-// Mon-Fri of the most recently COMPLETED work week, as of `now` (IST). The
-// week locks at Saturday 00:00 IST, so on any day "most recent completed" is
-// the week that ended on the latest past Saturday.
+// Sunday -> Saturday of the most recently COMPLETED week, as of `now` (IST).
+// A week closes at the end of Saturday and locks when the next Sunday starts
+// (00:00 IST) — all seven days, since clients may work weekends.
 function lastCompletedWeekDays(now = new Date()) {
   const ist = asIst(now);
-  const daysSinceSaturday = (ist.getUTCDay() + 1) % 7;
-  const saturday = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - daysSinceSaturday);
-  return [5, 4, 3, 2, 1].map((n) => new Date(saturday - n * 86400000));
+  const thisSunday = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - ist.getUTCDay());
+  return [7, 6, 5, 4, 3, 2, 1].map((n) => new Date(thisSunday - n * 86400000));
 }
 
 // Idempotent — days already locked (manually or by an earlier run) are left alone.
@@ -714,17 +764,21 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
   ]);
 
   const loggedTodayIds = new Set(todayEntries.map((e) => e.org_membership_id));
-  // Holiday work plus the overtime hours claimed on ordinary entries.
-  const overtimeHours = monthEntries
-    .reduce((sum, e) => sum + (e.is_holiday_overtime ? Number(e.hours) : 0) + Number(e.overtime_hours || 0), 0);
+  // Overtime = each day's logged hours beyond the employee's shift (0 expected
+  // on a weekend / company holiday), the same rule payroll uses — not only
+  // what was typed into the OT field.
+  const overtimeByMember = await workHours.loggedOvertime(orgId, [...new Set(monthEntries.map((e) => e.org_membership_id))], from, new Date(to.getTime() - 86400000));
+  const memberOt = (id) => [...(overtimeByMember.get(id)?.values() || [])].reduce((s, d) => s + d.ot, 0);
+  const overtimeHours = memberIds.reduce((s, id) => s + memberOt(id), 0);
 
   const byMember = new Map(memberIds.map((id) => [id, { hours: 0, byProject: new Map() }]));
   for (const e of monthEntries) {
     const bucket = byMember.get(e.org_membership_id);
     if (!bucket) continue;
-    bucket.hours += Number(e.hours);
+    const logged = Number(e.hours) + Number(e.overtime_hours || 0);
+    bucket.hours += logged;
     const name = e.account ? e.account.project_name || e.account.name : 'Unassigned';
-    bucket.byProject.set(name, (bucket.byProject.get(name) || 0) + Number(e.hours));
+    bucket.byProject.set(name, (bucket.byProject.get(name) || 0) + logged);
   }
 
   const grid = members.map((m) => {
@@ -743,6 +797,7 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
       department: m.person.department?.name || null,
       logged_today: loggedTodayIds.has(m.id),
       month_hours: monthHours,
+      overtime_hours: Math.round(memberOt(m.id) * 100) / 100,
       allocation,
     };
   });
@@ -759,7 +814,178 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
   };
 }
 
+// Manager (direct reports) or admin decides a day's overtime: approved (paid
+// as OT), rejected (not paid), or comp_off (time off in lieu instead of pay).
+async function decideOvertime(orgId, overtimeId, actor, { status, reason }) {
+  const row = await prisma.timesheetDayOvertime.findFirst({
+    where: { id: overtimeId, org_id: orgId },
+    include: { org_membership: { select: { id: true, manager_id: true, person_id: true } } },
+  });
+  if (!row) return { error: 'not_found' };
+  if (!canDecideFor(actor, row.org_membership)) return { error: 'not_approver' };
+  if (row.org_membership_id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_entry' };
+  // A manager decides once; an admin may revise a decision.
+  if (row.status !== 'pending' && actor.role !== 'admin') return { error: 'already_decided' };
+  const overtime = await prisma.timesheetDayOvertime.update({
+    where: { id: overtimeId },
+    data: { status, decided_by: actor.id, decided_at: new Date(), decision_reason: reason || null },
+  });
+  await detectFinanceChange(orgId, {
+    source_type: 'timesheet',
+    source_id: overtimeId,
+    date: row.date,
+    org_membership_id: row.org_membership_id,
+    account_id: null,
+    changed_by: actor.id,
+    description: `Overtime ${status.replace('_', ' ')} (${Number(row.hours)}h)`,
+    old_value: { overtime_status: row.status, hours: Number(row.hours) },
+    new_value: { overtime_status: status, hours: Number(row.hours) },
+  });
+  return { overtime: { ...overtime, hours: Number(overtime.hours) } };
+}
+
+// Admin: add an entry for any employee on any date (locked week included),
+// with a reason — it can go straight in as approved.
+async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason, status = 'approved', ...body }) {
+  const member = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true } });
+  if (!member) return { error: 'member_not_found' };
+  if (body.account_id) {
+    const account = await prisma.account.findFirst({ where: { id: body.account_id, org_id: orgId }, select: { id: true } });
+    if (!account) return { error: 'account_not_found' };
+  }
+  if ((await otherHoursOnDay(org_membership_id, body.date)) + body.hours + (body.overtime_hours || 0) > 24) return { error: 'exceeds_day_hours' };
+  const entry = await prisma.timesheetEntry.create({
+    data: {
+      org_id: orgId,
+      org_membership_id,
+      date: body.date,
+      account_id: body.account_id || null,
+      hours: body.hours,
+      overtime_hours: body.account_id ? body.overtime_hours || 0 : 0,
+      billable: body.account_id ? body.billable !== false : false,
+      notes: body.notes || null,
+      status,
+      ...(status === 'approved' ? { approved_by: adminUserId, approved_at: new Date(), decision_reason: `Added by admin: ${reason}`.slice(0, 500) } : {}),
+    },
+  });
+  await refreshRevenue(orgId, body.date);
+  await workHours.syncDayOvertime(orgId, org_membership_id, body.date);
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'timesheet',
+    source_id: entry.id,
+    date: body.date,
+    org_membership_id,
+    account_id: entry.account_id,
+    changed_by: adminUserId,
+    description: `Timesheet entry added by admin: ${reason}`,
+    old_value: null,
+    new_value: snapshotOf(entry),
+  });
+  return { entry, flagged: change?.flagged || 0 };
+}
+
+// Admin bulk upload of past timesheet entries (CSV). Employees are matched by
+// employee code or email; the project by project code or name (blank =
+// general, non-project time). Every row is checked first and nothing is
+// written if any row has an error, so a sheet is applied all-or-nothing and
+// can simply be fixed and re-uploaded. Rows go in as approved, like
+// adminCreateEntry, with the upload's reason.
+async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
+  const [memberships, projects] = await Promise.all([
+    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, employee_code: true, joined_at: true, person: { select: { email: true } } } }),
+    prisma.account.findMany({ where: { org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, project_code: true } }),
+  ]);
+  const memberByKey = new Map();
+  for (const m of memberships) {
+    if (m.employee_code) memberByKey.set(m.employee_code.trim().toLowerCase(), m);
+    if (m.person?.email) memberByKey.set(m.person.email.trim().toLowerCase(), m);
+  }
+  const projectByKey = new Map();
+  for (const p of projects) {
+    for (const key of [p.project_code, p.project_name, p.name]) {
+      if (key && !projectByKey.has(key.trim().toLowerCase())) projectByKey.set(key.trim().toLowerCase(), p);
+    }
+  }
+
+  const today = todayIst();
+  const errors = [];
+  const valid = [];
+  const dayTotals = new Map();
+  let skipped = 0;
+  for (const [index, row] of rows.entries()) {
+    const line = index + 2; // Row 1 of the sheet is the header.
+    if (!row.employee && !row.date && !row.hours) { skipped += 1; continue; }
+    const fail = (message) => errors.push({ row: line, employee: row.employee, date: row.date, message });
+    const member = memberByKey.get(row.employee.toLowerCase());
+    if (!member) { fail('Employee not found — use their employee code or email'); continue; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || Number.isNaN(new Date(`${row.date}T00:00:00.000Z`).getTime())) { fail('Date must be YYYY-MM-DD'); continue; }
+    const date = new Date(`${row.date}T00:00:00.000Z`);
+    if (date > today) { fail('Date is in the future'); continue; }
+    if (member.joined_at && row.date < ymd(member.joined_at)) { fail('Date is before the employee joined'); continue; }
+    const hours = Number(row.hours);
+    const overtime = row.overtime_hours === '' ? 0 : Number(row.overtime_hours);
+    if (!(hours > 0) || hours > 24) { fail('Hours must be a number above 0 and at most 24'); continue; }
+    if (!(overtime >= 0) || overtime > 24) { fail('Overtime hours must be a number from 0 to 24'); continue; }
+    let project = null;
+    if (row.project) {
+      project = projectByKey.get(row.project.toLowerCase());
+      if (!project) { fail(`Project "${row.project}" not found — use its project code or name`); continue; }
+    }
+    if (await leaveService.leaveDayFor(orgId, member.id, date)) { fail('Employee is on approved leave that day'); continue; }
+    const key = `${member.id}|${row.date}`;
+    if (!dayTotals.has(key)) dayTotals.set(key, await otherHoursOnDay(member.id, date));
+    dayTotals.set(key, dayTotals.get(key) + hours + (project ? overtime : 0));
+    if (dayTotals.get(key) > 24) { fail('More than 24 hours logged for this employee on this date'); continue; }
+    const billable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
+    valid.push({
+      org_membership_id: member.id,
+      date,
+      account_id: project?.id || null,
+      hours,
+      overtime_hours: project ? overtime : 0,
+      billable: Boolean(project) && billable,
+      notes: row.notes || null,
+      status: 'approved',
+      reason,
+    });
+  }
+
+  const summary = { total: rows.length, skipped, errors, created: valid.length, applied: false };
+  if (dry_run || errors.length) return summary;
+  let flagged = 0;
+  for (const entry of valid) {
+    const result = await adminCreateEntry(orgId, adminUserId, entry);
+    flagged += result.flagged || 0;
+  }
+  return { ...summary, applied: true, flagged };
+}
+
+// "Approve all" in the approval inbox: each item goes through its own
+// decision (same permission and state checks as one click), in order —
+// regularisations, then entries, then overtime. Items that can't be approved
+// (already decided, not the caller's report, over 24h…) are listed, not fatal.
+async function bulkApprove(orgId, actor, { entries = [], overtime = [], regularizations = [] }) {
+  const failed = [];
+  let approved = 0;
+  const run = async (kind, ids, decide) => {
+    for (const id of ids) {
+      const result = await decide(id);
+      if (result?.error) failed.push({ kind, id, error: result.error });
+      else approved += 1;
+    }
+  };
+  await run('regularization', regularizations, (id) => decideTicket(orgId, id, actor, { status: 'approved' }));
+  await run('entry', entries, (id) => decideEntry(orgId, id, actor, { status: 'approved' }));
+  await run('overtime', overtime, (id) => decideOvertime(orgId, id, actor, { status: 'approved' }));
+  return { approved, failed };
+}
+
 module.exports = {
+  bulkApprove,
+  importEntries,
+  deleteOwnEntry,
+  decideOvertime,
+  adminCreateEntry,
   adminUpdateEntry,
   adminDeleteEntry,
   unlockDay,

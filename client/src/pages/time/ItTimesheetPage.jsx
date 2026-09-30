@@ -11,6 +11,7 @@ import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
 import NoteText from '../../components/NoteText.jsx';
+import WeekHoursView from './WeekHoursView.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -81,8 +82,11 @@ export default function ItTimesheetPage() {
     }
   }
 
+  const [weekKey, setWeekKey] = useState(0);
+
   async function load() {
     setLoading(true);
+    setWeekKey((k) => k + 1);
     try {
       const { data } = await apiClient.get('/timesheets/my-log', { params: period });
       setDays(data.data || []);
@@ -96,6 +100,8 @@ export default function ItTimesheetPage() {
   useEffect(() => { load(); }, [period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthTotal = useMemo(() => days.reduce((sum, d) => sum + d.total_hours, 0), [days]);
+
+  const monthOt = useMemo(() => days.reduce((sum, d) => sum + (d.ot_hours || 0), 0), [days]);
   const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0) + (Number(r.overtime_hours) || 0), 0), [rows]);
   const openTasks = tasks.filter((t) => t.status !== 'completed');
 
@@ -236,7 +242,7 @@ export default function ItTimesheetPage() {
             </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">Month total: {monthTotal.toFixed(1)} hrs</span>
+            <span className="text-sm font-medium text-tertiary-700">Month total: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
@@ -251,7 +257,10 @@ export default function ItTimesheetPage() {
               <div key={day.date} className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
                 <div className="flex items-center justify-between bg-tertiary-50 px-4 py-2">
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>
-                  <span className="text-xs font-medium text-tertiary-600">{day.total_hours} hrs</span>
+                  <span className="text-xs font-medium text-tertiary-600">
+                    {day.total_hours} hrs
+                    {day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
+                  </span>
                 </div>
                 <table className="w-full text-sm">
                   <thead>
@@ -293,6 +302,8 @@ export default function ItTimesheetPage() {
           </div>
         )}
       </section>
+
+      <WeekHoursView canDeleteOwn reloadKey={weekKey} onChanged={load} />
 
       <RegularisationSection requireProject projectOptions={projectOptions} onChanged={load} />
     </div>

@@ -96,11 +96,13 @@ async function projectCalendar(orgId, accountId, month, year) {
   const calendar = mapped?.calendar || (await calendarsService.defaultCalendar(orgId));
   const { start, end } = monthBounds(month, year);
   const holidays = calendar
-    ? await prisma.calendarHoliday.findMany({ where: { calendar_id: calendar.id, date: { gte: start, lte: end } }, select: { date: true, label: true } })
+    ? await prisma.calendarHoliday.findMany({ where: { calendar_id: calendar.id, date: { gte: start, lte: end } }, select: { date: true, label: true, is_working_day: true } })
     : [];
-  const holidayLabels = new Map(holidays.map((h) => [ymd(h.date), h.label]));
-  const working_days = calendarsService.countWorkingDays(year, month, new Set(holidayLabels.keys()));
-  return { calendar: calendar ? { id: calendar.id, name: calendar.name } : null, holidayLabels, working_days };
+  const holidayLabels = new Map(holidays.filter((h) => !h.is_working_day).map((h) => [ymd(h.date), h.label]));
+  // Client working-day exceptions (e.g. a working Sunday) count as working days.
+  const workingDates = new Set(holidays.filter((h) => h.is_working_day).map((h) => ymd(h.date)));
+  const working_days = calendarsService.countWorkingDays(year, month, new Set(holidayLabels.keys()), workingDates);
+  return { calendar: calendar ? { id: calendar.id, name: calendar.name } : null, holidayLabels, workingDates, working_days };
 }
 
 // The full, unfiltered month for one project — exactly what a lock stores.
@@ -155,7 +157,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   for (const date of monthDates(period_month, period_year)) {
     const key = ymd(date);
     const holiday = cal.holidayLabels.get(key) || null;
-    const isWorkingDay = !isWeekend(date) && !holiday;
+    const isWorkingDay = cal.workingDates.has(key) || (!isWeekend(date) && !holiday);
     const inContract = (!agreementStart || date >= agreementStart) && (!agreementEnd || date <= agreementEnd);
     const dayEntries = byDate.get(key) || [];
     const rate = rateOn(rates, date);

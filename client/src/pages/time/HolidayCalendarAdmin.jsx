@@ -14,7 +14,7 @@ const SOURCE_LABEL = {
   assigned: 'Assigned directly',
   department: 'Via department',
   location: 'Via office location',
-  default: 'Organization default',
+  default: 'Standard calendar',
   project: 'Via project',
 };
 
@@ -205,6 +205,18 @@ export default function HolidayCalendarAdmin({ onChanged }) {
     }
   }
 
+  // The org has ONE standard calendar; this moves the flag here.
+  async function makeStandard(calendar) {
+    if (!window.confirm(`Make ${calendar.name} the standard holiday calendar? Everyone without a department, office or personal calendar will follow it.`)) return;
+    try {
+      await apiClient.patch(`/calendars/${calendar.id}`, { is_default: true });
+      pushInfo(`${calendar.name} is now the standard calendar`);
+      changed();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update calendar'), 'Something went wrong');
+    }
+  }
+
   async function deleteCalendar(calendar) {
     if (!window.confirm(`Delete ${calendar.name}? Its holidays are deleted too.`)) return;
     try {
@@ -279,7 +291,7 @@ export default function HolidayCalendarAdmin({ onChanged }) {
     { key: 'kind', header: 'Kind', render: (row) => <span className="capitalize">{row.kind}</span> },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || '-' },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || '-' },
-    { key: 'default', header: 'Default', render: (row) => (row.is_default ? 'Yes' : 'No') },
+    { key: 'default', header: 'Standard', render: (row) => (row.is_default ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">Standard</span> : '—') },
     { key: 'holidays', header: 'Holidays', render: (row) => <button type="button" className="text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row._count?.holidays ?? 0}</button> },
     { key: 'employees', header: 'Assigned', render: (row) => <button type="button" className="text-primary-700 hover:underline" onClick={() => setEmployeesCalendar(row)}>{row._count?.employees ?? 0}</button> },
     {
@@ -293,6 +305,9 @@ export default function HolidayCalendarAdmin({ onChanged }) {
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => openHolidays(row)}>
             <CalendarDays className="h-3.5 w-3.5" /> Holidays
           </button>
+          {!row.is_default && (
+            <button type="button" className="btn-ghost text-xs" title="Make this the one standard holiday calendar" onClick={() => makeStandard(row)}>Make standard</button>
+          )}
           <button type="button" aria-label="Edit calendar" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-tertiary-50 hover:text-tertiary-700" onClick={() => setEditingCalendar(row)}>
             <Pencil className="h-3.5 w-3.5" />
           </button>

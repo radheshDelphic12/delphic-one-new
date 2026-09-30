@@ -94,6 +94,44 @@ describe('Leave balances are computed live, Jan 1 -> today', () => {
   });
 });
 
+describe('Leave costs working days only, on the employee\'s calendar', () => {
+  test('Fri -> Mon costs 2 days; 1-5 Oct with a 2 Oct holiday costs 2; a weekend-only range is refused', async () => {
+    const { org } = await seedOrgAdmin();
+    const emp = await seedEmployee(org);
+    const cl = await typeByName(org, 'Casual Leave');
+    const calendar = await prisma.calendar.create({ data: { org_id: org.id, name: 'Standard', kind: 'internal', is_default: true } });
+    await prisma.calendarHoliday.create({ data: { calendar_id: calendar.id, date: d('2026-10-02'), label: 'Gandhi Jayanti' } });
+    const apply = (from_date, to_date) => authed(request(app).post('/api/v1/leave/requests'), emp.token).send({ leave_type_id: cl.id, from_date, to_date });
+
+    const friToMon = await apply('2026-11-06', '2026-11-09');
+    expect(friToMon.status).toBe(201);
+    expect(friToMon.body.data.days).toBe(2);
+
+    const octWeek = await apply('2026-10-01', '2026-10-05');
+    expect(octWeek.status).toBe(201);
+    expect(octWeek.body.data.days).toBe(2);
+
+    expect((await apply('2026-11-14', '2026-11-15')).status).toBe(422); // Sat + Sun
+
+    const mine = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), emp.token);
+    expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ pending: 4, remaining: 12 });
+  });
+
+  test('a full-day leave is refused on a date the employee was present; a half day is still allowed', async () => {
+    const { org } = await seedOrgAdmin();
+    const emp = await seedEmployee(org);
+    const cl = await typeByName(org, 'Casual Leave');
+    await prisma.attendanceRecord.create({ data: { org_id: org.id, org_membership_id: emp.membership.id, date: d('2026-09-15'), status: 'present', check_in_at: new Date('2026-09-15T04:00:00Z') } });
+
+    const full = await authed(request(app).post('/api/v1/leave/requests'), emp.token).send({ leave_type_id: cl.id, from_date: '2026-09-14', to_date: '2026-09-16' });
+    expect(full.status).toBe(409);
+    expect(full.body.message).toContain('2026-09-15');
+
+    const half = await authed(request(app).post('/api/v1/leave/requests'), emp.token).send({ leave_type_id: cl.id, from_date: '2026-09-15', to_date: '2026-09-15', is_half_day: true, half_day_session: 'SECOND_HALF' });
+    expect(half.status).toBe(201);
+  });
+});
+
 describe('Admin leave balances: overview, entitlement control, withdrawing leave', () => {
   test('the overview lists every active employee with CL/EL/SL/UL counters; only an admin can read it', async () => {
     const { org, token } = await seedOrgAdmin();

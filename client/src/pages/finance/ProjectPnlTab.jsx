@@ -191,7 +191,8 @@ function ProjectPnlDrawer({ projectId, period, vendors, onClose, onChanged }) {
           <p className="text-xs text-tertiary-500">
             Profit = client billing − (internal salary allocations + vendor contractor cost).
             {pnl.revenue.billing_type === 'monthly' && ` Fixed monthly billing of ${money(pnl.revenue.rate, pnl.revenue.original_currency)}${pnl.revenue.prorated_days ? `, prorated for ${pnl.revenue.prorated_days} days` : ''}.`}
-            {pnl.revenue.billing_type === 'hourly' && ` ${pnl.revenue.billable_hours} approved billable hours this month at ${money(pnl.revenue.rate, pnl.revenue.original_currency)}/hr.`}
+            {pnl.revenue.billing_type === 'hourly' && ` ${pnl.revenue.billable_hours} approved billable hours this month at ${money(pnl.revenue.rate, pnl.revenue.original_currency)}/hr${pnl.revenue.overtime_hours ? `, plus ${pnl.revenue.overtime_hours}h approved overtime (${money(pnl.revenue.overtime_amount, pnl.revenue.original_currency)})` : ''}${pnl.revenue.locked ? ' — from the locked billing' : ''}.`}
+            {pnl.revenue.note === 'after_agreement_end' && ' The agreement had ended before this month.'}
             {pnl.revenue.note === 'before_agreement_start' && ' The agreement had not started in this month.'}
             {pnl.revenue.note === 'no_billing_rate' && ' No billing terms are set for this project yet (Projects tab → Edit).'}
             {' All amounts are in INR'}{foreign ? `, converted from ${pnl.revenue.original_currency}` : ''}.
@@ -326,7 +327,7 @@ export default function ProjectPnlTab() {
         <span className="tabular-nums">
           {money(r.revenue, r.currency)}
           {r.original_currency && r.original_currency !== 'INR' && <span className="block text-xs text-tertiary-500">{money(r.original_revenue, r.original_currency)}</span>}
-          {r.billing_type === 'hourly' && <span className="block text-xs text-tertiary-500">{r.billable_hours} h × {money(r.billing_rate, r.original_currency)}</span>}
+          {r.billing_type === 'hourly' && <span className="block text-xs text-tertiary-500">{r.billable_hours} h × {money(r.billing_rate, r.original_currency)}{r.overtime_hours ? ` + ${r.overtime_hours}h OT` : ''}</span>}
           {r.minimum?.shortfall_hours > 0 && <span className="block text-xs font-medium text-warning-700">{r.minimum.shortfall_hours}h below the {r.minimum.hours}h minimum</span>}
         </span>
       ),
