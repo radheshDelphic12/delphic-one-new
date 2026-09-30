@@ -271,18 +271,22 @@ function Seat({ seat, cx, cy }) {
 const seatsOf = (unit) => [...(unit.lead ? [unit.lead] : []), ...(unit.members || [])];
 const headcount = (unit) => seatsOf(unit).filter((s) => !s.vacant).length;
 const vacancies = (unit) => seatsOf(unit).filter((s) => s.vacant).length;
+const newHires = (unit) => seatsOf(unit).filter((s) => !s.vacant && s.employment_status === 'pending_onboarding').length;
 
 function Box({ unit }) {
   const border = unit.contractor ? 'border-[3px] border-sky-400' : unit.kind === 'reports' ? 'border border-dashed border-slate-500' : 'border border-slate-600';
+  const current = headcount(unit);
+  const hires = newHires(unit);
+  const open = vacancies(unit);
   return (
     <>
       <div className={`absolute bg-[#fde59a] ${border}`} style={{ left: unit.x, top: unit.y, width: unit.width, height: unit.height }} />
       <p
         className="absolute truncate px-2 text-center text-[10.5px] font-bold text-slate-900"
         style={{ left: unit.x, top: unit.labelY - 8, width: unit.width, lineHeight: '16px' }}
-        title={`${unit.label} — ${headcount(unit)} ${headcount(unit) === 1 ? 'person' : 'people'}${vacancies(unit) ? `, ${vacancies(unit)} open` : ''}`}
+        title={`${unit.label} — ${current} current${hires ? ` (${hires} new hire${hires === 1 ? '' : 's'})` : ''}${open ? `, ${open} open → target ${current + open}` : ''}`}
       >
-        {unit.label} ({headcount(unit)}{vacancies(unit) ? ` · ${vacancies(unit)} open` : ''})
+        {unit.label} ({current}{hires ? ` · ${hires} new` : ''}{open ? ` · ${open} open → ${current + open}` : ''})
       </p>
     </>
   );

@@ -170,7 +170,12 @@ describe('Finance → Projects — same exchange rates as Project P&L', () => {
     const row = rows.find((r) => r.id === acme.id);
     expect(row.monthly_amount_inr).toBe(60000);
     expect(row.this_month).toMatchObject({ billing_type: 'hourly', contract_hours: 60, amount: 60000, amount_inr: 60000, note: null });
-    expect(rows.find((r) => r.id === loose.id).this_month).toMatchObject({ amount: null, amount_inr: null, note: 'no_minimum_hours' });
+    // No minimum: the monthly benchmark (default 160h) is the contract.
+    const looseRow = rows.find((r) => r.id === loose.id);
+    expect(looseRow).toMatchObject({ contract_hours: 160, contract_hours_basis: 'benchmark', monthly_amount_inr: 160000 });
+    expect(looseRow.this_month).toMatchObject({ contract_hours: 160, hours_basis: 'benchmark', amount: 160000, amount_inr: 160000, note: null });
+    // The Projects total is the sum of the rows' this-month amounts.
+    expect(rows.reduce((s, r) => s + (r.this_month?.amount_inr || 0), 0)).toBe(60000 + 160000);
 
     const period = `period_month=${now.getUTCMonth() + 1}&period_year=${now.getUTCFullYear()}`;
     const pnl = (await authed(request(app).get(`/api/v1/billing/projects/${acme.id}/pnl?${period}`), ctx.token)).body.data;

@@ -33,11 +33,10 @@ function billingLabel(row) {
         <span className="block text-xs text-tertiary-500">Est. {row.estimated_monthly_hours}h/mo ≈ {row.currency} {money(row.estimated_monthly_hours * row.rate)}</span>
       ) : null}
       <InrLine row={row} suffix={suffix} />
-      {row.billing_type === 'hourly' && row.minimum_monthly_hours ? (
-        <span className="block text-xs text-tertiary-500">Contract: min. {row.minimum_monthly_hours}h/mo ≈ {row.currency} {money(row.minimum_monthly_hours * row.rate)}</span>
-      ) : null}
-      {row.billing_type === 'hourly' && !row.minimum_monthly_hours ? (
-        <span className="block text-xs text-warning-700">No minimum hours — no contract amount</span>
+      {row.billing_type === 'hourly' && row.contract_hours ? (
+        <span className="block text-xs text-tertiary-500">
+          Contract: {row.contract_hours}h/mo ({row.contract_hours_basis === 'minimum' ? 'minimum' : 'benchmark'}) ≈ {row.currency} {money(row.contract_hours * row.rate)}
+        </span>
       ) : null}
     </span>
   );
@@ -50,6 +49,26 @@ function InrLine({ row, suffix }) {
   return (
     <span className="block text-xs text-tertiary-500" title={`1 ${row.currency} = ₹${row.exchange_rate}`}>
       ≈ ₹{money(row.rate_inr)}{suffix} <span className="text-tertiary-400">@ ₹{row.exchange_rate}</span>
+    </span>
+  );
+}
+
+// This month's contract amount in INR — the figures the total above adds up —
+// with why it differs from the full monthly contract, if it does.
+function ThisMonthCell({ row }) {
+  const t = row.this_month;
+  if (!t || !t.billing_type) return <span className="text-xs text-tertiary-400">No rate</span>;
+  const reason = t.note === 'before_agreement_start' ? 'Agreement not started'
+    : t.note === 'after_agreement_end' ? 'Agreement ended'
+    : t.prorated_days ? `Prorated: ${t.prorated_days} days in agreement`
+    : null;
+  return (
+    <span className="whitespace-nowrap text-right">
+      {t.amount_inr !== null
+        ? <span className="font-medium tabular-nums text-tertiary-900">₹{money(t.amount_inr)}</span>
+        : <span className="tabular-nums text-warning-700" title={`No ${t.currency} exchange rate — not in the total`}>{t.currency} {money(t.amount)} · no rate</span>}
+      {t.billing_type === 'hourly' && t.contract_hours !== null && <span className="block text-xs text-tertiary-500">{t.contract_hours}h × {t.currency} {money(t.rate)}</span>}
+      {reason && <span className="block text-xs text-tertiary-500">{reason}</span>}
     </span>
   );
 }
@@ -235,10 +254,11 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 Agreement end date
                 <input type="date" min={form.agreement_start_date || undefined} value={form.agreement_end_date} onChange={(e) => set('agreement_end_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
               </label>
-              {monthly && (
+              {(monthly || hourly) && (
                 <label className="block text-xs font-medium text-tertiary-600">
                   Monthly benchmark (hours)
                   <input type="number" min="1" max="744" value={form.benchmark_hours} onChange={(e) => set('benchmark_hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                  {hourly && <span className="mt-0.5 block font-normal text-tertiary-400">Contract hours when no minimum is set: benchmark × hourly rate per month.</span>}
                 </label>
               )}
               {hourly && (
@@ -254,7 +274,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 <label className="block text-xs font-medium text-tertiary-600">
                   Minimum hours / month <span className="font-normal text-tertiary-400">(committed, optional)</span>
                   <input type="number" min="0" max="10000" step="0.5" value={form.minimum_monthly_hours} onChange={(e) => set('minimum_monthly_hours', e.target.value)} placeholder="e.g. 100" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
-                  <span className="mt-0.5 block font-normal text-tertiary-400">The contract hours: Projects shows minimum × rate per month. Project P&amp;L and invoices use actual approved hours × rate, and flag months below the minimum.</span>
+                  <span className="mt-0.5 block font-normal text-tertiary-400">The contract hours: Projects shows minimum × rate per month (else the benchmark). Project P&amp;L and invoices use actual approved hours × rate, and flag months below the minimum.</span>
                 </label>
               )}
             </div>
@@ -331,8 +351,9 @@ export default function ProjectsTab() {
   );
 
   // This month's CONTRACT billing of the filtered projects, in INR, from the
-  // server: the fixed monthly fee, or the committed minimum hours x the hourly
-  // rate (prorated in the agreement's first / last month). Actual approved
+  // server: the fixed monthly fee, or contract hours (minimum, else benchmark)
+  // x the hourly rate, prorated in the agreement's first / last month. The
+  // total is exactly the sum of the "This month" column. Actual approved
   // hours are shown in Project P&L, not here.
   const billed = visible.filter((row) => row.this_month?.amount !== null && row.this_month?.amount !== undefined);
   const monthTotal = billed.reduce((sum, row) => sum + (row.this_month.amount_inr ?? 0), 0);
@@ -340,7 +361,9 @@ export default function ProjectsTab() {
   const monthlyCount = billed.filter((row) => row.this_month.billing_type === 'monthly' && row.this_month.amount > 0).length;
   const hourlyRows = billed.filter((row) => row.this_month.billing_type === 'hourly' && row.this_month.amount > 0);
   const contractHours = hourlyRows.reduce((sum, row) => sum + (row.this_month.contract_hours || 0), 0);
-  const noMinimum = visible.filter((row) => row.this_month?.note === 'no_minimum_hours').length;
+  const noRate = visible.filter((row) => !row.this_month?.billing_type).length;
+  const notRunning = billed.filter((row) => row.this_month.note === 'before_agreement_start' || row.this_month.note === 'after_agreement_end').length;
+  const prorated = billed.filter((row) => row.this_month.prorated_days).length;
   const monthName = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const load = useCallback(() => {
@@ -368,6 +391,7 @@ export default function ProjectsTab() {
     { key: 'category', header: 'Category', render: (row) => categoryLabel(row.service_category) },
     { key: 'start', header: 'Agreement', render: (row) => <AgreementDates row={row} /> },
     { key: 'contract', header: 'Contract', render: (row) => <ContractPill contract={row.contract} /> },
+    { key: 'this_month', header: 'This month (INR)', render: (row) => <ThisMonthCell row={row} /> },
     { key: 'open', header: '', render: (row) => <button type="button" className="btn-ghost text-xs" onClick={() => setSelected(row)}>Open</button> },
   ];
 
@@ -402,12 +426,14 @@ export default function ProjectsTab() {
                 <span className="font-heading text-base font-semibold tabular-nums text-tertiary-900">{moneyIn(monthTotal, 'INR')}</span>
                 <span className="text-xs text-tertiary-500">
                   {monthlyCount} monthly project{monthlyCount === 1 ? '' : 's'} (fixed fee)
-                  {hourlyRows.length > 0 && ` · ${hourlyRows.length} hourly: ${Math.round(contractHours * 100) / 100}h committed minimum × rate`}
+                  {hourlyRows.length > 0 && ` · ${hourlyRows.length} hourly: ${Math.round(contractHours * 100) / 100}h contract hours × rate`}
                   {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate below`}
                 </span>
                 <span className="w-full text-xs text-tertiary-500">
-                  Based on the contracts, not hours worked — see Project P&amp;L for actual approved hours.
-                  {noMinimum > 0 && ` ${noMinimum} hourly project${noMinimum === 1 ? ' has' : 's have'} no minimum hours set and ${noMinimum === 1 ? 'is' : 'are'} not included.`}
+                  Sum of the &ldquo;This month&rdquo; column — based on the contracts, not hours worked (see Project P&amp;L for actual approved hours).
+                  {prorated > 0 && ` ${prorated} prorated for a partial month.`}
+                  {notRunning > 0 && ` ${notRunning} not running this month (₹0).`}
+                  {noRate > 0 && ` ${noRate} with no billing rate.`}
                 </span>
               </div>
             )}

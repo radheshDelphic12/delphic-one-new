@@ -229,3 +229,42 @@ describe('Project P&L — vendor invoice file', () => {
     }
   });
 });
+
+describe('People — joining date', () => {
+  test('admins and the HR department can change it; HR only that field; others are refused', async () => {
+    const ctx = await seed();
+    const hrDept = await prisma.department.create({ data: { name: 'HR', org_id: ctx.org.id } });
+    const itDept = await prisma.department.create({ data: { name: 'IT', org_id: ctx.org.id } });
+    const hr = await employee(ctx, 'Hina In HR', hrDept.id);
+    const dev = await employee(ctx, 'Dev In IT', itDept.id);
+    const target = await employee(ctx, 'New Joiner');
+    const url = `/api/v1/orgs/memberships/${target.membership.id}`;
+    const joinedOf = async () => (await prisma.orgMembership.findUnique({ where: { id: target.membership.id } })).joined_at.toISOString().slice(0, 10);
+
+    // The profile read says who may edit it.
+    expect((await authed(request(app).get(url), hr.token)).body.data.can_edit_joining_date).toBe(true);
+    expect((await authed(request(app).get(url), dev.token)).body.data.can_edit_joining_date).toBe(false);
+
+    // Admin: through the full edit.
+    const byAdmin = await authed(request(app).patch(url), ctx.token).send({ joined_at: '2026-08-03' });
+    expect(byAdmin.status).toBe(200);
+    expect(await joinedOf()).toBe('2026-08-03');
+
+    // HR: through the joining-date route, which ignores any other field.
+    const byHr = await authed(request(app).patch(`${url}/joining-date`), hr.token).send({ joined_at: '2026-08-10', employee_code: 'HACK1' });
+    expect(byHr.status).toBe(200);
+    expect(await joinedOf()).toBe('2026-08-10');
+    expect((await prisma.orgMembership.findUnique({ where: { id: target.membership.id } })).employee_code).not.toBe('HACK1');
+    // …but not the full edit.
+    expect((await authed(request(app).patch(url), hr.token).send({ joined_at: '2026-08-11' })).status).toBe(403);
+
+    // Anyone else: refused.
+    expect((await authed(request(app).patch(`${url}/joining-date`), dev.token).send({ joined_at: '2026-08-12' })).status).toBe(403);
+    expect(await joinedOf()).toBe('2026-08-10');
+
+    // Never after the last working day; a date is required.
+    await prisma.orgMembership.update({ where: { id: target.membership.id }, data: { notice_end_date: new Date('2026-09-15') } });
+    expect((await authed(request(app).patch(`${url}/joining-date`), hr.token).send({ joined_at: '2026-09-20' })).status).toBe(422);
+    expect((await authed(request(app).patch(`${url}/joining-date`), hr.token).send({})).status).toBe(422);
+  });
+});

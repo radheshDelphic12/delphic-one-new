@@ -282,6 +282,9 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
   const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
   const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
   if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  // Joining date: can't come after the person's last working day / exit date.
+  const lastDay = lwd || membership.left_at;
+  if (data.joined_at && lastDay && data.joined_at > lastDay) return { error: 'joined_after_exit' };
   if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated' && !membership.left_at) {
     data.left_at = lwd || new Date(new Date().toISOString().slice(0, 10));
   }
