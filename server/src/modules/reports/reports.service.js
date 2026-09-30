@@ -969,7 +969,8 @@ async function recruiterVendorGaps({
 
 // --- HR report -------------------------------------------------------------
 // Recruiter-ops throughput grouped per day. Four tables; on-bench profiles are
-// excluded everywhere. Date anchors: sourcing = Profile.created_at, submission =
+// excluded everywhere. Each table carries `total` — profiles / submissions /
+// rounds in the range — since its rows are per person per day. Date anchors: sourcing = Profile.created_at, submission =
 // Submission.created_at, round = InterviewRound.scheduled_at.
 
 // Display labels for the candidate-source enum; stored values stay direct/linkedin.
@@ -1064,11 +1065,16 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
 
   const bySourcer = new Map();
   const byInterviewer = new Map();
+  // Distinct rounds counted in each table — a round with two interviewers is
+  // one row per interviewer but still one round in the total.
+  let sourcerRounds = 0;
+  let interviewerRounds = 0;
   for (const r of rounds) {
     const p = r.submission?.profile;
     const day = dayKey(r.scheduled_at);
 
     if (p && (!sourcer_id || p.added_by === sourcer_id)) {
+      sourcerRounds += 1;
       const key = `${p.added_by}|${day}`;
       bump(
         bySourcer,
@@ -1081,6 +1087,7 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     const people = r.interviewers.length
       ? r.interviewers.map((i) => i.user)
       : [{ id: null, name: r.interviewer_name || 'Unassigned' }];
+    if (people.some((person) => !interviewer_id || person.id === interviewer_id)) interviewerRounds += 1;
     for (const person of people) {
       if (interviewer_id && person.id !== interviewer_id) continue;
       const key = `${person.id || `name:${person.name}`}|${day}`;
@@ -1100,21 +1107,25 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     tables: [
       {
         key: 'sourcing',
+        total: sourcedProfiles.length,
         title: 'Sourcing',
         rows: [...sourcingMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'submissions',
+        total: submissions.length,
         title: 'Submissions',
         rows: [...submissionMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_sourcer',
+        total: sourcerRounds,
         title: 'Internal round 1 - by sourcer',
         rows: [...bySourcer.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_interviewer',
+        total: interviewerRounds,
         title: 'Internal round 1 - by interviewer',
         rows: [...byInterviewer.values()].sort(byDateThenName('interviewer')),
       },
