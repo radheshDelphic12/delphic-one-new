@@ -109,10 +109,14 @@ async function buildMonthlyWorkbook(orgId, orgMembershipId, month, year) {
     if (day) {
       const startRow = sheet.rowCount + 1;
       for (const entry of day.entries) {
+        // Description as typed: Windows line endings normalised, trailing blanks dropped.
+        const notes = String(entry.notes || '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim();
         const particulars = entry.is_holiday_overtime
-          ? `${entry.notes ? `${entry.notes} — ` : ''}OT: ${entry.holiday_label || 'Project holiday'}`
-          : entry.notes || '';
-        const row = sheet.addRow(['', membership.person.name, '', entry.account?.name || '', entry.hours, particulars]);
+          ? `${notes ? `${notes} — ` : ''}OT: ${entry.holiday_label || 'Project holiday'}`
+          : notes;
+        // Hours on the line include any overtime logged on it.
+        const hours = Number(entry.hours) + Number(entry.overtime_hours || 0);
+        const row = sheet.addRow(['', membership.person.name, '', entry.account?.name || '', hours, particulars]);
         row.eachCell((cell) => {
           cell.border = BORDER;
           if (entry.is_holiday_overtime) cell.fill = OT_FILL;

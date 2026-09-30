@@ -82,7 +82,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
-    return ok(res, result.data, { pagination: result.pagination });
+    return ok(res, result.data, { pagination: result.pagination, totals: result.totals });
   })
 );
 

@@ -4,6 +4,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../../components/ui/Pill.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const STATUS = {
@@ -146,11 +147,14 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
                     {d.entries.length > 0 && (
                       <ul className="mt-1 space-y-0.5 text-xs text-tertiary-500">
                         {d.entries.map((e) => (
-                          <li key={e.id} className="flex items-center gap-1">
-                            <span>{e.hours}h{e.overtime_hours ? ` +${e.overtime_hours}h OT` : ''} · {e.project || 'General'} · {STATUS[e.status === 'submitted' ? 'pending' : e.status]?.[0]}</span>
-                            {canDeleteOwn && !d.locked && e.status === 'submitted' && (
-                              <button type="button" className="text-danger-600 hover:text-danger-700" aria-label="Delete entry" onClick={() => removeEntry(e)}><Trash2 className="h-3 w-3" /></button>
-                            )}
+                          <li key={e.id}>
+                            <span className="flex items-center gap-1">
+                              <span>{e.hours}h{e.overtime_hours ? ` +${e.overtime_hours}h OT` : ''} · {e.project || 'General'} · {STATUS[e.status === 'submitted' ? 'pending' : e.status]?.[0]}</span>
+                              {canDeleteOwn && !d.locked && e.status === 'submitted' && (
+                                <button type="button" className="text-danger-600 hover:text-danger-700" aria-label="Delete entry" onClick={() => removeEntry(e)}><Trash2 className="h-3 w-3" /></button>
+                              )}
+                            </span>
+                            {e.notes && <NoteText text={e.notes} className="pl-2 text-tertiary-500" />}
                           </li>
                         ))}
                       </ul>

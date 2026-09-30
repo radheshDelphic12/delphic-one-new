@@ -11,7 +11,9 @@ import RejectReasonModal from './RejectReasonModal.jsx';
 import NoteText from '../../components/NoteText.jsx';
 import AdminEntryDrawer, { adminDeleteEntry } from './AdminEntryDrawer.jsx';
 import { AddTimesheetEntryDrawer, BulkTimesheetDrawer } from './TimesheetBackfill.jsx';
+import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import { useProjectOptions } from '../../lib/lookups.js';
+import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -21,26 +23,6 @@ function monthRange({ month, year }) {
   const mm = String(month).padStart(2, '0');
   const lastDay = new Date(year, month, 0).getDate();
   return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${lastDay}` };
-}
-
-const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const shortDay = (d) => d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
-
-// Monday-to-Sunday weeks touching the month, clipped to it: { key, label, from, to }.
-function monthWeeks({ month, year }) {
-  const first = new Date(year, month - 1, 1);
-  const last = new Date(year, month, 0);
-  const weeks = [];
-  let start = new Date(first);
-  while (start <= last) {
-    const end = new Date(start);
-    end.setDate(end.getDate() + (7 - ((start.getDay() + 6) % 7)) - 1); // through Sunday
-    const clippedEnd = end > last ? last : end;
-    weeks.push({ key: ymdLocal(start), label: `${shortDay(start)} – ${shortDay(clippedEnd)}`, from: ymdLocal(start), to: ymdLocal(clippedEnd) });
-    start = new Date(clippedEnd);
-    start.setDate(start.getDate() + 1);
-  }
-  return weeks;
 }
 
 const SCOPES = {
@@ -66,6 +48,7 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [total, setTotal] = useState(0);
+  const [filteredTotals, setFilteredTotals] = useState(null);
   const [page, setPage] = useState(1);
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [memberFilter, setMemberFilter] = useState('');
@@ -74,6 +57,10 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const [correcting, setCorrecting] = useState(null);
   const [adding, setAdding] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Bumped after every correction so the affected-billing banner re-reads.
+  const [changesKey, setChangesKey] = useState(0);
+  const [locks, setLocks] = useState([]);
+  const [lockBusy, setLockBusy] = useState(false);
   const [weekFilter, setWeekFilter] = useState('');
   const projectOptions = useProjectOptions(true);
   const weeks = useMemo(() => monthWeeks(period), [period]);
@@ -93,8 +80,43 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const deptParams = scope === 'it' ? { department_id: itDept?.id } : { exclude_department_id: itDept?.id || undefined };
   const ready = scope === 'it' ? Boolean(itDept) : itDept !== undefined;
 
+  function loadLocks() {
+    apiClient.get('/timesheets/locks').then(({ data }) => setLocks((data.data || []).map((l) => String(l.date).slice(0, 10)))).catch(() => setLocks([]));
+  }
+  useEffect(() => { loadLocks(); }, []);
+
+  // Unlock a whole (Sunday–Saturday) week so its logs can be corrected
+  // normally, or lock it again when done. Locked billing / salary months are
+  // flagged, never rewritten — see the banner above.
+  const weekDays = useMemo(() => {
+    const week = weeks.find((w) => w.key === weekFilter);
+    if (!week) return [];
+    const out = [];
+    for (let d = new Date(`${week.from}T00:00:00Z`); d <= new Date(`${week.to}T00:00:00Z`); d = new Date(d.getTime() + 86400000)) out.push(d.toISOString().slice(0, 10));
+    return out;
+  }, [weeks, weekFilter]);
+  const lockedInWeek = weekDays.filter((d) => locks.includes(d));
+  async function setWeekLocked(lock) {
+    const today = new Date().toISOString().slice(0, 10);
+    const targets = lock ? weekDays.filter((d) => !locks.includes(d) && d <= today) : lockedInWeek;
+    if (!targets.length) return;
+    setLockBusy(true);
+    let failed = 0;
+    for (const date of targets) {
+      try {
+        if (lock) await apiClient.post('/timesheets/locks', { date });
+        else await apiClient.delete(`/timesheets/locks/${date}`);
+      } catch { failed += 1; }
+    }
+    setLockBusy(false);
+    if (failed) pushError(`${failed} day(s) could not be ${lock ? 'locked' : 'unlocked'}`, 'Some days were skipped');
+    else pushSuccess(lock ? 'Week locked' : 'Week unlocked — entries can now be edited and deleted');
+    loadLocks();
+  }
+
   function loadOverview() {
     if (!ready) return;
+    setChangesKey((k) => k + 1);
     setOverviewLoading(true);
     apiClient
       .get('/timesheets/overview', { params: { ...deptParams, month: period.month, year: period.year } })
@@ -122,6 +144,7 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       .then(({ data }) => {
         setEntries(data.data || []);
         setTotal(data.pagination?.total ?? 0);
+        setFilteredTotals(data.totals || null);
       })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load timesheet entries'), 'Something went wrong'))
       .finally(() => setEntriesLoading(false));
@@ -242,6 +265,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         </div>
       </div>
 
+      <AffectedCalculationsBanner refreshKey={changesKey} />
+
       {overview && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatCard label={text.people} value={overview.summary.total_members} />
@@ -260,7 +285,14 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
 
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-heading text-sm font-semibold text-tertiary-900">Timesheet records</h3>
+          <h3 className="font-heading text-sm font-semibold text-tertiary-900">
+            Timesheet records
+            {filteredTotals && (
+              <span className="ml-2 text-xs font-normal text-tertiary-500">
+                {total} entr{total === 1 ? 'y' : 'ies'} · {filteredTotals.hours}h{filteredTotals.overtime_hours ? ` + ${filteredTotals.overtime_hours}h OT` : ''}
+              </span>
+            )}
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             <select value={memberFilter} onChange={(e) => setMemberFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
               <option value="">{text.all}</option>
@@ -272,8 +304,15 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
             </select>
             <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-2 py-1 text-xs">
               <option value="">Whole month</option>
-              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}</option>)}
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}{w.from && locks.includes(w.from) ? ' · locked' : ''}</option>)}
             </select>
+            {weekFilter && (lockedInWeek.length > 0 ? (
+              <button type="button" className="btn-secondary text-xs" disabled={lockBusy} onClick={() => setWeekLocked(false)} title="Unlock this week so its entries can be corrected">
+                {lockBusy ? 'Unlocking…' : `Unlock week (${lockedInWeek.length} day${lockedInWeek.length === 1 ? '' : 's'} locked)`}
+              </button>
+            ) : (
+              <button type="button" className="btn-ghost text-xs" disabled={lockBusy} onClick={() => setWeekLocked(true)}>{lockBusy ? 'Locking…' : 'Lock week'}</button>
+            ))}
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
               <option value="">All statuses</option>
               {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

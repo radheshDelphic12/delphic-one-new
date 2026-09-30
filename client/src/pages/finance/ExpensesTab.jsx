@@ -297,19 +297,30 @@ export default function ExpensesTab() {
     }
   }
 
-  // Approve every claim waiting on the caller's step, one decision each.
+  // Multi approve / reject: tick claims (or all), then decide them together —
+  // one decision each, so every claim still goes through its own step check.
   const [bulkBusy, setBulkBusy] = useState(false);
-  async function approveAll() {
-    const pending = rows.filter((row) => row.status === 'pending');
-    if (!pending.length || !window.confirm(`Approve all ${pending.length} claim${pending.length === 1 ? '' : 's'} waiting on you?`)) return;
+  const [selectedIds, setSelectedIds] = useState([]);
+  useEffect(() => { setSelectedIds([]); }, [view, rows]);
+  const canDecide = view === 'approvals' || (isAdmin && view === 'team');
+  async function decideSelected(status, ids = selectedIds) {
+    const pending = rows.filter((row) => ids.includes(row.id) && row.status === 'pending');
+    if (!pending.length) { pushInfo('None of the selected claims are pending'); return; }
+    let reason;
+    if (status === 'rejected') {
+      reason = window.prompt(`Reject ${pending.length} claim${pending.length === 1 ? '' : 's'}? Give a reason (shown to the employee):`);
+      if (reason === null) return;
+    } else if (!window.confirm(`Approve ${pending.length} claim${pending.length === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     let failed = 0;
     for (const row of pending) {
-      try { await apiClient.post(`/expenses/claims/${row.id}/decision`, { status: 'approved' }); } catch { failed += 1; }
+      try { await apiClient.post(`/expenses/claims/${row.id}/decision`, { status, reason: reason?.trim() || undefined }); } catch { failed += 1; }
     }
     setBulkBusy(false);
-    if (failed) pushError(`${pending.length - failed} approved; ${failed} could not be approved.`, 'Some claims were skipped');
-    else pushInfo(`${pending.length} claim${pending.length === 1 ? '' : 's'} approved`);
+    const verb = status === 'approved' ? 'approved' : 'rejected';
+    if (failed) pushError(`${pending.length - failed} ${verb}; ${failed} could not be ${verb} (not your step, or already decided).`, 'Some claims were skipped');
+    else pushInfo(`${pending.length} claim${pending.length === 1 ? '' : 's'} ${verb}`);
+    setSelectedIds([]);
     load();
     apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
   }
@@ -385,9 +396,9 @@ export default function ExpensesTab() {
           ))}
         </div>
         <div className="flex flex-wrap gap-2">
-        {view === 'approvals' && rows.filter((row) => row.status === 'pending').length > 1 && (
-          <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={bulkBusy} onClick={approveAll}>
-            {bulkBusy ? 'Approving…' : `Approve all (${rows.filter((row) => row.status === 'pending').length})`}
+        {canDecide && rows.filter((row) => row.status === 'pending').length > 1 && (
+          <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={bulkBusy} onClick={() => decideSelected('approved', rows.map((r) => r.id))}>
+            {bulkBusy ? 'Working…' : `Approve all pending (${rows.filter((row) => row.status === 'pending').length})`}
           </button>
         )}
         {view !== 'group' && (
@@ -426,7 +437,19 @@ export default function ExpensesTab() {
       ) : !loading && rows.length === 0 && !filtered ? (
         <EmptyState icon={Receipt} title="No expense claims yet" description="Submit a claim for reimbursement." action={<button type="button" className="btn-secondary" onClick={() => setDrawerOpen(true)}>Submit claim</button>} />
       ) : (
-        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No claims match these filters." />
+        <DataTable
+          columns={columns}
+          rows={rows}
+          loading={loading}
+          emptyLabel="No claims match these filters."
+          selectable={canDecide}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          actions={[
+            { key: 'approve', label: bulkBusy ? 'Working…' : 'Approve selected', onClick: () => decideSelected('approved') },
+            { key: 'reject', label: 'Reject selected', danger: true, onClick: () => decideSelected('rejected') },
+          ]}
+        />
       )}
       <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} members={isAdmin ? memberOptions : null} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
       <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} categories={expenseCategories} onClose={() => setEditing(null)} onSubmit={updateClaim} />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarClock, CalendarPlus, CheckCircle2, Clock3, LogIn, LogOut, Trash2, Upload, Wrench } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
+import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -242,6 +243,7 @@ export default function AttendancePage() {
         </section>
       )}
       <CheckoutPrompt open={checkoutPromptOpen} onClose={closePrompt} onConfirm={confirmCheckOut} />
+      {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}
       {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
       {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}

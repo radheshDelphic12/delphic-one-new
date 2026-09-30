@@ -13,6 +13,10 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
 - **Approve all**: `POST /timesheets/approvals/bulk`; leave queue and claim approvals get Approve-all too.
 - **Salary structures**: `DELETE /payroll/salary-structures/:id` (admin; flags locked months).
 - **Expense claims**: migration `20261001100000_expense_claim_approval_chain` (additive: `description`, `submitted_by`, `approval_stage`, `approvals`). Chain Manager → HR → Finance (`lib/claimApprovers.js`, departments matched by name; admin decision is final); `GET /expenses/claims/approvals`; admin can file for any employee; "Other" category requires a description; owner/admin delete a pending claim; receipts picked before submitting.
+- **Timesheet descriptions** keep their formatting (`NoteText` pre-wrap, CRLF normalised; was pre-line, collapsing indentation/bullets); the weekly hours view shows each entry's description; the Excel export's Hours include the line's OT.
+- **Timesheet filters**: admin view weeks are Sunday–Saturday (the lock week) with a filtered hours total (`GET /timesheets/entries` → `totals`); employees' IT timesheet gets week + project filters (`lib/timesheetWeeks.js`).
+- **Corrections at any stage**: admin view can Unlock / Lock a whole week; `AffectedCalculationsBanner` (IT admin view, attendance admin tab) lists locked calculations flagged by corrections with a link to recalculate / re-finalize and regenerate the invoice.
+- **Multi approve / reject**: claims (Approvals + Reimbursements) tick-select with Approve / Reject selected; timesheet Approvals tick-select across sections, `POST /timesheets/approvals/bulk` takes `status` + one `reason` for rejects.
 - **Org chart**: per-category counts (department / tier / team), team box headcounts, people-under count on managers.
 
 ## 2026-09-30 — Pay from approved timesheet hours + overtime approval, Sun→Sat weeks, client working days, hourly billing in Projects — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
@@ -54,12 +58,14 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
   honour it; the employee's company calendar never changes — their hours that
   day become OT / comp off. My Holidays tab now shows the one company calendar
   plus a collapsed "Client / project exceptions" section.
-- **Finance → Projects billing total includes hourly projects.** Each row
-  gets `this_month` from `projectPnl.monthBillingByProject` (same rule and
-  FX converter as P&L: monthly fee, or approved billable hours × rate). Hours
-  not billed are reported in `excluded` by reason (pending approval,
-  non-billable, before agreement, no hourly rate, overtime) and shown under
-  the total.
+- **Finance → Projects shows the contract; Project P&L shows actuals.** Each
+  Projects row gets `this_month` from `projectPnl.monthContractByProject`:
+  the fixed monthly fee, or the committed `minimum_monthly_hours` × hourly
+  rate, prorated in the agreement's first/last month (same FX converter as
+  P&L). Hourly projects with no minimum have no contract amount
+  (`note: 'no_minimum_hours'`). `monthly_amount_inr` uses minimum hours too.
+  Project P&L is unchanged: approved timesheet hours × rate (e.g. 60h
+  contract, 55h worked → Projects 60h, P&L 55h).
 - **UI copy:** Attendance page states attendance ≠ salary and renames
   "Overtime" to "Time past shift"; Attendance → Salary tab shows expected /
   approved / pending / short / OT columns and Actual vs Projected KPIs.

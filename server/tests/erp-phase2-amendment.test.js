@@ -230,3 +230,28 @@ describe('Client-brief amendment — multi-project calendar mapping', () => {
     expect(list.body.data[0].calendar.name).toBe('Calendar B');
   });
 });
+
+describe('Locations: one default, edit, delete', () => {
+  test('marking a location default moves the flag; edit and delete work; a location in use cannot be deleted', async () => {
+    const { org, access_token: token } = await seedOrgAdmin();
+    const add = (body) => authed(request(app).post('/api/v1/orgs/locations'), token).send(body);
+    const list = async () => (await authed(request(app).get('/api/v1/orgs/locations'), token)).body.data;
+    const ahm = (await add({ name: 'Ahmedabad Office', is_default: true })).body.data;
+    const ind = (await add({ name: 'Indore Office', is_default: true })).body.data;
+    expect((await list()).filter((l) => l.is_default).map((l) => l.name)).toEqual(['Indore Office']);
+
+    const patched = await authed(request(app).patch(`/api/v1/orgs/locations/${ahm.id}`), token).send({ is_default: true, city: 'Ahmedabad' });
+    expect(patched.body.data).toMatchObject({ is_default: true, city: 'Ahmedabad' });
+    expect((await list()).filter((l) => l.is_default).map((l) => l.name)).toEqual(['Ahmedabad Office']);
+    expect((await authed(request(app).patch(`/api/v1/orgs/locations/${ind.id}`), token).send({ name: 'Ahmedabad Office' })).status).toBe(409);
+
+    const emp = await seedOrgEmployee(org);
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { location_id: ind.id } });
+    const blocked = await authed(request(app).delete(`/api/v1/orgs/locations/${ind.id}`), token);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.message).toContain('1 employee');
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { location_id: null } });
+    expect((await authed(request(app).delete(`/api/v1/orgs/locations/${ind.id}`), token)).status).toBe(200);
+    expect((await authed(request(app).delete(`/api/v1/orgs/locations/${ahm.id}`), emp.access_token)).status).toBe(403);
+  });
+});

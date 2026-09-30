@@ -12,6 +12,7 @@ import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
 import NoteText from '../../components/NoteText.jsx';
 import WeekHoursView from './WeekHoursView.jsx';
+import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -99,9 +100,33 @@ export default function ItTimesheetPage() {
 
   useEffect(() => { load(); }, [period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const monthTotal = useMemo(() => days.reduce((sum, d) => sum + d.total_hours, 0), [days]);
+  // Filters on the month's log: a Sunday–Saturday week and/or one project.
+  const [weekFilter, setWeekFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  useEffect(() => { setWeekFilter(''); }, [period.month, period.year]);
+  const weeks = useMemo(() => monthWeeks(period), [period]);
+  const logProjects = useMemo(() => {
+    const byId = new Map();
+    for (const d of days) for (const e of d.entries) if (e.account?.id) byId.set(e.account.id, e.account.name);
+    return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [days]);
+  const shownDays = useMemo(() => {
+    const week = weeks.find((w) => w.key === weekFilter);
+    return days
+      .filter((d) => !week || (d.date >= week.from && d.date <= week.to))
+      .map((d) => {
+        if (!projectFilter) return d;
+        const entries = d.entries.filter((e) => e.account?.id === projectFilter);
+        return { ...d, entries, total_hours: Math.round(entries.reduce((s, e) => s + e.hours + (e.overtime_hours || 0), 0) * 100) / 100 };
+      })
+      .filter((d) => d.entries.length > 0);
+  }, [days, weeks, weekFilter, projectFilter]);
+  const filtered = Boolean(weekFilter || projectFilter);
 
-  const monthOt = useMemo(() => days.reduce((sum, d) => sum + (d.ot_hours || 0), 0), [days]);
+  const monthTotal = useMemo(() => shownDays.reduce((sum, d) => sum + d.total_hours, 0), [shownDays]);
+
+  // Overtime is per day (beyond the shift), so it follows the week filter, not a project.
+  const monthOt = useMemo(() => (projectFilter ? 0 : shownDays.reduce((sum, d) => sum + (d.ot_hours || 0), 0)), [shownDays, projectFilter]);
   const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0) + (Number(r.overtime_hours) || 0), 0), [rows]);
   const openTasks = tasks.filter((t) => t.status !== 'completed');
 
@@ -240,20 +265,30 @@ export default function ItTimesheetPage() {
             <select value={period.year} onChange={(e) => setPeriod((p) => ({ ...p, year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
               {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
+            <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">Whole month</option>
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}</option>)}
+            </select>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Project" className="max-w-[14rem] rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">All projects</option>
+              {logProjects.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">Month total: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
+            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
           </div>
         </div>
 
-        {!loading && days.length === 0 ? (
-          <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
+        {!loading && shownDays.length === 0 ? (
+          filtered
+            ? <EmptyState icon={Timer} title="Nothing matches these filters" description="Try another week or project." />
+            : <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
         ) : (
           <div className="space-y-3">
-            {days.map((day) => (
+            {shownDays.map((day) => (
               <div key={day.date} className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
                 <div className="flex items-center justify-between bg-tertiary-50 px-4 py-2">
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>

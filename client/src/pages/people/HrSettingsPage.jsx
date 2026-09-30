@@ -136,12 +136,35 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
   );
 }
 
-function LocationDrawer({ open, onClose, onSubmit }) {
+// Add (no `location`) or edit (`location` set) one office location. "Default
+// location" is exclusive: ticking it moves the default here.
+function LocationDrawer({ open, location = null, onClose, onSubmit }) {
+  const isEditing = Boolean(location);
   const [fields, setFields] = useState({ name: '', city: '', country: '', is_default: false });
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', is_default: location.is_default } : { name: '', city: '', country: '', is_default: false });
+  }, [open, location]);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
-  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit(fields); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title="Add location" onClose={onClose} size="sm" tone="create" footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="location-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : 'Add location'}</button></>}><form id="location-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">City<input value={fields.city} onChange={(event) => set('city', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Country<input value={fields.country} onChange={(event) => set('country', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default location</label></form></Drawer>;
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
+      onClose();
+    } finally { setSaving(false); }
+  }
+  const input = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
+  return (
+    <Drawer open={open} title={isEditing ? `Edit ${location.name}` : 'Add location'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="location-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add location'}</button></>}>
+      <form id="location-form" onSubmit={submit} className="space-y-4">
+        <label className="block text-xs font-medium text-tertiary-600">Location name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className={input} /></label>
+        <label className="block text-xs font-medium text-tertiary-600">City<input value={fields.city} onChange={(event) => set('city', event.target.value)} className={input} /></label>
+        <label className="block text-xs font-medium text-tertiary-600">Country<input value={fields.country} onChange={(event) => set('country', event.target.value)} className={input} /></label>
+        <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default location <span className="text-xs text-tertiary-400">(only one — replaces the current default)</span></label>
+      </form>
+    </Drawer>
+  );
 }
 
 function ShiftDrawer({ open, onClose, onSubmit }) {
@@ -314,6 +337,29 @@ export default function HrSettingsPage() {
     try { const { data } = await apiClient.post(ENDPOINTS[tab], payload); setRows((current) => [...current, data.data]); setDrawer(null); pushInfo('HR setting created'); } catch (err) { pushError(apiErrorMessage(err, 'Failed to create HR setting'), 'Something went wrong'); }
   }
 
+  // Locations: the default is exclusive, so reload after a change to show where it moved.
+  const [editingLocation, setEditingLocation] = useState(null);
+  async function saveLocation(location, payload) {
+    try {
+      await apiClient.patch(`/orgs/locations/${location.id}`, payload);
+      pushInfo(payload.is_default && Object.keys(payload).length === 1 ? `${location.name} is now the default location` : 'Location updated');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the location'), 'Something went wrong');
+      throw err;
+    }
+  }
+  async function deleteLocation(location) {
+    if (!window.confirm(`Delete ${location.name}?`)) return;
+    try {
+      await apiClient.delete(`/orgs/locations/${location.id}`);
+      pushInfo(`${location.name} deleted`);
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the location'), 'Could not delete');
+    }
+  }
+
   async function saveCalendarEdit(payload) {
     try {
       const { data } = await apiClient.patch(`/calendars/${editingCalendar.id}`, payload);
@@ -413,7 +459,19 @@ export default function HrSettingsPage() {
         ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1"><button type="button" aria-label="Edit team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingTeam(row)}><Pencil className="h-3.5 w-3.5" /></button><button type="button" aria-label="Delete team" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteTeam(row)}><Trash2 className="h-3.5 w-3.5" /></button></span> }] : []),
       ]
     : tab === 'locations'
-    ? [{ key: 'name', header: 'Location' }, { key: 'city', header: 'City', render: (row) => row.city || 'Not set' }, { key: 'country', header: 'Country', render: (row) => row.country || 'Not set' }, { key: 'default', header: 'Default', render: (row) => row.is_default ? 'Yes' : 'No' }]
+    ? [
+        { key: 'name', header: 'Location' },
+        { key: 'city', header: 'City', render: (row) => row.city || 'Not set' },
+        { key: 'country', header: 'Country', render: (row) => row.country || 'Not set' },
+        { key: 'default', header: 'Default', render: (row) => (row.is_default ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">Default</span> : <span className="text-tertiary-400">—</span>) },
+        ...(canManage ? [{ key: 'actions', header: '', render: (row) => (
+          <span className="flex justify-end gap-1">
+            {!row.is_default && <button type="button" className="btn-ghost text-xs" onClick={() => saveLocation(row, { is_default: true })}>Make default</button>}
+            <button type="button" aria-label="Edit location" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingLocation(row)}><Pencil className="h-3.5 w-3.5" /></button>
+            <button type="button" aria-label="Delete location" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteLocation(row)}><Trash2 className="h-3.5 w-3.5" /></button>
+          </span>
+        ) }] : []),
+      ]
     : tab === 'shifts'
     ? [{ key: 'name', header: 'Shift' }, { key: 'hours', header: 'Hours', render: (row) => `${minutesToTime(row.start_minutes)} - ${minutesToTime(row.end_minutes)}` }, { key: 'grace', header: 'Grace', render: (row) => `${row.grace_minutes}m` }]
     : [
@@ -451,7 +509,8 @@ export default function HrSettingsPage() {
     <NameDrawer open={drawer === 'departments' || drawer === 'designations'} title={`Add ${names[tab] || 'setting'}`} onClose={() => setDrawer(null)} value="" onSubmit={(name) => createResource({ name })} />
     <TeamDrawer open={drawer === 'teams'} team={null} onClose={() => setDrawer(null)} onSubmit={createResource} />
     <TeamDrawer open={Boolean(editingTeam)} team={editingTeam} onClose={() => setEditingTeam(null)} onSubmit={updateTeam} />
-    <LocationDrawer open={drawer === 'locations'} onClose={() => setDrawer(null)} onSubmit={createResource} />
+    <LocationDrawer open={drawer === 'locations'} onClose={() => setDrawer(null)} onSubmit={async (payload) => { await createResource(payload); load(); }} />
+    <LocationDrawer open={Boolean(editingLocation)} location={editingLocation} onClose={() => setEditingLocation(null)} onSubmit={(payload) => saveLocation(editingLocation, payload)} />
     <ShiftDrawer open={drawer === 'shifts'} onClose={() => setDrawer(null)} onSubmit={createResource} />
     {tab === 'calendars' && <ProjectCalendarPanel refreshKey={projectsRefresh} canManage={canManage} onAdd={() => setAddProjectOpen(true)} />}
     <AddProjectModal open={addProjectOpen} onClose={() => setAddProjectOpen(false)} onCreated={() => setProjectsRefresh((n) => n + 1)} />

@@ -34,7 +34,10 @@ function billingLabel(row) {
       ) : null}
       <InrLine row={row} suffix={suffix} />
       {row.billing_type === 'hourly' && row.minimum_monthly_hours ? (
-        <span className="block text-xs text-tertiary-500">Min. {row.minimum_monthly_hours}h/mo</span>
+        <span className="block text-xs text-tertiary-500">Contract: min. {row.minimum_monthly_hours}h/mo ≈ {row.currency} {money(row.minimum_monthly_hours * row.rate)}</span>
+      ) : null}
+      {row.billing_type === 'hourly' && !row.minimum_monthly_hours ? (
+        <span className="block text-xs text-warning-700">No minimum hours — no contract amount</span>
       ) : null}
     </span>
   );
@@ -251,7 +254,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 <label className="block text-xs font-medium text-tertiary-600">
                   Minimum hours / month <span className="font-normal text-tertiary-400">(committed, optional)</span>
                   <input type="number" min="0" max="10000" step="0.5" value={form.minimum_monthly_hours} onChange={(e) => set('minimum_monthly_hours', e.target.value)} placeholder="e.g. 100" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
-                  <span className="mt-0.5 block font-normal text-tertiary-400">Months with fewer approved hours are flagged in Project P&amp;L and Billing &amp; Sales. Billing stays approved hours × rate.</span>
+                  <span className="mt-0.5 block font-normal text-tertiary-400">The contract hours: Projects shows minimum × rate per month. Project P&amp;L and invoices use actual approved hours × rate, and flag months below the minimum.</span>
                 </label>
               )}
             </div>
@@ -327,22 +330,17 @@ export default function ProjectsTab() {
     [rows, category, contract]
   );
 
-  // This month's billing of the filtered projects, in INR — worked out on the
-  // server with the P&L's own rule and converter: the fixed monthly fee, or
-  // approved billable hours x the hourly rate. Hours not billed are counted
-  // and explained (pending approval, non-billable…), never dropped silently.
-  const billed = visible.filter((row) => row.this_month?.billing_type);
+  // This month's CONTRACT billing of the filtered projects, in INR, from the
+  // server: the fixed monthly fee, or the committed minimum hours x the hourly
+  // rate (prorated in the agreement's first / last month). Actual approved
+  // hours are shown in Project P&L, not here.
+  const billed = visible.filter((row) => row.this_month?.amount !== null && row.this_month?.amount !== undefined);
   const monthTotal = billed.reduce((sum, row) => sum + (row.this_month.amount_inr ?? 0), 0);
   const unconverted = [...new Set(billed.filter((row) => row.this_month.amount_inr === null).map((row) => row.this_month.currency))];
-  const monthlyCount = billed.filter((row) => row.this_month.billing_type === 'monthly').length;
-  const hourlyRows = billed.filter((row) => row.this_month.billing_type === 'hourly');
-  const hourlyHours = hourlyRows.reduce((sum, row) => sum + (row.this_month.billable_hours || 0), 0);
-  const excluded = hourlyRows.reduce((acc, row) => {
-    for (const [k, v] of Object.entries(row.this_month.excluded || {})) acc[k] = (acc[k] || 0) + v;
-    return acc;
-  }, {});
-  const EXCLUDED_LABEL = { pending_approval: 'pending approval', non_billable: 'non-billable', outside_agreement: 'outside the agreement dates', no_hourly_rate: 'no hourly rate that day', overtime: 'overtime (project does not bill OT)', not_supported: 'fixed-price project (not billed by hours)' };
-  const excludedText = Object.entries(excluded).filter(([, v]) => v > 0).map(([k, v]) => `${Math.round(v * 100) / 100}h ${EXCLUDED_LABEL[k] || k}`).join(' · ');
+  const monthlyCount = billed.filter((row) => row.this_month.billing_type === 'monthly' && row.this_month.amount > 0).length;
+  const hourlyRows = billed.filter((row) => row.this_month.billing_type === 'hourly' && row.this_month.amount > 0);
+  const contractHours = hourlyRows.reduce((sum, row) => sum + (row.this_month.contract_hours || 0), 0);
+  const noMinimum = visible.filter((row) => row.this_month?.note === 'no_minimum_hours').length;
   const monthName = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const load = useCallback(() => {
@@ -400,14 +398,17 @@ export default function ProjectsTab() {
             />
             {!loading && (
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-tertiary-100 bg-white px-4 py-2.5 text-sm">
-                <span className="text-tertiary-500">Billing · {monthName}</span>
+                <span className="text-tertiary-500">Contract billing · {monthName}</span>
                 <span className="font-heading text-base font-semibold tabular-nums text-tertiary-900">{moneyIn(monthTotal, 'INR')}</span>
                 <span className="text-xs text-tertiary-500">
                   {monthlyCount} monthly project{monthlyCount === 1 ? '' : 's'} (fixed fee)
-                  {hourlyRows.length > 0 && ` · ${hourlyRows.length} hourly: ${Math.round(hourlyHours * 100) / 100}h approved billable × rate`}
+                  {hourlyRows.length > 0 && ` · ${hourlyRows.length} hourly: ${Math.round(contractHours * 100) / 100}h committed minimum × rate`}
                   {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate below`}
                 </span>
-                {excludedText && <span className="w-full text-xs text-tertiary-500">Not billed yet: {excludedText}.</span>}
+                <span className="w-full text-xs text-tertiary-500">
+                  Based on the contracts, not hours worked — see Project P&amp;L for actual approved hours.
+                  {noMinimum > 0 && ` ${noMinimum} hourly project${noMinimum === 1 ? ' has' : 's have'} no minimum hours set and ${noMinimum === 1 ? 'is' : 'are'} not included.`}
+                </span>
               </div>
             )}
             <ExchangeRatesPanel rates={rates} onSaved={() => { reloadRates(); load(); }} />

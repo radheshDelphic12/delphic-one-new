@@ -77,3 +77,24 @@ describe('IT timesheet overtime = hours beyond the shift', () => {
     expect(overview.members.find((m) => m.org_membership_id === ctx.devMembership.id)).toMatchObject({ month_hours: 24, overtime_hours: 6 });
   });
 });
+
+describe('Approval inbox: many at once, and filtered totals', () => {
+  test('bulk reject needs one reason and rejects each item; bulk approve approves; the entries list reports hours for the whole filter', async () => {
+    const ctx = await seed();
+    const mk = (date, hours) => prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: ctx.devMembership.id, account_id: ctx.project.id, date: new Date(date), hours, overtime_hours: 1, status: 'submitted' } });
+    const [a, b, c] = [await mk('2026-09-01', 8), await mk('2026-09-02', 7), await mk('2026-09-03', 6)];
+    const bulk = (body) => authed(request(app).post('/api/v1/timesheets/approvals/bulk'), ctx.token).send(body);
+
+    expect((await bulk({ status: 'rejected', entries: [a.id, b.id] })).status).toBe(422);
+    const rejected = await bulk({ status: 'rejected', reason: 'Wrong project', entries: [a.id, b.id] });
+    expect(rejected.body.data).toMatchObject({ status: 'rejected', approved: 2, failed: [] });
+    expect((await bulk({ entries: [c.id, a.id] })).body.data).toMatchObject({ approved: 1, failed: [{ id: a.id }] });
+    const rows = await prisma.timesheetEntry.findMany({ orderBy: { date: 'asc' }, select: { status: true, decision_reason: true } });
+    expect(rows.map((r) => r.status)).toEqual(['rejected', 'rejected', 'approved']);
+    expect(rows[0].decision_reason).toBe('Wrong project');
+
+    const list = await authed(request(app).get('/api/v1/timesheets/entries').query({ org_membership_id: ctx.devMembership.id, account_id: ctx.project.id, from: '2026-09-01', to: '2026-09-02', limit: 1 }), ctx.token);
+    expect(list.body.pagination.total).toBe(2);
+    expect(list.body.totals).toEqual({ hours: 15, overtime_hours: 2 });
+  });
+});

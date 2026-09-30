@@ -75,14 +75,18 @@ const importEntriesSchema = z.object({
     .max(5000),
 });
 
-// "Approve all": the ids to approve from the approval inbox.
+// Approval inbox, many at once: approve (default) or reject the given ids.
+// A rejection needs one reason, applied to every item.
 const bulkApproveSchema = z
   .object({
+    status: z.enum(['approved', 'rejected']).default('approved'),
+    reason: z.string().trim().max(500).optional(),
     entries: z.array(z.string().uuid()).max(1000).default([]),
     overtime: z.array(z.string().uuid()).max(1000).default([]),
     regularizations: z.array(z.string().uuid()).max(1000).default([]),
   })
-  .refine((v) => v.entries.length + v.overtime.length + v.regularizations.length > 0, { message: 'Nothing to approve' });
+  .refine((v) => v.entries.length + v.overtime.length + v.regularizations.length > 0, { message: 'Nothing selected' })
+  .refine((v) => v.status !== 'rejected' || Boolean(v.reason), { message: 'A reason is required when rejecting', path: ['reason'] });
 
 // A day's overtime: paid (approved), not paid (rejected), or comp off.
 const decideOvertimeSchema = z
