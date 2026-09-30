@@ -217,7 +217,7 @@ async function listTeam(orgId, { from, to, org_membership_id, account_id, status
     // not OrgMembership.department_id — see requireItDepartment's own note.
     ...(person ? { org_membership: { person } } : {}),
   };
-  const [data, total] = await Promise.all([
+  const [data, total, sums] = await Promise.all([
     prisma.timesheetEntry.findMany({
       where,
       orderBy: [{ date: 'desc' }],
@@ -230,8 +230,11 @@ async function listTeam(orgId, { from, to, org_membership_id, account_id, status
       },
     }),
     prisma.timesheetEntry.count({ where }),
+    prisma.timesheetEntry.aggregate({ where, _sum: { hours: true, overtime_hours: true } }),
   ]);
-  return { data: data.map(labelEntry), pagination: { page, limit, total } };
+  // Hours across every page of the filtered set (employee / project / week / status).
+  const totals = { hours: Math.round(Number(sums._sum.hours || 0) * 100) / 100, overtime_hours: Math.round(Number(sums._sum.overtime_hours || 0) * 100) / 100 };
+  return { data: data.map(labelEntry), pagination: { page, limit, total }, totals };
 }
 
 // Itemized month view for the IT timesheet: every entry for the member in
@@ -960,11 +963,12 @@ async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
   return { ...summary, applied: true, flagged };
 }
 
-// "Approve all" in the approval inbox: each item goes through its own
-// decision (same permission and state checks as one click), in order —
-// regularisations, then entries, then overtime. Items that can't be approved
-// (already decided, not the caller's report, over 24h…) are listed, not fatal.
-async function bulkApprove(orgId, actor, { entries = [], overtime = [], regularizations = [] }) {
+// Approve all / multi approve-reject in the approval inbox: each item goes
+// through its own decision (same permission and state checks as one click),
+// in order — regularisations, then entries, then overtime. Items that can't
+// be decided (already decided, not the caller's report, over 24h…) are
+// listed, not fatal. `approved` counts the items decided either way.
+async function bulkApprove(orgId, actor, { status = 'approved', reason, entries = [], overtime = [], regularizations = [] }) {
   const failed = [];
   let approved = 0;
   const run = async (kind, ids, decide) => {
@@ -974,10 +978,10 @@ async function bulkApprove(orgId, actor, { entries = [], overtime = [], regulari
       else approved += 1;
     }
   };
-  await run('regularization', regularizations, (id) => decideTicket(orgId, id, actor, { status: 'approved' }));
-  await run('entry', entries, (id) => decideEntry(orgId, id, actor, { status: 'approved' }));
-  await run('overtime', overtime, (id) => decideOvertime(orgId, id, actor, { status: 'approved' }));
-  return { approved, failed };
+  await run('regularization', regularizations, (id) => decideTicket(orgId, id, actor, { status, decision_reason: reason }));
+  await run('entry', entries, (id) => decideEntry(orgId, id, actor, { status, reason }));
+  await run('overtime', overtime, (id) => decideOvertime(orgId, id, actor, { status, reason }));
+  return { status, approved, failed };
 }
 
 module.exports = {
