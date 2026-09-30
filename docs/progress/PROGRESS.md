@@ -60,10 +60,12 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
   plus a collapsed "Client / project exceptions" section.
 - **Finance → Projects shows the contract; Project P&L shows actuals.** Each
   Projects row gets `this_month` from `projectPnl.monthContractByProject`:
-  the fixed monthly fee, or the committed `minimum_monthly_hours` × hourly
-  rate, prorated in the agreement's first/last month (same FX converter as
-  P&L). Hourly projects with no minimum have no contract amount
-  (`note: 'no_minimum_hours'`). `monthly_amount_inr` uses minimum hours too.
+  the fixed monthly fee, or contract hours × hourly rate — contract hours are
+  `minimum_monthly_hours`, else `benchmark_hours` (`contractHours`) —
+  prorated in the agreement's first/last month (same FX converter as P&L).
+  A "This month (INR)" column shows each row's figure and why it is lower
+  (prorated / not started / ended / no FX rate); the total above the table
+  is exactly its sum. `monthly_amount_inr` uses the same contract hours.
   Project P&L is unchanged: approved timesheet hours × rate (e.g. 60h
   contract, 55h worked → Projects 60h, P&L 55h).
 - **UI copy:** Attendance page states attendance ≠ salary and renames

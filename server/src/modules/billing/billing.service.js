@@ -466,14 +466,15 @@ function currentAccountRate(rates, asOf) {
 function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project), fx = null } = {}) {
   const rate = currentAccountRate(rates, todayUtc());
   const currency = rate ? rate.currency : account.client_billing_currency || 'INR';
-  // The contract's hours: the client's committed minimum (not the estimate).
-  const contractHours = account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null;
+  // An hourly contract's hours: the committed minimum, else the monthly
+  // benchmark (lazy-required: projectPnl loads this file).
+  const hours = require('./projectPnl.service').contractHours(account);
   // INR figures use the same converter as Project P&L. null = this currency
   // has no exchange rate yet (or there's no rate to convert).
   const { toInr, rateFor } = exchangeRates.inrConverter(fx || new Map([['INR', 1]]));
   const exchangeRate = rateFor(currency);
   const inr = (amount) => (amount === null || exchangeRate === null ? null : toInr(amount, currency));
-  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : contractHours !== null ? Number(rate.rate) * contractHours : null;
+  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : Number(rate.rate) * hours.hours;
   return {
     id: account.id,
     project_code: account.project_code || null,
@@ -488,7 +489,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     // INR per 1 unit of `currency` (1 for INR); null when finance hasn't set it.
     exchange_rate: exchangeRate,
     rate_inr: rate ? inr(Number(rate.rate)) : null,
-    // The contract per month in INR: fixed monthly fee, or hourly rate x minimum hours.
+    // The contract per month in INR: fixed monthly fee, or hourly rate x contract hours.
     monthly_amount_inr: inr(monthlyAmount),
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
@@ -499,6 +500,9 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
     minimum_monthly_hours: account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null,
+    // Hourly: the hours the contract amount uses and where they come from.
+    contract_hours: rate && rate.rate_type === 'hourly' ? hours.hours : null,
+    contract_hours_basis: rate && rate.rate_type === 'hourly' ? hours.basis : null,
     // Editable when the row is a project: made by Add Project, or an older
     // client row already used as one (billing, team, timesheets…) — see
     // lib/projectScope. A plain catalogue client stays read-only. Edits only
