@@ -99,3 +99,31 @@ describe('Finance — Project P&L in INR', () => {
     expect(pnl.profit).toBe(24000 - 50000);
   });
 });
+
+describe('Finance → Projects — same exchange rates as Project P&L', () => {
+  test('project rows carry the INR rate and INR monthly figure from the shared converter, matching P&L', async () => {
+    const ctx = await seed();
+    const mii = await project(ctx, 'Mii Health 2', { rate_type: 'monthly', rate: 2000, currency: 'USD' });
+    const hourly = await project(ctx, 'Hourly AED', { rate_type: 'hourly', rate: 50, currency: 'AED' });
+    await prisma.account.updateMany({ where: { id: { in: [mii.id, hourly.id] } }, data: { is_project: true } });
+    await prisma.account.update({ where: { id: hourly.id }, data: { estimated_monthly_hours: 100 } });
+    const rowsOf = async () => (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
+
+    // No rates yet: INR figures are blank, not guessed.
+    expect((await rowsOf()).find((r) => r.id === mii.id)).toMatchObject({ currency: 'USD', rate: 2000, exchange_rate: null, rate_inr: null, monthly_amount_inr: null });
+
+    await authed(request(app).put('/api/v1/billing/exchange-rates'), ctx.token).send({ rates: [{ currency: 'USD', rate_to_inr: 83.25 }, { currency: 'AED', rate_to_inr: 22.7 }] });
+    const rows = await rowsOf();
+    const row = rows.find((r) => r.id === mii.id);
+    expect(row).toMatchObject({ exchange_rate: 83.25, rate_inr: 166500, monthly_amount_inr: 166500 });
+    expect(rows.find((r) => r.id === hourly.id)).toMatchObject({ exchange_rate: 22.7, rate_inr: 1135, monthly_amount_inr: 113500 });
+
+    // Same figure the P&L bills for the month.
+    const pnl = (await authed(request(app).get(pnlUrl(mii.id)), ctx.token)).body.data;
+    expect(pnl.revenue.amount).toBe(row.monthly_amount_inr);
+
+    // The single-project read (the drawer) agrees too.
+    const one = (await authed(request(app).get(`/api/v1/billing/projects/${mii.id}`), ctx.token)).body.data;
+    expect(one).toMatchObject({ exchange_rate: 83.25, rate_inr: 166500 });
+  });
+});

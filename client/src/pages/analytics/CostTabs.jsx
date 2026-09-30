@@ -94,7 +94,7 @@ export function ExpensesTab() {
         <KpiCard label="Top category" value={titleCase(data?.by_category[0]?.category) || '-'} hint={data?.by_category[0] ? money(data.by_category[0].amount) : undefined} icon={Receipt} theme="orange" />
         <KpiCard label="Top office" value={data?.by_location[0]?.location || '-'} hint={data?.by_location[0] ? money(data.by_location[0].amount) : undefined} icon={Building2} theme="cyan" />
       </div>
-      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Group expenses in {data.missing_rates.join(', ')} are left out — set the exchange rate in Finance → Project P&amp;L.</p>}
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Group expenses in {data.missing_rates.join(', ')} are left out — set the exchange rate in Finance → Projects or Project P&amp;L.</p>}
       <ChartCard title="Office expenses, group expenses and vendor payments by month" subtitle="Approved / reimbursed claims, group charges (by payment date) and approved / paid vendor payments">
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
