@@ -49,6 +49,13 @@ function printPayslip(payslip, orgName) {
     ['Loss-of-pay days', b.lop_days],
     ['Paid days', b.paid_days],
     ['Overtime (minutes)', b.overtime_minutes],
+    // Timesheet-based payslips (approved hours + approved OT).
+    ['Expected hours', b.expected_hours],
+    ['Approved hours paid', b.paid_hours],
+    ['Short hours', b.deficit_hours],
+    ['Approved overtime (h)', b.ot_approved_hours],
+    ['Overtime amount', b.ot_amount],
+    ['Hourly rate', b.hourly_rate],
   ].filter(([, v]) => v !== undefined);
 
   const win = window.open('', '_blank', 'width=820,height=960');
@@ -109,7 +116,7 @@ function PayslipDrawer({ open, payslip, onClose }) {
             </div>
           </div>
           <div>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Attendance breakdown</h4>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">{b.source === 'approved_timesheets' ? 'Timesheet breakdown (approved hours)' : 'Attendance breakdown'}</h4>
             <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
               {[
                 ['Working days', b.working_days], ['Weekend days', b.weekend_days], ['Holidays', b.holiday_days],
@@ -117,6 +124,9 @@ function PayslipDrawer({ open, payslip, onClose }) {
                 ['Unpaid leave', b.unpaid_leave_days], ['Unpaid (no record)', b.unpaid_days],
                 ['Loss-of-pay days', b.lop_days], ['Paid days', b.paid_days],
                 ['Overtime (min)', b.overtime_minutes], ['Per-day pay', b.per_day_pay !== undefined ? money(b.per_day_pay) : undefined],
+                ['Expected hours', b.expected_hours], ['Approved hours paid', b.paid_hours], ['Short hours', b.deficit_hours],
+                ['Approved OT (h)', b.ot_approved_hours], ['OT amount', b.ot_amount !== undefined ? money(b.ot_amount) : undefined],
+                ['Pending (not paid)', b.pending_hours !== undefined ? `${b.pending_hours}h` : undefined], ['Hourly rate', b.hourly_rate !== undefined ? money(b.hourly_rate) : undefined],
               ].filter(([, v]) => v !== undefined).map(([label, value]) => (
                 <div key={label} className="flex justify-between border-b border-tertiary-50 pb-1">
                   <dt className="text-tertiary-500">{label}</dt>
@@ -294,6 +304,19 @@ function SalaryStructuresTab({ filters }) {
     }
   }
 
+  async function remove(row) {
+    const who = row.org_membership?.person?.name || 'this employee';
+    if (!window.confirm(`Delete ${who}'s salary structure from ${new Date(row.effective_from).toLocaleDateString()} (${money(row.ctc)})? Payroll falls back to their previous structure. This can't be undone.`)) return;
+    try {
+      const { data } = await apiClient.delete(`/payroll/salary-structures/${row.id}`);
+      const flagged = data.data?.flagged || 0;
+      pushInfo(`Salary structure deleted${flagged ? ` — ${flagged} locked month${flagged === 1 ? '' : 's'} flagged for review` : ''}`);
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the salary structure'), 'Something went wrong');
+    }
+  }
+
   async function create(payload) {
     try {
       await apiClient.post('/payroll/salary-structures', payload);
@@ -341,7 +364,16 @@ function SalaryStructuresTab({ filters }) {
     },
     { key: 'ctc', header: 'Monthly CTC', render: (row) => <span>{money(row.ctc)}{row.updated_at && <span className="ml-1.5 text-[11px] text-tertiary-400" title={`Edited ${new Date(row.updated_at).toLocaleString()}`}>edited</span>}</span> },
     { key: 'components', header: 'Components', render: (row) => Object.keys(row.components || {}).join(', ') || '—' },
-    { key: 'actions', header: 'Actions', render: (row) => <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (row) => (
+        <span className="flex gap-1">
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs text-danger-600" onClick={() => remove(row)}><Trash2 className="h-3.5 w-3.5" /> Delete</button>
+        </span>
+      ),
+    },
   ];
 
   return (

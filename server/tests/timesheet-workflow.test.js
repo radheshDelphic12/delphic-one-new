@@ -158,41 +158,44 @@ describe('approval routing to the reporting manager', () => {
   });
 });
 
-describe('weekly auto-lock (Saturday 00:00, Mon-Fri)', () => {
-  test('the completed week is computed in IST: nothing before Saturday 00:00, the whole Mon-Fri week from it', () => {
+describe('weekly auto-lock (Sunday 00:00, Sunday -> Saturday week)', () => {
+  const week = (from) => Array.from({ length: 7 }, (_, i) => new Date(Date.parse(from) + i * 86400000).toISOString().slice(0, 10));
+
+  test('the completed week is computed in IST: nothing before Sunday 00:00, the whole Sun-Sat week from it', () => {
     const days = (iso) => timesheetsService.lastCompletedWeekDays(new Date(iso)).map((d) => d.toISOString().slice(0, 10));
-    // Thursday 24 Sep 2026 -> the week that ended Sat 19 Sep is the last completed one.
-    expect(days('2026-09-24T10:00:00Z')).toEqual(['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18']);
-    // Friday 25 Sep 23:59 IST: this week is NOT locked yet.
-    expect(days('2026-09-25T18:29:00Z')).toEqual(['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18']);
-    // Saturday 26 Sep 00:00 IST: it locks.
-    expect(days('2026-09-25T18:30:00Z')).toEqual(['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25']);
+    // Thursday 24 Sep 2026 -> the week Sun 13 - Sat 19 Sep is the last completed one.
+    expect(days('2026-09-24T10:00:00Z')).toEqual(week('2026-09-13'));
+    // Saturday 26 Sep 23:59 IST: this week is NOT locked yet.
+    expect(days('2026-09-26T18:29:00Z')).toEqual(week('2026-09-13'));
+    // Sunday 27 Sep 00:00 IST: Sun 20 - Sat 26 locks, weekend included.
+    expect(days('2026-09-26T18:30:00Z')).toEqual(week('2026-09-20'));
   });
 
-  test('the job locks Mon-Fri once (idempotent); afterwards neither an employee NOR an admin can log on those days', async () => {
+  test('the job locks the Sun-Sat week once (idempotent); afterwards neither an employee NOR an admin can log on those days', async () => {
     const org = await createOrg();
     const admin = await person(org, { role: 'admin' });
     const emp = await person(org);
     expect((await log(emp.token, { date: '2026-09-22', hours: 4 })).status).toBe(201); // before the lock
 
-    const now = new Date('2026-09-25T18:30:00Z');
+    const now = new Date('2026-09-26T18:30:00Z');
     const first = await weeklyLockJob.run(now);
-    expect(first.days_locked).toBe(5);
+    expect(first.days_locked).toBe(7);
     expect((await weeklyLockJob.run(now)).days_locked).toBe(0);
-    expect(await prisma.timesheetLock.count({ where: { org_id: org.id, is_auto: true } })).toBe(5);
+    expect(await prisma.timesheetLock.count({ where: { org_id: org.id, is_auto: true } })).toBe(7);
 
     const blockedEmployee = await log(emp.token, { date: '2026-09-23', hours: 4 });
     expect(blockedEmployee.status).toBe(409);
     expect(blockedEmployee.body.message).toContain('Regularisation');
     expect((await log(admin.token, { date: '2026-09-23', hours: 4 })).status).toBe(409);
-    // The weekend and the new week stay open.
+    // The locked week's weekend is closed too; the new week stays open.
+    expect((await log(emp.token, { date: '2026-09-26', hours: 4 })).status).toBe(409);
     expect((await log(emp.token, { date: '2026-09-28', hours: 4 })).status).toBe(201);
   });
 });
 
 describe('Timesheet Regularisation', () => {
   async function lockedWeek(org) {
-    await timesheetsService.lockCompletedWeek(org.id, new Date('2026-09-25T18:30:00Z')); // locks 21-25 Sep
+    await timesheetsService.lockCompletedWeek(org.id, new Date('2026-09-26T18:30:00Z')); // locks Sun 20 - Sat 26 Sep
   }
 
   test('the request only makes sense on a locked day; it is validated and de-duplicated', async () => {

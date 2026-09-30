@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const leaveService = require('../leave/leave.service');
+const calendarsService = require('../calendars/calendars.service');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 
 function minutesOfDayInZone(instant, timeZone) {
@@ -112,7 +113,7 @@ function dateRangeWhere({ from, to }) {
 async function listMine(orgId, orgMembershipId, { from, to, page, limit }) {
   const date = dateRangeWhere({ from, to });
   const where = { org_id: orgId, org_membership_id: orgMembershipId, ...(date ? { date } : {}) };
-  const [data, total] = await Promise.all([
+  const [data, total, calendar_days] = await Promise.all([
     prisma.attendanceRecord.findMany({
       where,
       orderBy: { date: 'desc' },
@@ -120,8 +121,33 @@ async function listMine(orgId, orgMembershipId, { from, to, page, limit }) {
       take: limit,
     }),
     prisma.attendanceRecord.count({ where }),
+    from && to ? calendarDays(orgId, orgMembershipId, from, to) : [],
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data, pagination: { page, limit, total }, calendar_days };
+}
+
+// The attendance sheet's calendar: the employee's company-calendar holidays
+// and approved full-day leave in [from, to], so the sheet shows them even on
+// days with no attendance record. [{ date, kind: 'holiday' | 'leave', label }].
+async function calendarDays(orgId, orgMembershipId, from, to) {
+  const [holidays, leaves] = await Promise.all([
+    calendarsService.companyHolidaysByMember(orgId, [orgMembershipId], from, to),
+    prisma.leaveRequest.findMany({
+      where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', is_half_day: false, from_date: { lte: to }, to_date: { gte: from } },
+      select: { from_date: true, to_date: true, leave_type: { select: { name: true } } },
+    }),
+  ]);
+  const days = new Map();
+  for (const [key, label] of holidays.get(orgMembershipId) || []) days.set(key, { date: key, kind: 'holiday', label });
+  for (const l of leaves) {
+    const start = l.from_date > from ? l.from_date : from;
+    const end = l.to_date < to ? l.to_date : to;
+    for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+      const key = ymd(new Date(t));
+      if (!days.has(key)) days.set(key, { date: key, kind: 'leave', label: l.leave_type.name });
+    }
+  }
+  return [...days.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
 // Admin/team view — every membership in the org, or one via org_membership_id.
@@ -362,9 +388,10 @@ async function importTemplate(orgId, { from, to, department_id }) {
   });
   if (!memberships.length || end < from) return [];
   const ids = memberships.map((m) => m.id);
-  const [records, leaves] = await Promise.all([
+  const [records, leaves, holidays] = await Promise.all([
     prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: end } } }),
     prisma.leaveRequest.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, status: 'approved', is_half_day: false, from_date: { lte: end }, to_date: { gte: from } }, select: { org_membership_id: true, from_date: true, to_date: true } }),
+    calendarsService.companyHolidaysByMember(orgId, ids, from, end),
   ]);
   const recordByKey = new Map(records.map((r) => [`${r.org_membership_id}|${ymd(r.date)}`, r]));
   const hhmm = (instant, timeZone) => (instant ? new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant) : '');
@@ -376,13 +403,15 @@ async function importTemplate(orgId, { from, to, department_id }) {
       if (m.joined_at && d < m.joined_at) continue;
       const record = recordByKey.get(`${m.id}|${ymd(d)}`);
       const onLeave = leaves.some((l) => l.org_membership_id === m.id && l.from_date <= d && l.to_date >= d);
+      // Holidays on the employee's calendar come prefilled as "holiday".
+      const holiday = holidays.get(m.id)?.has(ymd(d));
       out.push({
         employee: m.employee_code || m.person?.email || '',
         name: m.person?.name || '',
         department: m.department?.name || '',
         date: ymd(d),
         day: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
-        status: record?.status || (onLeave ? 'leave' : ''),
+        status: record?.status || (onLeave ? 'leave' : holiday ? 'holiday' : ''),
         check_in: hhmm(record?.check_in_at, timeZone),
         check_out: hhmm(record?.check_out_at, timeZone),
       });

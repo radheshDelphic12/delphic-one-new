@@ -135,7 +135,13 @@ export default function AttendancePage() {
     try {
       const endpoint = tab === 'team' ? '/attendance' : '/attendance/me';
       const { data } = await apiClient.get(endpoint, { params: { from, to } });
-      setRows(data.data || []);
+      // My attendance: holidays on my calendar and approved leave show as rows
+      // too, on days with no attendance record.
+      const recorded = new Set((data.data || []).map((r) => String(attendanceDate(r)).slice(0, 10)));
+      const calendarRows = (data.calendar_days || [])
+        .filter((d) => !recorded.has(d.date))
+        .map((d) => ({ id: `calendar-${d.date}`, date: d.date, status: d.kind, calendar_label: d.label, from_calendar: true }));
+      setRows([...(data.data || []), ...calendarRows].sort((a, b) => (String(attendanceDate(a)).slice(0, 10) < String(attendanceDate(b)).slice(0, 10) ? 1 : -1)));
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to load attendance'), 'Something went wrong');
     } finally {
@@ -178,19 +184,20 @@ export default function AttendancePage() {
   const columns = [
     ...(tab === 'team' ? [{ key: 'employee', header: 'Employee', render: (row) => row.org_membership?.person?.name || 'Unknown' }] : []),
     { key: 'date', header: 'Date', render: (row) => formatDate(row) },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
-    { key: 'check_in', header: 'Check in', render: (row) => formatDateTime(row.check_in_at) },
-    { key: 'check_out', header: 'Check out', render: (row) => formatDateTime(row.check_out_at) },
+    { key: 'status', header: 'Status', render: (row) => <span className="inline-flex flex-col gap-0.5"><Badge value={row.status} />{row.from_calendar && <span className="text-[11px] text-tertiary-500">{row.calendar_label}{row.status === 'holiday' ? ' · holiday calendar' : ' · approved leave'}</span>}</span> },
+    { key: 'check_in', header: 'Check in', render: (row) => (row.from_calendar ? '—' : formatDateTime(row.check_in_at)) },
+    { key: 'check_out', header: 'Check out', render: (row) => (row.from_calendar ? '—' : formatDateTime(row.check_out_at)) },
     {
       key: 'late',
       header: 'Late',
       render: (row) => {
+        if (row.from_calendar) return '—';
         if (row.late_minutes === null || row.late_minutes === undefined) return <span className="text-tertiary-400">No shift</span>;
         if (row.late_minutes === 0) return <span className="text-success-700">On time</span>;
         return <span className="font-medium text-danger-600">{formatMinutes(row.late_minutes)} late</span>;
       },
     },
-    { key: 'overtime', header: 'Overtime', render: (row) => formatMinutes(row.overtime_minutes) },
+    { key: 'overtime', header: 'Time past shift', render: (row) => <span title="Presence only — overtime is paid from approved timesheet overtime, not from check-out time">{formatMinutes(row.overtime_minutes)}</span> },
     ...(tab === 'team' ? [{ key: 'actions', header: 'Actions', render: (row) => <span className="flex gap-1"><button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={(event) => { event.stopPropagation(); setRegularize(row); }}><Wrench className="h-3.5 w-3.5" /> Correct</button><button type="button" className="btn-ghost inline-flex items-center gap-1 text-danger-600" onClick={(event) => { event.stopPropagation(); removeRecord(row); }}><Trash2 className="h-3.5 w-3.5" /> Delete</button></span> }] : []),
   ];
 
@@ -200,7 +207,10 @@ export default function AttendancePage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Attendance</h2>
-          <p className="mt-1 text-sm text-tertiary-500">Track check-ins, check-outs, daily status, and overtime.</p>
+          <p className="mt-1 text-sm text-tertiary-500">Track check-ins, check-outs and daily presence.</p>
+          <p className="mt-2 max-w-2xl rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">
+            <b>Attendance ≠ salary.</b> Check-in / check-out only records when you started and stopped. Pay is worked out from your <b>approved timesheet hours</b> and <b>approved overtime</b> (Time &amp; Attendance → Timesheets) — a long check-in never adds hours or overtime by itself.
+          </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-medium text-tertiary-600">From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm" /></label>

@@ -34,7 +34,10 @@ function CalendarCard({ title, subtitle, calendar }) {
         <ul className="divide-y divide-tertiary-100">
           {calendar.holidays.map((h) => (
             <li key={`${h.date}-${h.label}`} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span className="text-tertiary-900">{h.label}</span>
+              <span className="text-tertiary-900">
+                {h.label}
+                {h.is_working_day && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Client working day</span>}
+              </span>
               <span className="shrink-0 tabular-nums text-tertiary-500">{holidayDate(h.date)}</span>
             </li>
           ))}
@@ -45,10 +48,11 @@ function CalendarCard({ title, subtitle, calendar }) {
 }
 
 /**
- * The signed-in person's own holiday calendars: the standard one that governs
- * them (their mapping → department → office location → company default) and,
- * for IT staff / contractors, the calendar each assigned project follows — a
- * client calendar where the project has one. Non-IT staff get one calendar.
+ * The signed-in person's ONE official company calendar (their mapping →
+ * department → office location → company default) — the source of their
+ * working days, expected hours and pay. Project / client calendars are shown
+ * separately as client exceptions only (a client holiday, or a client working
+ * weekend → overtime / comp off); they never replace the company calendar.
  */
 export default function MyHolidaysTab() {
   const { user } = useAuth();
@@ -74,21 +78,31 @@ export default function MyHolidaysTab() {
       ) : !data ? (
         <EmptyState icon={CalendarDays} title="Holiday calendar unavailable" description="Your holiday calendar could not be loaded." />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
           <CalendarCard
-            title={data.per_project ? 'Standard holidays' : 'Holiday calendar'}
-            subtitle={data.per_project ? 'Applies to your regular working days and projects without their own calendar' : 'Applies to all your working days'}
+            title="Your company calendar"
+            subtitle="Official calendar for your office — your working days, expected hours and salary follow this one"
             calendar={data.standard_calendar}
           />
-          {/* Only IT staff / contractors work per project — non-IT follow the one calendar above. */}
-          {data.per_project && data.projects.map((p) => (
-            <CalendarCard
-              key={p.id}
-              title={p.name}
-              subtitle={p.client_name ? `Project for ${p.client_name} — follow this calendar when working on it` : 'Follow this calendar when working on this project'}
-              calendar={p.calendar}
-            />
-          ))}
+          {/* Client exceptions (IT staff / contractors): informational, never the employee's own calendar. */}
+          {data.per_project && data.projects.some((p) => p.calendar && p.calendar.id !== data.standard_calendar?.id) && (
+            <details className="rounded-2xl border border-tertiary-100 bg-tertiary-50/50 p-3">
+              <summary className="cursor-pointer select-none text-sm font-medium text-tertiary-800">
+                Client / project exceptions
+                <span className="ml-2 text-xs font-normal text-tertiary-500">A client may be off on your working day, or work on your day off — hours on your day off go to overtime / comp off.</span>
+              </summary>
+              <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                {data.projects.filter((p) => p.calendar && p.calendar.id !== data.standard_calendar?.id).map((p) => (
+                  <CalendarCard
+                    key={p.id}
+                    title={p.name}
+                    subtitle={p.client_name ? `Client ${p.client_name} — exceptions only` : 'Project calendar — exceptions only'}
+                    calendar={p.calendar}
+                  />
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
     </div>

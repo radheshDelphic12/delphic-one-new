@@ -2,7 +2,7 @@
 // timesheets, Managed Services billing on the project calendar, overtime,
 // approval states, the reusable lock / version / change-detection system,
 // invoices from a locked month, resource revenue across contracts, vendor
-// payments, attendance-based salary, Financials snapshots, and the new
+// payments, timesheet-based salary, Financials snapshots, and the new
 // Group Charge / Expense / Payroll filters and category permissions.
 const {
   app,
@@ -339,13 +339,16 @@ describe('Resource Revenue and vendor payments', () => {
     await assign(ctx, p2.id, m.membership.id, { allocation_percent: 40 });
     await approvedEntries(ctx, m.membership.id, p1.id, ['2026-08-03']);
     await approvedEntries(ctx, m.membership.id, p2.id, ['2026-08-04']);
-    await prisma.attendanceRecord.createMany({ data: weekdays(AUG).map((d) => ({ org_id: ctx.org.id, org_membership_id: m.membership.id, date: new Date(d), status: 'present' })) });
+    // Fill every weekday to the 9h shift with non-project hours, so the full
+    // month's salary is earned without touching either project's billing.
+    await approvedEntries(ctx, m.membership.id, null, weekdays(AUG, ['2026-08-03', '2026-08-04']), 9);
+    await approvedEntries(ctx, m.membership.id, null, ['2026-08-03', '2026-08-04'], 1);
 
     const res = await authed(request(app).get('/api/v1/analytics/resource-revenue'), ctx.adminToken).query(AUG);
     const r = res.body.data.resources.find((x) => x.name === 'Mallicka');
     expect(r.projects.map((p) => [p.project.id, p.revenue])).toEqual([[p1.id, 8000], [p2.id, 4000]]);
     expect(r.revenue).toBe(12000);
-    // Full attendance: the month's salary 42000, split 60/40 by allocation.
+    // Full approved timesheet: the month's salary 42000, split 60/40 by allocation.
     expect(r.projects.map((p) => p.cost)).toEqual([25200, 16800]);
     expect(r.projects.every((p) => p.approval_status === 'approved')).toBe(true);
   });
@@ -368,21 +371,23 @@ describe('Resource Revenue and vendor payments', () => {
   });
 });
 
-describe('Salary — attendance on the employee calendar; lock; regularisation after lock', () => {
-  test('per day = ctc / calendar working days; a regularisation after lock is flagged, recalculated as v2, and feeds payroll and Financials', async () => {
+describe('Salary — approved timesheet hours on the employee calendar; lock; correction after lock', () => {
+  test('hourly = ctc / expected hours; a timesheet correction after lock is flagged, recalculated as v2, and feeds payroll and Financials', async () => {
     const ctx = await seed();
     await prisma.calendarHoliday.create({ data: { calendar_id: ctx.calendar.id, date: new Date('2026-08-14'), label: 'Independence Day (obs.)' } });
     const n = await employee(ctx, { name: 'Nikhil' });
     await prisma.salaryStructure.create({ data: { org_id: ctx.org.id, org_membership_id: n.membership.id, effective_from: new Date('2026-01-01'), ctc: 55000, components: { basic: 55000 }, created_by: ctx.adminUser.id } });
-    const present = weekdays(AUG, ['2026-08-14', '2026-08-20', '2026-08-21']);
-    await prisma.attendanceRecord.createMany({ data: present.map((d) => ({ org_id: ctx.org.id, org_membership_id: n.membership.id, date: new Date(d), status: 'present' })) });
-    const absent = await prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: n.membership.id, date: new Date('2026-08-20'), status: 'absent' } });
+    // 9h approved on every working day except 20 and 21 Aug (no timesheet).
+    await approvedEntries(ctx, n.membership.id, null, weekdays(AUG, ['2026-08-14', '2026-08-20', '2026-08-21']), 9);
+    // Attendance alone never pays: marking 20 Aug present changes nothing.
+    await prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: n.membership.id, date: new Date('2026-08-20'), status: 'present' } });
 
     const salary = await authed(request(app).get('/api/v1/analytics/salary-attendance'), ctx.adminToken).query(AUG);
     const line = salary.body.data.lines[0];
     expect(line.breakdown.working_days).toBe(20); // 21 weekdays − 1 calendar holiday
-    expect(line.per_day).toBe(2750); // 55000 / 20
-    expect(line.deductions).toBe(5500); // 2 days loss of pay
+    expect(line.breakdown.expected_hours).toBe(180); // 20 x 9h
+    expect(line.breakdown.deficit_hours).toBe(18); // 2 days with no approved hours
+    expect(line.deductions).toBe(5500); // 18h x 55000 / 180
     expect(line.net).toBe(49500);
 
     const locked = await calc(ctx.adminToken, 'lock', { kind: 'salary', ...AUG });
@@ -390,19 +395,23 @@ describe('Salary — attendance on the employee calendar; lock; regularisation a
     const finLock = await calc(ctx.adminToken, 'lock', { kind: 'financials', ...AUG });
     expect(finLock.status).toBe(200);
 
-    // Regularise the absent day to present after the lock.
-    const reg = await authed(request(app).post(`/api/v1/attendance/${absent.id}/regularize`), ctx.adminToken).send({ status: 'present', reason: 'Was on client site' });
-    expect(reg.status).toBe(200);
+    // An attendance change after the lock is presence only — nothing flagged.
+    const att = await prisma.attendanceRecord.findFirst({ where: { org_membership_id: n.membership.id, date: new Date('2026-08-20') } });
+    await authed(request(app).post(`/api/v1/attendance/${att.id}/regularize`), ctx.adminToken).send({ status: 'wfh', reason: 'Worked from home' });
+    expect((await authed(request(app).get('/api/v1/calculations/state'), ctx.adminToken).query({ kind: 'salary', ...AUG })).body.data.status).toBe('locked');
+
+    // The admin adds the missing approved 9h for 20 Aug after the lock.
+    const added = await authed(request(app).post('/api/v1/timesheets/entries/admin'), ctx.adminToken).send({ org_membership_id: n.membership.id, date: '2026-08-20', hours: 9, reason: 'Was on client site' });
+    expect(added.status).toBe(201);
     const state = await authed(request(app).get('/api/v1/calculations/state'), ctx.adminToken).query({ kind: 'salary', ...AUG });
     expect(state.body.data.status).toBe('change_detected');
     expect(state.body.data.locked_amount).toBe(49500);
     expect(state.body.data.changes[0]).toMatchObject({
-      source_type: 'attendance',
+      source_type: 'timesheet',
       previous_amount: 49500,
       potential_amount: 52250,
       difference: 2750,
-      old_value: expect.objectContaining({ status: 'absent' }),
-      new_value: expect.objectContaining({ status: 'present' }),
+      new_value: expect.objectContaining({ hours: 9, status: 'approved' }),
       changed_by: expect.objectContaining({ id: ctx.adminUser.id }),
     });
     // Locked month keeps serving the locked figure.

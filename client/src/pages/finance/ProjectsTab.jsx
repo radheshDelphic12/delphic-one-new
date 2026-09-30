@@ -327,13 +327,23 @@ export default function ProjectsTab() {
     [rows, category, contract]
   );
 
-  // Monthly billing of the filtered projects, in INR — converted on the server
-  // with the same rates and converter as Project P&L. Hourly projects have no
-  // fixed monthly figure; a currency with no exchange rate is left out and named.
-  const monthly = visible.filter((row) => row.billing_type === 'monthly');
-  const monthlyTotal = monthly.reduce((sum, row) => sum + (row.monthly_amount_inr ?? 0), 0);
-  const unconverted = [...new Set(monthly.filter((row) => row.exchange_rate === null).map((row) => row.currency))];
-  const hourlyCount = visible.filter((row) => row.billing_type === 'hourly').length;
+  // This month's billing of the filtered projects, in INR — worked out on the
+  // server with the P&L's own rule and converter: the fixed monthly fee, or
+  // approved billable hours x the hourly rate. Hours not billed are counted
+  // and explained (pending approval, non-billable…), never dropped silently.
+  const billed = visible.filter((row) => row.this_month?.billing_type);
+  const monthTotal = billed.reduce((sum, row) => sum + (row.this_month.amount_inr ?? 0), 0);
+  const unconverted = [...new Set(billed.filter((row) => row.this_month.amount_inr === null).map((row) => row.this_month.currency))];
+  const monthlyCount = billed.filter((row) => row.this_month.billing_type === 'monthly').length;
+  const hourlyRows = billed.filter((row) => row.this_month.billing_type === 'hourly');
+  const hourlyHours = hourlyRows.reduce((sum, row) => sum + (row.this_month.billable_hours || 0), 0);
+  const excluded = hourlyRows.reduce((acc, row) => {
+    for (const [k, v] of Object.entries(row.this_month.excluded || {})) acc[k] = (acc[k] || 0) + v;
+    return acc;
+  }, {});
+  const EXCLUDED_LABEL = { pending_approval: 'pending approval', non_billable: 'non-billable', outside_agreement: 'outside the agreement dates', no_hourly_rate: 'no hourly rate that day', overtime: 'overtime (project does not bill OT)', not_supported: 'fixed-price project (not billed by hours)' };
+  const excludedText = Object.entries(excluded).filter(([, v]) => v > 0).map(([k, v]) => `${Math.round(v * 100) / 100}h ${EXCLUDED_LABEL[k] || k}`).join(' · ');
+  const monthName = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -390,13 +400,14 @@ export default function ProjectsTab() {
             />
             {!loading && (
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-tertiary-100 bg-white px-4 py-2.5 text-sm">
-                <span className="text-tertiary-500">Monthly billing total</span>
-                <span className="font-heading text-base font-semibold tabular-nums text-tertiary-900">{moneyIn(monthlyTotal, 'INR')}</span>
+                <span className="text-tertiary-500">Billing · {monthName}</span>
+                <span className="font-heading text-base font-semibold tabular-nums text-tertiary-900">{moneyIn(monthTotal, 'INR')}</span>
                 <span className="text-xs text-tertiary-500">
-                  {monthly.length} monthly project{monthly.length === 1 ? '' : 's'}
-                  {hourlyCount > 0 && ` · ${hourlyCount} hourly not included`}
+                  {monthlyCount} monthly project{monthlyCount === 1 ? '' : 's'} (fixed fee)
+                  {hourlyRows.length > 0 && ` · ${hourlyRows.length} hourly: ${Math.round(hourlyHours * 100) / 100}h approved billable × rate`}
                   {unconverted.length > 0 && ` · ${unconverted.join(', ')} not included — set the exchange rate below`}
                 </span>
+                {excludedText && <span className="w-full text-xs text-tertiary-500">Not billed yet: {excludedText}.</span>}
               </div>
             )}
             <ExchangeRatesPanel rates={rates} onSaved={() => { reloadRates(); load(); }} />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Receipt, Trash2 } from 'lucide-react';
+import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -17,55 +17,111 @@ const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+// The "Other" category — not an admin-managed category; needs a description.
+const OTHER = '__other';
+const STAGE_LABEL = { manager: 'Manager', hr: 'HR', finance: 'Finance' };
+
+// Status, plus the step a pending claim is waiting on (Manager → HR → Finance).
+function ClaimStatus({ row }) {
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <Badge value={row.status} />
+      {row.status === 'pending' && row.approval_stage && <span className="text-[11px] text-tertiary-500">Awaiting {STAGE_LABEL[row.approval_stage]}</span>}
+    </span>
+  );
+}
+
 // Submit (no `claim`) and edit (`claim` set) share the form. Editing is only offered
-// while the claim is pending; receipts attach to the saved claim, so they appear
-// once it exists (right after submitting, the drawer reopens in edit mode for them).
-// The category comes from the admin-managed Expense categories (Finance → Categories).
-function ClaimDrawer({ open, claim, locations, categories, onClose, onSubmit }) {
+// while the claim is pending. A new claim takes its receipts first (they upload
+// right after it is saved); an existing one manages them in the Receipts panel.
+// The category comes from the admin-managed Expense categories (Finance → Categories),
+// or "Other" with a description. An admin can submit for any employee.
+function ClaimDrawer({ open, claim, locations, categories, members = null, onClose, onSubmit }) {
   const isEditing = Boolean(claim);
-  const [fields, setFields] = useState({ location_id: '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR' });
+  const [fields, setFields] = useState({ org_membership_id: '', location_id: '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR', description: '' });
+  const [receipts, setReceipts] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setReceipts([]);
     // An older claim may carry only a free-text category: match it by name.
-    const byName = (name) => categories.find((c) => c.name.toLowerCase() === String(name || '').toLowerCase())?.id || '';
+    const byName = (name) => (String(name || '').toLowerCase() === 'other' ? OTHER : categories.find((c) => c.name.toLowerCase() === String(name || '').toLowerCase())?.id || '');
     setFields(claim
       ? {
+        org_membership_id: '',
         location_id: claim.location_id,
         category_id: claim.category_id || byName(claim.category),
         expense_date: claim.expense_date ? String(claim.expense_date).slice(0, 10) : '',
         amount: String(Number(claim.amount)),
         currency: claim.currency,
+        description: claim.description || '',
       }
-      : { location_id: locations[0]?.id || '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR' });
+      : { org_membership_id: '', location_id: locations[0]?.id || '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR', description: '' });
   }, [open, claim, locations, categories]);
 
   function set(key, value) {
     setFields((current) => ({ ...current, [key]: value }));
   }
 
+  const isOther = fields.category_id === OTHER;
+
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ ...fields, expense_date: fields.expense_date || undefined, amount: Number(fields.amount) });
+      const { org_membership_id, category_id, description, ...rest } = fields;
+      const payload = {
+        ...rest,
+        ...(isOther ? { category: 'Other' } : { category_id }),
+        description: description.trim() || null,
+        expense_date: fields.expense_date || undefined,
+        amount: Number(fields.amount),
+        ...(!isEditing && org_membership_id ? { org_membership_id } : {}),
+      };
+      await onSubmit(payload, receipts);
       onClose();
     } finally {
       setSaving(false);
     }
   }
 
+  const ready = fields.location_id && fields.category_id && fields.amount && (!isOther || fields.description.trim());
   return (
     <Drawer open={open} title={isEditing ? 'Edit expense claim' : 'Submit expense claim'} onClose={onClose} size={isEditing ? 'md' : 'sm'} tone={isEditing ? 'edit' : 'create'} footer={
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="expense-claim-form" className="btn-primary" disabled={saving || !fields.location_id || !fields.category_id || !fields.amount}>
+        <button type="submit" form="expense-claim-form" className="btn-primary" disabled={saving || !ready}>
           {saving ? (isEditing ? 'Saving…' : 'Submitting…') : isEditing ? 'Save changes' : 'Submit claim'}
         </button>
       </>
     }>
+      {!isEditing && (
+        <div className="mb-4 space-y-2">
+          <p className="text-xs font-medium text-tertiary-600">Receipts</p>
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-tertiary-300 px-3 py-3 text-sm text-tertiary-600 hover:bg-tertiary-50">
+            <Paperclip className="h-4 w-4" /> Add receipt (image or PDF)
+            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => { const picked = [...(e.target.files || [])]; e.target.value = ''; setReceipts((r) => [...r, ...picked]); }} />
+          </label>
+          {receipts.length > 0 && (
+            <ul className="space-y-1 text-xs text-tertiary-700">
+              {receipts.map((file, i) => (
+                <li key={`${file.name}-${i}`} className="flex items-center justify-between rounded-lg bg-tertiary-50 px-2 py-1">
+                  <span className="truncate">{file.name}</span>
+                  <button type="button" className="btn-ghost p-0.5" aria-label={`Remove ${file.name}`} onClick={() => setReceipts((r) => r.filter((_, k) => k !== i))}><X className="h-3.5 w-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <form id="expense-claim-form" onSubmit={submit} className="space-y-3">
+        {!isEditing && members && (
+          <label className="block text-xs font-medium text-tertiary-600">
+            Employee <span className="font-normal text-tertiary-400">(leave blank for yourself)</span>
+            <div className="mt-1"><SearchableSelect value={fields.org_membership_id} onChange={(v) => set('org_membership_id', v)} options={members} placeholder="Myself" allowClear /></div>
+          </label>
+        )}
         <label className="block text-xs font-medium text-tertiary-600">
           Office location
           <select required value={fields.location_id} onChange={(e) => set('location_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
@@ -77,8 +133,13 @@ function ClaimDrawer({ open, claim, locations, categories, onClose, onSubmit }) 
           Category
           <select required value={fields.category_id} onChange={(e) => set('category_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
             <option value="" disabled>Select category</option>
-            {categories.filter((c) => c.is_active || c.id === fields.category_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categories.filter((c) => (c.is_active || c.id === fields.category_id) && c.name.toLowerCase() !== 'other').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value={OTHER}>Other</option>
           </select>
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Description {isOther ? <span className="font-normal text-danger-600">(required for Other)</span> : <span className="font-normal text-tertiary-400">(optional)</span>}
+          <textarea required={isOther} rows={2} value={fields.description} onChange={(e) => set('description', e.target.value)} placeholder="What was this expense for?" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <label className="block text-xs font-medium text-tertiary-600">
           Expense date
@@ -108,7 +169,7 @@ function ClaimDrawer({ open, claim, locations, categories, onClose, onSubmit }) 
 
 const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '' };
 
-const VIEW_LABEL = { mine: 'My claims', team: 'Reimbursements', group: 'Group expenses' };
+const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', group: 'Group expenses' };
 
 /**
  * Finance → Expenses. Everyone: their own claims. Admins also get
@@ -129,6 +190,8 @@ export default function ExpensesTab() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // Managers, HR and Finance see the claims waiting on their step.
+  const [approvalCount, setApprovalCount] = useState(0);
   const expenseCategories = useFinanceCategories('expense', { includeInactive: true });
   const chargeCategories = useFinanceCategories('group_charge', { includeInactive: true, enabled: isAdmin });
   const locationOptions = useLocationOptions(true);
@@ -148,6 +211,10 @@ export default function ExpensesTab() {
       if (view === 'group') {
         const { data } = await apiClient.get('/billing/group-charges', { params });
         setRows(data.data || []);
+      } else if (view === 'approvals') {
+        const { data } = await apiClient.get('/expenses/claims/approvals');
+        setRows(data.data || []);
+        setApprovalCount((data.data || []).length);
       } else {
         const endpoint = view === 'team' ? '/expenses/claims' : '/expenses/claims/me';
         const { data } = await apiClient.get(endpoint, { params: { limit: 100, ...params } });
@@ -165,18 +232,34 @@ export default function ExpensesTab() {
   useEffect(() => { setFilters((f) => ({ ...f, category_id: '' })); }, [view]);
   useEffect(() => {
     apiClient.get('/orgs/locations').then(({ data }) => setLocations(data.data || [])).catch(() => setLocations([]));
+    apiClient.get('/expenses/claims/approvals').then(({ data }) => setApprovalCount((data.data || []).length)).catch(() => setApprovalCount(0));
   }, []);
 
-  async function createClaim(payload) {
+  async function createClaim(payload, receipts = []) {
+    let claim;
     try {
       const { data } = await apiClient.post('/expenses/claims', payload);
-      pushInfo('Expense claim submitted — you can attach receipts now');
-      load();
-      // Reopen in edit mode so the receipts can be attached to the new claim.
-      setEditing(data.data);
+      claim = data.data;
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to submit claim'), 'Something went wrong');
       throw err;
+    }
+    // Receipts picked on the form upload to the new claim.
+    let failed = 0;
+    for (const file of receipts) {
+      const body = new FormData();
+      body.append('entity_type', 'expense_claim');
+      body.append('entity_id', claim.id);
+      body.append('label', 'Receipt');
+      body.append('file', file);
+      try { await apiClient.post('/documents', body); } catch { failed += 1; }
+    }
+    load();
+    if (failed) {
+      pushError(`${failed} receipt${failed === 1 ? '' : 's'} could not be uploaded — add ${failed === 1 ? 'it' : 'them'} from Edit.`, 'Claim submitted');
+      setEditing(claim);
+    } else {
+      pushInfo(receipts.length ? `Expense claim submitted with ${receipts.length} receipt${receipts.length === 1 ? '' : 's'}` : 'Expense claim submitted');
     }
   }
 
@@ -204,12 +287,31 @@ export default function ExpensesTab() {
 
   async function decide(row, status) {
     try {
-      await apiClient.post(`/expenses/claims/${row.id}/decision`, { status });
-      pushInfo(`Claim ${status}`);
+      const { data } = await apiClient.post(`/expenses/claims/${row.id}/decision`, { status });
+      const next = data.data?.status === 'pending' && data.data?.approval_stage;
+      pushInfo(next ? `Approved — sent on to ${STAGE_LABEL[next]}` : `Claim ${status}`);
       load();
+      apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record decision'), 'Something went wrong');
     }
+  }
+
+  // Approve every claim waiting on the caller's step, one decision each.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  async function approveAll() {
+    const pending = rows.filter((row) => row.status === 'pending');
+    if (!pending.length || !window.confirm(`Approve all ${pending.length} claim${pending.length === 1 ? '' : 's'} waiting on you?`)) return;
+    setBulkBusy(true);
+    let failed = 0;
+    for (const row of pending) {
+      try { await apiClient.post(`/expenses/claims/${row.id}/decision`, { status: 'approved' }); } catch { failed += 1; }
+    }
+    setBulkBusy(false);
+    if (failed) pushError(`${pending.length - failed} approved; ${failed} could not be approved.`, 'Some claims were skipped');
+    else pushInfo(`${pending.length} claim${pending.length === 1 ? '' : 's'} approved`);
+    load();
+    apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
   }
 
   async function reimburse(row) {
@@ -224,11 +326,21 @@ export default function ExpensesTab() {
 
   const columns = [
     { key: 'date', header: 'Expense date', render: (row) => (row.expense_date ? new Date(row.expense_date).toLocaleDateString(undefined, { timeZone: 'UTC' }) : <span title="Submission date (no expense date recorded)">{new Date(row.created_at).toLocaleDateString()}</span>) },
-    ...(view === 'team' ? [{ key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' }] : []),
+    ...(view === 'team' || view === 'approvals' ? [{ key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' }] : []),
     { key: 'location', header: 'Office', render: (row) => row.location?.name || '—' },
-    { key: 'category', header: 'Category', render: (row) => row.category_ref?.name || row.category },
+    {
+      key: 'category',
+      header: 'Category',
+      render: (row) => (
+        <span>
+          {row.category_ref?.name || row.category}
+          {row.description && <span className="block max-w-[16rem] truncate text-xs text-tertiary-500" title={row.description}>{row.description}</span>}
+          {row.submitter && <span className="block text-[11px] text-tertiary-400">Filed by {row.submitter.name}</span>}
+        </span>
+      ),
+    },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${Number(row.amount).toLocaleString()}` },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
+    { key: 'status', header: 'Status', render: (row) => <ClaimStatus row={row} /> },
     {
       key: 'actions',
       header: 'Actions',
@@ -238,10 +350,11 @@ export default function ExpensesTab() {
           {((row.status === 'pending' && (view === 'mine' || isAdmin)) || isSuperadmin) && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
           )}
-          {isSuperadmin && (
+          {/* Raised by mistake: its owner or an admin may delete it while pending; a superadmin any time. */}
+          {(isSuperadmin || (row.status === 'pending' && (view === 'mine' || (isAdmin && view === 'team')))) && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs text-danger-600" onClick={() => removeClaim(row)}><Trash2 className="h-3.5 w-3.5" /> Delete</button>
           )}
-          {isAdmin && view === 'team' && row.status === 'pending' && (
+          {((isAdmin && view === 'team') || view === 'approvals') && row.status === 'pending' && (
             <>
               <button type="button" className="btn-ghost text-xs" onClick={() => decide(row, 'approved')}>Approve</button>
               <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => decide(row, 'rejected')}>Reject</button>
@@ -264,17 +377,25 @@ export default function ExpensesTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-          {['mine', ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
+          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
             <button key={key} type="button" role="tab" aria-selected={view === key} className={`border-b-2 px-3 py-2 text-sm font-medium ${view === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setView(key)}>
               {VIEW_LABEL[key]}
+              {key === 'approvals' && approvalCount > 0 && <span className="ml-1.5 rounded-full bg-primary-100 px-1.5 text-[11px] font-semibold text-primary-700">{approvalCount}</span>}
             </button>
           ))}
         </div>
+        <div className="flex flex-wrap gap-2">
+        {view === 'approvals' && rows.filter((row) => row.status === 'pending').length > 1 && (
+          <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={bulkBusy} onClick={approveAll}>
+            {bulkBusy ? 'Approving…' : `Approve all (${rows.filter((row) => row.status === 'pending').length})`}
+          </button>
+        )}
         {view !== 'group' && (
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
             <Plus className="h-4 w-4" /> Submit claim
           </button>
         )}
+        </div>
       </div>
 
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -307,7 +428,7 @@ export default function ExpensesTab() {
       ) : (
         <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No claims match these filters." />
       )}
-      <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
+      <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} members={isAdmin ? memberOptions : null} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
       <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} categories={expenseCategories} onClose={() => setEditing(null)} onSubmit={updateClaim} />
     </div>
   );

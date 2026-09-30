@@ -12,11 +12,17 @@ const claimFields = {
   expense_date: optionalDate,
   amount: z.coerce.number().positive(),
   currency: CURRENCY.default('INR'),
+  // What it was for; required when the category is "Other".
+  description: z.string().trim().max(2000).nullable().optional(),
 };
 
+const isOther = (v) => !v.category_id && String(v.category || '').trim().toLowerCase() === 'other';
+
+// An admin may file a claim for any employee (org_membership_id).
 const createClaimSchema = z
-  .object(claimFields)
-  .refine((v) => v.category || v.category_id, { message: 'Pick a category', path: ['category_id'] });
+  .object({ ...claimFields, org_membership_id: z.string().uuid().optional() })
+  .refine((v) => v.category || v.category_id, { message: 'Pick a category', path: ['category_id'] })
+  .refine((v) => !isOther(v) || Boolean(v.description), { message: 'Describe the expense when the category is Other', path: ['description'] });
 
 // Edit a pending claim — any subset of the submitted fields, at least one.
 const updateClaimSchema = z

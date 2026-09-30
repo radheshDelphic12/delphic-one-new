@@ -32,12 +32,18 @@ async function checkCalendarRefs(orgId, { location_id, department_id }) {
   return null;
 }
 
+// The org's ONE standard holiday calendar is its default (is_default): what
+// anyone without a more specific calendar follows. Marking a calendar as the
+// standard one moves the flag — two standards never coexist.
 async function create(orgId, { name, kind, is_default, location_id, department_id }) {
   const refError = await checkCalendarRefs(orgId, { location_id, department_id });
   if (refError) return { error: refError };
-  const calendar = await prisma.calendar.create({
-    data: { org_id: orgId, name, kind, is_default, location_id: location_id || null, department_id: department_id || null },
-    include: CALENDAR_INCLUDE,
+  const calendar = await prisma.$transaction(async (tx) => {
+    if (is_default) await tx.calendar.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
+    return tx.calendar.create({
+      data: { org_id: orgId, name, kind, is_default, location_id: location_id || null, department_id: department_id || null },
+      include: CALENDAR_INCLUDE,
+    });
   });
   return { calendar };
 }
@@ -47,10 +53,9 @@ async function update(orgId, calendarId, patch) {
   if (!calendar) return { error: 'not_found' };
   const refError = await checkCalendarRefs(orgId, patch);
   if (refError) return { error: refError };
-  const updated = await prisma.calendar.update({
-    where: { id: calendarId },
-    data: patch,
-    include: CALENDAR_INCLUDE,
+  const updated = await prisma.$transaction(async (tx) => {
+    if (patch.is_default) await tx.calendar.updateMany({ where: { org_id: orgId, is_default: true, id: { not: calendarId } }, data: { is_default: false } });
+    return tx.calendar.update({ where: { id: calendarId }, data: patch, include: CALENDAR_INCLUDE });
   });
   return { calendar: updated };
 }
@@ -164,6 +169,37 @@ async function resolveCalendar(orgId, orgMembershipId, accountId = null) {
   return id ? calendars.find((c) => c.id === id) : null;
 }
 
+// Each employee's company-calendar holidays over [from, to] (their calendar
+// picked exactly like resolveCalendar with no project), batched for many
+// employees: Map(membershipId → Map(ymd → label)). A date the calendar marks
+// as a working day is never a holiday.
+async function companyHolidaysByMember(orgId, membershipIds, from, to) {
+  const ids = [...new Set(membershipIds)];
+  const out = new Map();
+  if (!ids.length) return out;
+  const [memberships, assignments, calendars, rows] = await Promise.all([
+    prisma.orgMembership.findMany({ where: { id: { in: ids }, org_id: orgId }, select: { id: true, location_id: true, department_id: true } }),
+    prisma.employeeCalendar.findMany({ where: { org_membership_id: { in: ids } }, select: { org_membership_id: true, account_id: true, calendar_id: true } }),
+    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, department_id: true, is_default: true } }),
+    prisma.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, date: { gte: from, lte: to }, is_working_day: false }, select: { calendar_id: true, date: true, label: true } }),
+  ]);
+  const byCalendar = new Map();
+  for (const r of rows) {
+    if (!byCalendar.has(r.calendar_id)) byCalendar.set(r.calendar_id, new Map());
+    byCalendar.get(r.calendar_id).set(r.date.toISOString().slice(0, 10), r.label);
+  }
+  for (const m of memberships) {
+    const calendarId = pickCalendarId({
+      assignments: assignments.filter((a) => a.org_membership_id === m.id),
+      membershipLocationId: m.location_id,
+      membershipDepartmentId: m.department_id,
+      calendars,
+    });
+    out.set(m.id, byCalendar.get(calendarId) || new Map());
+  }
+  return out;
+}
+
 // IT staff and contractors log time per project, so each assigned project's
 // calendar applies to them; everyone else (non-IT) follows one standard
 // calendar only — their timesheets carry no project. Same IT test as
@@ -211,13 +247,13 @@ async function myCalendars(orgId, orgMembershipId, year) {
     prisma.calendarHoliday.findMany({
       where: { calendar_id: { in: calendarIds }, date: { gte: new Date(Date.UTC(year, 0, 1)), lte: new Date(Date.UTC(year, 11, 31)) } },
       orderBy: { date: 'asc' },
-      select: { calendar_id: true, date: true, label: true },
+      select: { calendar_id: true, date: true, label: true, is_working_day: true },
     }),
   ]);
   const withHolidays = (id) => {
     const calendar = calendars.find((c) => c.id === id);
     if (!calendar) return null;
-    return { ...calendar, holidays: holidays.filter((h) => h.calendar_id === id).map(({ date, label }) => ({ date, label })) };
+    return { ...calendar, holidays: holidays.filter((h) => h.calendar_id === id).map(({ date, label, is_working_day }) => ({ date, label, is_working_day })) };
   };
 
   return {
@@ -236,7 +272,7 @@ async function holidayFor(orgId, orgMembershipId, accountId, date) {
   const holiday = await prisma.calendarHoliday.findUnique({
     where: { calendar_id_date: { calendar_id: calendar.id, date } },
   });
-  return holiday ? { label: holiday.label, calendar_name: calendar.name } : null;
+  return holiday && !holiday.is_working_day ? { label: holiday.label, calendar_name: calendar.name } : null;
 }
 
 async function listHolidays(orgId, calendarId) {
@@ -249,14 +285,14 @@ async function listHolidays(orgId, calendarId) {
   return { holidays };
 }
 
-async function addHoliday(orgId, calendarId, { date, label }) {
+async function addHoliday(orgId, calendarId, { date, label, is_working_day = false }) {
   const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, org_id: orgId } });
   if (!calendar) return { error: 'not_found' };
   const existing = await prisma.calendarHoliday.findUnique({
     where: { calendar_id_date: { calendar_id: calendarId, date } },
   });
   if (existing) return { error: 'already_exists' };
-  const holiday = await prisma.calendarHoliday.create({ data: { calendar_id: calendarId, date, label } });
+  const holiday = await prisma.calendarHoliday.create({ data: { calendar_id: calendarId, date, label, is_working_day } });
   return { holiday };
 }
 
@@ -603,16 +639,19 @@ async function setProjectCalendar(orgId, accountId, calendarId) {
   return { project: project || null };
 }
 
-// Mon–Fri days of a month that are not holidays on the given calendar.
-// Pure: `holidayDates` is a Set of 'YYYY-MM-DD' strings.
-function countWorkingDays(year, month, holidayDates = new Set()) {
+// Mon–Fri days of a month that are not holidays on the given calendar, plus
+// any weekend date the calendar marks as a working-day exception (a client
+// working Saturday/Sunday). Pure: both are Sets of 'YYYY-MM-DD' strings.
+function countWorkingDays(year, month, holidayDates = new Set(), workingDates = new Set()) {
   const total = new Date(Date.UTC(year, month, 0)).getUTCDate();
   let count = 0;
   for (let day = 1; day <= total; day += 1) {
     const date = new Date(Date.UTC(year, month - 1, day));
+    const key = date.toISOString().slice(0, 10);
+    if (workingDates.has(key)) { count += 1; continue; }
     const weekday = date.getUTCDay();
     if (weekday === 0 || weekday === 6) continue;
-    if (holidayDates.has(date.toISOString().slice(0, 10))) continue;
+    if (holidayDates.has(key)) continue;
     count += 1;
   }
   return count;
@@ -624,13 +663,15 @@ async function projectWorkingDays(orgId, accountId, year, month) {
   const mapped = await prisma.projectCalendar.findFirst({ where: { org_id: orgId, account_id: accountId }, select: { calendar_id: true } });
   const calendarId = mapped?.calendar_id || (await defaultCalendar(orgId))?.id || null;
   let holidayDates = new Set();
+  let workingDates = new Set();
   if (calendarId) {
     const start = new Date(Date.UTC(year, month - 1, 1));
     const end = new Date(Date.UTC(year, month, 0));
-    const holidays = await prisma.calendarHoliday.findMany({ where: { calendar_id: calendarId, date: { gte: start, lte: end } }, select: { date: true } });
-    holidayDates = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+    const rows = await prisma.calendarHoliday.findMany({ where: { calendar_id: calendarId, date: { gte: start, lte: end } }, select: { date: true, is_working_day: true } });
+    holidayDates = new Set(rows.filter((h) => !h.is_working_day).map((h) => h.date.toISOString().slice(0, 10)));
+    workingDates = new Set(rows.filter((h) => h.is_working_day).map((h) => h.date.toISOString().slice(0, 10)));
   }
-  return { working_days: countWorkingDays(year, month, holidayDates), holiday_dates: holidayDates };
+  return { working_days: countWorkingDays(year, month, holidayDates, workingDates), holiday_dates: holidayDates, working_dates: workingDates };
 }
 
 module.exports = {
@@ -648,6 +689,7 @@ module.exports = {
   listAssignments,
   memberExists,
   pickCalendarId,
+  companyHolidaysByMember,
   resolveCalendar,
   myCalendars,
   followsProjectCalendars,

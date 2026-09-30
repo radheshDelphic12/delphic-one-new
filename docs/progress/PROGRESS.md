@@ -2,6 +2,73 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-09-30 — Hourly billing = billing engine, working-day leave, claim approval chain, admin timesheet backfill — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- **Hourly billing fixed (Finance → Projects total, Project P&L).** `projectPnl.projectRevenue` now takes hourly revenue from the billing engine (`billing.engine.computeProjectMonth` / `lockedAmount`, or the locked snapshot) so it matches Billing & Sales, locks and invoices: hours after `agreement_end_date` no longer bill, approved overtime bills (× multiplier) where `overtime_billable`, fixed-price projects are not billed by hours. Monthly fees are also prorated in the month the agreement ends. `excluded` reasons: `outside_agreement`, `not_supported` added.
+- **Leave counts working days only** on the employee's company calendar (weekends + holidays free; Fri→Mon = 2; 1–5 Oct with 2 Oct holiday = 2). All-non-working ranges refused (`no_working_days`); full-day leave refused on a date the employee was present (`present_on_date`). Requests carry `days`.
+- **Attendance sheet shows calendar holidays and approved leave** (`calendar_days` on `GET /attendance/me`); the bulk template prefills `holiday`. `calendars.companyHolidaysByMember` batches the lookup.
+- **One Standard holiday calendar**: `is_default` is exclusive per org (setting it moves it); UI labels it "Standard" with a "Make standard" action.
+- **IT timesheet OT** = logged hours beyond the day's shift (`workHours.loggedOvertime`), shown per day / month and in the admin overview (was only the typed OT field).
+- **Admin timesheet backfill**: "Add entry" (any employee, past date) and CSV bulk upload `POST /timesheets/entries/admin/import` (validated, all-or-nothing, approved).
+- **Approve all**: `POST /timesheets/approvals/bulk`; leave queue and claim approvals get Approve-all too.
+- **Salary structures**: `DELETE /payroll/salary-structures/:id` (admin; flags locked months).
+- **Expense claims**: migration `20261001100000_expense_claim_approval_chain` (additive: `description`, `submitted_by`, `approval_stage`, `approvals`). Chain Manager → HR → Finance (`lib/claimApprovers.js`, departments matched by name; admin decision is final); `GET /expenses/claims/approvals`; admin can file for any employee; "Other" category requires a description; owner/admin delete a pending claim; receipts picked before submitting.
+- **Org chart**: per-category counts (department / tier / team), team box headcounts, people-under count on managers.
+
+## 2026-09-30 — Pay from approved timesheet hours + overtime approval, Sun→Sat weeks, client working days, hourly billing in Projects — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- **Salary now comes from approved timesheet hours, not check-in/out.** New
+  `modules/timesheets/workHours.service.js` is the single place that turns
+  entries into payroll hours. Expected hours = the employee's ONE company
+  calendar (`resolveCalendar` with no project) working days × shift hours
+  (`shiftHours`, default 9). Per day: normal = min(logged, expected), the
+  rest is overtime. `salary.engine` / `payroll.service.computeBreakdown`:
+  hourly rate = CTC ÷ expected hours; net = CTC − rate × short hours +
+  approved OT. Paid leave counts as a full shift. Actual uses approved rows
+  only; pending hours / OT appear only in `projected_net` / `pending_amount`.
+  Payslip breakdown carries `source: 'approved_timesheets'`, expected / paid /
+  deficit / OT hours, OT amount, hourly rate.
+- **Overtime approval.** Migration `20261001090000_timesheet_overtime_workday`
+  (additive): `timesheet_day_overtime` (one row per employee-day,
+  `TimesheetOvertimeStatus` pending | approved | rejected | comp_off) and
+  `calendar_holidays.is_working_day`. `syncDayOvertime` re-syncs the row
+  whenever that day's entries change (create / edit / delete / decide /
+  regularise). `POST /timesheets/overtime/:id/decision` — reporting manager or
+  admin. Approvals tab lists pending OT (Approve / Comp off / Reject).
+- **Weeks are Sunday → Saturday.** `timesheetWeeklyLock` cron moved to
+  Sunday 00:00 IST. A locked week is read-only for the employee; the manager
+  can still decide and the admin can correct. Pending entries still undecided
+  `TIMESHEET_ADMIN_REVIEW_GRACE_DAYS` (default 3) after the lock get an
+  `admin_review` flag (red pill in Approvals).
+- **New timesheet endpoints:** `GET /timesheets/week?date=&org_membership_id=`
+  (per-day expected / logged / approved / pending / OT), `GET /timesheets/hours`
+  (range summaries), `POST /timesheets/entries/admin` (admin creates an entry
+  for anyone). Own / direct reports / admin-any scoping via `hoursTarget`.
+  `DELETE /entries/:id` now lets an employee remove their own entry while
+  pending and unlocked (`deleteOwnEntry`); admin PATCH can also approve /
+  reject / reopen. Client: new `pages/time/WeekHoursView.jsx`, opened from
+  "View week" in Approvals.
+- **Client working-day exceptions.** A calendar row with `is_working_day`
+  (HR Settings → holiday drawer checkbox) marks a normally-off date as
+  working on a client/project calendar. Billing and payroll working-day counts
+  honour it; the employee's company calendar never changes — their hours that
+  day become OT / comp off. My Holidays tab now shows the one company calendar
+  plus a collapsed "Client / project exceptions" section.
+- **Finance → Projects billing total includes hourly projects.** Each row
+  gets `this_month` from `projectPnl.monthBillingByProject` (same rule and
+  FX converter as P&L: monthly fee, or approved billable hours × rate). Hours
+  not billed are reported in `excluded` by reason (pending approval,
+  non-billable, before agreement, no hourly rate, overtime) and shown under
+  the total.
+- **UI copy:** Attendance page states attendance ≠ salary and renames
+  "Overtime" to "Time past shift"; Attendance → Salary tab shows expected /
+  approved / pending / short / OT columns and Actual vs Projected KPIs.
+- **Tests:** new `timesheet-payroll-rules.test.js` (scenarios 1-16);
+  `timesheet-workflow.test.js` and `project-pnl-fx.test.js` updated. **Not run
+  green this session** — the local test DB rejected the `postgres`
+  credentials. Most of the large `git diff` line counts are CRLF churn; the
+  real change is ~700 lines (`git diff -w --ignore-cr-at-eol --stat`).
+
 ## 2026-09-30 — Older projects editable in Finance → Projects — branch `delphic-one-bugFix-and-newImplementation`
 
 - **Legacy projects were locked as "Client account · read-only".** Rows used

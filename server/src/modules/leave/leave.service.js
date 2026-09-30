@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { detectFinanceChange } = require('../../lib/financeChanges');
+const { pickCalendarId } = require('../calendars/calendars.service');
 
 const DEFAULT_LEAVE_TYPES = [
   { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
@@ -30,8 +31,10 @@ async function listTypes(orgId) {
 // year up to today. Approved leave dated after today is shown as "upcoming" and
 // still comes off the balance; pending requests are shown separately. Cancelling
 // or revoking an approved leave therefore gives the days back with no extra step.
-// Days are counted the way requestedDays() and payroll count them: calendar
-// days, inclusive, a half day being 0.5.
+// Days are counted the way requestedDays() and payroll count them: WORKING
+// days only, on the employee's own company calendar — weekends and calendar
+// holidays inside a leave cost nothing (Fri → Mon is 2 days, not 4), a
+// weekend the calendar marks as working counts — and a half day is 0.5.
 // ---------------------------------------------------------------------------
 
 const DAY_MS = 86400000;
@@ -52,15 +55,72 @@ function todayIst(now = new Date()) {
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 }
 
-function overlapDays(from, to, lo, hi) {
-  const start = Math.max(from.getTime(), lo.getTime());
-  const end = Math.min(to.getTime(), hi.getTime());
-  return end < start ? 0 : Math.round((end - start) / DAY_MS) + 1;
+const ymd = (d) => d.toISOString().slice(0, 10);
+
+// Calendar days in [from, to], inclusive — the fallback when no working-day
+// calendar is supplied (pure unit tests).
+function calendarDays(from, to) {
+  return to < from ? 0 : Math.round((to - from) / DAY_MS) + 1;
+}
+
+// Working days in [from, to] under one calendar's rows: a date the calendar
+// marks as a working day counts; otherwise Mon–Fri that isn't a holiday.
+function countWorkingDays(from, to, { holidays = new Set(), working = new Set() } = {}) {
+  let n = 0;
+  for (let t = from.getTime(); t <= to.getTime(); t += DAY_MS) {
+    const d = new Date(t);
+    const key = ymd(d);
+    const dow = d.getUTCDay();
+    if (working.has(key) || (dow !== 0 && dow !== 6 && !holidays.has(key))) n += 1;
+  }
+  return n;
+}
+
+// One day-counter per employee: their company calendar (the same pick as
+// payroll and timesheets — calendars.service.pickCalendarId with no project)
+// with its holidays and working-day exceptions over [from, to].
+async function leaveDayCounters(orgId, membershipIds, from, to) {
+  const ids = [...new Set(membershipIds)];
+  if (!ids.length) return new Map();
+  const [memberships, assignments, calendars, rows] = await Promise.all([
+    prisma.orgMembership.findMany({ where: { id: { in: ids }, org_id: orgId }, select: { id: true, location_id: true, department_id: true } }),
+    prisma.employeeCalendar.findMany({ where: { org_membership_id: { in: ids } }, select: { org_membership_id: true, account_id: true, calendar_id: true } }),
+    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, department_id: true, is_default: true } }),
+    prisma.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, date: { gte: from, lte: to } }, select: { calendar_id: true, date: true, is_working_day: true } }),
+  ]);
+  const byCalendar = new Map();
+  for (const r of rows) {
+    if (!byCalendar.has(r.calendar_id)) byCalendar.set(r.calendar_id, { holidays: new Set(), working: new Set() });
+    byCalendar.get(r.calendar_id)[r.is_working_day ? 'working' : 'holidays'].add(ymd(r.date));
+  }
+  const counters = new Map();
+  for (const m of memberships) {
+    const calendarId = pickCalendarId({
+      assignments: assignments.filter((a) => a.org_membership_id === m.id),
+      membershipLocationId: m.location_id,
+      membershipDepartmentId: m.department_id,
+      calendars,
+    });
+    const cal = byCalendar.get(calendarId) || {};
+    counters.set(m.id, (a, b) => countWorkingDays(a, b, cal));
+  }
+  return counters;
+}
+
+async function leaveDayCounter(orgId, orgMembershipId, from, to) {
+  return (await leaveDayCounters(orgId, [orgMembershipId], from, to)).get(orgMembershipId) || ((a, b) => countWorkingDays(a, b));
+}
+
+function overlapDays(from, to, lo, hi, countDays = calendarDays) {
+  const start = from > lo ? from : lo;
+  const end = to < hi ? to : hi;
+  return end < start ? 0 : countDays(start, end);
 }
 
 // used / upcoming / pending days of one leave type's requests within `year`, as
-// of `today`. Pure — the unit tests drive it directly.
-function summariseUsage(requests, { year, today }) {
+// of `today`. `countDays(from, to)` is what a range costs (the employee's
+// working days; calendar days when omitted). Pure — the unit tests drive it.
+function summariseUsage(requests, { year, today, countDays = calendarDays }) {
   const yearStart = new Date(Date.UTC(year, 0, 1));
   const yearEnd = new Date(Date.UTC(year, 11, 31));
   const asOf = today > yearEnd ? yearEnd : today; // a past year is complete; a future year has nothing taken yet
@@ -69,8 +129,8 @@ function summariseUsage(requests, { year, today }) {
   let pending = 0;
   for (const r of requests) {
     if (r.status !== 'approved' && r.status !== 'pending') continue;
-    const inYear = overlapDays(r.from_date, r.to_date, yearStart, yearEnd);
-    if (inYear === 0) continue;
+    if (r.to_date < yearStart || r.from_date > yearEnd) continue;
+    const inYear = overlapDays(r.from_date, r.to_date, yearStart, yearEnd, countDays);
     const days = r.is_half_day ? 0.5 : inYear;
     if (r.status === 'pending') {
       pending += days;
@@ -78,7 +138,7 @@ function summariseUsage(requests, { year, today }) {
       if (r.from_date <= asOf) used += days;
       else upcoming += days;
     } else {
-      const taken = overlapDays(r.from_date, r.to_date, yearStart, asOf);
+      const taken = overlapDays(r.from_date, r.to_date, yearStart, asOf, countDays);
       used += taken;
       upcoming += inYear - taken;
     }
@@ -138,8 +198,9 @@ async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) 
     }),
   ]);
   const balanceByType = new Map(balances.map((b) => [b.leave_type_id, b]));
+  const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   return leaveTypes.map((leaveType) =>
-    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today }), { year, today })
+    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today })
   );
 }
 
@@ -175,13 +236,14 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
     requestsByKey.set(key, [...(requestsByKey.get(key) || []), r]);
   }
 
+  const counters = await leaveDayCounters(orgId, memberships.map((m) => m.id), range.gte, range.lte);
   const employees = memberships.map((m) => ({
     org_membership_id: m.id,
     name: m.person?.name || 'Unknown',
     department: m.department?.name || null,
     balances: leaveTypes.map((leaveType) => {
       const key = keyOf(m.id, leaveType.id);
-      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today }), { year, today });
+      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today });
     }),
   }));
 
@@ -218,11 +280,11 @@ async function createType(orgId, { name, paid, annual_quota }) {
   return { leaveType };
 }
 
-// Balance days a request consumes. Same rule the approval step uses when it
-// debits the balance (calendar days, inclusive; a half-day is 0.5) — kept in
-// one place so the check at request time can't disagree with the debit.
-function requestedDays({ from_date, to_date, is_half_day }) {
-  return is_half_day ? 0.5 : Math.round((to_date - from_date) / 86400000) + 1;
+// Balance days a request consumes. Same rule the balances use (the
+// employee's working days, inclusive; a half-day is 0.5) — kept in one place
+// so the check at request time can't disagree with the debit.
+function requestedDays({ from_date, to_date, is_half_day }, countDays = calendarDays) {
+  return is_half_day ? 0.5 : countDays(from_date, to_date);
 }
 
 // Two half-days on the same date in different sessions (AM + PM) are the one
@@ -266,7 +328,8 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year) {
   ]);
   const entitlement = entitlementFor(leaveType, balance);
   if (entitlement === null) return Infinity;
-  const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst() });
+  const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
+  const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst(), countDays });
   return entitlement - used - upcoming - pending;
 }
 
@@ -281,9 +344,29 @@ async function createRequest(
   const overlap = await findOverlap(orgId, orgMembershipId, { from_date, to_date, is_half_day, half_day_session });
   if (overlap) return { error: 'overlaps_existing' };
 
+  // Someone who was present on a date can't take a full day's leave for it
+  // (a half day is still allowed — they worked the other half).
+  if (!is_half_day) {
+    const present = await prisma.attendanceRecord.findFirst({
+      where: {
+        org_id: orgId,
+        org_membership_id: orgMembershipId,
+        date: { gte: from_date, lte: to_date },
+        OR: [{ status: { in: ['present', 'wfh', 'half_day'] } }, { check_in_at: { not: null } }],
+      },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    });
+    if (present) return { error: 'present_on_date', date: ymd(present.date) };
+  }
+
+  const countDays = await leaveDayCounter(orgId, orgMembershipId, from_date, to_date);
+  const needed = requestedDays({ from_date, to_date, is_half_day }, countDays);
+  // A range that is all weekend / holidays costs nothing and isn't a leave.
+  if (needed === 0) return { error: 'no_working_days' };
+
   if (leaveType.paid) {
     const remaining = await remainingPaidDays(orgId, orgMembershipId, leaveType, from_date.getUTCFullYear());
-    const needed = requestedDays({ from_date, to_date, is_half_day });
     if (needed > remaining) return { error: 'insufficient_balance', remaining, needed };
   }
 
@@ -300,7 +383,7 @@ async function createRequest(
     },
     include: { leave_type: true },
   });
-  return { request };
+  return { request: { ...request, days: needed } };
 }
 
 async function listMine(orgId, orgMembershipId, { status, page, limit }) {
@@ -315,7 +398,16 @@ async function listMine(orgId, orgMembershipId, { status, page, limit }) {
     }),
     prisma.leaveRequest.count({ where }),
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data: await withDays(orgId, data), pagination: { page, limit, total } };
+}
+
+// Each request's cost in the employee's working days (`days`), for the lists.
+async function withDays(orgId, requests) {
+  if (!requests.length) return requests;
+  const from = new Date(Math.min(...requests.map((r) => r.from_date.getTime())));
+  const to = new Date(Math.max(...requests.map((r) => r.to_date.getTime())));
+  const counters = await leaveDayCounters(orgId, requests.map((r) => r.org_membership_id), from, to);
+  return requests.map((r) => ({ ...r, days: requestedDays(r, counters.get(r.org_membership_id) || calendarDays) }));
 }
 
 async function listTeam(orgId, { status, org_membership_id, from, to, page, limit }) {
@@ -338,7 +430,7 @@ async function listTeam(orgId, { status, org_membership_id, from, to, page, limi
     }),
     prisma.leaveRequest.count({ where }),
   ]);
-  return { data, pagination: { page, limit, total } };
+  return { data: await withDays(orgId, data), pagination: { page, limit, total } };
 }
 
 async function decide(orgId, requestId, approverMembershipId, { status, reason }, actorUserId = null) {
@@ -443,6 +535,7 @@ module.exports = {
   LEAVE_DAY_MESSAGE,
   // exported for tests only
   summariseUsage,
+  countWorkingDays,
   leaveCode,
   todayIst,
 };

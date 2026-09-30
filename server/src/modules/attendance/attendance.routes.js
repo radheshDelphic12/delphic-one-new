@@ -35,7 +35,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.omit({ org_membership_id: true }).parse(req.query);
     const result = await service.listMine(req.user.org_id, req.user.org_membership_id, query);
-    return ok(res, result.data, { pagination: result.pagination });
+    // calendar_days: holidays on the employee's calendar and approved leave in the range.
+    return ok(res, result.data, { pagination: result.pagination, calendar_days: result.calendar_days });
   })
 );
 

@@ -132,14 +132,14 @@ async function computeDayRevenue(orgId, date) {
       const month = date.getUTCMonth() + 1;
       const cacheKey = `${account_id}|${year}-${month}`;
       if (!workingDaysCache.has(cacheKey)) workingDaysCache.set(cacheKey, await calendarsService.projectWorkingDays(orgId, account_id, year, month));
-      const { working_days, holiday_dates } = workingDaysCache.get(cacheKey);
+      const { working_days, holiday_dates, working_dates } = workingDaysCache.get(cacheKey);
       const weekday = date.getUTCDay();
       revenue = monthlyDayRevenue({
         rate: Number(rateRow.rate),
         hours,
         benchmarkHours: accounts.get(account_id)?.benchmark_hours || DEFAULT_BENCHMARK_HOURS,
         workingDays: working_days,
-        isWorkingDay: weekday !== 0 && weekday !== 6 && !holiday_dates.has(ymd(date)),
+        isWorkingDay: working_dates.has(ymd(date)) || (weekday !== 0 && weekday !== 6 && !holiday_dates.has(ymd(date))),
       });
     }
     supported.add(`${account_id}|${requirement_id || ''}`);
@@ -545,10 +545,16 @@ async function listProjectProfiles(orgId) {
   ]);
   const ratesByAccount = new Map();
   for (const r of rates) ratesByAccount.set(r.account_id, [...(ratesByAccount.get(r.account_id) || []), r]);
+  // This month's billing (monthly fee, or approved billable hours x rate) —
+  // the P&L's own revenue rule, so hourly projects are included, not skipped.
+  const now = todayUtc();
+  const { monthBillingByProject } = require('./projectPnl.service');
+  const billing = await monthBillingByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
   return accounts.map((a) => {
     // Every row listed here matches projectListWhere, so all are editable.
     const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true, fx });
     if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
+    profile.this_month = billing.get(a.id) || null;
     return profile;
   });
 }
