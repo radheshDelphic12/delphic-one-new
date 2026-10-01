@@ -95,7 +95,9 @@ export function printClientInvoice(inv, orgName) {
 /** How one contractor's vendor cost was worked out. */
 export function vendorLineText(c, currency) {
   const parts = [`${amountText(c.monthly_vendor_rate, currency)}/month × ${c.allocation_percent}% allocation`];
-  if (c.contract_working_days !== null && c.contract_working_days !== undefined) parts.push(`× ${c.contract_working_days} ÷ ${c.working_days} working days`);
+  // Approved-hours basis: the payout counts the days actually worked (approved timesheet hours), not the contract days.
+  if (c.payout_basis === 'approved_hours' && c.payable_days !== null && c.payable_days !== undefined) parts.push(`× ${c.payable_days} approved days (of ${c.contract_working_days ?? c.working_days} contract days) ÷ ${c.working_days} working days`);
+  else if (c.contract_working_days !== null && c.contract_working_days !== undefined) parts.push(`× ${c.contract_working_days} ÷ ${c.working_days} working days`);
   parts.push(`= ${amountText(c.base_amount, currency)}`);
   if (c.overtime_amount) parts.push(`+ overtime ${c.overtime_hours}h ${amountText(c.overtime_amount, currency)}`);
   return parts.join(' ');

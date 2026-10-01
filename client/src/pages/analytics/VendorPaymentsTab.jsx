@@ -96,7 +96,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
           </label>
         </div>
         <p className="text-xs text-tertiary-500">
-          {periodLabel(target)} · billing type: monthly vendor rate × allocation, over the project&apos;s contract working days (+ approved overtime where the project pays it).
+          {periodLabel(target)} · billing type: monthly vendor rate × allocation, over the days actually worked (approved timesheet hours) — or the project&apos;s contract working days where the project is set to the contract basis (+ approved overtime where the project pays it).
           {preview?.source === 'locked' && ` From the locked vendor record v${preview.locked_version}.`}
           {preview?.existing && ` Replaces the invoice generated earlier (${preview.existing.invoice_number}).`}
         </p>
