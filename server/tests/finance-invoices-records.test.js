@@ -106,6 +106,55 @@ describe('Client invoices — contract amount, right project / client / currency
     expect(clash.status).toBe(409);
   });
 
+  test('an invoice can be raised in another currency through the exchange rates; a currency with no rate is refused', async () => {
+    const ctx = await seed();
+    const inr = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 210000 });
+    const usd = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD' });
+
+    // INR project invoiced in USD (83 INR / USD): 210000 / 83.
+    const preview = await authed(request(app).get('/api/v1/billing/invoices/preview'), ctx.adminToken).query({ account_id: inr.id, ...AUG, currency: 'USD' });
+    expect(preview.status).toBe(200);
+    expect(preview.body.data).toMatchObject({ currency: 'USD', amount: 2530.12, details: { currency: 'USD', conversion: { from_currency: 'INR', from_amount: 210000 } } });
+    const a = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: inr.id, ...AUG, currency: 'USD' });
+    expect(a.status).toBe(201);
+    expect(a.body.data).toMatchObject({ currency: 'USD', amount: 2530.12 });
+
+    // USD project invoiced in INR: 5000 x 83.
+    const b = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: usd.id, ...AUG, currency: 'INR' });
+    expect(b.body.data).toMatchObject({ currency: 'INR', amount: 415000 });
+
+    // No EUR rate set -> clear error, nothing written.
+    const eur = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: usd.id, ...AUG, currency: 'EUR' });
+    expect(eur.status).toBe(422);
+    expect(eur.body.message || eur.body.error?.message || JSON.stringify(eur.body)).toMatch(/exchange rate/i);
+  });
+
+  test('a draft invoice can be edited (number, date, notes, currency); a sent one cannot', async () => {
+    const ctx = await seed();
+    const usd = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD' });
+    const other = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 100000 });
+    const inv = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: usd.id, ...AUG })).body.data;
+    const second = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: other.id, ...AUG })).body.data;
+
+    const edit = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ invoice_number: 'MII/2026/99', invoice_date: '2026-09-05', notes: 'PO 123' });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data).toMatchObject({ id: inv.id, invoice_number: 'MII/2026/99', invoice_date: '2026-09-05', notes: 'PO 123', currency: 'USD', amount: 5000 });
+
+    // Number already used by another invoice.
+    const clash = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ invoice_number: second.invoice_number });
+    expect(clash.status).toBe(409);
+
+    // Changing currency re-expresses the amount.
+    const inInr = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ currency: 'INR' });
+    expect(inInr.status).toBe(200);
+    expect(inInr.body.data).toMatchObject({ id: inv.id, invoice_number: 'MII/2026/99', currency: 'INR', amount: 415000 });
+
+    // A sent invoice is final.
+    expect((await authed(request(app).post(`/api/v1/billing/invoices/${inv.id}/status`), ctx.adminToken).send({ status: 'sent' })).status).toBe(200);
+    const late = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ notes: 'too late' });
+    expect(late.status).toBe(409);
+  });
+
   test('an hourly project invoices approved billable hours × rate and says so', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Acme Hourly', client: ctx.acme, rate: 1500, rate_type: 'hourly' });

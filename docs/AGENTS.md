@@ -57,6 +57,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [DATABASE-CONNECTION-POOLING.md](guides/DATABASE-CONNECTION-POOLING.md) — Prisma pool sizing (`DB_POOL_SIZE`/`DB_POOL_TIMEOUT`), why every `DATABASE_URL` now has `connection_limit`/`pool_timeout`, and the concrete triggers (+ gotchas) for PgBouncer / a read replica later
 - [BACKEND-LOGGING.md](guides/BACKEND-LOGGING.md)
 - [PRODUCTION-SEED.md](guides/PRODUCTION-SEED.md) — VPS / post-pull seed commands (`seed` → `seed:accounts` → `seed:jira` → `seed:vendors`; `seed-admin` = safe prod bootstrap)
+- [ADMIN-EDITABILITY.md](guides/ADMIN-EDITABILITY.md) — standing rule: every feature (current + future) must be admin-editable; checklist + backfill audit list
 - [DEPLOY-RUNBOOK.md](guides/DEPLOY-RUNBOOK.md) — VPS manual deploy: backup → `git pull` → `./start-delphic.sh --prod` → verify → rollback
 
 ## Stack
@@ -199,6 +200,7 @@ Zero-dependency structured logger. Full guide: [guides/BACKEND-LOGGING.md](guide
 ## Working conventions
 
 - **STRICT — an AI agent must never `git push` to `main` (or open/merge a PR into `main`).** `main` auto-deploys to production (`.github/workflows/deploy.yml`). An agent may push only to (a) local feature branches and (b) `staging`. For anything destined for `main`, the agent stops after committing and **hands the human the exact manual push/merge commands to run** — it does not run them, even if asked to "push", "deploy", or "ship". The human is the only one who advances `main`.
+- **STANDING RULE - every feature, built or future, must be editable by an admin** (edit endpoint gated to admin, locks/approvals overridable by admin with a reason, computed values overridable or recomputable, settings stored as editable data, edits audited, UI edit action via `can()`, a test for it). Checklist and backfill list: [guides/ADMIN-EDITABILITY.md](guides/ADMIN-EDITABILITY.md). Check it before calling any feature done.
 - Keep [progress/PROGRESS.md](progress/PROGRESS.md) and [progress/TODO.md](progress/TODO.md) up to date as work lands — check them at the start of a session and update them at the end.
 - Prefer `logger` over bare `console.*` in server code. See [guides/BACKEND-LOGGING.md](guides/BACKEND-LOGGING.md).
 - **Frontend must follow Jira-like UX** ([ui/UI-UX-JIRA.md](ui/UI-UX-JIRA.md)). Dense tables, filter bar, Create, inline status, avatar stacks — not a generic CRUD admin look. Compare list/dashboard work to the reference screenshot before calling UI tickets done.

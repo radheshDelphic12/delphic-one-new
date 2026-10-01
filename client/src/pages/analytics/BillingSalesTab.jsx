@@ -225,7 +225,7 @@ export default function BillingSalesTab() {
           </div>
           <GenerateInvoiceButton onClick={() => setInvoiceFor({ account_id: filters.account_id || '', period_month: period.period_month, period_year: period.period_year })} />
         </div>
-        <ClientInvoicesTable period={period} refreshKey={invoicesKey} />
+        <ClientInvoicesTable period={period} refreshKey={invoicesKey} onEdit={(inv) => setInvoiceFor({ account_id: inv.client_account_id, period_month: inv.period_month, period_year: inv.period_year, invoice: inv })} />
       </section>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">

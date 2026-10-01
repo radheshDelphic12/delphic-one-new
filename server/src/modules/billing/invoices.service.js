@@ -56,8 +56,33 @@ async function suggestVendorNumber(orgId, year) {
 
 // --- Client invoices -------------------------------------------------------
 
+// Re-expresses a month's calculation in another currency through the org's
+// INR rates (finance exchange rates): factor = INR/source / INR/target.
+// The project's own figures are kept in details.conversion. A currency with no
+// rate set can't be converted - the caller is told which one.
+async function convertToCurrency(orgId, details, lines, target) {
+  if (!target || target === details.currency) return { details, lines };
+  const fx = await exchangeRates.inrRates(orgId);
+  const missing = [details.currency, target].find((c) => !fx.has(c));
+  if (missing) return { error: 'exchange_rate_missing', currency: missing };
+  const factor = fx.get(details.currency) / fx.get(target);
+  const conv = (n) => (n === null || n === undefined ? n : round2(n * factor));
+  const converted = {
+    ...details,
+    currency: target,
+    rate: conv(details.rate),
+    base_amount: conv(details.base_amount),
+    overtime_amount: conv(details.overtime_amount),
+    amount: conv(details.amount),
+    conversion: { from_currency: details.currency, from_rate: details.rate, from_amount: details.amount, exchange_rate: Math.round(factor * 1e6) / 1e6, inr_per_unit: { [details.currency]: fx.get(details.currency), [target]: fx.get(target) } },
+  };
+  const convertedLines = lines.map((l) => ({ ...l, base_amount: conv(l.base_amount), overtime_amount: conv(l.overtime_amount), revenue: conv(l.revenue) }));
+  return { details: converted, lines: convertedLines };
+}
+
 // The project month an invoice is built from, with how its amount was worked out.
-async function clientInvoiceSource(orgId, accountId, period) {
+// `currency` (optional) invoices in a currency other than the project's rate currency.
+async function clientInvoiceSource(orgId, accountId, period, currency) {
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: billingEngine.PROJECT_SELECT });
   if (!account) return { error: 'account_not_found' };
   // Nothing is invoiced outside the agreement dates.
@@ -72,9 +97,8 @@ async function clientInvoiceSource(orgId, accountId, period) {
   const raw = version ? version.snapshot : await billingEngine.computeProjectMonth(orgId, account, period);
   if (!raw.supported) return { error: 'not_supported', note: raw.note };
   if (!raw.billing_type) return { error: 'no_billing_rate' };
-  const details = billingEngine.invoiceDetails(raw);
   const view = billingEngine.viewOf(raw, { include_overtime: raw.overtime.enabled });
-  const lines = view.resources.map((r) => ({
+  const baseLines = view.resources.map((r) => ({
     org_membership_id: r.org_membership_id,
     resource: r.name,
     hours: r.regular_hours,
@@ -83,6 +107,9 @@ async function clientInvoiceSource(orgId, accountId, period) {
     overtime_amount: r.overtime_amount,
     revenue: r.amount,
   }));
+  const converted = await convertToCurrency(orgId, billingEngine.invoiceDetails(raw), baseLines, currency);
+  if (converted.error) return converted;
+  const { details, lines } = converted;
   return {
     account,
     // Identity as the project is NOW (its own name and linked client).
@@ -94,8 +121,8 @@ async function clientInvoiceSource(orgId, accountId, period) {
   };
 }
 
-async function previewClientInvoice(orgId, accountId, period) {
-  const src = await clientInvoiceSource(orgId, accountId, period);
+async function previewClientInvoice(orgId, accountId, period, currency) {
+  const src = await clientInvoiceSource(orgId, accountId, period, currency);
   if (src.error) return src;
   const [existing, suggested] = await Promise.all([
     prisma.clientInvoice.findUnique({ where: { client_account_id_period_month_period_year: { client_account_id: accountId, ...period } }, select: { id: true, invoice_number: true, status: true, invoice_date: true } }),
@@ -119,9 +146,9 @@ async function previewClientInvoice(orgId, accountId, period) {
 
 // Creates the project's invoice for the month, or refreshes it while it is
 // still a draft. Sent / paid invoices are never rewritten.
-async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes }) {
+async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency }) {
   const period = { period_month, period_year };
-  const src = await clientInvoiceSource(orgId, account_id, period);
+  const src = await clientInvoiceSource(orgId, account_id, period, currency);
   if (src.error) return src;
   if (!(src.details.amount > 0)) return { error: 'nothing_to_invoice' };
   const existing = await prisma.clientInvoice.findUnique({ where: { client_account_id_period_month_period_year: { client_account_id: account_id, ...period } } });
@@ -178,6 +205,43 @@ function serializeClientInvoice(row) {
     project,
     details: items?.details || null,
   };
+}
+
+// Edits an invoice that is still a draft. Number, date and notes are updated in
+// place; a different currency re-expresses the amount from the project's month.
+async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency }) {
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
+  if (!invoice) return { error: 'not_found' };
+  if (invoice.status !== 'draft') return { error: 'invoice_sent' };
+  if (currency && currency !== invoice.currency) {
+    return generateClientInvoice(orgId, user, {
+      account_id: invoice.client_account_id,
+      period_month: invoice.period_month,
+      period_year: invoice.period_year,
+      invoice_number: invoice_number || invoice.invoice_number,
+      invoice_date: invoice_date || (invoice.invoice_date ? ymd(invoice.invoice_date) : undefined),
+      notes,
+      currency,
+    });
+  }
+  const number = (invoice_number || '').trim();
+  if (number && number !== invoice.invoice_number) {
+    const clash = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, invoice_number: number, NOT: { id: invoice.id } }, select: { id: true } });
+    if (clash) return { error: 'invoice_number_taken' };
+  }
+  const updated = await prisma.clientInvoice.update({
+    where: { id: invoice.id },
+    data: {
+      ...(number ? { invoice_number: number } : {}),
+      ...(invoice_date ? { invoice_date: new Date(invoice_date) } : {}),
+      ...(notes !== undefined ? { notes: notes || null } : {}),
+    },
+    include: { client_account: CLIENT_INVOICE_ACCOUNT },
+  });
+  await prisma.auditLog.create({
+    data: { org_id: orgId, actor_id: user.id, action: 'client_invoice_edit', entity_type: 'client_invoice', entity_id: invoice.id, reason: `Invoice ${updated.invoice_number} edited`, snapshot: { invoice_number: updated.invoice_number, invoice_date: updated.invoice_date, notes: updated.notes } },
+  });
+  return { invoice: serializeClientInvoice(updated) };
 }
 
 async function listClientInvoices(orgId, { client_account_id, status, period_month, period_year } = {}) {
@@ -322,6 +386,7 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
 module.exports = {
   previewClientInvoice,
   generateClientInvoice,
+  updateClientInvoice,
   listClientInvoices,
   getClientInvoice,
   serializeClientInvoice,
