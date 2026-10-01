@@ -50,6 +50,9 @@ const createInvoiceSchema = z.object({
   currency: INVOICE_CURRENCY,
 });
 
+// Deleting an invoice: a reason is required once it has been sent / paid.
+const deleteInvoiceSchema = z.object({ reason: z.string().trim().max(500).optional() });
+
 const updateInvoiceSchema = z.object({
   invoice_number: INVOICE_NUMBER,
   invoice_date: invoiceDate,
@@ -300,6 +303,7 @@ module.exports = {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  deleteInvoiceSchema,
   contractChargeSchema,
   updateContractChargeSchema,
   billingAdjustmentSchema,

@@ -283,6 +283,28 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
   return { invoice: serializeClientInvoice(updated) };
 }
 
+// Admin delete of a client invoice, any status. A sent / paid invoice needs a
+// `reason` (like editing one); the deletion is audited with what was removed.
+async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
+  if (!invoice) return { error: 'not_found' };
+  const why = (reason || '').trim();
+  if (invoice.status !== 'draft' && !why) return { error: 'reason_required' };
+  await prisma.clientInvoice.delete({ where: { id: invoice.id } });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId,
+      actor_id: user.id,
+      action: 'client_invoice_delete',
+      entity_type: 'client_invoice',
+      entity_id: invoice.id,
+      reason: why || `Draft invoice ${invoice.invoice_number || ''} deleted`,
+      snapshot: { status: invoice.status, invoice_number: invoice.invoice_number, amount: Number(invoice.amount), currency: invoice.currency, client_account_id: invoice.client_account_id, period_month: invoice.period_month, period_year: invoice.period_year, line_items: invoice.line_items },
+    },
+  });
+  return { deleted: true };
+}
+
 async function listClientInvoices(orgId, { client_account_id, status, period_month, period_year } = {}) {
   const rows = await prisma.clientInvoice.findMany({
     where: { org_id: orgId, ...(client_account_id ? { client_account_id } : {}), ...(status ? { status } : {}), ...(period_month ? { period_month } : {}), ...(period_year ? { period_year } : {}) },
@@ -428,6 +450,7 @@ module.exports = {
   previewClientInvoice,
   generateClientInvoice,
   updateClientInvoice,
+  deleteClientInvoice,
   listClientInvoices,
   getClientInvoice,
   serializeClientInvoice,

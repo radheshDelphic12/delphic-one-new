@@ -209,8 +209,23 @@ function VendorInvoiceEditDrawer({ group, onClose, onSaved }) {
 /** Generated vendor invoices of the month, one line per vendor invoice. */
 function VendorInvoicesTable({ period, refreshKey, onEdit }) {
   const { user } = useAuth();
-  const { pushError } = useAlerts();
-  const { data, loading } = useLiveData(() => apiClient.get('/billing/vendor-invoices', { params: period }).then((r) => r.data.data), { deps: [period.period_month, period.period_year, refreshKey] });
+  const { pushError, pushInfo } = useAlerts();
+  const { data, loading, refresh } = useLiveData(() => apiClient.get('/billing/vendor-invoices', { params: period }).then((r) => r.data.data), { deps: [period.period_month, period.period_year, refreshKey] });
+  // Admin delete of a whole vendor invoice (all its project rows), with a reason (audited).
+  async function removeGroup(group) {
+    const reason = window.prompt(`Delete vendor invoice ${group.rows[0].invoice_number || ''} (${group.rows.length} project row${group.rows.length === 1 ? '' : 's'})? Give a reason (required):`);
+    if (reason === null) return;
+    if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
+    try {
+      for (const r of group.rows) {
+        await apiClient.delete(`/billing/vendor-invoices/${r.id}`, { data: { reason: reason.trim() } });
+      }
+      pushInfo(`Vendor invoice ${group.rows[0].invoice_number || ''} deleted`);
+      refresh?.();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the vendor invoice'), 'Something went wrong');
+    }
+  }
   const groups = useMemo(() => {
     const map = new Map();
     for (const r of data || []) {
@@ -234,6 +249,7 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
       render: (g) => (
         <div className="flex flex-wrap gap-1">
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(g)}>Edit</button>}
+          <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => removeGroup(g)}>Delete</button>
           {g.rows[0].generated && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => { if (!printVendorInvoice(g.rows, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked'); }}><Printer className="h-3.5 w-3.5" /> Download</button>}
         </div>
       ),

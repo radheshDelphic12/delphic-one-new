@@ -195,3 +195,11 @@ Each contract (project) can carry any number of **charges**, added, edited and d
 - API: `GET|POST /billing/projects/:id/charges`, `PATCH|DELETE /billing/charges/:id`. UI: Finance > Projects > project profile >
   "Invoice charges"; shown in the invoice preview, invoice table (total) and the printed invoice.
 - Migration `20261001130000_contract_charges`. Vendor invoices do not carry charges yet.
+
+## Update 2026-10-01: delete invoices at any status
+
+- `DELETE /billing/invoices/:id` (client) and `DELETE /billing/vendor-invoices/:id` (vendor), admin only.
+  A sent / paid client invoice needs a `reason` (422 without); a draft does not. Audited as `client_invoice_delete` /
+  `vendor_invoice_delete` with the removed invoice's snapshot. UI: **Delete** next to **Edit** in the invoice tables.
+- Time & Attendance timesheet records (IT Timesheet and Team timesheets non-IT, same view): Status, Edit and Delete now sit
+  before the long Description column, so they are not pushed off-screen. Admin edit / delete works on any status and locked days.
