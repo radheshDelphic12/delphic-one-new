@@ -8,7 +8,8 @@
 //   THAT DAY (allocations are effective-dated — lib/allocations), then per
 //   day on that PROJECT's calendar:
 //     each working day inside the agreement = rate × share / working_days,
-//   counted by the project's Account.vendor_payout_basis:
+//   counted by the project's Account.vendor_payout_basis (a full day is the contractor's own
+//   billable_hours_per_day on that project - 8, 9, ... - else the project's billable_day_hours):
 //     approved_hours (default) — the day counts for the APPROVED timesheet
 //       hours actually logged on it (min(1, hours / billable_day_hours)), so a
 //       month with 20 approved days of 22 pays 20/22 of the rate;
@@ -27,7 +28,7 @@ const calendarsService = require('../../calendars/calendars.service');
 const exchangeRates = require('../../billing/exchangeRates.service');
 const { markResolved } = require('./billing.engine');
 const { round2, ymd, monthBounds, monthDates, isWeekend } = require('../period');
-const { overlaps, sharesOn, periodShares } = require('../../../lib/allocations');
+const { overlaps, sharesOn, periodShares, activeOn } = require('../../../lib/allocations');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -50,6 +51,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         select: {
           account_id: true,
           allocation_percent: true,
+          billable_hours_per_day: true,
           start_date: true,
           end_date: true,
           account: { select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { id: true, name: true } }, benchmark_hours: true, overtime_billable: true, vendor_payout_basis: true, billable_day_hours: true, agreement_start_date: true, agreement_end_date: true } },
@@ -112,7 +114,16 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       // Contract share: every working day inside the agreement, by the
       // allocation in force that day.
       const payoutBasis = account.vendor_payout_basis === 'contract' ? 'contract' : 'approved_hours';
-      const dayHours = Number(account.billable_day_hours ?? 8) || 8;
+      const projectDayHours = Number(account.billable_day_hours ?? 8) || 8;
+      // Phase 4: a full day is the contractor's own billable hours on this project (their assignment, effective-dated),
+      // so a contractor who logs 9h a day is paid for a full day at 9h, one on 8h at 8h.
+      const projectSpans = spans.filter((a) => a.account_id === account.id);
+      const dayHoursOn = (date) => {
+        const live = projectSpans.filter((a) => activeOn(a, date));
+        const best = live.reduce((m, a) => Math.max(m, Number(a.billable_hours_per_day ?? 0)), 0);
+        return best > 0 ? best : projectDayHours;
+      };
+      let dayHoursMax = 0;
       let base = 0;
       let contractDays = 0;
       let payableDays = 0;
@@ -120,6 +131,8 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         if (!isWorking(date) || !inContract(date) || working_days <= 0) continue;
         const dayRate = rateOn(date);
         // approved_hours: only the approved hours logged that day are paid for.
+        const dayHours = dayHoursOn(date);
+        dayHoursMax = Math.max(dayHoursMax, dayHours);
         const fraction = payoutBasis === 'approved_hours' ? Math.min(1, (perDay.get(ymd(date))?.hours || 0) / dayHours) : 1;
         if (dayRate > 0) { contractDays += 1; payableDays += fraction; }
         base += (dayRate / working_days) * fraction;
@@ -154,7 +167,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         working_days,
         contract_working_days: contractDays,
         payout_basis: payoutBasis,
-        day_hours: dayHours,
+        day_hours: dayHoursMax || projectDayHours,
         payable_days: round2(payableDays),
         agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
         agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,

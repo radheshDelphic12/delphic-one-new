@@ -7,6 +7,8 @@ const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const workHours = require('./workHours.service');
+const projectDayService = require('./projectDay.service');
+const overtimeTickets = require('./overtimeTickets.service');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 
@@ -119,6 +121,8 @@ async function isLocked(orgId, date) {
 
 async function createEntry(orgId, orgMembershipId, { date, account_id, requirement_id, hours, overtime_hours = 0, billable, notes }, actorUserId = null) {
   if (await isLocked(orgId, date)) return { error: 'day_locked' };
+  // Attendance-paid people: overtime is a ticket approved by the manager, never timesheet hours.
+  if (overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
   // Approved Leave Day = no timesheet, no project hours.
   const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
@@ -131,7 +135,8 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
+    // The person allocated to the project, or a team mate of someone allocated, may log on it.
+    if (it && !(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
     if (requirement_id) {
       const requirement = await prisma.requirement.findFirst({ where: { id: requirement_id, account_id, org_id: orgId } });
       if (!requirement) return { error: 'requirement_not_found' };
@@ -149,6 +154,11 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (dayTotal > 24) return { error: 'exceeds_day_hours' };
   const blocked = await leaveBlock(orgId, orgMembershipId, date, dayTotal);
   if (blocked) return blocked;
+  // Client / project timesheet: the project's day has a capacity (its allocated people's billable hours).
+  if (account_id) {
+    const full = await projectDayService.checkCap(orgId, account_id, date, hours, { orgMembershipId });
+    if (full) return full;
+  }
 
   const alreadyPendingToday = await prisma.timesheetEntry.count({ where: { org_membership_id: orgMembershipId, date, status: 'submitted' } });
 
@@ -306,6 +316,7 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'submitted') return { error: 'already_decided' };
   if (await isLocked(orgId, existing.date)) return { error: 'day_locked' };
+  if (patch.overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
   if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
     const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
@@ -314,6 +325,10 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
     if (dayTotal > 24) return { error: 'exceeds_day_hours' };
     const cap = await leaveService.workCapacityFor(orgId, orgMembershipId, existing.date);
     if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
+    if (existing.account_id && patch.hours !== undefined) {
+      const full = await projectDayService.checkCap(orgId, existing.account_id, existing.date, hours, { orgMembershipId, excludeEntryId: entryId });
+      if (full) return full;
+    }
   }
 
   const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
@@ -726,7 +741,17 @@ async function myProjects(orgId, orgMembershipId) {
       allocated_to: cur ? (cur.allocated_to && r.end_date ? [cur.allocated_to, ymdOr(r.end_date)].sort()[1] : null) : ymdOr(r.end_date),
     });
   }
-  return [...byProject.values()];
+  const mine = [...byProject.values()];
+  // Projects a team mate is allocated to can be logged on too (client / project timesheet).
+  const shared = await projectDayService.teamProjects(orgId, orgMembershipId, todayIst(), since, new Set(mine.map((p) => p.id)));
+  return [...mine, ...shared];
+}
+
+// The project's day: capacity from allocations, hours already logged, what is left.
+async function getProjectDay(orgId, orgMembershipId, { account_id, date }) {
+  const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId }, select: { id: true, name: true, project_name: true } });
+  if (!account) return { error: 'account_not_found' };
+  return { day: { ...(await projectDayService.projectDay(orgId, account_id, date, { orgMembershipId })), project: account.project_name || account.name } };
 }
 
 // --- Weekly auto-lock -------------------------------------------------------
@@ -1015,6 +1040,7 @@ async function bulkApprove(orgId, actor, { status = 'approved', reason, entries 
 }
 
 module.exports = {
+  getProjectDay,
   bulkApprove,
   importEntries,
   deleteOwnEntry,

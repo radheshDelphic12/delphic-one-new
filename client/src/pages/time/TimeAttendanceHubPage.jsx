@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -11,12 +11,15 @@ import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import TeamMonitoringTab from './TeamMonitoringTab.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
+import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
   // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
   { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
+  // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
+  { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
 ];
 // The ordinary popup-logging timesheet — for everyone EXCEPT IT-department
 // staff, who use the multi-row grid below exclusively (no popup at all).
@@ -76,6 +79,7 @@ export default function TimeAttendanceHubPage() {
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
       {section === 'holidays' && <MyHolidaysTab />}
+      {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
       {section === 'timesheets' && (
         <div className="space-y-8">
           <TimesheetsPage />

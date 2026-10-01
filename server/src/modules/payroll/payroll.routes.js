@@ -9,6 +9,7 @@ const {
   listSalaryStructuresQuerySchema,
   payrollFiltersSchema,
   attendanceSalaryQuerySchema,
+  setPayBasisSchema,
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
@@ -21,6 +22,7 @@ const ERRORS = {
   membership_not_found: [404, 'Org membership not found'],
   not_found: [404, 'Not found'],
   already_processed: [409, 'That payroll run has already been processed'],
+  nobody_selected: [422, 'Pick at least one person, or the IT department'],
 };
 
 function failFor(res, error) {
@@ -85,6 +87,23 @@ router.get(
   '/attendance-salary',
   authorize('admin'),
   asyncHandler(async (req, res) => ok(res, await service.attendanceSalary(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
+);
+
+// What each person would be paid under each basis (timesheet vs attendance) for a month - check before switching.
+router.get(
+  '/pay-basis',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.payBasisComparison(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
+);
+
+router.post(
+  '/pay-basis',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.setPayBasis(req.user.org_id, req.user.id, setPayBasisSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
 );
 
 router.post(

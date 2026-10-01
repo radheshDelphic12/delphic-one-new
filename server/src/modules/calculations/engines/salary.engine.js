@@ -16,7 +16,7 @@
 // are never on payroll (paid through their vendor — see vendorPayment.engine).
 
 const prisma = require('../../../config/db');
-const { computeBreakdown } = require('../../payroll/payroll.service');
+const { computeBreakdown, payBasisOf } = require('../../payroll/payroll.service');
 const { pickCalendarId } = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds } = require('../period');
 const { shiftHours } = require('../../timesheets/workHours.service');
@@ -59,6 +59,7 @@ const MEMBER_SELECT = {
   id: true,
   employee_code: true,
   worker_type: true,
+  pay_basis: true,
   location_id: true,
   department_id: true,
   team_id: true,
@@ -86,7 +87,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     orderBy: { joined_at: 'asc' },
   });
   const ids = memberships.map((m) => m.id);
-  const [structures, attendance, leaves, holidays, calendars, employeeCalendars, entries, overtime] = await Promise.all([
+  const [structures, attendance, leaves, holidays, calendars, employeeCalendars, entries, overtime, otTickets] = await Promise.all([
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, effective_from: { lte: end } },
       orderBy: [{ effective_from: 'desc' }, { created_at: 'desc' }],
@@ -110,6 +111,11 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     }),
     prisma.timesheetDayOvertime.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end } },
+      select: { org_membership_id: true, date: true, hours: true, status: true },
+    }),
+    // Overtime tickets (attendance-paid people): approved ones are paid, pending ones are the projection.
+    prisma.overtimeTicket.findMany({
+      where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end }, status: { in: ['pending', 'approved', 'rejected'] } },
       select: { org_membership_id: true, date: true, hours: true, status: true },
     }),
   ]);
@@ -144,6 +150,15 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     if (!overtimeByMember.has(o.org_membership_id)) overtimeByMember.set(o.org_membership_id, new Map());
     overtimeByMember.get(o.org_membership_id).set(ymd(o.date), { hours: Number(o.hours), status: o.status });
   }
+  const ticketsByMember = new Map();
+  for (const t of otTickets) {
+    if (!ticketsByMember.has(t.org_membership_id)) ticketsByMember.set(t.org_membership_id, new Map());
+    const days = ticketsByMember.get(t.org_membership_id);
+    const key = ymd(t.date);
+    const day = days.get(key) || { approved: 0, pending: 0, rejected: 0 };
+    day[t.status] += Number(t.hours);
+    days.set(key, day);
+  }
   const latestStructure = new Map();
   for (const s of structures) if (!latestStructure.has(s.org_membership_id)) latestStructure.set(s.org_membership_id, s);
 
@@ -160,6 +175,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     workingByCalendar,
     hoursByMember,
     overtimeByMember,
+    ticketsByMember,
   };
 }
 
@@ -173,7 +189,7 @@ function teamDuring(membership, date) {
 }
 
 // One employee's line. `asOf` = live mode (see computeBreakdown).
-function salaryLine(ctx, membership, asOf = null) {
+function salaryLine(ctx, membership, asOf = null, { payBasis = payBasisOf(membership) } = {}) {
   const base = {
     org_membership_id: membership.id,
     name: membership.person.name,
@@ -210,9 +226,12 @@ function salaryLine(ctx, membership, asOf = null) {
     workingSet: ctx.workingByCalendar.get(calendarId) || new Set(),
     shiftHours: shiftHours(membership.shift),
     asOf,
+    payBasis,
+    ticketsByDate: ctx.ticketsByMember.get(membership.id) || new Map(),
   });
   return {
     ...base,
+    pay_basis: payBasis,
     salary_structure_id: structure.id,
     calendar: calendarId ? ctx.calendarsById.get(calendarId)?.name || null : null,
     ctc: Number(structure.ctc),
@@ -267,4 +286,47 @@ async function computeSalary(orgId, { period_month, period_year, asOf = null, fi
   };
 }
 
-module.exports = { loadContext, salaryLine, computeSalary, membershipFilterWhere, isItDepartment };
+// Both bases for every employee in the month: the figures an admin compares before switching.
+async function comparePayBases(orgId, { period_month, period_year, filters = {}, ...rest }) {
+  const ctx = await loadContext(orgId, { period_month, period_year }, { ...rest, ...filters });
+  const rows = [];
+  for (const m of ctx.memberships) {
+    const timesheet = salaryLine(ctx, m, null, { payBasis: 'timesheet' });
+    if (timesheet.skipped) continue;
+    const attendance = salaryLine(ctx, m, null, { payBasis: 'attendance' });
+    const a = attendance.breakdown;
+    const t = timesheet.breakdown;
+    rows.push({
+      org_membership_id: m.id,
+      name: timesheet.name,
+      employee_code: timesheet.employee_code,
+      department: timesheet.department,
+      is_it: timesheet.is_it,
+      current_basis: payBasisOf(m),
+      ctc: timesheet.ctc,
+      timesheet_net: timesheet.net,
+      attendance_net: attendance.net,
+      difference: round2(attendance.net - timesheet.net),
+      timesheet: { approved_hours: t.approved_hours, pending_hours: t.pending_hours, deficit_hours: t.deficit_hours },
+      attendance: { present_days: a.present_days, half_days: a.half_days, absent_days: a.absent_days, unmarked_days: a.unmarked_days, paid_leave_days: a.paid_leave_days, unpaid_leave_days: a.unpaid_leave_days, deficit_hours: a.deficit_hours },
+    });
+  }
+  rows.sort((x, y) => x.name.localeCompare(y.name));
+  const sum = (list, key) => round2(list.reduce((s, r) => s + Number(r[key] || 0), 0));
+  return {
+    period_month,
+    period_year,
+    currency: 'INR',
+    rows,
+    totals: {
+      employees: rows.length,
+      timesheet_net: sum(rows, 'timesheet_net'),
+      attendance_net: sum(rows, 'attendance_net'),
+      difference: sum(rows, 'difference'),
+      unmarked_days: rows.reduce((s, r) => s + r.attendance.unmarked_days, 0),
+      on_attendance: rows.filter((r) => r.current_basis === 'attendance').length,
+    },
+  };
+}
+
+module.exports = { loadContext, salaryLine, computeSalary, comparePayBases, membershipFilterWhere, isItDepartment };

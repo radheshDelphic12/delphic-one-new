@@ -111,6 +111,10 @@ async function membershipShift(orgMembershipId) {
  * pending; no overtime left removes the row.
  */
 async function syncDayOvertime(orgId, orgMembershipId, date) {
+  // Attendance-paid people log CLIENT hours on projects (8h + 8h is normal), so those hours never
+  // create overtime; their OT is ticket based.
+  const basis = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { pay_basis: true } });
+  if (basis?.pay_basis === 'attendance') return null;
   const day = utcDay(date);
   const [shift, cal, entries, existing] = await Promise.all([
     membershipShift(orgMembershipId),

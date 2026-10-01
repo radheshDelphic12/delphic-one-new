@@ -217,6 +217,8 @@ async function computeLive(orgId, kind, scopeKey, period, { account = null, now 
     const blockers = [];
     const orgLock = await findCalc(orgId, 'salary', 'org', period);
     if (orgLock && FROZEN_STATUSES.includes(orgLock.status)) blockers.push({ code: 'org_salary_locked', message: 'The whole month\'s salary is already locked.' });
+    // Attendance-based pay: a working day nobody marked is unpaid - mark it (or approve leave) before locking.
+    if (line.breakdown?.unmarked_days > 0) blockers.push({ code: 'unmarked_attendance', count: line.breakdown.unmarked_days, message: `${line.breakdown.unmarked_days} working day${line.breakdown.unmarked_days === 1 ? ' has' : 's have'} no attendance marking - mark ${line.breakdown.unmarked_days === 1 ? 'it' : 'them'} (present / half day / absent) or approve leave first.` });
     raw.readiness = { can_lock: true, blockers, warnings: [] };
   } else if (kind === 'vendor_bill') {
     raw = await vendorEngine.computeVendorPayments(orgId, { ...period, vendor_account_id: scopeKey });

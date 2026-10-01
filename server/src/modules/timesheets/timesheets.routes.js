@@ -10,6 +10,11 @@ const { todayIst } = require('../../lib/istDate');
 const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
 const { buildMonthlyWorkbook } = require('./timesheets.export');
 const {
+  projectDayQuerySchema,
+  createOvertimeTicketSchema,
+  decideOvertimeTicketSchema,
+  listOvertimeTicketsQuerySchema,
+  adminUpdateOvertimeTicketSchema,
   createEntrySchema,
   updateEntrySchema,
   decideEntrySchema,
@@ -30,6 +35,8 @@ const {
   createRegularizationRequestSchema,
 } = require('./timesheets.validation');
 
+const tickets = require('./overtimeTickets.service');
+
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
 
@@ -49,10 +56,18 @@ const ENTRY_ERRORS = {
   already_decided: [409, 'Entry has already been approved or rejected — approved and rejected timesheets are final; ask for a regularisation'],
   member_not_found: [404, 'Employee not found'],
   not_team_member: [403, 'You can only view timesheets of people who report to you'],
+  tickets_not_applicable: [422, 'Overtime tickets are for people paid from attendance. Your overtime comes from your timesheet hours (or you are a vendor resource: log overtime on your timesheet)'],
+  exceeds_ticket_hours: [422, 'Overtime tickets for one day cannot add up to more than 12 hours'],
+  own_ticket: [403, "You can't approve your own overtime ticket"],
+  overtime_requires_ticket: [422, 'Your overtime is raised as a ticket (Time & Attendance > OT Tickets) and approved by your manager - it is not logged on the timesheet'],
 };
 
 function failFor(res, error, result) {
   if (error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
+  if (error === 'project_day_cap') {
+    const left = result.remaining === null ? 0 : result.remaining;
+    return fail(res, 422, `This project's day is full: ${result.logged}h of ${result.capacity}h already logged on ${result.date} (${left}h left, ${result.adding}h requested) - log less, or ask your admin to raise the project's billable hours`);
+  }
   if (error === 'half_day_capacity') return fail(res, 422, `You're on approved ${result.leave_type} half-day leave on that date — only ${result.capacity}h can be logged for work that day (${result.total}h requested)`);
   const mapped = ENTRY_ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
@@ -314,6 +329,74 @@ router.get(
 router.post(
   '/approvals/bulk',
   asyncHandler(async (req, res) => ok(res, await service.bulkApprove(req.user.org_id, req.user, bulkApproveSchema.parse(req.body))))
+);
+
+// --- Overtime tickets: the employee raises, the manager / admin decides (attendance-paid people) ---
+router.get(
+  '/overtime-tickets',
+  asyncHandler(async (req, res) => {
+    const result = await tickets.listTickets(req.user.org_id, req.user, listOvertimeTicketsQuerySchema.parse(req.query));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
+);
+
+router.post(
+  '/overtime-tickets',
+  asyncHandler(async (req, res) => {
+    const result = await tickets.createTicket(req.user.org_id, req.user.org_membership_id, createOvertimeTicketSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.ticket);
+  })
+);
+
+router.post(
+  '/overtime-tickets/:id/decision',
+  asyncHandler(async (req, res) => {
+    const result = await tickets.decideTicket(req.user.org_id, req.params.id, req.user, decideOvertimeTicketSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.ticket);
+  })
+);
+
+router.post(
+  '/overtime-tickets/:id/cancel',
+  asyncHandler(async (req, res) => {
+    const result = await tickets.cancelTicket(req.user.org_id, req.user.org_membership_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.ticket);
+  })
+);
+
+router.patch(
+  '/overtime-tickets/:id/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await tickets.adminUpdateTicket(req.user.org_id, req.user, req.params.id, adminUpdateOvertimeTicketSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.ticket);
+  })
+);
+
+router.delete(
+  '/overtime-tickets/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await tickets.adminDeleteTicket(req.user.org_id, req.user, req.params.id, adminDeleteEntrySchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// The project's day: capacity (allocated people's billable hours), what is already logged, what is left.
+router.get(
+  '/project-day',
+  asyncHandler(async (req, res) => {
+    const query = projectDayQuerySchema.parse(req.query);
+    const result = await service.getProjectDay(req.user.org_id, req.user.org_membership_id, query);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.day);
+  })
 );
 
 // Projects the caller is allocated to — the IT timesheet's project dropdown.

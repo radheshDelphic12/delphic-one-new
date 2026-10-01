@@ -446,6 +446,7 @@ model User {
   timesheet_approvals             TimesheetEntry[]                @relation("TimesheetApprover")
   timesheet_locks_made            TimesheetLock[]
   timesheet_overtime_decisions    TimesheetDayOvertime[]
+  overtime_tickets_decided        OvertimeTicket[]                @relation("OvertimeTicketDecidedBy")
   regularization_requests         TimesheetRegularizationTicket[] @relation("RegularizationRequestedBy")
   regularization_decisions        TimesheetRegularizationTicket[] @relation("RegularizationDecidedBy")
   expense_claims_submitted        ExpenseClaim[]                  @relation("ExpenseClaimSubmittedBy")
@@ -894,6 +895,36 @@ model TimesheetDayOvertime {
   @@map("timesheet_day_overtime")
 }
 
+// Overtime ticket - how OT works for attendance-paid people (OrgMembership.pay_basis = 'attendance'):
+// the employee raises a ticket (day, hours, optional project, reason) and the reporting manager (or an
+// admin) approves it. Approved hours are paid as OT (hours x hourly rate x multiplier) and, when the
+// ticket names a project that bills overtime, billed to the client. Never derived from timesheet hours.
+model OvertimeTicket {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date              DateTime      @db.Date
+  hours             Decimal       @db.Decimal(4, 2)
+  account_id        String?       @db.Uuid
+  account           Account?      @relation(fields: [account_id], references: [id])
+  reason            String
+  // pending -> approved | rejected (manager / admin); pending -> cancelled (the employee).
+  status            String        @default("pending")
+  decided_by        String?       @db.Uuid
+  decider           User?         @relation("OvertimeTicketDecidedBy", fields: [decided_by], references: [id])
+  decided_at        DateTime?
+  decision_reason   String?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@index([org_id, date])
+  @@index([org_membership_id, date])
+  @@index([account_id, date])
+  @@map("overtime_tickets")
+}
+
 // Freezes every TimesheetEntry for an org on a given date — an org-wide
 // daily lock (client brief: "Admins can lock timesheets daily"), not
 // per-employee. A locked day's entries can only change via a
@@ -1128,6 +1159,11 @@ model ProjectMemberAssignment {
   // contractor) charged to this project. Null = split evenly across all of
   // the person's project assignments (see projectPnl.service).
   allocation_percent Decimal?            @db.Decimal(5, 2)
+  // Hours a day this person can bill the client on this project (client / project timesheet).
+  // Separate from allocation_percent (a share of the person's COST, never above 100% in total),
+  // so one person can be 8h on project A and 8h on project B. A project's daily cap is the sum
+  // over its allocated people (timesheets/projectDay.service.js).
+  billable_hours_per_day Decimal         @default(8) @db.Decimal(4, 2)
   // Effective period of this allocation (both inclusive). An allocation is a
   // span of days, never "the current project": moving someone ends one row
   // and starts another, so any past date still resolves to what applied then.
@@ -1700,6 +1736,7 @@ model Org {
   timesheet_entries  TimesheetEntry[]
   timesheet_locks    TimesheetLock[]
   timesheet_overtime TimesheetDayOvertime[]
+  overtime_tickets   OvertimeTicket[]
 
   // Multi-company ERP (Phase 4).
   salary_structures SalaryStructure[]
@@ -1770,6 +1807,10 @@ model OrgMembership {
   // (monthly, in vendor_rate_currency) payable to vendor_account — the
   // vendor company — and never goes through payroll.
   worker_type                 WorkerType       @default(full_time_employee)
+  // What this person's salary is worked out from: 'timesheet' (approved timesheet hours - the original
+  // rule, and what null means) or 'attendance' (check-in / half day / leave / absent marking; the
+  // project timesheet then only feeds client billing). Set by an admin, per person or in bulk for IT.
+  pay_basis                   String?
   vendor_account_id           String?          @db.Uuid
   vendor_account              Account?         @relation("MembershipVendorAccount", fields: [vendor_account_id], references: [id], onDelete: SetNull)
   vendor_rate                 Decimal?         @db.Decimal(14, 2)
@@ -1822,6 +1863,7 @@ model OrgMembership {
   leave_requests_approved LeaveRequest[]                  @relation("LeaveRequestApprover")
   timesheet_entries       TimesheetEntry[]
   timesheet_overtime      TimesheetDayOvertime[]
+  overtime_tickets        OvertimeTicket[]
   salary_structures       SalaryStructure[]
   payslips                Payslip[]
   daily_profitability     DailyEmployeeProfitability[]
@@ -1958,6 +2000,7 @@ model Account {
   billable_day_hours      Decimal                @default(8) @db.Decimal(4, 2)
   billing_adjustments     BillingAdjustment[]
   contract_charges        ContractCharge[]
+  overtime_tickets        OvertimeTicket[]
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])

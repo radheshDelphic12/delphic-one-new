@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, Trash2, Wallet } from 'lucide-react';
+import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, Scale, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
+import PayBasisTab from './PayBasisTab.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -568,6 +569,8 @@ const ADMIN_TABS = [
   // Salary from attendance / check-ins on each employee's calendar — what a
   // run processes (and, once the month is locked, exactly the locked figures).
   { key: 'attendance-salary', label: 'Attendance Salary', icon: CalendarCheck },
+  // What each person is paid from (timesheet hours or attendance), compared before switching.
+  { key: 'pay-basis', label: 'Pay basis', icon: Scale },
   { key: 'salary-structures', label: 'Salary Structures', icon: Wallet },
   { key: 'runs', label: 'Payroll Runs', icon: Play },
 ];
@@ -616,6 +619,7 @@ export default function PayrollHubPage() {
       )}
       {section === 'my-payslips' && <MyPayslipsTab />}
       {section === 'attendance-salary' && isAdmin && <AttendanceSalaryTab people={people} endpoint="/payroll/attendance-salary" />}
+      {section === 'pay-basis' && isAdmin && <PayBasisTab people={people} />}
       {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
       {section === 'runs' && isAdmin && <PayrollRunsTab filters={people} />}
     </div>
