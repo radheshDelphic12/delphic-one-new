@@ -15,6 +15,7 @@ import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finan
 import CalculationLockBar, { inr } from '../../components/finance/CalculationLockBar.jsx';
 import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 import { ClientInvoiceDrawer, ClientInvoicesTable, GenerateInvoiceButton } from './ClientInvoices.jsx';
+import BillingAdjustmentDrawer from './BillingAdjustmentDrawer.jsx';
 
 const dayLabel = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
 const hrs = (n) => (n ? `${n}h` : '0');
@@ -116,6 +117,7 @@ export default function BillingSalesTab() {
   const [filters, setFilters] = useState({ project_type: 'all', client_account_id: '', account_id: '', org_membership_id: '', status: 'all', include_overtime: 'true', date_from: '', date_to: '' });
   const [openRow, setOpenRow] = useState(null);
   const [invoiceFor, setInvoiceFor] = useState(null);
+  const [adjustFor, setAdjustFor] = useState(null);
   const [invoicesKey, setInvoicesKey] = useState(0);
   const [projects, setProjects] = useState([]);
   const memberOptions = useOrgMembershipOptions(true);
@@ -152,6 +154,7 @@ export default function BillingSalesTab() {
     { key: 'amount', header: 'Amount', render: (r) => (
       <span className="tabular-nums">
         <span className="font-medium">{inr(r.amount, r.currency)}</span>
+        {r.adjustment_amount ? <span className="block text-xs text-tertiary-500" title="Admin adjustment included in the final amount">incl. {r.adjustment_amount > 0 ? '+' : ''}{inr(r.adjustment_amount, r.currency)} adjustment</span> : null}
         {r.currency !== 'INR' && r.amount_inr !== null && <span className="block text-xs text-tertiary-500">{inr(r.amount_inr)}</span>}
         {r.live_amount !== null && r.live_amount !== undefined && <span className="block text-xs text-danger-700">Live now {inr(r.live_amount, r.currency)}</span>}
         {r.estimate && (
@@ -168,6 +171,7 @@ export default function BillingSalesTab() {
     ) },
     { key: 'approval', header: 'Approval', render: (r) => <StatusBadge status={r.totals.rejected_days ? 'rejected' : r.totals.pending_days ? 'pending' : r.totals.approved_days ? 'approved' : 'no_entries'} size="xs" /> },
     { key: 'lock', header: 'Lock', render: (r) => <RecordLockButton kind="billing" scopeKey={r.project.id} period={{ period_month: r.period_month, period_year: r.period_year }} lock={r.lock} label={`${r.project.name} billing`} onChanged={() => refresh?.()} /> },
+    { key: 'adjust', header: 'Adjust', render: (r) => (r.supported && r.billing_type ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor(r)}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
     { key: 'invoice', header: 'Invoice', render: (r) => (r.supported && r.billing_type ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ account_id: r.project.id, period_month: r.period_month, period_year: r.period_year })} /> : <span className="text-xs text-tertiary-400">—</span>) },
   ];
 
@@ -254,6 +258,7 @@ export default function BillingSalesTab() {
         onChanged={() => refresh?.()}
         onInvoice={setInvoiceFor}
       />
+      <BillingAdjustmentDrawer target={adjustFor} onClose={() => setAdjustFor(null)} onChanged={() => { refresh?.(); setInvoicesKey((k) => k + 1); }} />
       <ClientInvoiceDrawer open={Boolean(invoiceFor)} initial={invoiceFor || {}} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
     </div>
   );

@@ -5,6 +5,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
+const adjustments = require('./adjustments.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
@@ -15,6 +16,8 @@ const {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  billingAdjustmentSchema,
+  listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,
@@ -49,6 +52,7 @@ const ERRORS = {
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
+  reason_required: [422, 'Give a reason to change an invoice that has already been sent or paid'],
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
@@ -173,7 +177,7 @@ router.patch(
   '/vendor-invoices/:id',
   ...adminInOrg,
   asyncHandler(async (req, res) => {
-    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body));
+    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body), req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
   })
@@ -263,6 +267,37 @@ router.get(
     const query = listDailyRevenueQuerySchema.parse(req.query);
     const rows = await service.listDailyRevenue(req.user.org_id, query);
     return ok(res, rows);
+  })
+);
+
+// Billing adjustments — an admin's + / - tweak to a project's month (reason required, audited).
+router.get(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...period } = listBillingAdjustmentsQuerySchema.parse(req.query);
+    return ok(res, await adjustments.listAdjustments(req.user.org_id, account_id, period));
+  })
+);
+
+router.post(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...rest } = billingAdjustmentSchema.parse(req.body);
+    const result = await adjustments.createAdjustment(req.user.org_id, req.user, account_id, rest);
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+
+router.delete(
+  '/adjustments/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await adjustments.removeAdjustment(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

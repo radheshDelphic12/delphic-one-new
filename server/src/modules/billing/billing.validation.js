@@ -55,11 +55,29 @@ const updateInvoiceSchema = z.object({
   invoice_date: invoiceDate,
   notes: z.string().trim().max(1000).nullable().optional(),
   currency: INVOICE_CURRENCY,
+  // Overrides the calculated amount (audited); `reason` is required once the invoice is sent / paid.
+  amount: z.coerce.number().positive().max(1e12).optional(),
+  reason: z.string().trim().max(500).optional(),
 });
 
 const previewInvoiceQuerySchema = z.object({
   account_id: z.string().uuid(),
   currency: INVOICE_CURRENCY,
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+});
+
+// Admin tweak (+ or -) to a project's billed amount for a month; the reason is mandatory.
+const billingAdjustmentSchema = z.object({
+  account_id: z.string().uuid(),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  amount: z.coerce.number().refine((n) => n !== 0, 'Enter a non-zero amount').refine((n) => Math.abs(n) <= 1e12, 'Too large'),
+  reason: z.string().trim().min(3, 'Give a reason').max(500),
+});
+
+const listBillingAdjustmentsQuerySchema = z.object({
+  account_id: z.string().uuid(),
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
@@ -203,6 +221,7 @@ const vendorInvoiceSchema = z.object({
 
 const updateVendorInvoiceSchema = vendorInvoiceSchema
   .partial()
+  .extend({ invoice_date: invoiceDate })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
 const listCostAssignmentsQuerySchema = z.object({
@@ -237,6 +256,11 @@ const updateProjectProfileSchema = z
     estimated_monthly_hours: z.coerce.number().positive().max(10000).nullable().optional(),
     // Hourly projects: the client's committed minimum hours per month; null clears it.
     minimum_monthly_hours: z.coerce.number().positive().max(10000).nullable().optional(),
+    // How a monthly client rate is billed (contract retainer vs approved hours per day), how contractors'
+    // vendor payout is worked out for this project, and the hours that make a full day under approved_hours.
+    client_billing_basis: z.enum(['contract', 'approved_hours']).optional(),
+    vendor_payout_basis: z.enum(['contract', 'approved_hours']).optional(),
+    billable_day_hours: z.coerce.number().min(1).max(24).optional(),
     billing: z
       .object({
         rate_type: z.enum(['hourly', 'monthly']),
@@ -261,6 +285,8 @@ module.exports = {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  billingAdjustmentSchema,
+  listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,

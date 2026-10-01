@@ -51,6 +51,9 @@ const PROJECT_SELECT = {
   overtime_multiplier: true,
   estimated_monthly_hours: true,
   minimum_monthly_hours: true,
+  client_billing_basis: true,
+  vendor_payout_basis: true,
+  billable_day_hours: true,
 };
 
 function engineFor(serviceCategory) {
@@ -133,7 +136,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const { engine, supported, note } = engineFor(account.service_category);
   const project = describeProject(account);
 
-  const [rates, rawEntries, cal] = await Promise.all([
+  const [rates, rawEntries, cal, adjustmentRows] = await Promise.all([
     prisma.billingRate.findMany({
       where: { org_id: orgId, account_id: account.id, requirement_id: null },
       select: { id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
@@ -155,12 +158,22 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
       },
     }),
     projectCalendar(orgId, account.id, period_month, period_year),
+    prisma.billingAdjustment.findMany({
+      where: { org_id: orgId, account_id: account.id, period_month, period_year },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, amount: true, reason: true, created_at: true, creator: { select: { id: true, name: true } } },
+    }),
   ]);
   const entries = markResolved(rawEntries);
   const monthRate = rateOn(rates, end);
   const benchmark = account.benchmark_hours || DEFAULT_BENCHMARK_HOURS;
   const overtimeEnabled = Boolean(account.overtime_billable);
   const multiplier = Number(account.overtime_multiplier ?? 1) || 1;
+  // Monthly rate billed by the contract (retainer) or by approved hours per day.
+  const billingBasis = account.client_billing_basis === 'approved_hours' ? 'approved_hours' : 'contract';
+  const dayHours = Number(account.billable_day_hours ?? 8) || 8;
+  const adjustmentItems = adjustmentRows.map((a) => ({ id: a.id, amount: round2(Number(a.amount)), reason: a.reason, created_at: a.created_at, by: a.creator ? { id: a.creator.id, name: a.creator.name } : null }));
+  const adjustmentTotal = round2(adjustmentItems.reduce((sum, a) => sum + a.amount, 0));
   const agreementStart = account.agreement_start_date;
   const agreementEnd = account.agreement_end_date;
 
@@ -213,13 +226,16 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
 
     let base = 0;
     let otRate = 0;
+    let payable = 0;
     if (supported && inContract && rate) {
       if (rate.rate_type === 'hourly') {
         base = round2(regular * Number(rate.rate));
         otRate = Number(rate.rate) * multiplier;
       } else {
-        // Contract share of the day; settled to the cent after the loop.
-        base = isWorkingDay && cal.working_days > 0 ? Number(rate.rate) / cal.working_days : 0;
+        // Contract share of the day; settled to the cent after the loop. On the
+        // approved_hours basis the day counts for the approved hours logged on it.
+        payable = billingBasis === 'approved_hours' ? Math.min(1, regular / dayHours) : 1;
+        base = isWorkingDay && cal.working_days > 0 ? (Number(rate.rate) / cal.working_days) * payable : 0;
         otRate = (Number(rate.rate) / benchmark) * multiplier;
       }
     }
@@ -238,6 +254,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
       holiday,
       in_contract: inContract,
       rate_type: rate?.rate_type || null,
+      payable_fraction: supported && inContract && rate?.rate_type === 'monthly' && isWorkingDay ? round2(payable) : null,
       status: dayStatus(dayEntries, { inContract, isWorkingDay }),
       hours: {
         approved: round2(regular),
@@ -267,7 +284,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
 
   // Hours only move the amount on hourly days or where overtime is billed;
   // a monthly contract without billable overtime doesn't wait on approvals.
-  const hoursMatter = days.some((d) => d.in_contract && d.rate_type === 'hourly') || overtimeEnabled;
+  const hoursMatter = days.some((d) => d.in_contract && d.rate_type === 'hourly') || overtimeEnabled || billingBasis === 'approved_hours';
   const pending = entries.filter((e) => e.status === 'submitted').length;
   const rejected = entries.filter((e) => e.status === 'rejected' && !e.resolved).length;
   const missing = days.filter((d) => d.status === 'no_entry').length;
@@ -291,6 +308,9 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     billing_type: monthRate?.rate_type || null,
     rate: monthRate ? Number(monthRate.rate) : null,
     currency: monthRate?.currency || account.client_billing_currency || 'INR',
+    billing_basis: billingBasis,
+    day_hours: dayHours,
+    adjustments: { items: adjustmentItems, total: adjustmentTotal },
     benchmark_hours: benchmark,
     working_days: cal.working_days,
     calendar: cal.calendar,
@@ -371,13 +391,19 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
   const resourceList = [...resources.values()].map((r) => ({ ...r, amount: round2(r.base_amount + (include_overtime ? r.overtime_amount : 0)) }));
   const total = (key) => round2(days.reduce((s, d) => s + d[key], 0));
   const statusCount = (s) => days.filter((d) => d.status === s).length;
+  // Admin adjustments belong to the whole month: shown only when the view isn't narrowed to a person, dates or one approval state.
+  const wholeMonth = !org_membership_id && !from && !to && (status === 'all' || !status);
+  const adjustments = wholeMonth ? raw.adjustments || { items: [], total: 0 } : { items: [], total: 0 };
   return {
     days,
     resources: resourceList,
+    adjustments,
     totals: {
       base_amount: total('base_amount'),
       overtime_amount: total('overtime_amount'),
       amount: total('amount'),
+      adjustment_amount: adjustments.total,
+      final_amount: round2(total('amount') + adjustments.total),
       approved_hours: round2(days.reduce((s, d) => s + d.hours.approved, 0)),
       overtime_hours: round2(days.reduce((s, d) => s + d.hours.overtime_approved, 0)),
       pending_hours: round2(days.reduce((s, d) => s + d.hours.pending, 0)),
@@ -413,7 +439,7 @@ function estimateFor(account, raw, totals) {
 // The amount a lock finalizes: approved base + (only if the project allows
 // it) approved overtime. Used for the lock's version amount and the invoice.
 function lockedAmount(raw) {
-  return round2(raw.days.reduce((s, d) => s + d.base_amount + (raw.overtime.enabled ? d.overtime_amount : 0), 0));
+  return round2(raw.days.reduce((s, d) => s + d.base_amount + (raw.overtime.enabled ? d.overtime_amount : 0), 0) + (raw.adjustments?.total || 0));
 }
 
 // How a month's amount was worked out, for an invoice or a locked record:
@@ -438,8 +464,13 @@ function invoiceDetails(raw) {
     overtime_billed: overtimeBilled,
     overtime_multiplier: raw.overtime?.multiplier ?? 1,
     overtime_hours: overtimeBilled ? sum(billedDays, (d) => d.hours.overtime_approved) : 0,
+    billing_basis: raw.billing_basis || 'contract',
+    day_hours: raw.day_hours ?? null,
+    payable_days: round2(billedDays.reduce((s, d) => s + (d.payable_fraction ?? (d.is_working_day ? 1 : 0)), 0)),
     base_amount: sum(raw.days, (d) => d.base_amount),
     overtime_amount: overtimeBilled ? sum(raw.days, (d) => d.overtime_amount) : 0,
+    adjustment_amount: raw.adjustments?.total || 0,
+    adjustments: (raw.adjustments?.items || []).map((a) => ({ amount: a.amount, reason: a.reason })),
     amount: lockedAmount(raw),
     calendar: raw.calendar?.name || null,
   };

@@ -159,3 +159,22 @@ payroll, analytics, allocations, projects). `erp-phase4-payroll` and
 paid September with employees whose joining date defaulted to "today", which
 the salary engine rightly excludes — their test memberships now join on
 2026-01-01. **Not yet done:** a click-through in the browser.
+
+## Update 2026-10-01: vendor payout by approved hours, billing basis, adjustments
+
+Source of truth is **approved timesheet hours**; admin can configure and tweak.
+
+- **Vendor payout** (`vendorPayment.engine.js`): per project `Account.vendor_payout_basis`.
+  `approved_hours` (default) pays each working day in the agreement for the approved hours logged on it,
+  `min(1, hours / billable_day_hours)` x `rate x share / working_days` (20 approved days of 22 = 20/22 of the rate).
+  `contract` keeps the old retainer behaviour (every working day). Pending / rejected entries block the lock under `approved_hours`.
+  Lines expose `payout_basis`, `payable_days`, `contract_working_days`.
+- **Client billing basis** (`billing.engine.js`): per project `Account.client_billing_basis`.
+  `contract` (default, unchanged) or `approved_hours` (monthly rate, each working day counted by approved hours).
+  Hourly rates always bill approved hours x rate. `billable_day_hours` (default 8) defines a full day.
+  Configured in Finance > Projects > project profile (`PATCH /billing/projects/:id`).
+- **Adjustments** (`BillingAdjustment`, `billing/adjustments.service.js`): admin + / - tweak per project and month,
+  reason mandatory, audited (`billing_adjustment_add|remove`). `lockedAmount(raw)` adds them, so locks, invoices
+  and Financials all follow the final amount; invoices list base and adjustments separately. A change on a locked month
+  flags it `change_detected` (source `billing_adjustment`). API: `GET/POST /billing/adjustments`, `DELETE /billing/adjustments/:id`.
+  UI: Live Analytics > Billing & Sales > "± Adjust".
