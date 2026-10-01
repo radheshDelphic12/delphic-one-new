@@ -209,6 +209,8 @@ describe('Finance — monthly project P&L with vendor contractors', () => {
     const ctx = await seedOrg();
     const { res } = await createContractor(ctx);
     const contractorMembership = await prisma.orgMembership.findFirst({ where: { person_id: res.body.data.id } });
+    // Employed in the run's month (Sep 2026), so payroll sees and skips them.
+    await prisma.orgMembership.update({ where: { id: contractorMembership.id }, data: { joined_at: new Date('2026-01-01') } });
     await prisma.salaryStructure.create({
       data: { org_id: ctx.org.id, org_membership_id: contractorMembership.id, effective_from: new Date('2026-01-01'), ctc: 50000, components: {}, created_by: ctx.adminUser.id },
     });

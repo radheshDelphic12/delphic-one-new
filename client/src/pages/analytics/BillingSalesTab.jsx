@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, FileText, IndianRupee, Lock, Timer } from 'lucide-react';
+import { Clock, IndianRupee, Lock, Timer } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -13,6 +13,8 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import CalculationLockBar, { inr } from '../../components/finance/CalculationLockBar.jsx';
+import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
+import { ClientInvoiceDrawer, ClientInvoicesTable, GenerateInvoiceButton } from './ClientInvoices.jsx';
 
 const dayLabel = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
 const hrs = (n) => (n ? `${n}h` : '0');
@@ -31,8 +33,8 @@ function Approvers({ approvers }) {
 }
 
 /** One project's month: date rows with every entry, approver and time, plus its lock and invoice. */
-function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
-  const { pushError, pushSuccess } = useAlerts();
+function ProjectMonthDrawer({ row, filters, onClose, onChanged, onInvoice }) {
+  const { pushError } = useAlerts();
   const [data, setData] = useState(null);
   const period = row ? { period_month: row.period_month, period_year: row.period_year } : null;
 
@@ -43,15 +45,6 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the project month'), 'Something went wrong'));
   }
   useEffect(() => { setData(null); load(); }, [row?.id, JSON.stringify(filters)]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function generateInvoice() {
-    try {
-      await apiClient.post('/calculations/billing/invoice', { account_id: row.project.id, ...period });
-      pushSuccess?.('Invoice saved as a draft — see Finance → Projects → Invoicing');
-    } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to generate the invoice'), 'Could not generate');
-    }
-  }
 
   const columns = [
     { key: 'date', header: 'Date', render: (d) => <span className={d.is_working_day ? '' : 'text-tertiary-400'}>{dayLabel(d.date)}{d.holiday ? <span className="block text-[11px] text-tertiary-500">{d.holiday}</span> : null}</span> },
@@ -88,19 +81,17 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
       {!data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
         <div className="space-y-4">
           <CalculationLockBar kind="billing" scopeKey={row.project.id} period={period} title="Billing" onChanged={() => { load(); onChanged(); }}>
-            {data.calculation?.status === 'locked' && (
-              <button type="button" className="btn-secondary inline-flex items-center gap-1.5 text-xs" onClick={generateInvoice}><FileText className="h-3.5 w-3.5" /> Generate invoice</button>
-            )}
+            {data.supported && data.billing_type && <GenerateInvoiceButton compact onClick={() => onInvoice({ account_id: row.project.id, ...period })} />}
           </CalculationLockBar>
           <p className="text-xs text-tertiary-500">
             {!data.supported ? data.note : (
               <>
                 {data.billing_type === 'monthly'
-                  ? `Monthly ${inr(data.rate, data.currency)} over this project's ${data.working_days} working days (${data.calendar?.name || 'default calendar'}): a working day earns up to ${inr(data.rate / Math.max(data.working_days, 1), data.currency)}, in proportion to approved hours against the ${data.benchmark_hours}h monthly benchmark.`
+                  ? `Monthly contract ${inr(data.rate, data.currency)} over this project's ${data.working_days} working days (${data.calendar?.name || 'default calendar'}): every working day inside the agreement bills ${inr(data.rate / Math.max(data.working_days, 1), data.currency)}, whatever hours were logged — a full month bills exactly the rate.`
                   : data.billing_type === 'hourly' ? `Hourly: approved hours × ${inr(data.rate, data.currency)}.` : 'No billing rate set for this project.'}
                 {data.minimum && ` Committed minimum ${data.minimum.hours}h/month: ${data.minimum.met ? 'met' : `${data.minimum.shortfall_hours}h short so far`} (billing is still approved hours × rate).`}
                 {data.estimate && ` Client estimate: ${data.estimate.hours}h × ${inr(data.rate, data.currency)} = ${inr(data.estimate.amount, data.currency)}; actual so far ${data.estimate.actual_hours}h = ${inr(data.estimate.actual_amount, data.currency)} (${data.estimate.hours_variance >= 0 ? '+' : ''}${data.estimate.hours_variance}h). Forecast only — not billed.`}
-                {' '}Overtime is {data.overtime.enabled ? `billed at ${data.overtime.multiplier}× the hourly-equivalent rate` : 'not billable on this project'}. Only approved hours bill.
+                {' '}Overtime is {data.overtime.enabled ? `billed at ${data.overtime.multiplier}× the hourly-equivalent rate (approved overtime only)` : 'not billable on this project'}.
                 {data.source === 'locked' && ' Showing the locked version.'}
               </>
             )}
@@ -114,15 +105,18 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged }) {
 
 /**
  * Live Analytics → Billing & Sales. What each project/contract bills for the
- * period from APPROVED timesheet hours on its own calendar, date by date
- * (dates with nothing billable show as zero), with approval states and the
- * per-project Review → Lock → Invoice workflow. A locked project month is
- * shown from its locked version.
+ * period from its CONTRACT on its own calendar (monthly: the working-day
+ * share of the rate; hourly: approved hours × rate), date by date, with
+ * approval states and the per-project Generate invoice → Lock workflow.
+ * Generated invoices are listed under the invoice area; a locked project
+ * month is shown from its locked version.
  */
 export default function BillingSalesTab() {
   const [period, setPeriod] = useState({ ...currentPeriod(), period: 'month' });
   const [filters, setFilters] = useState({ project_type: 'all', client_account_id: '', account_id: '', org_membership_id: '', status: 'all', include_overtime: 'true', date_from: '', date_to: '' });
   const [openRow, setOpenRow] = useState(null);
+  const [invoiceFor, setInvoiceFor] = useState(null);
+  const [invoicesKey, setInvoicesKey] = useState(0);
   const [projects, setProjects] = useState([]);
   const memberOptions = useOrgMembershipOptions(true);
 
@@ -173,7 +167,8 @@ export default function BillingSalesTab() {
       </span>
     ) },
     { key: 'approval', header: 'Approval', render: (r) => <StatusBadge status={r.totals.rejected_days ? 'rejected' : r.totals.pending_days ? 'pending' : r.totals.approved_days ? 'approved' : 'no_entries'} size="xs" /> },
-    { key: 'lock', header: 'Lock', render: (r) => <StatusBadge status={r.lock.status} label={r.lock.version ? `${({ locked: 'Locked', change_detected: 'Historical Calculation Affected', reviewed: 'Reviewed', reopened: 'Reopened' })[r.lock.status] || 'Draft'} v${r.lock.version}` : undefined} size="xs" /> },
+    { key: 'lock', header: 'Lock', render: (r) => <RecordLockButton kind="billing" scopeKey={r.project.id} period={{ period_month: r.period_month, period_year: r.period_year }} lock={r.lock} label={`${r.project.name} billing`} onChanged={() => refresh?.()} /> },
+    { key: 'invoice', header: 'Invoice', render: (r) => (r.supported && r.billing_type ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ account_id: r.project.id, period_month: r.period_month, period_year: r.period_year })} /> : <span className="text-xs text-tertiary-400">—</span>) },
   ];
 
   const dayCols = [
@@ -222,6 +217,17 @@ export default function BillingSalesTab() {
         <Filter label="To date"><input type="date" value={filters.date_to} onChange={(e) => set('date_to', e.target.value)} className="w-full rounded-xl border px-3 py-1.5 text-sm" /></Filter>
       </div>
 
+      <section className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="font-heading text-sm font-semibold text-tertiary-900">Invoices · {periodLabel(period)}</h2>
+            <p className="text-xs text-tertiary-500">Generate a project&apos;s invoice (editable invoice number) — it is built from the project&apos;s contract and billing rate, in the project&apos;s own currency. Generated invoices appear below.</p>
+          </div>
+          <GenerateInvoiceButton onClick={() => setInvoiceFor({ account_id: filters.account_id || '', period_month: period.period_month, period_year: period.period_year })} />
+        </div>
+        <ClientInvoicesTable period={period} refreshKey={invoicesKey} />
+      </section>
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label={`Billing · ${period.period === 'quarter' ? 'quarter' : periodLabel(period)}`} value={inr(t?.amount_inr)} hint={t?.estimated_projects ? `Estimated (client hours, ${t.estimated_projects} hourly): ${inr(t.estimated_inr)}` : undefined} icon={IndianRupee} theme="green" />
         <KpiCard label="of which overtime" value={inr(t?.overtime_inr)} hint={filters.include_overtime === 'false' ? 'excluded by filter' : 'only projects that pay overtime'} icon={Timer} theme="purple" />
@@ -229,10 +235,10 @@ export default function BillingSalesTab() {
         <KpiCard label="Pending / rejected hours" value={t ? `${t.pending_hours}h / ${t.rejected_hours}h` : '…'} hint="not billed until approved" icon={Clock} theme="red" />
         <KpiCard label="Locked projects" value={t ? `${t.locked_projects} / ${t.projects}` : '…'} icon={Lock} theme="cyan" />
       </div>
-      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Projects or Project P&amp;L) — those projects are left out of the INR totals.</p>}
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate (Finance → Projects) — those projects are left out of the INR totals.</p>}
 
       <section className="space-y-2">
-        <h2 className="font-heading text-sm font-semibold text-tertiary-900">Projects &amp; contracts <span className="font-normal text-tertiary-500">— open one to review its dates, lock it and generate the invoice</span></h2>
+        <h2 className="font-heading text-sm font-semibold text-tertiary-900">Projects &amp; contracts <span className="font-normal text-tertiary-500">— generate each project&apos;s invoice, then lock its billing; open one to review its dates</span></h2>
         <DataTable columns={projectCols} rows={data?.projects || []} loading={loading} emptyLabel="No projects match these filters" />
       </section>
 
@@ -246,7 +252,9 @@ export default function BillingSalesTab() {
         filters={{ org_membership_id: filters.org_membership_id || undefined, include_overtime: filters.include_overtime, status: filters.status, date_from: filters.date_from || undefined, date_to: filters.date_to || undefined }}
         onClose={() => setOpenRow(null)}
         onChanged={() => refresh?.()}
+        onInvoice={setInvoiceFor}
       />
+      <ClientInvoiceDrawer open={Boolean(invoiceFor)} initial={invoiceFor || {}} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
     </div>
   );
 }

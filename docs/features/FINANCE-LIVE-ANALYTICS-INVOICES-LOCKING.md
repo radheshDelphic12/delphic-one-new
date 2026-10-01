@@ -130,9 +130,32 @@ on the invoice.
   `GET /calculations/locked`, `GET /calculations/financials/records?state=locked|unlocked|all`.
   Salary / Vendors live views overlay per-record locks.
 
-**Frontend — in progress:** hide Project P&L; invoices + lock actions in
-Billing & Sales; Vendors / Salary / Expenses per-record locks; Locked tab;
-Financials Locked/Unlocked/All.
+**Frontend — done (2026-10-01), lint clean, `vite build` OK, not yet clicked
+through in a browser:**
 
-Known pre-existing failure (not from this work): `contractors-project-pnl` →
-"payroll never pays a contractor".
+- Finance: Project P&L tab hidden (`FinanceHubPage`, file + API kept); the old
+  Invoicing section (computed-revenue invoices) removed from Finance → Projects
+  (`InvoicingSection.jsx` no longer used).
+- Live Analytics → Billing & sales: invoice area at the top (Generate invoice
+  form with project, month, editable number, date, notes and a live preview of
+  the calculation) + Generated invoices table (Download / Mark sent / paid);
+  per project row Lock + Generate invoice (`ClientInvoices.jsx`).
+- Vendors: per vendor Lock + Generate invoice (preview per client / project /
+  contractor), Vendor invoices table with Download (`VendorPaymentsTab.jsx`).
+- Salary: Lock per employee (`AttendanceSalaryTab.jsx`); Payroll's embedded
+  view hides it.
+- Expenses: month's expense records with View + Lock and a Locked / Unlocked
+  filter (`ExpenseRecordsSection.jsx`).
+- New Live Analytics → Locked tab: every locked record with View / Download
+  (`LockedTab.jsx`). Printable documents: `components/finance/financePrint.js`;
+  lock action: `components/finance/RecordLockButton.jsx`.
+- Financials: Locked (default) / Unlocked / All filter over
+  `/calculations/financials/records`; the "Finalize a month" section is gone
+  from the UI (`FinalizedFinancialsTab.jsx`).
+
+**Tests (2026-10-01):** all 18 affected server suites pass (finance, billing,
+payroll, analytics, allocations, projects). `erp-phase4-payroll` and
+`contractors-project-pnl` had been failing since today passed 30 Sep 2026: they
+paid September with employees whose joining date defaulted to "today", which
+the salary engine rightly excludes — their test memberships now join on
+2026-01-01. **Not yet done:** a click-through in the browser.

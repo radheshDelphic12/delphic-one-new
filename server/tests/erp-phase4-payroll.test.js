@@ -21,14 +21,15 @@ afterAll(async () => {
 async function seedOrgAdmin() {
   const org = await createOrg({ name: 'Delphic', slug: 'delphic' });
   const admin = await createUser({ role: 'admin' });
-  const membership = await createOrgMembership(admin.id, org.id, { role: 'admin' });
+  const membership = await createOrgMembership(admin.id, org.id, { role: 'admin', joined_at: new Date('2026-01-01') });
   const { access_token } = await loginAs(admin);
   return { org, admin, membership, access_token };
 }
 
 async function seedOrgEmployee(org, role = 'recruiter') {
   const user = await createUser({ role });
-  const membership = await createOrgMembership(user.id, org.id, { role });
+  // Joined before PERIOD (Sep 2026): payroll only pays people employed that month.
+  const membership = await createOrgMembership(user.id, org.id, { role, joined_at: new Date('2026-01-01') });
   const { access_token } = await loginAs(user);
   return { user, membership, access_token };
 }

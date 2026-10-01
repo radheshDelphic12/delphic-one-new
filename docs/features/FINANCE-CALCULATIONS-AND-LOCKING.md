@@ -30,7 +30,16 @@ A finalized result never changes silently. A later change to its source data is
 | `salary` | org + month | net salary (approved timesheet hours + approved OT) | payroll run processing, Resource Revenue, Financials |
 | `resource_revenue` | org + month | total resource revenue | reporting |
 | `vendor_payment` | org + month | owed to vendors (INR) | creates pending `VendorPayment` rows, Financials |
-| `financials` | org + month | profit | Financials (finalized view) |
+| `financials` | org + month | profit | Financials (finalized view) — UI hidden since 2026-10-01 |
+| `salary_employee` | one employee (membership id) + month | that employee's net | Payroll (overrides the computed line), Locked, Financials |
+| `vendor_bill` | one vendor (account id) + month | owed to the vendor (INR) | pending `VendorPayment`, Locked, Financials |
+| `expense` | `claim:<id>` / `charge:<id>` + its month | the record in INR | Locked, Financials |
+
+Since 2026-10-01 Live Analytics locks **record by record** (billing per project, salary per employee,
+each expense, billing per vendor) and **Financials shows locked records only** (filter Locked /
+Unlocked / All) — see [FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md](FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md).
+The org-wide `salary` / `vendor_payment` locks still work and count as locked for anyone without
+their own lock.
 
 Statuses: `draft → reviewed → locked → change_detected → (recalculate → locked vN+1 | reopen → reopened → lock)`.
 Each lock/recalculation writes an immutable `FinancialCalculationVersion` holding the full computed
@@ -62,19 +71,23 @@ status to `change_detected`. Nothing is recalculated automatically.
   Project / client calendars never change expected hours.
 - **Timesheet weeks** run Sunday → Saturday and auto-lock Sunday 00:00 IST; still-pending entries get
   `admin_review` after `TIMESHEET_ADMIN_REVIEW_GRACE_DAYS` (default 3).
-- **Billing (Managed Services)**: existing rule — monthly rate: day = rate × min(hours ÷ benchmark,
-  1 ÷ project-calendar working days); hourly: hours × rate. Overtime = approved `overtime_hours`
+- **Billing (Managed Services)** (contract rule since 2026-10-01): monthly rate — every working day
+  inside the agreement bills rate ÷ project-calendar working days, whatever hours were logged (a full
+  month = exactly the rate; rounding settled on the last working day); hourly — approved hours × rate. Overtime = approved `overtime_hours`
   (plus weekend/holiday hours on a monthly contract) × hourly-equivalent × `overtime_multiplier`,
   only when `Account.overtime_billable`. Fixed price (`service_category = project`) is recognised but
   not calculated.
-- **Vendor payment**: contractor `vendor_rate` × allocation share, spread over the project calendar
-  like monthly billing; overtime at straight time where the project pays overtime.
+- **Vendor payment**: contractor `vendor_rate` × allocation share × contract working days ÷ working
+  days on the project calendar (contract rule, like monthly billing); overtime at straight time where
+  the project pays overtime.
+- **Invoices**: one builder (`billing/invoices.service.js`) — the project's Billing & Sales month
+  (locked version when locked), in the billing rate's currency, under the project's own name and
+  client, with an editable invoice number; `billingEngine.invoiceDetails` explains the amount.
 - **Resource revenue**: resource's pro-rata share (by hours) of each project's billing; cost =
   timesheet-based salary × allocation % (or the vendor payment line for a contractor).
-- **Finance → Projects "Billing · <month>" total**: `projectPnl.monthBillingByProject` — same rule and
-  FX converter as the P&L (monthly fee, or approved billable hours × hourly rate). Unbilled hours are
-  returned in `excluded` by reason (`pending_approval`, `non_billable`, `before_agreement`,
-  `no_hourly_rate`, `overtime`).
+- **Finance → Projects "Contract billing · <month>" total**: `projectPnl.monthContractByProject` —
+  the contract projection (fixed fee, or minimum / benchmark hours × rate), prorated by calendar days;
+  not timesheet based.
 
 ## Project identity
 

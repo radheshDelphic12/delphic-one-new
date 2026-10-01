@@ -7,7 +7,8 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
-import CalculationLockBar, { inr } from '../../components/finance/CalculationLockBar.jsx';
+import { inr } from '../../components/finance/CalculationLockBar.jsx';
+import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 
 /** Employee / Department / Team filters — combinable (Payroll + Live Analytics). */
 export function PeopleFilters({ value, onChange }) {
@@ -35,8 +36,9 @@ export function cleanParams(obj) {
  * employee's monthly CTC over their expected hours (company working days ×
  * shift), paid for approved hours up to the shift each day (paid leave = a
  * full day) plus approved overtime. Actual uses approved records only;
- * Projected adds pending hours / overtime. Locking freezes the month; the
- * payroll run then uses the locked figures.
+ * Projected adds pending hours / overtime. Each employee is locked on their
+ * own (Unlocked → Locked): a locked employee shows their locked figures,
+ * moves to Live Analytics → Locked, and the payroll run pays exactly that.
  */
 export default function AttendanceSalaryTab({ showLock = true, people: externalPeople = null, endpoint = '/analytics/salary-attendance' }) {
   const [period, setPeriod] = useState(currentPeriod());
@@ -60,6 +62,7 @@ export default function AttendanceSalaryTab({ showLock = true, people: externalP
     { key: 'earned', header: 'Incurred to date', render: (r) => <span className="font-medium tabular-nums">{inr(r.earned_to_date)}</span> },
     { key: 'net', header: 'Actual (approved)', render: (r) => <span className="font-medium tabular-nums">{inr(r.net)}</span> },
     { key: 'projected', header: 'Projected (+ pending)', render: (r) => <span className="tabular-nums text-tertiary-500">{inr(r.projected_net ?? r.net)}</span> },
+    ...(showLock ? [{ key: 'lock', header: 'Lock', render: (r) => <RecordLockButton kind="salary_employee" scopeKey={r.org_membership_id} period={period} lock={r.lock} label={`${r.name} salary`} onChanged={() => refresh?.()} /> }] : []),
   ];
 
   const t = data?.totals;
@@ -69,7 +72,7 @@ export default function AttendanceSalaryTab({ showLock = true, people: externalP
         <div className="lg:col-span-2"><PeriodPicker value={period} onChange={setPeriod} label="Month" /></div>
         {!externalPeople && <PeopleFilters value={people} onChange={setPeople} />}
       </div>
-      {showLock && <CalculationLockBar kind="salary" period={period} title="Salary" onChanged={() => refresh?.()} />}
+      {showLock && <p className="text-xs text-tertiary-500">Lock each employee&apos;s salary once it is final (after the month ends). Locked salaries move to Live Analytics → Locked, count in Financials, and are what the payroll run pays. {t?.locked ? `${t.locked} of ${t.employees} locked.` : ''}</p>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label={`Incurred to date · ${periodLabel(period)}`} value={inr(t?.earned_to_date)} hint={data?.as_of ? `as of ${data.as_of}` : data?.source === 'locked' ? `locked v${data.locked_version}` : 'whole month'} icon={Banknote} theme="purple" />
         <KpiCard label="Actual payroll (approved)" value={inr(t?.net)} hint={`OT ${inr(t?.ot_amount)} · days to come counted as worked`} icon={CalendarCheck} theme="blue" />
