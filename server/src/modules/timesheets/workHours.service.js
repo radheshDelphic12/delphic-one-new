@@ -20,6 +20,7 @@
 const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const { todayIst } = require('../../lib/istDate');
+const { leaveHoursForDay } = require('../leave/leaveHours');
 
 const DEFAULT_SHIFT_HOURS = 9;
 // Days after the week's lock (the following Sunday) a still-pending entry
@@ -229,8 +230,9 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
     prisma.timesheetDayOvertime.findMany({ where: { org_membership_id: orgMembershipId, date: { gte: start, lte: end } } }),
     prisma.timesheetLock.findMany({ where: { org_id: orgId, date: { gte: start, lte: end } }, select: { date: true } }),
     prisma.leaveRequest.findMany({
-      where: { org_membership_id: orgMembershipId, status: 'approved', from_date: { lte: end }, to_date: { gte: start } },
-      select: { from_date: true, to_date: true, leave_type: { select: { name: true, paid: true } } },
+      // Approved leave drives hours; pending is only shown (no effect on hours or pay).
+      where: { org_membership_id: orgMembershipId, status: { in: ['approved', 'pending'] }, from_date: { lte: end }, to_date: { gte: start } },
+      select: { id: true, status: true, from_date: true, to_date: true, is_half_day: true, half_day_session: true, leave_type: { select: { name: true, paid: true } } },
     }),
   ]);
   const accountIds = [...new Set(entries.map((e) => e.account_id).filter(Boolean))];
@@ -244,7 +246,22 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
     const date = new Date(t);
     const key = ymd(date);
     const info = dayInfo(date, cal, shift);
-    const leave = leaves.find((l) => date >= l.from_date && date <= l.to_date);
+    // Leave only means something on a working day; only APPROVED leave carries
+    // hours (full day = shift, half = half), pending is shown but never counted.
+    const onDay = info.day_type === 'working' ? leaves.filter((l) => date >= l.from_date && date <= l.to_date) : [];
+    const approvedLeaves = onDay.filter((l) => l.status === 'approved');
+    const pendingLeaves = onDay.filter((l) => l.status === 'pending');
+    const leaveHrs = leaveHoursForDay(approvedLeaves.map((l) => ({ is_half_day: l.is_half_day, paid: l.leave_type.paid })), info.expected);
+    const leaveRow = (l) => ({
+      request_id: l.id,
+      name: l.leave_type.name,
+      paid: l.leave_type.paid,
+      is_half_day: l.is_half_day,
+      half_day_session: l.half_day_session,
+      status: l.status,
+      hours: l.status === 'approved' ? round2(l.is_half_day ? info.expected / 2 : info.expected) : 0,
+    });
+    const leave = approvedLeaves[0] ? leaveRow(approvedLeaves[0]) : null;
     const dayEntries = entries.filter((e) => ymd(e.date) === key);
     const sumBy = (status) => round2(dayEntries.filter((e) => e.status === status).reduce((s, e) => s + Number(e.hours) + Number(e.overtime_hours || 0), 0));
     const approved = sumBy('approved');
@@ -270,16 +287,24 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
       weekday: date.getUTCDay(),
       day_type: info.day_type,
       day_label: info.label,
-      leave: leave ? { name: leave.leave_type.name, paid: leave.leave_type.paid } : null,
+      leave,
+      leaves: approvedLeaves.map(leaveRow),
+      pending_leaves: pendingLeaves.map(leaveRow),
+      leave_hours: leaveHrs.total,
+      paid_leave_hours: leaveHrs.paid,
+      unpaid_leave_hours: leaveHrs.unpaid,
       client_flags: flags,
       comp_off_eligible: clientWorkingOnDayOff,
-      expected: leave ? 0 : info.expected,
+      // What is left to work once approved leave is taken out of the day.
+      expected: round2(Math.max(0, info.expected - leaveHrs.total)),
       logged,
       approved,
       pending,
       rejected,
       normal_approved: split.normal_approved,
-      deficit: leave || date > today ? 0 : round2(Math.max(0, info.expected - logged)),
+      deficit: date > today ? 0 : round2(Math.max(0, info.expected - leaveHrs.total - logged)),
+      // Paid hours of the day: approved worked hours up to what leave leaves free + approved PAID leave (no double counting).
+      paid_hours: round2(leaveHrs.paid + Math.min(approved, info.expected - leaveHrs.total)),
       ot_hours: split.ot_hours,
       ot_status: split.ot_status,
       ot_id: ot?.id || null,
@@ -305,6 +330,10 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
       pending: total('pending'),
       rejected: total('rejected'),
       normal_approved: total('normal_approved'),
+      leave_hours: total('leave_hours'),
+      paid_leave_hours: total('paid_leave_hours'),
+      unpaid_leave_hours: total('unpaid_leave_hours'),
+      paid_hours: total('paid_hours'),
       deficit: total('deficit'),
       ot_hours: total('ot_hours'),
       ot_payable: total('ot_payable'),
@@ -327,6 +356,7 @@ module.exports = {
   weekBounds,
   needsAdminReview,
   companyCalendarDays,
+  membershipShift,
   dayInfo,
   splitDay,
   syncDayOvertime,

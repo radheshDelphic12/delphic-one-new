@@ -9,6 +9,8 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import LeaveBalancesPanel from './LeaveBalancesPanel.jsx';
 
 const STANDARD_LEAVE_TYPES = [
@@ -39,9 +41,15 @@ function formatRequestDate(row, side) {
   return formatDate(value);
 }
 
-function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
+// `admin` = an admin applying leave: they pick the employee (blank = themselves)
+// and may approve it in the same step. Everything else - the rules and the
+// conflict checks against timesheets - is the same as a self request.
+function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
   const { pushError } = useAlerts();
+  const employees = useOrgMembershipOptions(admin && open);
   const [fields, setFields] = useState({
+    org_membership_id: '',
+    auto_approve: false,
     leave_type_id: '',
     from_date: '',
     to_date: '',
@@ -54,6 +62,8 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
   useEffect(() => {
     if (open) {
       setFields({
+        org_membership_id: '',
+        auto_approve: false,
         leave_type_id: types[0]?.id || '',
         from_date: '',
         to_date: '',
@@ -72,10 +82,11 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
     event.preventDefault();
     setSaving(true);
     try {
-      const { data } = await apiClient.post('/leave/requests', {
-        ...fields,
-        half_day_session: fields.is_half_day ? fields.half_day_session : null,
-      });
+      const { org_membership_id: employeeId, auto_approve: autoApprove, ...rest } = fields;
+      const body = { ...rest, half_day_session: fields.is_half_day ? fields.half_day_session : null };
+      const { data } = admin
+        ? await apiClient.post('/leave/requests/admin', { ...body, ...(employeeId ? { org_membership_id: employeeId } : {}), auto_approve: autoApprove })
+        : await apiClient.post('/leave/requests', body);
       onSaved(data.data);
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to submit leave request'), 'Leave request not submitted');
@@ -85,16 +96,17 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
   }
 
   return (
-    <Drawer open={open} title="Request leave" onClose={onClose} size="md" tone="create" footer={(
+    <Drawer open={open} title={admin ? 'Apply leave for an employee' : 'Request leave'} onClose={onClose} size="md" tone="create" footer={(
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="leave-request-form" className="btn-primary" disabled={saving || !fields.leave_type_id || !fields.from_date || !fields.to_date}>{saving ? 'Submitting...' : 'Submit request'}</button>
+        <button type="submit" form="leave-request-form" className="btn-primary" disabled={saving || !fields.leave_type_id || !fields.from_date || !fields.to_date}>{saving ? 'Submitting...' : admin && fields.auto_approve ? 'Apply and approve' : 'Submit request'}</button>
       </>
     )}>
       <form id="leave-request-form" onSubmit={submit} className="space-y-4">
+        {admin && <label className="block text-xs font-medium text-tertiary-600">Employee<SearchableSelect value={fields.org_membership_id} onChange={(value) => set('org_membership_id', value)} options={employees} allowClear className="mt-1" placeholder="Myself" searchPlaceholder="Search employees..." ariaLabel="Employee" /><span className="mt-1 block font-normal text-tertiary-500">Leave blank to apply for yourself.</span></label>}
         <label className="block text-xs font-medium text-tertiary-600">Leave type<select required value={fields.leave_type_id} onChange={(event) => set('leave_type_id', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"><option value="">Select leave type</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}{type.paid ? ' (paid)' : ' (unpaid)'}</option>)}</select></label>
         <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-tertiary-600">From<input required type="date" value={fields.from_date} onChange={(event) => set('from_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-tertiary-600">To<input required type="date" value={fields.to_date} onChange={(event) => set('to_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></div>
-        <p className="text-xs text-tertiary-500">Only working days are deducted — weekends and holidays on your calendar inside the dates are not counted. You can&apos;t take a full day off on a date you were marked present.</p>
+        <p className="text-xs text-tertiary-500">A full day is 9h and a half day 4.5h (paid leave counts toward paid hours, unpaid does not). Only working days are deducted — weekends and holidays on your calendar inside the dates are not counted. You can&apos;t take a full day off on a date you were marked present.</p>
         <label className="flex items-center gap-2 text-sm text-tertiary-700">
           <input
             type="checkbox"
@@ -125,6 +137,7 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved }) {
             </div>
           </fieldset>
         )}
+        {admin && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={fields.auto_approve} onChange={(event) => set('auto_approve', event.target.checked)} /><span>Approve immediately<span className="block text-xs text-tertiary-500">Otherwise it goes to the approval queue as Pending. Either way it is refused if the employee already has a conflicting timesheet.</span></span></label>}
         <label className="block text-xs font-medium text-tertiary-600">Reason<textarea value={fields.reason} onChange={(event) => set('reason', event.target.value)} rows={4} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
       </form>
     </Drawer>
@@ -198,6 +211,7 @@ export default function LeavePage() {
   const [loading, setLoading] = useState(true);
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [adminApplyOpen, setAdminApplyOpen] = useState(false);
   const [decision, setDecision] = useState(null);
   const [withdrawing, setWithdrawing] = useState(null);
   const [status, setStatus] = useState('');
@@ -258,21 +272,22 @@ export default function LeavePage() {
 
   const columns = [
     ...(tab === 'team' ? [{ key: 'employee', header: 'Employee', render: (row) => row.org_membership?.person?.name || 'Unknown' }] : []),
-    { key: 'type', header: 'Leave type', render: (row) => row.leave_type?.name || 'Unknown' },
+    { key: 'type', header: 'Leave type', render: (row) => <span>{row.leave_type?.name || 'Unknown'} <span className="text-xs text-tertiary-500">({row.leave_type?.paid === false ? 'Unpaid' : 'Paid'})</span></span> },
     { key: 'dates', header: 'Dates', render: (row) => `${formatRequestDate(row, 'start')} to ${formatRequestDate(row, 'end')}` },
-    { key: 'days', header: 'Days', render: (row) => (row.days ?? '—') },
+    { key: 'days', header: 'Days', render: (row) => (row.is_half_day ? 'Half day (0.5)' : row.days ?? '—') },
     { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
     { key: 'reason', header: 'Reason', render: (row) => row.reason || 'Not provided' },
     { key: 'actions', header: 'Actions', render: (row) => tab === 'team' && (row.status === 'pending' || row.status === 'approved') ? <div className="flex gap-1">{row.status === 'pending' && <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setDecision(row)}><Check className="h-3.5 w-3.5" /> Review</button>}<button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setWithdrawing(row)}><Undo2 className="h-3.5 w-3.5" /> Withdraw</button></div> : tab === 'mine' && row.status === 'pending' ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => cancelRequest(row)}><X className="h-3.5 w-3.5" /> Cancel</button> : null },
   ];
 
   return <div className="space-y-4">
-    <div className="flex flex-col gap-4 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p><h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Leave management</h2><p className="mt-1 text-sm text-tertiary-500">Request time away and review approval status.</p></div><div className="flex gap-2"><select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-xl border px-3 py-2 text-sm"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{tab === 'mine' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setRequestOpen(true)}><FilePlus2 className="h-4 w-4" /> Request leave</button>}</div></div>
+    <div className="flex flex-col gap-4 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p><h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Leave management</h2><p className="mt-1 text-sm text-tertiary-500">Request time away and review approval status.</p></div><div className="flex gap-2"><select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-xl border px-3 py-2 text-sm"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select>{isAdmin && <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setAdminApplyOpen(true)}><FilePlus2 className="h-4 w-4" /> Apply for employee</button>}{tab === 'mine' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setRequestOpen(true)}><FilePlus2 className="h-4 w-4" /> Request leave</button>}</div></div>
     <div className="grid gap-4 md:grid-cols-3"><div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card md:col-span-2"><div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-sm font-semibold text-tertiary-800"><CircleHelp className="h-4 w-4 text-tertiary-400" /> Leave balances</div><span className="text-xs text-tertiary-400">{balances[0]?.as_of ? `1 Jan – ${new Date(`${balances[0].as_of}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : 'Current year'}</span></div>{balancesLoading ? <p className="mt-3 text-sm text-tertiary-500">Loading balances...</p> : balances.length === 0 ? <p className="mt-3 text-sm text-tertiary-500">No leave balance records are available.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2">{balances.map((balance) => <div key={balance.leave_type_id} className="rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3"><div className="flex items-center justify-between gap-2"><span className="text-sm font-medium text-tertiary-800">{balance.leave_type_name} <span className="text-xs text-tertiary-400">({balance.code})</span></span><span className="text-sm font-semibold text-primary-700">{balance.unlimited ? 'Uncapped' : `${balance.remaining} remaining`}</span></div><p className="mt-1 text-xs text-tertiary-500">{balance.used} taken{balance.unlimited ? '' : ` of ${balance.allocated}`}{balance.upcoming > 0 ? ` · ${balance.upcoming} approved ahead` : ''}{balance.pending > 0 ? ` · ${balance.pending} pending` : ''}</p></div>)}</div>}</div><div className="rounded-2xl border border-tertiary-100 bg-white p-4"><p className="text-xs uppercase tracking-wide text-tertiary-500">Visible requests</p><p className="mt-2 text-2xl font-semibold text-tertiary-900">{loading ? '...' : rows.length}</p><p className="mt-4 text-xs uppercase tracking-wide text-tertiary-500">Leave types</p><p className="mt-2 text-2xl font-semibold text-tertiary-900">{loading ? '...' : types.length}</p></div></div>
     <div className="flex gap-1 border-b border-tertiary-200"><button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My requests</button>{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Approval queue</button>}{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'balances' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('balances')}>Balances</button>}</div>
     {pendingRows.length > 1 && <div className="flex justify-end"><button type="button" className="btn-primary inline-flex items-center gap-1.5 text-sm" disabled={bulkBusy} onClick={approveAllPending}><Check className="h-4 w-4" /> {bulkBusy ? 'Approving…' : `Approve all pending (${pendingRows.length})`}</button></div>}
     {tab === 'balances' ? <LeaveBalancesPanel /> : !loading && rows.length === 0 ? <EmptyState icon={CalendarDays} title="No leave requests" description="There are no leave requests for the selected status." /> : <DataTable columns={columns} rows={rows} loading={loading} maxHeight="calc(100dvh - 25rem)" emptyLabel="No leave requests" />}
     <LeaveRequestDrawer types={types} open={requestOpen} onClose={() => setRequestOpen(false)} onSaved={(created) => { setRows((current) => [created, ...current]); setRequestOpen(false); pushInfo('Leave request submitted'); }} />
+    {isAdmin && <LeaveRequestDrawer admin types={types} open={adminApplyOpen} onClose={() => setAdminApplyOpen(false)} onSaved={() => { setAdminApplyOpen(false); pushInfo('Leave applied'); load(); }} />}
     <WithdrawModal row={withdrawing} onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); pushInfo('Leave withdrawn'); load(); }} />
     <DecisionDrawer row={decision} open={Boolean(decision)} onClose={() => setDecision(null)} onSaved={replaceRow} />
   </div>;

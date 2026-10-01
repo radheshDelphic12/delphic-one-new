@@ -24,6 +24,14 @@ const DAY_TYPE = {
   company_holiday: 'Company holiday',
 };
 
+// Leave on a day: type + Paid/Unpaid + Full/Half day. Only approved leave has hours.
+const leaveText = (l) => `${l.paid ? 'Paid' : 'Unpaid'} leave - ${l.name} - ${l.is_half_day ? 'Half day' : 'Full day'}`;
+const leaveTone = (d) => {
+  if (!d.leave) return '';
+  if (!d.leave.paid) return 'bg-tertiary-100';
+  return d.leave.is_half_day ? 'bg-sky-50' : 'bg-blue-50';
+};
+
 const h = (n) => (n ? `${Number(n)}h` : '0h');
 const shift = (iso, days) => {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -83,7 +91,7 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
         </div>
         {data && (
           <p className="text-xs text-tertiary-500">
-            Shift {data.shift_hours}h/day{data.calendar ? ` · ${data.calendar.name} calendar` : ''}
+            Shift {data.shift_hours}h/day{data.calendar ? ` · ${data.calendar.name} calendar` : ''} · Paid hours this week: {h(t?.paid_hours)}
           </p>
         )}
       </div>
@@ -106,21 +114,22 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
               <th className="py-2 pr-3 text-right">Pending</th>
               <th className="py-2 pr-3 text-right">Rejected</th>
               <th className="py-2 pr-3 text-right">OT</th>
+              <th className="py-2 pr-3">Leave</th>
               <th className="py-2 pr-3">Status</th>
             </tr>
           </thead>
           <tbody>
-            {loading && !data && <tr><td colSpan={9} className="py-6 text-center text-tertiary-400">Loading…</td></tr>}
+            {loading && !data && <tr><td colSpan={10} className="py-6 text-center text-tertiary-400">Loading…</td></tr>}
             {data?.days.map((d) => {
               const short = d.deficit > 0;
               const [statusLabel, statusTone] = STATUS[d.status] || STATUS.empty;
               const ot = d.ot_status ? OT_STATUS[d.ot_status] : null;
               return (
-                <tr key={d.date} className={`border-b border-tertiary-50 align-top ${short ? 'bg-orange-50' : ''}`}>
+                <tr key={d.date} className={`border-b border-tertiary-50 align-top ${short ? 'bg-orange-50' : leaveTone(d)}`}>
                   <td className="py-2 pr-3 whitespace-nowrap text-tertiary-900">{DAY_NAMES[d.weekday]} {dayLabel(d.date)}</td>
                   <td className="py-2 pr-3">
                     <span className="block text-xs text-tertiary-600">
-                      {d.leave ? `Leave · ${d.leave.name}` : DAY_TYPE[d.day_type] ? `${DAY_TYPE[d.day_type]}${d.day_label && d.day_type === 'company_holiday' ? ` · ${d.day_label}` : ''}` : d.day_label ? `Working · ${d.day_label}` : 'Working day'}
+                      {d.leave ? leaveText(d.leave) : DAY_TYPE[d.day_type] ? `${DAY_TYPE[d.day_type]}${d.day_label && d.day_type === 'company_holiday' ? ` · ${d.day_label}` : ''}` : d.day_label ? `Working · ${d.day_label}` : 'Working day'}
                     </span>
                     {d.client_flags.map((f) => (
                       <span key={`${f.type}-${f.project}`} className={`block text-xs ${f.type === 'client_working' ? 'text-primary-700' : 'text-purple-700'}`}>
@@ -138,6 +147,22 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
                   <td className="py-2 pr-3 text-right tabular-nums text-warning-700">{h(d.pending)}</td>
                   <td className="py-2 pr-3 text-right tabular-nums text-danger-600">{d.rejected ? h(d.rejected) : '—'}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{d.ot_hours ? <span className="font-semibold text-purple-700">{h(d.ot_hours)}</span> : '—'}</td>
+                  <td className="py-2 pr-3 text-xs">
+                    {d.leaves?.length > 0 && d.leaves.map((l) => (
+                      <span key={l.request_id} className="block whitespace-nowrap">
+                        <span className="font-semibold tabular-nums text-blue-700">{h(l.hours)}</span>
+                        {' '}<Pill tone={l.paid ? 'blue' : 'gray'}>{l.paid ? 'Paid' : 'Unpaid'}</Pill>
+                        {' '}<Pill tone="green">Approved</Pill>
+                        {l.is_half_day && <span className="block text-tertiary-500">{l.half_day_session === 'SECOND_HALF' ? 'Second half' : 'First half'} + working</span>}
+                      </span>
+                    ))}
+                    {d.pending_leaves?.map((l) => (
+                      <span key={l.request_id} className="block whitespace-nowrap text-tertiary-500">
+                        <Pill tone="amber">Leave pending</Pill> {l.name} - {l.is_half_day ? 'Half' : 'Full'} day (no effect yet)
+                      </span>
+                    ))}
+                    {!d.leaves?.length && !d.pending_leaves?.length && <span className="text-tertiary-400">-</span>}
+                  </td>
                   <td className="py-2 pr-3">
                     <span className="flex flex-wrap gap-1">
                       <Pill tone={statusTone}>{statusLabel}</Pill>
@@ -174,6 +199,7 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
                 <td className="pt-2 pr-3 text-right tabular-nums text-warning-700">{h(t.pending)}</td>
                 <td className="pt-2 pr-3 text-right tabular-nums text-danger-600">{t.rejected ? h(t.rejected) : '—'}</td>
                 <td className="pt-2 pr-3 text-right tabular-nums text-purple-700">{t.ot_hours ? h(t.ot_hours) : '—'}</td>
+                <td className="pt-2 pr-3 text-xs font-normal text-tertiary-600">{t.leave_hours ? `${h(t.paid_leave_hours)} paid${t.unpaid_leave_hours ? ` / ${h(t.unpaid_leave_hours)} unpaid` : ''}` : '-'}</td>
                 <td className="pt-2 pr-3 text-xs font-normal text-tertiary-500">{t.deficit ? `${t.deficit}h short` : ''}</td>
               </tr>
             </tfoot>
@@ -181,7 +207,7 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
         </table>
       </div>
       <p className="text-xs text-tertiary-500">
-        Salary uses <b>approved</b> hours up to your shift each day, plus <b>approved</b> overtime. Pending hours are only a projection; check-in/check-out is attendance, not pay.
+        Salary uses <b>approved</b> hours up to your shift each day, <b>approved paid leave</b> (full day = shift, half day = half) and <b>approved</b> overtime. Unpaid and pending leave add no paid hours. Pending hours are only a projection; check-in/check-out is attendance, not pay.
         {' '}<span className="rounded bg-orange-50 px-1 text-orange-800">Orange</span> = fewer hours than expected.
       </p>
     </section>
