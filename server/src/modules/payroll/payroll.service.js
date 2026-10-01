@@ -292,18 +292,26 @@ async function processRun(orgId, runId, adminUserId) {
 
   const locked = await calculations.lockedVersion(orgId, 'salary', 'org', period);
   const result = locked ? locked.snapshot : await salaryEngine.computeSalary(orgId, period);
+  // Employees locked one by one (Live Analytics → Salary → Lock) are paid
+  // exactly their locked figures; the rest of the month is computed now.
+  const individual = locked ? new Map() : await calculations.lockedRecords(orgId, 'salary_employee', period);
+  const lines = result.lines.map((line) => {
+    const own = individual.get(line.org_membership_id);
+    const lockedLine = own?.snapshot?.lines?.find((l) => l.org_membership_id === line.org_membership_id);
+    return lockedLine ? { ...lockedLine, calculation_version: own.version } : line;
+  });
 
   // Contractors are paid through their vendor (Finance → vendor invoices),
   // never through payroll — the engine lists them as skipped.
   const skipped = (result.skipped || []).map(({ org_membership_id, reason }) => ({ org_membership_id, reason }));
-  const payslipRows = result.lines.map((line) => ({
+  const payslipRows = lines.map((line) => ({
     org_id: orgId,
     payroll_run_id: run.id,
     org_membership_id: line.org_membership_id,
     gross: line.gross,
     deductions: line.deductions,
     net: line.net,
-    breakdown: { ...line.breakdown, ...(locked ? { calculation_version: locked.version } : {}) },
+    breakdown: { ...line.breakdown, ...(locked ? { calculation_version: locked.version } : line.calculation_version ? { calculation_version: line.calculation_version } : {}) },
   }));
 
   const updated = await prisma.$transaction(async (tx) => {

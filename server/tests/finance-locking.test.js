@@ -127,8 +127,9 @@ describe('Projects — the name is a label, the id/code is the identity', () => 
     const rowB = res.body.data.projects.find((p) => p.project.id === b.id);
     expect(rowA.resources.map((r) => r.name)).toEqual(['Aditya']);
     expect(rowB.resources.map((r) => r.name)).toEqual(['Yash']);
-    expect(rowA.amount).toBe(Math.round((100000 / 21) * 100) / 100);
-    expect(rowB.amount).toBe(2 * (Math.round((140000 / 21) * 100) / 100)); // each day rounded
+    // Monthly contracts bill the contract (whole month in force), not the hours.
+    expect(rowA.amount).toBe(100000);
+    expect(rowB.amount).toBe(140000);
 
     // Renaming to a name another project already has is fine too.
     const rename = await authed(request(app).patch(`/api/v1/billing/projects/${a.id}`), ctx.adminToken).send({ project_name: 'ABC Development' });
@@ -191,7 +192,7 @@ describe('Timesheets — employees and vendor resources share one model', () => 
 });
 
 describe('Billing & Sales — Managed Services on the project calendar', () => {
-  test('the same 8h day bills rate x min(8/160, 1/working days) for 19, 20, 21 and 22-day calendars', async () => {
+  test('a monthly contract bills rate / working days per working day, whatever the hours, on 19, 20, 21 and 22-day calendars', async () => {
     const ctx = await seed();
     const cases = [
       { month: 9, holidays: [], wd: 22 },
@@ -209,7 +210,13 @@ describe('Billing & Sales — Managed Services on the project calendar', () => {
       const raw = await billingEngine.computeProjectMonth(ctx.org.id, p.id, { period_month: c.month, period_year: 2026 });
       expect(raw.working_days).toBe(c.wd);
       const day = raw.days.find((d) => d.date === workDay);
-      expect(day.base_amount).toBe(Math.round(140000 * Math.min(8 / 160, 1 / c.wd) * 100) / 100);
+      expect(day.base_amount).toBe(Math.round((140000 / c.wd) * 100) / 100);
+      // A working day with no hours logged earns the same share; the month
+      // totals exactly the rate (rounding settled on the last working day).
+      const quiet = raw.days.find((d) => d.is_working_day && d.date !== workDay && !d.hours.approved);
+      expect(quiet.base_amount).toBe(Math.round((140000 / c.wd) * 100) / 100);
+      expect(billingEngine.lockedAmount(raw)).toBe(140000);
+      expect(billingEngine.invoiceDetails(raw)).toMatchObject({ billing_type: 'monthly', rate: 140000, working_days: c.wd, contract_working_days: c.wd, amount: 140000 });
       // A holiday shows as a zero row, never disappears.
       for (const h of c.holidays) expect(raw.days.find((d) => d.date === h)).toMatchObject({ is_working_day: false, base_amount: 0 });
       expect(raw.days).toHaveLength(c.month === 9 ? 30 : 31);

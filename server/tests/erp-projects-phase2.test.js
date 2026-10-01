@@ -479,7 +479,9 @@ describe('Agreement Start Date — billing applies only from that date', () => {
     const { org, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const emp = await seedEmployee(org);
-    const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
+    // Managed services: invoices are built from the Billing & Sales month
+    // (fixed-price invoicing isn't enabled yet).
+    const project = (await addProject(token, { name: 'Tax Portal', service_category: 'managed_services' })).body.data;
     const url = `/api/v1/billing/projects/${project.id}`;
     await authed(request(app).patch(url), token).send({ billing: { rate_type: 'hourly', rate: 1000, effective_from: '2026-08-01' } });
 

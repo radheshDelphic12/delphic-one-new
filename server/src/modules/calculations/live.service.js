@@ -217,21 +217,50 @@ async function billingProject(orgId, accountId, q, now = new Date()) {
   };
 }
 
-function filterSalary(result, { org_membership_id, department_id, team_id }) {
-  const lines = result.lines.filter((l) => (!org_membership_id || l.org_membership_id === org_membership_id) && (!department_id || l.department_id === department_id) && (!team_id || l.team_id === team_id));
+function salaryTotals(result, lines) {
   const sum = (key) => round2(lines.reduce((s, l) => s + Number(l[key] || 0), 0));
-  return { ...result, lines, totals: { ...result.totals, employees: lines.length, ctc: sum('ctc'), deductions: sum('deductions'), net: sum('net'), earned_to_date: sum('earned_to_date') } };
+  return { ...result.totals, employees: lines.length, ctc: sum('ctc'), deductions: sum('deductions'), net: sum('net'), earned_to_date: sum('earned_to_date'), projected_net: sum('projected_net'), pending_amount: sum('pending_amount'), ot_amount: sum('ot_amount') };
 }
 
-// Salary incurred this month from attendance / check-ins.
+function filterSalary(result, { org_membership_id, department_id, team_id }) {
+  const lines = result.lines.filter((l) => (!org_membership_id || l.org_membership_id === org_membership_id) && (!department_id || l.department_id === department_id) && (!team_id || l.team_id === team_id));
+  return { ...result, lines, totals: salaryTotals(result, lines) };
+}
+
+// A record's lock for the Live Analytics tables.
+function recordLock(rec, scope = 'record') {
+  return rec ? { status: rec.status, version: rec.version, locked_at: rec.calc?.locked_at || null, scope } : { status: 'draft', version: 0, scope };
+}
+
+// Salary this month from approved timesheets — each employee lockable on
+// their own (salary_employee); a locked employee shows their locked figures.
+// An older whole-month lock still freezes everyone.
 async function salaryLive(orgId, q, now = new Date()) {
   const period = { period_month: q.period_month, period_year: q.period_year };
   const locked = await calculations.lockedVersion(orgId, 'salary', 'org', period);
   const filters = { org_membership_id: q.org_membership_id, department_id: q.department_id, team_id: q.team_id };
-  const result = locked
-    ? filterSalary(locked.snapshot, filters)
-    : await salaryEngine.computeSalary(orgId, { ...period, asOf: liveAsOf(period.period_month, period.period_year, now), filters });
-  return { ...result, source: locked ? 'locked' : 'live', locked_version: locked?.version || null, lock_status: locked?.status || null };
+  if (locked) {
+    const result = filterSalary(locked.snapshot, filters);
+    const lines = result.lines.map((l) => ({ ...l, lock: { status: locked.status, version: locked.version, scope: 'month' } }));
+    return { ...result, lines, source: 'locked', locked_version: locked.version, lock_status: locked.status };
+  }
+  const [result, individual] = await Promise.all([
+    salaryEngine.computeSalary(orgId, { ...period, asOf: liveAsOf(period.period_month, period.period_year, now), filters }),
+    calculations.lockedRecords(orgId, 'salary_employee', period),
+  ]);
+  const lines = result.lines.map((l) => {
+    const rec = individual.get(l.org_membership_id);
+    const lockedLine = rec?.snapshot?.lines?.find((x) => x.org_membership_id === l.org_membership_id);
+    return lockedLine ? { ...lockedLine, source: 'locked', lock: recordLock(rec) } : { ...l, source: 'live', lock: recordLock(null) };
+  });
+  return {
+    ...result,
+    lines,
+    totals: { ...salaryTotals(result, lines), locked: lines.filter((l) => l.source === 'locked').length },
+    source: 'live',
+    locked_version: null,
+    lock_status: null,
+  };
 }
 
 async function resourceRevenueLive(orgId, q, now = new Date()) {
@@ -266,17 +295,42 @@ async function resourceRevenueLive(orgId, q, now = new Date()) {
   return { ...result, source: 'live' };
 }
 
+// Vendors this month — each vendor lockable on its own (vendor_bill); a
+// locked vendor shows its locked lines. An older whole-month lock still
+// freezes every vendor.
 async function vendorPaymentsLive(orgId, q) {
   const period = { period_month: q.period_month, period_year: q.period_year };
   const locked = await calculations.lockedVersion(orgId, 'vendor_payment', 'org', period);
   if (locked) {
     const snap = locked.snapshot;
     const lines = q.vendor_account_id ? snap.lines.filter((l) => l.vendor?.id === q.vendor_account_id) : snap.lines;
-    const vendors = q.vendor_account_id ? snap.vendors.filter((v) => v.vendor?.id === q.vendor_account_id) : snap.vendors;
+    const vendors = (q.vendor_account_id ? snap.vendors.filter((v) => v.vendor?.id === q.vendor_account_id) : snap.vendors).map((v) => ({ ...v, lock: { status: locked.status, version: locked.version, scope: 'month' } }));
     return { ...snap, lines, vendors, source: 'locked', locked_version: locked.version, lock_status: locked.status };
   }
-  const result = await vendorEngine.computeVendorPayments(orgId, { ...period, vendor_account_id: q.vendor_account_id });
-  return { ...result, source: 'live' };
+  const [result, individual] = await Promise.all([
+    vendorEngine.computeVendorPayments(orgId, { ...period, vendor_account_id: q.vendor_account_id }),
+    calculations.lockedRecords(orgId, 'vendor_bill', period),
+  ]);
+  const lockedIds = new Set([...individual.keys()].filter((id) => !q.vendor_account_id || id === q.vendor_account_id));
+  const lines = [
+    ...result.lines.filter((l) => !lockedIds.has(l.vendor?.id)).map((l) => ({ ...l, source: 'live' })),
+    ...[...lockedIds].flatMap((id) => (individual.get(id).snapshot.lines || []).map((l) => ({ ...l, source: 'locked' }))),
+  ];
+  const vendors = [
+    ...result.vendors.filter((v) => !lockedIds.has(v.vendor?.id)).map((v) => ({ ...v, source: 'live', lock: recordLock(null) })),
+    ...[...lockedIds].map((id) => {
+      const rec = individual.get(id);
+      const v = rec.snapshot.vendors?.find((x) => x.vendor?.id === id) || { vendor: { id, name: rec.calc.scope_label }, contractors: [], amount_inr: rec.amount, by_currency: {} };
+      return { ...v, source: 'locked', lock: recordLock(rec) };
+    }),
+  ].sort((a, b) => b.amount_inr - a.amount_inr);
+  return {
+    ...result,
+    lines,
+    vendors,
+    totals: { ...result.totals, amount_inr: round2(vendors.reduce((s, v) => s + (v.amount_inr || 0), 0)), vendors: vendors.length, contractors: new Set(lines.map((l) => l.org_membership_id)).size, locked: lockedIds.size },
+    source: 'live',
+  };
 }
 
 // Vendor payments generated from locked calculations (the Vendors section).

@@ -5,6 +5,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./analytics.service');
 const live = require('../calculations/live.service');
+const records = require('../calculations/records.service');
 
 // Real-time analytics for the operating company. Admin-only: this is the
 // money view (salaries, margins, vendor payables). Master-workspace only —
@@ -28,6 +29,8 @@ router.get('/salary-attendance', asyncHandler(async (req, res) => ok(res, await 
 router.get('/resource-revenue', asyncHandler(async (req, res) => ok(res, await live.resourceRevenueLive(orgId(req), live.resourceQuerySchema.parse(req.query)))));
 router.get('/vendor-payments', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentsLive(orgId(req), live.vendorQuerySchema.parse(req.query)))));
 router.get('/vendor-payments/records', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentRecords(orgId(req), live.monthSchema.partial().parse(req.query)))));
+// Expense records of a month (approved claims + group charges), each lockable.
+router.get('/expense-records', asyncHandler(async (req, res) => ok(res, await records.expenseRecords(orgId(req), live.monthSchema.parse(req.query)))));
 router.get('/financial-month', asyncHandler(async (req, res) => ok(res, await live.financialMonthLive(orgId(req), live.monthSchema.parse(req.query)))));
 
 // --- Previous Live Analytics reports. No longer shown in the UI (replaced by

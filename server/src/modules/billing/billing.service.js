@@ -17,12 +17,6 @@ function ymd(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function periodBounds(period_month, period_year) {
-  const period_start = new Date(Date.UTC(period_year, period_month - 1, 1));
-  const period_end = new Date(Date.UTC(period_year, period_month, 0));
-  return { period_start, period_end };
-}
-
 async function createRate(orgId, createdByUserId, { account_id, requirement_id, rate_type, rate, currency, effective_from }) {
   const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
   if (!account) return { error: 'account_not_found' };
@@ -195,65 +189,7 @@ async function listDailyRevenue(orgId, { account_id, requirement_id, from, to })
   });
 }
 
-async function createInvoice(orgId, createdByUserId, { client_account_id, period_month, period_year }) {
-  const existing = await prisma.clientInvoice.findUnique({
-    where: { client_account_id_period_month_period_year: { client_account_id, period_month, period_year } },
-  });
-  if (existing) return { error: 'invoice_exists', invoice: existing };
-
-  const account = await prisma.account.findFirst({ where: { id: client_account_id, org_id: orgId } });
-  if (!account) return { error: 'account_not_found' };
-
-  const { period_start, period_end } = periodBounds(period_month, period_year);
-  // Invoices only cover time from the agreement start date on: a period that
-  // ends before it can't be invoiced, and the first period is cut at the start.
-  const agreementStart = account.agreement_start_date;
-  if (agreementStart && period_end < agreementStart) return { error: 'before_agreement_start', agreement_start: ymd(agreementStart) };
-  const from = agreementStart && agreementStart > period_start ? agreementStart : period_start;
-  const rows = await prisma.dailyProjectRevenue.findMany({
-    where: { org_id: orgId, account_id: client_account_id, date: { gte: from, lte: period_end } },
-    include: { requirement: { select: { id: true, title: true } } },
-  });
-  if (!rows.length) return { error: 'no_revenue_computed' };
-
-  const byRequirement = new Map();
-  for (const row of rows) {
-    const key = row.requirement_id || '__account_level__';
-    const bucket = byRequirement.get(key) || {
-      requirement_id: row.requirement_id,
-      requirement_title: row.requirement?.title || null,
-      hours: 0,
-      revenue: 0,
-    };
-    bucket.hours += Number(row.billable_hours);
-    bucket.revenue += Number(row.revenue);
-    byRequirement.set(key, bucket);
-  }
-  const line_items = Array.from(byRequirement.values()).map((li) => ({ ...li, hours: round2(li.hours), revenue: round2(li.revenue) }));
-  const amount = round2(line_items.reduce((sum, li) => sum + li.revenue, 0));
-
-  const invoice = await prisma.clientInvoice.create({
-    data: { org_id: orgId, client_account_id, period_month, period_year, amount, line_items, created_by: createdByUserId },
-  });
-  return { invoice };
-}
-
-async function listInvoices(orgId, { client_account_id, status }) {
-  return prisma.clientInvoice.findMany({
-    where: { org_id: orgId, ...(client_account_id ? { client_account_id } : {}), ...(status ? { status } : {}) },
-    orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
-    include: { client_account: { select: { id: true, name: true } } },
-  });
-}
-
-async function getInvoice(orgId, invoiceId) {
-  const invoice = await prisma.clientInvoice.findFirst({
-    where: { id: invoiceId, org_id: orgId },
-    include: { client_account: { select: { id: true, name: true } } },
-  });
-  if (!invoice) return { error: 'not_found' };
-  return { invoice };
-}
+// Client invoices are built in invoices.service (one builder for every path).
 
 // draft -> sent -> paid, forward only (see schema.prisma's ClientInvoice comment).
 const FORWARD_TRANSITIONS = { draft: 'sent', sent: 'paid' };
@@ -654,9 +590,6 @@ module.exports = {
   computeDayRevenue,
   computeRevenueRange,
   listDailyRevenue,
-  createInvoice,
-  listInvoices,
-  getInvoice,
   transitionInvoice,
   createGroupCharge,
   updateGroupCharge,

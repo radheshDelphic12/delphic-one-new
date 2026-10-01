@@ -668,15 +668,15 @@ model Shift {
 }
 
 model CalendarHoliday {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  calendar_id String   @db.Uuid
-  calendar    Calendar @relation(fields: [calendar_id], references: [id], onDelete: Cascade)
-  date        DateTime @db.Date
-  label       String
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  calendar_id    String   @db.Uuid
+  calendar       Calendar @relation(fields: [calendar_id], references: [id], onDelete: Cascade)
+  date           DateTime @db.Date
+  label          String
   // An exception the other way round: this date IS a working day on this
   // calendar even though it would normally be off (e.g. a client that works
   // this Sunday). Used on project/client calendars; never a holiday.
-  is_working_day Boolean @default(false)
+  is_working_day Boolean  @default(false)
 
   @@unique([calendar_id, date])
   @@index([calendar_id])
@@ -1151,23 +1151,27 @@ model ProjectMemberAssignment {
 // The invoice file itself attaches via Document (entity_type
 // 'project_vendor_invoice').
 model ProjectVendorInvoice {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String   @db.Uuid
-  org               Org      @relation(fields: [org_id], references: [id])
-  account_id        String   @db.Uuid
-  account           Account  @relation("ProjectVendorInvoiceProject", fields: [account_id], references: [id])
-  vendor_account_id String   @db.Uuid
-  vendor_account    Account  @relation("ProjectVendorInvoiceVendor", fields: [vendor_account_id], references: [id])
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id])
+  account_id        String    @db.Uuid
+  account           Account   @relation("ProjectVendorInvoiceProject", fields: [account_id], references: [id])
+  vendor_account_id String    @db.Uuid
+  vendor_account    Account   @relation("ProjectVendorInvoiceVendor", fields: [vendor_account_id], references: [id])
   period_month      Int
   period_year       Int
   invoice_number    String?
-  amount            Decimal  @db.Decimal(14, 2)
-  currency          Currency @default(INR)
+  invoice_date      DateTime? @db.Date
+  amount            Decimal   @db.Decimal(14, 2)
+  currency          Currency  @default(INR)
   notes             String?
-  created_by        String   @db.Uuid
-  creator           User     @relation("ProjectVendorInvoiceCreatedBy", fields: [created_by], references: [id])
-  created_at        DateTime @default(now())
-  updated_at        DateTime @default(now()) @updatedAt
+  // Set when generated from Live Analytics → Vendors: how the amount was
+  // worked out (contractors, rate, allocation, working days, hours, overtime).
+  details           Json?
+  created_by        String    @db.Uuid
+  creator           User      @relation("ProjectVendorInvoiceCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
 
   @@index([org_id, period_year, period_month])
   @@index([account_id, period_year, period_month])
@@ -1219,13 +1223,18 @@ model ClientInvoice {
   sent_at                DateTime?
   paid_at                DateTime?
   // The locked Billing & Sales calculation version this invoice was generated
-  // from (null for an invoice built the older way, from DailyProjectRevenue).
+  // from (null when generated from the live month, or built the older way).
   calculation_version_id String?             @db.Uuid
+  // The company's own numbering (e.g. INV-2026-001) — editable, unique per org.
+  invoice_number         String?
+  invoice_date           DateTime?           @db.Date
+  notes                  String?
   created_by             String              @db.Uuid
   creator                User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
   created_at             DateTime            @default(now())
 
   @@unique([client_account_id, period_month, period_year])
+  @@unique([org_id, invoice_number])
   @@index([org_id])
   @@map("client_invoices")
 }
@@ -1300,38 +1309,38 @@ model DailyEmployeeProfitability {
 // (entity_type: 'expense_claim') — no dedicated FK column here, same
 // reasoning as Payslip's PDF (see DocumentEntityType).
 model ExpenseClaim {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String             @db.Uuid
-  org               Org                @relation(fields: [org_id], references: [id])
-  org_membership_id String             @db.Uuid
-  org_membership    OrgMembership      @relation(fields: [org_membership_id], references: [id])
-  location_id       String             @db.Uuid
-  location          Location           @relation(fields: [location_id], references: [id])
+  id                String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String                @db.Uuid
+  org               Org                   @relation(fields: [org_id], references: [id])
+  org_membership_id String                @db.Uuid
+  org_membership    OrgMembership         @relation(fields: [org_membership_id], references: [id])
+  location_id       String                @db.Uuid
+  location          Location              @relation(fields: [location_id], references: [id])
   category          String
   // Admin-managed expense category; `category` above keeps its name as text.
-  category_id       String?            @db.Uuid
-  category_ref      FinanceCategory?   @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  category_id       String?               @db.Uuid
+  category_ref      FinanceCategory?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
   // When the money was spent. Null on older claims — their month is the
   // submission date (created_at).
-  expense_date      DateTime?          @db.Date
-  amount            Decimal            @db.Decimal(12, 2)
-  currency          Currency           @default(INR)
-  status            ExpenseClaimStatus @default(pending)
-  decided_by        String?            @db.Uuid
-  decider           User?              @relation("ExpenseClaimDecidedBy", fields: [decided_by], references: [id])
+  expense_date      DateTime?             @db.Date
+  amount            Decimal               @db.Decimal(12, 2)
+  currency          Currency              @default(INR)
+  status            ExpenseClaimStatus    @default(pending)
+  decided_by        String?               @db.Uuid
+  decider           User?                 @relation("ExpenseClaimDecidedBy", fields: [decided_by], references: [id])
   decided_at        DateTime?
   decision_reason   String?
   reimbursed_at     DateTime?
-  created_at        DateTime           @default(now())
+  created_at        DateTime              @default(now())
   // What the money was for — required when the category is "Other".
   description       String?
   // Set when an admin files the claim on the employee's behalf.
-  submitted_by      String?            @db.Uuid
-  submitter         User?              @relation("ExpenseClaimSubmittedBy", fields: [submitted_by], references: [id], onDelete: SetNull)
+  submitted_by      String?               @db.Uuid
+  submitter         User?                 @relation("ExpenseClaimSubmittedBy", fields: [submitted_by], references: [id], onDelete: SetNull)
   // Manager -> HR -> Finance: the step a pending claim is waiting on (null
   // once decided). `approvals` logs each step: [{ stage, status, by, name, at, reason }].
   approval_stage    ExpenseApprovalStage?
-  approvals         Json               @default("[]")
+  approvals         Json                  @default("[]")
 
   @@index([org_id])
   @@index([org_membership_id])
@@ -2888,6 +2897,10 @@ enum CalculationKind {
   resource_revenue
   vendor_payment
   financials
+  // Per-record locks in Live Analytics (scope_key = employee / vendor / expense record).
+  salary_employee
+  vendor_bill
+  expense
 }
 
 enum CalculationStatus {
