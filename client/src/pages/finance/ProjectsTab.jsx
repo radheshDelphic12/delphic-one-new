@@ -10,7 +10,6 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
-import InvoicingSection from './InvoicingSection.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -443,10 +442,9 @@ export default function ProjectsTab() {
         )}
       </section>
 
-      <section className="space-y-2 border-t border-tertiary-100 pt-5">
-        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Invoicing</h3>
-        <InvoicingSection />
-      </section>
+      <p className="border-t border-tertiary-100 pt-4 text-xs text-tertiary-500">
+        Invoices are generated per project in <Link to="/analytics?section=sales" className="text-primary-700 hover:underline">Live Analytics → Billing &amp; sales</Link> (vendor invoices under Vendors).
+      </p>
 
       <AddProjectModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => load()} />
       <ProjectProfileDrawer project={selected} rates={rates} onClose={() => setSelected(null)} onSaved={load} />

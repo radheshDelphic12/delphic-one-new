@@ -53,6 +53,7 @@ const ENTRY_ERRORS = {
 
 function failFor(res, error, result) {
   if (error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
+  if (error === 'half_day_capacity') return fail(res, 422, `You're on approved ${result.leave_type} half-day leave on that date — only ${result.capacity}h can be logged for work that day (${result.total}h requested)`);
   const mapped = ENTRY_ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
 }

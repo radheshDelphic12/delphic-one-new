@@ -6,6 +6,7 @@ const service = require('./leave.service');
 const {
   createLeaveTypeSchema,
   createLeaveRequestSchema,
+  adminLeaveRequestSchema,
   decisionSchema,
   balanceQuerySchema,
   listRequestsQuerySchema,
@@ -25,7 +26,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const { date } = dayStatusQuerySchema.parse(req.query);
     const leave = await service.leaveDayFor(req.user.org_id, req.user.org_membership_id, date);
-    return ok(res, { date: date.toISOString().slice(0, 10), is_leave_day: Boolean(leave), leave_type: leave?.leave_type || null });
+    // A half-day leave leaves part of the day to work: `work_capacity` is that many hours.
+    const half = leave ? null : await service.workCapacityFor(req.user.org_id, req.user.org_membership_id, date);
+    return ok(res, {
+      date: date.toISOString().slice(0, 10),
+      is_leave_day: Boolean(leave),
+      leave_type: leave?.leave_type || half?.leave_type || null,
+      is_half_day_leave: Boolean(half),
+      work_capacity: half ? half.capacity : null,
+    });
   })
 );
 
@@ -81,18 +90,38 @@ router.post(
   })
 );
 
+// Why a request was refused - shared by self-apply, admin-apply and approval.
+function failRequest(res, result, who = 'You') {
+  if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
+  if (result.error === 'membership_not_found') return fail(res, 404, 'Employee not found in this organization');
+  if (result.error === 'membership_left') return fail(res, 422, 'That employee has left the organization');
+  if (result.error === 'timesheet_conflict' || result.error === 'half_day_hours_exceeded') return fail(res, 409, service.conflictMessage(result));
+  const self = who === 'You';
+  if (result.error === 'overlaps_existing') return fail(res, 409, self ? 'You already have a pending or approved leave request covering some of those dates' : 'The employee already has a pending or approved leave request covering some of those dates');
+  if (result.error === 'present_on_date') return fail(res, 409, self ? `You were marked present on ${result.date} — leave can't be applied for a day you attended` : `The employee was marked present on ${result.date} — leave can't be applied for a day attended`);
+  if (result.error === 'no_working_days') return fail(res, 422, self ? 'Those dates are all weekends or holidays on your calendar — there are no working days to take leave for' : 'Those dates are all weekends or holidays on the employee calendar — there are no working days to take leave for');
+  if (result.error === 'insufficient_balance') return fail(res, 422, `Not enough leave balance — ${result.needed} day(s) requested, ${Math.max(result.remaining, 0)} remaining`);
+  return null;
+}
+
+// Admin: apply leave for an employee (or for themselves - omit org_membership_id).
+router.post(
+  '/requests/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = adminLeaveRequestSchema.parse(req.body);
+    const result = await service.createRequestForEmployee(req.user.org_id, { org_membership_id: req.user.org_membership_id, user_id: req.user.id }, body);
+    if (result.error) return failRequest(res, result, 'The employee');
+    return created(res, result.request);
+  })
+);
+
 router.post(
   '/requests',
   asyncHandler(async (req, res) => {
     const body = createLeaveRequestSchema.parse(req.body);
     const result = await service.createRequest(req.user.org_id, req.user.org_membership_id, body);
-    if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
-    if (result.error === 'overlaps_existing') return fail(res, 409, 'You already have a pending or approved leave request covering some of those dates');
-    if (result.error === 'present_on_date') return fail(res, 409, `You were marked present on ${result.date} — leave can't be applied for a day you attended`);
-    if (result.error === 'no_working_days') return fail(res, 422, 'Those dates are all weekends or holidays on your calendar — there are no working days to take leave for');
-    if (result.error === 'insufficient_balance') {
-      return fail(res, 422, `Not enough leave balance — ${result.needed} day(s) requested, ${Math.max(result.remaining, 0)} remaining`);
-    }
+    if (result.error) return failRequest(res, result);
     return created(res, result.request);
   })
 );
@@ -124,6 +153,7 @@ router.post(
     const result = await service.decide(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
     if (result.error === 'not_pending') return fail(res, 409, 'Leave request is not pending');
+    if (result.error) return failRequest(res, result, 'The employee');
     return ok(res, result.request);
   })
 );

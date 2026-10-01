@@ -4,6 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
+const invoices = require('./invoices.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
@@ -15,7 +16,11 @@ const {
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
   createInvoiceSchema,
+  previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
+  vendorInvoicePeriodSchema,
+  generateVendorInvoiceSchema,
+  listVendorInvoicesQuerySchema,
   transitionInvoiceSchema,
   createGroupChargeSchema,
   createOwnGroupChargeSchema,
@@ -41,6 +46,12 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
+  invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
+  invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
+  nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
+  no_billing_rate: [422, 'This project has no billing rate for that month'],
+  not_supported: [422, 'Invoicing is not enabled for this project type yet (fixed price / recruitment)'],
+  change_detected: [409, 'The locked month has a detected change — recalculate or dismiss it first'],
   invalid_transition: [409, 'Invalid status transition'],
   org_not_found: [404, 'Org not found'],
   membership_not_found: [404, 'Employee not found in this org'],
@@ -56,6 +67,9 @@ const ERRORS = {
 function failFor(res, error, result) {
   if (error === 'before_agreement_start') {
     return fail(res, 422, `That period ends before the client agreement starts (${result?.agreement_start}) — nothing is billed before the Agreement Start Date`);
+  }
+  if (error === 'after_agreement_end') {
+    return fail(res, 422, `That period starts after the client agreement ended (${result?.agreement_end}) — nothing is billed after the Agreement End Date`);
   }
   const mapped = ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
@@ -117,6 +131,39 @@ router.post(
     const result = await pnlService.createVendorInvoice(req.user.org_id, req.user.id, req.params.id, vendorInvoiceSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
     return created(res, result.invoice);
+  })
+);
+
+// Live Analytics → Vendors: generated vendor invoices (one per vendor and
+// month, a row per project and currency).
+router.get(
+  '/vendor-invoices',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
+);
+
+router.get(
+  '/vendor-invoices/preview',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { vendor_account_id, ...period } = vendorInvoicePeriodSchema.parse(req.query);
+    const result = await invoices.previewVendorInvoice(req.user.org_id, vendor_account_id, period);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.preview);
+  })
+);
+
+router.post(
+  '/vendor-invoices/generate',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = generateVendorInvoiceSchema.parse(req.body);
+    const result = await invoices.generateVendorInvoice(req.user.org_id, req.user, body);
+    if (result.error) return failFor(res, result.error, result);
+    return created(res, result.invoices);
   })
 );
 
@@ -217,13 +264,15 @@ router.get(
   })
 );
 
+// Client invoices — one builder (invoices.service) for every path: the
+// project's contract month (its locked version when billing is locked).
 router.post(
   '/invoices',
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const body = createInvoiceSchema.parse(req.body);
-    const result = await service.createInvoice(req.user.org_id, req.user.id, body);
+    const { client_account_id, ...body } = createInvoiceSchema.parse(req.body);
+    const result = await invoices.generateClientInvoice(req.user.org_id, req.user, { account_id: client_account_id, ...body });
     if (result.error) return failFor(res, result.error, result);
     return created(res, result.invoice);
   })
@@ -235,8 +284,20 @@ router.get(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const query = listInvoicesQuerySchema.parse(req.query);
-    const rows = await service.listInvoices(req.user.org_id, query);
-    return ok(res, rows);
+    return ok(res, await invoices.listClientInvoices(req.user.org_id, query));
+  })
+);
+
+// What an invoice for that project and month would contain (form preview).
+router.get(
+  '/invoices/preview',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { account_id, ...period } = previewInvoiceQuerySchema.parse(req.query);
+    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.preview);
   })
 );
 
@@ -245,7 +306,7 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.getInvoice(req.user.org_id, req.params.id);
+    const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
   })

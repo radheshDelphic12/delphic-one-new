@@ -6,13 +6,15 @@
 //   to each project by its allocation share (ProjectMemberAssignment
 //   .allocation_percent, else an even split across their projects) IN FORCE
 //   THAT DAY (allocations are effective-dated — lib/allocations), then per
-//   day on that PROJECT's calendar exactly like monthly client billing:
-//     day = rate × share × min(approved hours / benchmark_hours, 1 / working_days)
+//   day on that PROJECT's calendar exactly like monthly client billing — the
+//   contract, not timesheets (client decision 2026-10-01):
+//     each working day inside the agreement = rate × share / working_days
 //   plus approved overtime at the hourly equivalent (rate × share /
 //   benchmark_hours) — only on a project whose overtime_billable is on (the
 //   project setting is the one source of truth for overtime).
 //
-// Only APPROVED timesheet entries pay. A contractor is never on payroll.
+// Only overtime depends on APPROVED timesheet entries. A contractor is never
+// on payroll.
 // Amounts are in the vendor rate's currency and converted to INR with
 // finance's exchange rates (a currency with no rate is listed, not guessed).
 
@@ -20,7 +22,7 @@ const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
 const exchangeRates = require('../../billing/exchangeRates.service');
 const { markResolved } = require('./billing.engine');
-const { round2, ymd, monthBounds, isWeekend } = require('../period');
+const { round2, ymd, monthBounds, monthDates, isWeekend } = require('../period');
 const { overlaps, sharesOn, periodShares } = require('../../../lib/allocations');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
@@ -46,7 +48,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
           allocation_percent: true,
           start_date: true,
           end_date: true,
-          account: { select: { id: true, name: true, project_name: true, project_code: true, benchmark_hours: true, overtime_billable: true, agreement_start_date: true, agreement_end_date: true } },
+          account: { select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { id: true, name: true } }, benchmark_hours: true, overtime_billable: true, agreement_start_date: true, agreement_end_date: true } },
         },
       },
     },
@@ -88,7 +90,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       const share = monthShare.get(account.id) || 0;
       const rateOn = (date) => monthlyRate * (sharesOn(spans, date).get(account.id) || 0);
       const benchmark = account.benchmark_hours || DEFAULT_BENCHMARK_HOURS;
-      const { working_days, holiday_dates } = await workingDaysFor(account.id);
+      const { working_days, holiday_dates, working_dates } = await workingDaysFor(account.id);
       const projectEntries = mine.filter((e) => e.account_id === account.id);
 
       // Approved hours per day on this project.
@@ -101,37 +103,49 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         d.overtime += Number(e.overtime_hours || 0);
         perDay.set(key, d);
       }
+      const inContract = (date) => (!account.agreement_start_date || date >= account.agreement_start_date) && (!account.agreement_end_date || date <= account.agreement_end_date);
+      const isWorking = (date) => working_dates?.has(ymd(date)) || (!isWeekend(date) && !holiday_dates.has(ymd(date)));
+      // Contract share: every working day inside the agreement, by the
+      // allocation in force that day.
       let base = 0;
+      let contractDays = 0;
+      for (const date of monthDates(period_month, period_year)) {
+        if (!isWorking(date) || !inContract(date) || working_days <= 0) continue;
+        const dayRate = rateOn(date);
+        if (dayRate > 0) contractDays += 1;
+        base += dayRate / working_days;
+      }
+      base = round2(base);
       let overtimeHours = 0;
       let overtimeAmountRaw = 0;
       let approvedHours = 0;
-      for (const [key, d] of perDay) {
-        const inContract = (!account.agreement_start_date || d.date >= account.agreement_start_date) && (!account.agreement_end_date || d.date <= account.agreement_end_date);
-        const working = !isWeekend(d.date) && !holiday_dates.has(key);
+      for (const d of perDay.values()) {
         const dayRate = rateOn(d.date);
         approvedHours += d.hours;
-        const otHours = working ? d.overtime : d.hours + d.overtime;
+        const otHours = isWorking(d.date) ? d.overtime : d.hours + d.overtime;
         overtimeHours += otHours;
         overtimeAmountRaw += otHours * (dayRate / benchmark);
-        if (!working || !inContract || working_days <= 0) continue;
-        base += dayRate * Math.min(d.hours / benchmark, 1 / working_days);
       }
-      base = round2(base);
       const overtimeAmount = account.overtime_billable ? round2(overtimeAmountRaw) : 0;
       const amount = round2(base + overtimeAmount);
-      const pending = projectEntries.filter((e) => e.status === 'submitted').length;
-      const rejected = projectEntries.filter((e) => e.status === 'rejected' && !e.resolved).length;
+      // Unapproved time only holds up the amount where overtime is paid.
+      const pending = account.overtime_billable ? projectEntries.filter((e) => e.status === 'submitted').length : 0;
+      const rejected = account.overtime_billable ? projectEntries.filter((e) => e.status === 'rejected' && !e.resolved).length : 0;
       const approved = projectEntries.filter((e) => e.status === 'approved');
       const last = approved.sort((x, y) => new Date(y.approved_at || 0) - new Date(x.approved_at || 0))[0];
       const line = {
         vendor: c.vendor_account,
         org_membership_id: c.id,
         contractor: c.person.name,
-        project: { id: account.id, code: account.project_code, name: calendarsService.projectName(account) },
+        project: { id: account.id, code: account.project_code, name: calendarsService.projectName(account), ...calendarsService.clientFields(account), client_account: undefined },
         currency,
         monthly_vendor_rate: monthlyRate,
         allocation_percent: round2(share * 100),
         working_days,
+        contract_working_days: contractDays,
+        agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
+        agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
+        overtime_billable: Boolean(account.overtime_billable),
         approved_hours: round2(approvedHours),
         overtime_hours: round2(overtimeHours),
         base_amount: base,

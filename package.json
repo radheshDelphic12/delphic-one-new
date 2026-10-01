@@ -21,7 +21,10 @@
     "seed:vendors": "npm run seed:vendors --workspace server",
     "seed:admin": "npm run seed:admin --workspace server",
     "build:client": "npm run build --workspace client",
+    "test:changed": "npm run test:changed --workspace server",
+    "test:branch": "npm run test:branch --workspace server",
     "lint": "eslint server/src client/src",
+    "lint:changed": "node scripts/lint-changed.js",
     "lint:fix": "eslint server/src client/src --fix"
   },
   "devDependencies": {
