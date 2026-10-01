@@ -398,3 +398,89 @@ describe('Vendor payout and client billing follow approved timesheet hours; admi
     expect((await authed(request(app).post('/api/v1/billing/adjustments'), (await loginAs(emp)).access_token).send({ account_id: p.id, ...AUG, amount: 1, reason: 'sneaky' })).status).toBeGreaterThanOrEqual(401);
   });
 });
+
+describe('Contract charges (GST, TDS, other) on client invoices', () => {
+  const addCharge = (ctx, projectId, body) => authed(request(app).post(`/api/v1/billing/projects/${projectId}/charges`), ctx.adminToken).send(body);
+  const preview = (ctx, projectId, extra = {}) => authed(request(app).get('/api/v1/billing/invoices/preview'), ctx.adminToken).query({ account_id: projectId, ...AUG, ...extra });
+
+  test('percent and fixed charges, added or deducted, are worked out on the final approved amount (after the admin adjustment)', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 210000 });
+    // Final approved amount = 210000 contract + 5000 admin adjustment = 215000.
+    expect((await authed(request(app).post('/api/v1/billing/adjustments'), ctx.adminToken).send({ account_id: p.id, ...AUG, amount: 5000, reason: 'Extra weekend support' })).status).toBe(201);
+
+    // Validation: a name, a positive value, and a percentage cannot exceed 100.
+    expect((await addCharge(ctx, p.id, { label: '', mode: 'percent', value: 18, effect: 'add' })).status).toBe(422);
+    expect((await addCharge(ctx, p.id, { label: 'GST', mode: 'percent', value: 150, effect: 'add' })).status).toBe(422);
+    expect((await addCharge(ctx, p.id, { label: 'GST', mode: 'fixed', value: 0, effect: 'add' })).status).toBe(422);
+
+    const gst = await addCharge(ctx, p.id, { label: 'GST', mode: 'percent', value: 18, effect: 'add' });
+    const tds = await addCharge(ctx, p.id, { label: 'TDS', mode: 'percent', value: 10, effect: 'deduct' });
+    const fee = await addCharge(ctx, p.id, { label: 'Handling fee', mode: 'fixed', value: 500, effect: 'add' });
+    expect([gst.status, tds.status, fee.status]).toEqual([201, 201, 201]);
+
+    const list = await authed(request(app).get(`/api/v1/billing/projects/${p.id}/charges`), ctx.adminToken);
+    expect(list.body.data.map((c) => c.label)).toEqual(['GST', 'TDS', 'Handling fee']);
+
+    // 215000 + 38700 (GST) - 21500 (TDS) + 500 (fee) = 232700.
+    const pre = await preview(ctx, p.id);
+    expect(pre.body.data).toMatchObject({ amount: 215000, total_amount: 232700, details: { subtotal: 215000, total_amount: 232700 } });
+    expect(pre.body.data.details.charges.map((c) => [c.label, c.amount])).toEqual([['GST', 38700], ['TDS', -21500], ['Handling fee', 500]]);
+
+    // The invoice keeps the approved amount as `amount` and the payable total beside it.
+    const inv = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p.id, ...AUG });
+    expect(inv.status).toBe(201);
+    expect(inv.body.data).toMatchObject({ amount: 215000, total_amount: 232700 });
+    expect(inv.body.data.details.charges).toHaveLength(3);
+  });
+
+  test('a charge can be edited and deleted one by one; a generated draft keeps its lines until it is refreshed', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 100000 });
+    const gst = (await addCharge(ctx, p.id, { label: 'GST', mode: 'percent', value: 18, effect: 'add' })).body.data;
+    const tds = (await addCharge(ctx, p.id, { label: 'TDS', mode: 'percent', value: 10, effect: 'deduct' })).body.data;
+    const inv = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p.id, ...AUG })).body.data;
+    expect(inv.total_amount).toBe(108000); // 100000 + 18000 - 10000
+
+    // Edit GST to 12%, delete TDS.
+    const edit = await authed(request(app).patch(`/api/v1/billing/charges/${gst.id}`), ctx.adminToken).send({ value: 12 });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data).toMatchObject({ label: 'GST', value: 12 });
+    expect((await authed(request(app).patch(`/api/v1/billing/charges/${gst.id}`), ctx.adminToken).send({ value: 250 })).status).toBe(422);
+    expect((await authed(request(app).delete(`/api/v1/billing/charges/${tds.id}`), ctx.adminToken)).status).toBe(200);
+
+    // The draft already generated is unchanged until it is refreshed ...
+    const same = await authed(request(app).get(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken);
+    expect(same.body.data.total_amount).toBe(108000);
+    // ... then the new set applies: 100000 + 12000.
+    const refreshed = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p.id, ...AUG });
+    expect(refreshed.body.data).toMatchObject({ id: inv.id, amount: 100000, total_amount: 112000 });
+    expect(refreshed.body.data.details.charges.map((c) => c.label)).toEqual(['GST']);
+
+    // Audited, and admin only.
+    const audits = await prisma.auditLog.findMany({ where: { org_id: ctx.org.id, entity_type: 'contract_charge' } });
+    expect(audits.map((a) => a.action).sort()).toEqual(['contract_charge_add', 'contract_charge_add', 'contract_charge_edit', 'contract_charge_remove']);
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).post(`/api/v1/billing/projects/${p.id}/charges`), (await loginAs(emp)).access_token).send({ label: 'GST', mode: 'percent', value: 18, effect: 'add' })).status).toBeGreaterThanOrEqual(401);
+  });
+
+  test('another invoice currency converts fixed charges; an admin amount override recomputes the percentages', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 83000 }); // INR project; USD rate is 83
+    await addCharge(ctx, p.id, { label: 'GST', mode: 'percent', value: 18, effect: 'add' });
+    await addCharge(ctx, p.id, { label: 'Handling fee', mode: 'fixed', value: 830, effect: 'add' }); // 830 INR
+
+    // In USD: subtotal 83000 / 83 = 1000; GST 180; the 830 INR fee becomes 10 USD.
+    const usd = await preview(ctx, p.id, { currency: 'USD' });
+    expect(usd.body.data).toMatchObject({ currency: 'USD', amount: 1000, total_amount: 1190 });
+    expect(usd.body.data.details.charges.map((c) => [c.label, c.amount])).toEqual([['GST', 180], ['Handling fee', 10]]);
+
+    // Admin overrides the draft amount: the percentage re-works on the new amount, the fixed fee stays.
+    const inv = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p.id, ...AUG })).body.data;
+    expect(inv.total_amount).toBe(83000 + 14940 + 830);
+    const over = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ amount: 50000, reason: 'Agreed discount' });
+    expect(over.status).toBe(200);
+    expect(over.body.data).toMatchObject({ amount: 50000, total_amount: 50000 + 9000 + 830 });
+  });
+});

@@ -82,6 +82,21 @@ const listBillingAdjustmentsQuerySchema = z.object({
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
 
+// A contract charge (GST, TDS, ...): percent of, or a fixed amount on, the month's final approved amount.
+const contractChargeSchema = z.object({
+  label: z.string().trim().min(1, 'Give the charge a name').max(60),
+  mode: z.enum(['percent', 'fixed']),
+  value: z.coerce.number().positive('Enter a value above zero').max(1e12),
+  effect: z.enum(['add', 'deduct']),
+}).refine((c) => c.mode !== 'percent' || c.value <= 100, { message: 'A percentage cannot be above 100', path: ['value'] });
+
+const updateContractChargeSchema = z.object({
+  label: z.string().trim().min(1).max(60).optional(),
+  mode: z.enum(['percent', 'fixed']).optional(),
+  value: z.coerce.number().positive().max(1e12).optional(),
+  effect: z.enum(['add', 'deduct']).optional(),
+}).refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+
 const listInvoicesQuerySchema = z.object({
   client_account_id: z.string().uuid().optional(),
   status: z.enum(['draft', 'sent', 'paid']).optional(),
@@ -285,6 +300,8 @@ module.exports = {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  contractChargeSchema,
+  updateContractChargeSchema,
   billingAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,

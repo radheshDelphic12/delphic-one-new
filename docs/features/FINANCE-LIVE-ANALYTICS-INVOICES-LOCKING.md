@@ -178,3 +178,20 @@ Source of truth is **approved timesheet hours**; admin can configure and tweak.
   and Financials all follow the final amount; invoices list base and adjustments separately. A change on a locked month
   flags it `change_detected` (source `billing_adjustment`). API: `GET/POST /billing/adjustments`, `DELETE /billing/adjustments/:id`.
   UI: Live Analytics > Billing & Sales > "± Adjust".
+
+## Update 2026-10-01: contract charges (GST, TDS, other) on client invoices
+
+Each contract (project) can carry any number of **charges**, added, edited and deleted one by one
+(`ContractCharge`, `billing/charges.service.js`, admin only, audited as `contract_charge_add|edit|remove`).
+
+- `mode`: `percent` (value % of the month's final approved amount) or `fixed` (an amount in the contract's billing currency).
+- `effect`: `add` raises the payable total (GST, fees), `deduct` lowers it (TDS, credits).
+- Base = the **final approved amount**: approved timesheet hours (per the billing basis) + any admin adjustment
+  (`billingEngine.lockedAmount`). Charges never change the billing amount, locks or Financials - only what the client pays.
+- An invoice stores the lines it was generated with (`line_items.details.charges`, `subtotal`, `total_amount`);
+  `ClientInvoice.amount` stays the approved amount, `total_amount` is the payable total. Editing / deleting a charge reaches
+  new or refreshed draft invoices only. Another invoice currency converts fixed charges with the invoice's exchange rate.
+  An admin amount override on an invoice re-works the percentages on the new amount.
+- API: `GET|POST /billing/projects/:id/charges`, `PATCH|DELETE /billing/charges/:id`. UI: Finance > Projects > project profile >
+  "Invoice charges"; shown in the invoice preview, invoice table (total) and the printed invoice.
+- Migration `20261001130000_contract_charges`. Vendor invoices do not carry charges yet.

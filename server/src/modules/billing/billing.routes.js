@@ -6,6 +6,7 @@ const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
 const adjustments = require('./adjustments.service');
+const charges = require('./charges.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
@@ -16,6 +17,8 @@ const {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  contractChargeSchema,
+  updateContractChargeSchema,
   billingAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
@@ -52,6 +55,7 @@ const ERRORS = {
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
+  percent_too_large: [422, 'A percentage cannot be above 100'],
   reason_required: [422, 'Give a reason to change an invoice that has already been sent or paid'],
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
@@ -267,6 +271,44 @@ router.get(
     const query = listDailyRevenueQuerySchema.parse(req.query);
     const rows = await service.listDailyRevenue(req.user.org_id, query);
     return ok(res, rows);
+  })
+);
+
+// Contract charges - GST, TDS or any other line a contract's client invoices carry (percent or fixed,
+// added or deducted, on the final approved amount). Added / edited / deleted one by one, audited.
+router.get(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await charges.listCharges(req.user.org_id, req.params.id)))
+);
+
+router.post(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.createCharge(req.user.org_id, req.user, req.params.id, contractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.charge);
+  })
+);
+
+router.patch(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.updateCharge(req.user.org_id, req.user, req.params.id, updateContractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+router.delete(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.removeCharge(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

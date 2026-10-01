@@ -24,6 +24,7 @@ const prisma = require('../../config/db');
 const billingEngine = require('../calculations/engines/billing.engine');
 const vendorEngine = require('../calculations/engines/vendorPayment.engine');
 const exchangeRates = require('./exchangeRates.service');
+const chargesService = require('./charges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
 
@@ -111,7 +112,12 @@ async function clientInvoiceSource(orgId, accountId, period, currency) {
   }));
   const converted = await convertToCurrency(orgId, billingEngine.invoiceDetails(raw), baseLines, currency);
   if (converted.error) return converted;
-  const { details, lines } = converted;
+  const { lines } = converted;
+  // The contract's charges (GST, TDS, ...) go on top of the final approved amount (subtotal);
+  // fixed ones are in the contract currency, so they follow the conversion factor.
+  const contractCharges = await prisma.contractCharge.findMany({ where: { org_id: orgId, account_id: accountId }, orderBy: { created_at: 'asc' } });
+  const worked = chargesService.applyCharges(converted.details.amount, contractCharges, converted.details.conversion ? converted.details.conversion.exchange_rate : 1);
+  const details = { ...converted.details, subtotal: converted.details.amount, charges: worked.lines, total_amount: worked.total };
   return {
     account,
     // Identity as the project is NOW (its own name and linked client).
@@ -137,6 +143,8 @@ async function previewClientInvoice(orgId, accountId, period, currency) {
       details: src.details,
       lines: src.lines,
       amount: src.details.amount,
+      total_amount: src.details.total_amount,
+      charges: src.details.charges,
       currency: src.details.currency,
       source: src.source,
       calculation_version: src.version?.version || null,
@@ -206,6 +214,8 @@ function serializeClientInvoice(row) {
     invoice_date: row.invoice_date ? ymd(row.invoice_date) : null,
     project,
     details: items?.details || null,
+    // What the client pays: the final approved amount plus / minus the contract's charges.
+    total_amount: items?.details?.total_amount !== undefined ? items.details.total_amount : Number(row.amount),
   };
 }
 
@@ -250,7 +260,7 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
     data.amount = amount;
     data.line_items = {
       ...items,
-      details: { ...(items.details || {}), amount },
+      details: chargesService.recomputeDetails(items.details || {}, amount),
       manual_override: { original_amount: original, amount, reason: why || null, by: user.id, at: new Date().toISOString() },
     };
   }

@@ -34,7 +34,18 @@ function InvoicePreview({ preview }) {
       <ul className="space-y-0.5 border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">
         {billingCalculationLines(d).map((line) => <li key={line}>{line}</li>)}
       </ul>
-      <p className="text-right text-base font-semibold text-tertiary-900">{amountText(preview.amount, preview.currency)}</p>
+      {(d.charges || []).length > 0 && (
+        <ul className="space-y-0.5 border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">
+          <li className="flex justify-between"><span>Final approved amount</span><span className="tabular-nums">{amountText(preview.amount, preview.currency)}</span></li>
+          {d.charges.map((c) => (
+            <li key={`${c.label}-${c.mode}-${c.value}`} className="flex justify-between">
+              <span>{c.label} ({c.mode === 'percent' ? `${c.value}%` : amountText(c.value, preview.currency)}{c.effect === 'deduct' ? ', deducted' : ''})</span>
+              <span className="tabular-nums">{c.amount < 0 ? '− ' : '+ '}{amountText(Math.abs(c.amount), preview.currency)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-right text-base font-semibold text-tertiary-900">{(d.charges || []).length > 0 ? 'Total payable ' : ''}{amountText(preview.total_amount ?? preview.amount, preview.currency)}</p>
     </div>
   );
 }
@@ -212,7 +223,12 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     { key: 'client', header: 'Client', render: (r) => r.project?.client_name || '—' },
     { key: 'period', header: 'Period', render: (r) => (r.details?.period_from ? `${dateText(r.details.period_from)} – ${dateText(r.details.period_to)}` : periodLabel(r)) },
     { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
-    { key: 'amount', header: 'Amount', render: (r) => <span className="font-medium tabular-nums">{amountText(r.amount, r.currency)}</span> },
+    { key: 'amount', header: 'Amount', render: (r) => (
+      <span className="tabular-nums">
+        <span className="font-medium">{amountText(r.total_amount ?? r.amount, r.currency)}</span>
+        {r.details?.charges?.length > 0 && <span className="block text-xs text-tertiary-500">{amountText(r.amount, r.currency)} + charges</span>}
+      </span>
+    ) },
     { key: 'currency', header: 'Currency', render: (r) => r.currency },
     { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
     {

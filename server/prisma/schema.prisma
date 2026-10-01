@@ -456,6 +456,7 @@ model User {
   project_vendor_invoices_created ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceCreatedBy")
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
   billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
+  contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
   expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
   vendor_payments_created         VendorPayment[]                 @relation("VendorPaymentCreatedBy")
@@ -1232,6 +1233,31 @@ model BillingAdjustment {
   @@map("billing_adjustments")
 }
 
+// Extra lines on a contract's (project's) client invoices - GST, TDS or anything
+// else. Each is added or deleted on its own and is worked out on the month's
+// FINAL approved billing amount (approved timesheet hours + any admin adjustment):
+//   mode  percent -> value % of that amount;  fixed -> value in the contract's billing currency
+//   effect add    -> raises the payable total (GST, fees);  deduct -> lowers it (TDS, credits)
+// An invoice stores the lines it was generated with; later changes only reach new / refreshed drafts.
+model ContractCharge {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id])
+  account_id String   @db.Uuid
+  account    Account  @relation(fields: [account_id], references: [id])
+  label      String
+  mode       String   @default("percent")
+  value      Decimal  @db.Decimal(14, 4)
+  effect     String   @default("add")
+  created_by String   @db.Uuid
+  creator    User     @relation("ContractChargeCreatedBy", fields: [created_by], references: [id])
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([org_id, account_id])
+  @@map("contract_charges")
+}
+
 model ClientInvoice {
   id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id                 String              @db.Uuid
@@ -1685,6 +1711,7 @@ model Org {
   daily_project_revenues DailyProjectRevenue[]
   client_invoices        ClientInvoice[]
   billing_adjustments    BillingAdjustment[]
+  contract_charges       ContractCharge[]
   group_billing_charges  GroupBillingCharge[]
 
   // Multi-company ERP (Phase 6).
@@ -1930,6 +1957,7 @@ model Account {
   // Hours that make a full billable / payable day under approved_hours.
   billable_day_hours      Decimal                @default(8) @db.Decimal(4, 2)
   billing_adjustments     BillingAdjustment[]
+  contract_charges        ContractCharge[]
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])
