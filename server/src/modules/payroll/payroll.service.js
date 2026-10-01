@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { detectFinanceChange } = require('../../lib/financeChanges');
+const { leaveHoursForDay } = require('../leave/leaveHours');
 
 function ymd(date) {
   return date.toISOString().slice(0, 10);
@@ -165,6 +166,8 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
   let upcoming_days = 0;
   let paid_leave_days = 0;
   let unpaid_leave_days = 0;
+  let paid_leave_hours = 0;
+  let unpaid_leave_hours = 0;
   let present_days = 0;
   let expected_hours = 0;
   let paid_hours = 0; // approved normal hours + paid leave, on past working days
@@ -210,12 +213,20 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
       upcoming_days += 1;
       continue;
     }
-    const leaveHit = leaveRanges.find((r) => day >= r.from_date && day <= r.to_date);
-    let paid = Math.min(logged.approved, expected);
-    let projected = Math.min(logged.approved + logged.pending, expected);
-    if (leaveHit) {
-      if (leaveHit.paid) { paid_leave_days += 1; paid = expected; projected = expected; } else unpaid_leave_days += 1;
+    // Approved leave only (callers pass nothing else). A full day = the shift, a
+    // half day = half of it; paid leave hours are paid, unpaid never are, and
+    // worked hours fill only what the leave leaves free (working + leave <=
+    // the day), so leave and timesheet hours are never counted twice.
+    const dayLeave = leaveHoursForDay(leaveRanges.filter((r) => day >= r.from_date && day <= r.to_date), expected);
+    const workCap = expected - dayLeave.total;
+    const paid = dayLeave.paid + Math.min(logged.approved, workCap);
+    const projected = dayLeave.paid + Math.min(logged.approved + logged.pending, workCap);
+    if (expected > 0) {
+      paid_leave_days += dayLeave.paid / expected;
+      unpaid_leave_days += dayLeave.unpaid / expected;
     }
+    paid_leave_hours += dayLeave.paid;
+    unpaid_leave_hours += dayLeave.unpaid;
     paid_hours += paid;
     paid_hours_to_date += paid;
     deficit_hours += expected - paid;
@@ -250,8 +261,10 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
       pending_hours: r2(pending_hours),
       paid_hours: r2(paid_hours),
       deficit_hours: r2(deficit_hours),
-      paid_leave_days,
-      unpaid_leave_days,
+      paid_leave_days: r2(paid_leave_days),
+      unpaid_leave_days: r2(unpaid_leave_days),
+      paid_leave_hours: r2(paid_leave_hours),
+      unpaid_leave_hours: r2(unpaid_leave_hours),
       // Presence only (check-in / check-out) — shown, never paid from.
       present_days,
       lop_days,

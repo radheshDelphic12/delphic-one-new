@@ -68,7 +68,7 @@ function EntryDrawer({ open, onClose, onSubmit }) {
         <LeaveDayNotice leave={leave} />
         <label className="block text-xs font-medium text-tertiary-600">
           Hours
-          <input required type="number" min="0.5" max="24" step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          <input required type="number" min="0.5" max={leave.work_capacity ?? 24} step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <label className="block text-xs font-medium text-tertiary-600">
           Notes

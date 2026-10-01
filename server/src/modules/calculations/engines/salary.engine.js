@@ -98,7 +98,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     }),
     prisma.leaveRequest.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, status: 'approved', from_date: { lte: end }, to_date: { gte: start } },
-      select: { org_membership_id: true, from_date: true, to_date: true, leave_type: { select: { paid: true } } },
+      select: { org_membership_id: true, from_date: true, to_date: true, is_half_day: true, leave_type: { select: { paid: true } } },
     }),
     prisma.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, date: { gte: start, lte: end } }, select: { calendar_id: true, date: true, is_working_day: true } }),
     prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, name: true, location_id: true, department_id: true, is_default: true } }),
@@ -195,7 +195,7 @@ function salaryLine(ctx, membership, asOf = null) {
     calendars: ctx.calendars,
   }, null);
   const attendanceByDate = new Map((ctx.attendanceByMember.get(membership.id) || []).map((a) => [ymd(a.date), a]));
-  const leaveRanges = (ctx.leavesByMember.get(membership.id) || []).map((l) => ({ from_date: l.from_date, to_date: l.to_date, paid: l.leave_type.paid }));
+  const leaveRanges = (ctx.leavesByMember.get(membership.id) || []).map((l) => ({ from_date: l.from_date, to_date: l.to_date, is_half_day: l.is_half_day, paid: l.leave_type.paid }));
   const { start, end } = ctx.period;
   const { breakdown, gross, deductions, net } = computeBreakdown({
     period_start: start,

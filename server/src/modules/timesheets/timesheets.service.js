@@ -88,6 +88,17 @@ async function otherHoursOnDay(orgMembershipId, date, excludeEntryId) {
   return rows.reduce((sum, e) => sum + Number(e.hours) + Number(e.overtime_hours || 0), 0);
 }
 
+// Approved leave vs the hours a day would hold after this write. Full-day
+// leave (or AM + PM halves) blocks the day; a half day caps work at what the
+// leave leaves free (shift - 4.5h). Returns a service error object or null.
+async function leaveBlock(orgId, orgMembershipId, date, totalHours) {
+  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
+  if (leave) return { error: 'leave_day', leave };
+  const cap = await leaveService.workCapacityFor(orgId, orgMembershipId, date);
+  if (cap && totalHours > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: totalHours };
+  return null;
+}
+
 // Revenue is derived from approved billable hours, so approving an entry (or
 // changing an approved one) refreshes that day's DailyProjectRevenue at once
 // instead of waiting for the nightly job. Best-effort: a billing hiccup must
@@ -134,7 +145,10 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
 
   // Multi-project allocation (4h Project A + 4h Project B in one day) is
   // fine; the total for the day still can't exceed 24h.
-  if ((await otherHoursOnDay(orgMembershipId, date)) + hours + overtime_hours > 24) return { error: 'exceeds_day_hours' };
+  const dayTotal = (await otherHoursOnDay(orgMembershipId, date)) + hours + overtime_hours;
+  if (dayTotal > 24) return { error: 'exceeds_day_hours' };
+  const blocked = await leaveBlock(orgId, orgMembershipId, date, dayTotal);
+  if (blocked) return blocked;
 
   const alreadyPendingToday = await prisma.timesheetEntry.count({ where: { org_membership_id: orgMembershipId, date, status: 'submitted' } });
 
@@ -296,7 +310,10 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
     const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
     const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
-    if ((await otherHoursOnDay(orgMembershipId, existing.date, entryId)) + hours + overtime > 24) return { error: 'exceeds_day_hours' };
+    const dayTotal = (await otherHoursOnDay(orgMembershipId, existing.date, entryId)) + hours + overtime;
+    if (dayTotal > 24) return { error: 'exceeds_day_hours' };
+    const cap = await leaveService.workCapacityFor(orgId, orgMembershipId, existing.date);
+    if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
 
   const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
@@ -340,7 +357,10 @@ async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch 
   if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
     const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
     const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
-    if ((await otherHoursOnDay(existing.org_membership_id, existing.date, entryId)) + hours + overtime > 24) return { error: 'exceeds_day_hours' };
+    const dayTotal = (await otherHoursOnDay(existing.org_membership_id, existing.date, entryId)) + hours + overtime;
+    if (dayTotal > 24) return { error: 'exceeds_day_hours' };
+    const cap = await leaveService.workCapacityFor(orgId, existing.org_membership_id, existing.date);
+    if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
   const data = { ...patch };
   if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
@@ -569,6 +589,11 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
     }
     const leave = await leaveService.leaveDayFor(orgId, targetMembershipId, targetDate);
     if (leave) return { error: 'leave_day', leave };
+    if (requestedHours !== undefined) {
+      const cap = await leaveService.workCapacityFor(orgId, targetMembershipId, targetDate);
+      const others = await otherHoursOnDay(targetMembershipId, targetDate, ticket.timesheet_entry_id || undefined);
+      if (cap && others + Number(requestedHours) > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: others + Number(requestedHours) };
+    }
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -856,7 +881,10 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
     const account = await prisma.account.findFirst({ where: { id: body.account_id, org_id: orgId }, select: { id: true } });
     if (!account) return { error: 'account_not_found' };
   }
-  if ((await otherHoursOnDay(org_membership_id, body.date)) + body.hours + (body.overtime_hours || 0) > 24) return { error: 'exceeds_day_hours' };
+  const dayTotal = (await otherHoursOnDay(org_membership_id, body.date)) + body.hours + (body.overtime_hours || 0);
+  if (dayTotal > 24) return { error: 'exceeds_day_hours' };
+  const blocked = await leaveBlock(orgId, org_membership_id, body.date, dayTotal);
+  if (blocked) return blocked;
   const entry = await prisma.timesheetEntry.create({
     data: {
       org_id: orgId,
@@ -939,6 +967,8 @@ async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
     if (!dayTotals.has(key)) dayTotals.set(key, await otherHoursOnDay(member.id, date));
     dayTotals.set(key, dayTotals.get(key) + hours + (project ? overtime : 0));
     if (dayTotals.get(key) > 24) { fail('More than 24 hours logged for this employee on this date'); continue; }
+    const halfCap = await leaveService.workCapacityFor(orgId, member.id, date);
+    if (halfCap && dayTotals.get(key) > halfCap.capacity + 1e-9) { fail(`Approved half-day leave that day - only ${halfCap.capacity}h can be logged for work`); continue; }
     const billable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
     valid.push({
       org_membership_id: member.id,
