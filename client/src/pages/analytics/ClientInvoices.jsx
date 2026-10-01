@@ -65,6 +65,8 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       invoice_date: editing?.invoice_date || today(),
       notes: editing?.notes || '',
       currency: editing?.currency || '',
+      amount: '',
+      reason: '',
     });
     setNumberEdited(Boolean(editing));
     setPreview(null);
@@ -79,6 +81,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
         if (!alive) return;
         setPreview(data.data);
         if (!numberEdited) setForm((f) => ({ ...f, invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || f.invoice_date }));
+        if (editing) setForm((f) => ({ ...f, amount: f.amount === '' ? String(editing.amount) : f.amount }));
       })
       .catch((err) => { if (alive) { setPreview(null); setPreviewError(apiErrorMessage(err, 'Nothing to invoice for that selection')); } });
     return () => { alive = false; };
@@ -86,13 +89,19 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
 
   if (!open || !form) return <Drawer open={false} title="" onClose={onClose} />;
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
-  const locked = preview?.existing && preview.existing.status !== 'draft';
+  const sentStatus = editing ? editing.status !== 'draft' : preview?.existing && preview.existing.status !== 'draft';
+  const locked = !editing && sentStatus;
+  const reasonMissing = Boolean(editing) && sentStatus && !form.reason.trim();
 
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
       const fields = { invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...(form.currency ? { currency: form.currency } : {}) };
+      if (editing) {
+        if (form.amount !== '' && Number(form.amount) !== Number(editing.amount)) fields.amount = Number(form.amount);
+        if (form.reason.trim()) fields.reason = form.reason.trim();
+      }
       const { data } = editing
         ? await apiClient.patch(`/billing/invoices/${editing.id}`, fields)
         : await apiClient.post('/billing/invoices', { client_account_id: form.account_id, ...form.period, ...fields });
@@ -116,7 +125,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || !form.invoice_number.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || reasonMissing || !form.invoice_number.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
@@ -128,7 +137,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
           </label>
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Invoice currency
-            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={Boolean(editing) && sentStatus} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
               <option value="">Project billing currency{preview && !form.currency ? ` (${preview.currency})` : ''}</option>
               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -144,6 +153,19 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
+          {editing && (
+            <label className="block text-xs font-medium text-tertiary-600">
+              Amount ({form.currency || editing.currency})
+              <input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              <span className="mt-0.5 block font-normal text-tertiary-400">Calculated: {amountText(preview?.amount ?? editing.amount, preview?.currency || editing.currency)}. Changing it records an override.</span>
+            </label>
+          )}
+          {editing && (
+            <label className="block text-xs font-medium text-tertiary-600">
+              Reason {sentStatus ? <span className="text-danger-600">(required — invoice already {editing.status})</span> : <span className="font-normal text-tertiary-400">(optional)</span>}
+              <input maxLength={500} value={form.reason} onChange={(e) => set('reason', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+          )}
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Notes <span className="font-normal text-tertiary-400">(optional, printed on the invoice)</span>
             <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
@@ -199,7 +221,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
       render: (r) => (
         <div className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(r)}><Printer className="h-3.5 w-3.5" /> Download</button>
-          {r.status === 'draft' && onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
+          {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
           {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
         </div>

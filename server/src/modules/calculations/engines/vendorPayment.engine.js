@@ -6,14 +6,18 @@
 //   to each project by its allocation share (ProjectMemberAssignment
 //   .allocation_percent, else an even split across their projects) IN FORCE
 //   THAT DAY (allocations are effective-dated — lib/allocations), then per
-//   day on that PROJECT's calendar exactly like monthly client billing — the
-//   contract, not timesheets (client decision 2026-10-01):
-//     each working day inside the agreement = rate × share / working_days
+//   day on that PROJECT's calendar:
+//     each working day inside the agreement = rate × share / working_days,
+//   counted by the project's Account.vendor_payout_basis:
+//     approved_hours (default) — the day counts for the APPROVED timesheet
+//       hours actually logged on it (min(1, hours / billable_day_hours)), so a
+//       month with 20 approved days of 22 pays 20/22 of the rate;
+//     contract — the whole working day counts, hours or not (the retainer).
 //   plus approved overtime at the hourly equivalent (rate × share /
 //   benchmark_hours) — only on a project whose overtime_billable is on (the
 //   project setting is the one source of truth for overtime).
 //
-// Only overtime depends on APPROVED timesheet entries. A contractor is never
+// Approved timesheet entries are the source of truth. A contractor is never
 // on payroll.
 // Amounts are in the vendor rate's currency and converted to INR with
 // finance's exchange rates (a currency with no rate is listed, not guessed).
@@ -48,7 +52,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
           allocation_percent: true,
           start_date: true,
           end_date: true,
-          account: { select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { id: true, name: true } }, benchmark_hours: true, overtime_billable: true, agreement_start_date: true, agreement_end_date: true } },
+          account: { select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { id: true, name: true } }, benchmark_hours: true, overtime_billable: true, vendor_payout_basis: true, billable_day_hours: true, agreement_start_date: true, agreement_end_date: true } },
         },
       },
     },
@@ -107,13 +111,18 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       const isWorking = (date) => working_dates?.has(ymd(date)) || (!isWeekend(date) && !holiday_dates.has(ymd(date)));
       // Contract share: every working day inside the agreement, by the
       // allocation in force that day.
+      const payoutBasis = account.vendor_payout_basis === 'contract' ? 'contract' : 'approved_hours';
+      const dayHours = Number(account.billable_day_hours ?? 8) || 8;
       let base = 0;
       let contractDays = 0;
+      let payableDays = 0;
       for (const date of monthDates(period_month, period_year)) {
         if (!isWorking(date) || !inContract(date) || working_days <= 0) continue;
         const dayRate = rateOn(date);
-        if (dayRate > 0) contractDays += 1;
-        base += dayRate / working_days;
+        // approved_hours: only the approved hours logged that day are paid for.
+        const fraction = payoutBasis === 'approved_hours' ? Math.min(1, (perDay.get(ymd(date))?.hours || 0) / dayHours) : 1;
+        if (dayRate > 0) { contractDays += 1; payableDays += fraction; }
+        base += (dayRate / working_days) * fraction;
       }
       base = round2(base);
       let overtimeHours = 0;
@@ -128,9 +137,10 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
       }
       const overtimeAmount = account.overtime_billable ? round2(overtimeAmountRaw) : 0;
       const amount = round2(base + overtimeAmount);
-      // Unapproved time only holds up the amount where overtime is paid.
-      const pending = account.overtime_billable ? projectEntries.filter((e) => e.status === 'submitted').length : 0;
-      const rejected = account.overtime_billable ? projectEntries.filter((e) => e.status === 'rejected' && !e.resolved).length : 0;
+      // Unapproved time holds up the amount where hours decide it (approved_hours basis) or overtime is paid.
+      const hoursDecide = payoutBasis === 'approved_hours' || account.overtime_billable;
+      const pending = hoursDecide ? projectEntries.filter((e) => e.status === 'submitted').length : 0;
+      const rejected = hoursDecide ? projectEntries.filter((e) => e.status === 'rejected' && !e.resolved).length : 0;
       const approved = projectEntries.filter((e) => e.status === 'approved');
       const last = approved.sort((x, y) => new Date(y.approved_at || 0) - new Date(x.approved_at || 0))[0];
       const line = {
@@ -143,6 +153,9 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         allocation_percent: round2(share * 100),
         working_days,
         contract_working_days: contractDays,
+        payout_basis: payoutBasis,
+        day_hours: dayHours,
+        payable_days: round2(payableDays),
         agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
         agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
         overtime_billable: Boolean(account.overtime_billable),

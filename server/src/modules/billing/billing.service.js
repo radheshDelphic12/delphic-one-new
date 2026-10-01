@@ -436,6 +436,9 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
     minimum_monthly_hours: account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null,
+    client_billing_basis: account.client_billing_basis || 'contract',
+    vendor_payout_basis: account.vendor_payout_basis || 'approved_hours',
+    billable_day_hours: Number(account.billable_day_hours ?? 8),
     // Hourly: the hours the contract amount uses and where they come from.
     contract_hours: rate && rate.rate_type === 'hourly' ? hours.hours : null,
     contract_hours_basis: rate && rate.rate_type === 'hourly' ? hours.basis : null,
@@ -459,6 +462,9 @@ const PROFILE_SELECT = {
   overtime_multiplier: true,
   estimated_monthly_hours: true,
   minimum_monthly_hours: true,
+  client_billing_basis: true,
+  vendor_payout_basis: true,
+  billable_day_hours: true,
   is_project: true,
   client_name: true,
   client_account_id: true,
@@ -560,6 +566,9 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
   if (patch.estimated_monthly_hours !== undefined) data.estimated_monthly_hours = patch.estimated_monthly_hours;
   if (patch.minimum_monthly_hours !== undefined) data.minimum_monthly_hours = patch.minimum_monthly_hours;
+  if (patch.client_billing_basis !== undefined) data.client_billing_basis = patch.client_billing_basis;
+  if (patch.vendor_payout_basis !== undefined) data.vendor_payout_basis = patch.vendor_payout_basis;
+  if (patch.billable_day_hours !== undefined) data.billable_day_hours = patch.billable_day_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   await prisma.$transaction(async (tx) => {

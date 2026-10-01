@@ -15,6 +15,9 @@ afterAll(async () => {
 
 // August 2026: 21 Mon–Fri working days, fully in the past.
 const AUG = { period_month: 8, period_year: 2026 };
+// Mon-Fri 3-14 Aug (10 working days) and every August weekday (21).
+const WORK_10 = ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14'];
+const WORK_21 = [...WORK_10, '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-31'];
 
 async function seed() {
   const org = await createOrg({ name: 'Delphic', slug: unique('delphic-') });
@@ -149,10 +152,28 @@ describe('Client invoices — contract amount, right project / client / currency
     expect(inInr.status).toBe(200);
     expect(inInr.body.data).toMatchObject({ id: inv.id, invoice_number: 'MII/2026/99', currency: 'INR', amount: 415000 });
 
-    // A sent invoice is final.
+    // Admin can override the calculated amount; it is recorded.
+    const over = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ amount: 400000, reason: 'Agreed discount' });
+    expect(over.status).toBe(200);
+    expect(over.body.data).toMatchObject({ amount: 400000, details: { amount: 400000 }, line_items: { manual_override: { original_amount: 415000, amount: 400000 } } });
+
+    // A sent invoice can still be corrected by an admin, but only with a reason (and every edit is audited).
     expect((await authed(request(app).post(`/api/v1/billing/invoices/${inv.id}/status`), ctx.adminToken).send({ status: 'sent' })).status).toBe(200);
-    const late = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ notes: 'too late' });
-    expect(late.status).toBe(409);
+    const noReason = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ notes: 'late fix' });
+    expect(noReason.status).toBe(422);
+    const withReason = await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ notes: 'late fix', reason: 'Client PO changed' });
+    expect(withReason.status).toBe(200);
+    expect(withReason.body.data).toMatchObject({ status: 'sent', notes: 'late fix' });
+    // ...but its currency can't be re-derived once sent.
+    expect((await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), ctx.adminToken).send({ currency: 'USD', reason: 'try' })).status).toBe(409);
+    const audits = await prisma.auditLog.findMany({ where: { entity_id: inv.id, action: 'client_invoice_edit' } });
+    expect(audits.length).toBeGreaterThanOrEqual(3);
+
+    // Only admins edit.
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    const empToken = (await loginAs(emp)).access_token;
+    expect((await authed(request(app).patch(`/api/v1/billing/invoices/${inv.id}`), empToken).send({ notes: 'x', reason: 'x' })).status).toBeGreaterThanOrEqual(401);
   });
 
   test('an hourly project invoices approved billable hours × rate and says so', async () => {
@@ -249,6 +270,7 @@ describe('Per-record locks and the Locked section', () => {
     const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
     const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
     await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
 
     const preview = await authed(request(app).get('/api/v1/billing/vendor-invoices/preview'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id, ...AUG });
     expect(preview.status).toBe(200);
@@ -266,5 +288,113 @@ describe('Per-record locks and the Locked section', () => {
     // Locking it creates the pending vendor payment, in INR.
     const payment = await prisma.vendorPayment.findFirst({ where: { org_id: ctx.org.id, vendor_account_id: ctx.vendor.id, ...AUG } });
     expect(Number(payment.amount)).toBe(83000);
+  });
+
+  test('a generated vendor invoice can be edited: number, date, notes, amount, currency (audited)', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const gen = await authed(request(app).post('/api/v1/billing/vendor-invoices/generate'), ctx.adminToken).send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'ABC-0815' });
+    const row = gen.body.data[0];
+
+    const edit = await authed(request(app).patch(`/api/v1/billing/vendor-invoices/${row.id}`), ctx.adminToken).send({ invoice_number: 'ABC-0816', invoice_date: '2026-09-03', notes: 'Corrected', amount: 1100 });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data).toMatchObject({ invoice_number: 'ABC-0816', amount: 1100, currency: 'USD', notes: 'Corrected' });
+    expect(edit.body.data.invoice_date).toMatch(/^2026-09-03/);
+    expect(edit.body.data.details).toMatchObject({ amount_inr: 91300, exchange_rate: 83, manual_override: { original_amount: 1000 } });
+
+    // Currency can be corrected too; the INR figure follows (INR rate is 1).
+    const inInr = await authed(request(app).patch(`/api/v1/billing/vendor-invoices/${row.id}`), ctx.adminToken).send({ currency: 'INR', amount: 90000 });
+    expect(inInr.body.data).toMatchObject({ currency: 'INR', amount: 90000, details: { amount_inr: 90000, manual_override: { original_amount: 1000, original_currency: 'USD' } } });
+
+    const audits = await prisma.auditLog.findMany({ where: { entity_id: row.id, action: 'vendor_invoice_edit' } });
+    expect(audits).toHaveLength(2);
+  });
+});
+
+describe('Vendor payout and client billing follow approved timesheet hours; admin can tweak', () => {
+  async function contractorOn(ctx, p) {
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    return contractor;
+  }
+  const vendorPreview = (ctx) => authed(request(app).get('/api/v1/billing/vendor-invoices/preview'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id, ...AUG });
+
+  test('vendor payout = rate x approved days / working days (20 of 21), not the fixed contract days; admin can switch a project back to the contract basis', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD' });
+    const contractor = await contractorOn(ctx, p);
+    await hours(ctx, contractor.id, p.id, WORK_21.slice(0, 20)); // 20 of 21 working days approved
+
+    const preview = await vendorPreview(ctx);
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.projects[0]).toMatchObject({ currency: 'USD', amount: 2000 });
+    expect(preview.body.data.projects[0].contractors[0]).toMatchObject({ payout_basis: 'approved_hours', payable_days: 20, contract_working_days: 21, amount: 2000 });
+
+    // A half day (4h of an 8h day) counts for half a day; a day without approved hours counts for nothing.
+    await prisma.timesheetEntry.deleteMany({ where: { org_membership_id: contractor.id, date: new Date('2026-08-31') } });
+    await prisma.timesheetEntry.deleteMany({ where: { org_membership_id: contractor.id, date: new Date('2026-08-28') } });
+    await hours(ctx, contractor.id, p.id, ['2026-08-28'], 4);
+    expect((await vendorPreview(ctx)).body.data.projects[0].contractors[0]).toMatchObject({ payable_days: 19.5, amount: 1950 });
+
+    // The retainer basis ignores hours (the previous behaviour), configurable per project by an admin.
+    const patch = await authed(request(app).patch(`/api/v1/billing/projects/${p.id}`), ctx.adminToken).send({ vendor_payout_basis: 'contract' });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.vendor_payout_basis).toBe('contract');
+    expect((await vendorPreview(ctx)).body.data.projects[0].contractors[0]).toMatchObject({ payout_basis: 'contract', amount: 2100 });
+  });
+
+  test('a monthly client rate can bill by approved days instead of the retainer; the default stays the contract', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 210000 });
+    const dev = await employee(ctx, 'Asha');
+    await hours(ctx, dev.id, p.id, WORK_21.slice(0, 20));
+    const preview = () => authed(request(app).get('/api/v1/billing/invoices/preview'), ctx.adminToken).query({ account_id: p.id, ...AUG });
+
+    expect((await preview()).body.data).toMatchObject({ amount: 210000, details: { billing_basis: 'contract' } });
+    const patch = await authed(request(app).patch(`/api/v1/billing/projects/${p.id}`), ctx.adminToken).send({ client_billing_basis: 'approved_hours', billable_day_hours: 8 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data).toMatchObject({ client_billing_basis: 'approved_hours', billable_day_hours: 8 });
+    expect((await preview()).body.data).toMatchObject({ amount: 200000, details: { billing_basis: 'approved_hours', payable_days: 20 } });
+  });
+
+  test('an admin adds a + or - adjustment (reason required); it moves the final amount, is audited, and flags a locked month', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 210000 });
+    const post = (body) => authed(request(app).post('/api/v1/billing/adjustments'), ctx.adminToken).send({ account_id: p.id, ...AUG, ...body });
+
+    expect((await post({ amount: 5000 })).status).toBe(422); // reason is mandatory
+    expect((await post({ amount: 0, reason: 'nothing' })).status).toBe(422);
+    const plus = await post({ amount: 5000, reason: 'Extra weekend support' });
+    expect(plus.status).toBe(201);
+    const minus = await post({ amount: -2000, reason: 'SLA credit' });
+    expect(minus.status).toBe(201);
+
+    const list = await authed(request(app).get('/api/v1/billing/adjustments'), ctx.adminToken).query({ account_id: p.id, ...AUG });
+    expect(list.body.data).toMatchObject({ total: 3000, items: [expect.objectContaining({ amount: 5000, reason: 'Extra weekend support' }), expect.objectContaining({ amount: -2000 })] });
+
+    // Approved hours stay the source; the invoice shows the base and the tweak separately.
+    const preview = await authed(request(app).get('/api/v1/billing/invoices/preview'), ctx.adminToken).query({ account_id: p.id, ...AUG });
+    expect(preview.body.data).toMatchObject({ amount: 213000, details: { base_amount: 210000, adjustment_amount: 3000, adjustments: [{ amount: 5000 }, { amount: -2000 }] } });
+    const inv = await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p.id, ...AUG });
+    expect(inv.body.data).toMatchObject({ amount: 213000 });
+
+    // Locking keeps the figure; a later tweak flags the locked month for review.
+    expect((await lock(ctx, { kind: 'billing', scope_key: p.id })).status).toBe(200);
+    expect((await post({ amount: 1000, reason: 'Late correction' })).status).toBe(201);
+    const calc = await prisma.financialCalculation.findFirst({ where: { org_id: ctx.org.id, kind: 'billing', scope_key: p.id, ...AUG } });
+    expect(calc.status).toBe('change_detected');
+
+    // Removing one is audited too; only admins can adjust.
+    expect((await authed(request(app).delete(`/api/v1/billing/adjustments/${plus.body.data.id}`), ctx.adminToken)).status).toBe(200);
+    const audits = await prisma.auditLog.findMany({ where: { org_id: ctx.org.id, entity_type: 'billing_adjustment' } });
+    expect(audits.map((a) => a.action).sort()).toEqual(['billing_adjustment_add', 'billing_adjustment_add', 'billing_adjustment_add', 'billing_adjustment_remove']);
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).post('/api/v1/billing/adjustments'), (await loginAs(emp)).access_token).send({ account_id: p.id, ...AUG, amount: 1, reason: 'sneaky' })).status).toBeGreaterThanOrEqual(401);
   });
 });
