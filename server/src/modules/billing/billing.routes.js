@@ -16,6 +16,7 @@ const {
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
   createInvoiceSchema,
+  updateInvoiceSchema,
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
   vendorInvoicePeriodSchema,
@@ -47,6 +48,7 @@ const ERRORS = {
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
+  exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
@@ -294,8 +296,8 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const { account_id, ...period } = previewInvoiceQuerySchema.parse(req.query);
-    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period);
+    const { account_id, currency, ...period } = previewInvoiceQuerySchema.parse(req.query);
+    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency);
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.preview);
   })
@@ -308,6 +310,17 @@ router.get(
   asyncHandler(async (req, res) => {
     const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+
+router.patch(
+  '/invoices/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error, result);
     return ok(res, result.invoice);
   })
 );

@@ -13,6 +13,7 @@ import PeriodPicker, { periodLabel } from '../../components/finance/PeriodPicker
 import { amountText, billingCalculationLines, dateText, printClientInvoice } from '../../components/finance/financePrint.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
+const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 /** Invoice fields + the live preview of how the amount is worked out. */
 function InvoicePreview({ preview }) {
@@ -25,7 +26,7 @@ function InvoicePreview({ preview }) {
         <dt className="text-tertiary-500">Project</dt><dd className="font-medium text-tertiary-900">{p.name}{p.code ? ` · ${p.code}` : ''}</dd>
         <dt className="text-tertiary-500">Client</dt><dd className="font-medium text-tertiary-900">{p.client_name || '—'}</dd>
         <dt className="text-tertiary-500">Billing type</dt><dd>{d.billing_type === 'monthly' ? 'Monthly' : 'Hourly'}</dd>
-        <dt className="text-tertiary-500">Currency</dt><dd>{preview.currency}</dd>
+        <dt className="text-tertiary-500">Currency</dt><dd>{preview.currency}{d.conversion ? ` (converted from ${d.conversion.from_currency} @ ${d.conversion.exchange_rate})` : ''}</dd>
         <dt className="text-tertiary-500">Rate</dt><dd>{amountText(d.rate, d.currency)}{d.billing_type === 'hourly' ? ' / hour' : ' / month'}</dd>
         <dt className="text-tertiary-500">Billing period</dt><dd>{d.period_from ? `${dateText(d.period_from)} – ${dateText(d.period_to)}` : periodLabel(preview)}</dd>
         <dt className="text-tertiary-500">Source</dt><dd>{preview.source === 'locked' ? `Locked billing v${preview.calculation_version}` : 'Live (not locked yet)'}</dd>
@@ -39,7 +40,8 @@ function InvoicePreview({ preview }) {
 }
 
 /**
- * Generate (or refresh, while a draft) one project's invoice for a month.
+ * Generate (or refresh, while a draft) one project's invoice for a month; with
+ * `initial.invoice` it edits that draft (number, date, notes, currency).
  * The invoice number is the company's own — prefilled with a suggestion, and
  * editable. The amount follows the project's contract (monthly: working-day
  * share of the rate; hourly: approved hours × rate), never re-typed by hand.
@@ -52,19 +54,27 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState('');
   const [saving, setSaving] = useState(false);
+  const editing = initial?.invoice || null;
 
   useEffect(() => {
     if (!open) return;
-    setForm({ account_id: initial?.account_id || '', period: { period_month: initial.period_month, period_year: initial.period_year }, invoice_number: '', invoice_date: today(), notes: '' });
-    setNumberEdited(false);
+    setForm({
+      account_id: initial?.account_id || '',
+      period: { period_month: initial.period_month, period_year: initial.period_year },
+      invoice_number: editing?.invoice_number || '',
+      invoice_date: editing?.invoice_date || today(),
+      notes: editing?.notes || '',
+      currency: editing?.currency || '',
+    });
+    setNumberEdited(Boolean(editing));
     setPreview(null);
-  }, [open, initial?.account_id, initial?.period_month, initial?.period_year]);
+  }, [open, initial?.account_id, initial?.period_month, initial?.period_year, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open || !form?.account_id) { setPreview(null); return undefined; }
     let alive = true;
     setPreviewError('');
-    apiClient.get('/billing/invoices/preview', { params: { account_id: form.account_id, ...form.period } })
+    apiClient.get('/billing/invoices/preview', { params: { account_id: form.account_id, ...form.period, ...(form.currency ? { currency: form.currency } : {}) } })
       .then(({ data }) => {
         if (!alive) return;
         setPreview(data.data);
@@ -72,7 +82,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       })
       .catch((err) => { if (alive) { setPreview(null); setPreviewError(apiErrorMessage(err, 'Nothing to invoice for that selection')); } });
     return () => { alive = false; };
-  }, [open, form?.account_id, form?.period.period_month, form?.period.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, form?.account_id, form?.period.period_month, form?.period.period_year, form?.currency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open || !form) return <Drawer open={false} title="" onClose={onClose} />;
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
@@ -82,14 +92,11 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      const { data } = await apiClient.post('/billing/invoices', {
-        client_account_id: form.account_id,
-        ...form.period,
-        invoice_number: form.invoice_number.trim(),
-        invoice_date: form.invoice_date,
-        notes: form.notes.trim() || null,
-      });
-      pushSuccess?.(`Invoice ${data.data.invoice_number} ${preview?.existing ? 'updated' : 'generated'}`);
+      const fields = { invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...(form.currency ? { currency: form.currency } : {}) };
+      const { data } = editing
+        ? await apiClient.patch(`/billing/invoices/${editing.id}`, fields)
+        : await apiClient.post('/billing/invoices', { client_account_id: form.account_id, ...form.period, ...fields });
+      pushSuccess?.(`Invoice ${data.data.invoice_number} ${editing || preview?.existing ? 'updated' : 'generated'}`);
       onGenerated?.(data.data);
       onClose();
     } catch (err) {
@@ -102,14 +109,14 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   return (
     <Drawer
       open
-      title={preview?.existing ? 'Update invoice' : 'Generate invoice'}
+      title={editing ? 'Edit invoice' : preview?.existing ? 'Update invoice' : 'Generate invoice'}
       onClose={onClose}
       size="lg"
       tone="create"
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || !form.invoice_number.trim()}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || !form.invoice_number.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
@@ -117,7 +124,15 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Project
-            <div className="mt-1"><SearchableSelect value={form.account_id} onChange={(v) => set('account_id', v)} options={projectOptions} placeholder="Select project" searchPlaceholder="Search projects…" /></div>
+            <div className="mt-1"><SearchableSelect value={form.account_id} onChange={(v) => set('account_id', v)} options={projectOptions} placeholder="Select project" searchPlaceholder="Search projects…" disabled={Boolean(editing)} /></div>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
+            Invoice currency
+            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <option value="">Project billing currency{preview && !form.currency ? ` (${preview.currency})` : ''}</option>
+              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <span className="mt-0.5 block font-normal text-tertiary-400">Another currency is converted with the exchange rates set in Finance.</span>
           </label>
           <div className="sm:col-span-2"><PeriodPicker value={form.period} onChange={(p) => set('period', { period_month: p.period_month, period_year: p.period_year })} label="Billing month" /></div>
           <label className="block text-xs font-medium text-tertiary-600">
@@ -144,7 +159,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
 }
 
 /** Generated client invoices for a month, with download and status steps. */
-export function ClientInvoicesTable({ period, refreshKey = 0 }) {
+export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
@@ -184,6 +199,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0 }) {
       render: (r) => (
         <div className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(r)}><Printer className="h-3.5 w-3.5" /> Download</button>
+          {r.status === 'draft' && onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
           {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
         </div>

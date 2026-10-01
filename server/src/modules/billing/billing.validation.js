@@ -38,6 +38,8 @@ const listDailyRevenueQuerySchema = z.object({
 const INVOICE_NUMBER = z.string().trim().max(50).regex(/^[A-Za-z0-9][A-Za-z0-9\-_/. ]*$/, 'Use letters, digits, - _ / and .').optional().or(z.literal('').transform(() => undefined));
 const invoiceDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional().or(z.literal('').transform(() => undefined));
 
+const INVOICE_CURRENCY = z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional().or(z.literal('').transform(() => undefined));
+
 const createInvoiceSchema = z.object({
   client_account_id: z.string().uuid(),
   period_month: z.coerce.number().int().min(1).max(12),
@@ -45,10 +47,19 @@ const createInvoiceSchema = z.object({
   invoice_number: INVOICE_NUMBER,
   invoice_date: invoiceDate,
   notes: z.string().trim().max(1000).nullable().optional(),
+  currency: INVOICE_CURRENCY,
+});
+
+const updateInvoiceSchema = z.object({
+  invoice_number: INVOICE_NUMBER,
+  invoice_date: invoiceDate,
+  notes: z.string().trim().max(1000).nullable().optional(),
+  currency: INVOICE_CURRENCY,
 });
 
 const previewInvoiceQuerySchema = z.object({
   account_id: z.string().uuid(),
+  currency: INVOICE_CURRENCY,
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
@@ -251,6 +262,7 @@ module.exports = {
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
   createInvoiceSchema,
+  updateInvoiceSchema,
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
   vendorInvoicePeriodSchema,
