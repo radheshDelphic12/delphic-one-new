@@ -5,6 +5,8 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
+const adjustments = require('./adjustments.service');
+const charges = require('./charges.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
@@ -15,6 +17,11 @@ const {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  deleteInvoiceSchema,
+  contractChargeSchema,
+  updateContractChargeSchema,
+  billingAdjustmentSchema,
+  listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,
@@ -49,6 +56,8 @@ const ERRORS = {
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
+  percent_too_large: [422, 'A percentage cannot be above 100'],
+  reason_required: [422, 'Give a reason to change an invoice that has already been sent or paid'],
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
@@ -173,7 +182,7 @@ router.patch(
   '/vendor-invoices/:id',
   ...adminInOrg,
   asyncHandler(async (req, res) => {
-    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body));
+    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body), req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
   })
@@ -183,7 +192,7 @@ router.delete(
   '/vendor-invoices/:id',
   ...adminInOrg,
   asyncHandler(async (req, res) => {
-    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id);
+    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id, deleteInvoiceSchema.parse(req.body || {}).reason, req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
   })
@@ -266,6 +275,75 @@ router.get(
   })
 );
 
+// Contract charges - GST, TDS or any other line a contract's client invoices carry (percent or fixed,
+// added or deducted, on the final approved amount). Added / edited / deleted one by one, audited.
+router.get(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await charges.listCharges(req.user.org_id, req.params.id)))
+);
+
+router.post(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.createCharge(req.user.org_id, req.user, req.params.id, contractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.charge);
+  })
+);
+
+router.patch(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.updateCharge(req.user.org_id, req.user, req.params.id, updateContractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+router.delete(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.removeCharge(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// Billing adjustments — an admin's + / - tweak to a project's month (reason required, audited).
+router.get(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...period } = listBillingAdjustmentsQuerySchema.parse(req.query);
+    return ok(res, await adjustments.listAdjustments(req.user.org_id, account_id, period));
+  })
+);
+
+router.post(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...rest } = billingAdjustmentSchema.parse(req.body);
+    const result = await adjustments.createAdjustment(req.user.org_id, req.user, account_id, rest);
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+
+router.delete(
+  '/adjustments/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await adjustments.removeAdjustment(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
 // Client invoices — one builder (invoices.service) for every path: the
 // project's contract month (its locked version when billing is locked).
 router.post(
@@ -322,6 +400,17 @@ router.patch(
     const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.invoice);
+  })
+);
+
+router.delete(
+  '/invoices/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { deleted: true });
   })
 );
 

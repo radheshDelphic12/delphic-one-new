@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
+import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates, ExchangeRatesPanel } from './projectFilters.jsx';
@@ -103,6 +104,9 @@ function emptyForm(profile) {
     overtime_multiplier: profile.overtime_multiplier ?? 1,
     estimated_monthly_hours: profile.estimated_monthly_hours ?? '',
     minimum_monthly_hours: profile.minimum_monthly_hours ?? '',
+    client_billing_basis: profile.client_billing_basis || 'contract',
+    vendor_payout_basis: profile.vendor_payout_basis || 'approved_hours',
+    billable_day_hours: profile.billable_day_hours ?? 8,
     billing_type: profile.billing_type || '',
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
@@ -138,6 +142,9 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
       benchmark_hours: Number(form.benchmark_hours) || 160,
       overtime_billable: form.overtime_billable,
       overtime_multiplier: Number(form.overtime_multiplier) || 1,
+      client_billing_basis: form.client_billing_basis,
+      vendor_payout_basis: form.vendor_payout_basis,
+      billable_day_hours: Number(form.billable_day_hours) || 8,
     };
     // The client's hour estimate only applies to hourly billing; leave it alone otherwise.
     if (hourly) patch.estimated_monthly_hours = Number(form.estimated_monthly_hours) > 0 ? Number(form.estimated_monthly_hours) : null;
@@ -302,6 +309,29 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 <span className="mt-0.5 block font-normal text-tertiary-400">× the {monthly ? 'monthly rate ÷ benchmark hours' : 'hourly rate'}</span>
               </label>
             </div>
+            <div className="mt-3 grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3 sm:grid-cols-3">
+              <label className="block text-xs font-medium text-tertiary-600">
+                Client billing basis
+                <select value={form.client_billing_basis} onChange={(e) => set('client_billing_basis', e.target.value)} disabled={!monthly} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
+                  <option value="contract">Contract (full retainer)</option>
+                  <option value="approved_hours">Approved hours (per day)</option>
+                </select>
+                <span className="mt-0.5 block font-normal text-tertiary-400">Monthly rate only. Hourly always bills approved hours.</span>
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Vendor payout basis
+                <select value={form.vendor_payout_basis} onChange={(e) => set('vendor_payout_basis', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+                  <option value="approved_hours">Approved hours (locked days worked)</option>
+                  <option value="contract">Contract (all working days)</option>
+                </select>
+                <span className="mt-0.5 block font-normal text-tertiary-400">How contractors on this project are paid.</span>
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Hours in a full day
+                <input type="number" min="1" max="24" step="0.5" value={form.billable_day_hours} onChange={(e) => set('billable_day_hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                <span className="mt-0.5 block font-normal text-tertiary-400">Fewer approved hours count as a part-day.</span>
+              </label>
+            </div>
             <p className="mt-3 text-xs text-tertiary-500">
               {monthly
                 ? `Monthly: the rate covers a ${form.benchmark_hours || 160}-hour benchmark spread over the month's actual working days (Mon–Fri less the project calendar's holidays). Each working day earns its share in proportion to hours logged.`
@@ -311,6 +341,10 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
           </div>
           </fieldset>
         </form>
+
+        <div className="rounded-2xl border border-tertiary-100 p-4">
+          <ContractChargesSection accountId={project.id} currency={form.currency || project.currency || 'INR'} />
+        </div>
 
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 

@@ -159,3 +159,47 @@ payroll, analytics, allocations, projects). `erp-phase4-payroll` and
 paid September with employees whose joining date defaulted to "today", which
 the salary engine rightly excludes — their test memberships now join on
 2026-01-01. **Not yet done:** a click-through in the browser.
+
+## Update 2026-10-01: vendor payout by approved hours, billing basis, adjustments
+
+Source of truth is **approved timesheet hours**; admin can configure and tweak.
+
+- **Vendor payout** (`vendorPayment.engine.js`): per project `Account.vendor_payout_basis`.
+  `approved_hours` (default) pays each working day in the agreement for the approved hours logged on it,
+  `min(1, hours / billable_day_hours)` x `rate x share / working_days` (20 approved days of 22 = 20/22 of the rate).
+  `contract` keeps the old retainer behaviour (every working day). Pending / rejected entries block the lock under `approved_hours`.
+  Lines expose `payout_basis`, `payable_days`, `contract_working_days`.
+- **Client billing basis** (`billing.engine.js`): per project `Account.client_billing_basis`.
+  `contract` (default, unchanged) or `approved_hours` (monthly rate, each working day counted by approved hours).
+  Hourly rates always bill approved hours x rate. `billable_day_hours` (default 8) defines a full day.
+  Configured in Finance > Projects > project profile (`PATCH /billing/projects/:id`).
+- **Adjustments** (`BillingAdjustment`, `billing/adjustments.service.js`): admin + / - tweak per project and month,
+  reason mandatory, audited (`billing_adjustment_add|remove`). `lockedAmount(raw)` adds them, so locks, invoices
+  and Financials all follow the final amount; invoices list base and adjustments separately. A change on a locked month
+  flags it `change_detected` (source `billing_adjustment`). API: `GET/POST /billing/adjustments`, `DELETE /billing/adjustments/:id`.
+  UI: Live Analytics > Billing & Sales > "± Adjust".
+
+## Update 2026-10-01: contract charges (GST, TDS, other) on client invoices
+
+Each contract (project) can carry any number of **charges**, added, edited and deleted one by one
+(`ContractCharge`, `billing/charges.service.js`, admin only, audited as `contract_charge_add|edit|remove`).
+
+- `mode`: `percent` (value % of the month's final approved amount) or `fixed` (an amount in the contract's billing currency).
+- `effect`: `add` raises the payable total (GST, fees), `deduct` lowers it (TDS, credits).
+- Base = the **final approved amount**: approved timesheet hours (per the billing basis) + any admin adjustment
+  (`billingEngine.lockedAmount`). Charges never change the billing amount, locks or Financials - only what the client pays.
+- An invoice stores the lines it was generated with (`line_items.details.charges`, `subtotal`, `total_amount`);
+  `ClientInvoice.amount` stays the approved amount, `total_amount` is the payable total. Editing / deleting a charge reaches
+  new or refreshed draft invoices only. Another invoice currency converts fixed charges with the invoice's exchange rate.
+  An admin amount override on an invoice re-works the percentages on the new amount.
+- API: `GET|POST /billing/projects/:id/charges`, `PATCH|DELETE /billing/charges/:id`. UI: Finance > Projects > project profile >
+  "Invoice charges"; shown in the invoice preview, invoice table (total) and the printed invoice.
+- Migration `20261001130000_contract_charges`. Vendor invoices do not carry charges yet.
+
+## Update 2026-10-01: delete invoices at any status
+
+- `DELETE /billing/invoices/:id` (client) and `DELETE /billing/vendor-invoices/:id` (vendor), admin only.
+  A sent / paid client invoice needs a `reason` (422 without); a draft does not. Audited as `client_invoice_delete` /
+  `vendor_invoice_delete` with the removed invoice's snapshot. UI: **Delete** next to **Edit** in the invoice tables.
+- Time & Attendance timesheet records (IT Timesheet and Team timesheets non-IT, same view): Status, Edit and Delete now sit
+  before the long Description column, so they are not pushed off-screen. Admin edit / delete works on any status and locked days.

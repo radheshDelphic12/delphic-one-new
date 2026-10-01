@@ -210,7 +210,6 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
     { key: 'member', header: 'Employee', render: (row) => <span className="font-medium text-tertiary-900">{row.org_membership?.person?.name || '—'}</span> },
     { key: 'project', header: 'Project', render: (row) => row.account?.name || 'General' },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Description', render: (row) => <NoteText text={row.notes} className="text-tertiary-500" /> },
     {
       key: 'status',
       header: 'Status',
@@ -238,6 +237,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         </span>
       ),
     },
+    // Last: the long free-text column must never push Status / Edit / Delete off-screen.
+    { key: 'notes', header: 'Description', render: (row) => <NoteText text={row.notes} className="text-tertiary-500" /> },
   ];
 
   if (scope === 'it' && itDept === null) {

@@ -87,7 +87,10 @@ export function printClientInvoice(inv, orgName) {
     ${lines.length && d.billing_type === 'hourly' ? `<h2>Resources</h2><table><thead><tr><th>Resource</th><th class="r">Hours</th><th class="r">Overtime hrs</th><th class="r">Amount (${escapeHtml(inv.currency)})</th></tr></thead><tbody>
       ${lines.map((l) => `<tr><td>${escapeHtml(l.resource)}</td><td class="r">${escapeHtml(l.hours)}</td><td class="r">${escapeHtml(l.overtime_hours || '')}</td><td class="r">${escapeHtml(amountText(l.revenue, inv.currency))}</td></tr>`).join('')}
       </tbody></table>` : ''}
-    <table><tbody><tr class="total"><td>Total due</td><td class="r">${escapeHtml(amountText(inv.amount, inv.currency))}</td></tr></tbody></table>
+    <table><tbody>
+      ${(d.charges || []).length ? `<tr><td>Amount for the period</td><td class="r">${escapeHtml(amountText(inv.amount, inv.currency))}</td></tr>${d.charges.map((c) => `<tr><td>${escapeHtml(c.label)} (${escapeHtml(c.mode === 'percent' ? `${c.value}%` : amountText(c.value, inv.currency))}${c.effect === 'deduct' ? ', deducted' : ''})</td><td class="r">${escapeHtml(`${c.amount < 0 ? '− ' : ''}${amountText(Math.abs(c.amount), inv.currency)}`)}</td></tr>`).join('')}` : ''}
+      <tr class="total"><td>Total due</td><td class="r">${escapeHtml(amountText(inv.total_amount ?? inv.amount, inv.currency))}</td></tr>
+    </tbody></table>
     ${inv.notes ? `<p class="note">${escapeHtml(inv.notes)}</p>` : ''}`;
   return openPrint(`Invoice ${inv.invoice_number || ''} — ${p.name || ''}`, body);
 }
@@ -95,7 +98,9 @@ export function printClientInvoice(inv, orgName) {
 /** How one contractor's vendor cost was worked out. */
 export function vendorLineText(c, currency) {
   const parts = [`${amountText(c.monthly_vendor_rate, currency)}/month × ${c.allocation_percent}% allocation`];
-  if (c.contract_working_days !== null && c.contract_working_days !== undefined) parts.push(`× ${c.contract_working_days} ÷ ${c.working_days} working days`);
+  // Approved-hours basis: the payout counts the days actually worked (approved timesheet hours), not the contract days.
+  if (c.payout_basis === 'approved_hours' && c.payable_days !== null && c.payable_days !== undefined) parts.push(`× ${c.payable_days} approved days (of ${c.contract_working_days ?? c.working_days} contract days) ÷ ${c.working_days} working days`);
+  else if (c.contract_working_days !== null && c.contract_working_days !== undefined) parts.push(`× ${c.contract_working_days} ÷ ${c.working_days} working days`);
   parts.push(`= ${amountText(c.base_amount, currency)}`);
   if (c.overtime_amount) parts.push(`+ overtime ${c.overtime_hours}h ${amountText(c.overtime_amount, currency)}`);
   return parts.join(' ');

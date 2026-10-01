@@ -352,18 +352,63 @@ async function createVendorInvoice(orgId, actorUserId, accountId, body) {
   return { invoice: serializeInvoice(invoice) };
 }
 
-async function updateVendorInvoice(orgId, invoiceId, patch) {
+// Admin edit of a vendor invoice row: number, date, notes, amount, currency
+// (and the vendor). On a generated row an amount / currency change also
+// refreshes its INR figure and is flagged in details.manual_override. Audited.
+async function updateVendorInvoice(orgId, invoiceId, patch, actorUserId = null) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (patch.vendor_account_id && !(await findVendorAccount(orgId, patch.vendor_account_id))) return { error: 'vendor_not_found' };
-  const invoice = await prisma.projectVendorInvoice.update({ where: { id: invoiceId }, data: patch, include: INVOICE_INCLUDE });
+  const { invoice_date: date, ...rest } = patch;
+  const data = { ...rest, ...(date ? { invoice_date: new Date(date) } : {}) };
+  const moneyChanged = (data.amount !== undefined && Number(data.amount) !== Number(existing.amount)) || (data.currency && data.currency !== existing.currency);
+  if (moneyChanged && existing.details && !Array.isArray(existing.details)) {
+    const currency = data.currency || existing.currency;
+    const amount = data.amount !== undefined ? Number(data.amount) : Number(existing.amount);
+    const fx = await exchangeRates.inrRates(orgId);
+    const rate = fx.has(currency) ? fx.get(currency) : null;
+    data.details = {
+      ...existing.details,
+      exchange_rate: rate,
+      amount_inr: rate === null ? null : Math.round(amount * rate * 100) / 100,
+      manual_override: { original_amount: existing.details.manual_override?.original_amount ?? Number(existing.amount), original_currency: existing.details.manual_override?.original_currency ?? existing.currency, by: actorUserId, at: new Date().toISOString() },
+    };
+  }
+  const invoice = await prisma.projectVendorInvoice.update({ where: { id: invoiceId }, data, include: INVOICE_INCLUDE });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId,
+      actor_id: actorUserId,
+      action: 'vendor_invoice_edit',
+      entity_type: 'vendor_invoice',
+      entity_id: invoiceId,
+      reason: `Vendor invoice ${invoice.invoice_number || invoiceId} edited`,
+      snapshot: {
+        before: { invoice_number: existing.invoice_number, invoice_date: existing.invoice_date, notes: existing.notes, amount: Number(existing.amount), currency: existing.currency },
+        after: { invoice_number: invoice.invoice_number, invoice_date: invoice.invoice_date, notes: invoice.notes, amount: Number(invoice.amount), currency: invoice.currency },
+      },
+    },
+  });
   return { invoice: serializeInvoice(invoice) };
 }
 
-async function removeVendorInvoice(orgId, invoiceId) {
+async function removeVendorInvoice(orgId, invoiceId, reason = null, actorUserId = null) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   await prisma.projectVendorInvoice.delete({ where: { id: invoiceId } });
+  if (actorUserId) {
+    await prisma.auditLog.create({
+      data: {
+        org_id: orgId,
+        actor_id: actorUserId,
+        action: 'vendor_invoice_delete',
+        entity_type: 'vendor_invoice',
+        entity_id: invoiceId,
+        reason: (reason || '').trim() || `Vendor invoice ${existing.invoice_number || invoiceId} deleted`,
+        snapshot: { invoice_number: existing.invoice_number, amount: Number(existing.amount), currency: existing.currency, vendor_account_id: existing.vendor_account_id, account_id: existing.account_id, period_month: existing.period_month, period_year: existing.period_year },
+      },
+    });
+  }
   return { deleted: true };
 }
 

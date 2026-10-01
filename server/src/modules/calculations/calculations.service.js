@@ -61,6 +61,8 @@ const SOURCE_KINDS = {
   // Entries and overtime decisions: billing, and (since salary is approved
   // timesheet hours + approved OT) salary too.
   timesheet: ['billing', 'salary', 'salary_employee', 'resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
+  // An admin's + / - tweak to a project's month (or a change of its billing basis).
+  billing_adjustment: ['billing', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).
   allocation: ['resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
 };

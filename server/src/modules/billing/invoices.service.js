@@ -24,6 +24,7 @@ const prisma = require('../../config/db');
 const billingEngine = require('../calculations/engines/billing.engine');
 const vendorEngine = require('../calculations/engines/vendorPayment.engine');
 const exchangeRates = require('./exchangeRates.service');
+const chargesService = require('./charges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
 
@@ -73,6 +74,8 @@ async function convertToCurrency(orgId, details, lines, target) {
     rate: conv(details.rate),
     base_amount: conv(details.base_amount),
     overtime_amount: conv(details.overtime_amount),
+    adjustment_amount: conv(details.adjustment_amount),
+    adjustments: (details.adjustments || []).map((a) => ({ ...a, amount: conv(a.amount) })),
     amount: conv(details.amount),
     conversion: { from_currency: details.currency, from_rate: details.rate, from_amount: details.amount, exchange_rate: Math.round(factor * 1e6) / 1e6, inr_per_unit: { [details.currency]: fx.get(details.currency), [target]: fx.get(target) } },
   };
@@ -109,7 +112,12 @@ async function clientInvoiceSource(orgId, accountId, period, currency) {
   }));
   const converted = await convertToCurrency(orgId, billingEngine.invoiceDetails(raw), baseLines, currency);
   if (converted.error) return converted;
-  const { details, lines } = converted;
+  const { lines } = converted;
+  // The contract's charges (GST, TDS, ...) go on top of the final approved amount (subtotal);
+  // fixed ones are in the contract currency, so they follow the conversion factor.
+  const contractCharges = await prisma.contractCharge.findMany({ where: { org_id: orgId, account_id: accountId }, orderBy: { created_at: 'asc' } });
+  const worked = chargesService.applyCharges(converted.details.amount, contractCharges, converted.details.conversion ? converted.details.conversion.exchange_rate : 1);
+  const details = { ...converted.details, subtotal: converted.details.amount, charges: worked.lines, total_amount: worked.total };
   return {
     account,
     // Identity as the project is NOW (its own name and linked client).
@@ -135,6 +143,8 @@ async function previewClientInvoice(orgId, accountId, period, currency) {
       details: src.details,
       lines: src.lines,
       amount: src.details.amount,
+      total_amount: src.details.total_amount,
+      charges: src.details.charges,
       currency: src.details.currency,
       source: src.source,
       calculation_version: src.version?.version || null,
@@ -204,17 +214,25 @@ function serializeClientInvoice(row) {
     invoice_date: row.invoice_date ? ymd(row.invoice_date) : null,
     project,
     details: items?.details || null,
+    // What the client pays: the final approved amount plus / minus the contract's charges.
+    total_amount: items?.details?.total_amount !== undefined ? items.details.total_amount : Number(row.amount),
   };
 }
 
-// Edits an invoice that is still a draft. Number, date and notes are updated in
-// place; a different currency re-expresses the amount from the project's month.
-async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency }) {
+// Admin edit of a client invoice. Number, date and notes update in place; a
+// different currency re-expresses the amount from the project's month (drafts
+// only); `amount` overrides the calculated figure and is recorded in
+// line_items.manual_override. A sent / paid invoice can still be corrected, but
+// only with a `reason`, and every edit is audited with before / after.
+async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason }) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
-  if (invoice.status !== 'draft') return { error: 'invoice_sent' };
+  const draft = invoice.status === 'draft';
+  const why = (reason || '').trim();
+  if (!draft && !why) return { error: 'reason_required' };
   if (currency && currency !== invoice.currency) {
-    return generateClientInvoice(orgId, user, {
+    if (!draft) return { error: 'invoice_sent' };
+    const regenerated = await generateClientInvoice(orgId, user, {
       account_id: invoice.client_account_id,
       period_month: invoice.period_month,
       period_year: invoice.period_year,
@@ -223,25 +241,68 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
       notes,
       currency,
     });
+    if (regenerated.error || amount === undefined) return regenerated;
+    return updateClientInvoice(orgId, user, invoiceId, { amount, reason: why });
   }
   const number = (invoice_number || '').trim();
   if (number && number !== invoice.invoice_number) {
     const clash = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, invoice_number: number, NOT: { id: invoice.id } }, select: { id: true } });
     if (clash) return { error: 'invoice_number_taken' };
   }
-  const updated = await prisma.clientInvoice.update({
-    where: { id: invoice.id },
-    data: {
-      ...(number ? { invoice_number: number } : {}),
-      ...(invoice_date ? { invoice_date: new Date(invoice_date) } : {}),
-      ...(notes !== undefined ? { notes: notes || null } : {}),
-    },
-    include: { client_account: CLIENT_INVOICE_ACCOUNT },
-  });
+  const data = {
+    ...(number ? { invoice_number: number } : {}),
+    ...(invoice_date ? { invoice_date: new Date(invoice_date) } : {}),
+    ...(notes !== undefined ? { notes: notes || null } : {}),
+  };
+  const items = invoice.line_items && !Array.isArray(invoice.line_items) ? invoice.line_items : {};
+  if (amount !== undefined && Number(amount) !== Number(invoice.amount)) {
+    const original = items.manual_override?.original_amount ?? Number(invoice.amount);
+    data.amount = amount;
+    data.line_items = {
+      ...items,
+      details: chargesService.recomputeDetails(items.details || {}, amount),
+      manual_override: { original_amount: original, amount, reason: why || null, by: user.id, at: new Date().toISOString() },
+    };
+  }
+  const updated = await prisma.clientInvoice.update({ where: { id: invoice.id }, data, include: { client_account: CLIENT_INVOICE_ACCOUNT } });
   await prisma.auditLog.create({
-    data: { org_id: orgId, actor_id: user.id, action: 'client_invoice_edit', entity_type: 'client_invoice', entity_id: invoice.id, reason: `Invoice ${updated.invoice_number} edited`, snapshot: { invoice_number: updated.invoice_number, invoice_date: updated.invoice_date, notes: updated.notes } },
+    data: {
+      org_id: orgId,
+      actor_id: user.id,
+      action: 'client_invoice_edit',
+      entity_type: 'client_invoice',
+      entity_id: invoice.id,
+      reason: why || `Invoice ${updated.invoice_number} edited`,
+      snapshot: {
+        status: invoice.status,
+        before: { invoice_number: invoice.invoice_number, invoice_date: invoice.invoice_date, notes: invoice.notes, amount: Number(invoice.amount) },
+        after: { invoice_number: updated.invoice_number, invoice_date: updated.invoice_date, notes: updated.notes, amount: Number(updated.amount) },
+      },
+    },
   });
   return { invoice: serializeClientInvoice(updated) };
+}
+
+// Admin delete of a client invoice, any status. A sent / paid invoice needs a
+// `reason` (like editing one); the deletion is audited with what was removed.
+async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
+  if (!invoice) return { error: 'not_found' };
+  const why = (reason || '').trim();
+  if (invoice.status !== 'draft' && !why) return { error: 'reason_required' };
+  await prisma.clientInvoice.delete({ where: { id: invoice.id } });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId,
+      actor_id: user.id,
+      action: 'client_invoice_delete',
+      entity_type: 'client_invoice',
+      entity_id: invoice.id,
+      reason: why || `Draft invoice ${invoice.invoice_number || ''} deleted`,
+      snapshot: { status: invoice.status, invoice_number: invoice.invoice_number, amount: Number(invoice.amount), currency: invoice.currency, client_account_id: invoice.client_account_id, period_month: invoice.period_month, period_year: invoice.period_year, line_items: invoice.line_items },
+    },
+  });
+  return { deleted: true };
 }
 
 async function listClientInvoices(orgId, { client_account_id, status, period_month, period_year } = {}) {
@@ -284,6 +345,8 @@ async function vendorInvoiceSource(orgId, vendorAccountId, period) {
       allocation_percent: l.allocation_percent,
       working_days: l.working_days,
       contract_working_days: l.contract_working_days ?? null,
+      payout_basis: l.payout_basis ?? null,
+      payable_days: l.payable_days ?? null,
       approved_hours: l.approved_hours,
       overtime_hours: l.overtime_hours,
       overtime_billable: l.overtime_billable ?? null,
@@ -387,6 +450,7 @@ module.exports = {
   previewClientInvoice,
   generateClientInvoice,
   updateClientInvoice,
+  deleteClientInvoice,
   listClientInvoices,
   getClientInvoice,
   serializeClientInvoice,

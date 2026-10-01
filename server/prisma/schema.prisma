@@ -455,6 +455,8 @@ model User {
   billing_rates_created           BillingRate[]                   @relation("BillingRateCreatedBy")
   project_vendor_invoices_created ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceCreatedBy")
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
+  billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
+  contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
   expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
   vendor_payments_created         VendorPayment[]                 @relation("VendorPaymentCreatedBy")
@@ -1208,6 +1210,54 @@ model DailyProjectRevenue {
 // One per (client account, period) — generated from that period's
 // DailyProjectRevenue rows. draft -> sent -> paid, forward-only; no
 // void/backward move yet (documented gap, same posture as PayrollRun).
+// Admin tweak (+ / -) to a project's client billing for a month. The approved
+// timesheet hours stay the source of truth; adjustments are listed separately,
+// carry a reason, and are added to the month's final billable amount (in the
+// project's billing currency). Rows are never edited silently - add, or delete
+// with the audit trail.
+model BillingAdjustment {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id])
+  account_id   String   @db.Uuid
+  account      Account  @relation(fields: [account_id], references: [id])
+  period_month Int
+  period_year  Int
+  amount       Decimal  @db.Decimal(14, 2)
+  reason       String
+  created_by   String   @db.Uuid
+  creator      User     @relation("BillingAdjustmentCreatedBy", fields: [created_by], references: [id])
+  created_at   DateTime @default(now())
+
+  @@index([org_id, account_id, period_year, period_month])
+  @@map("billing_adjustments")
+}
+
+// Extra lines on a contract's (project's) client invoices - GST, TDS or anything
+// else. Each is added or deleted on its own and is worked out on the month's
+// FINAL approved billing amount (approved timesheet hours + any admin adjustment):
+//   mode  percent -> value % of that amount;  fixed -> value in the contract's billing currency
+//   effect add    -> raises the payable total (GST, fees);  deduct -> lowers it (TDS, credits)
+// An invoice stores the lines it was generated with; later changes only reach new / refreshed drafts.
+model ContractCharge {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id])
+  account_id String   @db.Uuid
+  account    Account  @relation(fields: [account_id], references: [id])
+  label      String
+  mode       String   @default("percent")
+  value      Decimal  @db.Decimal(14, 4)
+  effect     String   @default("add")
+  created_by String   @db.Uuid
+  creator    User     @relation("ContractChargeCreatedBy", fields: [created_by], references: [id])
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([org_id, account_id])
+  @@map("contract_charges")
+}
+
 model ClientInvoice {
   id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id                 String              @db.Uuid
@@ -1660,6 +1710,8 @@ model Org {
   billing_rates          BillingRate[]
   daily_project_revenues DailyProjectRevenue[]
   client_invoices        ClientInvoice[]
+  billing_adjustments    BillingAdjustment[]
+  contract_charges       ContractCharge[]
   group_billing_charges  GroupBillingCharge[]
 
   // Multi-company ERP (Phase 6).
@@ -1892,6 +1944,20 @@ model Account {
   // Hourly contracts: the minimum hours a month the client committed to.
   // Months below it are flagged (shortfall) — billing itself is unchanged.
   minimum_monthly_hours   Decimal?               @db.Decimal(7, 2)
+  // How the client month is billed on a MONTHLY rate:
+  //   contract       - rate x contract working days / working days (the retainer,
+  //                    never scaled by hours - the original behaviour);
+  //   approved_hours - the same share, but each working day counts only for the
+  //                    approved timesheet hours logged on it (day = billable_day_hours).
+  // Hourly rates always bill approved hours x rate.
+  client_billing_basis    String                 @default("contract")
+  // How a contractor's vendor payout is worked out for this project (same two
+  // options). Default approved_hours: pay for the locked, approved days actually worked.
+  vendor_payout_basis     String                 @default("approved_hours")
+  // Hours that make a full billable / payable day under approved_hours.
+  billable_day_hours      Decimal                @default(8) @db.Decimal(4, 2)
+  billing_adjustments     BillingAdjustment[]
+  contract_charges        ContractCharge[]
 
   owner_id           String    @db.Uuid
   owner              User      @relation("AccountOwner", fields: [owner_id], references: [id])
