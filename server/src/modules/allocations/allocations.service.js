@@ -43,6 +43,7 @@ function serializeSpan(span, today = todayIst()) {
   return {
     ...span,
     allocation_percent: span.allocation_percent !== null && span.allocation_percent !== undefined ? Number(span.allocation_percent) : null,
+    billable_hours_per_day: span.billable_hours_per_day !== null && span.billable_hours_per_day !== undefined ? Number(span.billable_hours_per_day) : 8,
     cost_rate_per_hr: span.cost_rate_per_hr !== null && span.cost_rate_per_hr !== undefined ? Number(span.cost_rate_per_hr) : null,
     start_date: ymdOrNull(span.start_date),
     end_date: ymdOrNull(span.end_date),
@@ -68,6 +69,7 @@ async function flagAllocationChange(orgId, span, { from, to, userId, description
 
 function spanValues(span) {
   return {
+    billable_hours_per_day: span.billable_hours_per_day !== null && span.billable_hours_per_day !== undefined ? Number(span.billable_hours_per_day) : 8,
     allocation_percent: span.allocation_percent !== null && span.allocation_percent !== undefined ? Number(span.allocation_percent) : null,
     cost_rate_per_hr: span.cost_rate_per_hr !== null && span.cost_rate_per_hr !== undefined ? Number(span.cost_rate_per_hr) : null,
     start_date: ymdOrNull(span.start_date),
@@ -96,7 +98,7 @@ async function loadRefs(orgId, accountId, membershipId) {
  *    the current span ends the day before, a new one starts on it (history kept).
  *  - A span in force, no `effective_date` → a correction of that span in place.
  */
-async function assign(orgId, userId, { account_id, org_membership_id, cost_rate_per_hr, allocation_percent, start_date, end_date, effective_date }) {
+async function assign(orgId, userId, { account_id, org_membership_id, cost_rate_per_hr, allocation_percent, billable_hours_per_day, start_date, end_date, effective_date }) {
   const refs = await loadRefs(orgId, account_id, org_membership_id);
   if (refs.error) return refs;
   const resource_type = refs.membership.worker_type === 'contractor' ? 'contractor' : 'company_employee';
@@ -110,6 +112,7 @@ async function assign(orgId, userId, { account_id, org_membership_id, cost_rate_
     // Effective-dated change: end the current span, open a new one.
     const values = {
       allocation_percent: allocation_percent !== undefined ? allocation_percent : current.allocation_percent,
+      billable_hours_per_day: billable_hours_per_day !== undefined ? billable_hours_per_day : current.billable_hours_per_day,
       cost_rate_per_hr: cost_rate_per_hr !== undefined ? cost_rate_per_hr : current.cost_rate_per_hr,
     };
     const newEnd = end_date !== undefined ? end_date : current.end_date;
@@ -139,6 +142,7 @@ async function assign(orgId, userId, { account_id, org_membership_id, cost_rate_
     const data = { resource_type };
     if (cost_rate_per_hr !== undefined) data.cost_rate_per_hr = cost_rate_per_hr;
     if (allocation_percent !== undefined) data.allocation_percent = allocation_percent;
+    if (billable_hours_per_day !== undefined) data.billable_hours_per_day = billable_hours_per_day;
     if (start_date !== undefined) data.start_date = start_date;
     if (end_date !== undefined) data.end_date = end_date;
     const next = { ...current, ...data };
@@ -162,7 +166,7 @@ async function assign(orgId, userId, { account_id, org_membership_id, cost_rate_
   if (candidate.start_date && candidate.end_date && A.toDate(candidate.end_date) < A.toDate(candidate.start_date)) return { error: 'end_before_start' };
   if (clashes(spans, candidate)) return { error: 'overlapping_allocation' };
   const assignment = await prisma.projectMemberAssignment.create({
-    data: { org_id: orgId, account_id, org_membership_id, resource_type, cost_rate_per_hr, allocation_percent, ...candidate, created_by: userId },
+    data: { org_id: orgId, account_id, org_membership_id, resource_type, cost_rate_per_hr, allocation_percent, ...(billable_hours_per_day !== undefined ? { billable_hours_per_day } : {}), ...candidate, created_by: userId },
     include: SPAN_INCLUDE,
   });
   await flagAllocationChange(orgId, assignment, {

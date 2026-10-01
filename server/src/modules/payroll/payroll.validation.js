@@ -42,6 +42,14 @@ const attendanceSalaryQuerySchema = payrollFiltersSchema.extend({
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
 
+// Admin: switch some people (and / or the whole IT department) to a pay basis - reason required.
+const setPayBasisSchema = z.object({
+  pay_basis: z.enum(['timesheet', 'attendance']),
+  org_membership_ids: z.array(z.string().uuid()).max(500).default([]),
+  it_department: z.boolean().default(false),
+  reason: z.string().trim().min(3).max(500),
+});
+
 const createRunSchema = z.object({
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
@@ -62,6 +70,7 @@ module.exports = {
   listSalaryStructuresQuerySchema,
   payrollFiltersSchema,
   attendanceSalaryQuerySchema,
+  setPayBasisSchema,
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,

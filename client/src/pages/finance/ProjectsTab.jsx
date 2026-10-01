@@ -329,7 +329,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
               <label className="block text-xs font-medium text-tertiary-600">
                 Hours in a full day
                 <input type="number" min="1" max="24" step="0.5" value={form.billable_day_hours} onChange={(e) => set('billable_day_hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
-                <span className="mt-0.5 block font-normal text-tertiary-400">Fewer approved hours count as a part-day.</span>
+                <span className="mt-0.5 block font-normal text-tertiary-400">Fewer approved hours count as a part-day (client billing). A vendor resource&apos;s payout uses their own Billable hrs/day.</span>
               </label>
             </div>
             <p className="mt-3 text-xs text-tertiary-500">

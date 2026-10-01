@@ -98,6 +98,12 @@ const decideOvertimeSchema = z
 
 // Sunday -> Saturday week containing `date` (default today); managers/admins
 // may pass someone else's org_membership_id.
+// The project's day (client / project timesheet): capacity, hours already logged, what is left.
+const projectDayQuerySchema = z.object({
+  account_id: z.string().uuid(),
+  date: requiredDate,
+});
+
 const weekQuerySchema = z.object({
   date: optionalDate,
   org_membership_id: z.string().uuid().optional(),
@@ -111,6 +117,36 @@ const hoursQuerySchema = z.object({
 }).refine((v) => v.to >= v.from && (v.to - v.from) / 86400000 <= 62, { message: 'Pick a range of up to 62 days', path: ['to'] });
 
 const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+
+// Overtime tickets (attendance-paid people): raised by the employee, decided by the manager / admin.
+const createOvertimeTicketSchema = z.object({
+  date: requiredDate,
+  hours: z.coerce.number().min(0.25).max(12),
+  account_id: z.string().uuid().nullable().optional(),
+  reason: z.string().trim().min(3, 'Say why the overtime was needed').max(500),
+});
+
+const decideOvertimeTicketSchema = z
+  .object({ status: z.enum(['approved', 'rejected']), reason: z.string().trim().max(500).optional() })
+  .refine((v) => v.status !== 'rejected' || Boolean(v.reason), { message: 'A reason is required when rejecting', path: ['reason'] });
+
+const listOvertimeTicketsQuerySchema = z.object({
+  scope: z.enum(['mine', 'to_decide', 'all']).default('mine'),
+  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+  from: optionalDate,
+  to: optionalDate,
+});
+
+const adminUpdateOvertimeTicketSchema = z
+  .object({
+    hours: z.coerce.number().min(0.25).max(12).optional(),
+    date: requiredDate.optional(),
+    account_id: z.string().uuid().nullable().optional(),
+    ticket_reason: z.string().trim().min(3).max(500).optional(),
+    status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .refine((v) => Object.keys(v).some((k) => k !== 'reason' && v[k] !== undefined), { message: 'Provide at least one field to change' });
 
 // A rejection must always tell the employee why.
 const decideEntrySchema = z
@@ -183,12 +219,17 @@ const createRegularizationRequestSchema = z.object({
 });
 
 module.exports = {
+  projectDayQuerySchema,
   createEntrySchema,
   updateEntrySchema,
   decideEntrySchema,
   lockDaySchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  createOvertimeTicketSchema,
+  decideOvertimeTicketSchema,
+  listOvertimeTicketsQuerySchema,
+  adminUpdateOvertimeTicketSchema,
   adminCreateEntrySchema,
   importEntriesSchema,
   bulkApproveSchema,

@@ -136,7 +136,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const { engine, supported, note } = engineFor(account.service_category);
   const project = describeProject(account);
 
-  const [rates, rawEntries, cal, adjustmentRows] = await Promise.all([
+  const [rates, rawEntries, cal, adjustmentRows, otTicketRows] = await Promise.all([
     prisma.billingRate.findMany({
       where: { org_id: orgId, account_id: account.id, requirement_id: null },
       select: { id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
@@ -163,7 +163,19 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
       orderBy: { created_at: 'asc' },
       select: { id: true, amount: true, reason: true, created_at: true, creator: { select: { id: true, name: true } } },
     }),
+    // Overtime tickets on this project: approved ones are billed as overtime (where the project bills it), pending ones hold the month.
+    prisma.overtimeTicket.findMany({
+      where: { org_id: orgId, account_id: account.id, status: { in: ['approved', 'pending'] }, date: { gte: start, lte: end } },
+      select: { org_membership_id: true, date: true, hours: true, status: true, org_membership: { select: { worker_type: true, person: { select: { name: true } } } } },
+    }),
   ]);
+  const ticketsByDay = new Map();
+  for (const t of otTicketRows) {
+    const key = ymd(t.date);
+    if (!ticketsByDay.has(key)) ticketsByDay.set(key, []);
+    ticketsByDay.get(key).push(t);
+  }
+  const pendingTickets = otTicketRows.filter((t) => t.status === 'pending').length;
   const entries = markResolved(rawEntries);
   const monthRate = rateOn(rates, end);
   const benchmark = account.benchmark_hours || DEFAULT_BENCHMARK_HOURS;
@@ -219,6 +231,14 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
         else { r.regular_hours += hours; r.overtime_hours += ot; }
       } else if (e.status === 'submitted') r.pending_hours += hours + ot;
       else if (!e.resolved) r.rejected_hours += hours + ot;
+    }
+    // Approved overtime tickets of the day count as overtime hours of that person on this project.
+    for (const t of ticketsByDay.get(key) || []) {
+      if (t.status !== 'approved') continue;
+      if (!perResource.has(t.org_membership_id)) {
+        perResource.set(t.org_membership_id, { org_membership_id: t.org_membership_id, name: t.org_membership.person.name, worker_type: t.org_membership.worker_type, regular_hours: 0, overtime_hours: 0, pending_hours: 0, rejected_hours: 0, base_amount: 0, overtime_amount: 0 });
+      }
+      perResource.get(t.org_membership_id).overtime_hours += Number(t.hours);
     }
     const resources = [...perResource.values()];
     const regular = resources.reduce((s, r) => s + r.regular_hours, 0);
@@ -296,6 +316,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   if (hoursMatter && pending) blockers.push({ code: 'pending_entries', count: pending, message: `${pending} timesheet ${pending === 1 ? 'entry is' : 'entries are'} still pending approval.` });
   if (hoursMatter && rejected) blockers.push({ code: 'rejected_entries', count: rejected, message: `${rejected} rejected ${rejected === 1 ? 'entry has' : 'entries have'} not been corrected and re-submitted.` });
   if (today <= lastBillableDay && today >= start) blockers.push({ code: 'period_open', message: 'The billing period has not ended yet.' });
+  if (overtimeEnabled && pendingTickets) blockers.push({ code: 'pending_overtime_tickets', count: pendingTickets, message: `${pendingTickets} overtime ticket${pendingTickets === 1 ? ' is' : 's are'} still waiting for the manager's approval.` });
   const warnings = hoursMatter && missing ? [{ code: 'missing_days', count: missing, message: `${missing} working ${missing === 1 ? 'day has' : 'days have'} no timesheet entry.` }] : [];
 
   return {
