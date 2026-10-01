@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const { pickCalendarId } = require('../calendars/calendars.service');
+const workHours = require('../timesheets/workHours.service');
 
 const DEFAULT_LEAVE_TYPES = [
   { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
@@ -309,7 +310,7 @@ async function findOverlap(orgId, orgMembershipId, candidate) {
 // Paid leave can't be booked past what's left: the entitlement minus days
 // already taken or booked (approved) minus days already requested (pending) —
 // all live, see summariseUsage. Unpaid types and types with no quota are uncapped.
-async function remainingPaidDays(orgId, orgMembershipId, leaveType, year) {
+async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, excludeRequestId = null) {
   const range = yearRange(year);
   const [balance, requests] = await Promise.all([
     prisma.leaveBalance.findUnique({
@@ -323,6 +324,7 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year) {
         status: { in: ['approved', 'pending'] },
         from_date: { lte: range.lte },
         to_date: { gte: range.gte },
+        ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
       },
     }),
   ]);
@@ -331,6 +333,77 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year) {
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst(), countDays });
   return entitlement - used - upcoming - pending;
+}
+
+// Timesheet / leave conflicts, checked when leave is applied for AND again when
+// it is approved (a timesheet may have been logged in between). Only working
+// days of the employee's company calendar count - the same days leave costs.
+//   full day  -> any logged (submitted / approved) hours on the date conflict;
+//   half day  -> the date's logged hours must fit what the leave leaves free
+//                (the standard day minus half, minus any other approved half).
+// Nothing is ever overwritten; the caller gets the date and hours to show.
+async function findTimesheetConflict(orgId, orgMembershipId, { from_date, to_date, is_half_day }, { excludeRequestId } = {}) {
+  const entries = await prisma.timesheetEntry.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from_date, lte: to_date }, status: { in: ['submitted', 'approved'] } },
+    select: { date: true, hours: true, overtime_hours: true },
+  });
+  if (!entries.length) return null;
+  const [shift, cal] = await Promise.all([
+    workHours.membershipShift(orgMembershipId),
+    workHours.companyCalendarDays(orgId, orgMembershipId, from_date, to_date),
+  ]);
+  const byDate = new Map();
+  for (const e of entries) {
+    const key = ymd(e.date);
+    byDate.set(key, (byDate.get(key) || 0) + Number(e.hours) + Number(e.overtime_hours || 0));
+  }
+  let otherHalves = [];
+  if (is_half_day) {
+    otherHalves = await prisma.leaveRequest.findMany({
+      where: {
+        org_id: orgId,
+        org_membership_id: orgMembershipId,
+        status: 'approved',
+        is_half_day: true,
+        from_date: { lte: to_date },
+        to_date: { gte: from_date },
+        ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
+      },
+      select: { from_date: true },
+    });
+  }
+  for (const key of [...byDate.keys()].sort()) {
+    const logged = Math.round(byDate.get(key) * 100) / 100;
+    if (logged <= 0) continue;
+    const date = new Date(`${key}T00:00:00.000Z`);
+    if (workHours.dayInfo(date, cal, shift).day_type !== 'working') continue;
+    if (!is_half_day) return { error: 'timesheet_conflict', date: key, hours: logged };
+    const halvesToday = otherHalves.filter((r) => ymd(r.from_date) === key).length;
+    const max = Math.max(0, Math.round((shift - (shift / 2) * (1 + halvesToday)) * 100) / 100);
+    if (logged > max) return { error: 'half_day_hours_exceeded', date: key, hours: logged, max };
+  }
+  return null;
+}
+
+function conflictMessage(result) {
+  if (result.error === 'timesheet_conflict') {
+    return `A timesheet with ${result.hours}h already exists on ${result.date}, so a full-day leave can't cover it. Delete or reduce that timesheet first (or use a half-day leave).`;
+  }
+  return `${result.hours}h are already logged on ${result.date}, but a half-day leave leaves only ${result.max}h for work that day. Reduce the timesheet to ${result.max}h or less first.`;
+}
+
+// Hours a day still has free for work after approved HALF-day leave (a second
+// half-day, AM + PM, leaves none). null = no half-day leave applies that date.
+async function workCapacityFor(orgId, orgMembershipId, date) {
+  const halves = await prisma.leaveRequest.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', is_half_day: true, from_date: { lte: date }, to_date: { gte: date } },
+    include: { leave_type: { select: { name: true } } },
+  });
+  if (!halves.length) return null;
+  const [shift, cal] = await Promise.all([workHours.membershipShift(orgMembershipId), workHours.companyCalendarDays(orgId, orgMembershipId, date, date)]);
+  if (workHours.dayInfo(date, cal, shift).day_type !== 'working') return null;
+  const leaveHours = Math.min(shift, (shift / 2) * halves.length);
+  return { capacity: Math.round((shift - leaveHours) * 100) / 100, leave_hours: leaveHours, leave_type: halves[0].leave_type.name };
 }
 
 async function createRequest(
@@ -343,6 +416,9 @@ async function createRequest(
 
   const overlap = await findOverlap(orgId, orgMembershipId, { from_date, to_date, is_half_day, half_day_session });
   if (overlap) return { error: 'overlaps_existing' };
+
+  const conflict = await findTimesheetConflict(orgId, orgMembershipId, { from_date, to_date, is_half_day });
+  if (conflict) return conflict;
 
   // Someone who was present on a date can't take a full day's leave for it
   // (a half day is still allowed — they worked the other half).
@@ -384,6 +460,28 @@ async function createRequest(
     include: { leave_type: true },
   });
   return { request: { ...request, days: needed } };
+}
+
+// Admin applies leave for an employee, or for themselves (org_membership_id
+// omitted). Same rules and the same Pending -> approver flow as a self request;
+// an admin IS the approver in this system, so `auto_approve` may approve it in
+// the same step - through decide(), so the approval-time checks still run.
+async function createRequestForEmployee(orgId, actor, { org_membership_id, auto_approve = false, ...body }) {
+  const targetId = org_membership_id || actor.org_membership_id;
+  const target = await prisma.orgMembership.findFirst({ where: { id: targetId, org_id: orgId }, select: { id: true, left_at: true } });
+  if (!target) return { error: 'membership_not_found' };
+  if (target.left_at) return { error: 'membership_left' };
+
+  const result = await createRequest(orgId, targetId, body);
+  if (result.error || !auto_approve) return result;
+
+  const decided = await decide(orgId, result.request.id, actor.org_membership_id, { status: 'approved', reason: 'Applied and approved by admin' }, actor.user_id);
+  if (decided.error) {
+    // Nothing half-applied: the pending request is withdrawn and the reason returned.
+    await prisma.leaveRequest.update({ where: { id: result.request.id }, data: { status: 'cancelled', decision_reason: 'Auto-approval failed' } });
+    return decided;
+  }
+  return { request: { ...result.request, ...decided.request } };
 }
 
 async function listMine(orgId, orgMembershipId, { status, page, limit }) {
@@ -437,6 +535,20 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
   const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'pending') return { error: 'not_pending' };
+
+  // Approval is what makes leave real, so it re-checks what apply checked: a
+  // timesheet logged since then, and (paid leave) the balance still covering it.
+  if (status === 'approved') {
+    const conflict = await findTimesheetConflict(orgId, existing.org_membership_id, existing, { excludeRequestId: existing.id });
+    if (conflict) return conflict;
+    const leaveType = await prisma.leaveType.findFirst({ where: { id: existing.leave_type_id, org_id: orgId } });
+    if (leaveType?.paid) {
+      const countDays = await leaveDayCounter(orgId, existing.org_membership_id, existing.from_date, existing.to_date);
+      const needed = requestedDays(existing, countDays);
+      const remaining = await remainingPaidDays(orgId, existing.org_membership_id, leaveType, existing.from_date.getUTCFullYear(), existing.id);
+      if (needed > remaining) return { error: 'insufficient_balance', remaining, needed };
+    }
+  }
 
   const request = await prisma.leaveRequest.update({
     where: { id: requestId },
@@ -513,7 +625,13 @@ async function leaveDayFor(orgId, orgMembershipId, date) {
     },
     include: { leave_type: { select: { name: true } } },
   });
-  return leave ? { leave_type: leave.leave_type.name, from_date: leave.from_date, to_date: leave.to_date } : null;
+  if (leave) return { leave_type: leave.leave_type.name, from_date: leave.from_date, to_date: leave.to_date };
+  // Two approved half days on one date (AM + PM) leave no time to work either.
+  const halves = await prisma.leaveRequest.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', is_half_day: true, from_date: { lte: date }, to_date: { gte: date } },
+    include: { leave_type: { select: { name: true } } },
+  });
+  return halves.length >= 2 ? { leave_type: halves[0].leave_type.name, from_date: halves[0].from_date, to_date: halves[0].to_date } : null;
 }
 
 const LEAVE_DAY_MESSAGE = (leave) =>
@@ -526,6 +644,10 @@ module.exports = {
   setEntitlement,
   createType,
   createRequest,
+  createRequestForEmployee,
+  findTimesheetConflict,
+  conflictMessage,
+  workCapacityFor,
   listMine,
   listTeam,
   decide,

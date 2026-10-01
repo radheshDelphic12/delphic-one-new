@@ -2,6 +2,11 @@
 // (Billing & Sales per project, Salary, Resource Revenue, Vendor Payments,
 // Financials) — instead of a separate freeze in each module.
 //
+// Per-record locks (Live Analytics, 2026-10-01): billing per project,
+// salary per employee (salary_employee), vendor billing per vendor
+// (vendor_bill) and each expense record (expense: claim:<id> / charge:<id>).
+// Financials is built from these locked records only.
+//
 //   draft ──review──▶ reviewed ──lock──▶ locked ──(source data changes)──▶ change_detected
 //     ▲                                   │  ▲                                  │
 //     └────────────── reopen ◀────────────┘  └──────── recalculate ◀────────────┘
@@ -26,6 +31,7 @@ const salaryEngine = require('./engines/salary.engine');
 const vendorEngine = require('./engines/vendorPayment.engine');
 const resourceEngine = require('./engines/resourceRevenue.engine');
 const financialsEngine = require('./engines/financials.engine');
+const exchangeRates = require('../billing/exchangeRates.service');
 const { round2, monthBounds, todayIst, ymd } = require('./period');
 
 const KINDS = {
@@ -34,7 +40,15 @@ const KINDS = {
   resource_revenue: { label: 'Resource Revenue', scoped: false },
   vendor_payment: { label: 'Vendor Payments', scoped: false },
   financials: { label: 'Financials', scoped: false },
+  // Per-record locks — scope_key is the employee's membership id, the vendor
+  // account id, or "claim:<id>" / "charge:<id>" for an expense record.
+  salary_employee: { label: 'Salary', scoped: true },
+  vendor_bill: { label: 'Vendor billing', scoped: true },
+  expense: { label: 'Expense', scoped: true },
 };
+
+// The kinds Live Analytics locks record by record (and Financials sums).
+const RECORD_KINDS = ['billing', 'salary_employee', 'expense', 'vendor_bill'];
 
 // Which locked calculations a change to each kind of operational data can
 // affect. Financials aggregates everything, so it is affected by all of them.
@@ -42,13 +56,13 @@ const SOURCE_KINDS = {
   // Check-in / check-out is presence only — pay comes from approved
   // timesheet hours — so an attendance change never moves a locked figure.
   attendance: [],
-  leave: ['salary', 'resource_revenue', 'financials'],
-  salary_structure: ['salary', 'resource_revenue', 'financials'],
+  leave: ['salary', 'salary_employee', 'resource_revenue', 'financials'],
+  salary_structure: ['salary', 'salary_employee', 'resource_revenue', 'financials'],
   // Entries and overtime decisions: billing, and (since salary is approved
   // timesheet hours + approved OT) salary too.
-  timesheet: ['billing', 'salary', 'resource_revenue', 'vendor_payment', 'financials'],
+  timesheet: ['billing', 'salary', 'salary_employee', 'resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).
-  allocation: ['resource_revenue', 'vendor_payment', 'financials'],
+  allocation: ['resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
 };
 
 const LIVE_STATUSES = ['draft', 'reviewed', 'reopened'];
@@ -67,6 +81,64 @@ function scopeKeyFor(kind, scopeKey) {
 function periodOpenBlocker({ period_month, period_year }, now = new Date()) {
   const { end } = monthBounds(period_month, period_year);
   return todayIst(now) <= end ? { code: 'period_open', message: 'The month has not ended yet.' } : null;
+}
+
+// Kinds that can't be finalized before their month is over (billing has its
+// own rule — through the agreement end — inside the billing engine).
+const WAIT_FOR_MONTH_END = new Set(['salary', 'resource_revenue', 'vendor_payment', 'financials', 'salary_employee', 'vendor_bill']);
+
+// An expense record (approved / reimbursed claim, or a group charge) as it
+// is now, with its INR amount at today's rates. Null when it isn't in `period`.
+async function expenseRecord(orgId, scopeKey, { period_month, period_year }) {
+  const [type, id] = String(scopeKey).split(':');
+  const { start, end } = monthBounds(period_month, period_year);
+  let record = null;
+  if (type === 'claim') {
+    const c = await prisma.expenseClaim.findFirst({
+      where: { id, org_id: orgId },
+      include: { org_membership: { select: { id: true, employee_code: true, person: { select: { name: true } } } }, location: { select: { name: true } }, category_ref: { select: { name: true } } },
+    });
+    if (!c) return null;
+    const date = c.expense_date || c.created_at;
+    record = {
+      type: 'claim',
+      id: c.id,
+      category: c.category_ref?.name || c.category,
+      description: c.description || null,
+      person: c.org_membership?.person?.name || null,
+      employee_code: c.org_membership?.employee_code || null,
+      location: c.location?.name || null,
+      date: ymd(new Date(date)),
+      status: c.status,
+      amount: Number(c.amount),
+      currency: c.currency,
+      approved: ['approved', 'reimbursed'].includes(c.status),
+    };
+  } else if (type === 'charge') {
+    const g = await prisma.groupBillingCharge.findFirst({ where: { id, org_id: orgId }, include: { category: { select: { name: true } }, location: { select: { name: true } } } });
+    if (!g) return null;
+    const date = g.payment_date || new Date(Date.UTC(g.period_year, g.period_month - 1, 1));
+    record = {
+      type: 'charge',
+      id: g.id,
+      category: g.category?.name || g.kind,
+      description: g.notes || null,
+      person: null,
+      employee_code: null,
+      location: g.location?.name || null,
+      date: ymd(new Date(date)),
+      status: 'recorded',
+      amount: Number(g.amount),
+      currency: g.currency,
+      approved: true,
+    };
+  }
+  if (!record) return null;
+  const at = new Date(`${record.date}T00:00:00Z`);
+  if (at < start || at > end) return null;
+  const fx = await exchangeRates.inrRates(orgId);
+  const rate = fx.has(record.currency) ? fx.get(record.currency) : null;
+  return { ...record, exchange_rate: rate, amount_inr: rate === null ? null : round2(record.amount * rate) };
 }
 
 // --- Reading a component: locked snapshot, or live ------------------------
@@ -90,6 +162,21 @@ async function lockedVersion(orgId, kind, scopeKey, period) {
   return version ? { version: version.version, snapshot: version.snapshot, amount: Number(version.amount), status: calc.status } : null;
 }
 
+// Every frozen (locked / change_detected) record of one kind in a month,
+// by scope_key → { calc, version, snapshot, amount, status }.
+async function lockedRecords(orgId, kind, { period_month, period_year }) {
+  const calcs = await prisma.financialCalculation.findMany({ where: { org_id: orgId, kind, period_month, period_year, status: { in: FROZEN_STATUSES } } });
+  if (!calcs.length) return new Map();
+  const versions = await prisma.financialCalculationVersion.findMany({ where: { OR: calcs.map((c) => ({ calculation_id: c.id, version: c.current_version })) } });
+  const byCalc = new Map(versions.map((v) => [v.calculation_id, v]));
+  const out = new Map();
+  for (const c of calcs) {
+    const v = byCalc.get(c.id);
+    if (v) out.set(c.scope_key, { calc: c, version: v.version, version_id: v.id, snapshot: v.snapshot, amount: Number(v.amount), currency: v.currency, status: c.status });
+  }
+  return out;
+}
+
 // Resolves another component for an aggregate (Resource Revenue, Financials):
 // its locked snapshot when locked, otherwise computed live.
 async function resolveMonth(orgId, kind, scopeKey, period, account = null) {
@@ -111,6 +198,39 @@ async function computeLive(orgId, kind, scopeKey, period, { account = null, now 
     amount = billingEngine.lockedAmount(raw);
     currency = raw.currency;
     label = `${raw.project.code ? `${raw.project.code} · ` : ''}${raw.project.name}`;
+    // The INR figure at today's rate travels with the snapshot, so a locked
+    // record (and Financials) never re-converts it later.
+    const fx = await exchangeRates.inrRates(orgId);
+    raw.exchange_rate = fx.has(currency) ? fx.get(currency) : null;
+    raw.amount_inr = raw.exchange_rate === null ? null : round2(amount * raw.exchange_rate);
+    if (raw.exchange_rate === null && amount) {
+      raw.readiness = { ...raw.readiness, blockers: [...raw.readiness.blockers, { code: 'missing_exchange_rate', message: `Set the ${currency} exchange rate first.` }] };
+    }
+  } else if (kind === 'salary_employee') {
+    raw = await salaryEngine.computeSalary(orgId, { ...period, filters: { org_membership_id: scopeKey } });
+    const line = raw.lines[0];
+    if (!line) return null;
+    amount = line.net;
+    label = line.name;
+    const blockers = [];
+    const orgLock = await findCalc(orgId, 'salary', 'org', period);
+    if (orgLock && FROZEN_STATUSES.includes(orgLock.status)) blockers.push({ code: 'org_salary_locked', message: 'The whole month\'s salary is already locked.' });
+    raw.readiness = { can_lock: true, blockers, warnings: [] };
+  } else if (kind === 'vendor_bill') {
+    raw = await vendorEngine.computeVendorPayments(orgId, { ...period, vendor_account_id: scopeKey });
+    const vendor = raw.vendors.find((v) => v.vendor?.id === scopeKey);
+    if (!vendor) return null;
+    amount = raw.totals.amount_inr;
+    label = vendor.vendor.name;
+  } else if (kind === 'expense') {
+    const record = await expenseRecord(orgId, scopeKey, period);
+    if (!record) return null;
+    const blockers = [];
+    if (!record.approved) blockers.push({ code: 'not_approved', message: 'Only an approved or reimbursed claim can be locked.' });
+    if (record.amount_inr === null) blockers.push({ code: 'missing_exchange_rate', message: `Set the ${record.currency} exchange rate first.` });
+    raw = { record, readiness: { can_lock: true, blockers, warnings: [] } };
+    amount = record.amount_inr || 0;
+    label = `${record.category}${record.person ? ` · ${record.person}` : ''}`;
   } else if (kind === 'salary') {
     raw = await salaryEngine.computeSalary(orgId, { ...period });
     amount = raw.totals.net;
@@ -127,7 +247,7 @@ async function computeLive(orgId, kind, scopeKey, period, { account = null, now 
     throw new Error(`unknown calculation kind ${kind}`);
   }
   const readiness = raw.readiness || { can_lock: true, blockers: [], warnings: [] };
-  if (!KINDS[kind].scoped) {
+  if (WAIT_FOR_MONTH_END.has(kind)) {
     const open = periodOpenBlocker(period, now);
     if (open && !readiness.blockers.some((b) => b.code === 'period_open')) readiness.blockers = [...readiness.blockers, open];
   }
@@ -382,7 +502,7 @@ async function dismissChange(orgId, user, changeId, { reason } = {}) {
 
 // Side effects of a lock / recalculation.
 async function afterLock(orgId, user, calc, version, live) {
-  if (calc.kind !== 'vendor_payment') return;
+  if (!['vendor_payment', 'vendor_bill'].includes(calc.kind)) return;
   // Vendor payments appear in the Vendors section as pending payments, one per
   // vendor and month. A still-pending one is updated to the new version; one
   // already approved/paid is never rewritten — a difference becomes its own
@@ -416,48 +536,12 @@ async function afterLock(orgId, user, calc, version, live) {
   }
 }
 
-// Billing → Invoice: builds (or refreshes, while still a draft) the client
-// invoice for a project month from its LOCKED Billing & Sales version. The
-// invoice lands in Finance → Projects → Invoicing as a draft.
-async function generateInvoice(orgId, user, accountId, period) {
-  const calc = await findCalc(orgId, 'billing', accountId, period);
-  if (!calc || !FROZEN_STATUSES.includes(calc.status)) return { error: 'not_locked' };
-  if (calc.status === 'change_detected') return { error: 'change_detected' };
-  const version = await latestVersion(calc);
-  const raw = version.snapshot;
-  const view = billingEngine.viewOf(raw, { include_overtime: raw.overtime.enabled });
-  const line_items = view.resources.map((r) => ({
-    org_membership_id: r.org_membership_id,
-    resource: r.name,
-    hours: r.regular_hours,
-    overtime_hours: r.overtime_hours,
-    base_amount: r.base_amount,
-    overtime_amount: r.overtime_amount,
-    revenue: r.amount,
-  }));
-  const data = {
-    amount: Number(version.amount),
-    currency: raw.currency,
-    line_items: {
-      project: raw.project,
-      billing_type: raw.billing_type,
-      rate: raw.rate,
-      working_days: raw.working_days,
-      overtime_enabled: raw.overtime.enabled,
-      calculation_version: version.version,
-      lines: line_items,
-    },
-    calculation_version_id: version.id,
-  };
-  const existing = await prisma.clientInvoice.findUnique({
-    where: { client_account_id_period_month_period_year: { client_account_id: accountId, period_month: period.period_month, period_year: period.period_year } },
-  });
-  if (existing && existing.status !== 'draft') return { error: 'invoice_sent' };
-  const invoice = existing
-    ? await prisma.clientInvoice.update({ where: { id: existing.id }, data })
-    : await prisma.clientInvoice.create({ data: { ...data, org_id: orgId, client_account_id: accountId, ...period, created_by: user.id } });
-  await audit(prisma, orgId, user.id, 'calculation_invoice', calc, `Invoice ${existing ? 'refreshed' : 'generated'} from version ${version.version}`, { invoice_id: invoice.id, amount: Number(version.amount) });
-  return { invoice };
+// Billing → Invoice: the project's month as a client invoice — built by the
+// ONE invoice builder (billing/invoices.service): the locked version when the
+// month is locked, else the live contract month. Drafts can be refreshed;
+// sent / paid invoices are never rewritten.
+async function generateInvoice(orgId, user, accountId, period, extra = {}) {
+  return require('../billing/invoices.service').generateClientInvoice(orgId, user, { account_id: accountId, ...period, ...extra });
 }
 
 // --- Change detection -----------------------------------------------------
@@ -495,15 +579,20 @@ async function flagChange(orgId, { source_type, source_id = null, date = null, f
   if (!calcs.length) return { flagged: 0 };
 
   let isContractor = false;
-  if (org_membership_id && calcs.some((c) => c.kind === 'vendor_payment')) {
-    const m = await prisma.orgMembership.findUnique({ where: { id: org_membership_id }, select: { worker_type: true } });
+  let vendorId = null;
+  if (org_membership_id && calcs.some((c) => ['vendor_payment', 'vendor_bill'].includes(c.kind))) {
+    const m = await prisma.orgMembership.findUnique({ where: { id: org_membership_id }, select: { worker_type: true, vendor_account_id: true } });
     isContractor = m?.worker_type === 'contractor';
+    vendorId = m?.vendor_account_id || null;
   }
 
   let flagged = 0;
   for (const calc of calcs) {
     if (calc.kind === 'billing' && calc.scope_key !== account_id) continue;
     if (calc.kind === 'vendor_payment' && !isContractor) continue;
+    // Per-record locks: only the employee / the contractor's vendor affected.
+    if (calc.kind === 'salary_employee' && calc.scope_key !== org_membership_id) continue;
+    if (calc.kind === 'vendor_bill' && (!isContractor || calc.scope_key !== vendorId)) continue;
     const period = { period_month: calc.period_month, period_year: calc.period_year };
     const version = await latestVersion(calc);
     let potential = null;
@@ -541,12 +630,17 @@ async function flagChange(orgId, { source_type, source_id = null, date = null, f
 
 module.exports = {
   KINDS,
+  RECORD_KINDS,
+  expenseRecord,
   SOURCE_KINDS,
   LIVE_STATUSES,
   FROZEN_STATUSES,
   computeLive,
   resolveMonth,
+  findCalc,
+  latestVersion,
   lockedVersion,
+  lockedRecords,
   getState,
   listCalculations,
   review,

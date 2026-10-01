@@ -10,6 +10,7 @@ import ChartCard from '../../components/ui/ChartCard.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import { LiveIndicator } from './LiveSalesTab.jsx';
+import ExpenseRecordsSection from './ExpenseRecordsSection.jsx';
 
 const POLL_MS = 60000;
 
@@ -87,6 +88,7 @@ export function ExpensesTab() {
 
   return (
     <div className="space-y-4">
+      <ExpenseRecordsSection />
       <div className="flex items-center justify-between gap-3"><LiveIndicator updatedAt={updatedAt} everyMs={POLL_MS} /><MonthsSelect value={months} onChange={setMonths} /></div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label={`Total spend (${months} mo)`} value={money(data?.total)} icon={Receipt} theme="red" to="/finance?section=expenses" />
@@ -94,7 +96,7 @@ export function ExpensesTab() {
         <KpiCard label="Top category" value={titleCase(data?.by_category[0]?.category) || '-'} hint={data?.by_category[0] ? money(data.by_category[0].amount) : undefined} icon={Receipt} theme="orange" />
         <KpiCard label="Top office" value={data?.by_location[0]?.location || '-'} hint={data?.by_location[0] ? money(data.by_location[0].amount) : undefined} icon={Building2} theme="cyan" />
       </div>
-      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Group expenses in {data.missing_rates.join(', ')} are left out — set the exchange rate in Finance → Projects or Project P&amp;L.</p>}
+      {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Group expenses in {data.missing_rates.join(', ')} are left out — set the exchange rate in Finance → Projects.</p>}
       <ChartCard title="Office expenses, group expenses and vendor payments by month" subtitle="Approved / reimbursed claims, group charges (by payment date) and approved / paid vendor payments">
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">

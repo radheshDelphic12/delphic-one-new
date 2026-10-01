@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { optionalDate } = require('../../lib/zodDate');
+const { optionalDate, requiredDate } = require('../../lib/zodDate');
 
 const MODULES = ['trading', 'leads', 'contracts', 'projects'];
 
@@ -13,6 +13,15 @@ const updateOrgSettingsSchema = z
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one setting' });
+
+const updateLocationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    city: z.string().max(100).nullable().optional(),
+    country: z.string().max(100).nullable().optional(),
+    is_default: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Change at least one field' });
 
 const createLocationSchema = z.object({
   name: z.string().min(1).max(100),
@@ -28,6 +37,10 @@ const createOrgSchema = z.object({
   timezone: z.string().min(1).max(80).default('Asia/Kolkata'),
   default_currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).default('INR'),
 });
+
+// Admin or HR corrects an employee's date of joining — the only field the
+// HR-department route may change.
+const joiningDateSchema = z.object({ joined_at: requiredDate });
 
 // Admin sets an employee's directory/reporting fields — all optional, patch
 // semantics. `null` clears a field (e.g. removing a manager).
@@ -53,6 +66,8 @@ const updateMembershipSchema = z.object({
   // When a team change takes effect (default today; never in the future) —
   // the old team keeps everything before it (TeamMembershipPeriod).
   team_effective_date: optionalDate,
+  // Date of joining — also editable by HR (see joiningDateSchema).
+  joined_at: optionalDate,
   // Lifecycle: notice period (resignation date → last working day) and exit.
   employment_status: z.enum(['active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated']).optional(),
   notice_start_date: optionalDate.nullable(),
@@ -99,7 +114,9 @@ module.exports = {
   updateOrgSettingsSchema,
   createOrgSchema,
   createLocationSchema,
+  updateLocationSchema,
   updateMembershipSchema,
+  joiningDateSchema,
   membershipListQuerySchema,
   updateValuationSchema,
 };

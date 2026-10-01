@@ -239,21 +239,97 @@ function categoryCounts(roots, viewMode, teams = []) {
       add(ROLE_TIERS[i].key, ROLE_TIERS[i].label, i);
     }
   } else {
-    const teamById = new Map(teams.map((t) => [t.id, t]));
-    const leadTeam = new Map(teams.filter((t) => t.lead_membership_id).map((t) => [t.lead_membership_id, t]));
-    for (const p of people) {
-      const team = teamById.get(p.team_id) || leadTeam.get(p.id);
-      if (team) add(team.id, team.name, team.sort_order ?? 0);
-      else if (p.worker_type === 'contractor') add('__contractor__', 'Contractors', 1e6);
-      else add('__none__', 'Not in a team', 1e6 + 1);
-    }
+    return teamCounts(people, teams);
   }
   return [...tally.values()].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+}
+
+/**
+ * Team view: per HR team, who is on it now vs who is still to come —
+ *   current   — people on the team (lead included), terminated excluded
+ *   new_hires — of those, not joined yet (pending onboarding)
+ *   open      — the team's open positions (HR Settings → Teams)
+ *   target    — current + open, the team's size once hiring is done
+ * Contractors and people in no team are listed with current / new hires only.
+ */
+function teamCounts(people, teams) {
+  const teamById = new Map(teams.map((t) => [t.id, t]));
+  const leadTeam = new Map(teams.filter((t) => t.lead_membership_id).map((t) => [t.lead_membership_id, t]));
+  const tally = new Map(teams.map((t) => [t.id, { key: t.id, label: t.name, order: t.sort_order ?? 0, current: 0, new_hires: 0, open: t.open_positions || 0, isTeam: true }]));
+  const row = (key, label, order) => {
+    if (!tally.has(key)) tally.set(key, { key, label, order, current: 0, new_hires: 0, open: 0, isTeam: false });
+    return tally.get(key);
+  };
+  for (const p of people) {
+    if (p.employment_status === 'terminated') continue;
+    const team = teamById.get(p.team_id) || leadTeam.get(p.id);
+    const r = team ? tally.get(team.id) : p.worker_type === 'contractor' ? row('__contractor__', 'Contractors', 1e6) : row('__none__', 'Not in a team', 1e6 + 1);
+    r.current += 1;
+    if (p.employment_status === 'pending_onboarding') r.new_hires += 1;
+  }
+  return [...tally.values()]
+    .filter((r) => r.current > 0 || r.open > 0)
+    .map((r) => ({ ...r, count: r.current, target: r.current + r.open }))
+    .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+}
+
+function TeamCounts({ rows }) {
+  const teamRows = rows.filter((r) => r.isTeam);
+  const other = rows.filter((r) => !r.isTeam);
+  const sum = (k) => teamRows.reduce((s, r) => s + r[k], 0);
+  const cell = 'px-3 py-1.5 text-right tabular-nums';
+  return (
+    <div className="overflow-x-auto rounded-xl border border-tertiary-200 bg-white">
+      <table className="min-w-full text-xs" aria-label="Headcount and hiring per team">
+        <thead className="bg-tertiary-50 text-tertiary-500">
+          <tr>
+            <th className="px-3 py-1.5 text-left font-medium">Team</th>
+            <th className={`${cell} font-medium`} title="People on the team now, lead included">Current</th>
+            <th className={`${cell} font-medium`} title="Of the current people, not joined yet (pending onboarding)">New hires</th>
+            <th className={`${cell} font-medium`} title="Open positions still to fill (HR Settings → Teams)">Open</th>
+            <th className={`${cell} font-medium`} title="Current + open: the team size once hiring is done">Target</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-tertiary-100 text-tertiary-700">
+          {teamRows.map((r) => (
+            <tr key={r.key}>
+              <td className="px-3 py-1.5 font-medium text-tertiary-900">{r.label}</td>
+              <td className={cell}>{r.current}</td>
+              <td className={cell}>{r.new_hires || <span className="text-tertiary-300">0</span>}</td>
+              <td className={`${cell} ${r.open ? 'font-semibold text-violet-700' : ''}`}>{r.open || <span className="text-tertiary-300">0</span>}</td>
+              <td className={`${cell} font-semibold text-tertiary-900`}>{r.target}</td>
+            </tr>
+          ))}
+          {other.map((r) => (
+            <tr key={r.key} className="text-tertiary-500">
+              <td className="px-3 py-1.5">{r.label}</td>
+              <td className={cell}>{r.current}</td>
+              <td className={cell}>{r.new_hires || <span className="text-tertiary-300">0</span>}</td>
+              <td className={cell}>—</td>
+              <td className={cell}>—</td>
+            </tr>
+          ))}
+        </tbody>
+        {teamRows.length > 1 && (
+          <tfoot className="border-t border-tertiary-200 bg-tertiary-50 font-semibold text-tertiary-900">
+            <tr>
+              <td className="px-3 py-1.5">All teams</td>
+              <td className={cell}>{sum('current')}</td>
+              <td className={cell}>{sum('new_hires')}</td>
+              <td className={cell}>{sum('open')}</td>
+              <td className={cell}>{sum('target')}</td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
 }
 
 function CategoryCounts({ roots, viewMode, teams }) {
   const rows = categoryCounts(roots, viewMode, teams);
   if (!rows.length) return null;
+  if (viewMode === 'team') return <TeamCounts rows={rows} />;
   return (
     <div className="flex flex-wrap gap-1.5" aria-label="People per category">
       {rows.map((r) => (

@@ -17,12 +17,6 @@ function ymd(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function periodBounds(period_month, period_year) {
-  const period_start = new Date(Date.UTC(period_year, period_month - 1, 1));
-  const period_end = new Date(Date.UTC(period_year, period_month, 0));
-  return { period_start, period_end };
-}
-
 async function createRate(orgId, createdByUserId, { account_id, requirement_id, rate_type, rate, currency, effective_from }) {
   const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
   if (!account) return { error: 'account_not_found' };
@@ -195,65 +189,7 @@ async function listDailyRevenue(orgId, { account_id, requirement_id, from, to })
   });
 }
 
-async function createInvoice(orgId, createdByUserId, { client_account_id, period_month, period_year }) {
-  const existing = await prisma.clientInvoice.findUnique({
-    where: { client_account_id_period_month_period_year: { client_account_id, period_month, period_year } },
-  });
-  if (existing) return { error: 'invoice_exists', invoice: existing };
-
-  const account = await prisma.account.findFirst({ where: { id: client_account_id, org_id: orgId } });
-  if (!account) return { error: 'account_not_found' };
-
-  const { period_start, period_end } = periodBounds(period_month, period_year);
-  // Invoices only cover time from the agreement start date on: a period that
-  // ends before it can't be invoiced, and the first period is cut at the start.
-  const agreementStart = account.agreement_start_date;
-  if (agreementStart && period_end < agreementStart) return { error: 'before_agreement_start', agreement_start: ymd(agreementStart) };
-  const from = agreementStart && agreementStart > period_start ? agreementStart : period_start;
-  const rows = await prisma.dailyProjectRevenue.findMany({
-    where: { org_id: orgId, account_id: client_account_id, date: { gte: from, lte: period_end } },
-    include: { requirement: { select: { id: true, title: true } } },
-  });
-  if (!rows.length) return { error: 'no_revenue_computed' };
-
-  const byRequirement = new Map();
-  for (const row of rows) {
-    const key = row.requirement_id || '__account_level__';
-    const bucket = byRequirement.get(key) || {
-      requirement_id: row.requirement_id,
-      requirement_title: row.requirement?.title || null,
-      hours: 0,
-      revenue: 0,
-    };
-    bucket.hours += Number(row.billable_hours);
-    bucket.revenue += Number(row.revenue);
-    byRequirement.set(key, bucket);
-  }
-  const line_items = Array.from(byRequirement.values()).map((li) => ({ ...li, hours: round2(li.hours), revenue: round2(li.revenue) }));
-  const amount = round2(line_items.reduce((sum, li) => sum + li.revenue, 0));
-
-  const invoice = await prisma.clientInvoice.create({
-    data: { org_id: orgId, client_account_id, period_month, period_year, amount, line_items, created_by: createdByUserId },
-  });
-  return { invoice };
-}
-
-async function listInvoices(orgId, { client_account_id, status }) {
-  return prisma.clientInvoice.findMany({
-    where: { org_id: orgId, ...(client_account_id ? { client_account_id } : {}), ...(status ? { status } : {}) },
-    orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
-    include: { client_account: { select: { id: true, name: true } } },
-  });
-}
-
-async function getInvoice(orgId, invoiceId) {
-  const invoice = await prisma.clientInvoice.findFirst({
-    where: { id: invoiceId, org_id: orgId },
-    include: { client_account: { select: { id: true, name: true } } },
-  });
-  if (!invoice) return { error: 'not_found' };
-  return { invoice };
-}
+// Client invoices are built in invoices.service (one builder for every path).
 
 // draft -> sent -> paid, forward only (see schema.prisma's ClientInvoice comment).
 const FORWARD_TRANSITIONS = { draft: 'sent', sent: 'paid' };
@@ -466,13 +402,15 @@ function currentAccountRate(rates, asOf) {
 function serializeProfile(account, rates, calendar, { editable = Boolean(account.is_project), fx = null } = {}) {
   const rate = currentAccountRate(rates, todayUtc());
   const currency = rate ? rate.currency : account.client_billing_currency || 'INR';
-  const estimatedHours = account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null;
+  // An hourly contract's hours: the committed minimum, else the monthly
+  // benchmark (lazy-required: projectPnl loads this file).
+  const hours = require('./projectPnl.service').contractHours(account);
   // INR figures use the same converter as Project P&L. null = this currency
   // has no exchange rate yet (or there's no rate to convert).
   const { toInr, rateFor } = exchangeRates.inrConverter(fx || new Map([['INR', 1]]));
   const exchangeRate = rateFor(currency);
   const inr = (amount) => (amount === null || exchangeRate === null ? null : toInr(amount, currency));
-  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : estimatedHours !== null ? Number(rate.rate) * estimatedHours : null;
+  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : Number(rate.rate) * hours.hours;
   return {
     id: account.id,
     project_code: account.project_code || null,
@@ -487,7 +425,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     // INR per 1 unit of `currency` (1 for INR); null when finance hasn't set it.
     exchange_rate: exchangeRate,
     rate_inr: rate ? inr(Number(rate.rate)) : null,
-    // Fixed monthly fee, or hourly rate x estimated hours, in INR.
+    // The contract per month in INR: fixed monthly fee, or hourly rate x contract hours.
     monthly_amount_inr: inr(monthlyAmount),
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
@@ -498,6 +436,9 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
     minimum_monthly_hours: account.minimum_monthly_hours !== null && account.minimum_monthly_hours !== undefined ? Number(account.minimum_monthly_hours) : null,
+    // Hourly: the hours the contract amount uses and where they come from.
+    contract_hours: rate && rate.rate_type === 'hourly' ? hours.hours : null,
+    contract_hours_basis: rate && rate.rate_type === 'hourly' ? hours.basis : null,
     // Editable when the row is a project: made by Add Project, or an older
     // client row already used as one (billing, team, timesheets…) — see
     // lib/projectScope. A plain catalogue client stays read-only. Edits only
@@ -545,11 +486,11 @@ async function listProjectProfiles(orgId) {
   ]);
   const ratesByAccount = new Map();
   for (const r of rates) ratesByAccount.set(r.account_id, [...(ratesByAccount.get(r.account_id) || []), r]);
-  // This month's billing (monthly fee, or approved billable hours x rate) —
-  // the P&L's own revenue rule, so hourly projects are included, not skipped.
+  // This month's contract billing (fixed monthly fee, or committed minimum
+  // hours x rate). Actual approved hours are Project P&L's, not this list's.
   const now = todayUtc();
-  const { monthBillingByProject } = require('./projectPnl.service');
-  const billing = await monthBillingByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
+  const { monthContractByProject } = require('./projectPnl.service');
+  const billing = await monthContractByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
   return accounts.map((a) => {
     // Every row listed here matches projectListWhere, so all are editable.
     const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true, fx });
@@ -649,9 +590,6 @@ module.exports = {
   computeDayRevenue,
   computeRevenueRange,
   listDailyRevenue,
-  createInvoice,
-  listInvoices,
-  getInvoice,
   transitionInvoice,
   createGroupCharge,
   updateGroupCharge,

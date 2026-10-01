@@ -2,6 +2,16 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-01 — Finance: contract-based billing, invoices in Live Analytics, per-record locks, Financials = locked only — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+Spec, decisions and file map: [features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md](../features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md).
+
+- **Billing follows the contract.** A monthly project bills rate ÷ working days for every working day inside its agreement (partial months by working days), no longer scaled by approved hours; hourly = approved hours × rate; vendor (contractor) cost follows the same rule. Applies to Billing & Sales, its lock, invoices and Financials.
+- **Invoices fixed and moved.** One builder (`billing/invoices.service.js`) for every path: project's own name + linked client and the billing rate's currency (was: account `name` — often another client — and always INR), calculation details on the invoice, editable invoice number (unique per org, `INV-2026-001` suggested), invoice date, notes. Generate from Live Analytics → Billing & sales (top form + per project row); vendor invoices from Live Analytics → Vendors. Project P&L tab hidden; Finance → Projects' old Invoicing section removed.
+- **Per-record locks** (`salary_employee`, `vendor_bill`, `expense` kinds on the existing lock system): lock billing per project, salary per employee (payroll pays the locked line), each expense record, billing per vendor. New Live Analytics → Locked tab with View / Download.
+- **Financials = locked records only** by default, with a Locked / Unlocked / All filter (`GET /calculations/financials/records`).
+- Migrations: `invoice_numbers_details`, `record_lock_kinds` (additive). Tests: new `finance-invoices-records.test.js`; updated `finance-locking`, `erp-phase5-billing`, `erp-projects-phase2` for the contract rule / single invoice builder.
+
 ## 2026-09-30 — Hourly billing = billing engine, working-day leave, claim approval chain, admin timesheet backfill — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
 
 - **Hourly billing fixed (Finance → Projects total, Project P&L).** `projectPnl.projectRevenue` now takes hourly revenue from the billing engine (`billing.engine.computeProjectMonth` / `lockedAmount`, or the locked snapshot) so it matches Billing & Sales, locks and invoices: hours after `agreement_end_date` no longer bill, approved overtime bills (× multiplier) where `overtime_billable`, fixed-price projects are not billed by hours. Monthly fees are also prorated in the month the agreement ends. `excluded` reasons: `outside_agreement`, `not_supported` added.
@@ -58,12 +68,16 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
   honour it; the employee's company calendar never changes — their hours that
   day become OT / comp off. My Holidays tab now shows the one company calendar
   plus a collapsed "Client / project exceptions" section.
-- **Finance → Projects billing total includes hourly projects.** Each row
-  gets `this_month` from `projectPnl.monthBillingByProject` (same rule and
-  FX converter as P&L: monthly fee, or approved billable hours × rate). Hours
-  not billed are reported in `excluded` by reason (pending approval,
-  non-billable, before agreement, no hourly rate, overtime) and shown under
-  the total.
+- **Finance → Projects shows the contract; Project P&L shows actuals.** Each
+  Projects row gets `this_month` from `projectPnl.monthContractByProject`:
+  the fixed monthly fee, or contract hours × hourly rate — contract hours are
+  `minimum_monthly_hours`, else `benchmark_hours` (`contractHours`) —
+  prorated in the agreement's first/last month (same FX converter as P&L).
+  A "This month (INR)" column shows each row's figure and why it is lower
+  (prorated / not started / ended / no FX rate); the total above the table
+  is exactly its sum. `monthly_amount_inr` uses the same contract hours.
+  Project P&L is unchanged: approved timesheet hours × rate (e.g. 60h
+  contract, 55h worked → Projects 60h, P&L 55h).
 - **UI copy:** Attendance page states attendance ≠ salary and renames
   "Overtime" to "Time past shift"; Attendance → Salary tab shows expected /
   approved / pending / short / OT columns and Actual vs Projected KPIs.

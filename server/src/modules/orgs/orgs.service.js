@@ -98,11 +98,45 @@ async function listLocations(orgId) {
   return prisma.location.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } });
 }
 
+// An org has ONE default location: marking a location as the default moves
+// the flag, so two defaults never coexist.
 async function createLocation(orgId, { name, city, country, is_default }) {
   const existing = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
-  const location = await prisma.location.create({ data: { org_id: orgId, name, city, country, is_default } });
+  const location = await prisma.$transaction(async (tx) => {
+    if (is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
+    return tx.location.create({ data: { org_id: orgId, name, city, country, is_default } });
+  });
   return { location };
+}
+
+async function updateLocation(orgId, locationId, patch) {
+  const location = await prisma.location.findFirst({ where: { id: locationId, org_id: orgId } });
+  if (!location) return { error: 'not_found' };
+  if (patch.name && patch.name !== location.name) {
+    const taken = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name: patch.name } } });
+    if (taken) return { error: 'name_taken' };
+  }
+  const updated = await prisma.$transaction(async (tx) => {
+    if (patch.is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true, id: { not: locationId } }, data: { is_default: false } });
+    return tx.location.update({ where: { id: locationId }, data: patch });
+  });
+  return { location: updated };
+}
+
+// Blocked while anything still points at the location (employees, calendars,
+// expense claims) — reassign them first rather than leave them dangling.
+async function deleteLocation(orgId, locationId) {
+  const location = await prisma.location.findFirst({ where: { id: locationId, org_id: orgId } });
+  if (!location) return { error: 'not_found' };
+  const [employees, calendars, claims] = await Promise.all([
+    prisma.orgMembership.count({ where: { location_id: locationId } }),
+    prisma.calendar.count({ where: { location_id: locationId } }),
+    prisma.expenseClaim.count({ where: { location_id: locationId } }),
+  ]);
+  if (employees || calendars || claims) return { error: 'in_use', employees, calendars, claims };
+  await prisma.location.delete({ where: { id: locationId } });
+  return { deleted: true };
 }
 
 const MEMBERSHIP_DETAIL_SELECT = {
@@ -248,6 +282,9 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
   const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
   const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
   if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  // Joining date: can't come after the person's last working day / exit date.
+  const lastDay = lwd || membership.left_at;
+  if (data.joined_at && lastDay && data.joined_at > lastDay) return { error: 'joined_after_exit' };
   if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated' && !membership.left_at) {
     data.left_at = lwd || new Date(new Date().toISOString().slice(0, 10));
   }
@@ -315,6 +352,8 @@ module.exports = {
   getMembership,
   listLocations,
   createLocation,
+  updateLocation,
+  deleteLocation,
   updateMembership,
   updateValuation,
 };

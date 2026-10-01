@@ -1,17 +1,18 @@
 import { useSearchParams } from 'react-router-dom';
-import { FolderKanban, Receipt, Tags, TrendingUp, Users2 } from 'lucide-react';
+import { FolderKanban, Receipt, Tags, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import ExpensesTab from './ExpensesTab.jsx';
 import ProjectsTab from './ProjectsTab.jsx';
 import GroupChargesTab from './GroupChargesTab.jsx';
-import ProjectPnlTab from './ProjectPnlTab.jsx';
+// Project P&L is hidden for now (client brief 2026-10-01: its cost rules —
+// partial-month salary on a last working day, actual project cost — are not
+// settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
+// and add { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp }.
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
 
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt }];
 const ADMIN_TABS = [
   { key: 'projects', label: 'Projects', icon: FolderKanban },
-  // Monthly profit per project: billing - internal salary - vendor contractors.
-  { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp },
   { key: 'group-charges', label: 'Group Charges', icon: Users2 },
   // Admin-managed Group Charge + Expense categories (next to Group Charges).
   { key: 'categories', label: 'Categories', icon: Tags },
@@ -57,7 +58,6 @@ export default function FinanceHubPage() {
       </div>
       {section === 'expenses' && <ExpensesTab />}
       {section === 'projects' && isAdmin && <ProjectsTab />}
-      {section === 'project-pnl' && isAdmin && <ProjectPnlTab />}
       {section === 'group-charges' && isAdmin && <GroupChargesTab />}
       {section === 'categories' && isAdmin && <FinanceCategoriesTab />}
     </div>

@@ -1,0 +1,207 @@
+import { useEffect, useState } from 'react';
+import { FileText, Printer } from 'lucide-react';
+import apiClient from '../../lib/apiClient.js';
+import { useAuth } from '../../lib/authContext.jsx';
+import { useAlerts } from '../../lib/alerts/alertContext.jsx';
+import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { useProjectOptions } from '../../lib/lookups.js';
+import Badge from '../../components/ui/Badge.jsx';
+import DataTable from '../../components/ui/DataTable.jsx';
+import Drawer from '../../components/ui/Drawer.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import PeriodPicker, { periodLabel } from '../../components/finance/PeriodPicker.jsx';
+import { amountText, billingCalculationLines, dateText, printClientInvoice } from '../../components/finance/financePrint.js';
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Invoice fields + the live preview of how the amount is worked out. */
+function InvoicePreview({ preview }) {
+  if (!preview) return null;
+  const d = preview.details;
+  const p = preview.project;
+  return (
+    <div className="space-y-2 rounded-xl border border-tertiary-100 bg-tertiary-50/60 p-3 text-sm">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+        <dt className="text-tertiary-500">Project</dt><dd className="font-medium text-tertiary-900">{p.name}{p.code ? ` · ${p.code}` : ''}</dd>
+        <dt className="text-tertiary-500">Client</dt><dd className="font-medium text-tertiary-900">{p.client_name || '—'}</dd>
+        <dt className="text-tertiary-500">Billing type</dt><dd>{d.billing_type === 'monthly' ? 'Monthly' : 'Hourly'}</dd>
+        <dt className="text-tertiary-500">Currency</dt><dd>{preview.currency}</dd>
+        <dt className="text-tertiary-500">Rate</dt><dd>{amountText(d.rate, d.currency)}{d.billing_type === 'hourly' ? ' / hour' : ' / month'}</dd>
+        <dt className="text-tertiary-500">Billing period</dt><dd>{d.period_from ? `${dateText(d.period_from)} – ${dateText(d.period_to)}` : periodLabel(preview)}</dd>
+        <dt className="text-tertiary-500">Source</dt><dd>{preview.source === 'locked' ? `Locked billing v${preview.calculation_version}` : 'Live (not locked yet)'}</dd>
+      </dl>
+      <ul className="space-y-0.5 border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">
+        {billingCalculationLines(d).map((line) => <li key={line}>{line}</li>)}
+      </ul>
+      <p className="text-right text-base font-semibold text-tertiary-900">{amountText(preview.amount, preview.currency)}</p>
+    </div>
+  );
+}
+
+/**
+ * Generate (or refresh, while a draft) one project's invoice for a month.
+ * The invoice number is the company's own — prefilled with a suggestion, and
+ * editable. The amount follows the project's contract (monthly: working-day
+ * share of the rate; hourly: approved hours × rate), never re-typed by hand.
+ */
+export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const projectOptions = useProjectOptions(open);
+  const [form, setForm] = useState(null);
+  const [numberEdited, setNumberEdited] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setForm({ account_id: initial?.account_id || '', period: { period_month: initial.period_month, period_year: initial.period_year }, invoice_number: '', invoice_date: today(), notes: '' });
+    setNumberEdited(false);
+    setPreview(null);
+  }, [open, initial?.account_id, initial?.period_month, initial?.period_year]);
+
+  useEffect(() => {
+    if (!open || !form?.account_id) { setPreview(null); return undefined; }
+    let alive = true;
+    setPreviewError('');
+    apiClient.get('/billing/invoices/preview', { params: { account_id: form.account_id, ...form.period } })
+      .then(({ data }) => {
+        if (!alive) return;
+        setPreview(data.data);
+        if (!numberEdited) setForm((f) => ({ ...f, invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || f.invoice_date }));
+      })
+      .catch((err) => { if (alive) { setPreview(null); setPreviewError(apiErrorMessage(err, 'Nothing to invoice for that selection')); } });
+    return () => { alive = false; };
+  }, [open, form?.account_id, form?.period.period_month, form?.period.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!open || !form) return <Drawer open={false} title="" onClose={onClose} />;
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const locked = preview?.existing && preview.existing.status !== 'draft';
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { data } = await apiClient.post('/billing/invoices', {
+        client_account_id: form.account_id,
+        ...form.period,
+        invoice_number: form.invoice_number.trim(),
+        invoice_date: form.invoice_date,
+        notes: form.notes.trim() || null,
+      });
+      pushSuccess?.(`Invoice ${data.data.invoice_number} ${preview?.existing ? 'updated' : 'generated'}`);
+      onGenerated?.(data.data);
+      onClose();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to generate the invoice'), 'Could not generate');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Drawer
+      open
+      title={preview?.existing ? 'Update invoice' : 'Generate invoice'}
+      onClose={onClose}
+      size="lg"
+      tone="create"
+      footer={(
+        <>
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || !form.invoice_number.trim()}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+        </>
+      )}
+    >
+      <form id="client-invoice-form" onSubmit={submit} className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
+            Project
+            <div className="mt-1"><SearchableSelect value={form.account_id} onChange={(v) => set('account_id', v)} options={projectOptions} placeholder="Select project" searchPlaceholder="Search projects…" /></div>
+          </label>
+          <div className="sm:col-span-2"><PeriodPicker value={form.period} onChange={(p) => set('period', { period_month: p.period_month, period_year: p.period_year })} label="Billing month" /></div>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Invoice number
+            <input required maxLength={50} value={form.invoice_number} onChange={(e) => { setNumberEdited(true); set('invoice_number', e.target.value); }} placeholder="INV-2026-001" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-0.5 block font-normal text-tertiary-400">Suggested — change it to your own numbering.</span>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Invoice date
+            <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
+            Notes <span className="font-normal text-tertiary-400">(optional, printed on the invoice)</span>
+            <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+        </div>
+        {previewError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{previewError}</p>}
+        {locked && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Invoice {preview.existing.invoice_number} for this project and month is already {preview.existing.status} — it can no longer be changed.</p>}
+        {preview?.existing && !locked && <p className="text-xs text-tertiary-500">A draft invoice ({preview.existing.invoice_number}) exists for this project and month — saving refreshes it.</p>}
+        <InvoicePreview preview={preview} />
+      </form>
+    </Drawer>
+  );
+}
+
+/** Generated client invoices for a month, with download and status steps. */
+export function ClientInvoicesTable({ period, refreshKey = 0 }) {
+  const { user } = useAuth();
+  const { pushError, pushInfo } = useAlerts();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  function load() {
+    setLoading(true);
+    apiClient.get('/billing/invoices', { params: { period_month: period.period_month, period_year: period.period_year } })
+      .then(({ data }) => setRows(data.data || []))
+      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load invoices'), 'Something went wrong'))
+      .finally(() => setLoading(false));
+  }
+  useEffect(load, [period.period_month, period.period_year, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function transition(row, status) {
+    try {
+      await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
+      pushInfo(`Invoice ${row.invoice_number || ''} marked ${status}`);
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
+    }
+  }
+
+  const columns = [
+    { key: 'number', header: 'Invoice no.', render: (r) => <span className="font-mono text-xs font-medium text-tertiary-900">{r.invoice_number || '—'}</span> },
+    { key: 'project', header: 'Project', render: (r) => <span>{r.project?.name || '—'}{r.project?.code && <span className="block text-xs text-tertiary-500">{r.project.code}</span>}</span> },
+    { key: 'client', header: 'Client', render: (r) => r.project?.client_name || '—' },
+    { key: 'period', header: 'Period', render: (r) => (r.details?.period_from ? `${dateText(r.details.period_from)} – ${dateText(r.details.period_to)}` : periodLabel(r)) },
+    { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
+    { key: 'amount', header: 'Amount', render: (r) => <span className="font-medium tabular-nums">{amountText(r.amount, r.currency)}</span> },
+    { key: 'currency', header: 'Currency', render: (r) => r.currency },
+    { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
+    {
+      key: 'actions',
+      header: 'Action',
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(r)}><Printer className="h-3.5 w-3.5" /> Download</button>
+          {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
+          {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
+        </div>
+      ),
+    },
+  ];
+
+  function printInvoice(r) {
+    if (!printClientInvoice(r, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked');
+  }
+
+  return <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} />;
+}
+
+export function GenerateInvoiceButton({ onClick, label = 'Generate invoice', compact = false }) {
+  return (
+    <button type="button" className={`${compact ? 'btn-ghost px-2 py-1 text-xs' : 'btn-primary'} inline-flex items-center gap-1.5`} onClick={onClick}>
+      <FileText className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} /> {label}
+    </button>
+  );
+}

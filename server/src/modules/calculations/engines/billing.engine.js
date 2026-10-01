@@ -1,5 +1,6 @@
 // Billing & Sales — what each project/contract bills its client for a month,
-// date by date, from APPROVED timesheet hours only.
+// date by date, from its CONTRACT (billing rate + agreement dates); hours
+// only matter where the contract is priced by the hour.
 //
 // The project's type picks the engine:
 //   managed_services (and legacy projects with no type) — active, below.
@@ -8,12 +9,13 @@
 //     returns `supported: false` and bills nothing here.
 //
 // Managed services, per day, on the project's OWN calendar:
-//   monthly rate: day = rate × min(hours / benchmark_hours, 1 / working_days)
-//     — the existing, documented billing rule (billing.service.monthlyDayRevenue):
-//     the month's rate is spread over the calendar's actual working days
-//     (19, 20, 21, 22 …), a working day earns in proportion to the hours
-//     logged and never more than its 1/working_days share; weekends and
-//     calendar holidays earn nothing as base billing.
+//   monthly rate: every working day inside the agreement earns
+//     rate / working_days (the calendar's actual working days: 19, 20, 21,
+//     22 …), whatever hours were logged — billing follows the contract, not
+//     timesheets (client decision 2026-10-01). A full month bills exactly the
+//     rate; a month the agreement starts or ends in bills
+//     rate × contract working days / working days. Weekends and calendar
+//     holidays earn nothing as base billing.
 //   hourly rate:  day = approved regular hours × rate.
 //   overtime:     approved `overtime_hours` (plus, on a monthly contract,
 //     hours worked on a weekend / holiday) × the hourly-equivalent rate
@@ -27,7 +29,6 @@
 
 const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
-const { monthlyDayRevenue } = require('../../billing/billing.service');
 const { round2, ymd, monthBounds, monthDates, isWeekend, todayIst } = require('../period');
 const { projectListWhere } = require('../../../lib/projectScope');
 
@@ -103,6 +104,23 @@ async function projectCalendar(orgId, accountId, month, year) {
   const workingDates = new Set(holidays.filter((h) => h.is_working_day).map((h) => ymd(h.date)));
   const working_days = calendarsService.countWorkingDays(year, month, new Set(holidayLabels.keys()), workingDates);
   return { calendar: calendar ? { id: calendar.id, name: calendar.name } : null, holidayLabels, workingDates, working_days };
+}
+
+// Monthly contract days carry an unrounded rate / working_days share. Round
+// each to the cent and put the rounding remainder on the last such day, so
+// the month totals exactly rate × contract working days / working days (a
+// full month = exactly the rate). Resource lines follow their day.
+function settleMonthlyDays(days) {
+  const monthly = days.filter((d) => d.rate_type === 'monthly' && d.base_amount > 0);
+  if (!monthly.length) return;
+  const exact = monthly.reduce((s, d) => s + d.base_amount, 0);
+  let rounded = 0;
+  monthly.forEach((d, i) => {
+    d.base_amount = i === monthly.length - 1 ? round2(round2(exact) - rounded) : round2(d.base_amount);
+    rounded = round2(rounded + d.base_amount);
+    const regular = d.resources.reduce((s, r) => s + r.regular_hours, 0);
+    for (const r of d.resources) r.base_amount = regular > 0 ? round2((d.base_amount * r.regular_hours) / regular) : 0;
+  });
 }
 
 // The full, unfiltered month for one project — exactly what a lock stores.
@@ -200,11 +218,13 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
         base = round2(regular * Number(rate.rate));
         otRate = Number(rate.rate) * multiplier;
       } else {
-        base = monthlyDayRevenue({ rate: Number(rate.rate), hours: regular, benchmarkHours: benchmark, workingDays: cal.working_days, isWorkingDay });
+        // Contract share of the day; settled to the cent after the loop.
+        base = isWorkingDay && cal.working_days > 0 ? Number(rate.rate) / cal.working_days : 0;
         otRate = (Number(rate.rate) / benchmark) * multiplier;
       }
     }
     const overtimeAmount = supported && inContract && overtimeEnabled ? round2(overtime * otRate) : 0;
+    if (rate?.rate_type !== 'monthly') base = round2(base);
     for (const r of resources) {
       r.base_amount = regular > 0 ? round2((base * r.regular_hours) / regular) : 0;
       r.overtime_amount = overtime > 0 ? round2((overtimeAmount * r.overtime_hours) / overtime) : 0;
@@ -243,6 +263,11 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     });
   }
 
+  settleMonthlyDays(days);
+
+  // Hours only move the amount on hourly days or where overtime is billed;
+  // a monthly contract without billable overtime doesn't wait on approvals.
+  const hoursMatter = days.some((d) => d.in_contract && d.rate_type === 'hourly') || overtimeEnabled;
   const pending = entries.filter((e) => e.status === 'submitted').length;
   const rejected = entries.filter((e) => e.status === 'rejected' && !e.resolved).length;
   const missing = days.filter((d) => d.status === 'no_entry').length;
@@ -251,10 +276,10 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const blockers = [];
   if (!supported) blockers.push({ code: 'engine_not_supported', message: note });
   else if (!monthRate) blockers.push({ code: 'no_billing_rate', message: 'No billing rate is set for this project.' });
-  if (pending) blockers.push({ code: 'pending_entries', count: pending, message: `${pending} timesheet ${pending === 1 ? 'entry is' : 'entries are'} still pending approval.` });
-  if (rejected) blockers.push({ code: 'rejected_entries', count: rejected, message: `${rejected} rejected ${rejected === 1 ? 'entry has' : 'entries have'} not been corrected and re-submitted.` });
+  if (hoursMatter && pending) blockers.push({ code: 'pending_entries', count: pending, message: `${pending} timesheet ${pending === 1 ? 'entry is' : 'entries are'} still pending approval.` });
+  if (hoursMatter && rejected) blockers.push({ code: 'rejected_entries', count: rejected, message: `${rejected} rejected ${rejected === 1 ? 'entry has' : 'entries have'} not been corrected and re-submitted.` });
   if (today <= lastBillableDay && today >= start) blockers.push({ code: 'period_open', message: 'The billing period has not ended yet.' });
-  const warnings = missing ? [{ code: 'missing_days', count: missing, message: `${missing} working ${missing === 1 ? 'day has' : 'days have'} no timesheet entry.` }] : [];
+  const warnings = hoursMatter && missing ? [{ code: 'missing_days', count: missing, message: `${missing} working ${missing === 1 ? 'day has' : 'days have'} no timesheet entry.` }] : [];
 
   return {
     project,
@@ -391,6 +416,35 @@ function lockedAmount(raw) {
   return round2(raw.days.reduce((s, d) => s + d.base_amount + (raw.overtime.enabled ? d.overtime_amount : 0), 0));
 }
 
+// How a month's amount was worked out, for an invoice or a locked record:
+// monthly — rate, the month's working days, the contract working days and
+// the billed period; hourly — rate × approved billable hours. Overtime only
+// where the project bills it. `amount` is exactly lockedAmount(raw).
+function invoiceDetails(raw) {
+  const contractDays = raw.days.filter((d) => d.in_contract);
+  const billedDays = contractDays.filter((d) => d.rate_type);
+  const sum = (list, pick) => round2(list.reduce((s, d) => s + pick(d), 0));
+  const overtimeBilled = Boolean(raw.overtime?.enabled);
+  return {
+    billing_type: raw.billing_type,
+    rate: raw.rate,
+    currency: raw.currency,
+    period_from: billedDays[0]?.date || null,
+    period_to: billedDays[billedDays.length - 1]?.date || null,
+    days_in_month: raw.days.length,
+    working_days: raw.working_days,
+    contract_working_days: billedDays.filter((d) => d.is_working_day).length,
+    billable_hours: sum(billedDays.filter((d) => d.rate_type === 'hourly'), (d) => d.hours.approved),
+    overtime_billed: overtimeBilled,
+    overtime_multiplier: raw.overtime?.multiplier ?? 1,
+    overtime_hours: overtimeBilled ? sum(billedDays, (d) => d.hours.overtime_approved) : 0,
+    base_amount: sum(raw.days, (d) => d.base_amount),
+    overtime_amount: overtimeBilled ? sum(raw.days, (d) => d.overtime_amount) : 0,
+    amount: lockedAmount(raw),
+    calendar: raw.calendar?.name || null,
+  };
+}
+
 // Active client projects matching the Billing & Sales / P&L filters.
 // project_type: managed_services | project | none | all.
 async function listProjects(orgId, { project_type = 'all', client_account_id, account_id } = {}) {
@@ -413,4 +467,4 @@ function minimumFor(account, raw, totals) {
   return { hours: minimumHours, actual_hours: totals.approved_hours, shortfall_hours: shortfall, met: shortfall === 0 };
 }
 
-module.exports = { PROJECT_SELECT, estimateFor, minimumFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };
+module.exports = { invoiceDetails, PROJECT_SELECT, estimateFor, minimumFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };
