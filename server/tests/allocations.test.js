@@ -191,6 +191,10 @@ describe('Team capacity', () => {
       status: 'available',
     });
 
+    // Capability is a whole number, rounded up: capacity 4.52 - allocation 2 = 2.52 shows as 3; can allocate follows it.
+    await authed(request(app).put('/api/v1/allocations/settings'), ctx.adminToken).send({ projects_per_resource: 1.13 });
+    expect(await row()).toMatchObject({ total_capacity: 4.52, current_allocation: 2, available_capability: 3, projects_ending_soon: 1, can_allocate: 4 });
+
     // Configurable: 0.25 projects/resource → capacity 1, allocation 2 → available 0, over capacity.
     await authed(request(app).put('/api/v1/allocations/settings'), ctx.adminToken).send({ projects_per_resource: 0.25 });
     expect(await row()).toMatchObject({ total_capacity: 1, current_allocation: 2, available_capability: 0, over_capacity_by: 1, status: 'over_capacity' });
@@ -221,8 +225,9 @@ describe('Team capacity', () => {
 
     const capOn = async (date, id) => (await report('team-capacity', { date })).body.data.teams.find((t) => t.team?.id === id);
     expect(await capOn('2026-08-10', smith.id)).toMatchObject({ members: 4, total_capacity: 6 });
-    expect(await capOn('2026-08-20', smith.id)).toMatchObject({ members: 3, total_capacity: 4.5 });
-    expect(await capOn('2026-08-20', growth.id)).toMatchObject({ members: 1, total_capacity: 1.5 });
+    // Nothing allocated: capability 4.5 shows as 5 and 1.5 as 2 (whole projects, rounded up).
+    expect(await capOn('2026-08-20', smith.id)).toMatchObject({ members: 3, total_capacity: 4.5, available_capability: 5 });
+    expect(await capOn('2026-08-20', growth.id)).toMatchObject({ members: 1, total_capacity: 1.5, available_capability: 2 });
 
     const moves = (await report('movements', { from: '2026-08-15', to: '2026-08-31' })).body.data.rows;
     expect(moves).toEqual([expect.objectContaining({ effective_date: '2026-08-17', change_type: 'team', from_team: { id: smith.id, name: 'Data Smith' }, to_team: { id: growth.id, name: 'Growth' } })]);
