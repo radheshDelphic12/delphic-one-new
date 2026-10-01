@@ -136,8 +136,18 @@ async function listRuns(orgId, { status }) {
   });
 }
 
-// One employee's salary for the period — from APPROVED TIMESHEET HOURS, never
-// from attendance check-in / check-out (that is presence tracking only).
+// One employee's salary for the period. The SOURCE depends on the person's pay basis
+// (OrgMembership.pay_basis, set by an admin):
+//   timesheet (default) - APPROVED TIMESHEET HOURS, never attendance (rules below);
+//   attendance          - the attendance MARKING: every company working day counts the
+//                         shift when marked present / wfh, half the shift when half_day,
+//                         nothing when absent. Approved leave pays / doesn't pay per its type
+//                         (leave and attendance never double count), and a past working day
+//                         with no marking and no leave is "unmarked" - unpaid, listed in
+//                         `unmarked_days` and blocking the salary lock until an admin marks it.
+//                         Project timesheets only feed client billing; overtime is
+//                         ticket based (phase 3), so the timesheet never creates OT here.
+// The rules below are described for the timesheet basis; both share the deficit logic.
 //
 // - Expected hours: each company working day (the employee's company calendar:
 //   Mon–Fri less its holidays, plus any weekend it marks as a working day) ×
@@ -158,8 +168,20 @@ async function listRuns(orgId, { status }) {
 //   `earned_to_date` is what the days up to it have earned.
 const OT_MULTIPLIER = 1;
 
-function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null }) {
+// A day's share of the shift for an attendance marking (anything else pays nothing).
+const ATTENDANCE_DAY_SHARE = { present: 1, wfh: 1, half_day: 0.5 };
+
+// 'attendance' only when an admin chose it; everyone else keeps the timesheet basis.
+function payBasisOf(membership) {
+  return membership?.pay_basis === 'attendance' ? 'attendance' : 'timesheet';
+}
+
+function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null, payBasis = 'timesheet', ticketsByDate = new Map() }) {
   const r2 = (n) => Math.round(n * 100) / 100;
+  const attendanceMode = payBasis === 'attendance';
+  let half_days = 0;
+  let absent_days = 0;
+  let unmarked_days = 0;
   let weekend_days = 0;
   let holiday_days = 0;
   let working_days = 0;
@@ -196,7 +218,9 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
     const att = attendanceByDate.get(key);
     if (att && (att.status === 'present' || att.status === 'wfh' || att.status === 'half_day')) present_days += 1;
 
-    const logged = hoursByDate.get(key) || { approved: 0, pending: 0 };
+    let logged = hoursByDate.get(key) || { approved: 0, pending: 0 };
+    // Attendance basis: the day's hours are what the marking says, not what was logged on projects.
+    if (attendanceMode) logged = { approved: isWorking ? expected * (att ? ATTENDANCE_DAY_SHARE[att.status] || 0 : 0) : 0, pending: 0 };
     approved_hours += logged.approved;
     pending_hours += logged.pending;
     const ot = overtimeByDate.get(key) || null;
@@ -207,6 +231,15 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
     if (otStatus === 'approved' || otStatus === 'pending') ot_pending_hours += Math.max(0, otProjectedExcess - (otStatus === 'approved' ? Math.min(Number(ot.hours), otApprovedExcess) : 0));
     if (otStatus === 'rejected') ot_rejected_hours += otProjectedExcess;
     if (otStatus === 'comp_off') comp_off_days += 1;
+    // Attendance basis: overtime is what the manager approved on tickets (never timesheet hours).
+    if (attendanceMode) {
+      const t = ticketsByDate.get(key);
+      if (t) {
+        ot_approved_hours += t.approved;
+        ot_pending_hours += t.pending;
+        ot_rejected_hours += t.rejected;
+      }
+    }
 
     if (!isWorking) continue;
     if (asOf && day > asOf) {
@@ -219,6 +252,11 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
     // the day), so leave and timesheet hours are never counted twice.
     const dayLeave = leaveHoursForDay(leaveRanges.filter((r) => day >= r.from_date && day <= r.to_date), expected);
     const workCap = expected - dayLeave.total;
+    if (attendanceMode) {
+      if (!att && dayLeave.total < expected - 1e-9) unmarked_days += 1;
+      else if (att && att.status === 'absent') absent_days += 1;
+      else if (att && att.status === 'half_day') half_days += 1;
+    }
     const paid = dayLeave.paid + Math.min(logged.approved, workCap);
     const projected = dayLeave.paid + Math.min(logged.approved + logged.pending, workCap);
     if (expected > 0) {
@@ -247,7 +285,11 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
 
   return {
     breakdown: {
-      source: 'approved_timesheets',
+      source: attendanceMode ? 'attendance' : 'approved_timesheets',
+      pay_basis: attendanceMode ? 'attendance' : 'timesheet',
+      half_days,
+      absent_days,
+      unmarked_days,
       period_start: ymd(period_start),
       period_end: ymd(period_end),
       days_in_month,
@@ -358,6 +400,38 @@ async function attendanceSalary(orgId, query) {
   return live.salaryLive(orgId, query);
 }
 
+// What each employee would be paid under each basis for a month, side by side, so an admin
+// can check the attendance basis (unmarked days, absences) BEFORE switching anyone.
+async function payBasisComparison(orgId, query) {
+  const salaryEngine = require('../calculations/engines/salary.engine');
+  return salaryEngine.comparePayBases(orgId, query);
+}
+
+// Admin: set the pay basis of some people (ids) and / or everyone in the IT department.
+// Audited with the reason; locked months keep their locked figures, only live / future
+// calculations follow the new basis.
+async function setPayBasis(orgId, adminUserId, { pay_basis, org_membership_ids = [], it_department = false, reason }) {
+  const where = { org_id: orgId, worker_type: { not: 'contractor' }, OR: [] };
+  if (org_membership_ids.length) where.OR.push({ id: { in: org_membership_ids } });
+  if (it_department) where.OR.push({ person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } }, { department: { name: { equals: 'IT', mode: 'insensitive' } } });
+  if (!where.OR.length) return { error: 'nobody_selected' };
+  const people = await prisma.orgMembership.findMany({ where, select: { id: true, pay_basis: true, person: { select: { name: true } } } });
+  const changing = people.filter((p) => (p.pay_basis === 'attendance' ? 'attendance' : 'timesheet') !== pay_basis);
+  if (changing.length) await prisma.orgMembership.updateMany({ where: { id: { in: changing.map((p) => p.id) } }, data: { pay_basis } });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId,
+      actor_id: adminUserId,
+      action: 'pay_basis_set',
+      entity_type: 'org_membership',
+      entity_id: changing[0]?.id || people[0]?.id || orgId,
+      reason,
+      snapshot: { pay_basis, changed: changing.map((p) => ({ id: p.id, name: p.person?.name, from: p.pay_basis || 'timesheet' })), considered: people.length },
+    },
+  });
+  return { pay_basis, changed: changing.length, considered: people.length };
+}
+
 async function listMyPayslips(orgId, orgMembershipId, { page, limit }) {
   const where = { org_id: orgId, org_membership_id: orgMembershipId };
   const [data, total] = await Promise.all([
@@ -394,6 +468,9 @@ module.exports = {
   processRun,
   listRunPayslips,
   attendanceSalary,
+  payBasisOf,
+  setPayBasis,
+  payBasisComparison,
   listMyPayslips,
   getPayslip,
   // exported for tests only

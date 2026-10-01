@@ -206,6 +206,8 @@ const costAssignmentSchema = z.object({
   // Share of the person's monthly cost charged to this project; null = even
   // split across their projects. resource_type follows the person's worker type.
   allocation_percent: z.coerce.number().min(0).max(100).nullable().optional(),
+  // Hours a day this person can bill the client on this project (client / project timesheet cap); default 8.
+  billable_hours_per_day: z.coerce.number().positive().max(24).optional(),
   // Effective-dated allocation (both inclusive; null = open). `effective_date`
   // applies a change to the allocation in force from that day on (the old
   // values stay for the days before) — see allocations.service.assign.

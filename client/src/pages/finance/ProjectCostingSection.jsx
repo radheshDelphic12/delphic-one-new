@@ -34,6 +34,7 @@ function AllocationRow({ a, onEnd, onChange, onDelete }) {
   const [endDate, setEndDate] = useState(localToday);
   const [effective, setEffective] = useState(localToday);
   const [pct, setPct] = useState(a.allocation_percent ?? '');
+  const [billable, setBillable] = useState(a.billable_hours_per_day ?? 8);
   const [rate, setRate] = useState(a.cost_rate_per_hr ?? '');
   const range = `${formatDay(a.start_date) || 'Project start'} → ${formatDay(a.end_date) || 'open'}`;
   return (
@@ -51,6 +52,7 @@ function AllocationRow({ a, onEnd, onChange, onDelete }) {
         </span>
         <span className="flex items-center gap-3 text-tertiary-600">
           <span title="Share of capacity / monthly cost charged to this project">{a.allocation_percent != null ? `${Number(a.allocation_percent)}% allocated` : <span className="text-tertiary-400">even split</span>}</span>
+          <span title="Hours a day this person can bill the client on this project — the project's daily timesheet cap is the sum over its people">{Number(a.billable_hours_per_day ?? 8)}h/day billable</span>
           <span title="Internal cost per approved hour (not client billing)">{a.cost_rate_per_hr != null ? `internal cost ${money(a.cost_rate_per_hr)}/hr` : <span className="text-tertiary-400">no internal cost rate</span>}</span>
           {a.status !== 'ended' && (
             <>
@@ -71,9 +73,10 @@ function AllocationRow({ a, onEnd, onChange, onDelete }) {
       {mode === 'change' && (
         <div className="mt-2 flex flex-wrap items-end gap-2 rounded-xl bg-primary-50/60 p-2 text-xs">
           <label className="font-medium text-tertiary-600">Allocation %<input type="number" min="0" max="100" value={pct} onChange={(e) => setPct(e.target.value)} placeholder="even split" className="mt-1 block w-28 rounded-lg border px-2 py-1 text-sm" /></label>
+          <label className="font-medium text-tertiary-600">Billable hrs/day<input type="number" min="0.25" max="24" step="0.25" value={billable} onChange={(e) => setBillable(e.target.value)} className="mt-1 block w-28 rounded-lg border px-2 py-1 text-sm" /></label>
           <label className="font-medium text-tertiary-600">Internal cost/hr<input type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} className="mt-1 block w-32 rounded-lg border px-2 py-1 text-sm" /></label>
           <label className="font-medium text-tertiary-600">Effective from<input type="date" value={effective} onChange={(e) => setEffective(e.target.value)} className="mt-1 block rounded-lg border px-2 py-1 text-sm" /></label>
-          <button type="button" className="btn-secondary text-xs" onClick={() => onChange(a, { allocation_percent: pct === '' ? null : Number(pct), cost_rate_per_hr: rate === '' ? null : Number(rate), effective_date: effective }).then((done) => done && setMode(null))}>Apply from this date</button>
+          <button type="button" className="btn-secondary text-xs" onClick={() => onChange(a, { allocation_percent: pct === '' ? null : Number(pct), billable_hours_per_day: Number(billable) || 8, cost_rate_per_hr: rate === '' ? null : Number(rate), effective_date: effective }).then((done) => done && setMode(null))}>Apply from this date</button>
         </div>
       )}
       {mode === 'delete' && (
@@ -106,6 +109,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
   const [membershipId, setMembershipId] = useState('');
   const [rate, setRate] = useState('');
   const [allocation, setAllocation] = useState('');
+  const [billableDay, setBillableDay] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showEnded, setShowEnded] = useState(false);
@@ -141,6 +145,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
         org_membership_id: membershipId,
         cost_rate_per_hr: rate ? Number(rate) : undefined,
         allocation_percent: allocation === '' ? undefined : Number(allocation),
+        billable_hours_per_day: billableDay === '' ? undefined : Number(billableDay),
         start_date: startDate || null,
         end_date: endDate || null,
       });
@@ -148,6 +153,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
       setMembershipId('');
       setRate('');
       setAllocation('');
+      setBillableDay('');
       setStartDate('');
       setEndDate('');
       load(accountId);
@@ -245,6 +251,7 @@ export default function ProjectCostingSection({ accountId: fixedAccountId = '' }
             {/* Resource type follows the person's user type (People → Full-Time Employee / Contractor). */}
             <div className="w-56"><SearchableSelect value={membershipId} onChange={setMembershipId} options={membershipOptions} placeholder="Select employee or contractor" searchPlaceholder="Search people…" /></div>
             <input type="number" min="0" max="100" step="1" placeholder="Allocation % (optional)" title="Share of this person's capacity / monthly cost on this project" aria-label="Allocation percent" value={allocation} onChange={(e) => setAllocation(e.target.value)} className="w-44 rounded-xl border px-3 py-2 text-sm" />
+            <input type="number" min="0.25" max="24" step="0.25" placeholder="Billable hrs/day (default 8)" title="Hours a day this person can bill the client on this project (client / project timesheet cap)" aria-label="Billable hours per day" value={billableDay} onChange={(e) => setBillableDay(e.target.value)} className="w-48 rounded-xl border px-3 py-2 text-sm" />
             <input type="number" min="0" step="0.01" placeholder="Internal cost/hr (optional)" title="Internal cost per approved hour — never client billing" aria-label="Internal cost rate per hour" value={rate} onChange={(e) => setRate(e.target.value)} className="w-48 rounded-xl border px-3 py-2 text-sm" />
             <label className="text-xs font-medium text-tertiary-600">From<input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} title="First day on the project (blank = from the project start)" className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" /></label>
             <label className="text-xs font-medium text-tertiary-600">To<input type="date" min={startDate || undefined} value={endDate} onChange={(e) => setEndDate(e.target.value)} title="Last day (blank = open-ended)" className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" /></label>
