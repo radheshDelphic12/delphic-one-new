@@ -87,7 +87,10 @@ export function printClientInvoice(inv, orgName) {
     ${lines.length && d.billing_type === 'hourly' ? `<h2>Resources</h2><table><thead><tr><th>Resource</th><th class="r">Hours</th><th class="r">Overtime hrs</th><th class="r">Amount (${escapeHtml(inv.currency)})</th></tr></thead><tbody>
       ${lines.map((l) => `<tr><td>${escapeHtml(l.resource)}</td><td class="r">${escapeHtml(l.hours)}</td><td class="r">${escapeHtml(l.overtime_hours || '')}</td><td class="r">${escapeHtml(amountText(l.revenue, inv.currency))}</td></tr>`).join('')}
       </tbody></table>` : ''}
-    <table><tbody><tr class="total"><td>Total due</td><td class="r">${escapeHtml(amountText(inv.amount, inv.currency))}</td></tr></tbody></table>
+    <table><tbody>
+      ${(d.charges || []).length ? `<tr><td>Amount for the period</td><td class="r">${escapeHtml(amountText(inv.amount, inv.currency))}</td></tr>${d.charges.map((c) => `<tr><td>${escapeHtml(c.label)} (${escapeHtml(c.mode === 'percent' ? `${c.value}%` : amountText(c.value, inv.currency))}${c.effect === 'deduct' ? ', deducted' : ''})</td><td class="r">${escapeHtml(`${c.amount < 0 ? '− ' : ''}${amountText(Math.abs(c.amount), inv.currency)}`)}</td></tr>`).join('')}` : ''}
+      <tr class="total"><td>Total due</td><td class="r">${escapeHtml(amountText(inv.total_amount ?? inv.amount, inv.currency))}</td></tr>
+    </tbody></table>
     ${inv.notes ? `<p class="note">${escapeHtml(inv.notes)}</p>` : ''}`;
   return openPrint(`Invoice ${inv.invoice_number || ''} — ${p.name || ''}`, body);
 }

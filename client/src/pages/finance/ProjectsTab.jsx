@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
+import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { CONTRACT_FILTERS, CONTRACT_STATES, CategoryFilter, FilterPills, matchesCategory, money as moneyIn, useExchangeRates, ExchangeRatesPanel } from './projectFilters.jsx';
@@ -340,6 +341,10 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
           </div>
           </fieldset>
         </form>
+
+        <div className="rounded-2xl border border-tertiary-100 p-4">
+          <ContractChargesSection accountId={project.id} currency={form.currency || project.currency || 'INR'} />
+        </div>
 
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 
