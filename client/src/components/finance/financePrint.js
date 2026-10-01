@@ -79,6 +79,7 @@ export function printClientInvoice(inv, orgName) {
       ['Project', `${escapeHtml(p.name || '—')}${p.code ? ` (${escapeHtml(p.code)})` : ''}`],
       ['Billing type', escapeHtml(d.billing_type ? (d.billing_type === 'monthly' ? 'Monthly' : 'Hourly') : '—')],
       ['Currency', escapeHtml(inv.currency)],
+      ['Converted from', d.conversion ? escapeHtml(`${amountText(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`) : null],
       ['Rate', escapeHtml(d.rate !== undefined && d.rate !== null ? `${amountText(d.rate, inv.currency)}${d.billing_type === 'hourly' ? ' / hour' : ' / month'}` : '—')],
     ])}
     <h2>Calculation</h2>
