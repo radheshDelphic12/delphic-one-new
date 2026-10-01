@@ -177,7 +177,7 @@ function TeamCapacityReport() {
       <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpen} emptyLabel="No teams yet — add them under HR Settings → Teams." />
       {data && (
         <p className="text-xs text-tertiary-500">
-          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
+          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
           {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)}.
         </p>
       )}
