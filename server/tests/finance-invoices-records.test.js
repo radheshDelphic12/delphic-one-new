@@ -484,3 +484,49 @@ describe('Contract charges (GST, TDS, other) on client invoices', () => {
     expect(over.body.data).toMatchObject({ amount: 50000, total_amount: 50000 + 9000 + 830 });
   });
 });
+
+describe('Admin can delete invoices at any status (reason required once sent / paid)', () => {
+  test('client invoice: a draft goes with no reason; a sent one needs a reason; both are audited; only admins delete', async () => {
+    const ctx = await seed();
+    const p1 = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 100000 });
+    const p2 = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD' });
+    const draft = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p1.id, ...AUG })).body.data;
+    const sent = (await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p2.id, ...AUG })).body.data;
+    expect((await authed(request(app).post(`/api/v1/billing/invoices/${sent.id}/status`), ctx.adminToken).send({ status: 'sent' })).status).toBe(200);
+
+    expect((await authed(request(app).delete(`/api/v1/billing/invoices/${draft.id}`), ctx.adminToken)).status).toBe(200);
+    expect((await authed(request(app).get(`/api/v1/billing/invoices/${draft.id}`), ctx.adminToken)).status).toBe(404);
+
+    // Sent: refused without a reason, and for non-admins; allowed with one.
+    expect((await authed(request(app).delete(`/api/v1/billing/invoices/${sent.id}`), ctx.adminToken)).status).toBe(422);
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).delete(`/api/v1/billing/invoices/${sent.id}`), (await loginAs(emp)).access_token).send({ reason: 'sneaky' })).status).toBeGreaterThanOrEqual(401);
+    const gone = await authed(request(app).delete(`/api/v1/billing/invoices/${sent.id}`), ctx.adminToken).send({ reason: 'Raised against the wrong client' });
+    expect(gone.status).toBe(200);
+    expect((await authed(request(app).get(`/api/v1/billing/invoices/${sent.id}`), ctx.adminToken)).status).toBe(404);
+
+    const audits = await prisma.auditLog.findMany({ where: { org_id: ctx.org.id, action: 'client_invoice_delete' } });
+    expect(audits).toHaveLength(2);
+    expect(audits.find((a) => a.entity_id === sent.id)).toMatchObject({ reason: 'Raised against the wrong client' });
+    expect(audits.find((a) => a.entity_id === sent.id).snapshot).toMatchObject({ status: 'sent', invoice_number: sent.invoice_number });
+    // The month can be invoiced again once the old one is gone.
+    expect((await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p2.id, ...AUG })).status).toBe(201);
+  });
+
+  test('vendor invoice: delete is audited with a reason', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const row = (await authed(request(app).post('/api/v1/billing/vendor-invoices/generate'), ctx.adminToken).send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'ABC-0815' })).body.data[0];
+
+    expect((await authed(request(app).delete(`/api/v1/billing/vendor-invoices/${row.id}`), ctx.adminToken).send({ reason: 'Vendor re-issued the bill' })).status).toBe(200);
+    const list = await authed(request(app).get('/api/v1/billing/vendor-invoices'), ctx.adminToken).query(AUG);
+    expect(list.body.data).toHaveLength(0);
+    const audit = await prisma.auditLog.findFirst({ where: { org_id: ctx.org.id, action: 'vendor_invoice_delete', entity_id: row.id } });
+    expect(audit).toMatchObject({ reason: 'Vendor re-issued the bill' });
+  });
+});

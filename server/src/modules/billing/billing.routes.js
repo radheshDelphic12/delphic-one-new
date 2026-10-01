@@ -17,6 +17,7 @@ const {
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  deleteInvoiceSchema,
   contractChargeSchema,
   updateContractChargeSchema,
   billingAdjustmentSchema,
@@ -191,7 +192,7 @@ router.delete(
   '/vendor-invoices/:id',
   ...adminInOrg,
   asyncHandler(async (req, res) => {
-    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id);
+    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id, deleteInvoiceSchema.parse(req.body || {}).reason, req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
   })
@@ -399,6 +400,17 @@ router.patch(
     const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.invoice);
+  })
+);
+
+router.delete(
+  '/invoices/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { deleted: true });
   })
 );
 

@@ -207,6 +207,23 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
   }
   useEffect(load, [period.period_month, period.period_year, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Admin delete, any status. A sent / paid invoice needs a reason (audited).
+  async function remove(row) {
+    const needsReason = row.status !== 'draft';
+    const reason = window.prompt(needsReason
+      ? `Invoice ${row.invoice_number || ''} is already ${row.status}. Give a reason to delete it (required):`
+      : `Delete draft invoice ${row.invoice_number || ''}? Reason (optional):`);
+    if (reason === null) return;
+    if (needsReason && reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
+    try {
+      await apiClient.delete(`/billing/invoices/${row.id}`, { data: { reason: reason.trim() || undefined } });
+      pushInfo(`Invoice ${row.invoice_number || ''} deleted`);
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the invoice'), 'Something went wrong');
+    }
+  }
+
   async function transition(row, status) {
     try {
       await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
@@ -238,6 +255,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
         <div className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(r)}><Printer className="h-3.5 w-3.5" /> Download</button>
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
+          <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => remove(r)}>Delete</button>
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
           {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
         </div>

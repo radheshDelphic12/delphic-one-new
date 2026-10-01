@@ -392,10 +392,23 @@ async function updateVendorInvoice(orgId, invoiceId, patch, actorUserId = null) 
   return { invoice: serializeInvoice(invoice) };
 }
 
-async function removeVendorInvoice(orgId, invoiceId) {
+async function removeVendorInvoice(orgId, invoiceId, reason = null, actorUserId = null) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   await prisma.projectVendorInvoice.delete({ where: { id: invoiceId } });
+  if (actorUserId) {
+    await prisma.auditLog.create({
+      data: {
+        org_id: orgId,
+        actor_id: actorUserId,
+        action: 'vendor_invoice_delete',
+        entity_type: 'vendor_invoice',
+        entity_id: invoiceId,
+        reason: (reason || '').trim() || `Vendor invoice ${existing.invoice_number || invoiceId} deleted`,
+        snapshot: { invoice_number: existing.invoice_number, amount: Number(existing.amount), currency: existing.currency, vendor_account_id: existing.vendor_account_id, account_id: existing.account_id, period_month: existing.period_month, period_year: existing.period_year },
+      },
+    });
+  }
   return { deleted: true };
 }
 
