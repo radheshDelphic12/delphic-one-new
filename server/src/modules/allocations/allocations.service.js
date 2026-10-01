@@ -468,7 +468,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       const members = r.team ? r.members.length : 0;
       const total = round2(members * r.capacity_per_resource);
       const current = projects.length;
-      const available = round2(Math.max(0, total - current));
+      // Projects are whole units: a fractional remainder (0.5, 2.5) counts as one more project, so capability is a whole number.
+      const available = Math.ceil(round2(Math.max(0, total - current)));
       const endingSoon = projects.filter((p) => p.ending_soon).length;
       return {
         team: r.team,
