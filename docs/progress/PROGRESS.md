@@ -2,6 +2,10 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-01 — Zephyr Infrastructure workspace: plan + docs — branch `zephyr-bug-fix-new-implementation`
+
+New work stream for the Zephyr group with only six sections (Leads, Client/Vendor, Projects, Revenue/Expense/Salaries/Profit/Valuation, Employee/Contractor management, Financials). Audited what exists (leads/contracts/projects/people are in place; Client/Vendor directory, company money overview and Zephyr-reachable Financials are the gaps) and wrote a phased plan. Revised later the same day to a standalone `Zx` module (no Delphic Global reuse), 9 phases Z0-Z8. Plan and live work log: [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Plan v4 (reviewed against platform code, admin/manager/staff access model, fixed-rate salaries) approved. Z0 started and **paused**: schema + migration `zephyr_foundation` + org-stamp registration done (uncommitted); server module, client shell and tests not started. See the work log in the spec for resume notes.
+
 ## 2026-10-01 — Finance: contract-based billing, invoices in Live Analytics, per-record locks, Financials = locked only — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
 
 Spec, decisions and file map: [features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md](../features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md).

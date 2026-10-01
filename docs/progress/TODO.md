@@ -4,6 +4,21 @@ Working task list. Check off / move to [PROGRESS.md](PROGRESS.md) as items land.
 
 **Sprint tickets live in [SPRINT-PLAN.md](SPRINT-PLAN.md)** (Aug 21 → Aug 28 deploy).
 
+## Zephyr Infrastructure workspace (2026-10-01, branch `zephyr-bug-fix-new-implementation`)
+
+Standalone `Zx` module, nothing reused from Delphic Global. Spec + phases: [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md).
+
+- [x] Decisions made (spec section 11): logins admin+manager+staff, fixed-rate salaries, dependency order
+- [ ] Z0 foundation + isolation (PAUSED): [x] schema + migration + db.js org-stamp; [ ] modules/zephyr (access, audit, /me, settings, categories, people) + app.js mount; [ ] client shell (ZEPHYR_NAV, /zephyr home, guard, settings); [ ] seed Zephyr org to ['zephyr']; [ ] zephyr-foundation tests + wider erp-verticals/workspace-isolation/auth run
+- [ ] Z1 Client/Vendor
+- [ ] Z2 Leads
+- [ ] Z3 Projects
+- [ ] Z4 Employee/Contractor + salary records
+- [ ] Z5 Money ledger (revenue / expense)
+- [ ] Z6 Company overview (revenue, expense, salaries, profit, valuation)
+- [ ] Z7 Financials (plan vs actual, month close, projections, statements)
+- [ ] Z8 Hardening: seed, testing guide, QA
+
 ## Timesheet-based pay + overtime approval (2026-09-30, branch `delphic-one-bugFix-and-newImplementation`, uncommitted)
 
 See PROGRESS.md 2026-09-30 entry.

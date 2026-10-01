@@ -439,6 +439,7 @@ model User {
   notifications_authored          Notification[]                  @relation("NotificationActor")
   notification_preferences        NotificationPreference[]
   org_memberships                 OrgMembership[]                 @relation("OrgMembershipPerson")
+  zx_people                       ZxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1670,6 +1671,12 @@ model Org {
   project_documents  ProjectDocument[]
   financial_plans    FinancialPlan[]
   resource_mappings  ResourceMapping[]
+
+  // Zephyr Infrastructure workspace (standalone Zx* module).
+  zx_settings   ZxSetting[]
+  zx_categories ZxCategory[]
+  zx_audit      ZxAudit[]
+  zx_people     ZxPerson[]
 
   // Backfilled onto every existing tenant-scoped table in this same
   // migration (nullable — Phase 1 flips these to NOT NULL once app code
@@ -3058,4 +3065,86 @@ model FinancialCalculationChange {
 
   @@index([calculation_id, status])
   @@map("financial_calculation_changes")
+}
+
+// ---------------------------------------------------------------------------
+// Zephyr Infrastructure workspace (standalone Zx* module, 2026-10).
+// Nothing here references Delphic Global business tables. Every row is
+// org-scoped; services must filter by org_id explicitly (reads are not
+// auto-filtered). See docs/features/ZEPHYR-INFRASTRUCTURE.md.
+// ---------------------------------------------------------------------------
+
+// One row per org: company-level Zephyr settings (valuation, numbering).
+model ZxSetting {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @unique @db.Uuid
+  org                Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency           String   @default("INR")
+  valuation_method   String   @default("revenue_multiple") // manual | revenue_multiple | profit_multiple
+  valuation_multiple Decimal  @default(3) @db.Decimal(8, 2)
+  valuation_manual   Decimal? @db.Decimal(16, 2)
+  project_prefix     String   @default("ZX-P")
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@map("zx_settings")
+}
+
+// Admin-editable revenue / expense categories (not hard-coded).
+model ZxCategory {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  org        Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind       String // revenue | expense
+  name       String
+  active     Boolean   @default(true)
+  sort_order Int       @default(0)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
+
+  @@unique([org_id, kind, name])
+  @@index([org_id, kind])
+  @@map("zx_categories")
+}
+
+// Zephyr's own audit trail (before/after JSON, actor, optional reason).
+model ZxAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("zx_audit")
+}
+
+// The Zephyr people roster. Z0 holds only what roles need (name, optional
+// login, access role); Z4 extends it with employment and pay fields.
+// access_role: manager | staff | none. Org-membership admins are Zephyr
+// admins regardless of this row.
+model ZxPerson {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name        String
+  user_id     String?   @db.Uuid
+  user        User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role String    @default("none")
+  active      Boolean   @default(true)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+  deleted_at  DateTime?
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("zx_people")
 }
