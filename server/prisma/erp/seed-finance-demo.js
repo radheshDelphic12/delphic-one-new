@@ -22,7 +22,6 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../src/config/db');
 const calendarsService = require('../../src/modules/calendars/calendars.service');
-const billingService = require('../../src/modules/billing/billing.service');
 const invoices = require('../../src/modules/billing/invoices.service');
 const adjustments = require('../../src/modules/billing/adjustments.service');
 const leaveService = require('../../src/modules/leave/leave.service');
@@ -62,14 +61,13 @@ async function ensureProject(org, admin, client, { name, rate_type, rate, curren
     console.log(`  + project "${name}"`);
   }
   // Billing terms are applied once (a half-finished earlier run is completed, a configured project is left alone).
+  // Plain writes (not billingService.updateProjectProfile): no interactive transaction, so a slow link can't time it out.
   if (!(await prisma.billingRate.count({ where: { account_id: project.id } }))) {
-    const patched = await billingService.updateProjectProfile(org.id, admin.id, project.id, {
-      agreement_start_date: new Date('2026-01-01'),
-      overtime_billable: false,
-      billing: { rate_type, rate, currency, effective_from: new Date('2026-01-01') },
-      ...settings,
+    await prisma.account.update({
+      where: { id: project.id },
+      data: { agreement_start_date: new Date('2026-01-01'), overtime_billable: false, client_billing_currency: currency, ...settings },
     });
-    if (patched.error) throw new Error(`updateProjectProfile ${name}: ${patched.error}`);
+    await prisma.billingRate.create({ data: { org_id: org.id, account_id: project.id, rate_type, rate, currency, effective_from: new Date('2026-01-01'), created_by: admin.id } });
     console.log(`    billing ${rate_type} ${currency} ${rate}`);
   }
   return project;
