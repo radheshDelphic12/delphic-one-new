@@ -37,7 +37,6 @@ async function applicableMembers(orgId, { membershipIds = null } = {}) {
       employment_status: { in: ['active', 'notice_period'] },
       worker_type: 'full_time_employee',
       ...(membershipIds ? { id: { in: membershipIds } } : {}),
-      OR: [{ pay_basis: 'attendance' }, { person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } }],
     },
     select: MEMBER_SELECT,
     orderBy: { joined_at: 'asc' },

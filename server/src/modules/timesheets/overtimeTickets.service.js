@@ -49,8 +49,8 @@ function canDecideFor(actor, target) {
 }
 
 async function usesTickets(orgMembershipId) {
-  const m = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { pay_basis: true, worker_type: true } });
-  return Boolean(m && m.worker_type !== 'contractor' && m.pay_basis === 'attendance');
+  const m = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { worker_type: true } });
+  return Boolean(m && m.worker_type !== 'contractor');
 }
 
 async function dayTotal(orgMembershipId, date, excludeId = null) {
