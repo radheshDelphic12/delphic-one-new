@@ -8,7 +8,6 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 
 const STATUSES = ['present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
-const TIMED = new Set(['present', 'half_day', 'wfh']);
 const TEMPLATE_COLUMNS = ['employee', 'name', 'department', 'date', 'day', 'status', 'check_in', 'check_out'];
 
 // Local calendar day (not UTC) — "today" as the admin sees it.
@@ -101,15 +100,14 @@ export const BOM = String.fromCharCode(0xfeff);
 
 const inputClass = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 
-/** One employee, one past day — creates the record if they never checked in. */
+/** One employee, one past day — creates the record if none exists. */
 export function ManualAttendanceDrawer({ open, onClose, onSaved }) {
   const { pushError } = useAlerts();
   const members = useOrgMembershipOptions(open);
-  const empty = { org_membership_id: '', date: '', status: 'present', check_in_time: '', check_out_time: '', reason: '' };
+  const empty = { org_membership_id: '', date: '', status: 'present', reason: '' };
   const [fields, setFields] = useState(empty);
   const [saving, setSaving] = useState(false);
   const set = (key, value) => setFields((current) => ({ ...current, [key]: value }));
-  const timed = TIMED.has(fields.status);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (open) setFields(empty); }, [open]);
@@ -122,8 +120,6 @@ export function ManualAttendanceDrawer({ open, onClose, onSaved }) {
         org_membership_id: fields.org_membership_id,
         date: fields.date,
         status: fields.status,
-        check_in_time: timed && fields.check_in_time ? fields.check_in_time : null,
-        check_out_time: timed && fields.check_out_time ? fields.check_out_time : null,
         reason: fields.reason.trim(),
       });
       onSaved();
@@ -156,21 +152,92 @@ export function ManualAttendanceDrawer({ open, onClose, onSaved }) {
             </select>
           </label>
         </div>
-        {timed && (
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-xs font-medium text-tertiary-600">Check in <span className="font-normal text-tertiary-400">(optional)</span>
-              <input type="time" value={fields.check_in_time} onChange={(e) => set('check_in_time', e.target.value)} className={inputClass} />
-            </label>
-            <label className="block text-xs font-medium text-tertiary-600">Check out <span className="font-normal text-tertiary-400">(optional)</span>
-              <input type="time" value={fields.check_out_time} onChange={(e) => set('check_out_time', e.target.value)} className={inputClass} />
-            </label>
-          </div>
-        )}
         <label className="block text-xs font-medium text-tertiary-600">Reason
           <input required value={fields.reason} onChange={(e) => set('reason', e.target.value)} placeholder="e.g. Backfill — attendance kept on paper in September" className={inputClass} />
         </label>
         <p className="text-xs text-tertiary-500">Replaces anything already recorded for that day. If the month is locked, the change is flagged for review instead of altering locked salary.</p>
       </form>
+    </Drawer>
+  );
+}
+
+/**
+ * Admin / IT: mark every applicable employee present on each working day of a PREVIOUS month
+ * (one-time backfill, never the current or a future month). Preview first, then apply; audited.
+ */
+export function BackfillMonthDrawer({ open, onClose, onApplied }) {
+  const { pushError, pushInfo } = useAlerts();
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const [month, setMonth] = useState(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
+  const [reason, setReason] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [runs, setRuns] = useState([]);
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  useEffect(() => {
+    if (!open) return;
+    setPreview(null);
+    setReason('');
+    apiClient.get('/attendance/backfill-month/runs').then(({ data }) => setRuns(data.data || [])).catch(() => setRuns([]));
+  }, [open]);
+
+  async function run(dryRun) {
+    const [year, mon] = month.split('-').map(Number);
+    setBusy(true);
+    try {
+      const { data } = await apiClient.post('/attendance/backfill-month', { year, month: mon, reason: reason.trim(), dry_run: dryRun });
+      if (dryRun) setPreview(data.data);
+      else {
+        pushInfo(`Marked present: ${data.data.records} day${data.data.records === 1 ? '' : 's'} for ${data.data.employees_affected} employee${data.data.employees_affected === 1 ? '' : 's'}`);
+        onApplied?.();
+        onClose();
+      }
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to backfill the month'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = month && month < thisMonth && reason.trim().length >= 3;
+  return (
+    <Drawer open={open} title="Backfill previous month" onClose={onClose} size="md" tone="create" footer={(
+      <>
+        <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Close</button>
+        <button type="button" className="btn-secondary" onClick={() => run(true)} disabled={busy || !ready}>Preview</button>
+        <button type="button" className="btn-primary" onClick={() => run(false)} disabled={busy || !ready || !preview}>{busy ? 'Working…' : 'Mark present'}</button>
+      </>
+    )}>
+      <div className="space-y-3">
+        <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">
+          Marks IT / attendance-paid employees <b>present</b> on every working day of the chosen month. Weekends, company holidays, approved leave and days that already have a record are skipped. Only past months can be backfilled - never the current or a future month.
+        </p>
+        <label className="block text-xs font-medium text-tertiary-600">Month
+          <input type="month" max={thisMonth} value={month} onChange={(e) => { setMonth(e.target.value); setPreview(null); }} className={inputClass} />
+        </label>
+        {month >= thisMonth && <p className="text-xs text-danger-600">Pick a month before {thisMonth}.</p>}
+        <label className="block text-xs font-medium text-tertiary-600">Reason
+          <input value={reason} onChange={(e) => { setReason(e.target.value); setPreview(null); }} placeholder="e.g. September attendance for IT" className={inputClass} />
+        </label>
+        {preview && (
+          <div className="rounded-xl border border-tertiary-100 p-3 text-sm text-tertiary-700">
+            <p><b>{preview.records}</b> day{preview.records === 1 ? '' : 's'} would be marked present for <b>{preview.employees_affected}</b> of {preview.employees_considered} employees.</p>
+            <p className="mt-1 text-xs text-tertiary-500">Skipped: {Object.keys(preview.skipped).length ? Object.entries(preview.skipped).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', ') : 'none'}</p>
+          </div>
+        )}
+        {runs.length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Previous runs</h4>
+            <ul className="mt-1 divide-y divide-tertiary-100 text-xs text-tertiary-600">
+              {runs.map((r) => (
+                <li key={r.id} className="py-1.5">{new Date(r.created_at).toLocaleString()} · {r.year}-{String(r.month).padStart(2, '0')} · {r.records} records · {r.employees_affected} employees · {r.reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </Drawer>
   );
 }
@@ -253,7 +320,7 @@ export function BulkAttendanceDrawer({ open, onClose, onApplied }) {
       <div className="space-y-5">
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-tertiary-900">1. Download the sheet</h3>
-          <p className="text-xs text-tertiary-500">One row per employee per day up to today, with what&apos;s already recorded filled in (approved leave shows as <b>leave</b>). Fill the <b>status</b> column — present, absent, half_day, leave, holiday or wfh — and optionally <b>check_in</b> / <b>check_out</b> as HH:MM. Rows left blank are skipped.</p>
+          <p className="text-xs text-tertiary-500">One row per employee per day up to today, with what&apos;s already recorded filled in (approved leave shows as <b>leave</b>). Fill the <b>status</b> column — present, absent, half_day, leave, holiday or wfh — Rows left blank are skipped.</p>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs font-medium text-tertiary-600">Department
               <div className="mt-1"><SearchableSelect value={departmentId} onChange={setDepartmentId} options={departments} placeholder="All departments" allowClear /></div>

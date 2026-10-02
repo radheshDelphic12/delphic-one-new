@@ -3,6 +3,7 @@ const { authenticate, authorize, requireOrgMembership } = require('../../middlew
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./payroll.service');
+const adjustmentsService = require('./salaryAdjustments.service');
 const {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
@@ -13,6 +14,10 @@ const {
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
+  salaryAdjustmentSchema,
+  updateSalaryAdjustmentSchema,
+  listSalaryAdjustmentsQuerySchema,
+  deleteSalaryAdjustmentSchema,
 } = require('./payroll.validation');
 
 const router = express.Router();
@@ -165,6 +170,41 @@ router.get(
     });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.payslip);
+  })
+);
+
+// Monthly salary adjustments (TDS, OT adjustment, variable pay, reimbursement, other additions / deductions).
+// Admin only; each change is audited and flags a locked month for recalculation.
+router.get(
+  '/adjustments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await adjustmentsService.list(req.user.org_id, listSalaryAdjustmentsQuerySchema.parse(req.query))))
+);
+router.post(
+  '/adjustments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.create(req.user.org_id, req.user, salaryAdjustmentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+router.patch(
+  '/adjustments/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.update(req.user.org_id, req.user, req.params.id, updateSalaryAdjustmentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.adjustment);
+  })
+);
+router.delete(
+  '/adjustments/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.remove(req.user.org_id, req.user, req.params.id, deleteSalaryAdjustmentSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

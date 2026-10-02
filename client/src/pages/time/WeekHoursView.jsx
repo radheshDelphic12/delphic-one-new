@@ -207,7 +207,7 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
         </table>
       </div>
       <p className="text-xs text-tertiary-500">
-        Salary uses <b>approved</b> hours up to your shift each day, <b>approved paid leave</b> (full day = shift, half day = half) and <b>approved</b> overtime. Unpaid and pending leave add no paid hours. Pending hours are only a projection; check-in/check-out is attendance, not pay.
+        Salary uses <b>approved</b> hours up to your shift each day, <b>approved paid leave</b> (full day = shift, half day = half) and <b>approved</b> overtime. Unpaid and pending leave add no paid hours. Pending hours are only a projection.
         {' '}<span className="rounded bg-orange-50 px-1 text-orange-800">Orange</span> = fewer hours than expected.
       </p>
     </section>

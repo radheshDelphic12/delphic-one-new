@@ -16,6 +16,7 @@
 // are never on payroll (paid through their vendor — see vendorPayment.engine).
 
 const prisma = require('../../../config/db');
+const salaryAdjustments = require('../../payroll/salaryAdjustments.service');
 const { computeBreakdown, payBasisOf } = require('../../payroll/payroll.service');
 const { pickCalendarId } = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds } = require('../period');
@@ -87,7 +88,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     orderBy: { joined_at: 'asc' },
   });
   const ids = memberships.map((m) => m.id);
-  const [structures, attendance, leaves, holidays, calendars, employeeCalendars, entries, overtime, otTickets] = await Promise.all([
+  const [structures, attendance, leaves, holidays, calendars, employeeCalendars, entries, overtime, otTickets, adjustments] = await Promise.all([
     prisma.salaryStructure.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, effective_from: { lte: end } },
       orderBy: [{ effective_from: 'desc' }, { created_at: 'desc' }],
@@ -95,7 +96,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     }),
     prisma.attendanceRecord.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end } },
-      select: { org_membership_id: true, date: true, status: true, overtime_minutes: true, check_in_at: true, check_out_at: true },
+      select: { org_membership_id: true, date: true, status: true },
     }),
     prisma.leaveRequest.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, status: 'approved', from_date: { lte: end }, to_date: { gte: start } },
@@ -115,8 +116,14 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     }),
     // Overtime tickets (attendance-paid people): approved ones are paid, pending ones are the projection.
     prisma.overtimeTicket.findMany({
-      where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end }, status: { in: ['pending', 'approved', 'rejected'] } },
+      where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: start, lte: end }, status: { in: ['pending', 'manager_approved', 'approved', 'rejected'] } },
       select: { org_membership_id: true, date: true, hours: true, status: true },
+    }),
+    // TDS, OT adjustment, variable pay, reimbursements and other additions / deductions of the month.
+    prisma.salaryAdjustment.findMany({
+      where: { org_id: orgId, org_membership_id: { in: ids }, period_month, period_year },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, org_membership_id: true, kind: true, amount: true, note: true },
     }),
   ]);
 
@@ -156,7 +163,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     const days = ticketsByMember.get(t.org_membership_id);
     const key = ymd(t.date);
     const day = days.get(key) || { approved: 0, pending: 0, rejected: 0 };
-    day[t.status] += Number(t.hours);
+    day[t.status === 'manager_approved' ? 'pending' : t.status] += Number(t.hours);
     days.set(key, day);
   }
   const latestStructure = new Map();
@@ -176,6 +183,7 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     hoursByMember,
     overtimeByMember,
     ticketsByMember,
+    adjustmentsByMember: group(adjustments, 'org_membership_id'),
   };
 }
 
@@ -229,6 +237,9 @@ function salaryLine(ctx, membership, asOf = null, { payBasis = payBasisOf(member
     payBasis,
     ticketsByDate: ctx.ticketsByMember.get(membership.id) || new Map(),
   });
+  // Month-level adjustments (TDS, OT adjustment, variable pay, reimbursements, other additions / deductions)
+  // change what is payable; the structure's own figures stay as they were.
+  const adjustments = salaryAdjustments.summarize(ctx.adjustmentsByMember.get(membership.id) || []);
   return {
     ...base,
     pay_basis: payBasis,
@@ -237,11 +248,13 @@ function salaryLine(ctx, membership, asOf = null, { payBasis = payBasisOf(member
     ctc: Number(structure.ctc),
     gross,
     deductions,
-    net,
+    base_net: net,
+    adjustments,
+    net: round2(net + adjustments.net_effect),
     earned_to_date: breakdown.earned_to_date,
     per_day: breakdown.per_day_pay,
     // Actual (approved) vs projected (approved + pending) — never mixed.
-    projected_net: breakdown.projected_net,
+    projected_net: round2(breakdown.projected_net + adjustments.net_effect),
     pending_amount: breakdown.pending_amount,
     ot_amount: breakdown.ot_amount,
     breakdown,

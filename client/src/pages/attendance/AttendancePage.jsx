@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, CalendarPlus, CheckCircle2, Clock3, LogIn, LogOut, Trash2, Upload, Wrench } from 'lucide-react';
+import { CalendarClock, CalendarPlus, History, Trash2, Upload, Wrench } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -9,10 +9,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
-import { ATTENDANCE_CHANGED, useTodayAttendance } from '../../lib/useTodayAttendance.js';
-import LeaveDayNotice from '../time/LeaveDayNotice.jsx';
-import CheckoutPrompt from './CheckoutPrompt.jsx';
-import { BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
+import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -36,17 +33,6 @@ function attendanceDate(row) {
 function formatDate(row) {
   const parsed = formatDateValue(attendanceDate(row));
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString() : 'Not set';
-}
-
-function formatDateTime(value) {
-  return value ? new Date(value).toLocaleString() : 'Not recorded';
-}
-
-function formatMinutes(value) {
-  if (value === null || value === undefined) return 'Not calculated';
-  const hours = Math.floor(Number(value) / 60);
-  const minutes = Number(value) % 60;
-  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 function RegularizeDrawer({ row, open, onClose, onSaved }) {
@@ -120,16 +106,7 @@ export default function AttendancePage() {
   const [regularize, setRegularize] = useState(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const {
-    today,
-    leaveToday,
-    busy: actionLoading,
-    checkIn,
-    requestCheckOut,
-    confirmCheckOut,
-    promptOpen: checkoutPromptOpen,
-    closePrompt,
-  } = useTodayAttendance(user);
+  const [monthOpen, setMonthOpen] = useState(false);
 
   async function loadAttendance() {
     setLoading(true);
@@ -153,12 +130,6 @@ export default function AttendancePage() {
   useEffect(() => {
     loadAttendance();
   }, [tab, from, to]);
-
-  // A check-in/out from here or the header refreshes the table.
-  useEffect(() => {
-    window.addEventListener(ATTENDANCE_CHANGED, loadAttendance);
-    return () => window.removeEventListener(ATTENDANCE_CHANGED, loadAttendance);
-  });
 
   // Admin: remove a wrong record at any stage (a finalized month is flagged
   // for recalculation rather than rewritten).
@@ -186,19 +157,6 @@ export default function AttendancePage() {
     ...(tab === 'team' ? [{ key: 'employee', header: 'Employee', render: (row) => row.org_membership?.person?.name || 'Unknown' }] : []),
     { key: 'date', header: 'Date', render: (row) => formatDate(row) },
     { key: 'status', header: 'Status', render: (row) => <span className="inline-flex flex-col gap-0.5"><Badge value={row.status} />{row.from_calendar && <span className="text-[11px] text-tertiary-500">{row.calendar_label}{row.status === 'holiday' ? ' · holiday calendar' : ' · approved leave'}</span>}</span> },
-    { key: 'check_in', header: 'Check in', render: (row) => (row.from_calendar ? '—' : formatDateTime(row.check_in_at)) },
-    { key: 'check_out', header: 'Check out', render: (row) => (row.from_calendar ? '—' : formatDateTime(row.check_out_at)) },
-    {
-      key: 'late',
-      header: 'Late',
-      render: (row) => {
-        if (row.from_calendar) return '—';
-        if (row.late_minutes === null || row.late_minutes === undefined) return <span className="text-tertiary-400">No shift</span>;
-        if (row.late_minutes === 0) return <span className="text-success-700">On time</span>;
-        return <span className="font-medium text-danger-600">{formatMinutes(row.late_minutes)} late</span>;
-      },
-    },
-    { key: 'overtime', header: 'Time past shift', render: (row) => <span title="Presence only — overtime is paid from approved timesheet overtime, not from check-out time">{formatMinutes(row.overtime_minutes)}</span> },
     ...(tab === 'team' ? [{ key: 'actions', header: 'Actions', render: (row) => <span className="flex gap-1"><button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={(event) => { event.stopPropagation(); setRegularize(row); }}><Wrench className="h-3.5 w-3.5" /> Correct</button><button type="button" className="btn-ghost inline-flex items-center gap-1 text-danger-600" onClick={(event) => { event.stopPropagation(); removeRecord(row); }}><Trash2 className="h-3.5 w-3.5" /> Delete</button></span> }] : []),
   ];
 
@@ -208,9 +166,9 @@ export default function AttendancePage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Attendance</h2>
-          <p className="mt-1 text-sm text-tertiary-500">Track check-ins, check-outs and daily presence.</p>
+          <p className="mt-1 text-sm text-tertiary-500">Daily attendance is marked automatically at your working-hour start time on working days. Leave and holidays are shown as they are.</p>
           <p className="mt-2 max-w-2xl rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">
-            <b>Attendance ≠ salary.</b> Check-in / check-out only records when you started and stopped. Pay is worked out from your <b>approved timesheet hours</b> and <b>approved overtime</b> (Time &amp; Attendance → Timesheets) — a long check-in never adds hours or overtime by itself.
+            <b>Attendance is separate from project timesheets.</b> It records whether you were present, absent or on leave. Project hours are logged in the Timesheet and never come from attendance.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -225,27 +183,15 @@ export default function AttendancePage() {
       </div>
       {tab === 'team' && (
         <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setMonthOpen(true)}><History className="h-4 w-4" /> Backfill previous month</button>
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setManualOpen(true)}><CalendarPlus className="h-4 w-4" /> Add past attendance</button>
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setBulkOpen(true)}><Upload className="h-4 w-4" /> Bulk upload</button>
         </div>
       )}
-      {tab === 'mine' && (
-        <section className="rounded-2xl border border-primary-100 bg-primary-50/50 p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3"><Clock3 className="h-5 w-5 text-primary-700" /><div><h3 className="font-semibold text-tertiary-900">Today</h3><p className="text-sm text-tertiary-600">{today ? `${formatDateTime(today.check_in_at)} to ${formatDateTime(today.check_out_at)}` : 'No attendance recorded yet.'}</p></div></div>
-            <div className="flex gap-2">
-              {!today?.check_in_at && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={checkIn} disabled={actionLoading || leaveToday.is_leave_day}><LogIn className="h-4 w-4" /> Check in</button>}
-              {today?.check_in_at && !today?.check_out_at && <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={requestCheckOut} disabled={actionLoading || leaveToday.is_leave_day}><LogOut className="h-4 w-4" /> Check out</button>}
-              {today?.check_out_at && <span className="inline-flex items-center gap-2 rounded-xl bg-green-50 px-3 py-2 text-sm font-medium text-green-700"><CheckCircle2 className="h-4 w-4" /> Complete</span>}
-            </div>
-          </div>
-          <div className="mt-3"><LeaveDayNotice leave={leaveToday} what="check-in, check-out, timesheet and project hours" /></div>
-        </section>
-      )}
-      <CheckoutPrompt open={checkoutPromptOpen} onClose={closePrompt} onConfirm={confirmCheckOut} />
       {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}
       {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
+      {isAdmin && <BackfillMonthDrawer open={monthOpen} onClose={() => setMonthOpen(false)} onApplied={loadAttendance} />}
       {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}
       <RegularizeDrawer row={regularize} open={Boolean(regularize)} onClose={() => setRegularize(null)} onSaved={handleRegularized} />
     </div>
