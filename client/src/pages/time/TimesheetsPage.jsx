@@ -19,14 +19,15 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Non-IT timesheet: just Date, Hours and Notes — no project, no billing fields.
-function EntryDrawer({ open, onClose, onSubmit }) {
-  const [fields, setFields] = useState({ date: todayIso(), hours: '', notes: '' });
+// Non-IT timesheet: Date, Hours and Notes. If you are allocated to projects (or a team mate of someone
+// who is) you can also pick the project the hours belong to; without one it is general time.
+function EntryDrawer({ open, onClose, onSubmit, projects }) {
+  const [fields, setFields] = useState({ date: todayIso(), hours: '', notes: '', account_id: '' });
   const [saving, setSaving] = useState(false);
   const leave = useLeaveDay(open ? fields.date : null);
 
   useEffect(() => {
-    if (open) setFields({ date: todayIso(), hours: '', notes: '' });
+    if (open) setFields({ date: todayIso(), hours: '', notes: '', account_id: '' });
   }, [open]);
 
   function set(key, value) {
@@ -37,7 +38,7 @@ function EntryDrawer({ open, onClose, onSubmit }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ date: fields.date, hours: Number(fields.hours), notes: fields.notes.trim() || undefined });
+      await onSubmit({ date: fields.date, hours: Number(fields.hours), notes: fields.notes.trim() || undefined, ...(fields.account_id ? { account_id: fields.account_id } : {}) });
       onClose();
     } finally {
       setSaving(false);
@@ -66,6 +67,15 @@ function EntryDrawer({ open, onClose, onSubmit }) {
           <input required type="date" max={todayIso()} value={fields.date} onChange={(e) => set('date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <LeaveDayNotice leave={leave} />
+        {projects.length > 0 && (
+          <label className="block text-xs font-medium text-tertiary-600">
+            Project
+            <select value={fields.account_id} onChange={(e) => set('account_id', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <option value="">No project (general time)</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+        )}
         <label className="block text-xs font-medium text-tertiary-600">
           Hours
           <input required type="number" min="0.5" max={leave.work_capacity ?? 24} step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
@@ -91,6 +101,11 @@ export default function TimesheetsPage() {
   const [loading, setLoading] = useState(true);
   const [entryDrawerOpen, setEntryDrawerOpen] = useState(false);
   const [weekKey, setWeekKey] = useState(0);
+  const [projects, setProjects] = useState([]);
+
+  useEffect(() => {
+    apiClient.get('/timesheets/my-projects').then(({ data }) => setProjects(data.data || [])).catch(() => setProjects([]));
+  }, []);
 
   async function loadEntries() {
     setLoading(true);
@@ -120,6 +135,7 @@ export default function TimesheetsPage() {
 
   const columns = [
     { key: 'date', header: 'Date', render: (row) => new Date(`${row.date}`.slice(0, 10)).toLocaleDateString() },
+    { key: 'project', header: 'Project', render: (row) => row.account?.name || <span className="text-tertiary-400">General</span> },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
     { key: 'notes', header: 'Notes', render: (row) => <NoteText text={row.notes} /> },
     {
@@ -152,7 +168,7 @@ export default function TimesheetsPage() {
       )}
 
       <RegularisationSection onChanged={loadEntries} />
-      <EntryDrawer open={entryDrawerOpen} onClose={() => setEntryDrawerOpen(false)} onSubmit={createEntry} />
+      <EntryDrawer open={entryDrawerOpen} onClose={() => setEntryDrawerOpen(false)} onSubmit={createEntry} projects={projects} />
     </div>
   );
 }
