@@ -352,11 +352,6 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
           <ProjectCostingSection accountId={project.id} />
         </div>
 
-        <p className="text-xs text-tertiary-500">
-          Calendar: <span className="font-medium text-tertiary-700">{project.calendar?.name || '—'}</span>
-          {' · '}
-          <Link to="/people?section=hr-settings&tab=calendars" className="text-primary-700 hover:underline">change under People → Calendars</Link>
-        </p>
       </div>
     </Drawer>
   );
