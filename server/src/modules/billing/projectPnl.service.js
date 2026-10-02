@@ -34,6 +34,7 @@ const prisma = require('../../config/db');
 const calendarsService = require('../calendars/calendars.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const exchangeRates = require('./exchangeRates.service');
+const financialLock = require('../calculations/financialLock');
 const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
 const { contractState } = require('../../lib/contractState');
@@ -342,6 +343,8 @@ async function listVendorInvoices(orgId, accountId, { period_month, period_year 
 }
 
 async function createVendorInvoice(orgId, actorUserId, accountId, body) {
+  const frozenOnCreate = await financialLock.assertOpen(orgId, body.period_month, body.period_year);
+  if (frozenOnCreate) return frozenOnCreate;
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true } });
   if (!account) return { error: 'account_not_found' };
   if (!(await findVendorAccount(orgId, body.vendor_account_id))) return { error: 'vendor_not_found' };
@@ -358,6 +361,8 @@ async function createVendorInvoice(orgId, actorUserId, accountId, body) {
 async function updateVendorInvoice(orgId, invoiceId, patch, actorUserId = null) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, existing.period_month, existing.period_year);
+  if (frozen) return frozen;
   if (patch.vendor_account_id && !(await findVendorAccount(orgId, patch.vendor_account_id))) return { error: 'vendor_not_found' };
   const { invoice_date: date, ...rest } = patch;
   const data = { ...rest, ...(date ? { invoice_date: new Date(date) } : {}) };
@@ -395,6 +400,8 @@ async function updateVendorInvoice(orgId, invoiceId, patch, actorUserId = null) 
 async function removeVendorInvoice(orgId, invoiceId, reason = null, actorUserId = null) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, existing.period_month, existing.period_year);
+  if (frozen) return frozen;
   await prisma.projectVendorInvoice.delete({ where: { id: invoiceId } });
   if (actorUserId) {
     await prisma.auditLog.create({

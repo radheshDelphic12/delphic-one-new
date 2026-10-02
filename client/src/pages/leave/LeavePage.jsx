@@ -12,12 +12,14 @@ import Modal from '../../components/ui/Modal.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import LeaveBalancesPanel from './LeaveBalancesPanel.jsx';
+import LeaveTypesAdmin from './LeaveTypesAdmin.jsx';
 
 const STANDARD_LEAVE_TYPES = [
   { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
   { id: '00000000-0000-4000-8000-000000000002', name: 'Sick Leave', paid: true, annual_quota: 12 },
   { id: '00000000-0000-4000-8000-000000000003', name: 'Earned Leave', paid: true, annual_quota: 18 },
   { id: '00000000-0000-4000-8000-000000000004', name: 'Unpaid Leave', paid: false, annual_quota: 0 },
+  { id: '00000000-0000-4000-8000-000000000005', name: 'Comp Off', paid: true, annual_quota: 0 },
 ];
 
 function parseDateValue(value) {
@@ -286,6 +288,7 @@ export default function LeavePage() {
     <div className="flex gap-1 border-b border-tertiary-200"><button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My requests</button>{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Approval queue</button>}{isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'balances' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('balances')}>Balances</button>}</div>
     {pendingRows.length > 1 && <div className="flex justify-end"><button type="button" className="btn-primary inline-flex items-center gap-1.5 text-sm" disabled={bulkBusy} onClick={approveAllPending}><Check className="h-4 w-4" /> {bulkBusy ? 'Approving…' : `Approve all pending (${pendingRows.length})`}</button></div>}
     {tab === 'balances' ? <LeaveBalancesPanel /> : !loading && rows.length === 0 ? <EmptyState icon={CalendarDays} title="No leave requests" description="There are no leave requests for the selected status." /> : <DataTable columns={columns} rows={rows} loading={loading} maxHeight="calc(100dvh - 25rem)" emptyLabel="No leave requests" />}
+    {isAdmin && <LeaveTypesAdmin />}
     <LeaveRequestDrawer types={types} open={requestOpen} onClose={() => setRequestOpen(false)} onSaved={(created) => { setRows((current) => [created, ...current]); setRequestOpen(false); pushInfo('Leave request submitted'); }} />
     {isAdmin && <LeaveRequestDrawer admin types={types} open={adminApplyOpen} onClose={() => setAdminApplyOpen(false)} onSaved={() => { setAdminApplyOpen(false); pushInfo('Leave applied'); load(); }} />}
     <WithdrawModal row={withdrawing} onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); pushInfo('Leave withdrawn'); load(); }} />

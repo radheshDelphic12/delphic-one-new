@@ -11,6 +11,12 @@ const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
 const { buildMonthlyWorkbook } = require('./timesheets.export');
 const {
   projectDayQuerySchema,
+  projectTeamQuerySchema,
+  dashboardQuerySchema,
+  monthQuerySchema,
+  lockMonthSchema,
+  reopenMonthSchema,
+  approvalPolicySchema,
   createOvertimeTicketSchema,
   decideOvertimeTicketSchema,
   listOvertimeTicketsQuerySchema,
@@ -28,7 +34,7 @@ const {
   weekQuerySchema,
   hoursQuerySchema,
   listQuerySchema,
-  monthQuerySchema,
+  lockMonthQuerySchema,
   overviewQuerySchema,
   createTicketSchema,
   decideTicketSchema,
@@ -36,6 +42,9 @@ const {
 } = require('./timesheets.validation');
 
 const tickets = require('./overtimeTickets.service');
+
+const dashboard = require('./dashboard.service');
+const monthLocks = require('./monthLocks.service');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -53,6 +62,8 @@ const ENTRY_ERRORS = {
   requirement_not_found: [404, 'Requirement not found for that account'],
   exceeds_day_hours: [422, 'Total hours logged for that day would exceed 24'],
   not_found: [404, 'Timesheet entry not found'],
+  manager_approval_disabled: [403, 'Manager approval is switched off for this company - an admin decides timesheets and overtime'],
+  awaiting_admin: [409, 'Already approved by the manager - it now waits for the admin, who gives the final approval'],
   already_decided: [409, 'Entry has already been approved or rejected — approved and rejected timesheets are final; ask for a regularisation'],
   member_not_found: [404, 'Employee not found'],
   not_team_member: [403, 'You can only view timesheets of people who report to you'],
@@ -64,10 +75,6 @@ const ENTRY_ERRORS = {
 
 function failFor(res, error, result) {
   if (error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
-  if (error === 'project_day_cap') {
-    const left = result.remaining === null ? 0 : result.remaining;
-    return fail(res, 422, `This project's day is full: ${result.logged}h of ${result.capacity}h already logged on ${result.date} (${left}h left, ${result.adding}h requested) - log less, or ask your admin to raise the project's billable hours`);
-  }
   if (error === 'half_day_capacity') return fail(res, 422, `You're on approved ${result.leave_type} half-day leave on that date — only ${result.capacity}h can be logged for work that day (${result.total}h requested)`);
   const mapped = ENTRY_ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
@@ -215,7 +222,7 @@ router.post(
     const body = decideOvertimeSchema.parse(req.body);
     const result = await service.decideOvertime(req.user.org_id, req.params.id, req.user, body);
     if (result.error) return failFor(res, result.error, result);
-    return ok(res, result.overtime);
+    return ok(res, result.overtime, result.awaiting_admin ? { awaiting_admin: true } : undefined);
   })
 );
 
@@ -242,6 +249,34 @@ router.get(
   })
 );
 
+// Approval chain settings (Employee -> Manager (optional) -> Admin (mandatory)).
+router.get(
+  '/approval-policy',
+  asyncHandler(async (req, res) => ok(res, await service.approvalPolicy(req.user.org_id)))
+);
+router.patch(
+  '/approval-policy',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.updateApprovalPolicy(req.user.org_id, approvalPolicySchema.parse(req.body))))
+);
+
+// Timesheet Dashboard: every timesheet of a month the caller may view (own / direct reports / all for admin).
+router.get(
+  '/dashboard',
+  asyncHandler(async (req, res) => ok(res, await dashboard.monthList(req.user.org_id, req.user, dashboardQuerySchema.parse(req.query))))
+);
+
+// One person's month as a calendar (logged hours, attendance, leave, lock, approval, OT per day).
+router.get(
+  '/dashboard/calendar',
+  asyncHandler(async (req, res) => {
+    const { year, month, org_membership_id } = dashboardQuerySchema.parse(req.query);
+    const target = await hoursTarget(req, org_membership_id);
+    if (target.error) return failFor(res, target.error);
+    return ok(res, await dashboard.monthCalendar(req.user.org_id, target.id, { year, month }));
+  })
+);
+
 router.get(
   '/hours',
   asyncHandler(async (req, res) => {
@@ -260,7 +295,7 @@ router.post(
     const body = decideEntrySchema.parse(req.body);
     const result = await service.decideEntry(req.user.org_id, req.params.id, req.user, body);
     if (result.error) return failFor(res, result.error, result);
-    return ok(res, result.entry);
+    return ok(res, result.entry, result.awaiting_admin ? { awaiting_admin: true } : undefined);
   })
 );
 
@@ -294,7 +329,7 @@ router.post(
     if (result.error === 'already_decided') return fail(res, 409, 'Ticket has already been decided');
     if (result.error === 'exceeds_day_hours') return fail(res, 422, 'Approving would push that day over 24 total hours across projects');
     if (result.error) return failFor(res, result.error, result);
-    return ok(res, result.ticket);
+    return ok(res, result.ticket, result.awaiting_admin ? { awaiting_admin: true } : undefined);
   })
 );
 
@@ -350,12 +385,23 @@ router.post(
   })
 );
 
+// The audit history of one ticket: submission, approvals, rejections, edits, with who and when.
+router.get(
+  '/overtime-tickets/:id/history',
+  asyncHandler(async (req, res) => {
+    const result = await tickets.ticketHistory(req.user.org_id, req.user, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Ticket not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
+);
+
 router.post(
   '/overtime-tickets/:id/decision',
   asyncHandler(async (req, res) => {
     const result = await tickets.decideTicket(req.user.org_id, req.params.id, req.user, decideOvertimeTicketSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
-    return ok(res, result.ticket);
+    return ok(res, result.ticket, result.awaiting_admin ? { awaiting_admin: true } : undefined);
   })
 );
 
@@ -388,7 +434,7 @@ router.delete(
   })
 );
 
-// The project's day: capacity (allocated people's billable hours), what is already logged, what is left.
+// The project's day: what the team has logged (informational; there is no hour cap).
 router.get(
   '/project-day',
   asyncHandler(async (req, res) => {
@@ -396,6 +442,19 @@ router.get(
     const result = await service.getProjectDay(req.user.org_id, req.user.org_membership_id, query);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.day);
+  })
+);
+
+// A project's team timesheet for a month - members, who logged, per-member / date-wise / total hours.
+// Only people allocated to the project (and admins) may open it.
+router.get(
+  '/project-team',
+  asyncHandler(async (req, res) => {
+    const query = projectTeamQuerySchema.parse(req.query);
+    const result = await service.getProjectTeam(req.user.org_id, req.user, query);
+    if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.team);
   })
 );
 
@@ -422,10 +481,32 @@ router.delete(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const { date } = lockDaySchema.parse({ date: req.params.date });
-    const result = await service.unlockDay(req.user.org_id, date);
+    const result = await service.unlockDay(req.user.org_id, date, req.user.id, req.body?.reason || null);
     if (result.error === 'not_locked') return fail(res, 404, 'That day is not locked');
     return ok(res, { unlocked: true });
   })
+);
+
+// Stage 1 - timesheet lock, per employee and month (bulk). Previous month is due by the 5th of the next.
+router.get(
+  '/locks/month-status',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await monthLocks.status(req.user.org_id, lockMonthQuerySchema.parse(req.query))))
+);
+router.post(
+  '/locks/month',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await monthLocks.lockMonth(req.user.org_id, req.user, lockMonthSchema.parse(req.body));
+    if (result.error === 'future_month') return fail(res, 422, 'A month that has not started cannot be locked');
+    if (result.error === 'nobody_selected') return fail(res, 422, 'Nobody to lock - select employees or choose all with entries');
+    return ok(res, result);
+  })
+);
+router.post(
+  '/locks/month/reopen',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await monthLocks.reopenMonth(req.user.org_id, req.user, reopenMonthSchema.parse(req.body))))
 );
 
 router.get(

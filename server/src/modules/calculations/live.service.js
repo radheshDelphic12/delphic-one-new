@@ -13,6 +13,7 @@ const vendorEngine = require('./engines/vendorPayment.engine');
 const resourceEngine = require('./engines/resourceRevenue.engine');
 const calculations = require('./calculations.service');
 const { round2, periodMonths, liveAsOf } = require('./period');
+const invoiceStatus = require('./invoiceStatus');
 
 const bool = z.preprocess((v) => (v === undefined || v === '' ? undefined : v === true || v === 'true' || v === '1'), z.boolean().optional());
 const uuid = z.string().uuid().optional();
@@ -30,6 +31,9 @@ const billingQuerySchema = monthSchema.extend({
   account_id: uuid,
   org_membership_id: uuid,
   status: z.enum(['all', 'approved', 'pending', 'rejected']).default('all'),
+  // Finance: which invoices to list (generated / not generated / paid / unpaid / sent / unsent) and the billing type.
+  invoice_status: z.enum(invoiceStatus.FILTERS).default('all'),
+  billing_type: z.enum(['all', 'monthly', 'hourly', 'mixed']).default('all'),
   include_overtime: bool.default(true),
   date_from: z.coerce.date().optional(),
   date_to: z.coerce.date().optional(),
@@ -89,6 +93,7 @@ async function billingOverview(orgId, q, now = new Date()) {
     frozenCalcs(orgId, 'billing', months),
     draftStatuses(orgId, 'billing', months),
   ]);
+  const invoices = await invoiceStatus.load(orgId, projects.map((p) => p.id), months);
   const missing = new Set();
   const toInr = (amount, currency) => {
     const cur = currency || 'INR';
@@ -120,7 +125,7 @@ async function billingOverview(orgId, q, now = new Date()) {
       if (q.status && q.status !== 'all' && !view.days.some((d) => d.entries.length)) continue;
       const draft = drafts.get(key);
       const estimate = billingEngine.estimateFor(account, raw, view.totals);
-      rows.push({
+      const row = {
         id: key,
         project: raw.project,
         period_month: m.period_month,
@@ -146,7 +151,13 @@ async function billingOverview(orgId, q, now = new Date()) {
         lock: lock ? lockInfo(lock) : { status: draft?.status || 'draft', version: draft?.current_version || 0, reviewed_at: draft?.reviewed_at || null },
         readiness: lock?.version ? null : raw.readiness,
         resources: view.resources,
-      });
+        resource_rates: raw.resource_rates || [],
+        invoice: invoices.get(invoiceStatus.keyOf(account.id, m.period_month, m.period_year)) || invoiceStatus.describe(null),
+      };
+      // Finance filters: invoice state and billing type.
+      if (!invoiceStatus.matches(row.invoice, q.invoice_status)) continue;
+      if (q.billing_type && q.billing_type !== 'all' && invoiceStatus.billingTypeOf(row) !== q.billing_type) continue;
+      rows.push(row);
       for (const d of view.days) {
         if (!byDate.has(d.date)) {
           byDate.set(d.date, { date: d.date, is_working_day: d.is_working_day, holiday: d.holiday, status: d.status, hours: { approved: 0, overtime_approved: 0, pending: 0, rejected: 0 }, base_inr: 0, overtime_inr: 0, amount_inr: 0, approvers: [], projects: 0 });
@@ -183,6 +194,8 @@ async function billingOverview(orgId, q, now = new Date()) {
       rejected_hours: round2(days.reduce((s, d) => s + d.hours.rejected, 0)),
       locked_projects: rows.filter((r) => r.source === 'locked').length,
       projects: rows.length,
+      // What Finance still has to do: invoices not generated, not sent, not paid.
+      invoice_summary: invoiceStatus.summarize(rows.map((r) => r.invoice)),
     },
     missing_rates: [...missing],
   };

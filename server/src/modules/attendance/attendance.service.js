@@ -22,48 +22,6 @@ function computeLateMinutes(shift, checkInAt, timeZone) {
   return diff > shift.grace_minutes ? diff : 0;
 }
 
-async function checkIn(orgId, orgMembershipId) {
-  const date = todayIst();
-  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
-  if (leave) return { error: 'leave_day', leave };
-  const existing = await prisma.attendanceRecord.findFirst({
-    where: { org_id: orgId, org_membership_id: orgMembershipId, date },
-  });
-  if (existing?.check_in_at) return { error: 'already_checked_in', record: existing };
-
-  const membership = await prisma.orgMembership.findUnique({
-    where: { id: orgMembershipId },
-    select: { shift: true, org: { select: { timezone: true } } },
-  });
-  const check_in_at = new Date();
-  const late_minutes = computeLateMinutes(membership?.shift, check_in_at, membership?.org?.timezone || 'Asia/Kolkata');
-
-  const record = existing
-    ? await prisma.attendanceRecord.update({
-        where: { id: existing.id },
-        data: { check_in_at, late_minutes, status: 'present', source: 'web' },
-      })
-    : await prisma.attendanceRecord.create({
-        data: { org_id: orgId, org_membership_id: orgMembershipId, date, check_in_at, late_minutes, status: 'present', source: 'web' },
-      });
-  await detectFinanceChange(orgId, {
-    source_type: 'attendance',
-    source_id: record.id,
-    date,
-    org_membership_id: orgMembershipId,
-    changed_by: await personIdOf(orgMembershipId),
-    description: 'Checked in',
-    old_value: { status: existing?.status || 'no_record' },
-    new_value: { status: 'present', check_in_at },
-  });
-  return { record };
-}
-
-async function personIdOf(orgMembershipId) {
-  const m = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person_id: true } });
-  return m?.person_id || null;
-}
-
 // A shift's expected duration in minutes, handling an overnight shift
 // (end_minutes < start_minutes, e.g. a 22:00-06:00 shift).
 function shiftDurationMinutes(shift) {
@@ -79,30 +37,6 @@ function computeOvertimeMinutes(shift, checkInAt, checkOutAt) {
   const workedMinutes = Math.round((checkOutAt - checkInAt) / 60000);
   const allowed = shiftDurationMinutes(shift) + shift.grace_minutes;
   return Math.max(0, workedMinutes - allowed);
-}
-
-async function checkOut(orgId, orgMembershipId) {
-  const date = todayIst();
-  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
-  if (leave) return { error: 'leave_day', leave };
-  const existing = await prisma.attendanceRecord.findFirst({
-    where: { org_id: orgId, org_membership_id: orgMembershipId, date },
-  });
-  if (!existing || !existing.check_in_at) return { error: 'not_checked_in' };
-  if (existing.check_out_at) return { error: 'already_checked_out', record: existing };
-
-  const membership = await prisma.orgMembership.findUnique({
-    where: { id: orgMembershipId },
-    select: { shift: true },
-  });
-  const check_out_at = new Date();
-  const overtime_minutes = computeOvertimeMinutes(membership?.shift, existing.check_in_at, check_out_at);
-
-  const record = await prisma.attendanceRecord.update({
-    where: { id: existing.id },
-    data: { check_out_at, overtime_minutes },
-  });
-  return { record };
 }
 
 function dateRangeWhere({ from, to }) {
@@ -200,6 +134,7 @@ async function regularize(orgId, recordId, adminUserId, { status, check_in_at, c
     old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
     new_value: { status: record.status, check_in_at: record.check_in_at, check_out_at: record.check_out_at },
   });
+  await auditManual(orgId, adminUserId, 'attendance_regularize', reason, { date: existing.date, from: existing.status, status: record.status, employees: [existing.org_membership_id], records: 1 });
   return { record };
 }
 
@@ -220,6 +155,7 @@ async function deleteRecord(orgId, recordId, adminUserId, { reason }) {
     old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
     new_value: null,
   });
+  await auditManual(orgId, adminUserId, 'attendance_delete', reason, { date: existing.date, from: existing.status, status: null, employees: [existing.org_membership_id], records: 1 });
   return { deleted: true, flagged: change?.flagged || 0 };
 }
 
@@ -314,7 +250,16 @@ async function backfillDay(orgId, adminUserId, membership, { date, status, check
 async function recordManualDay(orgId, adminUserId, { org_membership_id, ...entry }) {
   const membership = await loadMembershipForBackfill(orgId, org_membership_id);
   if (!membership) return { error: 'membership_not_found' };
-  return backfillDay(orgId, adminUserId, membership, entry);
+  const result = await backfillDay(orgId, adminUserId, membership, entry);
+  if (result.record && result.action !== 'unchanged') {
+    await auditManual(orgId, adminUserId, 'attendance_manual_mark', entry.reason, { date: entry.date, status: entry.status, action: result.action, employees: [org_membership_id], records: 1 });
+  }
+  return result;
+}
+
+// Every manual attendance marking leaves an audit row (admin, time, employees, records, reason).
+async function auditManual(orgId, adminUserId, action, reason, snapshot) {
+  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: adminUserId, action, entity_type: 'attendance', entity_id: orgId, reason: reason || 'manual attendance', snapshot } });
 }
 
 const IMPORT_ERRORS = {
@@ -372,6 +317,7 @@ async function importAttendance(orgId, adminUserId, { rows, reason, dry_run }) {
   if (dry_run || errors.length) return summary;
 
   for (const item of valid) await backfillDay(orgId, adminUserId, item.membership, item.entry);
+  await auditManual(orgId, adminUserId, 'attendance_import', reason, { ...counts, total: rows.length, employees: [...new Set(valid.map((v) => v.membership.id))], records: counts.created + counts.updated });
   return { ...summary, applied: true };
 }
 
@@ -434,8 +380,6 @@ async function createShift(orgId, { name, start_minutes, end_minutes, grace_minu
 
 module.exports = {
   deleteRecord,
-  checkIn,
-  checkOut,
   listMine,
   listTeam,
   regularize,

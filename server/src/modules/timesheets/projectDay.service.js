@@ -1,15 +1,11 @@
-// Client / project timesheet - the per project, per day view.
+// Client / project timesheet - the per project views.
 //
-// A project's daily capacity is what its allocated resources can bill that day:
-// the sum of their ProjectMemberAssignment.billable_hours_per_day (default 8,
-// effective-dated like the allocation itself and separate from the cost
-// allocation %, so one developer can be 8h on project A and 8h on project B).
-// Everyone filling the timesheet sees how much of that is already logged, so two
-// developers can't conflict or over-log. Submitted + approved hours count;
-// rejected ones don't. Overtime hours are separate (ticket based) and never use
-// the day's capacity. A project with no allocated resource has no cap.
-// The person allocated, or anyone on the same team as an allocated resource,
-// may log on the project; admin edits bypass the cap.
+// There is NO daily or project-level hour cap: people log the hours they actually
+// worked on a project they are allocated to (or whose allocated people are on their
+// team). What this file adds is visibility - who on a project has logged what - for
+// tracking and transparency only; it never limits anyone's hours.
+// A user sees a project's team timesheet only when allocated to that project
+// (admins see every project).
 
 const prisma = require('../../config/db');
 
@@ -37,46 +33,83 @@ async function allocatedOn(orgId, accountId, date) {
   return [...byPerson.values()];
 }
 
-// Capacity, what is already logged, and what is left on one project day.
-async function projectDay(orgId, accountId, date, { orgMembershipId = null, excludeEntryId = null } = {}) {
+// What the team has logged on one project day (informational, never a limit).
+async function projectDay(orgId, accountId, date, { orgMembershipId = null } = {}) {
   const [resources, entries] = await Promise.all([
     allocatedOn(orgId, accountId, date),
     prisma.timesheetEntry.findMany({
-      where: { org_id: orgId, account_id: accountId, date, status: { in: COUNTED }, ...(excludeEntryId ? { id: { not: excludeEntryId } } : {}) },
+      where: { org_id: orgId, account_id: accountId, date, status: { in: COUNTED } },
       select: { org_membership_id: true, hours: true, org_membership: { select: { person: { select: { name: true } } } } },
     }),
   ]);
-  const capacity = round2(resources.reduce((s, r) => s + r.billable_hours_per_day, 0));
-  const people = new Map(resources.map((r) => [r.org_membership_id, { ...r, logged: 0 }]));
+  const people = new Map(resources.map((r) => [r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.name, logged: 0 }]));
   let logged = 0;
   let mine = 0;
   for (const e of entries) {
     const hours = Number(e.hours);
     logged += hours;
     if (e.org_membership_id === orgMembershipId) mine += hours;
-    if (!people.has(e.org_membership_id)) people.set(e.org_membership_id, { org_membership_id: e.org_membership_id, name: e.org_membership?.person?.name || 'Unknown', billable_hours_per_day: null, logged: 0 });
+    if (!people.has(e.org_membership_id)) people.set(e.org_membership_id, { org_membership_id: e.org_membership_id, name: e.org_membership?.person?.name || 'Unknown', logged: 0 });
     people.get(e.org_membership_id).logged = round2(people.get(e.org_membership_id).logged + hours);
   }
-  const capped = capacity > 0;
-  return {
-    account_id: accountId,
-    date: ymd(date),
-    capped,
-    capacity,
-    logged: round2(logged),
-    mine: round2(mine),
-    remaining: capped ? round2(Math.max(0, capacity - logged)) : null,
-    over_by: capped ? round2(Math.max(0, logged - capacity)) : 0,
-    people: [...people.values()],
-  };
+  return { account_id: accountId, date: ymd(date), logged: round2(logged), mine: round2(mine), people: [...people.values()] };
 }
 
-// null when `hours` fits; otherwise the project_day_cap error with the numbers.
-async function checkCap(orgId, accountId, date, hours, options = {}) {
-  const day = await projectDay(orgId, accountId, date, options);
-  if (!day.capped) return null;
-  if (day.logged + hours > day.capacity + 1e-9) return { error: 'project_day_cap', ...day, adding: hours };
-  return null;
+// Whether the person is (or was, in the month) allocated to the project.
+async function isAssignedToProject(orgId, orgMembershipId, accountId, from, to) {
+  const count = await prisma.projectMemberAssignment.count({
+    where: {
+      org_id: orgId,
+      account_id: accountId,
+      org_membership_id: orgMembershipId,
+      AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }],
+    },
+  });
+  return count > 0;
+}
+
+// The project's team timesheet for a month: assigned members, who has logged, per-member totals,
+// the date-wise log and the project total. Rejected entries are left out.
+async function projectTeamTimesheet(orgId, accountId, from, to) {
+  const [assigned, entries] = await Promise.all([
+    prisma.projectMemberAssignment.findMany({
+      where: { org_id: orgId, account_id: accountId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }] },
+      select: { org_membership_id: true, org_membership: { select: { person: { select: { name: true } } } } },
+    }),
+    prisma.timesheetEntry.findMany({
+      where: { org_id: orgId, account_id: accountId, date: { gte: from, lte: to }, status: { not: 'rejected' } },
+      select: { org_membership_id: true, date: true, hours: true, status: true, org_membership: { select: { person: { select: { name: true } } } } },
+      orderBy: { date: 'asc' },
+    }),
+  ]);
+  const members = new Map();
+  const touch = (id, name, assignedFlag) => {
+    if (!members.has(id)) members.set(id, { org_membership_id: id, name: name || 'Unknown', assigned: false, total_hours: 0, approved_hours: 0, days: {} });
+    if (assignedFlag) members.get(id).assigned = true;
+    return members.get(id);
+  };
+  for (const a of assigned) touch(a.org_membership_id, a.org_membership?.person?.name, true);
+  const byDate = new Map();
+  let total = 0;
+  for (const e of entries) {
+    const hours = Number(e.hours);
+    const m = touch(e.org_membership_id, e.org_membership?.person?.name, false);
+    const day = ymd(e.date);
+    m.total_hours = round2(m.total_hours + hours);
+    if (e.status === 'approved') m.approved_hours = round2(m.approved_hours + hours);
+    m.days[day] = round2((m.days[day] || 0) + hours);
+    byDate.set(day, round2((byDate.get(day) || 0) + hours));
+    total += hours;
+  }
+  const list = [...members.values()].map((m) => ({ ...m, has_logged: m.total_hours > 0 })).sort((a, b) => b.total_hours - a.total_hours || a.name.localeCompare(b.name));
+  return {
+    account_id: accountId,
+    from: ymd(from),
+    to: ymd(to),
+    members: list,
+    dates: [...byDate.entries()].sort(([x], [y]) => (x < y ? -1 : 1)).map(([date, hours]) => ({ date, hours })),
+    total_hours: round2(total),
+  };
 }
 
 // Teams the person belongs to on the day (periods, plus the current team as a fallback).
@@ -123,4 +156,4 @@ async function teamProjects(orgId, orgMembershipId, today, since, exclude = new 
   return [...seen.values()];
 }
 
-module.exports = { projectDay, checkCap, canLogOnProject, teamProjects, DEFAULT_HOURS_PER_DAY };
+module.exports = { projectDay, isAssignedToProject, projectTeamTimesheet, canLogOnProject, teamProjects, DEFAULT_HOURS_PER_DAY };

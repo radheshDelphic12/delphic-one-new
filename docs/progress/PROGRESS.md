@@ -2,6 +2,22 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-02 — FRD slices 2-4: approval chain, 3-stage lock audit, leave types, per-resource billing, finance views, salary adjustments (uncommitted)
+
+- Migration `20261002100000_approval_locks_leave_billing` (additive). Backend + client UI built; everything is documented in [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md) ("slices 2-4").
+- Approval chain Employee -> Manager (optional) -> Admin (mandatory) for timesheets and OT tickets, OT audit history, per-employee month timesheet lock (bulk) and a lock audit across timesheet / calculation / financial stages with bulk -> one row per record.
+- Leave: applicable / counts-in-balance / overflow flags, Comp Off in the balance, unpaid overflow. Billing: per-resource rates (monthly + hourly in one month) with client billing statuses; invoice-status filters; Finance Month View; Sales / Salary Excel exports; salary adjustments (TDS, OT adjustment, variable pay, reimbursement); vendor invoice tracking + trace.
+- UI: Time & Attendance > Timesheet Locks, OT history; Payroll > Adjustments; Finance > Month View; Leave type settings; Live Analytics invoice filters. API only for now: resource rates, billing status rules, vendor tracking.
+- Hardening round: admin approval before a month lock (force with reason), day OT + regularisation on the same chain, approval steps and attendance corrections on the audit trail, lock order timesheets -> calculations -> financials (`orgs.enforce_lock_order`), financial freeze of invoices / vendor payments (423 until reopened), Leave Manager role, unpaid overflow split at approval, half-day-leave days in the daily attendance run, vendor Excel export, "apply project rate to every resource", UI for Billing Setup / Vendor Invoices / Leave Managers. Test: `frd-hardening.test.js`.
+- Full server suite on a private DB (2026-10-02): 89 suites, 798 tests, all passing. Client build and lint pass. Not done: browser click-through, applying the migration to dev / staging.
+- Tests: `approval-locks-leave.test.js`, `finance-frd.test.js`; `phase3-leave-salary-expense.test.js` updated (Comp Off type, overflow off for the hard-cap case). Test helper `createOrg` defaults `timesheet_admin_approval` off.
+
+## 2026-10-02 — FRD slice 1: timesheet + attendance core (no hour cap, Timesheet Dashboard, project team view, auto attendance) — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- Removed the project hour cap, the Project Calendar from Time & Attendance, and check-in / check-out (endpoints, header button, Today card, columns, prompt). Salary never read check-in/out; legacy columns kept (no DROP).
+- Added: Timesheet Dashboard (`/timesheets/dashboard`, `/timesheets/dashboard/calendar`), Project Team timesheet (`/timesheets/project-team`, assigned users + admin only), daily auto attendance job (today only, after the start time, never future), admin previous-month backfill with preview + audit, audit rows for manual marking / import.
+- Tests: new `auto-attendance.test.js`, `project-timesheet.test.js` (replaces `project-timesheet-cap.test.js`); check-in tests removed from `erp-phase2*`, `erp-multiproject-calendars`, `timesheet-workflow`. Detail + the list of FRD sections still open: [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md).
+
 ## 2026-10-01 — Finance: contract-based billing, invoices in Live Analytics, per-record locks, Financials = locked only — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
 
 Spec, decisions and file map: [features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md](../features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md).

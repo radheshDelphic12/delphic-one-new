@@ -1,6 +1,6 @@
 # Client / project timesheet - source of truth per person (design, 2026-10-01)
 
-Status: **design agreed, not implemented.** Decisions below were answered by the product owner on 2026-10-01.
+Status: **all four phases implemented and committed (61ec9b3, 2026-10-01).** Decisions below were answered by the product owner on 2026-10-01.
 
 ## Problem
 
@@ -112,5 +112,59 @@ not rewritten, targeted tests per phase.
   The project's "Hours in a full day" now only applies to client billing on the approved-hours basis.
 * Tests: `overtime-tickets.test.js` (phases 3 and 4), `project-timesheet-cap.test.js` (1), `attendance-pay-basis.test.js` (2).
 
+## FRD revision (2026-10-02): slice 1 - timesheet + attendance core
+
+The product FRD ("Timesheet, Attendance, Billing & Finance") reverses two earlier choices. Built in this slice (sections 1-3, 16 of the FRD):
+
+* **No project hour cap.** `projectDay.checkCap` and the `person_day_cap` / `project_day_cap` errors are gone; people log the hours actually worked on allocated projects (the 24h-a-day sanity rule and half-day-leave rule remain). `billable_hours_per_day` stays only as the contractor's day length for vendor payout (phase 4). `GET /timesheets/project-day` is now informational (`{ logged, mine, people[] }`, no capacity).
+* **Project team visibility.** `GET /timesheets/project-team?account_id&year&month`: assigned members, who logged, per-person / date-wise / total hours (rejected excluded). Only people allocated to the project (that month) and admins; others get 403. UI: Time & Attendance > **Project Team**.
+* **Timesheet Dashboard.** `GET /timesheets/dashboard?year&month` (every timesheet the caller may open: all for admin, own + direct reports otherwise) and `GET /timesheets/dashboard/calendar?year&month&org_membership_id` (per day: logged / approved / pending hours, attendance status, leave, OT row + OT tickets, approval status, lock, project-wise hours, notes). UI: Time & Attendance > **Timesheet Dashboard** (month + year pickers, list, calendar, day detail on hover / click).
+* **Project Calendar removed** from Time & Attendance (Holiday Calendar tab no longer shows the project calendar panel or the client exceptions block; the Project Calendar stays in HR Settings).
+* **Check-in / check-out removed.** `POST /attendance/check-in|check-out`, the header button, the Today card, the check-in/out columns and the checkout prompt are gone; manual / import forms no longer ask for times. Salary never used them (the engine only read `status`); the leave "present on date" guard now looks at `status` only. The legacy `check_in_at` / `check_out_at` / `overtime_minutes` columns stay in the table (no DROP: expand -> contract) and nothing writes them.
+* **Daily attendance process** (`jobs/autoAttendance.js`, every 10 min, IST; `attendance/autoAttendance.service.js`). For "applicable" people (active full-time employees paid from attendance, or in the IT department) whose working-hour start time (Shift start, 09:00 without one) has passed, it marks TODAY present when it is a working day on their company calendar with no approved leave and no record yet. It never marks a future date and never overwrites a record. Half-day leave days are left to leave management / admin.
+* **Previous-month backfill** `POST /attendance/backfill-month { year, month, reason, org_membership_ids?, dry_run }` (admin) + `GET /attendance/backfill-month/runs`: same rules over every working day of a PAST month (the current / a future month -> 422). Attendance > Team attendance > "Backfill previous month" (preview, then apply). **Audit:** `audit_logs` rows `attendance_backfill_month`, `attendance_manual_mark`, `attendance_import` (admin, time, month, employees, records, reason).
+
+Not in this slice (FRD sections 4-15): leave-type flags / Comp Off balance, configurable manager approval + mandatory admin approval, OT as a separate Manager -> Admin workflow (tickets exist, manager-optional / admin-mandatory does not), monthly vs hourly billing statuses (PL / NPL / FH / SH), sales + salary Excel exports, Live Analytics invoice filters, 3-stage financial lock with per-record audit on bulk, Finance month-wise project view.
+
+## FRD revision (2026-10-02): slices 2-4 - approval, locks, leave types, billing, finance (built)
+
+Additive migration `20261002100000_approval_locks_leave_billing` (no DROP). Tests: `approval-locks-leave.test.js`, `finance-frd.test.js` (plus the older suites, rerun on a private DB).
+
+**Approval chain (FRD 7).** `orgs.timesheet_manager_approval` / `timesheet_admin_approval` (both default on; the test helper `createOrg` turns admin approval off so the older suites keep a manager approval final). Employee -> Manager (optional) -> Admin (mandatory): a manager's approval only sets `manager_approved_by/at` (the entry stays `submitted`, not payable / billable), the admin's approval makes it final; a manager rejection is final; with manager approval off only the admin decides. `GET/PATCH /timesheets/approval-policy`. UI: Time & Attendance > **Timesheet Locks** (policy card).
+
+**Overtime (FRD 8).** Tickets follow the same chain (`manager_approved` status; engines treat it as pending). Audit history in `overtime_ticket_events` (submitted, manager_approved, approved, rejected, cancelled, edited, with actor + time): `GET /timesheets/overtime-tickets/:id/history`; UI: OT Tickets > History.
+
+**Three-stage lock + audit (FRD 13-14).** Stage 1 timesheet lock: per employee and month, bulk, due the 5th of the next month, reopen needs a reason (`monthLocks.service.js`, `timesheet_month_locks`; `GET /timesheets/locks/month-status`, `POST /timesheets/locks/month`, `POST /timesheets/locks/month/reopen`; locked members cannot add / change entries, the calendar shows every day locked). Stage 2 calculation lock and stage 3 financial lock (`kind = financials`) already existed; they now also write the lock audit. `lock_audits` (`lockAudit.service.js`): one append-only row per employee / project / record with actor, time, stage, previous and new status, change and reason; bulk actions write one row per record sharing a `bulk_id`. `GET /calculations/lock-audit`; `POST /calculations/bulk` (review / lock / reopen / recalculate many records). Day locks and calculation changes inside a locked period are on the trail too.
+
+**Leave types for salary (FRD 4).** `leave_types.is_applicable / counts_in_balance / overflow_to_unpaid`, `PATCH /leave/types/:id` (admin, audited), the five types incl. **Comp Off** (balance = admin-set days + one per overtime day approved as comp off). Beyond the paid balance the rest becomes **Unpaid Leave** (a second request on the Unpaid Leave type) when the type has the overflow flag (on for the default types). UI: Leave > Leave type settings (admin).
+
+**Client billing per resource (FRD 5-6).** `resource_billing_rates` (`POST/GET/DELETE /billing/resource-rates`): one resource monthly while another is hourly on the same project and month; resources without their own rate use the project rate. Hourly = approved hours x rate (no attendance, no cap); monthly = rate / working days x the fraction its **client billing status** earns (present, present + OT, full day, half day, PL, NPL, comp off, first half, second half, absent). Fractions are `accounts.billing_leave_rules` (defaults in `engines/resourceBilling.js`; `GET/PUT /billing/projects/:id/billing-rules`), separate from salary leave rules. OT stays separate (approved OT hours only). The project row reports `resource_rates` with per-status day counts; a project with different types is `mixed`.
+
+**Salary adjustments (FRD 9).** `salary_adjustments` (TDS, OT adjustment, variable pay, reimbursement, other addition / deduction); `salary.engine` adds them to the payable salary (`net`, with `base_net` and `adjustments` per component) and a change in a locked month is flagged. `GET/POST/PATCH/DELETE /payroll/adjustments`; UI: Payroll > **Adjustments** (component table to the final payable).
+
+**Finance (FRD 10-12, 15).** Live Analytics billing filters `invoice_status` (generated / not generated / paid / unpaid / sent / unsent) and `billing_type`, plus `invoice` per row and `totals.invoice_summary` (`invoiceStatus.js`; UI filters in Live Analytics > Billing & Sales). Month-wise project view `GET /calculations/finance/month-projects` (client, billing type, resources, logged hours, amount, invoice / payment / financial status, to-do flags); Sales and Salary Excel exports `GET /calculations/export/sales|salary?period_year&period_month` (`format=json` for rows). UI: Finance > **Month View**. Vendor billing: `PATCH /billing/vendor-invoices/:id/tracking` (sent / unsent, TDS, adjustment) and `GET /billing/vendor-invoices/:id/trace` (vendor -> project -> billing record -> timesheet entries -> invoice -> payment).
+
+**Hardening round (same day).**
+
+* **Admin approval before a lock:** a month is not locked for an employee while entries wait for approval (`pending_entries`); the admin can force it with a reason (`force`, written on the audit row). Day overtime (`/timesheets/overtime/:id/decision`) and regularisation tickets follow the same Employee -> Manager (optional) -> Admin chain (`manager_approved_by/at` columns; `awaiting_admin` in the response).
+* **Lock order:** `orgs.enforce_lock_order` (default on). A calculation cannot be locked while the timesheets it is built from are open (`timesheets_not_locked`); the month's financials cannot be locked while timesheets are open or calculations are started but not locked (`calculations_not_locked`) - `calculations/financialLock.js`, shown as readiness blockers. The test helper `createOrg` turns it off for the older suites.
+* **Financial freeze:** once the month's `financials` calculation is locked, client invoices (generate / edit / delete / sent / paid), vendor invoices (create / edit / delete / tracking) and vendor payments (decide / pay) of that month answer 423 `financial_locked` until an admin reopens the financial lock (audited).
+* **Audit:** every timesheet / overtime / regularisation approval step (manager_approve, approve, reject) is on the lock audit trail (stage `timesheet`) with employee, month, previous / new status; attendance regularise / delete / manual / import / backfill write `audit_logs` rows.
+* **Leave Manager:** `org_memberships.is_leave_manager` (admin sets it: `PUT /leave/managers/:membershipId`, `GET /leave/managers`, audited). Leave Managers list, apply, approve / reject and withdraw leave; balances, types and entitlements stay admin-only. A pending paid request longer than the balance is split when it is approved (paid part + approved Unpaid Leave), like at request time.
+* **Daily attendance:** a day with one approved half-day leave is marked `half_day` (the leave pays the other half); two half-days or a full leave day are left alone.
+* **Monthly billing by status for a normal project:** `POST /billing/projects/:id/resource-rates/apply-project-rate` copies the project's rate to every allocated resource that has no rate of its own, so the client billing statuses apply to them (a project billed on one project rate still bills by contract).
+* **Vendor:** `GET /calculations/export/vendor` (Excel / `format=json`), vendor invoice list shows TDS, adjustment, net payable, sent and paid.
+* **UI added:** Finance > Billing Setup (resource rates, apply project rate, status rules), Finance > Vendor Invoices (sent, TDS / adjustment, trace, Excel), Leave type settings > Leave Managers, Timesheet Locks (approval column, force option). Tests: `frd-hardening.test.js`.
+
+Still manual / by design: locking a timesheet month is a manual admin action (no automatic lock on the 5th - the board shows the deadline and who is overdue); the previous-month attendance backfill is admin-only (no separate IT role exists in the system); leave that was already approved is not split retroactively.
+
 All four phases are done. Remaining (not requested): a notification type for new tickets, a ticket-based OT report, and flipping IT to the attendance basis
 in production (admin action, after the Pay basis comparison).
+
+## Fix (2026-10-02): the cap is per person AND per project - SUPERSEDED by the FRD revision above (no cap at all)
+
+Found on staging: with two people allocated (8h + 8h = 16h for the project day) one developer could log 9h or more on the project, using the other's hours.
+`projectDay.checkCap` now applies two limits: an allocated person can log at most **their own** `billable_hours_per_day` on the project a day
+(`person_day_cap`: "You have already logged Xh of your Yh a day..."), and everyone together stays within the project's day capacity
+(`project_day_cap`). A team mate who is not allocated fills only what the allocated people left. `GET /timesheets/project-day` also returns `my_limit` /
+`my_remaining`; the IT timesheet hint shows "you: Xh of your Yh (Zh left)". Admin entries still bypass both.

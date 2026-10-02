@@ -198,6 +198,8 @@ async function transitionInvoice(orgId, invoiceId, status) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
   if (FORWARD_TRANSITIONS[invoice.status] !== status) return { error: 'invalid_transition' };
+  const frozen = await require('../calculations/financialLock').assertOpen(orgId, invoice.period_month, invoice.period_year);
+  if (frozen) return frozen;
 
   const data = { status };
   if (status === 'sent') data.sent_at = new Date();

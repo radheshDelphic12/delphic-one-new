@@ -95,41 +95,17 @@ describe('Phase 2 — calendars', () => {
 });
 
 describe('Phase 2 — attendance', () => {
-  test('check-in then check-out records both timestamps for today', async () => {
+  test('check-in and check-out are removed - attendance is marked automatically', async () => {
     const { org } = await seedOrgAdmin();
     const { access_token } = await seedOrgEmployee(org);
-
-    const ci = await authed(request(app).post('/api/v1/attendance/check-in'), access_token);
-    expect(ci.status).toBe(201);
-    expect(ci.body.data.check_in_at).toBeTruthy();
-    expect(ci.body.data.check_out_at).toBeNull();
-
-    const dup = await authed(request(app).post('/api/v1/attendance/check-in'), access_token);
-    expect(dup.status).toBe(409);
-
-    const co = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(co.status).toBe(200);
-    expect(co.body.data.check_out_at).toBeTruthy();
-
-    const dupOut = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(dupOut.status).toBe(409);
-
-    const mine = await authed(request(app).get('/api/v1/attendance/me'), access_token);
-    expect(mine.status).toBe(200);
-    expect(mine.body.data).toHaveLength(1);
-  });
-
-  test('check-out without a check-in is rejected', async () => {
-    const { org } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
-    const res = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(res.status).toBe(409);
+    expect((await authed(request(app).post('/api/v1/attendance/check-in'), access_token)).status).toBe(404);
+    expect((await authed(request(app).post('/api/v1/attendance/check-out'), access_token)).status).toBe(404);
   });
 
   test('admin can list the whole team and regularize a record', async () => {
     const { org, access_token: adminToken, admin } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
-    await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
+    const { membership: empMembership } = await seedOrgEmployee(org);
+    await prisma.attendanceRecord.create({ data: { org_id: org.id, org_membership_id: empMembership.id, date: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`), status: 'present', source: 'manual' } });
 
     const team = await authed(request(app).get('/api/v1/attendance'), adminToken);
     expect(team.status).toBe(200);

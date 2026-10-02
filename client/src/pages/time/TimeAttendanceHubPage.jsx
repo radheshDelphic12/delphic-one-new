@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ListChecks, Radar, Timer } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, LayoutDashboard, ListChecks, Lock, Radar, Timer, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -12,10 +12,17 @@ import TeamMonitoringTab from './TeamMonitoringTab.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
 import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
+import TimesheetDashboard from './TimesheetDashboard.jsx';
+import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
+import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
+  // Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
+  { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
+  // Hours logged by everyone on a project you are assigned to (visibility only, no cap).
+  { key: 'project-team', label: 'Project Team', icon: Users },
   // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
   { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
@@ -31,6 +38,8 @@ const TIMESHEETS_TAB = { key: 'timesheets', label: 'Timesheets', icon: Timer };
 const IT_TAB = { key: 'it-timesheet', label: 'IT Timesheet', icon: ListChecks };
 // Admin/Superadmin monitoring & task-assignment hub — see TeamMonitoringTab.
 const MONITORING_TAB = { key: 'monitoring', label: 'Team Monitoring', icon: Radar };
+// Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
+const LOCKS_TAB = { key: 'locks', label: 'Timesheet Locks', icon: Lock };
 // Reporting managers approve their direct reports' timesheets here (admins do it in Team Monitoring).
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 
@@ -51,7 +60,7 @@ export default function TimeAttendanceHubPage() {
     ...(!isItDept || isAdmin ? [TIMESHEETS_TAB] : []),
     ...(isIt ? [IT_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [MONITORING_TAB] : []),
+    ...(isAdmin ? [MONITORING_TAB, LOCKS_TAB] : []),
   ];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
@@ -78,6 +87,8 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
+      {section === 'dashboard' && <TimesheetDashboard />}
+      {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}
       {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
       {section === 'timesheets' && (
@@ -96,6 +107,7 @@ export default function TimeAttendanceHubPage() {
       {section === 'it-timesheet' && isIt && (isAdmin ? <ItTimesheetAdminView /> : <ItTimesheetPage />)}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
       {section === 'monitoring' && isAdmin && <TeamMonitoringTab />}
+      {section === 'locks' && isAdmin && <TimesheetLocksTab />}
     </div>
   );
 }

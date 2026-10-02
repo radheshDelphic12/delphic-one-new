@@ -13,6 +13,7 @@
 const prisma = require('../../config/db');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const { todayIst } = require('../../lib/istDate');
+const lockAudit = require('../calculations/lockAudit.service');
 
 const MAX_DAY_HOURS = 12;
 const ymd = (date) => date.toISOString().slice(0, 10);
@@ -37,6 +38,7 @@ function serialize(row) {
     status: row.status,
     decided_by: row.decider ? { id: row.decider.id, name: row.decider.name } : null,
     decided_at: row.decided_at,
+    manager_approved_at: row.manager_approved_at || null,
     decision_reason: row.decision_reason,
     created_at: row.created_at,
   };
@@ -53,10 +55,20 @@ async function usesTickets(orgMembershipId) {
 
 async function dayTotal(orgMembershipId, date, excludeId = null) {
   const rows = await prisma.overtimeTicket.findMany({
-    where: { org_membership_id: orgMembershipId, date, status: { in: ['pending', 'approved'] }, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    where: { org_membership_id: orgMembershipId, date, status: { in: ['pending', 'manager_approved', 'approved'] }, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { hours: true },
   });
   return rows.reduce((s, r) => s + Number(r.hours), 0);
+}
+
+// Append-only history of a ticket: submission, every approval / rejection step, cancellation, admin edits.
+async function recordEvent(ticketId, action, { from = null, to = null, actorId = null, reason = null, detail = null } = {}) {
+  await prisma.overtimeTicketEvent.create({ data: { ticket_id: ticketId, action, from_status: from, to_status: to, actor_id: actorId, reason, detail } });
+}
+
+async function approvalPolicy(orgId) {
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { timesheet_manager_approval: true, timesheet_admin_approval: true } });
+  return { manager: org?.timesheet_manager_approval !== false, admin: org?.timesheet_admin_approval !== false };
 }
 
 async function createTicket(orgId, orgMembershipId, { date, hours, account_id, reason }) {
@@ -65,6 +77,7 @@ async function createTicket(orgId, orgMembershipId, { date, hours, account_id, r
   if (account_id && !(await prisma.account.findFirst({ where: { id: account_id, org_id: orgId }, select: { id: true } }))) return { error: 'account_not_found' };
   if ((await dayTotal(orgMembershipId, date)) + hours > MAX_DAY_HOURS + 1e-9) return { error: 'exceeds_ticket_hours' };
   const row = await prisma.overtimeTicket.create({ data: { org_id: orgId, org_membership_id: orgMembershipId, date, hours, account_id: account_id || null, reason }, include: INCLUDE });
+  await recordEvent(row.id, 'submitted', { to: 'pending', actorId: row.org_membership?.person_id || null, reason, detail: { date: ymd(row.date), hours: Number(row.hours) } });
   return { ticket: serialize(row) };
 }
 
@@ -73,8 +86,11 @@ async function listTickets(orgId, actor, { scope = 'mine', status, from, to } = 
   const where = { org_id: orgId, ...(status ? { status } : {}), ...(from || to ? { date: { gte: from || undefined, lte: to || undefined } } : {}) };
   if (scope === 'mine') where.org_membership_id = actor.org_membership_id;
   else if (scope === 'to_decide') {
-    where.status = 'pending';
-    if (actor.role !== 'admin') where.org_membership = { manager_id: actor.org_membership_id };
+    if (actor.role === 'admin') where.status = { in: ['pending', 'manager_approved'] };
+    else {
+      where.status = 'pending';
+      where.org_membership = { manager_id: actor.org_membership_id };
+    }
   } else if (actor.role !== 'admin') return { error: 'not_approver' };
   const rows = await prisma.overtimeTicket.findMany({ where, include: INCLUDE, orderBy: [{ date: 'desc' }, { created_at: 'desc' }], take: 300 });
   return { tickets: rows.map(serialize), uses_tickets: await usesTickets(actor.org_membership_id) };
@@ -94,6 +110,14 @@ async function raiseFinanceChange(orgId, actorUserId, row, description, oldValue
   });
 }
 
+// The ticket decision also goes on the shared lock / approval audit trail.
+async function trail(orgId, actor, row, action, previous, next, change, reason) {
+  await lockAudit.record(prisma, orgId, {
+    stage: 'timesheet', action, actor_id: actor.id, org_membership_id: row.org_membership_id, account_id: row.account_id || null,
+    period_month: row.date.getUTCMonth() + 1, period_year: row.date.getUTCFullYear(), previous_status: previous, new_status: next, change, reason: reason || null,
+  });
+}
+
 // Manager of the employee, or an admin. A manager decides once; an admin may revise a decision.
 async function decideTicket(orgId, ticketId, actor, { status, reason }) {
   const row = await prisma.overtimeTicket.findFirst({ where: { id: ticketId, org_id: orgId }, include: INCLUDE });
@@ -101,8 +125,21 @@ async function decideTicket(orgId, ticketId, actor, { status, reason }) {
   if (!canDecideFor(actor, row.org_membership)) return { error: 'not_approver' };
   if (row.org_membership_id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_ticket' };
   if (row.status === 'cancelled') return { error: 'already_decided' };
-  if (row.status !== 'pending' && actor.role !== 'admin') return { error: 'already_decided' };
+  const isAdmin = actor.role === 'admin';
+  if (row.status === 'manager_approved' && !isAdmin) return { error: 'awaiting_admin' };
+  if (row.status !== 'pending' && !isAdmin) return { error: 'already_decided' };
+  // Employee -> Manager (optional) -> Admin (mandatory): a manager's approval is only the first step.
+  const policy = await approvalPolicy(orgId);
+  if (!isAdmin && !policy.manager) return { error: 'manager_approval_disabled' };
+  if (!isAdmin && status === 'approved' && policy.admin) {
+    const stepped = await prisma.overtimeTicket.update({ where: { id: ticketId }, data: { status: 'manager_approved', manager_approved_by: actor.id, manager_approved_at: new Date(), decision_reason: reason || null }, include: INCLUDE });
+    await recordEvent(ticketId, 'manager_approved', { from: row.status, to: 'manager_approved', actorId: actor.id, reason });
+    await trail(orgId, actor, row, 'manager_approve', row.status, 'manager_approved', `Overtime ticket ${Number(row.hours)}h approved by the manager, waiting for the admin`, reason);
+    return { ticket: serialize(stepped), awaiting_admin: true };
+  }
   const updated = await prisma.overtimeTicket.update({ where: { id: ticketId }, data: { status, decided_by: actor.id, decided_at: new Date(), decision_reason: reason || null }, include: INCLUDE });
+  await recordEvent(ticketId, status, { from: row.status, to: status, actorId: actor.id, reason });
+  await trail(orgId, actor, row, status === 'rejected' ? 'reject' : 'approve', row.status, status, `Overtime ticket ${Number(row.hours)}h ${status}`, reason);
   if (status === 'approved' || row.status === 'approved') {
     await raiseFinanceChange(orgId, actor.id, row, `Overtime ticket ${status} (${Number(row.hours)}h)`, { status: row.status, hours: Number(row.hours) }, { status, hours: Number(row.hours) });
   }
@@ -115,6 +152,7 @@ async function cancelTicket(orgId, orgMembershipId, ticketId) {
   if (!row) return { error: 'not_found' };
   if (row.status !== 'pending') return { error: 'already_decided' };
   const updated = await prisma.overtimeTicket.update({ where: { id: ticketId }, data: { status: 'cancelled' }, include: INCLUDE });
+  await recordEvent(ticketId, 'cancelled', { from: 'pending', to: 'cancelled', actorId: updated.org_membership?.person_id || null });
   return { ticket: serialize(updated) };
 }
 
@@ -128,6 +166,7 @@ async function adminUpdateTicket(orgId, adminUser, ticketId, { reason, ticket_re
   const data = { ...patch, ...(ticket_reason !== undefined ? { reason: ticket_reason } : {}) };
   if (patch.status && patch.status !== row.status) Object.assign(data, { decided_by: adminUser.id, decided_at: new Date(), decision_reason: reason });
   const updated = await prisma.overtimeTicket.update({ where: { id: ticketId }, data, include: INCLUDE });
+  await recordEvent(ticketId, 'edited', { from: row.status, to: updated.status, actorId: adminUser.id, reason, detail: { before: { hours: Number(row.hours), date: ymd(row.date) }, after: { hours: Number(updated.hours), date: ymd(updated.date) } } });
   await prisma.auditLog.create({
     data: { org_id: orgId, actor_id: adminUser.id, action: 'overtime_ticket_edit', entity_type: 'overtime_ticket', entity_id: ticketId, reason, snapshot: { before: serialize(row), after: serialize(updated) } },
   });
@@ -146,4 +185,16 @@ async function adminDeleteTicket(orgId, adminUser, ticketId, { reason }) {
   return { deleted: true };
 }
 
-module.exports = { createTicket, listTickets, decideTicket, cancelTicket, adminUpdateTicket, adminDeleteTicket, usesTickets, round2 };
+// The full history of a ticket (who, what, when). Visible to the employee, their manager and admins.
+async function ticketHistory(orgId, actor, ticketId) {
+  const row = await prisma.overtimeTicket.findFirst({ where: { id: ticketId, org_id: orgId }, include: INCLUDE });
+  if (!row) return { error: 'not_found' };
+  if (actor.role !== 'admin' && row.org_membership_id !== actor.org_membership_id && row.org_membership?.manager_id !== actor.org_membership_id) return { error: 'not_approver' };
+  const events = await prisma.overtimeTicketEvent.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'asc' } });
+  const ids = [...new Set(events.map((e) => e.actor_id).filter(Boolean))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+  const names = new Map(users.map((u) => [u.id, u.name]));
+  return { ticket: serialize(row), events: events.map((e) => ({ id: e.id, action: e.action, from_status: e.from_status, to_status: e.to_status, actor: e.actor_id ? { id: e.actor_id, name: names.get(e.actor_id) || null } : null, reason: e.reason, detail: e.detail, created_at: e.created_at })) };
+}
+
+module.exports = { ticketHistory, createTicket, listTickets, decideTicket, cancelTicket, adminUpdateTicket, adminDeleteTicket, usesTickets, round2 };

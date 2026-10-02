@@ -22,6 +22,7 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   already_decided: [409, 'Already decided'],
   not_approved: [422, 'Must be approved first'],
+  financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
   not_editable: [409, 'Only a pending claim can be edited — this one has already been decided'],
   category_not_found: [404, 'Expense category not found (or deactivated)'],
   membership_not_found: [404, 'Employee not found in this company'],

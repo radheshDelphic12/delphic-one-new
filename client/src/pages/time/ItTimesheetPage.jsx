@@ -253,7 +253,7 @@ export default function ItTimesheetPage() {
                   <Trash2 className="h-4 w-4" />
                 </button>
                 {row.account_id && (
-                  <div className="sm:col-span-5"><ProjectDayHint accountId={row.account_id} date={date} reloadKey={weekKey} requested={Number(row.hours) || 0} /></div>
+                  <div className="sm:col-span-5"><ProjectDayHint accountId={row.account_id} date={date} reloadKey={weekKey} /></div>
                 )}
               </div>
             ))}

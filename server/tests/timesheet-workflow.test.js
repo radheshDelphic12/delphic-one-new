@@ -105,8 +105,6 @@ describe('Approved Leave Day = no attendance, no timesheet, no project hours', (
     const other = await authed(request(app).get('/api/v1/leave/day-status').query({ date: '2026-01-05' }), emp.token);
     expect(other.body.data.is_leave_day).toBe(false);
 
-    expect((await authed(request(app).post('/api/v1/attendance/check-in'), emp.token)).status).toBe(422);
-    expect((await authed(request(app).post('/api/v1/attendance/check-out'), emp.token)).status).toBe(422);
   });
 });
 

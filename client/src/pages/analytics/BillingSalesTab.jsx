@@ -114,7 +114,7 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged, onInvoice }) {
  */
 export default function BillingSalesTab() {
   const [period, setPeriod] = useState({ ...currentPeriod(), period: 'month' });
-  const [filters, setFilters] = useState({ project_type: 'all', client_account_id: '', account_id: '', org_membership_id: '', status: 'all', include_overtime: 'true', date_from: '', date_to: '' });
+  const [filters, setFilters] = useState({ project_type: 'all', client_account_id: '', account_id: '', org_membership_id: '', status: 'all', invoice_status: 'all', billing_type: 'all', include_overtime: 'true', date_from: '', date_to: '' });
   const [openRow, setOpenRow] = useState(null);
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [adjustFor, setAdjustFor] = useState(null);
@@ -149,7 +149,7 @@ export default function BillingSalesTab() {
       </button>
     ) },
     { key: 'type', header: 'Type', render: (r) => (r.supported ? categoryLabel(r.project.service_category) || 'Managed services' : <span className="text-xs text-amber-800" title={r.note}>{categoryLabel(r.project.service_category)} · not enabled</span>) },
-    { key: 'billing', header: 'Billing', render: (r) => (r.billing_type ? <span className="text-xs">{r.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} {inr(r.rate, r.currency)} · {r.working_days} WD{r.overtime.enabled ? ` · OT ${r.overtime.multiplier}×` : ' · no OT'}</span> : <span className="text-xs text-tertiary-400">Not set</span>) },
+    { key: 'billing', header: 'Billing', render: (r) => (r.billing_type ? <span className="text-xs">{r.resource_rates?.length ? 'Mixed - ' : ''}{r.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} {inr(r.rate, r.currency)} · {r.working_days} WD{r.overtime.enabled ? ` · OT ${r.overtime.multiplier}×` : ' · no OT'}</span> : <span className="text-xs text-tertiary-400">Not set</span>) },
     { key: 'hours', header: 'Approved / pending / rejected', render: (r) => <span className="text-xs tabular-nums">{hrs(r.totals.approved_hours)}{r.totals.overtime_hours ? ` +${r.totals.overtime_hours}h OT` : ''} · {hrs(r.totals.pending_hours)} · {hrs(r.totals.rejected_hours)}</span> },
     { key: 'amount', header: 'Amount', render: (r) => (
       <span className="tabular-nums">
@@ -172,6 +172,7 @@ export default function BillingSalesTab() {
     { key: 'approval', header: 'Approval', render: (r) => <StatusBadge status={r.totals.rejected_days ? 'rejected' : r.totals.pending_days ? 'pending' : r.totals.approved_days ? 'approved' : 'no_entries'} size="xs" /> },
     { key: 'lock', header: 'Lock', render: (r) => <RecordLockButton kind="billing" scopeKey={r.project.id} period={{ period_month: r.period_month, period_year: r.period_year }} lock={r.lock} label={`${r.project.name} billing`} onChanged={() => refresh?.()} /> },
     { key: 'adjust', header: 'Adjust', render: (r) => (r.supported && r.billing_type ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor(r)}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
+    { key: 'invoice_state', header: 'Invoice status', render: (r) => (r.invoice?.generated ? <span className="text-xs">{r.invoice.number || 'Generated'}<span className="block text-tertiary-500">{r.invoice.sent ? 'Sent' : 'Unsent'} · {r.invoice.paid ? 'Paid' : 'Unpaid'}</span></span> : <span className="text-xs text-tertiary-400">Not generated</span>) },
     { key: 'invoice', header: 'Invoice', render: (r) => (r.supported && r.billing_type ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ account_id: r.project.id, period_month: r.period_month, period_year: r.period_year })} /> : <span className="text-xs text-tertiary-400">—</span>) },
   ];
 
@@ -209,6 +210,25 @@ export default function BillingSalesTab() {
             <option value="approved">Approved</option>
             <option value="pending">Pending</option>
             <option value="rejected">Rejected</option>
+          </select>
+        </Filter>
+        <Filter label="Invoice">
+          <select value={filters.invoice_status} onChange={(e) => set('invoice_status', e.target.value)} className="w-full rounded-xl border px-3 py-1.5 text-sm">
+            <option value="all">All</option>
+            <option value="generated">Invoice generated</option>
+            <option value="not_generated">Invoice not generated</option>
+            <option value="paid">Paid</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="sent">Sent</option>
+            <option value="unsent">Unsent</option>
+          </select>
+        </Filter>
+        <Filter label="Billing type">
+          <select value={filters.billing_type} onChange={(e) => set('billing_type', e.target.value)} className="w-full rounded-xl border px-3 py-1.5 text-sm">
+            <option value="all">All</option>
+            <option value="monthly">Monthly</option>
+            <option value="hourly">Hourly</option>
+            <option value="mixed">Mixed (per resource)</option>
           </select>
         </Filter>
         <Filter label="Overtime">

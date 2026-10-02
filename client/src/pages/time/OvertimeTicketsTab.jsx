@@ -4,9 +4,10 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
+import Modal from '../../components/ui/Modal.jsx';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const STATUS = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
+const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
 
 /**
  * Overtime tickets. People paid from attendance raise a ticket (day, hours, project, reason); their
@@ -22,6 +23,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const [projects, setProjects] = useState([]);
   const [form, setForm] = useState({ date: todayIso(), hours: '', account_id: '', reason: '' });
   const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState(null);
 
   const fail = (err, text) => pushError(apiErrorMessage(err, text), 'Something went wrong');
 
@@ -53,13 +55,16 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   async function call(fn, done) {
     try { await fn(); pushSuccess(done); load(); } catch (err) { fail(err, 'That did not work'); }
   }
-  const approve = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status: 'approved' }), 'Ticket approved');
+  const approve = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status: 'approved' }), isAdmin ? 'Ticket approved' : 'Approved - it now waits for the admin');
   const reject = (t) => {
     const reason = window.prompt(`Reject ${t.employee}'s ${t.hours}h on ${t.date}? Give the reason (required):`);
     if (reason === null) return undefined;
     if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return undefined; }
     return call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status: 'rejected', reason: reason.trim() }), 'Ticket rejected');
   };
+  // The ticket's audit history: submission, each approval / rejection step, edits - who and when.
+  const showHistory = (t) => apiClient.get(`/timesheets/overtime-tickets/${t.id}/history`).then(({ data }) => setHistory({ ticket: t, events: data.data.events })).catch((e) => fail(e, 'Failed to load the history'));
+  const historyButton = (t) => <button type="button" className="btn-ghost text-xs" onClick={() => showHistory(t)}>History</button>;
   const cancel = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/cancel`), 'Ticket cancelled');
   const adminEdit = (t) => {
     const hours = window.prompt(`New hours for ${t.employee} on ${t.date} (now ${t.hours}h):`, String(t.hours));
@@ -83,8 +88,8 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     { key: 'reason', header: 'Reason', render: (t) => <span className="text-xs text-tertiary-600">{t.reason}</span> },
     { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decided_by?.name ? `${t.decided_by.name}: ` : ''}{t.decision_reason}</span>}</span> },
   ];
-  const mineColumns = [...base.filter((c) => c.key !== 'employee'), { key: 'actions', header: '', render: (t) => (t.status === 'pending' ? <button type="button" className="btn-ghost text-xs" onClick={() => cancel(t)}>Cancel</button> : null) }];
-  const queueColumns = [...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button></span> }];
+  const mineColumns = [...base.filter((c) => c.key !== 'employee'), { key: 'actions', header: '', render: (t) => <span className="flex gap-1">{t.status === 'pending' && <button type="button" className="btn-ghost text-xs" onClick={() => cancel(t)}>Cancel</button>}{historyButton(t)}</span> }];
+  const queueColumns = [...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
   const allColumns = [...base, {
     key: 'actions',
     header: '',
@@ -92,6 +97,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
       <span className="flex flex-wrap gap-1">
         {t.status !== 'approved' && t.status !== 'cancelled' && <button type="button" className="btn-ghost text-xs" onClick={() => approve(t)}>Approve</button>}
         {t.status !== 'rejected' && t.status !== 'cancelled' && <button type="button" className="btn-ghost text-xs" onClick={() => reject(t)}>Reject</button>}
+        {historyButton(t)}
         <button type="button" className="btn-ghost text-xs" onClick={() => adminEdit(t)}>Edit</button>
         <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => adminDelete(t)}>Delete</button>
       </span>
@@ -134,6 +140,20 @@ export default function OvertimeTicketsTab({ isAdmin }) {
           <DataTable columns={allColumns} rows={all} emptyLabel="No overtime tickets yet" />
         </section>
       )}
+
+      <Modal open={Boolean(history)} title="Overtime ticket history" onClose={() => setHistory(null)} footer={<button type="button" className="btn-primary" onClick={() => setHistory(null)}>Close</button>}>
+        {history && (
+          <ul className="space-y-2 text-sm">
+            {history.events.map((e) => (
+              <li key={e.id} className="rounded-lg bg-tertiary-50 px-3 py-2">
+                <span className="font-medium text-tertiary-900">{e.action.replace(/_/g, ' ')}</span>
+                <span className="text-tertiary-500"> by {e.actor?.name || 'the employee'} · {new Date(e.created_at).toLocaleString()}</span>
+                {e.reason && <p className="text-xs text-tertiary-600">{e.reason}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -12,6 +12,43 @@ const createRateSchema = z.object({
   effective_from: requiredDate,
 });
 
+// A resource's own rate on a project (monthly for one person, hourly for another, same month).
+const resourceRateSchema = z.object({
+  account_id: z.string().uuid(),
+  org_membership_id: z.string().uuid(),
+  rate_type: z.enum(['hourly', 'monthly']),
+  rate: z.coerce.number().positive(),
+  currency: CURRENCY.default('INR'),
+  effective_from: requiredDate,
+});
+const applyProjectRateSchema = z.object({ effective_from: requiredDate });
+const resourceRateQuerySchema = z.object({
+  account_id: z.string().uuid().optional(),
+  org_membership_id: z.string().uuid().optional(),
+});
+const reasonBodySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+
+// Client billing status rules: the fraction of a working day billed for each status (0 - 1).
+const fraction = z.coerce.number().min(0).max(1);
+const billingRulesSchema = z.object({
+  rules: z
+    .object({ present: fraction, full_day: fraction, half_day: fraction, pl: fraction, npl: fraction, comp_off: fraction, first_half: fraction, second_half: fraction, absent: fraction })
+    .partial()
+    .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' }),
+  reason: z.string().trim().max(500).optional(),
+});
+
+// Vendor invoice tracking: sent / unsent, TDS withheld, other financial adjustment.
+const vendorTrackingSchema = z
+  .object({
+    sent: z.boolean().optional(),
+    tds_amount: z.coerce.number().min(0).optional(),
+    adjustment_amount: z.coerce.number().optional(),
+    adjustment_note: z.string().trim().max(500).optional(),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => Object.keys(v).filter((k) => k !== 'reason').length > 0, { message: 'Nothing to change' });
+
 const listRatesQuerySchema = z.object({
   account_id: z.string().uuid().optional(),
   requirement_id: z.string().uuid().optional(),
@@ -331,4 +368,10 @@ module.exports = {
   pnlListQuerySchema,
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
+  resourceRateSchema,
+  resourceRateQuerySchema,
+  applyProjectRateSchema,
+  reasonBodySchema,
+  billingRulesSchema,
+  vendorTrackingSchema,
 };

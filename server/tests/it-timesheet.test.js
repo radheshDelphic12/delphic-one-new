@@ -83,8 +83,6 @@ describe('IT timesheet — multi-project daily log (Date / Project / Hours / Des
     const project = await createActiveClientAccount(membership.person_id);
     await prisma.account.update({ where: { id: project.id }, data: { org_id: org.id } });
     await assign(org, membership, project);
-    // The project's own day would stop 20h first (billable_hours_per_day, default 8) - lift it so the person-day 24h rule is what's tested.
-    await prisma.projectMemberAssignment.updateMany({ where: { account_id: project.id }, data: { billable_hours_per_day: 24 } });
 
     const date = '2026-07-02';
     const first = await authed(request(app).post('/api/v1/timesheets/entries'), token).send({ date, account_id: project.id, hours: 20 });

@@ -243,6 +243,10 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
   const clientFlags = await clientFlagsFor(orgId, accountIds, start, end);
   const otByDate = new Map(overtime.map((o) => [ymd(o.date), o]));
   const locked = new Set(locks.map((l) => ymd(l.date)));
+  // An admin may also have locked this employee's whole month (stage 1 of the financial lock).
+  const monthLockRows = await prisma.timesheetMonthLock.findMany({ where: { org_membership_id: orgMembershipId }, select: { period_year: true, period_month: true } });
+  const lockedMonths = new Set(monthLockRows.map((l) => `${l.period_year}-${l.period_month}`));
+  const dayLocked = (date, key) => locked.has(key) || lockedMonths.has(`${date.getUTCFullYear()}-${date.getUTCMonth() + 1}`);
   const today = todayIst();
 
   const days = [];
@@ -314,8 +318,8 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
       ot_id: ot?.id || null,
       ot_payable: split.ot_payable,
       status,
-      locked: locked.has(key),
-      admin_review: status === 'pending' && locked.has(key) && needsAdminReview(date, today),
+      locked: dayLocked(date, key),
+      admin_review: status === 'pending' && dayLocked(date, key) && needsAdminReview(date, today),
       entries: dayEntries.map((e) => ({
         id: e.id, account_id: e.account_id, project: projectName(e.account), hours: Number(e.hours), overtime_hours: Number(e.overtime_hours || 0),
         billable: e.billable, notes: e.notes, module_name: e.module_name, status: e.status, decision_reason: e.decision_reason,
