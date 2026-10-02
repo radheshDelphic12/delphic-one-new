@@ -1,6 +1,6 @@
 # Client / project timesheet - source of truth per person (design, 2026-10-01)
 
-Status: **design agreed, not implemented.** Decisions below were answered by the product owner on 2026-10-01.
+Status: **all four phases implemented and committed (61ec9b3, 2026-10-01).** Decisions below were answered by the product owner on 2026-10-01.
 
 ## Problem
 
@@ -114,3 +114,11 @@ not rewritten, targeted tests per phase.
 
 All four phases are done. Remaining (not requested): a notification type for new tickets, a ticket-based OT report, and flipping IT to the attendance basis
 in production (admin action, after the Pay basis comparison).
+
+## Fix (2026-10-02): the cap is per person AND per project
+
+Found on staging: with two people allocated (8h + 8h = 16h for the project day) one developer could log 9h or more on the project, using the other's hours.
+`projectDay.checkCap` now applies two limits: an allocated person can log at most **their own** `billable_hours_per_day` on the project a day
+(`person_day_cap`: "You have already logged Xh of your Yh a day..."), and everyone together stays within the project's day capacity
+(`project_day_cap`). A team mate who is not allocated fills only what the allocated people left. `GET /timesheets/project-day` also returns `my_limit` /
+`my_remaining`; the IT timesheet hint shows "you: Xh of your Yh (Zh left)". Admin entries still bypass both.

@@ -52,11 +52,12 @@ describe('Client / project timesheet - the project day', () => {
     expect(seen.people.find((x) => x.name === 'Asha')).toMatchObject({ billable_hours_per_day: 8, logged: 8 });
     expect((await log(b, p, 4)).status).toBe(201);
 
-    // The project's day is now full: nobody can add more.
+    // Everyone has used their own hours: each is stopped at their own limit (and the project day is full).
     const over = await log(a, p, 1);
     expect(over.status).toBe(422);
-    expect(over.body.message || over.body.error?.message || JSON.stringify(over.body)).toMatch(/12h of 12h already logged/);
-    expect((await dayOf(a, p)).body.data).toMatchObject({ logged: 12, remaining: 0, over_by: 0 });
+    expect(over.body.message || over.body.error?.message || JSON.stringify(over.body)).toMatch(/already logged 8h of your 8h a day/);
+    expect((await log(b, p, 1)).status).toBe(422);
+    expect((await dayOf(a, p)).body.data).toMatchObject({ logged: 12, remaining: 0, over_by: 0, my_limit: 8, my_remaining: 0 });
   });
 
   test('one person can bill 8h on project A and 8h on project B on the same day - the caps are per project, not per person', async () => {
@@ -136,5 +137,34 @@ describe('Client / project timesheet - the project day', () => {
     expect(raise.body.data.billable_hours_per_day).toBe(10);
     expect((await dayOf(a, p)).body.data).toMatchObject({ capacity: 10, logged: 8, remaining: 2 });
     expect((await log(a, p, 2)).status).toBe(201);
+  });
+});
+
+describe('Client / project timesheet - one person cannot use up another person\'s hours', () => {
+  test('each allocated person is held to their own billable hours a day even if the project still has room; a team mate fills only what is left', async () => {
+    const ctx = await seed();
+    const a = await ctx.dev('Asha');
+    const b = await ctx.dev('Bilal');
+    const mate = await ctx.dev('Mohan');
+    const p = await ctx.project('Miicare');
+    await assign(ctx, p, a); // 8h
+    await assign(ctx, p, b); // 8h -> the project day holds 16h
+
+    expect((await log(a, p, 8)).status).toBe(201);
+    // The project still has 8h free (Bilal's), but Asha has used all of hers.
+    const more = await log(a, p, 1);
+    expect(more.status).toBe(422);
+    expect(more.body.message || more.body.error?.message || JSON.stringify(more.body)).toMatch(/already logged 8h of your 8h a day/);
+    expect((await dayOf(a, p)).body.data).toMatchObject({ capacity: 16, logged: 8, remaining: 8, my_limit: 8, my_remaining: 0 });
+    expect((await dayOf(b, p)).body.data).toMatchObject({ my_limit: 8, my_remaining: 8 });
+
+    // Bilal logs 5; a team mate who is not allocated (Mohan) may use the 3h that are left in the project day.
+    const team = await prisma.team.create({ data: { org_id: ctx.org.id, name: 'Web' } });
+    for (const person of [a, b, mate]) await prisma.teamMembershipPeriod.create({ data: { org_id: ctx.org.id, org_membership_id: person.membership.id, team_id: team.id } });
+    expect((await log(b, p, 5)).status).toBe(201);
+    expect((await dayOf(mate, p)).body.data).toMatchObject({ my_limit: null, remaining: 3 });
+    expect((await log(mate, p, 4)).status).toBe(422); // 4h > the 3h left
+    expect((await log(mate, p, 3)).status).toBe(201);
+    expect((await log(b, p, 1)).status).toBe(422); // the project day is full now
   });
 });
