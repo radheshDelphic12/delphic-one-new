@@ -458,6 +458,15 @@ router.get(
   })
 );
 
+// Projects the caller may open in Project Team for a month (admin: all projects).
+router.get(
+  '/project-team/projects',
+  asyncHandler(async (req, res) => {
+    const { year, month } = projectTeamQuerySchema.pick({ year: true, month: true }).parse(req.query);
+    return ok(res, await service.listTeamProjects(req.user.org_id, req.user, { year, month }));
+  })
+);
+
 // Projects the caller is allocated to — the IT timesheet's project dropdown.
 router.get(
   '/my-projects',

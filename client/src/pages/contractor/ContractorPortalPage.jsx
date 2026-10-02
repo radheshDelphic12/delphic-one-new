@@ -1,16 +1,18 @@
 import { useSearchParams } from 'react-router-dom';
-import { CalendarDays, FolderKanban, ListChecks } from 'lucide-react';
+import { CalendarDays, FolderKanban, ListChecks, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import MyHolidaysTab from '../time/MyHolidaysTab.jsx';
 import ItTimesheetPage from '../time/ItTimesheetPage.jsx';
+import ProjectTeamTimesheet from '../time/ProjectTeamTimesheet.jsx';
 
 const TABS = [
   { key: 'projects', label: 'My Projects', icon: FolderKanban },
   { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
   { key: 'timesheet', label: 'Timesheet', icon: ListChecks },
+  { key: 'project-team', label: 'Project Team', icon: Users },
 ];
 
 const CATEGORY_LABEL = { managed_services: 'Managed Services', project: 'Project' };
@@ -65,6 +67,7 @@ export default function ContractorPortalPage() {
       {section === 'projects' && <MyProjects />}
       {section === 'holidays' && <MyHolidaysTab />}
       {section === 'timesheet' && <ItTimesheetPage />}
+      {section === 'project-team' && <ProjectTeamTimesheet />}
     </div>
   );
 }
