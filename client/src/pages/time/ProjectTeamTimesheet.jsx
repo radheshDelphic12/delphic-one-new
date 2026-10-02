@@ -22,15 +22,19 @@ export default function ProjectTeamTimesheet() {
   const [accountId, setAccountId] = useState('');
   const [team, setTeam] = useState(null);
 
+  // Admin: every project. Everyone else: projects they were allocated to during the chosen month.
   useEffect(() => {
-    apiClient.get('/timesheets/my-projects')
+    let alive = true;
+    apiClient.get('/timesheets/project-team/projects', { params: { year, month } })
       .then(({ data }) => {
-        const rows = (data.data || []).filter((p) => !p.via_team);
+        if (!alive) return;
+        const rows = data.data || [];
         setProjects(rows);
-        if (rows.length) setAccountId((current) => current || rows[0].id);
+        setAccountId((current) => (rows.some((p) => p.id === current) ? current : rows[0]?.id || ''));
       })
-      .catch(() => setProjects([]));
-  }, []);
+      .catch(() => { if (alive) setProjects([]); });
+    return () => { alive = false; };
+  }, [year, month]);
 
   useEffect(() => {
     if (!accountId) { setTeam(null); return undefined; }
