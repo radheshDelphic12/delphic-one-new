@@ -8,7 +8,6 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { CalendarDrawer, HolidaysDrawer } from '../people/HrSettingsPage.jsx';
-import ProjectCalendarPanel, { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 
 const SOURCE_LABEL = {
   assigned: 'Assigned directly',
@@ -161,8 +160,6 @@ export default function HolidayCalendarAdmin({ onChanged }) {
   const [holidayCalendar, setHolidayCalendar] = useState(null);
   const [holidays, setHolidays] = useState([]);
   const [employeesCalendar, setEmployeesCalendar] = useState(null);
-  const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [projectsRefresh, setProjectsRefresh] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -348,10 +345,6 @@ export default function HolidayCalendarAdmin({ onChanged }) {
         onExport={exportHolidays}
       />
       <CalendarEmployeesDrawer calendar={employeesCalendar} onClose={() => setEmployeesCalendar(null)} onChanged={changed} />
-
-      {/* IT staff work per project: each project's calendar applies to them for that project. */}
-      <ProjectCalendarPanel refreshKey={projectsRefresh} canManage onAdd={() => setAddProjectOpen(true)} />
-      <AddProjectModal open={addProjectOpen} onClose={() => setAddProjectOpen(false)} onCreated={() => { setProjectsRefresh((n) => n + 1); onChanged?.(); }} />
     </section>
   );
 }

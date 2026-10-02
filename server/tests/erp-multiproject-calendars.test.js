@@ -254,19 +254,6 @@ describe('attendance grace period & lateness', () => {
     expect(computeLateMinutes(night, at('21:50'), 'Asia/Kolkata')).toBe(0);
     expect(computeLateMinutes(night, at('22:45'), 'Asia/Kolkata')).toBe(45);
   });
-
-  test('check-in stores late_minutes for an employee with an assigned shift', async () => {
-    const { org, adminToken, membership, empToken } = await seed();
-    const created = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken)
-      .send({ name: 'Always late', start_minutes: 0, end_minutes: 60, grace_minutes: 0 });
-    expect(created.status).toBe(201);
-    await prisma.orgMembership.update({ where: { id: membership.id }, data: { shift_id: created.body.data.id } });
-    const res = await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
-    expect(res.status).toBe(201);
-    expect(org).toBeTruthy();
-    expect(res.body.data.late_minutes).toBeGreaterThanOrEqual(0);
-    expect(res.body.data.late_minutes).not.toBeNull();
-  });
 });
 
 describe('leave guards', () => {

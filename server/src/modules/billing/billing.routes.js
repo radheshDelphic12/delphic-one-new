@@ -6,6 +6,8 @@ const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
 const adjustments = require('./adjustments.service');
+const resourceBilling = require('./resourceBilling.service');
+const vendorTracking = require('./vendorTracking.service');
 const charges = require('./charges.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
@@ -27,6 +29,12 @@ const {
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
   vendorInvoicePeriodSchema,
+  resourceRateSchema,
+  applyProjectRateSchema,
+  resourceRateQuerySchema,
+  reasonBodySchema,
+  billingRulesSchema,
+  vendorTrackingSchema,
   generateVendorInvoiceSchema,
   listVendorInvoicesQuerySchema,
   transitionInvoiceSchema,
@@ -54,6 +62,7 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
+  financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
   percent_too_large: [422, 'A percentage cannot be above 100'],
@@ -185,6 +194,86 @@ router.patch(
     const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body), req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
+  })
+);
+
+// Vendor invoice tracking (sent / unsent, TDS, financial adjustment) and the full trace behind one invoice.
+router.patch(
+  '/vendor-invoices/:id/tracking',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorTracking.updateTracking(req.user.org_id, req.user, req.params.id, vendorTrackingSchema.parse(req.body));
+    if (result.error === 'not_found') return fail(res, 404, 'Vendor invoice not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+router.get(
+  '/vendor-invoices/:id/trace',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorTracking.trace(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Vendor invoice not found');
+    return ok(res, result);
+  })
+);
+
+// A resource's own billing rate on a project (monthly for one person, hourly for another in the same month).
+router.get(
+  '/resource-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await resourceBilling.list(req.user.org_id, resourceRateQuerySchema.parse(req.query))))
+);
+router.post(
+  '/resource-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.create(req.user.org_id, req.user, resourceRateSchema.parse(req.body));
+    if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
+    if (result.error === 'membership_not_found') return fail(res, 404, 'Resource not found in this company');
+    return created(res, result.rate);
+  })
+);
+router.post(
+  '/projects/:id/resource-rates/apply-project-rate',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { effective_from } = applyProjectRateSchema.parse(req.body);
+    const result = await resourceBilling.applyProjectRate(req.user.org_id, req.user, req.params.id, { effective_from });
+    if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
+    if (result.error === 'no_project_rate') return fail(res, 422, 'The project has no billing rate in force on that date');
+    return ok(res, result);
+  })
+);
+router.delete(
+  '/resource-rates/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.remove(req.user.org_id, req.user, req.params.id, reasonBodySchema.parse(req.body || {}));
+    if (result.error === 'not_found') return fail(res, 404, 'Rate not found');
+    return ok(res, { deleted: true });
+  })
+);
+
+// Client billing status rules of a project (PL / NPL / comp off / FH / SH / half day ...): separate from salary leave rules.
+router.get(
+  '/projects/:id/billing-rules',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.getRules(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Project not found');
+    return ok(res, result);
+  })
+);
+router.put(
+  '/projects/:id/billing-rules',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const body = billingRulesSchema.parse(req.body);
+    const current = await resourceBilling.getRules(req.user.org_id, req.params.id);
+    if (current.error === 'not_found') return fail(res, 404, 'Project not found');
+    const result = await resourceBilling.setRules(req.user.org_id, req.user, req.params.id, { ...(current.custom || {}), ...body.rules }, { reason: body.reason });
+    return ok(res, result);
   })
 );
 

@@ -31,6 +31,7 @@ const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds, monthDates, isWeekend, todayIst } = require('../period');
 const { projectListWhere } = require('../../../lib/projectScope');
+const resourceBilling = require('./resourceBilling');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
 
@@ -54,6 +55,7 @@ const PROJECT_SELECT = {
   client_billing_basis: true,
   vendor_payout_basis: true,
   billable_day_hours: true,
+  billing_leave_rules: true,
 };
 
 function engineFor(serviceCategory) {
@@ -121,9 +123,39 @@ function settleMonthlyDays(days) {
   monthly.forEach((d, i) => {
     d.base_amount = i === monthly.length - 1 ? round2(round2(exact) - rounded) : round2(d.base_amount);
     rounded = round2(rounded + d.base_amount);
-    const regular = d.resources.reduce((s, r) => s + r.regular_hours, 0);
-    for (const r of d.resources) r.base_amount = regular > 0 ? round2((d.base_amount * r.regular_hours) / regular) : 0;
+    const pool = d.resources.filter((r) => !r.own_rate);
+    const regular = pool.reduce((s, r) => s + r.regular_hours, 0);
+    for (const r of pool) r.base_amount = regular > 0 ? round2((d.base_amount * r.regular_hours) / regular) : 0;
   });
+}
+
+// A resource billed monthly on its own rate: round each day to the cent and put the remainder on its last
+// billed day, so a full month bills exactly the resource's rate (x the fraction its statuses earned).
+function settleOwnMonthly(days) {
+  const byResource = new Map();
+  for (const d of days) {
+    for (const r of d.resources) {
+      if (r.own_rate && r.rate_type === 'monthly' && r.base_amount_exact > 0) {
+        if (!byResource.has(r.org_membership_id)) byResource.set(r.org_membership_id, []);
+        byResource.get(r.org_membership_id).push(r);
+      }
+    }
+  }
+  for (const list of byResource.values()) {
+    const exact = round2(list.reduce((s, r) => s + r.base_amount_exact, 0));
+    let rounded = 0;
+    list.forEach((r, i) => {
+      r.base_amount = i === list.length - 1 ? round2(exact - rounded) : round2(r.base_amount_exact);
+      rounded = round2(rounded + r.base_amount);
+    });
+  }
+  for (const d of days) {
+    for (const r of d.resources) delete r.base_amount_exact;
+    d.resource_base_amount = round2(d.resources.filter((r) => r.own_rate).reduce((s, r) => s + r.base_amount, 0));
+    d.resource_overtime_amount = round2(d.resources.filter((r) => r.own_rate).reduce((s, r) => s + r.overtime_amount, 0));
+    d.base_amount = round2(d.base_amount + d.resource_base_amount);
+    d.overtime_amount = round2(d.overtime_amount + d.resource_overtime_amount);
+  }
 }
 
 // The full, unfiltered month for one project — exactly what a lock stores.
@@ -136,7 +168,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const { engine, supported, note } = engineFor(account.service_category);
   const project = describeProject(account);
 
-  const [rates, rawEntries, cal, adjustmentRows, otTicketRows] = await Promise.all([
+  const [rates, rawEntries, cal, adjustmentRows, otTicketRows, rbData] = await Promise.all([
     prisma.billingRate.findMany({
       where: { org_id: orgId, account_id: account.id, requirement_id: null },
       select: { id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
@@ -165,17 +197,21 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     }),
     // Overtime tickets on this project: approved ones are billed as overtime (where the project bills it), pending ones hold the month.
     prisma.overtimeTicket.findMany({
-      where: { org_id: orgId, account_id: account.id, status: { in: ['approved', 'pending'] }, date: { gte: start, lte: end } },
+      where: { org_id: orgId, account_id: account.id, status: { in: ['approved', 'pending', 'manager_approved'] }, date: { gte: start, lte: end } },
       select: { org_membership_id: true, date: true, hours: true, status: true, org_membership: { select: { worker_type: true, person: { select: { name: true } } } } },
     }),
+    // Resources billed on their own rate (monthly for one, hourly for another, in the same month).
+    resourceBilling.load(orgId, account.id, start, end),
   ]);
+  const rbRules = resourceBilling.rulesFor(account);
+  const ownMembers = [...new Set(rbData.rates.map((r) => r.org_membership_id))];
   const ticketsByDay = new Map();
   for (const t of otTicketRows) {
     const key = ymd(t.date);
     if (!ticketsByDay.has(key)) ticketsByDay.set(key, []);
     ticketsByDay.get(key).push(t);
   }
-  const pendingTickets = otTicketRows.filter((t) => t.status === 'pending').length;
+  const pendingTickets = otTicketRows.filter((t) => t.status === 'pending' || t.status === 'manager_approved').length;
   const entries = markResolved(rawEntries);
   const monthRate = rateOn(rates, end);
   const benchmark = account.benchmark_hours || DEFAULT_BENCHMARK_HOURS;
@@ -240,9 +276,25 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
       }
       perResource.get(t.org_membership_id).overtime_hours += Number(t.hours);
     }
+    // A resource with its own monthly rate is billed for the day by its client billing status even with no timesheet entry.
+    for (const id of ownMembers) {
+      const own = resourceBilling.resourceRateOn(rbData.rates, id, date);
+      if (own?.rate_type === 'monthly' && inContract && isWorkingDay && !perResource.has(id)) {
+        const who = rbData.names.get(id) || { name: 'Unknown', worker_type: null };
+        perResource.set(id, { org_membership_id: id, name: who.name, worker_type: who.worker_type, regular_hours: 0, overtime_hours: 0, pending_hours: 0, rejected_hours: 0, base_amount: 0, overtime_amount: 0 });
+      }
+    }
     const resources = [...perResource.values()];
-    const regular = resources.reduce((s, r) => s + r.regular_hours, 0);
-    const overtime = resources.reduce((s, r) => s + r.overtime_hours, 0);
+    const ownRates = new Map();
+    for (const r of resources) {
+      const own = resourceBilling.resourceRateOn(rbData.rates, r.org_membership_id, date);
+      if (own) { ownRates.set(r.org_membership_id, own); r.own_rate = true; r.rate_type = own.rate_type; r.rate = Number(own.rate); }
+    }
+    const pool = resources.filter((r) => !r.own_rate);
+    const allRegular = resources.reduce((s, r) => s + r.regular_hours, 0);
+    const allOvertime = resources.reduce((s, r) => s + r.overtime_hours, 0);
+    const regular = pool.reduce((s, r) => s + r.regular_hours, 0);
+    const overtime = pool.reduce((s, r) => s + r.overtime_hours, 0);
 
     let base = 0;
     let otRate = 0;
@@ -261,9 +313,30 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     }
     const overtimeAmount = supported && inContract && overtimeEnabled ? round2(overtime * otRate) : 0;
     if (rate?.rate_type !== 'monthly') base = round2(base);
-    for (const r of resources) {
+    for (const r of pool) {
       r.base_amount = regular > 0 ? round2((base * r.regular_hours) / regular) : 0;
       r.overtime_amount = overtime > 0 ? round2((overtimeAmount * r.overtime_hours) / overtime) : 0;
+    }
+    for (const r of resources.filter((x) => x.own_rate)) {
+      const rateNum = r.rate;
+      if (supported && inContract) {
+        if (r.rate_type === 'hourly') {
+          // Hourly: approved project hours x the resource's rate - no attendance, no hour cap.
+          r.base_amount = round2(r.regular_hours * rateNum);
+          r.overtime_amount = overtimeEnabled ? round2(r.overtime_hours * rateNum * multiplier) : 0;
+        } else {
+          // Monthly: the resource's rate / working days x the fraction its client billing status earns.
+          const status = isWorkingDay ? resourceBilling.statusFor({ membershipId: r.org_membership_id, date, data: rbData, approvedHours: r.regular_hours, overtimeHours: r.overtime_hours, dayHours }) : null;
+          const fraction = status ? resourceBilling.fractionOf(rbRules, status) : 0;
+          r.billing_status = status;
+          r.fraction = fraction;
+          r.base_amount_exact = isWorkingDay && cal.working_days > 0 ? (rateNum / cal.working_days) * fraction : 0;
+          r.base_amount = round2(r.base_amount_exact);
+          r.overtime_amount = overtimeEnabled ? round2(r.overtime_hours * (rateNum / benchmark) * multiplier) : 0;
+        }
+      }
+    }
+    for (const r of resources) {
       r.regular_hours = round2(r.regular_hours);
       r.overtime_hours = round2(r.overtime_hours);
     }
@@ -277,8 +350,8 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
       payable_fraction: supported && inContract && rate?.rate_type === 'monthly' && isWorkingDay ? round2(payable) : null,
       status: dayStatus(dayEntries, { inContract, isWorkingDay }),
       hours: {
-        approved: round2(regular),
-        overtime_approved: round2(overtime),
+        approved: round2(allRegular),
+        overtime_approved: round2(allOvertime),
         pending: round2(resources.reduce((s, r) => s + r.pending_hours, 0)),
         rejected: round2(resources.reduce((s, r) => s + r.rejected_hours, 0)),
       },
@@ -301,10 +374,11 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   }
 
   settleMonthlyDays(days);
+  settleOwnMonthly(days);
 
   // Hours only move the amount on hourly days or where overtime is billed;
   // a monthly contract without billable overtime doesn't wait on approvals.
-  const hoursMatter = days.some((d) => d.in_contract && d.rate_type === 'hourly') || overtimeEnabled || billingBasis === 'approved_hours';
+  const hoursMatter = days.some((d) => d.in_contract && d.rate_type === 'hourly') || overtimeEnabled || billingBasis === 'approved_hours' || rbData.rates.some((r) => r.rate_type === 'hourly');
   const pending = entries.filter((e) => e.status === 'submitted').length;
   const rejected = entries.filter((e) => e.status === 'rejected' && !e.resolved).length;
   const missing = days.filter((d) => d.status === 'no_entry').length;
@@ -312,7 +386,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const lastBillableDay = agreementEnd && agreementEnd < end ? agreementEnd : end;
   const blockers = [];
   if (!supported) blockers.push({ code: 'engine_not_supported', message: note });
-  else if (!monthRate) blockers.push({ code: 'no_billing_rate', message: 'No billing rate is set for this project.' });
+  else if (!monthRate && !rbData.rates.length) blockers.push({ code: 'no_billing_rate', message: 'No billing rate is set for this project.' });
   if (hoursMatter && pending) blockers.push({ code: 'pending_entries', count: pending, message: `${pending} timesheet ${pending === 1 ? 'entry is' : 'entries are'} still pending approval.` });
   if (hoursMatter && rejected) blockers.push({ code: 'rejected_entries', count: rejected, message: `${rejected} rejected ${rejected === 1 ? 'entry has' : 'entries have'} not been corrected and re-submitted.` });
   if (today <= lastBillableDay && today >= start) blockers.push({ code: 'period_open', message: 'The billing period has not ended yet.' });
@@ -331,6 +405,19 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     currency: monthRate?.currency || account.client_billing_currency || 'INR',
     billing_basis: billingBasis,
     day_hours: dayHours,
+    resource_rates: ownMembers.map((id) => {
+      const latest = resourceBilling.resourceRateOn(rbData.rates, id, end) || rbData.rates.filter((r) => r.org_membership_id === id)[0];
+      const statusDays = {};
+      let amount = 0;
+      for (const d of days) {
+        const r = d.resources.find((x) => x.org_membership_id === id && x.own_rate);
+        if (!r) continue;
+        amount += r.base_amount + r.overtime_amount;
+        if (r.billing_status) statusDays[r.billing_status] = round2((statusDays[r.billing_status] || 0) + 1);
+      }
+      return { org_membership_id: id, name: rbData.names.get(id)?.name || null, rate_type: latest.rate_type, rate: Number(latest.rate), currency: latest.currency, status_days: statusDays, amount: round2(amount) };
+    }),
+    status_rules: rbRules,
     adjustments: { items: adjustmentItems, total: adjustmentTotal },
     benchmark_hours: benchmark,
     working_days: cal.working_days,
@@ -403,9 +490,10 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
     days.push(row);
     for (const r of dayResources) {
       if (!resources.has(r.org_membership_id)) {
-        resources.set(r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.name, worker_type: r.worker_type, regular_hours: 0, overtime_hours: 0, pending_hours: 0, rejected_hours: 0, base_amount: 0, overtime_amount: 0 });
+        resources.set(r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.name, worker_type: r.worker_type, regular_hours: 0, overtime_hours: 0, pending_hours: 0, rejected_hours: 0, base_amount: 0, overtime_amount: 0, ...(r.own_rate ? { own_rate: true, rate_type: r.rate_type, rate: r.rate, status_days: {} } : {}) });
       }
       const acc = resources.get(r.org_membership_id);
+      if (r.own_rate && r.billing_status) acc.status_days[r.billing_status] = round2((acc.status_days[r.billing_status] || 0) + 1);
       for (const k of ['regular_hours', 'overtime_hours', 'pending_hours', 'rejected_hours', 'base_amount', 'overtime_amount']) acc[k] = round2(acc[k] + r[k]);
     }
   }

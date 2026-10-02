@@ -36,8 +36,8 @@ export default function ApprovalsTab() {
 
   async function decideEntry(entry, status, reason) {
     try {
-      await apiClient.post(`/timesheets/entries/${entry.id}/decision`, { status, reason });
-      pushSuccess(`Entry ${status}`);
+      const { data: res } = await apiClient.post(`/timesheets/entries/${entry.id}/decision`, { status, reason });
+      pushSuccess(res.awaiting_admin ? 'Approved - it now waits for the final approval of an admin' : `Entry ${status}`);
       load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record the decision'), 'Something went wrong');
@@ -58,8 +58,8 @@ export default function ApprovalsTab() {
 
   async function decideOvertime(row, status, reason) {
     try {
-      await apiClient.post(`/timesheets/overtime/${row.id}/decision`, { status, reason });
-      pushSuccess(status === 'comp_off' ? 'Overtime given as comp off' : `Overtime ${status}`);
+      const { data: res } = await apiClient.post(`/timesheets/overtime/${row.id}/decision`, { status, reason });
+      pushSuccess(res.awaiting_admin ? 'Approved - it now waits for the final approval of an admin' : status === 'comp_off' ? 'Overtime given as comp off' : `Overtime ${status}`);
       load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record the decision'), 'Something went wrong');

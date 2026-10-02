@@ -69,5 +69,15 @@ const templateQuerySchema = z
   .refine((v) => v.to >= v.from, { message: 'to must be on or after from', path: ['to'] })
   .refine((v) => (v.to - v.from) / 86400000 <= 30, { message: 'range cannot exceed 31 days', path: ['to'] });
 
-module.exports = { listQuerySchema, regularizeSchema,
+// Admin: mark applicable employees present for every working day of a previous month.
+const backfillMonthSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+  reason: z.string().trim().min(3).max(500),
+  org_membership_ids: z.array(z.string().uuid()).min(1).optional(),
+  dry_run: z.boolean().optional().default(false),
+});
+
+module.exports = {
+  backfillMonthSchema, listQuerySchema, regularizeSchema,
   deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };

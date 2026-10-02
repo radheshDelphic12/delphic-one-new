@@ -148,7 +148,7 @@ describe('Admin leave balances: overview, entitlement control, withdrawing leave
 
     const res = await authed(request(app).get('/api/v1/leave/balances/overview').query({ year: 2026 }), token);
     expect(res.status).toBe(200);
-    expect(res.body.data.types.map((t) => t.code).sort()).toEqual(['CL', 'EL', 'SL', 'UL']);
+    expect(res.body.data.types.map((t) => t.code).sort()).toEqual(['CL', 'CO', 'EL', 'SL', 'UL']);
     expect(res.body.data.employees.map((e) => e.org_membership_id)).not.toContain(left.membership.id); // ex-employees are not listed
 
     const byMember = Object.fromEntries(res.body.data.employees.map((e) => [e.org_membership_id, Object.fromEntries(e.balances.map((b) => [b.code, b]))]));
@@ -183,6 +183,8 @@ describe('Admin leave balances: overview, entitlement control, withdrawing leave
     expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ allocated: 2, customised: true });
 
     // 3 days against an entitlement of 2 is refused with the new figure.
+    // Casual Leave spills the excess into unpaid leave by default; this test is about the hard cap.
+    await prisma.leaveType.update({ where: { id: cl.id }, data: { overflow_to_unpaid: false } });
     const tooMany = await authed(request(app).post('/api/v1/leave/requests'), emp.token).send({ leave_type_id: cl.id, from_date: '2026-11-02', to_date: '2026-11-04' });
     expect(tooMany.status).toBe(422);
     expect(tooMany.body.message).toContain('2 remaining');

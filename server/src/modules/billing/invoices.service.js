@@ -27,6 +27,7 @@ const exchangeRates = require('./exchangeRates.service');
 const chargesService = require('./charges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
+const financialLock = require('../calculations/financialLock');
 
 // Lazy: calculations.service loads the engines, which load billing.service.
 const calculations = () => require('../calculations/calculations.service');
@@ -158,6 +159,8 @@ async function previewClientInvoice(orgId, accountId, period, currency) {
 // still a draft. Sent / paid invoices are never rewritten.
 async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency }) {
   const period = { period_month, period_year };
+  const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
+  if (frozen) return frozen;
   const src = await clientInvoiceSource(orgId, account_id, period, currency);
   if (src.error) return src;
   if (!(src.details.amount > 0)) return { error: 'nothing_to_invoice' };
@@ -227,6 +230,8 @@ function serializeClientInvoice(row) {
 async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason }) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
+  if (frozen) return frozen;
   const draft = invoice.status === 'draft';
   const why = (reason || '').trim();
   if (!draft && !why) return { error: 'reason_required' };
@@ -288,6 +293,8 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
 async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
+  if (frozen) return frozen;
   const why = (reason || '').trim();
   if (invoice.status !== 'draft' && !why) return { error: 'reason_required' };
   await prisma.clientInvoice.delete({ where: { id: invoice.id } });
@@ -385,6 +392,8 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
 // replaced; invoices added by hand are left alone.
 async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes }) {
   const period = { period_month, period_year };
+  const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
+  if (frozen) return frozen;
   const src = await vendorInvoiceSource(orgId, vendor_account_id, period);
   if (src.error) return src;
   const billable = src.projects.filter((p) => p.amount > 0);
@@ -430,6 +439,10 @@ function serializeVendorInvoice(row) {
   return {
     ...row,
     amount: Number(row.amount),
+    tds_amount: Number(row.tds_amount || 0),
+    adjustment_amount: Number(row.adjustment_amount || 0),
+    net_payable: round2(Number(row.amount) - Number(row.tds_amount || 0) + Number(row.adjustment_amount || 0)),
+    sent: Boolean(row.sent_at),
     invoice_date: row.invoice_date ? ymd(row.invoice_date) : null,
     project: row.details?.project?.name ? row.details.project : row.account ? billingEngine.describeProject(row.account) : null,
     generated: Boolean(row.details),
@@ -443,7 +456,12 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { created_at: 'desc' }],
     include: VENDOR_INVOICE_INCLUDE,
   });
-  return rows.map(serializeVendorInvoice);
+  // Paid / unpaid comes from the vendor payment of the same vendor and month.
+  const payments = rows.length
+    ? await prisma.vendorPayment.findMany({ where: { org_id: orgId, status: 'paid', vendor_account_id: { in: [...new Set(rows.map((r) => r.vendor_account_id))] } }, select: { vendor_account_id: true, period_month: true, period_year: true } })
+    : [];
+  const paid = new Set(payments.map((p) => `${p.vendor_account_id}|${p.period_year}-${p.period_month}`));
+  return rows.map((row) => ({ ...serializeVendorInvoice(row), paid: paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`) }));
 }
 
 module.exports = {
