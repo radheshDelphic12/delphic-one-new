@@ -64,6 +64,9 @@ const ENTRY_ERRORS = {
 
 function failFor(res, error, result) {
   if (error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
+  if (error === 'person_day_cap') {
+    return fail(res, 422, `You have already logged ${result.mine}h of your ${result.my_limit}h a day on this project on ${result.date} (${result.adding}h requested) - log less, or ask your admin to raise your billable hours on this project`);
+  }
   if (error === 'project_day_cap') {
     const left = result.remaining === null ? 0 : result.remaining;
     return fail(res, 422, `This project's day is full: ${result.logged}h of ${result.capacity}h already logged on ${result.date} (${left}h left, ${result.adding}h requested) - log less, or ask your admin to raise the project's billable hours`);

@@ -22,12 +22,13 @@ export default function ProjectDayHint({ accountId, date, reloadKey = 0, request
   if (!day.capped) {
     return <p className="text-xs text-tertiary-500">{day.logged}h already logged on this project today · no daily limit (nobody is allocated yet)</p>;
   }
-  const over = requested > 0 && requested > day.remaining + 1e-9;
+  const personal = day.my_limit !== null && day.my_limit !== undefined;
+  const over = requested > 0 && (requested > day.remaining + 1e-9 || (personal && requested > day.my_remaining + 1e-9));
   return (
     <p className={`text-xs ${over ? 'font-medium text-danger-700' : day.remaining === 0 ? 'text-warning-700' : 'text-tertiary-600'}`}>
       {day.logged}h of {day.capacity}h logged on this project today · {day.remaining}h left
-      {day.mine > 0 ? ` (you: ${day.mine}h)` : ''}
-      {over ? ` — ${requested}h is more than what is left` : ''}
+      {personal ? ` · you: ${day.mine}h of your ${day.my_limit}h (${day.my_remaining}h left)` : day.mine > 0 ? ` · you: ${day.mine}h` : ''}
+      {over ? ` — ${requested}h is more than you can add` : ''}
       {day.people.some((p) => p.logged > 0) && (
         <span className="ml-1 text-tertiary-400">· {day.people.filter((p) => p.logged > 0).map((p) => `${p.name} ${p.logged}h`).join(', ')}</span>
       )}

@@ -58,6 +58,9 @@ async function projectDay(orgId, accountId, date, { orgMembershipId = null, excl
     people.get(e.org_membership_id).logged = round2(people.get(e.org_membership_id).logged + hours);
   }
   const capped = capacity > 0;
+  // The caller's own limit: what THEY can bill on this project a day (their allocation), minus what they already logged.
+  const me = orgMembershipId ? people.get(orgMembershipId) : null;
+  const myLimit = me && me.billable_hours_per_day !== null ? me.billable_hours_per_day : null;
   return {
     account_id: accountId,
     date: ymd(date),
@@ -65,16 +68,23 @@ async function projectDay(orgId, accountId, date, { orgMembershipId = null, excl
     capacity,
     logged: round2(logged),
     mine: round2(mine),
+    my_limit: myLimit,
+    my_remaining: myLimit === null ? null : round2(Math.max(0, myLimit - mine)),
     remaining: capped ? round2(Math.max(0, capacity - logged)) : null,
     over_by: capped ? round2(Math.max(0, logged - capacity)) : 0,
     people: [...people.values()],
   };
 }
 
-// null when `hours` fits; otherwise the project_day_cap error with the numbers.
+// null when `hours` fits; otherwise the error with the numbers. Two limits apply:
+//  1. an allocated person can log at most THEIR billable_hours_per_day on the project a day (person_day_cap) - one
+//     developer can't use up another's hours;
+//  2. everyone together can't pass the project's day capacity (project_day_cap) - a team mate who is not allocated
+//     fills only what the allocated people left.
 async function checkCap(orgId, accountId, date, hours, options = {}) {
   const day = await projectDay(orgId, accountId, date, options);
   if (!day.capped) return null;
+  if (day.my_limit !== null && day.mine + hours > day.my_limit + 1e-9) return { error: 'person_day_cap', ...day, adding: hours };
   if (day.logged + hours > day.capacity + 1e-9) return { error: 'project_day_cap', ...day, adding: hours };
   return null;
 }
