@@ -22,6 +22,15 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Last month stays open through the 5th. After that, only the current month.
+function earliestLogIso() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (now.getDate() <= 5 ? 1 : 0), 1);
+  const month = String(start.getMonth() + 1).padStart(2, '0');
+  const day = String(start.getDate()).padStart(2, '0');
+  return `${start.getFullYear()}-${month}-${day}`;
+}
+
 function blankRow() {
   return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
@@ -230,7 +239,8 @@ export default function ItTimesheetPage() {
         <form onSubmit={saveDay} className="mt-3 space-y-3">
           <label className="block text-xs font-medium text-tertiary-600">
             Date
-            <input required type="date" max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <input required type="date" min={earliestLogIso()} max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-1 block font-normal text-tertiary-500">Last month can be filled until the 5th of this month.</span>
           </label>
           <LeaveDayNotice leave={leave} />
           {noProjects && (

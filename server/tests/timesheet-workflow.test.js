@@ -12,6 +12,7 @@ const {
 } = require('./helpers');
 const timesheetsService = require('../src/modules/timesheets/timesheets.service');
 const weeklyLockJob = require('../src/jobs/timesheetWeeklyLock');
+const { todayIst } = require('../src/lib/istDate');
 
 beforeEach(async () => {
   await cleanDatabase();
@@ -203,6 +204,26 @@ describe('weekly auto-lock (Sunday 00:00, Sunday -> Saturday week)', () => {
     // The locked week's weekend is closed too; the new week stays open.
     expect((await log(emp.token, { date: '2026-09-26', hours: 4 })).status).toBe(409);
     expect((await log(emp.token, { date: '2026-09-28', hours: 4 })).status).toBe(201);
+  });
+});
+
+describe('developer filing window', () => {
+  test('an IT developer can log a locked day in last month through the 5th, and an older month stays closed', async () => {
+    const org = await createOrg();
+    const dept = await prisma.department.create({ data: { org_id: org.id, name: 'IT' } });
+    const dev = await person(org, { dept });
+    const today = todayIst();
+    const lastMonthDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 15));
+    const olderDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 2, 10));
+    await prisma.timesheetLock.create({ data: { org_id: org.id, date: lastMonthDay, is_auto: true } });
+
+    const last = await log(dev.token, { date: lastMonthDay.toISOString().slice(0, 10), hours: 4 });
+    if (today.getUTCDate() <= 5) expect(last.status).toBe(201);
+    else expect(last.status).toBe(409);
+
+    const older = await log(dev.token, { date: olderDay.toISOString().slice(0, 10), hours: 4 });
+    expect(older.status).toBe(409);
+    expect(older.body.message).toContain('5th');
   });
 });
 
