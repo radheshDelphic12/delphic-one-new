@@ -4,7 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
 const autoAttendance = require('./autoAttendance.service');
-const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema } = require('./attendance.validation');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema, backfillCleanupSchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -97,6 +97,16 @@ router.post(
     const result = await autoAttendance.backfillMonth(req.user.org_id, req.user.id, body);
     if (result.error === 'month_not_past') return fail(res, 422, 'Pick a previous month - the current or a future month cannot be backfilled');
     return ok(res, result);
+  })
+);
+
+// Undo the earlier bulk Present for people outside IT (auto / backfill rows only; audited; dry_run counts).
+router.post(
+  '/backfill-cleanup',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = backfillCleanupSchema.parse(req.body);
+    return ok(res, await autoAttendance.cleanupNonItAttendance(req.user.org_id, req.user.id, body));
   })
 );
 

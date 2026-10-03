@@ -31,15 +31,18 @@ const BASE_TABS = [
 // The ordinary popup-logging timesheet — for everyone EXCEPT IT-department
 // staff, who use the multi-row grid below exclusively (no popup at all).
 // Admins keep it as their own self-service, separate from Team Monitoring.
+// eslint-disable-next-line no-unused-vars -- tab switched off for now, kept so it can be restored
 const TIMESHEETS_TAB = { key: 'timesheets', label: 'Timesheets', icon: Timer };
 // IT staff fill their itemized daily log here (ItTimesheetPage); admins get
 // the same tab as a records/management view of the whole IT department
 // (ItTimesheetAdminView) — they never log into it themselves.
+// eslint-disable-next-line no-unused-vars -- tab switched off for now, kept so it can be restored
 const IT_TAB = { key: 'it-timesheet', label: 'IT Timesheet', icon: ListChecks };
 // Admin/Superadmin monitoring & task-assignment hub — see TeamMonitoringTab.
+// eslint-disable-next-line no-unused-vars -- tab switched off for now, kept so it can be restored
 const MONITORING_TAB = { key: 'monitoring', label: 'Team Monitoring', icon: Radar };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
-const LOCKS_TAB = { key: 'locks', label: 'Timesheet Locks', icon: Lock };
+const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
 // Reporting managers approve their direct reports' timesheets here (admins do it in Team Monitoring).
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 
@@ -55,12 +58,15 @@ export default function TimeAttendanceHubPage() {
   }, []);
   // A pure IT employee (not admin) never sees the ordinary popup-based tab —
   // the multi-row grid is their only logging surface.
+  // Timesheets, IT Timesheet and Team Monitoring are switched off for now (not required yet): they are
+  // commented out of the tab list, not deleted, so they can be restored by re-adding the lines below.
   const TABS = [
     ...BASE_TABS,
-    ...(!isItDept || isAdmin ? [TIMESHEETS_TAB] : []),
-    ...(isIt ? [IT_TAB] : []),
+    // ...(!isItDept || isAdmin ? [TIMESHEETS_TAB] : []),
+    // ...(isIt ? [IT_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [MONITORING_TAB, LOCKS_TAB] : []),
+    // ...(isAdmin ? [MONITORING_TAB] : []),
+    ...(isAdmin ? [LOCKS_TAB] : []),
   ];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';

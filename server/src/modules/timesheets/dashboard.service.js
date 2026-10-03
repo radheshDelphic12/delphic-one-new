@@ -18,23 +18,29 @@ async function visibleMembers(orgId, user) {
   if (user.role !== 'admin') where.OR = [{ id: own }, { manager_id: own }];
   return prisma.orgMembership.findMany({
     where,
-    select: { id: true, manager_id: true, person: { select: { name: true, department: { select: { name: true } } } } },
+    select: { id: true, manager_id: true, worker_type: true, vendor_account_id: true, person: { select: { name: true, department: { select: { name: true } } } } },
     orderBy: { person: { name: 'asc' } },
   });
 }
+
+// Contractors and vendor resources have no employee attendance or leave - only project timesheet.
+const hasEmployeeAttendance = (m) => m.worker_type !== 'contractor' && !m.vendor_account_id;
 
 // All timesheets of the month: one row per person with hour totals, approval and lock state.
 async function monthList(orgId, user, { year, month }) {
   const { from, to } = monthBounds(year, month);
   const members = await visibleMembers(orgId, user);
   const ids = members.map((m) => m.id);
-  const [entries, locks] = await Promise.all([
+  const [entries, locks, monthLocks] = await Promise.all([
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } },
       select: { org_membership_id: true, hours: true, overtime_hours: true, status: true },
     }),
     prisma.timesheetLock.findMany({ where: { org_id: orgId, date: { gte: from, lte: to } }, select: { date: true } }),
+    // The admin's per-employee month lock (the lock the Attendance Locks tab sets).
+    prisma.timesheetMonthLock.findMany({ where: { org_id: orgId, period_year: year, period_month: month }, select: { org_membership_id: true } }),
   ]);
+  const monthLocked = new Set(monthLocks.map((l) => l.org_membership_id));
   const totals = new Map();
   for (const e of entries) {
     const t = totals.get(e.org_membership_id) || { logged: 0, approved: 0, pending: 0, rejected: 0, entries: 0 };
@@ -66,7 +72,8 @@ async function monthList(orgId, user, { year, month }) {
         pending_hours: round2(t.pending),
         rejected_hours: round2(t.rejected),
         status,
-        month_locked: locks.length >= daysInMonth,
+        month_locked: monthLocked.has(m.id) || locks.length >= daysInMonth,
+        has_attendance: hasEmployeeAttendance(m),
       };
     }),
   };
@@ -75,9 +82,13 @@ async function monthList(orgId, user, { year, month }) {
 // One person's month as a calendar: the day summaries plus attendance status and OT tickets per day.
 async function monthCalendar(orgId, orgMembershipId, { year, month }) {
   const { from, to } = monthBounds(year, month);
+  const member = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { worker_type: true, vendor_account_id: true } });
+  const withAttendance = member ? hasEmployeeAttendance(member) : true;
   const [summary, attendance, tickets] = await Promise.all([
     workHours.daySummaries(orgId, orgMembershipId, from, to),
-    prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from, lte: to } }, select: { date: true, status: true, regularized_reason: true } }),
+    withAttendance
+      ? prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from, lte: to } }, select: { date: true, status: true, regularized_reason: true } })
+      : [],
     prisma.overtimeTicket.findMany({
       where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from, lte: to } },
       select: { id: true, date: true, hours: true, status: true, reason: true, account: { select: { name: true, project_name: true } } },
@@ -97,16 +108,29 @@ async function monthCalendar(orgId, orgMembershipId, { year, month }) {
       const name = e.project || 'No project';
       projects.set(name, round2((projects.get(name) || 0) + e.hours));
     }
+    // Attendance and leave are two separate sources. The recorded attendance status is shown as it was
+    // recorded (Present stays Present); the leave TYPE (Sick / Casual / Paid Leave ...) only ever comes from
+    // an approved leave request, never from the word "leave" on an attendance row.
+    const att = attByDay.get(d.date) || null;
+    const leaveRows = withAttendance ? d.leaves : [];
+    const leaveName = leaveRows[0]?.name || null;
+    const fullDayLeave = leaveRows.some((l) => !l.is_half_day);
     return {
       ...d,
-      attendance_status: attByDay.get(d.date)?.status || null,
-      attendance_note: attByDay.get(d.date)?.regularized_reason || null,
+      leave: withAttendance ? d.leave : null,
+      leaves: leaveRows,
+      pending_leaves: withAttendance ? d.pending_leaves : [],
+      attendance_applicable: withAttendance,
+      attendance_status: att?.status || null,
+      attendance_label: att ? (att.status === 'leave' ? leaveName || 'Leave (no leave request)' : null) : null,
+      attendance_conflict: Boolean(att && ['present', 'wfh'].includes(att.status) && fullDayLeave),
+      attendance_note: att?.regularized_reason || null,
       ot_tickets: ticketsByDay.get(d.date) || [],
       project_hours: [...projects.entries()].map(([project, hours]) => ({ project, hours })),
       notes: d.entries.filter((e) => e.notes).map((e) => ({ project: e.project, notes: e.notes })),
     };
   });
-  return { year, month, ...summary, days };
+  return { year, month, ...summary, attendance_applicable: withAttendance, days };
 }
 
 module.exports = { monthList, monthCalendar, visibleMembers };

@@ -105,9 +105,13 @@ async function billingOverview(orgId, q, now = new Date()) {
   const rows = [];
   const byDate = new Map();
   for (const m of months) {
+    const monthStart = new Date(Date.UTC(m.period_year, m.period_month - 1, 1));
+    const monthEnd = new Date(Date.UTC(m.period_year, m.period_month, 0));
     for (const account of projects) {
       const key = `${account.id}|${m.period_year}-${m.period_month}`;
       const lock = frozen.get(key);
+      // A project is billed only for the months its start / end dates overlap (an already locked month stays visible).
+      if (!lock?.version && !billingEngine.overlapsMonth(account, monthStart, monthEnd)) continue;
       let raw;
       let liveAmount = null;
       if (lock?.version) {

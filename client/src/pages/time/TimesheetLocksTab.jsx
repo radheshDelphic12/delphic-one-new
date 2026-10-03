@@ -130,7 +130,7 @@ export default function TimesheetLocksTab() {
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Stage 1 - timesheet lock</p>
-          <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Timesheet locks</h2>
+          <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Attendance locks</h2>
           {data && <p className={`mt-1 text-sm ${data.overdue ? 'font-medium text-danger-600' : 'text-tertiary-500'}`}>{MONTHS[month - 1]} {year} timesheets are due to be locked by {data.due_date}{data.overdue ? ' - the deadline has passed' : ''}.</p>}
         </div>
         <div className="flex gap-2">

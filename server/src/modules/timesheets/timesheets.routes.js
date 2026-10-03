@@ -27,6 +27,7 @@ const {
   lockDaySchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  bulkDeleteEntriesSchema,
   adminCreateEntrySchema,
   importEntriesSchema,
   bulkApproveSchema,
@@ -181,6 +182,16 @@ router.patch(
 
 // Admin: delete any entry with a reason. Anyone else: their own entry, only
 // while pending and before the week locks (enforced in the service).
+// Bulk delete from the Timesheet Dashboard: only the listed logs; an admin must give a reason.
+router.post(
+  '/entries/bulk-delete',
+  asyncHandler(async (req, res) => {
+    const body = bulkDeleteEntriesSchema.parse(req.body);
+    if (req.user.role === 'admin' && !body.reason) return fail(res, 422, 'A reason is required to delete logs');
+    return ok(res, await service.bulkDeleteEntries(req.user.org_id, req.user, body));
+  })
+);
+
 router.delete(
   '/entries/:id',
   asyncHandler(async (req, res) => {
