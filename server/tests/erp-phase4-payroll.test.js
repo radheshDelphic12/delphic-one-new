@@ -137,7 +137,8 @@ describe('Phase 4 — payroll runs', () => {
 });
 
 describe('Phase 4 — processing a run computes payslips from approved timesheet hours + leave', () => {
-  test('an employee with a full approved timesheet has zero deductions; net equals gross', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('an employee with a full approved timesheet has zero deductions; net equals gross', async () => {
     const { org, access_token: adminToken } = await seedOrgAdmin();
     const { membership, access_token: empToken } = await seedOrgEmployee(org);
 
@@ -173,7 +174,8 @@ describe('Phase 4 — processing a run computes payslips from approved timesheet
     expect(payslip.breakdown.weekend_days).toBe(8);
   });
 
-  test('missing timesheet days reduce net pay; approved paid leave does not', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('missing timesheet days reduce net pay; approved paid leave does not', async () => {
     const { org, access_token: adminToken } = await seedOrgAdmin();
     const { membership, access_token: empToken } = await seedOrgEmployee(org);
 

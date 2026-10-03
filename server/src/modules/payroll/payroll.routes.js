@@ -105,7 +105,10 @@ router.post(
   '/pay-basis',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.setPayBasis(req.user.org_id, req.user.id, setPayBasisSchema.parse(req.body));
+    const body = setPayBasisSchema.parse(req.body);
+    // Salary is calculated from attendance for everyone; the timesheet option is switched off.
+    if (body.pay_basis === 'timesheet') return fail(res, 422, 'Salary is calculated from attendance only - the timesheet option is switched off');
+    const result = await service.setPayBasis(req.user.org_id, req.user.id, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result);
   })

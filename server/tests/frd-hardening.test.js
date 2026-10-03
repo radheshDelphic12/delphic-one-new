@@ -141,6 +141,7 @@ describe('The lock stages run in order', () => {
     const emp = await salaried(ctx, 'Eve');
     await prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: new Date('2026-08-12'), hours: 8, status: 'approved', approved_by: ctx.adminUser.id, approved_at: new Date() } });
 
+    await markMonthPresent(ctx.org.id, emp.membership.id, 2026, 8);
     const blocked = await calc(ctx, 'lock', { kind: 'salary_employee', scope_key: emp.membership.id });
     expect(blocked.status).toBe(422);
     expect(blocked.body.message).toContain('Stage 1 first');
@@ -286,3 +287,14 @@ describe('Vendor export and applying the project rate to every resource', () => 
     expect(rates.map((r) => [r.rate_type, r.rate]).sort()).toEqual([['monthly', 100000], ['monthly', 100000]]);
   });
 });
+
+// Salary is calculated from attendance now: a salary can only be locked once every working day of the month is marked.
+async function markMonthPresent(orgId, membershipId, year, month) {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const data = [];
+  for (let d = 1; d <= days; d += 1) {
+    const date = new Date(Date.UTC(year, month - 1, d));
+    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) data.push({ org_id: orgId, org_membership_id: membershipId, date, status: 'present', source: 'manual' });
+  }
+  await prisma.attendanceRecord.createMany({ data, skipDuplicates: true });
+}

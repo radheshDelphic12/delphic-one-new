@@ -225,3 +225,31 @@ describe('client billing comes from the project timesheet', () => {
     expect(row.project.billable_day_hours ?? 8).toBe(8); // the client billing day is 8 hours by default
   });
 });
+
+describe('salary is calculated from attendance for everyone', () => {
+  test('a non-IT person with no pay basis is paid from attendance; project timesheet hours change nothing; an unmarked day is unpaid', async () => {
+    const ctx = await seed();
+    const exec = await ctx.person('Exec Sales', { dept: ctx.hr }); // non-IT, pay_basis never set
+    await prisma.salaryStructure.create({ data: { org_id: ctx.org.id, org_membership_id: exec.membership.id, effective_from: day('2026-01-01'), ctc: 198000, components: { basic: 198000 }, created_by: ctx.adminUser.id } });
+    const project = await addProject(ctx, 'Proj');
+    // 16h of approved project hours on every working day - must not pay anything or create overtime.
+    const workdays = [];
+    for (let d = 1; d <= 30; d += 1) { const t = new Date(Date.UTC(2026, 8, d)); if (t.getUTCDay() !== 0 && t.getUTCDay() !== 6) workdays.push(t.toISOString().slice(0, 10)); }
+    await prisma.timesheetEntry.createMany({ data: workdays.map((date) => ({ org_id: ctx.org.id, org_membership_id: exec.membership.id, account_id: project.id, date: day(date), hours: 8, overtime_hours: 8, status: 'approved' })) });
+    // Attendance: present on every working day except one that nobody marked.
+    await prisma.attendanceRecord.createMany({ data: workdays.slice(1).map((date) => ({ org_id: ctx.org.id, org_membership_id: exec.membership.id, date: day(date), status: 'present', source: 'manual' })) });
+
+    const res = await authed(request(app).get(api('/payroll/attendance-salary')), ctx.adminToken).query({ period_month: 9, period_year: 2026 });
+    const line = res.body.data.lines.find((l) => l.name === 'Exec Sales');
+    expect(line).toMatchObject({ pay_basis: 'attendance' });
+    expect(line.breakdown).toMatchObject({ source: 'attendance', unmarked_days: 1, ot_approved_hours: 0 });
+    expect(line.net).toBe(198000 - 9000); // one unmarked 9h day at Rs 1000 / hour
+  });
+
+  test('the Pay basis switch to "timesheet" is not available any more', async () => {
+    const ctx = await seed();
+    const dev = await ctx.person('Dev', { dept: ctx.it });
+    const res = await authed(request(app).post(api('/payroll/pay-basis')), ctx.adminToken).send({ pay_basis: 'timesheet', org_membership_ids: [dev.membership.id], reason: 'try' });
+    expect(res.status).toBe(422);
+  });
+});

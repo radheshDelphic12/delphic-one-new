@@ -336,7 +336,8 @@ describe('Billing & Sales — Managed Services on the project calendar', () => {
 });
 
 describe('Resource Revenue and vendor payments', () => {
-  test('a resource on two contracts has one line per contract and a total', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('a resource on two contracts has one line per contract and a total', async () => {
     const ctx = await seed();
     const p1 = await addProject(ctx, 'Circle XYZ', { rate: 1000, rate_type: 'hourly' });
     const p2 = await addProject(ctx, 'Another', { rate: 500, rate_type: 'hourly' });
@@ -379,7 +380,8 @@ describe('Resource Revenue and vendor payments', () => {
 });
 
 describe('Salary — approved timesheet hours on the employee calendar; lock; correction after lock', () => {
-  test('hourly = ctc / expected hours; a timesheet correction after lock is flagged, recalculated as v2, and feeds payroll and Financials', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('hourly = ctc / expected hours; a timesheet correction after lock is flagged, recalculated as v2, and feeds payroll and Financials', async () => {
     const ctx = await seed();
     await prisma.calendarHoliday.create({ data: { calendar_id: ctx.calendar.id, date: new Date('2026-08-14'), label: 'Independence Day (obs.)' } });
     const n = await employee(ctx, { name: 'Nikhil' });
