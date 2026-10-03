@@ -125,14 +125,20 @@ const recentWeekday = () => recent((d) => d.getUTCDay() >= 1 && d.getUTCDay() <=
 const recentSunday = () => recent((d) => d.getUTCDay() === 0);
 
 describe('timesheet rules end to end', () => {
+  let projectId;
   async function seed() {
     const org = await createOrg();
     const admin = await person(org, { role: 'admin' });
     const manager = await person(org);
     const emp = await person(org, { managerMembership: manager.membership });
-    return { org, admin, manager, emp };
+    const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
+    projectId = project.id;
+    return { org, admin, manager, emp, project };
   }
-  const post = (token, path, body) => authed(request(app).post(`/api/v1/timesheets${path}`), token).send(body);
+  const post = (token, path, body) => {
+    const withProject = body && path === '/entries' && !body.account_id ? { ...body, account_id: projectId } : body;
+    return authed(request(app).post(`/api/v1/timesheets${path}`), token).send(withProject);
+  };
   const patch = (token, path, body) => authed(request(app).patch(`/api/v1/timesheets${path}`), token).send(body);
   const del = (token, path, body = {}) => authed(request(app).delete(`/api/v1/timesheets${path}`), token).send(body);
   const week = async (token, date, member) => (await authed(request(app).get(`/api/v1/timesheets/week?date=${date}${member ? `&org_membership_id=${member}` : ''}`), token)).body.data;

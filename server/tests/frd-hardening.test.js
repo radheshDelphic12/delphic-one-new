@@ -2,11 +2,14 @@
 // regularisation, approval steps on the audit trail, the lock order (timesheets -> calculations -> financials),
 // the financial freeze of invoices / payments, Leave Managers + unpaid overflow at approval, half-day leave in the
 // daily attendance run, attendance audit, the vendor export and "apply the project rate to every resource".
-const { app, prisma, request, cleanDatabase, createUser, loginAs, createOrg, createOrgMembership, authed, unique } = require('./helpers');
+const { app, prisma, request, cleanDatabase, createUser, loginAs, createOrg, createOrgMembership, authed, unique, createActiveClientAccount } = require('./helpers');
 const autoAttendance = require('../src/modules/attendance/autoAttendance.service');
 const { todayIst } = require('../src/lib/istDate');
 
+const projectByToken = new Map();
+
 beforeEach(async () => {
+  projectByToken.clear();
   await cleanDatabase();
 });
 
@@ -35,7 +38,14 @@ async function seed(orgOverrides = {}) {
   return { org, adminUser, adminToken, managerUser, managerMembership, managerToken, employee };
 }
 
-const logEntry = (p, date, hours = 8) => authed(request(app).post(api('/timesheets/entries')), p.token).send({ date, hours, notes: 'work' });
+const logEntry = async (p, date, hours = 8) => {
+  if (!projectByToken.has(p.token)) {
+    const account = await createActiveClientAccount(p.user.id);
+    await prisma.account.update({ where: { id: account.id }, data: { org_id: p.membership.org_id } });
+    projectByToken.set(p.token, account.id);
+  }
+  return authed(request(app).post(api('/timesheets/entries')), p.token).send({ date, hours, notes: 'work', account_id: projectByToken.get(p.token) });
+};
 const decideEntry = (token, id, status = 'approved') => authed(request(app).post(api(`/timesheets/entries/${id}/decision`)), token).send({ status });
 const audit = (ctx, query) => authed(request(app).get(api('/calculations/lock-audit')), ctx.adminToken).query(query).then((r) => r.body.data);
 
