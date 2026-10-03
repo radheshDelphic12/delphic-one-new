@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-10-03: Timesheet tests created days with no project
+
+**Root cause:** Employee timesheet creates now require `account_id`. `frd-hardening.test.js`, `timesheet-payroll-rules.test.js`, and `leave-timesheet-integration.test.js` still posted `{ date, hours }` only. The API returned 422, so `body.data` was missing and the month lock saw zero pending entries.
+
+**Failure symptoms:** CI failed on lock assertions (`locked` was 1, audit text was "Month timesheet locked" with no "admin override") and on `entry.id` / `pending.body.data.id` being undefined.
+
+**Fix details:** The test helpers create one client account in the employee's org and send `account_id` on employee `POST /timesheets/entries`. Admin creates and direct Prisma inserts were left as they were.
+
+**Consulted sources:** `timesheets.service.js` `createEntry` (`project_required`); `monthLocks.service.js` pending-entry audit text; the three Jest files above.
+
+**Prevention guidance:** Any new employee timesheet fixture must include a project. A 422 on create makes later lock and audit assertions look like product bugs.
+
 ## 2026-09-07: Calendar My interviews / All identical for recruiters
 
 **Root cause:** `listForCalendar` applied the same OR for recruiter `mine=1` and recruiter All (`submitted_by` OR interviewer). All never included `RequirementAssignment`, so the toolbar toggle did nothing for recruiters. BDA All was also narrowed to `account.owner_id` while the rest of the app treats BDA like admin for requirement visibility.

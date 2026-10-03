@@ -26,10 +26,14 @@ async function person(org, { role = 'employee' } = {}) {
   return { user, membership, token: access_token };
 }
 
+let projectId;
+
 async function seed() {
   const org = await createOrg();
   const admin = await person(org, { role: 'admin' });
   const emp = await person(org);
+  const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
+  projectId = project.id;
   await prisma.salaryStructure.create({
     data: { org_id: org.id, org_membership_id: emp.membership.id, effective_from: d('2020-01-01'), ctc: 198000, components: {}, created_by: admin.user.id },
   });
@@ -44,7 +48,7 @@ const apply = (token, body) => api('post', token, '/leave/requests').send(body);
 const adminApply = (token, body) => api('post', token, '/leave/requests/admin').send(body);
 const decide = (token, id, status, reason) => api('post', token, `/leave/requests/${id}/decision`).send({ status, reason });
 const revoke = (token, id) => api('post', token, `/leave/requests/${id}/revoke`).send({ reason: 'Plan changed' });
-const logHours = (token, date, hours) => api('post', token, '/timesheets/entries').send({ date, hours });
+const logHours = (token, date, hours) => api('post', token, '/timesheets/entries').send({ date, hours, account_id: projectId });
 const weekOf = async (token, date) => (await api('get', token, `/timesheets/week?date=${date}`)).body.data;
 const dayOf = async (token, date) => (await weekOf(token, date)).days.find((x) => x.date === date);
 
