@@ -31,8 +31,13 @@ const MEMBER_SELECT = {
   person: { select: { name: true } },
 };
 
-// The IT department, however it is capitalised.
-const IT_DEPARTMENT = { person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } };
+// The IT department, however it is capitalised. A person's department lives in two places: the membership's own
+// department (what Payroll and the rest of the app show) and, for older records, the person's. The membership's
+// wins; the person's is only used when the membership has none - the same rule as salary.engine.isItDepartment.
+const IT_NAME = { name: { equals: 'IT', mode: 'insensitive' } };
+const IT_DEPARTMENT = {
+  OR: [{ department: IT_NAME }, { department_id: null, person: { department: IT_NAME } }],
+};
 
 async function applicableMembers(orgId, { membershipIds = null } = {}) {
   return prisma.orgMembership.findMany({
@@ -40,7 +45,7 @@ async function applicableMembers(orgId, { membershipIds = null } = {}) {
       org_id: orgId,
       employment_status: { in: ['active', 'notice_period'] },
       worker_type: 'full_time_employee',
-      ...IT_DEPARTMENT,
+      AND: [IT_DEPARTMENT],
       ...(membershipIds ? { id: { in: membershipIds } } : {}),
     },
     select: MEMBER_SELECT,

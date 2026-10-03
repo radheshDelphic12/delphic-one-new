@@ -65,6 +65,21 @@ describe('bulk Present is for the IT department only', () => {
     for (const other of [hrEmp, noDept, itContractor]) expect(await prisma.attendanceRecord.count({ where: { org_membership_id: other.membership.id } })).toBe(0);
   });
 
+  test('IT is read the same way Payroll reads it: the membership department wins, the person department is the fallback', async () => {
+    const ctx = await seed();
+    // Department only on the membership (how most real employees are set up).
+    const user = await createUser({ role: 'employee', name: 'Membership IT' });
+    const viaMembership = await createOrgMembership(user.id, ctx.org.id, { role: 'employee', joined_at: new Date('2020-01-01'), department_id: ctx.it.id });
+    // Membership says HR, the old person record still says IT: HR wins, so not IT.
+    const other = await createUser({ role: 'employee', name: 'Membership HR' });
+    await prisma.user.update({ where: { id: other.id }, data: { department_id: ctx.it.id } });
+    const hrWins = await createOrgMembership(other.id, ctx.org.id, { role: 'employee', joined_at: new Date('2020-01-01'), department_id: ctx.hr.id });
+
+    await authed(request(app).post(api('/attendance/backfill-month')), ctx.adminToken).send({ ...SEP, reason: 'September IT' });
+    expect(await prisma.attendanceRecord.count({ where: { org_membership_id: viaMembership.id } })).toBeGreaterThan(15);
+    expect(await prisma.attendanceRecord.count({ where: { org_membership_id: hrWins.id } })).toBe(0);
+  });
+
   test('clean-up removes only the auto / backfill Present rows of non-IT staff and is audited', async () => {
     const ctx = await seed();
     const itEmp = await ctx.person('It Emp', { dept: ctx.it });
