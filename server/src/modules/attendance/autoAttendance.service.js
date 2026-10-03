@@ -7,9 +7,10 @@
 //  * an admin backfill for a previous month - the same rules for every working day of that
 //    month, audited (who, when, month, employees, records created, reason).
 //
-// "Applicable" = active full-time employees paid from attendance (pay_basis = 'attendance') or in
-// the IT department. Existing attendance records are never overwritten, and approved leave days,
-// weekends and company holidays are skipped. Attendance stays separate from project timesheets.
+// "Applicable" = active full-time employees, IT and non-IT. Contractors and vendors are never marked:
+// their pay comes from the project timesheet, not from attendance. Existing records are never
+// overwritten, and approved leave days, weekends and company holidays are skipped. Attendance stays
+// separate from project timesheets.
 
 const prisma = require('../../config/db');
 const logger = require('../../config/logger');
@@ -37,7 +38,6 @@ async function applicableMembers(orgId, { membershipIds = null } = {}) {
       employment_status: { in: ['active', 'notice_period'] },
       worker_type: 'full_time_employee',
       ...(membershipIds ? { id: { in: membershipIds } } : {}),
-      OR: [{ pay_basis: 'attendance' }, { person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } }],
     },
     select: MEMBER_SELECT,
     orderBy: { joined_at: 'asc' },

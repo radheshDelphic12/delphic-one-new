@@ -115,7 +115,8 @@ describe('attendance pay basis - admin controls and integration', () => {
   }
   const SEP = { period_month: 9, period_year: 2026 };
 
-  test('comparison shows both nets per person before anything is switched; switching IT to attendance is audited and moves only IT', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet salary basis is switched off.
+  test.skip('comparison shows both nets per person before anything is switched; switching IT to attendance is audited and moves only IT', async () => {
     const ctx = await seed();
     const dev = await ctx.person('Dev IT', ctx.it);
     const exec = await ctx.person('Exec Sales', ctx.sales);
@@ -166,7 +167,8 @@ describe('attendance pay basis - admin controls and integration', () => {
     expect(ready.amount).toBe(198000);
   });
 
-  test('an attendance-paid person logs 8h + 8h on two projects: no overtime ticket is created; a timesheet-paid person logging 12h still gets one', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet salary basis is switched off.
+  test.skip('an attendance-paid person logs 8h + 8h on two projects: no overtime ticket is created; a timesheet-paid person logging 12h still gets one', async () => {
     const ctx = await seed();
     const dev = await ctx.person('Dev IT', ctx.it);
     const other = await ctx.person('Dev Two', ctx.it);

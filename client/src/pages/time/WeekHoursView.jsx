@@ -150,7 +150,8 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
                   <td className="py-2 pr-3 text-xs">
                     {d.leaves?.length > 0 && d.leaves.map((l) => (
                       <span key={l.request_id} className="block whitespace-nowrap">
-                        <span className="font-semibold tabular-nums text-blue-700">{h(l.hours)}</span>
+                        <span className="font-semibold text-blue-700">{l.name}</span>
+                        {' '}<span className="font-semibold tabular-nums text-blue-700">{h(l.hours)}</span>
                         {' '}<Pill tone={l.paid ? 'blue' : 'gray'}>{l.paid ? 'Paid' : 'Unpaid'}</Pill>
                         {' '}<Pill tone="green">Approved</Pill>
                         {l.is_half_day && <span className="block text-tertiary-500">{l.half_day_session === 'SECOND_HALF' ? 'Second half' : 'First half'} + working</span>}
@@ -158,7 +159,7 @@ export default function WeekHoursView({ orgMembershipId, initialDate, canDeleteO
                     ))}
                     {d.pending_leaves?.map((l) => (
                       <span key={l.request_id} className="block whitespace-nowrap text-tertiary-500">
-                        <Pill tone="amber">Leave pending</Pill> {l.name} - {l.is_half_day ? 'Half' : 'Full'} day (no effect yet)
+                        <span className="font-semibold text-tertiary-700">{l.name}</span> pending - {l.is_half_day ? 'Half' : 'Full'} day (no effect yet)
                       </span>
                     ))}
                     {!d.leaves?.length && !d.pending_leaves?.length && <span className="text-tertiary-400">-</span>}

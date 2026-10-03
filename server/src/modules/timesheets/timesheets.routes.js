@@ -27,6 +27,7 @@ const {
   lockDaySchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  bulkDeleteEntriesSchema,
   adminCreateEntrySchema,
   importEntriesSchema,
   bulkApproveSchema,
@@ -51,7 +52,7 @@ router.use(authenticate, requireOrgMembership);
 
 const ENTRY_ERRORS = {
   day_locked: [409, 'That day is locked (weekly auto-lock) — submit a Timesheet Regularisation request instead'],
-  project_required: [422, 'Select a project — IT timesheet entries must be logged against one of your assigned projects'],
+  project_required: [422, 'Select a project — timesheet entries are project time, logged against one of your assigned projects'],
   project_not_assigned: [403, "You aren't allocated to that project on that date — ask your admin to assign you to it (or extend your allocation)"],
   not_approver: [403, "You can only decide timesheets for people who report to you"],
   own_entry: [403, "You can't approve your own timesheet"],
@@ -181,6 +182,16 @@ router.patch(
 
 // Admin: delete any entry with a reason. Anyone else: their own entry, only
 // while pending and before the week locks (enforced in the service).
+// Bulk delete from the Timesheet Dashboard: only the listed logs; an admin must give a reason.
+router.post(
+  '/entries/bulk-delete',
+  asyncHandler(async (req, res) => {
+    const body = bulkDeleteEntriesSchema.parse(req.body);
+    if (req.user.role === 'admin' && !body.reason) return fail(res, 422, 'A reason is required to delete logs');
+    return ok(res, await service.bulkDeleteEntries(req.user.org_id, req.user, body));
+  })
+);
+
 router.delete(
   '/entries/:id',
   asyncHandler(async (req, res) => {
@@ -455,6 +466,15 @@ router.get(
     if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
     if (result.error) return failFor(res, result.error);
     return ok(res, result.team);
+  })
+);
+
+// Projects the caller may open in Project Team for a month (admin: all projects).
+router.get(
+  '/project-team/projects',
+  asyncHandler(async (req, res) => {
+    const { year, month } = projectTeamQuerySchema.pick({ year: true, month: true }).parse(req.query);
+    return ok(res, await service.listTeamProjects(req.user.org_id, req.user, { year, month }));
   })
 );
 

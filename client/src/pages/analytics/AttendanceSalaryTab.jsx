@@ -81,7 +81,7 @@ export default function AttendanceSalaryTab({ showLock = true, people: externalP
         <KpiCard label="Employees" value={t?.employees ?? '…'} hint={data?.skipped?.length ? `${data.skipped.length} skipped (no structure / contractor)` : undefined} icon={Users} theme="cyan" />
       </div>
       <DataTable columns={cols} rows={(data?.lines || []).map((l) => ({ ...l, id: l.org_membership_id }))} loading={loading} emptyLabel="No employees with a salary structure match these filters" />
-      <p className="text-xs text-tertiary-500">Per hour = monthly CTC ÷ expected hours (working days of the employee&apos;s company calendar × shift). Actual pays approved timesheet hours (up to the shift per day; paid leave = a full day) plus approved overtime — pending hours and pending OT appear only in Projected; check-in / check-out never counts. Weekends and holidays are paid non-working days. Contractors are paid through their vendor (see Vendors), never payroll.</p>
+      <p className="text-xs text-tertiary-500">In-house salary comes from attendance, approved leave, approved overtime, and salary adjustments. A present or paid leave day pays a full day, a half day pays half, and unpaid leave or an absence pays nothing. Project hours are for billing and team visibility. Contractor and vendor pay comes from their project timesheet, not this payroll.</p>
     </div>
   );
 }

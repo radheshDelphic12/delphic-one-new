@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarDays, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Lock, LockOpen, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -17,9 +17,25 @@ const STATUS_TONE = {
   empty: 'bg-tertiary-50 text-tertiary-400',
   no_entries: 'bg-tertiary-50 text-tertiary-400',
 };
-const ATTENDANCE_LABEL = { present: 'Present', absent: 'Absent', half_day: 'Half day', leave: 'Leave', holiday: 'Holiday', wfh: 'WFH' };
+const ATTENDANCE_LABEL = { present: 'Present', absent: 'Absent', half_day: 'Half day', holiday: 'Holiday', wfh: 'WFH' };
 
 const hoursLabel = (n) => `${Number(n || 0)}h`;
+const leaveCaption = (leave) => `${leave.name}${leave.is_half_day ? ' (half)' : ''}`;
+// Hours for the month, named by leave type (Sick Leave, Casual Leave, Earned Leave ...).
+const leaveHourSummary = (days) => {
+  const totals = new Map();
+  for (const day of days || []) {
+    for (const leave of day.leaves || []) totals.set(leave.name, (totals.get(leave.name) || 0) + Number(leave.hours || 0));
+  }
+  return [...totals.entries()].filter(([, hours]) => hours > 0).map(([name, hours]) => `${name} ${hoursLabel(hours)}`).join(' · ');
+};
+const attendanceText = (day) => {
+  if (day.attendance_status === 'leave') {
+    const names = (day.leaves || []).map(leaveCaption);
+    return names.length ? names.join(', ') : 'No leave type recorded';
+  }
+  return day.attendance_label || ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status;
+};
 
 function DayCell({ day, selected, onSelect }) {
   const off = day.day_type !== 'working';
@@ -34,9 +50,12 @@ function DayCell({ day, selected, onSelect }) {
         <span className="font-semibold text-tertiary-800">{Number(day.date.slice(8))}</span>
         {day.locked ? <Lock className="h-3 w-3 text-tertiary-500" aria-label="Locked" /> : <LockOpen className="h-3 w-3 text-tertiary-300" aria-label="Unlocked" />}
       </span>
-      {day.logged > 0 && <span className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_TONE[day.status] || STATUS_TONE.empty}`}>{hoursLabel(day.logged)} · {day.status}</span>}
-      {day.attendance_status && <span className="text-tertiary-600">{ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status}</span>}
-      {day.leave && <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-blue-700">{day.leave.name}{day.leave.is_half_day ? ' (half)' : ''}</span>}
+      {day.logged > 0 && <span className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_TONE[day.status] || STATUS_TONE.empty}`} title="Project timesheet hours">Project {hoursLabel(day.logged)} · {day.status}</span>}
+      {day.attendance_applicable !== false && day.attendance_status && day.attendance_status !== 'leave' && <span className="text-tertiary-600" title="Attendance">{attendanceText(day)}</span>}
+      {day.attendance_status === 'leave' && !(day.leaves || []).length && <span className="text-tertiary-600" title="Attendance">No leave type recorded</span>}
+      {(day.leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-blue-50 px-1.5 py-0.5 text-blue-700" title="Approved leave">{leaveCaption(leave)}</span>)}
+      {(day.pending_leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700" title="Pending leave">{leaveCaption(leave)} (pending)</span>)}
+      {day.attendance_conflict && <span className="text-[11px] text-amber-700">Present + approved leave - review</span>}
       {off && day.day_label && <span className="text-tertiary-400">{day.day_label}</span>}
       {(day.ot_hours > 0 || day.ot_tickets.length > 0) && (
         <span className="text-purple-700">OT {day.ot_tickets.length ? day.ot_tickets.map((t) => `${t.hours}h ${t.status}`).join(', ') : `${day.ot_hours}h ${day.ot_status || ''}`}</span>
@@ -54,18 +73,26 @@ function DayDetail({ day }) {
         <span className="inline-flex items-center gap-1 text-xs text-tertiary-500">{day.locked ? <><Lock className="h-3 w-3" /> Locked</> : <><LockOpen className="h-3 w-3" /> Open</>}</span>
       </div>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-tertiary-600">
-        <dt>Attendance</dt><dd className="text-tertiary-900">{day.attendance_status ? ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status : 'Not marked'}</dd>
+        {day.attendance_applicable !== false && (
+          <>
+            <dt>Attendance</dt><dd className="text-tertiary-900">{day.attendance_status ? attendanceText(day) : 'Not marked'}{day.attendance_conflict ? ' · approved leave also exists - needs review' : ''}</dd>
+          </>
+        )}
         <dt>Day type</dt><dd className="text-tertiary-900">{day.day_label || day.day_type.replace(/_/g, ' ')}</dd>
-        <dt>Leave</dt>
-        <dd className="text-tertiary-900">
-          {day.leaves.length ? day.leaves.map((l) => `${l.name}${l.is_half_day ? ' (half)' : ''}`).join(', ') : 'None'}
-          {day.pending_leaves.length > 0 && ` · pending: ${day.pending_leaves.map((l) => l.name).join(', ')}`}
-        </dd>
-        <dt>Logged</dt><dd className="text-tertiary-900">{hoursLabel(day.logged)} (approved {hoursLabel(day.approved)}, pending {hoursLabel(day.pending)})</dd>
-        <dt>Approval</dt><dd className="text-tertiary-900">{day.status === 'empty' ? 'No entries' : day.status}{day.admin_review ? ' · needs admin review' : ''}</dd>
+        {day.attendance_applicable !== false && (
+          <>
+            <dt>Leave</dt>
+            <dd className="text-tertiary-900">
+              {day.leaves.length ? day.leaves.map((l) => `${l.name}${l.is_half_day ? ' (half)' : ''}`).join(', ') : 'None'}
+              {day.pending_leaves.length > 0 && ` · pending: ${day.pending_leaves.map((l) => l.name).join(', ')}`}
+            </dd>
+          </>
+        )}
+        <dt>Project hours</dt><dd className="text-tertiary-900">{hoursLabel(day.logged)} (approved {hoursLabel(day.approved)}, pending {hoursLabel(day.pending)})</dd>
+        <dt>Project approval</dt><dd className="text-tertiary-900">{day.status === 'empty' ? 'No entries' : day.status}{day.admin_review ? ' · needs admin review' : ''}</dd>
       </dl>
       <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Project hours</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Project-wise hours</h4>
         {day.project_hours.length === 0 ? <p className="text-xs text-tertiary-400">Nothing logged.</p> : (
           <ul className="mt-1 space-y-0.5 text-xs">{day.project_hours.map((p) => <li key={p.project} className="flex justify-between"><span>{p.project}</span><span className="tabular-nums">{hoursLabel(p.hours)}</span></li>)}</ul>
         )}
@@ -99,20 +126,51 @@ function DayDetail({ day }) {
 }
 
 function MonthCalendar({ year, month, member, onBack }) {
-  const { pushError } = useAlerts();
+  const { user } = useAuth();
+  const { pushError, pushInfo } = useAlerts();
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
     setData(null);
     setSelected(null);
+    setPicked(new Set());
     apiClient.get('/timesheets/dashboard/calendar', { params: { year, month, org_membership_id: member.org_membership_id } })
       .then(({ data: res }) => { if (alive) setData(res.data); })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the timesheet'), 'Something went wrong'));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month, member.org_membership_id]);
+  }, [year, month, member.org_membership_id, reloadKey]);
+
+  // Every project log of the month, newest first: the rows you can select for a bulk delete.
+  const logs = useMemo(() => (data ? data.days.flatMap((d) => d.entries.map((e) => ({ ...e, date: d.date, locked: d.locked }))).sort((a, b) => (a.date < b.date ? 1 : -1)) : []), [data]);
+  const toggle = (id) => setPicked((cur) => { const next = new Set(cur); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const allPicked = logs.length > 0 && logs.every((l) => picked.has(l.id));
+
+  async function deleteLogs(ids) {
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} selected log${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    let reason;
+    if (user?.role === 'admin') {
+      reason = window.prompt('Reason for deleting (required):') || '';
+      if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
+    }
+    setDeleting(true);
+    try {
+      const { data: res } = await apiClient.post('/timesheets/entries/bulk-delete', { ids, ...(reason ? { reason: reason.trim() } : {}) });
+      const { deleted, failed } = res.data;
+      pushInfo(`Deleted ${deleted.length} log${deleted.length === 1 ? '' : 's'}${failed.length ? `, ${failed.length} could not be deleted (locked or already decided)` : ''}`);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to delete the logs'), 'Something went wrong');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const cells = useMemo(() => {
     if (!data) return [];
@@ -120,12 +178,13 @@ function MonthCalendar({ year, month, member, onBack }) {
     return [...Array(lead).fill(null), ...data.days];
   }, [data]);
 
+  const leaveSummary = leaveHourSummary(data?.days);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {onBack ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={onBack}><ArrowLeft className="h-4 w-4" /> All timesheets</button> : <span />}
         <h3 className="font-heading text-base font-semibold text-tertiary-900">{member.name} · {MONTHS[month - 1]} {year}</h3>
-        {data && <span className="text-xs text-tertiary-500">Logged {hoursLabel(data.totals.logged)} · approved {hoursLabel(data.totals.approved)} · pending {hoursLabel(data.totals.pending)} · leave {hoursLabel(data.totals.leave_hours)}</span>}
+        {data && <span className="text-xs text-tertiary-500">Logged {hoursLabel(data.totals.logged)} · approved {hoursLabel(data.totals.approved)} · pending {hoursLabel(data.totals.pending)}{leaveSummary ? ` · ${leaveSummary}` : ''}</span>}
       </div>
       {!data ? <p className="text-sm text-tertiary-500">Loading...</p> : (
         <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
@@ -137,6 +196,39 @@ function MonthCalendar({ year, month, member, onBack }) {
           </div>
           <DayDetail day={selected} />
         </div>
+      )}
+      {data && logs.length > 0 && (
+        <section className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="font-heading text-sm font-semibold text-tertiary-900">Project logs of the month ({logs.length})</h4>
+            <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs text-danger-700" disabled={!picked.size || deleting} onClick={() => deleteLogs([...picked])}>
+              <Trash2 className="h-3.5 w-3.5" /> {deleting ? 'Deleting…' : `Delete selected (${picked.size})`}
+            </button>
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="text-left text-tertiary-500">
+                  <th className="w-8 py-1"><input type="checkbox" aria-label="Select all logs" checked={allPicked} onChange={() => setPicked(allPicked ? new Set() : new Set(logs.map((l) => l.id)))} /></th>
+                  <th className="py-1 pr-3">Date</th><th className="pr-3">Project</th><th className="pr-3">Hours</th><th className="pr-3">Status</th><th className="pr-3">Notes</th><th />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-tertiary-100">
+                {logs.map((l) => (
+                  <tr key={l.id}>
+                    <td className="py-1"><input type="checkbox" aria-label={`Select log of ${l.date}`} checked={picked.has(l.id)} onChange={() => toggle(l.id)} /></td>
+                    <td className="pr-3 tabular-nums">{l.date}</td>
+                    <td className="pr-3">{l.project || 'No project'}</td>
+                    <td className="pr-3 tabular-nums">{l.hours}{l.overtime_hours ? ` +${l.overtime_hours} OT` : ''}</td>
+                    <td className="pr-3"><Badge value={l.status} /></td>
+                    <td className="pr-3 text-tertiary-500">{l.notes || ''}</td>
+                    <td className="py-1 text-right"><button type="button" className="text-danger-600 hover:underline" title="Delete this log" disabled={deleting} onClick={() => deleteLogs([l.id])}><Trash2 className="inline h-3.5 w-3.5" /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   );

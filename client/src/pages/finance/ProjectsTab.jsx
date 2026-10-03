@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FolderPlus } from 'lucide-react';
+import { FolderPlus, Search } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -10,7 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
-import ProjectCostingSection from './ProjectCostingSection.jsx';
+// import ProjectCostingSection from './ProjectCostingSection.jsx'; // switched off in the project drawer
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -348,15 +348,9 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
 
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 
-        <div className="rounded-2xl border border-tertiary-100 p-4">
-          <ProjectCostingSection accountId={project.id} />
-        </div>
-
-        <p className="text-xs text-tertiary-500">
-          Calendar: <span className="font-medium text-tertiary-700">{project.calendar?.name || '—'}</span>
-          {' · '}
-          <Link to="/people?section=hr-settings&tab=calendars" className="text-primary-700 hover:underline">change under People → Calendars</Link>
-        </p>
+        {/* Switched off: the "Project team (Employee <-> Project), cost rates & budget" section and the project
+            calendar line are not part of the project billing screen. */}
+        {/* <div className="rounded-2xl border border-tertiary-100 p-4"><ProjectCostingSection accountId={project.id} /></div> */}
       </div>
     </Drawer>
   );
@@ -375,13 +369,16 @@ export default function ProjectsTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [contract, setContract] = useState('all');
+  const [search, setSearch] = useState('');
   const { rates, reload: reloadRates } = useExchangeRates();
 
   const matchesContract = (row, key) => key === 'all' || row.contract?.state === key;
-  const visible = useMemo(
-    () => rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract)),
-    [rows, category, contract]
-  );
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    // Search by project name, project ID, client name or requirement.
+    const matchesSearch = (row) => !q || [row.project_name, row.project_code, row.client_name, row.requirement].some((v) => String(v || '').toLowerCase().includes(q));
+    return rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract) && matchesSearch(row));
+  }, [rows, category, contract, search]);
 
   // This month's CONTRACT billing of the filtered projects, in INR, from the
   // server: the fixed monthly fee, or contract hours (minimum, else benchmark)
@@ -435,9 +432,15 @@ export default function ProjectsTab() {
           <p className="text-xs text-tertiary-500">
             Running projects and contracts. <b>Add project</b> creates one (name, client, type, holiday calendar); open a project to update its billing, dates and contract status. Its calendar can also be changed under <Link to="/people?section=hr-settings&tab=calendars" className="text-primary-700 hover:underline">People → HR Settings → Calendars</Link>.
           </p>
-          <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddOpen(true)}>
-            <FolderPlus className="h-4 w-4" /> Add project
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tertiary-400" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search project, ID or client" aria-label="Search projects" className="w-64 max-w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
+            </div>
+            <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddOpen(true)}>
+              <FolderPlus className="h-4 w-4" /> Add project
+            </button>
+          </div>
         </div>
         {!loading && rows.length === 0 ? (
           <EmptyState title="No projects yet" description="Use Add project to create the first one, then set its billing here." />
@@ -471,7 +474,7 @@ export default function ProjectsTab() {
               </div>
             )}
             <ExchangeRatesPanel rates={rates} onSaved={() => { reloadRates(); load(); }} />
-            <DataTable columns={columns} rows={visible} loading={loading} emptyLabel="No projects in this category." onRowClick={setSelected} />
+            <DataTable columns={columns} rows={visible} loading={loading} emptyLabel={search.trim() ? 'No project matches your search.' : 'No projects in this category.'} onRowClick={setSelected} />
           </>
         )}
       </section>

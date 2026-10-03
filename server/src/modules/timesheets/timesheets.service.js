@@ -3,6 +3,7 @@ const logger = require('../../config/logger');
 const calendarsService = require('../calendars/calendars.service');
 const leaveService = require('../leave/leave.service');
 const { computeDayRevenue } = require('../billing/billing.service');
+const { projectListWhere } = require('../../lib/projectScope');
 const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
@@ -133,7 +134,8 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (leave) return { error: 'leave_day', leave };
 
   const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  // The old non-IT timesheet (date, hours, notes, no project) is gone. Every entry is project time.
+  if (!account_id) return { error: 'project_required' };
 
   let account = null;
   if (account_id) {
@@ -418,6 +420,23 @@ async function adminDeleteEntry(orgId, adminUserId, entryId, { reason }) {
   return { deleted: true, flagged: change?.flagged || 0 };
 }
 
+// Delete several logs at once (Timesheet Dashboard). Each id goes through the same rule as a single delete -
+// an admin deletes any entry with a reason (locked billing is flagged); anyone else only their own pending
+// entries on an open day. Only the listed ids are touched; the result says which ones could not be deleted.
+async function bulkDeleteEntries(orgId, user, { ids, reason }) {
+  const unique = [...new Set(ids)];
+  const deleted = [];
+  const failed = [];
+  for (const id of unique) {
+    const result = user.role === 'admin'
+      ? await adminDeleteEntry(orgId, user.id, id, { reason })
+      : await deleteOwnEntry(orgId, user.org_membership_id, id);
+    if (result.error) failed.push({ id, error: result.error });
+    else deleted.push(id);
+  }
+  return { deleted, failed };
+}
+
 async function accountRef(accountId) {
   return accountId ? prisma.account.findUnique({ where: { id: accountId }, ...ACCOUNT_REF }) : null;
 }
@@ -563,7 +582,7 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   if (leave) return { error: 'leave_day', leave };
 
   const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  if (!account_id) return { error: 'project_required' };
   let account = null;
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
@@ -809,6 +828,28 @@ async function myProjects(orgId, orgMembershipId) {
   // Projects a team mate is allocated to can be logged on too (client / project timesheet).
   const shared = await projectDayService.teamProjects(orgId, orgMembershipId, todayIst(), since, new Set(mine.map((p) => p.id)));
   return [...mine, ...shared];
+}
+
+// Projects whose team timesheet the caller may open for a month: every project for an admin, otherwise
+// the projects the caller was allocated to at any point in that month (so an ended allocation still shows).
+async function listTeamProjects(orgId, user, { year, month }) {
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 0));
+  const label = (a) => ({ id: a.id, name: a.project_name || a.name });
+  if (user.role === 'admin') {
+    const accounts = await prisma.account.findMany({ where: projectListWhere(orgId), select: { id: true, name: true, project_name: true }, orderBy: { name: 'asc' } });
+    return accounts.map(label);
+  }
+  const rows = await prisma.projectMemberAssignment.findMany({
+    where: {
+      org_id: orgId,
+      org_membership_id: user.org_membership_id,
+      AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }],
+    },
+    select: { account: { select: { id: true, name: true, project_name: true } } },
+  });
+  const byId = new Map(rows.map((r) => [r.account.id, label(r.account)]));
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Project team timesheet for a month. Only people allocated to the project (and admins) may see it.
@@ -1154,6 +1195,8 @@ module.exports = {
   updateApprovalPolicy,
   pendingApprovals,
   myProjects,
+  listTeamProjects,
+  bulkDeleteEntries,
   lastCompletedWeekDays,
   lockCompletedWeek,
   teamOverview,

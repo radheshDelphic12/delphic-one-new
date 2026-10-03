@@ -60,9 +60,14 @@ async function monthProjects(orgId, { period_month, period_year }, now = new Dat
   for (const row of overview.projects) {
     const account = accountById.get(row.project.id);
     const people = assigned.get(row.project.id) || new Map();
-    const inAgreement = account && (!account.agreement_start_date || account.agreement_start_date <= end) && (!account.agreement_end_date || account.agreement_end_date >= start);
+    // The project's own start / end dates decide whether it belongs to the month. A project that ended before
+    // the month (or starts after it) is never listed, whoever is still allocated to it. Only a project with no
+    // dates at all falls back to "people allocated, hours or billing in the month".
+    const hasDates = Boolean(account?.agreement_start_date || account?.agreement_end_date);
     const hours = row.totals.approved_hours + row.totals.pending_hours;
-    const active = people.size > 0 || hours > 0 || row.totals.final_amount !== 0 || (inAgreement && Boolean(account?.agreement_start_date));
+    const active = hasDates
+      ? billingEngine.overlapsMonth(account, start, end)
+      : people.size > 0 || hours > 0 || row.totals.final_amount !== 0;
     if (!active) continue;
     const lockedCount = [...people.keys()].filter((id) => lockedMembers.has(id)).length;
     const invoice = row.invoice || invoiceStatus.describe(null);

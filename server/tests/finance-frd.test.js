@@ -248,6 +248,7 @@ describe('Sales and Salary Excel exports, salary adjustments', () => {
     expect(after.final_payable).toBe(before.salary + 5000 + 1500 + 1000 - 2000);
 
     // Lock the employee's month, then change an adjustment: the locked figure stays and the change is flagged.
+    await markMonthPresent(ctx.org.id, emp.membership.id, 2026, 8);
     expect((await authed(request(app).post(api('/calculations/lock')), ctx.adminToken).send({ kind: 'salary_employee', scope_key: emp.membership.id, ...AUG })).status).toBe(200);
     const list = (await authed(request(app).get(api('/payroll/adjustments')), ctx.adminToken).query({ ...AUG, org_membership_id: emp.membership.id })).body.data;
     expect(list).toHaveLength(4);
@@ -295,3 +296,14 @@ describe('Vendor billing tracking and traceability', () => {
     expect((await authed(request(app).get(api(`/billing/vendor-invoices/${invoice.id}/trace`)), (await loginAs(other)).access_token)).status).toBe(403);
   });
 });
+
+// Salary is calculated from attendance now: a salary can only be locked once every working day of the month is marked.
+async function markMonthPresent(orgId, membershipId, year, month) {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const data = [];
+  for (let d = 1; d <= days; d += 1) {
+    const date = new Date(Date.UTC(year, month - 1, d));
+    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) data.push({ org_id: orgId, org_membership_id: membershipId, date, status: 'present', source: 'manual' });
+  }
+  await prisma.attendanceRecord.createMany({ data, skipDuplicates: true });
+}

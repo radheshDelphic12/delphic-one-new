@@ -29,7 +29,6 @@ const ADMIN_REVIEW_GRACE_DAYS = Number(process.env.TIMESHEET_ADMIN_REVIEW_GRACE_
 
 const DAY_MS = 86400000;
 const ymd = (date) => date.toISOString().slice(0, 10);
-const round1 = (n) => Math.round(n * 10) / 10;
 const round2 = (n) => Math.round(n * 100) / 100;
 const utcDay = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
@@ -110,33 +109,9 @@ async function membershipShift(orgMembershipId) {
  * logged (non-rejected) hours beyond expected. A changed amount goes back to
  * pending; no overtime left removes the row.
  */
-async function syncDayOvertime(orgId, orgMembershipId, date) {
-  // Attendance-paid people log CLIENT hours on projects (8h + 8h is normal), so those hours never
-  // create overtime; their OT is ticket based.
-  const basis = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { pay_basis: true } });
-  if (basis?.pay_basis === 'attendance') return null;
-  const day = utcDay(date);
-  const [shift, cal, entries, existing] = await Promise.all([
-    membershipShift(orgMembershipId),
-    companyCalendarDays(orgId, orgMembershipId, day, day),
-    prisma.timesheetEntry.findMany({ where: { org_membership_id: orgMembershipId, date: day, status: { not: 'rejected' } }, select: { hours: true, overtime_hours: true } }),
-    prisma.timesheetDayOvertime.findUnique({ where: { org_membership_id_date: { org_membership_id: orgMembershipId, date: day } } }),
-  ]);
-  const { expected } = dayInfo(day, cal, shift);
-  const logged = entries.reduce((s, e) => s + Number(e.hours) + Number(e.overtime_hours || 0), 0);
-  const hours = round1(Math.max(0, logged - expected));
-  if (hours <= 0) {
-    if (existing) await prisma.timesheetDayOvertime.delete({ where: { id: existing.id } });
-    return null;
-  }
-  if (!existing) {
-    return prisma.timesheetDayOvertime.create({ data: { org_id: orgId, org_membership_id: orgMembershipId, date: day, hours } });
-  }
-  if (Number(existing.hours) === hours) return existing;
-  return prisma.timesheetDayOvertime.update({
-    where: { id: existing.id },
-    data: { hours, status: 'pending', decided_by: null, decided_at: null, decision_reason: null },
-  });
+async function syncDayOvertime() {
+  // Everyone is paid from attendance, so logged hours never create overtime (OT is ticket based).
+  return null;
 }
 
 /**

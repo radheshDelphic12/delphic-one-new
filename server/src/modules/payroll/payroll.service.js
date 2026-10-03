@@ -172,8 +172,9 @@ const OT_MULTIPLIER = 1;
 const ATTENDANCE_DAY_SHARE = { present: 1, wfh: 1, half_day: 0.5 };
 
 // 'attendance' only when an admin chose it; everyone else keeps the timesheet basis.
-function payBasisOf(membership) {
-  return membership?.pay_basis === 'attendance' ? 'attendance' : 'timesheet';
+// Salary is paid from attendance for everyone (timesheets no longer feed pay).
+function payBasisOf() {
+  return 'attendance';
 }
 
 function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null, payBasis = 'timesheet', ticketsByDate = new Map() }) {

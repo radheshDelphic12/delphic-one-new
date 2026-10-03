@@ -30,7 +30,12 @@ async function seed(orgOverrides = {}) {
   return { org, adminUser, adminToken, managerUser, managerMembership, managerToken, employee };
 }
 
-const logEntry = (person, date = DAY, hours = 8) => authed(request(app).post('/api/v1/timesheets/entries'), person.token).send({ date, hours, notes: 'work' });
+const logEntry = async (person, date = DAY, hours = 8) => {
+  const account = await prisma.account.create({
+    data: { type: 'client', name: `Project ${date} ${hours} ${person.membership.id.slice(0, 8)}`, stage: 'active', owner_id: person.user.id, org_id: person.membership.org_id },
+  });
+  return authed(request(app).post('/api/v1/timesheets/entries'), person.token).send({ date, hours, notes: 'work', account_id: account.id });
+};
 const decide = (token, id, status = 'approved', reason) => authed(request(app).post(`/api/v1/timesheets/entries/${id}/decision`), token).send({ status, ...(reason ? { reason } : {}) });
 
 describe('Timesheet approval chain - Employee -> Manager (optional) -> Admin (mandatory)', () => {
@@ -219,6 +224,7 @@ describe('Stage 2 / 3 - calculation and financial locks write the audit trail (b
     expect(rows[0]).toMatchObject({ stage: 'calculation', action: 'review', new_status: 'reviewed' });
     expect(rows.map((r) => r.employee.name).sort()).toEqual(['Asha', 'Bilal']);
 
+    await markMonthPresent(ctx.org.id, a.membership.id, 2026, 1);
     const lock = await authed(request(app).post('/api/v1/calculations/lock'), ctx.adminToken).send({ kind: 'salary_employee', scope_key: a.membership.id, ...period });
     expect(lock.status).toBe(200);
     const reopen = await authed(request(app).post('/api/v1/calculations/reopen'), ctx.adminToken).send({ kind: 'salary_employee', scope_key: a.membership.id, ...period, reason: 'Fix TDS' });
@@ -315,4 +321,31 @@ describe('Leave types for salary - configuration, Comp Off, unpaid overflow', ()
     expect(reqs).toHaveLength(1);
     expect(reqs[0].leave_type.name).toBe('Unpaid Leave');
   });
+
+  test('an already approved paid leave can be marked unpaid', async () => {
+    const ctx = await seed();
+    const emp = await ctx.employee('Eve');
+    const casual = await typeByName(ctx.adminToken, 'Casual Leave');
+    const created = await apply(emp, casual.id, MON, MON);
+    expect(created.status).toBe(201);
+    const approved = await authed(request(app).post(`/api/v1/leave/requests/${created.body.data.id}/decision`), ctx.adminToken).send({ status: 'approved' });
+    expect(approved.status).toBe(200);
+    const marked = await authed(request(app).post(`/api/v1/leave/requests/${created.body.data.id}/mark-unpaid`), ctx.adminToken).send({ reason: 'Balance was already used' });
+    expect(marked.status).toBe(200);
+    const row = await prisma.leaveRequest.findUnique({ where: { id: created.body.data.id }, include: { leave_type: true } });
+    expect(row.status).toBe('approved');
+    expect(row.leave_type.paid).toBe(false);
+    expect(row.leave_type.name).toBe('Unpaid Leave');
+  });
 });
+
+// Salary is calculated from attendance now: a salary can only be locked once every working day of the month is marked.
+async function markMonthPresent(orgId, membershipId, year, month) {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const data = [];
+  for (let d = 1; d <= days; d += 1) {
+    const date = new Date(Date.UTC(year, month - 1, d));
+    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) data.push({ org_id: orgId, org_membership_id: membershipId, date, status: 'present', source: 'manual' });
+  }
+  await prisma.attendanceRecord.createMany({ data, skipDuplicates: true });
+}

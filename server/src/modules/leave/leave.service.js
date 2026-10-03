@@ -718,6 +718,37 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
   return { request, ...(split?.unpaid ? { overflow: { request: split.unpaid, to_unpaid_days: split.unpaidDays } } : {}) };
 }
 
+// An approved paid leave can be turned into Unpaid Leave after the fact. The days stay approved.
+// Salary then treats them as unpaid. Admin and Leave Managers can do this.
+async function markApprovedUnpaid(orgId, requestId, approverMembershipId, { reason }, actorUserId = null) {
+  const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId }, include: { leave_type: true } });
+  if (!existing) return { error: 'not_found' };
+  if (existing.status !== 'approved') return { error: 'not_approved' };
+  if (!existing.leave_type?.paid) return { error: 'already_unpaid' };
+  await ensureDefaultTypes(orgId);
+  const unpaidType = (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false, name: 'Unpaid Leave' } }))
+    || (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false } }));
+  if (!unpaidType) return { error: 'no_unpaid_type' };
+  const note = [existing.reason, reason || 'Marked unpaid after approval'].filter(Boolean).join(' - ');
+  const request = await prisma.leaveRequest.update({
+    where: { id: requestId },
+    data: { leave_type_id: unpaidType.id, reason: note, approver_id: approverMembershipId, decision_reason: reason || 'Marked unpaid after approval' },
+    include: { leave_type: true },
+  });
+  await detectFinanceChange(orgId, {
+    source_type: 'leave',
+    source_id: requestId,
+    from_date: existing.from_date,
+    to_date: existing.to_date,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Approved ${existing.leave_type.name} marked unpaid`.slice(0, 500),
+    old_value: { leave_type: existing.leave_type.name, paid: true },
+    new_value: { leave_type: unpaidType.name, paid: false },
+  });
+  return { request };
+}
+
 // Admin authority over a leave that was already granted (or is still pending):
 // withdraw it. The days go back to the balance by themselves — it is computed
 // from the approved requests — and the leave-day rule stops applying.
@@ -801,6 +832,7 @@ module.exports = {
   listMine,
   listTeam,
   decide,
+  markApprovedUnpaid,
   revoke,
   cancel,
   leaveDayFor,

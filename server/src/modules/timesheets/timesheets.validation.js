@@ -1,9 +1,8 @@
 const { z } = require('zod');
 const { requiredDate, optionalDate } = require('../../lib/zodDate');
 
-// `account_id` is optional: a non-IT employee logs just Date/Hours/Notes with no
-// project (stored as non-billable general time). IT staff must send a project,
-// and only one assigned to them — enforced in timesheets.service.createEntry.
+// `account_id` is required. The old non-IT timesheet (date, hours and notes, no
+// project) is gone. A project is enforced in timesheets.service.createEntry.
 // There is deliberately no `module_name` any more (unknown keys are stripped).
 const createEntrySchema = z.object({
   date: requiredDate,
@@ -136,6 +135,11 @@ const hoursQuerySchema = z.object({
 }).refine((v) => v.to >= v.from && (v.to - v.from) / 86400000 <= 62, { message: 'Pick a range of up to 62 days', path: ['to'] });
 
 const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+// Bulk delete from the Timesheet Dashboard: only the listed logs are deleted (an admin gives one reason for all).
+const bulkDeleteEntriesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  reason: z.string().trim().min(3).max(500).optional(),
+});
 
 // Overtime tickets (attendance-paid people): raised by the employee, decided by the manager / admin.
 const createOvertimeTicketSchema = z.object({
@@ -268,6 +272,7 @@ module.exports = {
   reopenMonthSchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  bulkDeleteEntriesSchema,
   createOvertimeTicketSchema,
   decideOvertimeTicketSchema,
   listOvertimeTicketsQuerySchema,

@@ -212,14 +212,14 @@ export function BackfillMonthDrawer({ open, onClose, onApplied }) {
     )}>
       <div className="space-y-3">
         <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">
-          Marks IT / attendance-paid employees <b>present</b> on every working day of the chosen month. Weekends, company holidays, approved leave and days that already have a record are skipped. Only past months can be backfilled - never the current or a future month.
+          Marks full-time employees, IT and non-IT, <b>present</b> on every working day of the chosen month. Contractors and vendors are never marked. Weekends, company holidays, approved leave and days that already have a record are skipped. Only past months can be backfilled - never the current or a future month.
         </p>
         <label className="block text-xs font-medium text-tertiary-600">Month
           <input type="month" max={thisMonth} value={month} onChange={(e) => { setMonth(e.target.value); setPreview(null); }} className={inputClass} />
         </label>
         {month >= thisMonth && <p className="text-xs text-danger-600">Pick a month before {thisMonth}.</p>}
         <label className="block text-xs font-medium text-tertiary-600">Reason
-          <input value={reason} onChange={(e) => { setReason(e.target.value); setPreview(null); }} placeholder="e.g. September attendance for IT" className={inputClass} />
+          <input value={reason} onChange={(e) => { setReason(e.target.value); setPreview(null); }} placeholder="e.g. September attendance for full-time staff" className={inputClass} />
         </label>
         {preview && (
           <div className="rounded-xl border border-tertiary-100 p-3 text-sm text-tertiary-700">
