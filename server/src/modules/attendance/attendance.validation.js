@@ -78,6 +78,11 @@ const backfillMonthSchema = z.object({
   dry_run: z.boolean().optional().default(false),
 });
 
+const backfillCleanupSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  dry_run: z.boolean().optional().default(false),
+});
+
 module.exports = {
-  backfillMonthSchema, listQuerySchema, regularizeSchema,
+  backfillMonthSchema, backfillCleanupSchema, listQuerySchema, regularizeSchema,
   deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };

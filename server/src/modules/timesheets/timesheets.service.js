@@ -419,6 +419,23 @@ async function adminDeleteEntry(orgId, adminUserId, entryId, { reason }) {
   return { deleted: true, flagged: change?.flagged || 0 };
 }
 
+// Delete several logs at once (Timesheet Dashboard). Each id goes through the same rule as a single delete -
+// an admin deletes any entry with a reason (locked billing is flagged); anyone else only their own pending
+// entries on an open day. Only the listed ids are touched; the result says which ones could not be deleted.
+async function bulkDeleteEntries(orgId, user, { ids, reason }) {
+  const unique = [...new Set(ids)];
+  const deleted = [];
+  const failed = [];
+  for (const id of unique) {
+    const result = user.role === 'admin'
+      ? await adminDeleteEntry(orgId, user.id, id, { reason })
+      : await deleteOwnEntry(orgId, user.org_membership_id, id);
+    if (result.error) failed.push({ id, error: result.error });
+    else deleted.push(id);
+  }
+  return { deleted, failed };
+}
+
 async function accountRef(accountId) {
   return accountId ? prisma.account.findUnique({ where: { id: accountId }, ...ACCOUNT_REF }) : null;
 }
@@ -1178,6 +1195,7 @@ module.exports = {
   pendingApprovals,
   myProjects,
   listTeamProjects,
+  bulkDeleteEntries,
   lastCompletedWeekDays,
   lockCompletedWeek,
   teamOverview,

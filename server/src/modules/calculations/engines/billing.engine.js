@@ -607,4 +607,16 @@ function minimumFor(account, raw, totals) {
   return { hours: minimumHours, actual_hours: totals.approved_hours, shortfall_hours: shortfall, met: shortfall === 0 };
 }
 
-module.exports = { invoiceDetails, PROJECT_SELECT, estimateFor, minimumFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };
+/**
+ * Is the project running at any point of the month? A project is billable for a month only when its duration
+ * (agreement start .. end) overlaps it: start <= last day of the month AND (no end OR end >= first day).
+ * A missing start means "from the beginning", a missing end "still running". Dates are plain calendar dates
+ * (UTC midnight), the same as the billing engine uses day by day.
+ */
+function overlapsMonth(account, start, end) {
+  const from = account?.agreement_start_date;
+  const to = account?.agreement_end_date;
+  return (!from || from <= end) && (!to || to >= start);
+}
+
+module.exports = { overlapsMonth, invoiceDetails, PROJECT_SELECT, estimateFor, minimumFor, engineFor, describeProject, computeProjectMonth, viewOf, lockedAmount, listProjects, rateOn, markResolved, dayStatus };

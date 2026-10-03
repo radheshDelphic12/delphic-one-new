@@ -25,7 +25,7 @@ const BASE_TABS = [
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
 ];
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
-const LOCKS_TAB = { key: 'locks', label: 'Timesheet Locks', icon: Lock };
+const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
 // Reporting managers approve their direct reports' timesheets here (admins do it in Team Monitoring).
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 

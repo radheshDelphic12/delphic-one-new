@@ -136,6 +136,11 @@ const hoursQuerySchema = z.object({
 }).refine((v) => v.to >= v.from && (v.to - v.from) / 86400000 <= 62, { message: 'Pick a range of up to 62 days', path: ['to'] });
 
 const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+// Bulk delete from the Timesheet Dashboard: only the listed logs are deleted (an admin gives one reason for all).
+const bulkDeleteEntriesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  reason: z.string().trim().min(3).max(500).optional(),
+});
 
 // Overtime tickets (attendance-paid people): raised by the employee, decided by the manager / admin.
 const createOvertimeTicketSchema = z.object({
@@ -268,6 +273,7 @@ module.exports = {
   reopenMonthSchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  bulkDeleteEntriesSchema,
   createOvertimeTicketSchema,
   decideOvertimeTicketSchema,
   listOvertimeTicketsQuerySchema,
