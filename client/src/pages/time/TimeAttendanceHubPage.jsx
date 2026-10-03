@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, LayoutDashboard, Lock, Users } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, ListChecks, Lock, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
+import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
+import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
 import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
 import TimesheetDashboard from './TimesheetDashboard.jsx';
@@ -24,23 +26,30 @@ const BASE_TABS = [
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
 ];
+// IT staff log project hours here. Those hours feed client billing, not salary.
+const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
+// Admin: every IT project entry — check, edit, add, and give the final approval.
+const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
 const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
-// Reporting managers approve their direct reports' timesheets here (admins do it in Team Monitoring).
+// Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 
 /** Time & Attendance hub: Attendance + Leave + Timesheets (+ IT Timesheet — logging for IT staff, records view for admins — + Team Monitoring for admins) under one sidebar entry. */
 export default function TimeAttendanceHubPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isDeveloper = user?.department?.name?.toLowerCase() === 'it';
   const [isApprover, setIsApprover] = useState(false);
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
   const TABS = [
-    ...BASE_TABS,
+    ...BASE_TABS.slice(0, 2),
+    ...(isDeveloper ? [LOG_TAB] : []),
+    ...BASE_TABS.slice(2),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [LOCKS_TAB] : []),
+    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB] : []),
   ];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
@@ -67,6 +76,13 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
+      {section === 'log' && isDeveloper && (
+        <div className="space-y-3">
+          <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Log hours against a project you are assigned to. These hours are for client billing. Your salary still comes from attendance.</p>
+          <ItTimesheetPage />
+        </div>
+      )}
+      {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
       {section === 'dashboard' && <TimesheetDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}
