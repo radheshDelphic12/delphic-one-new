@@ -216,6 +216,7 @@ describe('Per-record locks and the Locked section', () => {
     const diksha = await employee(ctx, 'Diksha', 42000);
     const ravi = await employee(ctx, 'Ravi', 30000);
 
+    await markMonthPresent(ctx.org.id, diksha.id, 2026, 8);
     const res = await lock(ctx, { kind: 'salary_employee', scope_key: diksha.id });
     expect(res.status).toBe(200);
     const lockedNet = res.body.data.locked_amount;
@@ -530,3 +531,14 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect(audit).toMatchObject({ reason: 'Vendor re-issued the bill' });
   });
 });
+
+// Salary is calculated from attendance now: a salary can only be locked once every working day of the month is marked.
+async function markMonthPresent(orgId, membershipId, year, month) {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const data = [];
+  for (let d = 1; d <= days; d += 1) {
+    const date = new Date(Date.UTC(year, month - 1, d));
+    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6) data.push({ org_id: orgId, org_membership_id: membershipId, date, status: 'present', source: 'manual' });
+  }
+  await prisma.attendanceRecord.createMany({ data, skipDuplicates: true });
+}
