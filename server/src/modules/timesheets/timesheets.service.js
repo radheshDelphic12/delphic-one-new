@@ -126,15 +126,8 @@ async function isLocked(orgId, date, orgMembershipId = null) {
 
 // Developers (IT and contractors) fill last month until the 5th of this month.
 // The weekly lock still runs, but it does not block those days during that window.
-// An admin month lock still blocks. Older months stay closed.
+// An admin month lock still blocks. Any other locked day stays locked.
 const FILING_DEADLINE_DAY = 5;
-
-function filingWindowStart(today) {
-  const year = today.getUTCFullYear();
-  const month = today.getUTCMonth();
-  if (today.getUTCDate() <= FILING_DEADLINE_DAY) return new Date(Date.UTC(year, month - 1, 1));
-  return new Date(Date.UTC(year, month, 1));
-}
 
 function developerMayIgnoreWeeklyLock(date, today) {
   if (today.getUTCDate() > FILING_DEADLINE_DAY) return false;
@@ -146,11 +139,7 @@ function developerMayIgnoreWeeklyLock(date, today) {
 // Why an employee cannot log or edit this date, or null when the day is open for them.
 async function employeeLogBlock(orgId, date, orgMembershipId) {
   if (await monthLocks.isMemberMonthLocked(orgMembershipId, date)) return 'day_locked';
-  if (await isItMember(orgMembershipId)) {
-    const today = todayIst();
-    if (date < filingWindowStart(today)) return 'month_closed';
-    if (developerMayIgnoreWeeklyLock(date, today)) return null;
-  }
+  if ((await isItMember(orgMembershipId)) && developerMayIgnoreWeeklyLock(date, todayIst())) return null;
   const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
   return lock ? 'day_locked' : null;
 }
