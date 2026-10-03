@@ -194,6 +194,20 @@ router.post(
 );
 
 router.post(
+  '/requests/:id/mark-unpaid',
+  authorizeLeaveManager,
+  asyncHandler(async (req, res) => {
+    const body = revokeSchema.parse(req.body || {});
+    const result = await service.markApprovedUnpaid(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
+    if (result.error === 'not_approved') return fail(res, 409, 'Only an approved leave can be marked unpaid');
+    if (result.error === 'already_unpaid') return fail(res, 409, 'That leave is already unpaid');
+    if (result.error === 'no_unpaid_type') return fail(res, 422, 'This company has no Unpaid Leave type');
+    return ok(res, result.request);
+  })
+);
+
+router.post(
   '/requests/:id/revoke',
   authorizeLeaveManager,
   asyncHandler(async (req, res) => {

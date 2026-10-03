@@ -52,7 +52,7 @@ router.use(authenticate, requireOrgMembership);
 
 const ENTRY_ERRORS = {
   day_locked: [409, 'That day is locked (weekly auto-lock) — submit a Timesheet Regularisation request instead'],
-  project_required: [422, 'Select a project — IT timesheet entries must be logged against one of your assigned projects'],
+  project_required: [422, 'Select a project — timesheet entries are project time, logged against one of your assigned projects'],
   project_not_assigned: [403, "You aren't allocated to that project on that date — ask your admin to assign you to it (or extend your allocation)"],
   not_approver: [403, "You can only decide timesheets for people who report to you"],
   own_entry: [403, "You can't approve your own timesheet"],

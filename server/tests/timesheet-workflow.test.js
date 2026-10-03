@@ -21,6 +21,9 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+const projectByToken = new Map();
+const actorByToken = new Map();
+
 async function person(org, { role = 'employee', dept, managerMembership } = {}) {
   const user = await createUser({ role });
   if (dept) await prisma.user.update({ where: { id: user.id }, data: { department_id: dept.id } });
@@ -29,6 +32,7 @@ async function person(org, { role = 'employee', dept, managerMembership } = {}) 
     await prisma.orgMembership.update({ where: { id: membership.id }, data: { manager_id: managerMembership.id } });
   }
   const { access_token } = await loginAs(user);
+  actorByToken.set(access_token, { org, user, membership });
   return { user, membership, token: access_token };
 }
 
@@ -48,16 +52,27 @@ async function approvedLeave(org, membership, from, to, extra = {}) {
   });
 }
 
-const log = (token, body) => authed(request(app).post('/api/v1/timesheets/entries'), token).send(body);
+const log = async (token, body) => {
+  const { noProject, ...rest } = body;
+  let account_id = rest.account_id;
+  if (!noProject && !account_id) {
+    if (!projectByToken.has(token)) {
+      const actor = actorByToken.get(token);
+      const account = await project(actor.org, actor.user.id, actor.membership);
+      projectByToken.set(token, account.id);
+    }
+    account_id = projectByToken.get(token);
+  }
+  return authed(request(app).post('/api/v1/timesheets/entries'), token).send({ ...rest, ...(account_id ? { account_id } : {}) });
+};
 
 describe('non-IT vs IT timesheet fields', () => {
-  test('a non-IT employee logs just Date/Hours/Notes with no project — stored as non-billable general time', async () => {
+  test('a non-IT employee cannot log a timesheet with no project', async () => {
     const org = await createOrg();
     const emp = await person(org);
-    const res = await log(emp.token, { date: '2026-09-15', hours: 6, notes: 'Team meetings' });
-    expect(res.status).toBe(201);
-    expect(res.body.data.account_id).toBeNull();
-    expect(res.body.data.billable).toBe(false);
+    const res = await log(emp.token, { date: '2026-09-15', hours: 6, notes: 'Team meetings', noProject: true });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toContain('project');
   });
 
   test('an IT employee must pick a project, and only one assigned to them; /my-projects lists exactly those', async () => {
@@ -67,7 +82,7 @@ describe('non-IT vs IT timesheet fields', () => {
     const mine = await project(org, dev.user.id, dev.membership);
     const notMine = await project(org, dev.user.id);
 
-    expect((await log(dev.token, { date: '2026-09-15', hours: 4 })).status).toBe(422);
+    expect((await log(dev.token, { date: '2026-09-15', hours: 4, noProject: true })).status).toBe(422);
     const forbidden = await log(dev.token, { date: '2026-09-15', hours: 4, account_id: notMine.id });
     expect(forbidden.status).toBe(403);
     expect(forbidden.body.message).toContain("aren't allocated to that project");
@@ -204,9 +219,10 @@ describe('Timesheet Regularisation', () => {
     expect((await request_({ date: '2026-09-22', hours: 6, reason: 'forgot' })).status).toBe(422); // not locked
     await lockedWeek(org);
     expect((await request_({ date: '2099-01-01', hours: 6, reason: 'future' })).status).toBe(422);
-    const ok = await request_({ date: '2026-09-22', hours: 6, reason: 'Missed the deadline' });
+    const proj = await project(org, emp.user.id, emp.membership);
+    const ok = await request_({ date: '2026-09-22', account_id: proj.id, hours: 6, reason: 'Missed the deadline' });
     expect(ok.status).toBe(201);
-    expect((await request_({ date: '2026-09-22', hours: 7, reason: 'again' })).status).toBe(409);
+    expect((await request_({ date: '2026-09-22', account_id: proj.id, hours: 7, reason: 'again' })).status).toBe(409);
   });
 
   test('approval by the reporting manager creates the entry on the locked day; the manager was notified and the employee is told', async () => {
@@ -252,7 +268,8 @@ describe('Timesheet Regularisation', () => {
     const onLeave = await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-23', hours: 6, reason: 'x' });
     expect(onLeave.status).toBe(422);
 
-    const req = (await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-22', hours: 6, reason: 'x' })).body.data;
+    const proj = await project(org, emp.user.id, emp.membership);
+    const req = (await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-22', account_id: proj.id, hours: 6, reason: 'x' })).body.data;
     const rejected = await authed(request(app).post(`/api/v1/timesheets/regularization-tickets/${req.id}/decision`), manager.token)
       .send({ status: 'rejected', decision_reason: 'Not justified' });
     expect(rejected.status).toBe(200);

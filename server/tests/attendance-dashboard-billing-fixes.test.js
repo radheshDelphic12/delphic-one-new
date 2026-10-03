@@ -49,58 +49,33 @@ async function addProject(ctx, name, { rate = 1000, rate_type = 'hourly', start 
 
 const day = (s) => new Date(`${s}T00:00:00.000Z`);
 
-describe('bulk Present is for the IT department only', () => {
-  test('backfill and the daily process mark IT employees; non-IT, contractors and vendors are never marked', async () => {
+describe('bulk Present covers full-time employees, IT and non-IT', () => {
+  test('backfill marks IT and non-IT full-time employees; contractors are never marked', async () => {
     const ctx = await seed();
     const itEmp = await ctx.person('It Emp', { dept: ctx.it });
     const hrEmp = await ctx.person('Hr Emp', { dept: ctx.hr });
     const noDept = await ctx.person('No Dept');
     const itContractor = await ctx.person('It Contractor', { dept: ctx.it, worker_type: 'contractor' });
 
-    const res = await authed(request(app).post(api('/attendance/backfill-month')), ctx.adminToken).send({ ...SEP, reason: 'September IT' });
+    const res = await authed(request(app).post(api('/attendance/backfill-month')), ctx.adminToken).send({ ...SEP, reason: 'September attendance' });
     expect(res.status).toBe(200);
-    const marked = await prisma.attendanceRecord.groupBy({ by: ['org_membership_id'], where: { org_id: ctx.org.id }, _count: true });
-    expect(marked.map((m) => m.org_membership_id)).toEqual([itEmp.membership.id]);
-    expect(marked[0]._count).toBeGreaterThan(15);
-    for (const other of [hrEmp, noDept, itContractor]) expect(await prisma.attendanceRecord.count({ where: { org_membership_id: other.membership.id } })).toBe(0);
+    for (const employee of [itEmp, hrEmp, noDept]) {
+      expect(await prisma.attendanceRecord.count({ where: { org_membership_id: employee.membership.id } })).toBeGreaterThan(15);
+    }
+    expect(await prisma.attendanceRecord.count({ where: { org_membership_id: itContractor.membership.id } })).toBe(0);
   });
 
-  test('IT is read the same way Payroll reads it: the membership department wins, the person department is the fallback', async () => {
+  test('department does not decide who is marked: a full-time HR employee is marked the same as IT', async () => {
     const ctx = await seed();
-    // Department only on the membership (how most real employees are set up).
     const user = await createUser({ role: 'employee', name: 'Membership IT' });
     const viaMembership = await createOrgMembership(user.id, ctx.org.id, { role: 'employee', joined_at: new Date('2020-01-01'), department_id: ctx.it.id });
-    // Membership says HR, the old person record still says IT: HR wins, so not IT.
     const other = await createUser({ role: 'employee', name: 'Membership HR' });
     await prisma.user.update({ where: { id: other.id }, data: { department_id: ctx.it.id } });
     const hrWins = await createOrgMembership(other.id, ctx.org.id, { role: 'employee', joined_at: new Date('2020-01-01'), department_id: ctx.hr.id });
 
-    await authed(request(app).post(api('/attendance/backfill-month')), ctx.adminToken).send({ ...SEP, reason: 'September IT' });
+    await authed(request(app).post(api('/attendance/backfill-month')), ctx.adminToken).send({ ...SEP, reason: 'September attendance' });
     expect(await prisma.attendanceRecord.count({ where: { org_membership_id: viaMembership.id } })).toBeGreaterThan(15);
-    expect(await prisma.attendanceRecord.count({ where: { org_membership_id: hrWins.id } })).toBe(0);
-  });
-
-  test('clean-up removes only the auto / backfill Present rows of non-IT staff and is audited', async () => {
-    const ctx = await seed();
-    const itEmp = await ctx.person('It Emp', { dept: ctx.it });
-    const hrEmp = await ctx.person('Hr Emp', { dept: ctx.hr });
-    const row = (membership, date, reason, status = 'present') => prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: membership.id, date: day(date), status, source: 'manual', regularized_reason: reason } });
-    await row(hrEmp.membership, '2026-09-01', 'backfill 2026-09: September IT'); // wrong: bulk run on a non-IT person
-    await row(hrEmp.membership, '2026-09-02', 'auto_daily'); // wrong: daily process on a non-IT person
-    const byHand = await row(hrEmp.membership, '2026-09-03', 'marked present by HR'); // a hand-marked row stays
-    const itRow = await row(itEmp.membership, '2026-09-01', 'backfill 2026-09: September IT'); // IT stays
-
-    const preview = await authed(request(app).post(api('/attendance/backfill-cleanup')), ctx.adminToken).send({ reason: 'Wrong bulk run', dry_run: true });
-    expect(preview.body.data).toMatchObject({ dry_run: true, records: 2, employees_affected: 1 });
-    expect(await prisma.attendanceRecord.count({ where: { org_id: ctx.org.id } })).toBe(4); // a preview deletes nothing
-
-    const done = await authed(request(app).post(api('/attendance/backfill-cleanup')), ctx.adminToken).send({ reason: 'Wrong bulk run' });
-    expect(done.body.data).toMatchObject({ dry_run: false, records: 2 });
-    const left = await prisma.attendanceRecord.findMany({ where: { org_id: ctx.org.id } });
-    expect(left.map((r) => r.id).sort()).toEqual([byHand.id, itRow.id].sort());
-    expect(await prisma.auditLog.count({ where: { action: 'attendance_backfill_cleanup', reason: 'Wrong bulk run' } })).toBe(1);
-
-    expect((await authed(request(app).post(api('/attendance/backfill-cleanup')), itEmp.token).send({ reason: 'nope' })).status).toBe(403);
+    expect(await prisma.attendanceRecord.count({ where: { org_membership_id: hrWins.id } })).toBeGreaterThan(15);
   });
 });
 

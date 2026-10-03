@@ -174,13 +174,11 @@ export function BackfillMonthDrawer({ open, onClose, onApplied }) {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState([]);
-  const [cleanupPreview, setCleanupPreview] = useState(null);
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   useEffect(() => {
     if (!open) return;
     setPreview(null);
-    setCleanupPreview(null);
     setReason('');
     apiClient.get('/attendance/backfill-month/runs').then(({ data }) => setRuns(data.data || [])).catch(() => setRuns([]));
   }, [open]);
@@ -203,19 +201,6 @@ export function BackfillMonthDrawer({ open, onClose, onApplied }) {
     }
   }
 
-  async function cleanup(dryRun) {
-    setBusy(true);
-    try {
-      const { data } = await apiClient.post('/attendance/backfill-cleanup', { reason: reason.trim(), dry_run: dryRun });
-      setCleanupPreview(data.data);
-      if (!dryRun) { pushInfo(`Removed ${data.data.records} wrongly marked row${data.data.records === 1 ? '' : 's'}`); onApplied?.(); }
-    } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to clean up'), 'Something went wrong');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const ready = month && month < thisMonth && reason.trim().length >= 3;
   return (
     <Drawer open={open} title="Backfill previous month" onClose={onClose} size="md" tone="create" footer={(
@@ -227,14 +212,14 @@ export function BackfillMonthDrawer({ open, onClose, onApplied }) {
     )}>
       <div className="space-y-3">
         <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">
-          Marks <b>IT department</b> employees <b>present</b> on every working day of the chosen month. Non-IT staff, contractors and vendors are never marked. Weekends, company holidays, approved leave and days that already have a record are skipped. Only past months can be backfilled - never the current or a future month.
+          Marks full-time employees, IT and non-IT, <b>present</b> on every working day of the chosen month. Contractors and vendors are never marked. Weekends, company holidays, approved leave and days that already have a record are skipped. Only past months can be backfilled - never the current or a future month.
         </p>
         <label className="block text-xs font-medium text-tertiary-600">Month
           <input type="month" max={thisMonth} value={month} onChange={(e) => { setMonth(e.target.value); setPreview(null); }} className={inputClass} />
         </label>
         {month >= thisMonth && <p className="text-xs text-danger-600">Pick a month before {thisMonth}.</p>}
         <label className="block text-xs font-medium text-tertiary-600">Reason
-          <input value={reason} onChange={(e) => { setReason(e.target.value); setPreview(null); }} placeholder="e.g. September attendance for IT" className={inputClass} />
+          <input value={reason} onChange={(e) => { setReason(e.target.value); setPreview(null); }} placeholder="e.g. September attendance for full-time staff" className={inputClass} />
         </label>
         {preview && (
           <div className="rounded-xl border border-tertiary-100 p-3 text-sm text-tertiary-700">
@@ -242,15 +227,6 @@ export function BackfillMonthDrawer({ open, onClose, onApplied }) {
             <p className="mt-1 text-xs text-tertiary-500">Skipped: {Object.keys(preview.skipped).length ? Object.entries(preview.skipped).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', ') : 'none'}</p>
           </div>
         )}
-        <div className="rounded-xl border border-warning-200 bg-warning-50 p-3 text-xs text-tertiary-700">
-          <p className="font-semibold text-tertiary-900">Wrongly marked non-IT staff?</p>
-          <p className="mt-1">Removes the Present rows that an earlier bulk run or the daily process created for people outside IT. Rows marked by hand, leave and IT rows are never touched. The reason above is used for the audit.</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn-secondary text-xs" disabled={busy || reason.trim().length < 3} onClick={() => cleanup(true)}>Preview clean-up</button>
-            <button type="button" className="btn-secondary text-xs" disabled={busy || reason.trim().length < 3 || !cleanupPreview?.records} onClick={() => cleanup(false)}>Remove them</button>
-            {cleanupPreview && <span>{cleanupPreview.records} row{cleanupPreview.records === 1 ? '' : 's'} for {cleanupPreview.employees_affected} non-IT employee{cleanupPreview.employees_affected === 1 ? '' : 's'}{cleanupPreview.dry_run ? ' would be removed' : ' removed'}</span>}
-          </div>
-        </div>
         {runs.length > 0 && (
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Previous runs</h4>

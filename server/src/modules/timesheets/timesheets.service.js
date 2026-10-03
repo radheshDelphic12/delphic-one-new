@@ -134,7 +134,8 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (leave) return { error: 'leave_day', leave };
 
   const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  // The old non-IT timesheet (date, hours, notes, no project) is gone. Every entry is project time.
+  if (!account_id) return { error: 'project_required' };
 
   let account = null;
   if (account_id) {
@@ -581,7 +582,7 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   if (leave) return { error: 'leave_day', leave };
 
   const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  if (!account_id) return { error: 'project_required' };
   let account = null;
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });

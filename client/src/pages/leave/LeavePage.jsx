@@ -170,6 +170,38 @@ function DecisionDrawer({ row, open, onClose, onSaved }) {
   </Drawer>;
 }
 
+// An already-approved paid leave can be converted to Unpaid Leave as a whole.
+// The request stays approved. Only the type changes.
+function MarkUnpaidModal({ row, onClose, onDone }) {
+  const { pushError } = useAlerts();
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (row) setReason(''); }, [row]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiClient.post(`/leave/requests/${row.id}/mark-unpaid`, { reason: reason.trim() || undefined });
+      onDone();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to mark the leave unpaid'), 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={Boolean(row)} title="Mark leave unpaid" onClose={onClose} footer={<><button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Keep paid</button><button type="submit" form="mark-unpaid-form" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Mark unpaid'}</button></>}>
+      <form id="mark-unpaid-form" onSubmit={submit} className="space-y-3">
+        <p className="text-tertiary-600">{row?.org_membership?.person?.name} · {row?.leave_type?.name} · {formatRequestDate(row, 'start')} to {formatRequestDate(row, 'end')}</p>
+        <p className="text-xs text-tertiary-500">The leave stays approved. It becomes Unpaid Leave, so those days no longer count as paid.</p>
+        <label className="block text-xs font-medium text-tertiary-600">Reason <span className="font-normal text-tertiary-400">(optional)</span><textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
+      </form>
+    </Modal>
+  );
+}
+
 // Admin withdraws a pending or already-approved leave. The days go back to the
 // employee's balance on their own (balances are computed from approved leave).
 function WithdrawModal({ row, onClose, onDone }) {
@@ -216,6 +248,7 @@ export default function LeavePage() {
   const [adminApplyOpen, setAdminApplyOpen] = useState(false);
   const [decision, setDecision] = useState(null);
   const [withdrawing, setWithdrawing] = useState(null);
+  const [markingUnpaid, setMarkingUnpaid] = useState(null);
   const [status, setStatus] = useState('');
 
   async function load() {
@@ -279,7 +312,7 @@ export default function LeavePage() {
     { key: 'days', header: 'Days', render: (row) => (row.is_half_day ? 'Half day (0.5)' : row.days ?? '—') },
     { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
     { key: 'reason', header: 'Reason', render: (row) => row.reason || 'Not provided' },
-    { key: 'actions', header: 'Actions', render: (row) => tab === 'team' && (row.status === 'pending' || row.status === 'approved') ? <div className="flex gap-1">{row.status === 'pending' && <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setDecision(row)}><Check className="h-3.5 w-3.5" /> Review</button>}<button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setWithdrawing(row)}><Undo2 className="h-3.5 w-3.5" /> Withdraw</button></div> : tab === 'mine' && row.status === 'pending' ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => cancelRequest(row)}><X className="h-3.5 w-3.5" /> Cancel</button> : null },
+    { key: 'actions', header: 'Actions', render: (row) => tab === 'team' && (row.status === 'pending' || row.status === 'approved') ? <div className="flex gap-1">{row.status === 'pending' && <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setDecision(row)}><Check className="h-3.5 w-3.5" /> Review</button>}{row.status === 'approved' && row.leave_type?.paid !== false && <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setMarkingUnpaid(row)}>Mark unpaid</button>}<button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => setWithdrawing(row)}><Undo2 className="h-3.5 w-3.5" /> Withdraw</button></div> : tab === 'mine' && row.status === 'pending' ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={() => cancelRequest(row)}><X className="h-3.5 w-3.5" /> Cancel</button> : null },
   ];
 
   return <div className="space-y-4">
@@ -291,6 +324,7 @@ export default function LeavePage() {
     {isAdmin && <LeaveTypesAdmin />}
     <LeaveRequestDrawer types={types} open={requestOpen} onClose={() => setRequestOpen(false)} onSaved={(created) => { setRows((current) => [created, ...current]); setRequestOpen(false); pushInfo('Leave request submitted'); }} />
     {isAdmin && <LeaveRequestDrawer admin types={types} open={adminApplyOpen} onClose={() => setAdminApplyOpen(false)} onSaved={() => { setAdminApplyOpen(false); pushInfo('Leave applied'); load(); }} />}
+    <MarkUnpaidModal row={markingUnpaid} onClose={() => setMarkingUnpaid(null)} onDone={() => { setMarkingUnpaid(null); pushInfo('Leave marked unpaid'); load(); }} />
     <WithdrawModal row={withdrawing} onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); pushInfo('Leave withdrawn'); load(); }} />
     <DecisionDrawer row={decision} open={Boolean(decision)} onClose={() => setDecision(null)} onSaved={replaceRow} />
   </div>;

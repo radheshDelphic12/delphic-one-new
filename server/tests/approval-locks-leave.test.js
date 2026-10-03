@@ -30,7 +30,12 @@ async function seed(orgOverrides = {}) {
   return { org, adminUser, adminToken, managerUser, managerMembership, managerToken, employee };
 }
 
-const logEntry = (person, date = DAY, hours = 8) => authed(request(app).post('/api/v1/timesheets/entries'), person.token).send({ date, hours, notes: 'work' });
+const logEntry = async (person, date = DAY, hours = 8) => {
+  const account = await prisma.account.create({
+    data: { type: 'client', name: `Project ${date} ${hours} ${person.membership.id.slice(0, 8)}`, stage: 'active', owner_id: person.user.id, org_id: person.membership.org_id },
+  });
+  return authed(request(app).post('/api/v1/timesheets/entries'), person.token).send({ date, hours, notes: 'work', account_id: account.id });
+};
 const decide = (token, id, status = 'approved', reason) => authed(request(app).post(`/api/v1/timesheets/entries/${id}/decision`), token).send({ status, ...(reason ? { reason } : {}) });
 
 describe('Timesheet approval chain - Employee -> Manager (optional) -> Admin (mandatory)', () => {
@@ -315,6 +320,22 @@ describe('Leave types for salary - configuration, Comp Off, unpaid overflow', ()
     const reqs = await prisma.leaveRequest.findMany({ where: { org_membership_id: emp.membership.id }, include: { leave_type: true } });
     expect(reqs).toHaveLength(1);
     expect(reqs[0].leave_type.name).toBe('Unpaid Leave');
+  });
+
+  test('an already approved paid leave can be marked unpaid', async () => {
+    const ctx = await seed();
+    const emp = await ctx.employee('Eve');
+    const casual = await typeByName(ctx.adminToken, 'Casual Leave');
+    const created = await apply(emp, casual.id, MON, MON);
+    expect(created.status).toBe(201);
+    const approved = await authed(request(app).post(`/api/v1/leave/requests/${created.body.data.id}/decision`), ctx.adminToken).send({ status: 'approved' });
+    expect(approved.status).toBe(200);
+    const marked = await authed(request(app).post(`/api/v1/leave/requests/${created.body.data.id}/mark-unpaid`), ctx.adminToken).send({ reason: 'Balance was already used' });
+    expect(marked.status).toBe(200);
+    const row = await prisma.leaveRequest.findUnique({ where: { id: created.body.data.id }, include: { leave_type: true } });
+    expect(row.status).toBe('approved');
+    expect(row.leave_type.paid).toBe(false);
+    expect(row.leave_type.name).toBe('Unpaid Leave');
   });
 });
 

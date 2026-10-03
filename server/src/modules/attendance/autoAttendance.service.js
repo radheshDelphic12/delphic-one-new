@@ -7,10 +7,10 @@
 //  * an admin backfill for a previous month - the same rules for every working day of that
 //    month, audited (who, when, month, employees, records created, reason).
 //
-// "Applicable" = active full-time employees of the IT DEPARTMENT only. Non-IT staff, contractors and
-// vendors are never marked by either operation. Existing attendance records are never overwritten, and
-// approved leave days, weekends and company holidays are skipped. Attendance stays separate from
-// project timesheets.
+// "Applicable" = active full-time employees, IT and non-IT. Contractors and vendors are never marked:
+// their pay comes from the project timesheet, not from attendance. Existing records are never
+// overwritten, and approved leave days, weekends and company holidays are skipped. Attendance stays
+// separate from project timesheets.
 
 const prisma = require('../../config/db');
 const logger = require('../../config/logger');
@@ -31,21 +31,12 @@ const MEMBER_SELECT = {
   person: { select: { name: true } },
 };
 
-// The IT department, however it is capitalised. A person's department lives in two places: the membership's own
-// department (what Payroll and the rest of the app show) and, for older records, the person's. The membership's
-// wins; the person's is only used when the membership has none - the same rule as salary.engine.isItDepartment.
-const IT_NAME = { name: { equals: 'IT', mode: 'insensitive' } };
-const IT_DEPARTMENT = {
-  OR: [{ department: IT_NAME }, { department_id: null, person: { department: IT_NAME } }],
-};
-
 async function applicableMembers(orgId, { membershipIds = null } = {}) {
   return prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
       employment_status: { in: ['active', 'notice_period'] },
       worker_type: 'full_time_employee',
-      AND: [IT_DEPARTMENT],
       ...(membershipIds ? { id: { in: membershipIds } } : {}),
     },
     select: MEMBER_SELECT,
@@ -177,55 +168,10 @@ async function backfillMonth(orgId, adminUserId, { year, month, reason, org_memb
   return { dry_run, ...summary };
 }
 
-/**
- * Clean-up of the earlier bulk Present that ran for everybody: removes the attendance rows that the DAILY
- * process or a BACKFILL created (source 'manual', status present / half_day, reason 'auto_daily' or
- * 'backfill YYYY-MM: ...') for people OUTSIDE the IT department. Nothing else is touched: a row an admin
- * regularised or marked by hand, leave, and IT rows stay. `dry_run` only counts. Audited like the run it undoes.
- */
-async function cleanupNonItAttendance(orgId, adminUserId, { reason, dry_run = false }) {
-  const rows = await prisma.attendanceRecord.findMany({
-    where: {
-      org_id: orgId,
-      source: 'manual',
-      status: { in: ['present', 'half_day'] },
-      OR: [{ regularized_reason: 'auto_daily' }, { regularized_reason: { startsWith: 'backfill ' } }],
-      NOT: { org_membership: IT_DEPARTMENT },
-    },
-    select: { id: true, org_membership_id: true, date: true, status: true, org_membership: { select: { person: { select: { name: true } } } } },
-  });
-  const perEmployee = new Map();
-  for (const r of rows) {
-    const cur = perEmployee.get(r.org_membership_id) || { id: r.org_membership_id, name: r.org_membership?.person?.name || null, days: 0 };
-    cur.days += 1;
-    perEmployee.set(r.org_membership_id, cur);
-  }
-  const summary = { records: rows.length, employees_affected: perEmployee.size, employees: [...perEmployee.values()] };
-  if (dry_run || !rows.length) return { dry_run, ...summary };
-
-  for (const r of rows) {
-    // A locked month is flagged for recalculation, never silently rewritten.
-    await detectFinanceChange(orgId, {
-      source_type: 'attendance',
-      source_id: r.id,
-      date: r.date,
-      org_membership_id: r.org_membership_id,
-      changed_by: adminUserId,
-      description: `Auto/backfill attendance removed for a non-IT employee (${r.status.replace('_', ' ')}): ${reason}`.slice(0, 500),
-      old_value: { status: r.status },
-      new_value: { status: 'no_record' },
-    });
-  }
-  await prisma.attendanceRecord.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
-  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: adminUserId, action: 'attendance_backfill_cleanup', entity_type: 'attendance', entity_id: orgId, reason, snapshot: summary } });
-  logger.info('attendance_backfill_cleanup', { org_id: orgId, actor_id: adminUserId, records: rows.length });
-  return { dry_run, ...summary };
-}
-
 // Past backfill runs (audit trail), newest first.
 async function listBackfillRuns(orgId, limit = 20) {
   const rows = await prisma.auditLog.findMany({ where: { org_id: orgId, action: 'attendance_backfill_month' }, orderBy: { created_at: 'desc' }, take: limit });
   return rows.map((r) => ({ id: r.id, actor_id: r.actor_id, created_at: r.created_at, reason: r.reason, ...r.snapshot }));
 }
 
-module.exports = { applicableMembers, startTimePassed, runDaily, backfillMonth, cleanupNonItAttendance, listBackfillRuns };
+module.exports = { applicableMembers, startTimePassed, runDaily, backfillMonth, listBackfillRuns };

@@ -17,11 +17,25 @@ const STATUS_TONE = {
   empty: 'bg-tertiary-50 text-tertiary-400',
   no_entries: 'bg-tertiary-50 text-tertiary-400',
 };
-const ATTENDANCE_LABEL = { present: 'Present', absent: 'Absent', half_day: 'Half day', leave: 'Leave', holiday: 'Holiday', wfh: 'WFH' };
+const ATTENDANCE_LABEL = { present: 'Present', absent: 'Absent', half_day: 'Half day', holiday: 'Holiday', wfh: 'WFH' };
 
 const hoursLabel = (n) => `${Number(n || 0)}h`;
-// Attendance as recorded; an attendance row of status "leave" shows the real leave type (Sick Leave, Casual Leave ...).
-const attendanceText = (day) => day.attendance_label || ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status;
+const leaveCaption = (leave) => `${leave.name}${leave.is_half_day ? ' (half)' : ''}`;
+// Hours for the month, named by leave type (Sick Leave, Casual Leave, Earned Leave ...).
+const leaveHourSummary = (days) => {
+  const totals = new Map();
+  for (const day of days || []) {
+    for (const leave of day.leaves || []) totals.set(leave.name, (totals.get(leave.name) || 0) + Number(leave.hours || 0));
+  }
+  return [...totals.entries()].filter(([, hours]) => hours > 0).map(([name, hours]) => `${name} ${hoursLabel(hours)}`).join(' · ');
+};
+const attendanceText = (day) => {
+  if (day.attendance_status === 'leave') {
+    const names = (day.leaves || []).map(leaveCaption);
+    return names.length ? names.join(', ') : 'No leave type recorded';
+  }
+  return day.attendance_label || ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status;
+};
 
 function DayCell({ day, selected, onSelect }) {
   const off = day.day_type !== 'working';
@@ -37,8 +51,10 @@ function DayCell({ day, selected, onSelect }) {
         {day.locked ? <Lock className="h-3 w-3 text-tertiary-500" aria-label="Locked" /> : <LockOpen className="h-3 w-3 text-tertiary-300" aria-label="Unlocked" />}
       </span>
       {day.logged > 0 && <span className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_TONE[day.status] || STATUS_TONE.empty}`} title="Project timesheet hours">Project {hoursLabel(day.logged)} · {day.status}</span>}
-      {day.attendance_applicable !== false && day.attendance_status && <span className="text-tertiary-600" title="Attendance">{attendanceText(day)}</span>}
-      {day.leave && <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-blue-700" title="Approved leave">{day.leave.name}{day.leave.is_half_day ? ' (half)' : ''}</span>}
+      {day.attendance_applicable !== false && day.attendance_status && day.attendance_status !== 'leave' && <span className="text-tertiary-600" title="Attendance">{attendanceText(day)}</span>}
+      {day.attendance_status === 'leave' && !(day.leaves || []).length && <span className="text-tertiary-600" title="Attendance">No leave type recorded</span>}
+      {(day.leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-blue-50 px-1.5 py-0.5 text-blue-700" title="Approved leave">{leaveCaption(leave)}</span>)}
+      {(day.pending_leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700" title="Pending leave">{leaveCaption(leave)} (pending)</span>)}
       {day.attendance_conflict && <span className="text-[11px] text-amber-700">Present + approved leave - review</span>}
       {off && day.day_label && <span className="text-tertiary-400">{day.day_label}</span>}
       {(day.ot_hours > 0 || day.ot_tickets.length > 0) && (
@@ -162,12 +178,13 @@ function MonthCalendar({ year, month, member, onBack }) {
     return [...Array(lead).fill(null), ...data.days];
   }, [data]);
 
+  const leaveSummary = leaveHourSummary(data?.days);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {onBack ? <button type="button" className="btn-ghost inline-flex items-center gap-1" onClick={onBack}><ArrowLeft className="h-4 w-4" /> All timesheets</button> : <span />}
         <h3 className="font-heading text-base font-semibold text-tertiary-900">{member.name} · {MONTHS[month - 1]} {year}</h3>
-        {data && <span className="text-xs text-tertiary-500">Logged {hoursLabel(data.totals.logged)} · approved {hoursLabel(data.totals.approved)} · pending {hoursLabel(data.totals.pending)} · leave {hoursLabel(data.totals.leave_hours)}</span>}
+        {data && <span className="text-xs text-tertiary-500">Logged {hoursLabel(data.totals.logged)} · approved {hoursLabel(data.totals.approved)} · pending {hoursLabel(data.totals.pending)}{leaveSummary ? ` · ${leaveSummary}` : ''}</span>}
       </div>
       {!data ? <p className="text-sm text-tertiary-500">Loading...</p> : (
         <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">

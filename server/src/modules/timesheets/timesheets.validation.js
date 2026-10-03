@@ -1,9 +1,8 @@
 const { z } = require('zod');
 const { requiredDate, optionalDate } = require('../../lib/zodDate');
 
-// `account_id` is optional: a non-IT employee logs just Date/Hours/Notes with no
-// project (stored as non-billable general time). IT staff must send a project,
-// and only one assigned to them — enforced in timesheets.service.createEntry.
+// `account_id` is required. The old non-IT timesheet (date, hours and notes, no
+// project) is gone. A project is enforced in timesheets.service.createEntry.
 // There is deliberately no `module_name` any more (unknown keys are stripped).
 const createEntrySchema = z.object({
   date: requiredDate,
