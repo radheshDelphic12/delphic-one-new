@@ -124,8 +124,40 @@ async function isLocked(orgId, date, orgMembershipId = null) {
   return orgMembershipId ? monthLocks.isMemberMonthLocked(orgMembershipId, date) : false;
 }
 
+// Developers (IT and contractors) fill last month until the 5th of this month.
+// The weekly lock still runs, but it does not block those days during that window.
+// An admin month lock still blocks. Older months stay closed.
+const FILING_DEADLINE_DAY = 5;
+
+function filingWindowStart(today) {
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth();
+  if (today.getUTCDate() <= FILING_DEADLINE_DAY) return new Date(Date.UTC(year, month - 1, 1));
+  return new Date(Date.UTC(year, month, 1));
+}
+
+function developerMayIgnoreWeeklyLock(date, today) {
+  if (today.getUTCDate() > FILING_DEADLINE_DAY) return false;
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+  return date >= start && date <= end;
+}
+
+// Why an employee cannot log or edit this date, or null when the day is open for them.
+async function employeeLogBlock(orgId, date, orgMembershipId) {
+  if (await monthLocks.isMemberMonthLocked(orgMembershipId, date)) return 'day_locked';
+  if (await isItMember(orgMembershipId)) {
+    const today = todayIst();
+    if (date < filingWindowStart(today)) return 'month_closed';
+    if (developerMayIgnoreWeeklyLock(date, today)) return null;
+  }
+  const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
+  return lock ? 'day_locked' : null;
+}
+
 async function createEntry(orgId, orgMembershipId, { date, account_id, requirement_id, hours, overtime_hours = 0, billable, notes }, actorUserId = null) {
-  if (await isLocked(orgId, date, orgMembershipId)) return { error: 'day_locked' };
+  const logBlock = await employeeLogBlock(orgId, date, orgMembershipId);
+  if (logBlock) return { error: logBlock };
   // Attendance-paid people: overtime is a ticket approved by the manager, never timesheet hours.
   if (overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
@@ -317,7 +349,8 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId, org_membership_id: orgMembershipId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'submitted') return { error: 'already_decided' };
-  if (await isLocked(orgId, existing.date, existing.org_membership_id)) return { error: 'day_locked' };
+  const blocked = await employeeLogBlock(orgId, existing.date, existing.org_membership_id);
+  if (blocked) return { error: blocked };
   if (patch.overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
   if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
@@ -340,7 +373,8 @@ async function deleteOwnEntry(orgId, orgMembershipId, entryId) {
   const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId, org_membership_id: orgMembershipId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'submitted') return { error: 'already_decided' };
-  if (await isLocked(orgId, existing.date, existing.org_membership_id)) return { error: 'day_locked' };
+  const blocked = await employeeLogBlock(orgId, existing.date, existing.org_membership_id);
+  if (blocked) return { error: blocked };
   await prisma.timesheetEntry.delete({ where: { id: entryId } });
   await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
   return { deleted: true };
