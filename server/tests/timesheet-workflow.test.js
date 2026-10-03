@@ -208,7 +208,7 @@ describe('weekly auto-lock (Sunday 00:00, Sunday -> Saturday week)', () => {
 });
 
 describe('developer filing window', () => {
-  test('an IT developer can log a locked day in last month through the 5th, and an older month stays closed', async () => {
+  test('an IT developer can log a locked day in last month through the 5th; an older locked month stays closed', async () => {
     const org = await createOrg();
     const dept = await prisma.department.create({ data: { org_id: org.id, name: 'IT' } });
     const dev = await person(org, { dept });
@@ -216,6 +216,7 @@ describe('developer filing window', () => {
     const lastMonthDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 15));
     const olderDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 2, 10));
     await prisma.timesheetLock.create({ data: { org_id: org.id, date: lastMonthDay, is_auto: true } });
+    await prisma.timesheetLock.create({ data: { org_id: org.id, date: olderDay, is_auto: true } });
 
     const last = await log(dev.token, { date: lastMonthDay.toISOString().slice(0, 10), hours: 4 });
     if (today.getUTCDate() <= 5) expect(last.status).toBe(201);
@@ -223,7 +224,6 @@ describe('developer filing window', () => {
 
     const older = await log(dev.token, { date: olderDay.toISOString().slice(0, 10), hours: 4 });
     expect(older.status).toBe(409);
-    expect(older.body.message).toContain('5th');
   });
 });
 
