@@ -1,6 +1,5 @@
 const express = require('express');
 const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
-const requireItDepartment = require('../../middleware/requireItDepartment');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./timesheets.service');
@@ -110,13 +109,11 @@ router.get(
   })
 );
 
-// --- IT itemized timesheet view (module-tagged daily log + Excel export). ---
-//     Restricted to the IT department (admins bypass) — the underlying
-//     entries above stay open org-wide for every department's billing use.
+// Own project timesheet (daily log + Excel). Any employee. An admin may pass
+// org_membership_id to open someone else's log.
 
 router.get(
   '/my-log',
-  requireItDepartment,
   asyncHandler(async (req, res) => {
     const { month, year, org_membership_id } = monthQuerySchema.parse(req.query);
     // Only an admin may pull someone else's log (the monitoring hub's drill-down) —
@@ -141,7 +138,6 @@ router.get(
 
 router.get(
   '/export/excel',
-  requireItDepartment,
   asyncHandler(async (req, res) => {
     const { month, year, org_membership_id } = monthQuerySchema.parse(req.query);
     // Only an admin may export someone else's log — everyone else always gets their own.

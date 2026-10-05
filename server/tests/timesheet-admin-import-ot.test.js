@@ -13,10 +13,12 @@ afterAll(async () => {
 
 async function seed() {
   const org = await createOrg({ name: 'Delphic', slug: 'delphic' });
+  const it = await prisma.department.create({ data: { name: 'IT', org_id: org.id } });
   const admin = await createUser({ role: 'admin' });
   await createOrgMembership(admin.id, org.id, { role: 'admin' });
   const token = (await loginAs(admin)).access_token;
   const dev = await createUser({ role: 'employee' });
+  await prisma.user.update({ where: { id: dev.id }, data: { department_id: it.id } });
   const devMembership = await createOrgMembership(dev.id, org.id, { role: 'employee', employee_code: 'EMP7' });
   await prisma.orgMembership.update({ where: { id: devMembership.id }, data: { joined_at: new Date('2026-01-01') } });
   const project = await prisma.account.create({ data: { org_id: org.id, name: 'Acme', type: 'client', stage: 'active', project_code: 'P0042', owner_id: admin.id } });

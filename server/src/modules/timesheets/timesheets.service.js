@@ -28,31 +28,14 @@ function labelAccount(account) {
 const labelEntry = (row) => (row ? { ...row, account: labelAccount(row.account) } : row);
 const labelTicket = (row) => (row ? { ...row, account: labelAccount(row.account), timesheet_entry: labelEntry(row.timesheet_entry) } : row);
 
-// IT staff and vendor resources (contractors) log against a fixed set of
-// assigned projects only; everyone else logs plain Date/Hours/Notes with no
-// project (see createEntry). One timesheet model and one approval flow for
-// both — a contractor is an OrgMembership like any employee.
+// IT staff and contractors may log for a few days after the weekly lock.
+// Everyone, IT or not, logs project time only on a project they are allocated to.
 async function isItMember(orgMembershipId) {
   const m = await prisma.orgMembership.findUnique({
     where: { id: orgMembershipId },
     select: { worker_type: true, person: { select: { department: { select: { name: true } } } } },
   });
   return m?.worker_type === 'contractor' || m?.person?.department?.name?.toLowerCase() === 'it';
-}
-
-// Allocations are effective-dated: hours can only go on a project for a day
-// the person was allocated to it (start/end inclusive, null = open).
-async function isAssignedToProject(orgId, orgMembershipId, accountId, date) {
-  const row = await prisma.projectMemberAssignment.findFirst({
-    where: {
-      org_id: orgId,
-      org_membership_id: orgMembershipId,
-      account_id: accountId,
-      ...(date ? { AND: [{ OR: [{ start_date: null }, { start_date: { lte: date } }] }, { OR: [{ end_date: null }, { end_date: { gte: date } }] }] } : {}),
-    },
-    select: { id: true },
-  });
-  return Boolean(row);
 }
 
 // Approver routing: the employee's reporting manager (OrgMembership.manager_id),
@@ -154,8 +137,8 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
   if (leave) return { error: 'leave_day', leave };
 
+  // Every entry is project time. Non-IT hours are never billable, so they cannot land on a client timesheet.
   const it = await isItMember(orgMembershipId);
-  // The old non-IT timesheet (date, hours, notes, no project) is gone. Every entry is project time.
   if (!account_id) return { error: 'project_required' };
 
   let account = null;
@@ -163,7 +146,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
     // The person allocated to the project, or a team mate of someone allocated, may log on it.
-    if (it && !(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
+    if (!(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
     if (requirement_id) {
       const requirement = await prisma.requirement.findFirst({ where: { id: requirement_id, account_id, org_id: orgId } });
       if (!requirement) return { error: 'requirement_not_found' };
@@ -198,7 +181,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
       overtime_hours: account_id ? overtime_hours : 0,
       // A no-project entry is general time — never billable, so it can't
       // leak into revenue / project cost / budget.
-      billable: account_id ? billable : false,
+      billable: account_id && it ? billable : false,
       notes,
       is_holiday_overtime: Boolean(holiday),
       holiday_label: holiday ? `${holiday.label}, ${holiday.calendar_name}` : null,
@@ -351,7 +334,9 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
     if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
 
-  const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
+  const data = { ...patch };
+  if (!(await isItMember(orgMembershipId))) data.billable = false;
+  const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data });
   await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
   return { entry };
 }
@@ -400,6 +385,7 @@ async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch 
   }
   const data = { ...patch };
   if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
+  if (!(await isItMember(existing.org_membership_id))) data.billable = false;
   // Admin can also approve / reject (or re-open) any entry, locked or not.
   if (data.status && data.status !== existing.status) {
     Object.assign(data, data.status === 'submitted'
@@ -604,13 +590,12 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
   if (leave) return { error: 'leave_day', leave };
 
-  const it = await isItMember(orgMembershipId);
   if (!account_id) return { error: 'project_required' };
   let account = null;
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
+    if (!(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
   }
 
   const duplicate = await prisma.timesheetRegularizationTicket.findFirst({
@@ -1067,7 +1052,7 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
       account_id: body.account_id || null,
       hours: body.hours,
       overtime_hours: body.account_id ? body.overtime_hours || 0 : 0,
-      billable: body.account_id ? body.billable !== false : false,
+      billable: body.account_id && (await isItMember(org_membership_id)) ? body.billable !== false : false,
       notes: body.notes || null,
       status,
       ...(status === 'approved' ? { approved_by: adminUserId, approved_at: new Date(), decision_reason: `Added by admin: ${reason}`.slice(0, 500) } : {}),
@@ -1097,7 +1082,7 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
 // adminCreateEntry, with the upload's reason.
 async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
   const [memberships, projects] = await Promise.all([
-    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, employee_code: true, joined_at: true, person: { select: { email: true } } } }),
+    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, employee_code: true, joined_at: true, worker_type: true, person: { select: { email: true, department: { select: { name: true } } } } } }),
     prisma.account.findMany({ where: { org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, project_code: true } }),
   ]);
   const memberByKey = new Map();
@@ -1143,14 +1128,15 @@ async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
     if (dayTotals.get(key) > 24) { fail('More than 24 hours logged for this employee on this date'); continue; }
     const halfCap = await leaveService.workCapacityFor(orgId, member.id, date);
     if (halfCap && dayTotals.get(key) > halfCap.capacity + 1e-9) { fail(`Approved half-day leave that day - only ${halfCap.capacity}h can be logged for work`); continue; }
-    const billable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
+    const askedBillable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
+    const onClientTimesheet = member.worker_type === 'contractor' || member.person?.department?.name?.toLowerCase() === 'it';
     valid.push({
       org_membership_id: member.id,
       date,
       account_id: project?.id || null,
       hours,
       overtime_hours: project ? overtime : 0,
-      billable: Boolean(project) && billable,
+      billable: Boolean(project) && askedBillable && onClientTimesheet,
       notes: row.notes || null,
       status: 'approved',
       reason,

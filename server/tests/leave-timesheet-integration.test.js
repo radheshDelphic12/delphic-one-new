@@ -34,6 +34,9 @@ async function seed() {
   const emp = await person(org);
   const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
   projectId = project.id;
+  await prisma.projectMemberAssignment.create({
+    data: { org_id: org.id, account_id: project.id, org_membership_id: emp.membership.id, created_by: admin.user.id },
+  });
   await prisma.salaryStructure.create({
     data: { org_id: org.id, org_membership_id: emp.membership.id, effective_from: d('2020-01-01'), ctc: 198000, components: {}, created_by: admin.user.id },
   });

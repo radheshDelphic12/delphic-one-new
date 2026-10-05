@@ -10,7 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
-// import ProjectCostingSection from './ProjectCostingSection.jsx'; // switched off in the project drawer
+import ProjectCostingSection from './ProjectCostingSection.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -348,9 +348,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
 
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 
-        {/* Switched off: the "Project team (Employee <-> Project), cost rates & budget" section and the project
-            calendar line are not part of the project billing screen. */}
-        {/* <div className="rounded-2xl border border-tertiary-100 p-4"><ProjectCostingSection accountId={project.id} /></div> */}
+        <div className="rounded-2xl border border-tertiary-100 p-4"><ProjectCostingSection accountId={project.id} /></div>
       </div>
     </Drawer>
   );

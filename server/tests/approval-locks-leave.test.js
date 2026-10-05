@@ -34,6 +34,9 @@ const logEntry = async (person, date = DAY, hours = 8) => {
   const account = await prisma.account.create({
     data: { type: 'client', name: `Project ${date} ${hours} ${person.membership.id.slice(0, 8)}`, stage: 'active', owner_id: person.user.id, org_id: person.membership.org_id },
   });
+  await prisma.projectMemberAssignment.create({
+    data: { org_id: person.membership.org_id, account_id: account.id, org_membership_id: person.membership.id, created_by: person.user.id },
+  });
   return authed(request(app).post('/api/v1/timesheets/entries'), person.token).send({ date, hours, notes: 'work', account_id: account.id });
 };
 const decide = (token, id, status = 'approved', reason) => authed(request(app).post(`/api/v1/timesheets/entries/${id}/decision`), token).send({ status, ...(reason ? { reason } : {}) });
