@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-10-05: Salary lock counted days before joining as unmarked
+
+**Root cause:** Attendance pay walks every company working day of the month. A day with no attendance and no full-day leave incremented `unmarked_days`, and that count blocks the salary lock. `joined_at` and `left_at` were not part of the day loop, so a person who joined late in the month was blocked for every working day before they started.
+
+**Failure symptoms:** Locking that person's salary returned "Not ready to lock: 20 working days have no attendance marking" even though those days were before the joining date.
+
+**Fix details:** `computeBreakdown` takes `joinedAt` and `leftAt`. Days outside that employment stay in the month's expected hours (pay is still prorated) but are not unmarked, and attendance on them is ignored. `salaryLine` passes the membership dates. A day after joining that is still unmarked still blocks the lock.
+
+**Consulted sources:** `payroll.service.js` `computeBreakdown`; `salary.engine.js` `salaryLine`; `autoAttendance.service.js` `skipReason` (already skipped `before_joining`); `attendance-pay-basis.test.js`.
+
+**Prevention guidance:** Any new salary day-count (unmarked, deficit, leave) must skip days before `joined_at` and after `left_at`. Do not drop those days from expected hours, or a mid-month joiner is paid a full month.
+
 ## 2026-10-03: Timesheet tests created days with no project
 
 **Root cause:** Employee timesheet creates now require `account_id`. `frd-hardening.test.js`, `timesheet-payroll-rules.test.js`, and `leave-timesheet-integration.test.js` still posted `{ date, hours }` only. The API returned 422, so `body.data` was missing and the month lock saw zero pending entries.

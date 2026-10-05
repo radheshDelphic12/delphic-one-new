@@ -188,7 +188,7 @@ describe('Live Analytics invoice filters and the Finance month-wise project view
     const view = res.body.data;
     expect(view.label).toBe('August 2026');
     const inv = view.projects.find((p) => p.project === 'Invoiced Co');
-    expect(inv).toMatchObject({ client: expect.any(String), billing_type: 'hourly', assigned_resources: ['Dev'], approved_hours: 24, billing_amount: 24000, payment_status: 'unpaid' });
+    expect(inv).toMatchObject({ client: expect.any(String), service_category: 'managed_services', billing_type: 'hourly', assigned_resources: ['Dev'], approved_hours: 24, billing_amount: 24000, payment_status: 'unpaid' });
     expect(inv.invoice).toMatchObject({ generated: true, sent: true, paid: false });
     expect(inv.financial_status).toMatchObject({ calculation: 'draft', financial: 'open' });
     expect(inv.attention).toEqual(['payment_pending']);

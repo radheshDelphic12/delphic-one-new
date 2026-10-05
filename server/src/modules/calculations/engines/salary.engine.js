@@ -235,6 +235,8 @@ function salaryLine(ctx, membership, asOf = null, { payBasis = payBasisOf(member
     shiftHours: shiftHours(membership.shift),
     asOf,
     payBasis,
+    joinedAt: membership.joined_at,
+    leftAt: membership.left_at,
     ticketsByDate: ctx.ticketsByMember.get(membership.id) || new Map(),
   });
   // Month-level adjustments (TDS, OT adjustment, variable pay, reimbursements, other additions / deductions)

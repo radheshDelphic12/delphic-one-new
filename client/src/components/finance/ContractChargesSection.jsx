@@ -74,7 +74,7 @@ export default function ContractChargesSection({ accountId, currency = 'INR' }) 
       <div>
         <h3 className="font-heading text-sm font-semibold text-tertiary-900">Invoice charges (GST, TDS, other)</h3>
         <p className="text-xs text-tertiary-500">
-          Worked out on the month&apos;s final approved amount (approved timesheet hours plus any adjustment). Percent = % of that amount; fixed = an amount in {currency}. “Added” raises what the client pays (GST), “deducted” lowers it (TDS). Applies to invoices generated or refreshed after the change.
+          Worked out on the month&apos;s final approved amount (approved project timesheet hours plus any adjustment). Percent = % of that amount; fixed = an amount in {currency}. “Added” raises what the client pays (GST), “deducted” lowers it (TDS). Applies to invoices generated or refreshed after the change.
         </p>
       </div>
 

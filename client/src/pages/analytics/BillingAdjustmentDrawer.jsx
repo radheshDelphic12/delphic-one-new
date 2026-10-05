@@ -64,7 +64,7 @@ export default function BillingAdjustmentDrawer({ target, onClose, onChanged }) 
     <Drawer open title={`Adjust billing · ${target.project.name}`} onClose={onClose} size="lg">
       <div className="space-y-4 text-sm">
         <p className="text-xs text-tertiary-500">
-          {periodLabel(target)} · calculated from approved timesheet hours {amountText(target.totals.amount, currency)}. Add a + or − tweak; it is listed on the invoice and audited. A locked month is flagged for review.
+          {periodLabel(target)} · calculated from approved project timesheet hours {amountText(target.totals.amount, currency)}. Add a + or − tweak; it is listed on the invoice and audited. A locked month is flagged for review.
         </p>
         <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
           {data.items.length === 0 && <li className="px-3 py-2 text-xs text-tertiary-400">No adjustments for this month.</li>}
