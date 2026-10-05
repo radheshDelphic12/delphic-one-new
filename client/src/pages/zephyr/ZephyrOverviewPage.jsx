@@ -90,7 +90,7 @@ function DrillDrawer({ drill, range, onClose }) {
       {rows === null && <div className="text-sm text-tertiary-500">Loading…</div>}
       {rows?.length === 0 && <div className="rounded-xl border border-dashed p-6 text-center text-sm text-tertiary-400">Nothing behind this number.</div>}
       <ul className="divide-y rounded-xl border bg-white">
-        {rows?.map((r) => (
+        {drill && rows?.map((r) => (
           <li key={r.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
             <div className="min-w-0">
               <div className="truncate font-medium text-tertiary-900">{drill.metric === 'salaries' ? r.person.name : r.category?.name}</div>
