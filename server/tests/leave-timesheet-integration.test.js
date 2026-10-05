@@ -26,10 +26,17 @@ async function person(org, { role = 'employee' } = {}) {
   return { user, membership, token: access_token };
 }
 
+let projectId;
+
 async function seed() {
   const org = await createOrg();
   const admin = await person(org, { role: 'admin' });
   const emp = await person(org);
+  const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
+  projectId = project.id;
+  await prisma.projectMemberAssignment.create({
+    data: { org_id: org.id, account_id: project.id, org_membership_id: emp.membership.id, created_by: admin.user.id },
+  });
   await prisma.salaryStructure.create({
     data: { org_id: org.id, org_membership_id: emp.membership.id, effective_from: d('2020-01-01'), ctc: 198000, components: {}, created_by: admin.user.id },
   });
@@ -44,7 +51,7 @@ const apply = (token, body) => api('post', token, '/leave/requests').send(body);
 const adminApply = (token, body) => api('post', token, '/leave/requests/admin').send(body);
 const decide = (token, id, status, reason) => api('post', token, `/leave/requests/${id}/decision`).send({ status, reason });
 const revoke = (token, id) => api('post', token, `/leave/requests/${id}/revoke`).send({ reason: 'Plan changed' });
-const logHours = (token, date, hours) => api('post', token, '/timesheets/entries').send({ date, hours });
+const logHours = (token, date, hours) => api('post', token, '/timesheets/entries').send({ date, hours, account_id: projectId });
 const weekOf = async (token, date) => (await api('get', token, `/timesheets/week?date=${date}`)).body.data;
 const dayOf = async (token, date) => (await weekOf(token, date)).days.find((x) => x.date === date);
 
@@ -301,7 +308,8 @@ describe('admin applies leave (rule 7)', () => {
 });
 
 describe('monthly paid hours and payroll (rules 5, 6, 10)', () => {
-  test('140h worked + 2 approved full paid days = 158 paid hours; unpaid leave and pending leave add nothing', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('140h worked + 2 approved full paid days = 158 paid hours; unpaid leave and pending leave add nothing', async () => {
     const s = await seed();
     const workDays = ['01', '02', '03', '04', '07', '08', '09', '10', '11', '14', '15', '16', '17', '18', '21'];
     for (const day of workDays) await entry(s, `2026-09-${day}`, 9);
@@ -338,7 +346,8 @@ describe('monthly paid hours and payroll (rules 5, 6, 10)', () => {
     expect(unpaidHalf.breakdown).toMatchObject({ paid_hours: 4.5, unpaid_leave_hours: 4.5, unpaid_leave_days: 0.5 });
   });
 
-  test('payroll after approved paid leave: no salary deduction for the leave days; unpaid leave is deducted; revoke puts it back', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('payroll after approved paid leave: no salary deduction for the leave days; unpaid leave is deducted; revoke puts it back', async () => {
     const s = await seed();
     for (let day = 1; day <= 30; day += 1) {
       const date = d(`2026-09-${String(day).padStart(2, '0')}`);

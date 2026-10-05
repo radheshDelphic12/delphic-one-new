@@ -137,6 +137,13 @@ async function createOrg(overrides = {}) {
       // predate is_master_workspace. Pass `is_master_workspace: false` explicitly
       // to exercise the new gating itself.
       is_master_workspace: overrides.is_master_workspace ?? true,
+      // Production default is true (admin approval is mandatory); the older suites approve as a
+      // manager and expect that to be final, so they run with it off. The approval-chain tests
+      // pass `timesheet_admin_approval: true`.
+      timesheet_admin_approval: overrides.timesheet_admin_approval ?? false,
+      // Same for the lock order (timesheets -> calculations -> financials): off for the older suites.
+      enforce_lock_order: overrides.enforce_lock_order ?? false,
+      ...(overrides.timesheet_manager_approval === undefined ? {} : { timesheet_manager_approval: overrides.timesheet_manager_approval }),
     },
   });
 }

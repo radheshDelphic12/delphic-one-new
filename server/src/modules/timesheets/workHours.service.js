@@ -29,7 +29,6 @@ const ADMIN_REVIEW_GRACE_DAYS = Number(process.env.TIMESHEET_ADMIN_REVIEW_GRACE_
 
 const DAY_MS = 86400000;
 const ymd = (date) => date.toISOString().slice(0, 10);
-const round1 = (n) => Math.round(n * 10) / 10;
 const round2 = (n) => Math.round(n * 100) / 100;
 const utcDay = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
@@ -110,29 +109,9 @@ async function membershipShift(orgMembershipId) {
  * logged (non-rejected) hours beyond expected. A changed amount goes back to
  * pending; no overtime left removes the row.
  */
-async function syncDayOvertime(orgId, orgMembershipId, date) {
-  const day = utcDay(date);
-  const [shift, cal, entries, existing] = await Promise.all([
-    membershipShift(orgMembershipId),
-    companyCalendarDays(orgId, orgMembershipId, day, day),
-    prisma.timesheetEntry.findMany({ where: { org_membership_id: orgMembershipId, date: day, status: { not: 'rejected' } }, select: { hours: true, overtime_hours: true } }),
-    prisma.timesheetDayOvertime.findUnique({ where: { org_membership_id_date: { org_membership_id: orgMembershipId, date: day } } }),
-  ]);
-  const { expected } = dayInfo(day, cal, shift);
-  const logged = entries.reduce((s, e) => s + Number(e.hours) + Number(e.overtime_hours || 0), 0);
-  const hours = round1(Math.max(0, logged - expected));
-  if (hours <= 0) {
-    if (existing) await prisma.timesheetDayOvertime.delete({ where: { id: existing.id } });
-    return null;
-  }
-  if (!existing) {
-    return prisma.timesheetDayOvertime.create({ data: { org_id: orgId, org_membership_id: orgMembershipId, date: day, hours } });
-  }
-  if (Number(existing.hours) === hours) return existing;
-  return prisma.timesheetDayOvertime.update({
-    where: { id: existing.id },
-    data: { hours, status: 'pending', decided_by: null, decided_at: null, decision_reason: null },
-  });
+async function syncDayOvertime() {
+  // Everyone is paid from attendance, so logged hours never create overtime (OT is ticket based).
+  return null;
 }
 
 /**
@@ -239,6 +218,10 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
   const clientFlags = await clientFlagsFor(orgId, accountIds, start, end);
   const otByDate = new Map(overtime.map((o) => [ymd(o.date), o]));
   const locked = new Set(locks.map((l) => ymd(l.date)));
+  // An admin may also have locked this employee's whole month (stage 1 of the financial lock).
+  const monthLockRows = await prisma.timesheetMonthLock.findMany({ where: { org_membership_id: orgMembershipId }, select: { period_year: true, period_month: true } });
+  const lockedMonths = new Set(monthLockRows.map((l) => `${l.period_year}-${l.period_month}`));
+  const dayLocked = (date, key) => locked.has(key) || lockedMonths.has(`${date.getUTCFullYear()}-${date.getUTCMonth() + 1}`);
   const today = todayIst();
 
   const days = [];
@@ -310,8 +293,8 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
       ot_id: ot?.id || null,
       ot_payable: split.ot_payable,
       status,
-      locked: locked.has(key),
-      admin_review: status === 'pending' && locked.has(key) && needsAdminReview(date, today),
+      locked: dayLocked(date, key),
+      admin_review: status === 'pending' && dayLocked(date, key) && needsAdminReview(date, today),
       entries: dayEntries.map((e) => ({
         id: e.id, account_id: e.account_id, project: projectName(e.account), hours: Number(e.hours), overtime_hours: Number(e.overtime_hours || 0),
         billable: e.billable, notes: e.notes, module_name: e.module_name, status: e.status, decision_reason: e.decision_reason,

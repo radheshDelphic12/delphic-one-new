@@ -47,7 +47,8 @@ function LockedDetails({ rec }) {
         <Row label="Employee">{s.employee?.name}{s.employee?.employee_code ? ` (${s.employee.employee_code})` : ''}</Row>
         <Row label="Department / team">{[s.employee?.department, s.employee?.team].filter(Boolean).join(' · ') || '—'}</Row>
         <Row label="Monthly CTC">{amountText(s.ctc, 'INR')} · per hour {amountText(b.hourly_rate, 'INR')}</Row>
-        <Row label="Hours">{b.working_days} working days × {b.shift_hours}h = {b.expected_hours}h expected · {b.paid_hours}h paid · {b.deficit_hours || 0}h short</Row>
+        <Row label="Attendance">{b.source === 'approved_timesheets' ? 'Older lock, paid from approved project timesheet hours' : `${Math.max(0, (b.present_days || 0) - (b.half_days || 0))} present or work from home · ${b.half_days || 0} half day · ${b.absent_days || 0} absent · ${b.unmarked_days || 0} unmarked · ${b.paid_leave_days || 0} paid leave`}</Row>
+        <Row label="Hours">{b.working_days} working days × {b.shift_hours}h. Paid {b.paid_hours}h. Unpaid {b.deficit_hours || 0}h{b.source === 'approved_timesheets' ? ' below the approved project timesheet hours' : ' from absent days, unmarked days, or unpaid leave'}.</Row>
         <Row label="Overtime">{b.ot_approved_hours || 0}h approved · {amountText(s.ot_amount, 'INR')}</Row>
         <Row label="Net pay">{amountText(s.gross, 'INR')} − {amountText(s.deductions, 'INR')} = <span className="font-semibold">{amountText(s.net, 'INR')}</span></Row>
       </dl>

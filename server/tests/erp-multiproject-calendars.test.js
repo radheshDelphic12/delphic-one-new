@@ -50,9 +50,17 @@ function logHours(token, body) {
   return authed(request(app).post('/api/v1/timesheets/entries'), token).send(body);
 }
 
+async function assign(ctx, ...accounts) {
+  for (const account of accounts) {
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: account.id, org_membership_id: ctx.membership.id, created_by: ctx.admin.id } });
+  }
+}
+
 describe('multi-project timesheet allocation', () => {
   test('4h on Project A + 4h on Project B in one day is accepted; the 24h/day cap spans projects', async () => {
-    const { empToken, usClient, inClient } = await seed();
+    const ctx = await seed();
+    const { empToken, usClient, inClient } = ctx;
+    await assign(ctx, usClient, inClient);
     expect((await logHours(empToken, { date: '2026-09-01', account_id: usClient.id, hours: 4 })).status).toBe(201);
     expect((await logHours(empToken, { date: '2026-09-01', account_id: inClient.id, hours: 4 })).status).toBe(201);
     const over = await logHours(empToken, { date: '2026-09-01', account_id: inClient.id, hours: 16.5 });
@@ -60,7 +68,9 @@ describe('multi-project timesheet allocation', () => {
   });
 
   test('editing an entry cannot push the day past 24h (no bypass via PATCH)', async () => {
-    const { empToken, usClient, inClient } = await seed();
+    const ctx = await seed();
+    const { empToken, usClient, inClient } = ctx;
+    await assign(ctx, usClient, inClient);
     await logHours(empToken, { date: '2026-09-01', account_id: usClient.id, hours: 20 });
     const small = await logHours(empToken, { date: '2026-09-01', account_id: inClient.id, hours: 2 });
     const patch = await authed(request(app).patch(`/api/v1/timesheets/entries/${small.body.data.id}`), empToken).send({ hours: 6 });
@@ -70,7 +80,9 @@ describe('multi-project timesheet allocation', () => {
   });
 
   test('a regularization ticket cannot push the day past 24h either', async () => {
-    const { adminToken, empToken, usClient, inClient } = await seed();
+    const ctx = await seed();
+    const { adminToken, empToken, usClient, inClient } = ctx;
+    await assign(ctx, usClient, inClient);
     await logHours(empToken, { date: '2026-09-02', account_id: usClient.id, hours: 20 });
     const small = await logHours(empToken, { date: '2026-09-02', account_id: inClient.id, hours: 2 });
     await authed(request(app).post('/api/v1/timesheets/locks'), adminToken).send({ date: '2026-09-02' });
@@ -87,7 +99,9 @@ describe('multi-project timesheet allocation', () => {
 
 describe('timesheets follow the PROJECT calendar', () => {
   test("a US-client holiday no longer blocks logging on that project — it's allowed and flagged as holiday overtime, scoped to that project only", async () => {
-    const { org, adminToken, empToken, membership, usClient, inClient } = await seed();
+    const ctx = await seed();
+    const { org, adminToken, empToken, membership, usClient, inClient } = ctx;
+    await assign(ctx, usClient, inClient);
     const location = await prisma.location.create({ data: { org_id: org.id, name: 'Ahmedabad' } });
     await prisma.orgMembership.update({ where: { id: membership.id }, data: { location_id: location.id } });
 
@@ -216,7 +230,11 @@ describe('admin can edit and delete calendars and their holidays', () => {
 
 describe('real-time daily revenue', () => {
   test('approving an entry creates the day revenue immediately; a ticket that removes billable hours removes it', async () => {
-    const { org, admin, adminToken, empToken, usClient } = await seed();
+    const ctx = await seed();
+    const { org, admin, adminToken, user, empToken, usClient } = ctx;
+    const it = await prisma.department.create({ data: { org_id: org.id, name: 'IT' } });
+    await prisma.user.update({ where: { id: user.id }, data: { department_id: it.id } });
+    await assign(ctx, usClient);
     await prisma.billingRate.create({
       data: { org_id: org.id, account_id: usClient.id, rate_type: 'hourly', rate: 100, currency: 'INR', effective_from: new Date('2026-01-01'), created_by: admin.id },
     });
@@ -253,19 +271,6 @@ describe('attendance grace period & lateness', () => {
     const night = { start_minutes: 22 * 60, end_minutes: 6 * 60, grace_minutes: 15 };
     expect(computeLateMinutes(night, at('21:50'), 'Asia/Kolkata')).toBe(0);
     expect(computeLateMinutes(night, at('22:45'), 'Asia/Kolkata')).toBe(45);
-  });
-
-  test('check-in stores late_minutes for an employee with an assigned shift', async () => {
-    const { org, adminToken, membership, empToken } = await seed();
-    const created = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken)
-      .send({ name: 'Always late', start_minutes: 0, end_minutes: 60, grace_minutes: 0 });
-    expect(created.status).toBe(201);
-    await prisma.orgMembership.update({ where: { id: membership.id }, data: { shift_id: created.body.data.id } });
-    const res = await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
-    expect(res.status).toBe(201);
-    expect(org).toBeTruthy();
-    expect(res.body.data.late_minutes).toBeGreaterThanOrEqual(0);
-    expect(res.body.data.late_minutes).not.toBeNull();
   });
 });
 

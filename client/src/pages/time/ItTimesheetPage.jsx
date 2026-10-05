@@ -9,9 +9,9 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
+import ProjectDayHint from '../../components/finance/ProjectDayHint.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
 import NoteText from '../../components/NoteText.jsx';
-import WeekHoursView from './WeekHoursView.jsx';
 import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -19,6 +19,15 @@ const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Re
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Last month stays open through the 5th. After that, only the current month.
+function earliestLogIso() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (now.getDate() <= 5 ? 1 : 0), 1);
+  const month = String(start.getMonth() + 1).padStart(2, '0');
+  const day = String(start.getDate()).padStart(2, '0');
+  return `${start.getFullYear()}-${month}-${day}`;
 }
 
 function blankRow() {
@@ -46,12 +55,15 @@ export default function ItTimesheetPage() {
   const [saving, setSaving] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState(null);
+  // Attendance-paid people raise overtime as a ticket (OT Tickets tab) instead of logging OT hours here.
+  const [usesTickets, setUsesTickets] = useState(false);
   const leave = useLeaveDay(date);
 
   const projectOptions = useMemo(() => (projects || []).map((p) => ({ value: p.id, label: p.name })), [projects]);
 
   useEffect(() => {
     apiClient.get('/timesheets/my-projects').then(({ data }) => setProjects(data.data || [])).catch(() => setProjects([]));
+    apiClient.get('/timesheets/overtime-tickets', { params: { scope: 'mine' } }).then(({ data }) => setUsesTickets(Boolean(data.data?.uses_tickets))).catch(() => setUsesTickets(false));
   }, []);
 
   function loadTasks() {
@@ -226,7 +238,8 @@ export default function ItTimesheetPage() {
         <form onSubmit={saveDay} className="mt-3 space-y-3">
           <label className="block text-xs font-medium text-tertiary-600">
             Date
-            <input required type="date" max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <input required type="date" min={earliestLogIso()} max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-1 block font-normal text-tertiary-500">Last month can be filled until the 5th of this month.</span>
           </label>
           <LeaveDayNotice leave={leave} />
           {noProjects && (
@@ -239,11 +252,18 @@ export default function ItTimesheetPage() {
               <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_0.6fr_2.2fr_auto]">
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
                 <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
-                <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                {usesTickets ? (
+                  <span className="self-center text-xs text-tertiary-500" title="Overtime is raised as a ticket and approved by your manager">OT: use OT Tickets</span>
+                ) : (
+                  <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                )}
                 <textarea placeholder="Description" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] resize-y rounded-xl border px-3 py-2 text-sm" />
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
                 </button>
+                {row.account_id && (
+                  <div className="sm:col-span-5"><ProjectDayHint accountId={row.account_id} date={date} reloadKey={weekKey} /></div>
+                )}
               </div>
             ))}
           </div>
@@ -337,8 +357,6 @@ export default function ItTimesheetPage() {
           </div>
         )}
       </section>
-
-      <WeekHoursView canDeleteOwn reloadKey={weekKey} onChanged={load} />
 
       <RegularisationSection requireProject projectOptions={projectOptions} onChanged={load} />
     </div>

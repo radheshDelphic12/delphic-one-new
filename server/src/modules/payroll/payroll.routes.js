@@ -3,15 +3,21 @@ const { authenticate, authorize, requireOrgMembership } = require('../../middlew
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./payroll.service');
+const adjustmentsService = require('./salaryAdjustments.service');
 const {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
   listSalaryStructuresQuerySchema,
   payrollFiltersSchema,
   attendanceSalaryQuerySchema,
+  setPayBasisSchema,
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
+  salaryAdjustmentSchema,
+  updateSalaryAdjustmentSchema,
+  listSalaryAdjustmentsQuerySchema,
+  deleteSalaryAdjustmentSchema,
 } = require('./payroll.validation');
 
 const router = express.Router();
@@ -21,6 +27,7 @@ const ERRORS = {
   membership_not_found: [404, 'Org membership not found'],
   not_found: [404, 'Not found'],
   already_processed: [409, 'That payroll run has already been processed'],
+  nobody_selected: [422, 'Pick at least one person, or the IT department'],
 };
 
 function failFor(res, error) {
@@ -87,6 +94,26 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await service.attendanceSalary(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
 );
 
+// What each person would be paid under each basis (timesheet vs attendance) for a month - check before switching.
+router.get(
+  '/pay-basis',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await service.payBasisComparison(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
+);
+
+router.post(
+  '/pay-basis',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = setPayBasisSchema.parse(req.body);
+    // Salary is calculated from attendance for everyone; the timesheet option is switched off.
+    if (body.pay_basis === 'timesheet') return fail(res, 422, 'Salary is calculated from attendance only - the timesheet option is switched off');
+    const result = await service.setPayBasis(req.user.org_id, req.user.id, body);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
+);
+
 router.post(
   '/runs',
   authorize('admin'),
@@ -146,6 +173,41 @@ router.get(
     });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.payslip);
+  })
+);
+
+// Monthly salary adjustments (TDS, OT adjustment, variable pay, reimbursement, other additions / deductions).
+// Admin only; each change is audited and flags a locked month for recalculation.
+router.get(
+  '/adjustments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await adjustmentsService.list(req.user.org_id, listSalaryAdjustmentsQuerySchema.parse(req.query))))
+);
+router.post(
+  '/adjustments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.create(req.user.org_id, req.user, salaryAdjustmentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+router.patch(
+  '/adjustments/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.update(req.user.org_id, req.user, req.params.id, updateSalaryAdjustmentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.adjustment);
+  })
+);
+router.delete(
+  '/adjustments/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await adjustmentsService.remove(req.user.org_id, req.user, req.params.id, deleteSalaryAdjustmentSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

@@ -3,10 +3,15 @@ const logger = require('../../config/logger');
 const calendarsService = require('../calendars/calendars.service');
 const leaveService = require('../leave/leave.service');
 const { computeDayRevenue } = require('../billing/billing.service');
+const { projectListWhere } = require('../../lib/projectScope');
 const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const workHours = require('./workHours.service');
+const projectDayService = require('./projectDay.service');
+const monthLocks = require('./monthLocks.service');
+const lockAudit = require('../calculations/lockAudit.service');
+const overtimeTickets = require('./overtimeTickets.service');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 
@@ -23,31 +28,14 @@ function labelAccount(account) {
 const labelEntry = (row) => (row ? { ...row, account: labelAccount(row.account) } : row);
 const labelTicket = (row) => (row ? { ...row, account: labelAccount(row.account), timesheet_entry: labelEntry(row.timesheet_entry) } : row);
 
-// IT staff and vendor resources (contractors) log against a fixed set of
-// assigned projects only; everyone else logs plain Date/Hours/Notes with no
-// project (see createEntry). One timesheet model and one approval flow for
-// both — a contractor is an OrgMembership like any employee.
+// IT staff and contractors may log for a few days after the weekly lock.
+// Everyone, IT or not, logs project time only on a project they are allocated to.
 async function isItMember(orgMembershipId) {
   const m = await prisma.orgMembership.findUnique({
     where: { id: orgMembershipId },
     select: { worker_type: true, person: { select: { department: { select: { name: true } } } } },
   });
   return m?.worker_type === 'contractor' || m?.person?.department?.name?.toLowerCase() === 'it';
-}
-
-// Allocations are effective-dated: hours can only go on a project for a day
-// the person was allocated to it (start/end inclusive, null = open).
-async function isAssignedToProject(orgId, orgMembershipId, accountId, date) {
-  const row = await prisma.projectMemberAssignment.findFirst({
-    where: {
-      org_id: orgId,
-      org_membership_id: orgMembershipId,
-      account_id: accountId,
-      ...(date ? { AND: [{ OR: [{ start_date: null }, { start_date: { lte: date } }] }, { OR: [{ end_date: null }, { end_date: { gte: date } }] }] } : {}),
-    },
-    select: { id: true },
-  });
-  return Boolean(row);
 }
 
 // Approver routing: the employee's reporting manager (OrgMembership.manager_id),
@@ -112,26 +100,53 @@ async function refreshRevenue(orgId, date) {
   }
 }
 
-async function isLocked(orgId, date) {
+// A day is locked org-wide (weekly auto-lock / admin day lock) or, for one employee, when their whole month is locked.
+async function isLocked(orgId, date, orgMembershipId = null) {
   const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
-  return Boolean(lock);
+  if (lock) return true;
+  return orgMembershipId ? monthLocks.isMemberMonthLocked(orgMembershipId, date) : false;
+}
+
+// Developers (IT and contractors) fill last month until the 5th of this month.
+// The weekly lock still runs, but it does not block those days during that window.
+// An admin month lock still blocks. Any other locked day stays locked.
+const FILING_DEADLINE_DAY = 5;
+
+function developerMayIgnoreWeeklyLock(date, today) {
+  if (today.getUTCDate() > FILING_DEADLINE_DAY) return false;
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+  return date >= start && date <= end;
+}
+
+// Why an employee cannot log or edit this date, or null when the day is open for them.
+async function employeeLogBlock(orgId, date, orgMembershipId) {
+  if (await monthLocks.isMemberMonthLocked(orgMembershipId, date)) return 'day_locked';
+  if ((await isItMember(orgMembershipId)) && developerMayIgnoreWeeklyLock(date, todayIst())) return null;
+  const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
+  return lock ? 'day_locked' : null;
 }
 
 async function createEntry(orgId, orgMembershipId, { date, account_id, requirement_id, hours, overtime_hours = 0, billable, notes }, actorUserId = null) {
-  if (await isLocked(orgId, date)) return { error: 'day_locked' };
+  const logBlock = await employeeLogBlock(orgId, date, orgMembershipId);
+  if (logBlock) return { error: logBlock };
+  // Attendance-paid people: overtime is a ticket approved by the manager, never timesheet hours.
+  if (overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
   // Approved Leave Day = no timesheet, no project hours.
   const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
   if (leave) return { error: 'leave_day', leave };
 
+  // Every entry is project time. Non-IT hours are never billable, so they cannot land on a client timesheet.
   const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  if (!account_id) return { error: 'project_required' };
 
   let account = null;
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
+    // The person allocated to the project, or a team mate of someone allocated, may log on it.
+    if (!(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
     if (requirement_id) {
       const requirement = await prisma.requirement.findFirst({ where: { id: requirement_id, account_id, org_id: orgId } });
       if (!requirement) return { error: 'requirement_not_found' };
@@ -149,6 +164,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   if (dayTotal > 24) return { error: 'exceeds_day_hours' };
   const blocked = await leaveBlock(orgId, orgMembershipId, date, dayTotal);
   if (blocked) return blocked;
+  // No project-level hour cap: people log the hours they actually worked on their allocated projects.
 
   const alreadyPendingToday = await prisma.timesheetEntry.count({ where: { org_membership_id: orgMembershipId, date, status: 'submitted' } });
 
@@ -165,7 +181,7 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
       overtime_hours: account_id ? overtime_hours : 0,
       // A no-project entry is general time — never billable, so it can't
       // leak into revenue / project cost / budget.
-      billable: account_id ? billable : false,
+      billable: account_id && it ? billable : false,
       notes,
       is_holiday_overtime: Boolean(holiday),
       holiday_label: holiday ? `${holiday.label}, ${holiday.calendar_name}` : null,
@@ -305,7 +321,9 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
   const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId, org_membership_id: orgMembershipId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'submitted') return { error: 'already_decided' };
-  if (await isLocked(orgId, existing.date)) return { error: 'day_locked' };
+  const blocked = await employeeLogBlock(orgId, existing.date, existing.org_membership_id);
+  if (blocked) return { error: blocked };
+  if (patch.overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
   if (patch.hours !== undefined || patch.overtime_hours !== undefined) {
     const hours = patch.hours !== undefined ? Number(patch.hours) : Number(existing.hours);
@@ -316,7 +334,9 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
     if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
 
-  const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data: patch });
+  const data = { ...patch };
+  if (!(await isItMember(orgMembershipId))) data.billable = false;
+  const entry = await prisma.timesheetEntry.update({ where: { id: entryId }, data });
   await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
   return { entry };
 }
@@ -327,7 +347,8 @@ async function deleteOwnEntry(orgId, orgMembershipId, entryId) {
   const existing = await prisma.timesheetEntry.findFirst({ where: { id: entryId, org_id: orgId, org_membership_id: orgMembershipId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'submitted') return { error: 'already_decided' };
-  if (await isLocked(orgId, existing.date)) return { error: 'day_locked' };
+  const blocked = await employeeLogBlock(orgId, existing.date, existing.org_membership_id);
+  if (blocked) return { error: blocked };
   await prisma.timesheetEntry.delete({ where: { id: entryId } });
   await workHours.syncDayOvertime(orgId, orgMembershipId, existing.date);
   return { deleted: true };
@@ -364,6 +385,7 @@ async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch 
   }
   const data = { ...patch };
   if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
+  if (!(await isItMember(existing.org_membership_id))) data.billable = false;
   // Admin can also approve / reject (or re-open) any entry, locked or not.
   if (data.status && data.status !== existing.status) {
     Object.assign(data, data.status === 'submitted'
@@ -407,20 +429,69 @@ async function adminDeleteEntry(orgId, adminUserId, entryId, { reason }) {
   return { deleted: true, flagged: change?.flagged || 0 };
 }
 
+// Delete several logs at once (Timesheet Dashboard). Each id goes through the same rule as a single delete -
+// an admin deletes any entry with a reason (locked billing is flagged); anyone else only their own pending
+// entries on an open day. Only the listed ids are touched; the result says which ones could not be deleted.
+async function bulkDeleteEntries(orgId, user, { ids, reason }) {
+  const unique = [...new Set(ids)];
+  const deleted = [];
+  const failed = [];
+  for (const id of unique) {
+    const result = user.role === 'admin'
+      ? await adminDeleteEntry(orgId, user.id, id, { reason })
+      : await deleteOwnEntry(orgId, user.org_membership_id, id);
+    if (result.error) failed.push({ id, error: result.error });
+    else deleted.push(id);
+  }
+  return { deleted, failed };
+}
+
 async function accountRef(accountId) {
   return accountId ? prisma.account.findUnique({ where: { id: accountId }, ...ACCOUNT_REF }) : null;
 }
 
-async function unlockDay(orgId, date) {
+async function unlockDay(orgId, date, adminUserId = null, reason = null) {
   const lock = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
   if (!lock) return { error: 'not_locked' };
   await prisma.timesheetLock.delete({ where: { id: lock.id } });
+  if (adminUserId) {
+    await lockAudit.record(prisma, orgId, { stage: 'timesheet', action: 'unlock', actor_id: adminUserId, period_month: date.getUTCMonth() + 1, period_year: date.getUTCFullYear(), previous_status: 'locked', new_status: 'open', change: `Day ${ymd(date)} unlocked for everyone`, reason });
+  }
   return { unlocked: true };
 }
 
 // The reporting manager decides their own direct reports' entries; admins can
 // decide anyone's. Nobody (but an admin) approves their own hours. A rejection
 // always carries the manager's reason (enforced in the validation schema).
+// Every timesheet / overtime / regularisation approval step is on the audit trail (stage 'timesheet').
+async function auditDecision(orgId, actor, target, action, previous, next, change, reason) {
+  const date = target.date ? new Date(target.date) : null;
+  await lockAudit.record(prisma, orgId, {
+    stage: 'timesheet',
+    action,
+    actor_id: actor.id,
+    org_membership_id: target.org_membership_id || null,
+    account_id: target.account_id || null,
+    period_month: date ? date.getUTCMonth() + 1 : null,
+    period_year: date ? date.getUTCFullYear() : null,
+    previous_status: previous,
+    new_status: next,
+    change,
+    reason: reason || null,
+  });
+}
+
+// The org's approval chain settings (see Org.timesheet_manager_approval / timesheet_admin_approval).
+async function approvalPolicy(orgId) {
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { timesheet_manager_approval: true, timesheet_admin_approval: true } });
+  return { timesheet_manager_approval: org?.timesheet_manager_approval !== false, timesheet_admin_approval: org?.timesheet_admin_approval !== false };
+}
+
+async function updateApprovalPolicy(orgId, patch) {
+  const org = await prisma.org.update({ where: { id: orgId }, data: patch, select: { timesheet_manager_approval: true, timesheet_admin_approval: true } });
+  return org;
+}
+
 async function decideEntry(orgId, entryId, actor, { status, reason }) {
   const existing = await prisma.timesheetEntry.findFirst({
     where: { id: entryId, org_id: orgId },
@@ -431,6 +502,27 @@ async function decideEntry(orgId, entryId, actor, { status, reason }) {
   if (!canDecideFor(actor, existing.org_membership)) return { error: 'not_approver' };
   if (existing.org_membership_id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_entry' };
 
+  // Approval chain: Employee -> Manager (optional) -> Admin (mandatory). A manager's approval is only the
+  // first step when the org requires admin approval; the entry is final (pay, billing) once an admin approves.
+  const isAdmin = actor.role === 'admin';
+  const policy = await approvalPolicy(orgId);
+  if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
+  if (!isAdmin && existing.manager_approved_at) return { error: 'awaiting_admin' };
+  if (!isAdmin && status === 'approved' && policy.timesheet_admin_approval) {
+    const stepped = await prisma.timesheetEntry.update({
+      where: { id: entryId },
+      data: { manager_approved_by: actor.id, manager_approved_at: new Date(), decision_reason: reason },
+    });
+    await auditDecision(orgId, actor, existing, 'manager_approve', 'submitted', 'manager_approved', `Timesheet entry approved by the manager, waiting for the admin (${Number(existing.hours)}h)`, reason);
+    await notify(prisma, {
+      type: 'timesheet_entry_decided',
+      actorId: actor.id,
+      recipientIds: [existing.org_membership.person_id],
+      context: { orgId, skipAdmins: true, status: 'approved by your manager, waiting for admin', reason, hours: Number(existing.hours), dateLabel: ymd(existing.date) },
+    });
+    return { entry: stepped, awaiting_admin: true };
+  }
+
   const entry = await prisma.timesheetEntry.update({
     where: { id: entryId },
     data: { status, approved_by: actor.id, approved_at: new Date(), decision_reason: reason },
@@ -439,6 +531,7 @@ async function decideEntry(orgId, entryId, actor, { status, reason }) {
   // A rejected entry's hours no longer count toward the day's overtime.
   await workHours.syncDayOvertime(orgId, existing.org_membership_id, existing.date);
   const hoursLabel = `${Number(existing.hours)}h${Number(existing.overtime_hours || 0) ? ` + ${Number(existing.overtime_hours)}h overtime` : ''}`;
+  await auditDecision(orgId, actor, existing, status === 'rejected' ? 'reject' : 'approve', 'submitted', status, `Timesheet entry ${status} (${hoursLabel})`, reason);
   await detectFinanceChange(orgId, {
     source_type: 'timesheet',
     source_id: entryId,
@@ -464,6 +557,7 @@ async function lockDay(orgId, date, adminUserId) {
   const existing = await prisma.timesheetLock.findUnique({ where: { org_id_date: { org_id: orgId, date } } });
   if (existing) return { error: 'already_locked', lock: existing };
   const lock = await prisma.timesheetLock.create({ data: { org_id: orgId, date, locked_by: adminUserId } });
+  await lockAudit.record(prisma, orgId, { stage: 'timesheet', action: 'lock', actor_id: adminUserId, period_month: date.getUTCMonth() + 1, period_year: date.getUTCFullYear(), previous_status: 'open', new_status: 'locked', change: `Day ${ymd(date)} locked for everyone` });
   return { lock };
 }
 
@@ -496,13 +590,12 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
   if (leave) return { error: 'leave_day', leave };
 
-  const it = await isItMember(orgMembershipId);
-  if (it && !account_id) return { error: 'project_required' };
+  if (!account_id) return { error: 'project_required' };
   let account = null;
   if (account_id) {
     account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId } });
     if (!account) return { error: 'account_not_found' };
-    if (it && !(await isAssignedToProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
+    if (!(await projectDayService.canLogOnProject(orgId, orgMembershipId, account_id, date))) return { error: 'project_not_assigned' };
   }
 
   const duplicate = await prisma.timesheetRegularizationTicket.findFirst({
@@ -576,6 +669,16 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
   const owner = ticket.org_membership || ticket.timesheet_entry?.org_membership;
   if (!canDecideFor(actor, owner)) return { error: 'not_approver' };
   if (owner?.id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_entry' };
+  // Employee -> Manager (optional) -> Admin (mandatory): a manager's approval is only the first step.
+  const isAdmin = actor.role === 'admin';
+  const policy = await approvalPolicy(orgId);
+  if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
+  if (!isAdmin && ticket.manager_approved_at) return { error: 'awaiting_admin' };
+  if (!isAdmin && status === 'approved' && policy.timesheet_admin_approval) {
+    const stepped = await prisma.timesheetRegularizationTicket.update({ where: { id: ticketId }, data: { manager_approved_by: actor.id, manager_approved_at: new Date(), decision_reason } });
+    await auditDecision(orgId, actor, { org_membership_id: owner.id, date: ticket.date || ticket.timesheet_entry?.date }, 'manager_approve', 'pending', 'manager_approved', 'Regularisation approved by the manager, waiting for the admin', decision_reason);
+    return { ticket: stepped, awaiting_admin: true };
+  }
 
   const isNewStyle = Boolean(ticket.date) && ticket.target_hours !== null;
   const targetDate = isNewStyle ? ticket.date : ticket.timesheet_entry.date;
@@ -668,15 +771,18 @@ async function approvalsScope(orgId, actor) {
 // their direct reports' (or, for an admin, everyone's).
 async function pendingApprovals(orgId, actor) {
   const owner = actor.role === 'admin' ? {} : { manager_id: actor.org_membership_id };
+  const policy = await approvalPolicy(orgId);
+  const managerOnly = actor.role !== 'admin';
   const [entries, regularizations] = await Promise.all([
-    prisma.timesheetEntry.findMany({
-      where: { org_id: orgId, status: 'submitted', org_membership: owner },
+    managerOnly && !policy.timesheet_manager_approval ? [] : prisma.timesheetEntry.findMany({
+      where: { org_id: orgId, status: 'submitted', org_membership: owner, ...(managerOnly ? { manager_approved_at: null } : {}) },
       orderBy: [{ date: 'desc' }, { created_at: 'asc' }],
       include: { account: ACCOUNT_REF, org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
     }),
-    prisma.timesheetRegularizationTicket.findMany({
+    managerOnly && !policy.timesheet_manager_approval ? [] : prisma.timesheetRegularizationTicket.findMany({
       where: {
         status: 'pending',
+        ...(managerOnly ? { manager_approved_at: null } : {}),
         AND: [
           { OR: [{ org_id: orgId }, { timesheet_entry: { org_id: orgId } }] },
           { OR: [{ org_membership: owner }, { timesheet_entry: { org_membership: owner } }] },
@@ -686,8 +792,8 @@ async function pendingApprovals(orgId, actor) {
       include: TICKET_INCLUDE,
     }),
   ]);
-  const overtime = await prisma.timesheetDayOvertime.findMany({
-    where: { org_id: orgId, status: 'pending', org_membership: owner },
+  const overtime = managerOnly && !policy.timesheet_manager_approval ? [] : await prisma.timesheetDayOvertime.findMany({
+    where: { org_id: orgId, status: 'pending', org_membership: owner, ...(managerOnly ? { manager_approved_at: null } : {}) },
     orderBy: { date: 'desc' },
     include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
   });
@@ -726,7 +832,49 @@ async function myProjects(orgId, orgMembershipId) {
       allocated_to: cur ? (cur.allocated_to && r.end_date ? [cur.allocated_to, ymdOr(r.end_date)].sort()[1] : null) : ymdOr(r.end_date),
     });
   }
-  return [...byProject.values()];
+  const mine = [...byProject.values()];
+  // Projects a team mate is allocated to can be logged on too (client / project timesheet).
+  const shared = await projectDayService.teamProjects(orgId, orgMembershipId, todayIst(), since, new Set(mine.map((p) => p.id)));
+  return [...mine, ...shared];
+}
+
+// Projects whose team timesheet the caller may open for a month: every project for an admin, otherwise
+// the projects the caller was allocated to at any point in that month (so an ended allocation still shows).
+async function listTeamProjects(orgId, user, { year, month }) {
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 0));
+  const label = (a) => ({ id: a.id, name: a.project_name || a.name });
+  if (user.role === 'admin') {
+    const accounts = await prisma.account.findMany({ where: projectListWhere(orgId), select: { id: true, name: true, project_name: true }, orderBy: { name: 'asc' } });
+    return accounts.map(label);
+  }
+  const rows = await prisma.projectMemberAssignment.findMany({
+    where: {
+      org_id: orgId,
+      org_membership_id: user.org_membership_id,
+      AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }],
+    },
+    select: { account: { select: { id: true, name: true, project_name: true } } },
+  });
+  const byId = new Map(rows.map((r) => [r.account.id, label(r.account)]));
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Project team timesheet for a month. Only people allocated to the project (and admins) may see it.
+async function getProjectTeam(orgId, user, { account_id, year, month }) {
+  const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId }, select: { id: true, name: true, project_name: true } });
+  if (!account) return { error: 'account_not_found' };
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 0));
+  if (user.role !== 'admin' && !(await projectDayService.isAssignedToProject(orgId, user.org_membership_id, account_id, from, to))) return { error: 'project_not_assigned' };
+  return { team: { ...(await projectDayService.projectTeamTimesheet(orgId, account_id, from, to)), project: account.project_name || account.name } };
+}
+
+// What the team has logged on one project day (informational; there is no cap).
+async function getProjectDay(orgId, orgMembershipId, { account_id, date }) {
+  const account = await prisma.account.findFirst({ where: { id: account_id, org_id: orgId }, select: { id: true, name: true, project_name: true } });
+  if (!account) return { error: 'account_not_found' };
+  return { day: { ...(await projectDayService.projectDay(orgId, account_id, date, { orgMembershipId })), project: account.project_name || account.name } };
 }
 
 // --- Weekly auto-lock -------------------------------------------------------
@@ -854,6 +1002,16 @@ async function decideOvertime(orgId, overtimeId, actor, { status, reason }) {
   if (row.org_membership_id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_entry' };
   // A manager decides once; an admin may revise a decision.
   if (row.status !== 'pending' && actor.role !== 'admin') return { error: 'already_decided' };
+  // Employee -> Manager (optional) -> Admin (mandatory): a manager's approval is only the first step.
+  const isAdmin = actor.role === 'admin';
+  const policy = await approvalPolicy(orgId);
+  if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
+  if (!isAdmin && row.manager_approved_at) return { error: 'awaiting_admin' };
+  if (!isAdmin && status !== 'rejected' && policy.timesheet_admin_approval) {
+    const stepped = await prisma.timesheetDayOvertime.update({ where: { id: overtimeId }, data: { manager_approved_by: actor.id, manager_approved_at: new Date(), decision_reason: reason || null } });
+    await auditDecision(orgId, actor, row, 'manager_approve', 'pending', 'manager_approved', `Overtime ${Number(row.hours)}h approved by the manager, waiting for the admin`, reason);
+    return { overtime: { ...stepped, hours: Number(stepped.hours) }, awaiting_admin: true };
+  }
   const overtime = await prisma.timesheetDayOvertime.update({
     where: { id: overtimeId },
     data: { status, decided_by: actor.id, decided_at: new Date(), decision_reason: reason || null },
@@ -869,6 +1027,7 @@ async function decideOvertime(orgId, overtimeId, actor, { status, reason }) {
     old_value: { overtime_status: row.status, hours: Number(row.hours) },
     new_value: { overtime_status: status, hours: Number(row.hours) },
   });
+  await auditDecision(orgId, actor, row, status === 'rejected' ? 'reject' : 'approve', row.status, status, `Overtime ${Number(row.hours)}h ${status.replace('_', ' ')}`, reason);
   return { overtime: { ...overtime, hours: Number(overtime.hours) } };
 }
 
@@ -893,7 +1052,7 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
       account_id: body.account_id || null,
       hours: body.hours,
       overtime_hours: body.account_id ? body.overtime_hours || 0 : 0,
-      billable: body.account_id ? body.billable !== false : false,
+      billable: body.account_id && (await isItMember(org_membership_id)) ? body.billable !== false : false,
       notes: body.notes || null,
       status,
       ...(status === 'approved' ? { approved_by: adminUserId, approved_at: new Date(), decision_reason: `Added by admin: ${reason}`.slice(0, 500) } : {}),
@@ -923,7 +1082,7 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
 // adminCreateEntry, with the upload's reason.
 async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
   const [memberships, projects] = await Promise.all([
-    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, employee_code: true, joined_at: true, person: { select: { email: true } } } }),
+    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, employee_code: true, joined_at: true, worker_type: true, person: { select: { email: true, department: { select: { name: true } } } } } }),
     prisma.account.findMany({ where: { org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, project_code: true } }),
   ]);
   const memberByKey = new Map();
@@ -969,14 +1128,15 @@ async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
     if (dayTotals.get(key) > 24) { fail('More than 24 hours logged for this employee on this date'); continue; }
     const halfCap = await leaveService.workCapacityFor(orgId, member.id, date);
     if (halfCap && dayTotals.get(key) > halfCap.capacity + 1e-9) { fail(`Approved half-day leave that day - only ${halfCap.capacity}h can be logged for work`); continue; }
-    const billable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
+    const askedBillable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
+    const onClientTimesheet = member.worker_type === 'contractor' || member.person?.department?.name?.toLowerCase() === 'it';
     valid.push({
       org_membership_id: member.id,
       date,
       account_id: project?.id || null,
       hours,
       overtime_hours: project ? overtime : 0,
-      billable: Boolean(project) && billable,
+      billable: Boolean(project) && askedBillable && onClientTimesheet,
       notes: row.notes || null,
       status: 'approved',
       reason,
@@ -1015,6 +1175,8 @@ async function bulkApprove(orgId, actor, { status = 'approved', reason, entries 
 }
 
 module.exports = {
+  getProjectDay,
+  getProjectTeam,
   bulkApprove,
   importEntries,
   deleteOwnEntry,
@@ -1038,8 +1200,12 @@ module.exports = {
   listMyTickets,
   decideTicket,
   approvalsScope,
+  approvalPolicy,
+  updateApprovalPolicy,
   pendingApprovals,
   myProjects,
+  listTeamProjects,
+  bulkDeleteEntries,
   lastCompletedWeekDays,
   lockCompletedWeek,
   teamOverview,

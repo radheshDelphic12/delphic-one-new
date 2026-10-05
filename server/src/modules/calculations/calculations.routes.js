@@ -6,6 +6,8 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./calculations.service');
 const live = require('./live.service');
 const records = require('./records.service');
+const lockAudit = require('./lockAudit.service');
+const financeViews = require('./financeViews.service');
 
 // Finance calculation locking / versioning. Locking, recalculating, reopening
 // and dismissing a detected change are financial decisions: admin only.
@@ -58,6 +60,7 @@ const ERRORS = {
   before_agreement_start: [422, 'That month ends before the client agreement starts — nothing is billed before the Agreement Start Date'],
   after_agreement_end: [422, 'That month starts after the client agreement ended — nothing is billed after the Agreement End Date'],
   already_resolved: [409, 'That change has already been resolved'],
+  financial_locked: [423, 'This month is financially locked - reopen the financial lock before changing its invoices'],
 };
 
 function failFor(res, result) {
@@ -95,6 +98,92 @@ for (const action of ['review', 'lock', 'recalculate', 'reopen']) {
     })
   );
 }
+
+// Bulk: lock / review / reopen / recalculate many records of one month in one call. Each record goes through the
+// same checks as a single action and writes its own audit row (all sharing the bulk_id).
+const bulkSchema = z.object({
+  action: z.enum(['review', 'lock', 'reopen', 'recalculate']),
+  items: z.array(z.object({ kind, scope_key: z.string().min(1).max(64).optional() })).min(1).max(200),
+  ...period,
+  reason: z.string().trim().max(500).optional(),
+});
+router.post(
+  '/bulk',
+  asyncHandler(async (req, res) => {
+    const b = bulkSchema.parse(req.body);
+    if (['recalculate', 'reopen'].includes(b.action) && !b.reason) return fail(res, 422, 'A reason is required');
+    const bulkId = lockAudit.newBulkId();
+    const results = [];
+    for (const item of b.items) {
+      if (SCOPE_RULES[item.kind] && !SCOPE_RULES[item.kind](item.scope_key)) { results.push({ ...item, ok: false, error: 'invalid_scope' }); continue; }
+      const result = await service[b.action](req.user.org_id, req.user, item.kind, item.scope_key, { period_month: b.period_month, period_year: b.period_year }, { reason: b.reason, bulk_id: bulkId });
+      results.push({ ...item, ok: !result.error, error: result.error || null, blockers: result.blockers || undefined });
+    }
+    return ok(res, { bulk_id: bulkId, action: b.action, done: results.filter((r) => r.ok).length, results });
+  })
+);
+
+// Finance: the month-wise project view (active projects -> timesheet -> billing -> invoice -> payment -> financial status).
+router.get(
+  '/finance/month-projects',
+  asyncHandler(async (req, res) => ok(res, await financeViews.monthProjects(req.user.org_id, z.object(period).parse(req.query))))
+);
+
+// Month-wise Excel exports. ?format=json returns the same rows for on-screen use.
+const exportSchema = z.object({
+  ...period,
+  format: z.enum(['xlsx', 'json']).default('xlsx'),
+  client_account_id: uuid.optional(),
+  account_id: uuid.optional(),
+  department_id: uuid.optional(),
+  team_id: uuid.optional(),
+  billing_type: z.enum(['all', 'monthly', 'hourly', 'mixed']).optional(),
+  invoice_status: z.enum(['all', 'generated', 'not_generated', 'paid', 'unpaid', 'sent', 'unsent']).optional(),
+});
+async function sendWorkbook(res, buffer, filename) {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+  return res.send(Buffer.from(buffer));
+}
+router.get(
+  '/export/sales',
+  asyncHandler(async (req, res) => {
+    const q = exportSchema.parse(req.query);
+    if (q.format === 'json') return ok(res, await financeViews.salesRows(req.user.org_id, q));
+    return sendWorkbook(res, await financeViews.salesWorkbook(req.user.org_id, q), `sales-${q.period_year}-${String(q.period_month).padStart(2, '0')}`);
+  })
+);
+router.get(
+  '/export/vendor',
+  asyncHandler(async (req, res) => {
+    const q = exportSchema.parse(req.query);
+    if (q.format === 'json') return ok(res, await financeViews.vendorRows(req.user.org_id, q));
+    return sendWorkbook(res, await financeViews.vendorWorkbook(req.user.org_id, q), `vendor-${q.period_year}-${String(q.period_month).padStart(2, '0')}`);
+  })
+);
+router.get(
+  '/export/salary',
+  asyncHandler(async (req, res) => {
+    const q = exportSchema.parse(req.query);
+    if (q.format === 'json') return ok(res, await financeViews.salaryRows(req.user.org_id, q));
+    return sendWorkbook(res, await financeViews.salaryWorkbook(req.user.org_id, q), `salary-${q.period_year}-${String(q.period_month).padStart(2, '0')}`);
+  })
+);
+
+// Lock audit trail across the three stages (timesheet, calculation, financial).
+const lockAuditQuerySchema = z.object({
+  stage: z.enum(['timesheet', 'calculation', 'financial']).optional(),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  org_membership_id: uuid.optional(),
+  account_id: uuid.optional(),
+  bulk_id: uuid.optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+router.get(
+  '/lock-audit',
+  asyncHandler(async (req, res) => ok(res, await lockAudit.list(req.user.org_id, lockAuditQuerySchema.parse(req.query))))
+);
 
 router.post(
   '/changes/:id/dismiss',

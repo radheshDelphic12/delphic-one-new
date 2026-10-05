@@ -6,9 +6,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
 import NoteText from '../../components/NoteText.jsx';
-import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
-import WeekHoursView from './WeekHoursView.jsx';
 
 /**
  * Approval inbox for a reporting manager: timesheet entries and
@@ -20,7 +18,6 @@ export default function ApprovalsTab() {
   const [data, setData] = useState({ entries: [], regularizations: [], overtime: [] });
   const [loading, setLoading] = useState(true);
   const [rejecting, setRejecting] = useState(null); // { kind, row }
-  const [viewing, setViewing] = useState(null); // { membershipId, name, date }
   const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -36,8 +33,8 @@ export default function ApprovalsTab() {
 
   async function decideEntry(entry, status, reason) {
     try {
-      await apiClient.post(`/timesheets/entries/${entry.id}/decision`, { status, reason });
-      pushSuccess(`Entry ${status}`);
+      const { data: res } = await apiClient.post(`/timesheets/entries/${entry.id}/decision`, { status, reason });
+      pushSuccess(res.awaiting_admin ? 'Approved - it now waits for the final approval of an admin' : `Entry ${status}`);
       load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record the decision'), 'Something went wrong');
@@ -58,8 +55,8 @@ export default function ApprovalsTab() {
 
   async function decideOvertime(row, status, reason) {
     try {
-      await apiClient.post(`/timesheets/overtime/${row.id}/decision`, { status, reason });
-      pushSuccess(status === 'comp_off' ? 'Overtime given as comp off' : `Overtime ${status}`);
+      const { data: res } = await apiClient.post(`/timesheets/overtime/${row.id}/decision`, { status, reason });
+      pushSuccess(res.awaiting_admin ? 'Approved - it now waits for the final approval of an admin' : status === 'comp_off' ? 'Overtime given as comp off' : `Overtime ${status}`);
       load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record the decision'), 'Something went wrong');
@@ -118,7 +115,6 @@ export default function ApprovalsTab() {
   const rowTick = (section, id) => (
     <input type="checkbox" className="mr-2 align-middle" aria-label="Select" checked={isTicked(section, id)} onChange={() => tick(section, id)} />
   );
-  const viewWeek = (membership, date) => setViewing({ membershipId: membership?.id, name: membership?.person?.name, date: String(date).slice(0, 10) });
   const empty = !loading && data.entries.length === 0 && data.regularizations.length === 0 && overtime.length === 0;
 
   return (
@@ -180,7 +176,6 @@ export default function ApprovalsTab() {
                 <span className="text-tertiary-700">
                   {rowTick('overtime', o.id)}
                   <b className="text-tertiary-900">{o.org_membership?.person?.name}</b> — {String(o.date).slice(0, 10)} · <span className="font-semibold text-purple-700">{o.hours}h overtime</span>
-                  <button type="button" className="ml-2 text-xs text-primary-700 hover:underline" onClick={() => viewWeek(o.org_membership, o.date)}>View week</button>
                 </span>
                 <span className="flex shrink-0 gap-2">
                   <button type="button" className="btn-secondary text-xs" onClick={() => decideOvertime(o, 'approved')}>Approve OT</button>
@@ -207,7 +202,6 @@ export default function ApprovalsTab() {
                   <b className="text-tertiary-900">{e.org_membership?.person?.name}</b> — {String(e.date).slice(0, 10)} · {e.hours}h{Number(e.overtime_hours) ? ` + ${Number(e.overtime_hours)}h overtime` : ''}
                   {e.account?.name ? ` · ${e.account.name}` : ''}
                   {e.admin_review && <span className="ml-2" title="The week locked and wasn't reviewed in time — an admin should decide it"><Pill tone="red">Admin review</Pill></span>}
-                  <button type="button" className="ml-2 text-xs text-primary-700 hover:underline" onClick={() => viewWeek(e.org_membership, e.date)}>View week</button>
                   {e.notes && <NoteText text={e.notes} className="text-xs text-tertiary-500" />}
                 </span>
                 <span className="flex shrink-0 gap-2">
@@ -232,10 +226,6 @@ export default function ApprovalsTab() {
           return decideRegularisation(rejecting.row, 'rejected', reason);
         }}
       />
-
-      <Drawer open={Boolean(viewing)} title={viewing ? `${viewing.name || 'Employee'} — week` : ''} onClose={() => setViewing(null)} size="xl">
-        {viewing && <WeekHoursView key={`${viewing.membershipId}-${viewing.date}`} orgMembershipId={viewing.membershipId} initialDate={viewing.date} />}
-      </Drawer>
     </div>
   );
 }

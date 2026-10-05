@@ -91,17 +91,16 @@ describe('IT timesheet — multi-project daily log (Date / Project / Hours / Des
     expect(second.status).toBe(422);
   });
 
-  test('a non-IT, non-admin user is blocked from the IT log and export, but keeps ordinary timesheet access unchanged', async () => {
+  test('a non-IT employee can open their own project log and export', async () => {
     const org = await createOrg();
     const { token } = await seedNonItUser(org);
 
     const log = await authed(request(app).get('/api/v1/timesheets/my-log').query({ month: 7, year: 2026 }), token);
-    expect(log.status).toBe(403);
+    expect(log.status).toBe(200);
 
     const xlsx = await authed(request(app).get('/api/v1/timesheets/export/excel').query({ month: 7, year: 2026 }), token);
-    expect(xlsx.status).toBe(403);
+    expect(xlsx.status).toBe(200);
 
-    // The pre-existing, org-wide timesheets feature is untouched.
     const ordinary = await authed(request(app).get('/api/v1/timesheets/entries/me'), token);
     expect(ordinary.status).toBe(200);
   });
@@ -116,7 +115,7 @@ describe('IT timesheet — multi-project daily log (Date / Project / Hours / Des
     expect(log.status).toBe(200);
   });
 
-  test('a department-tagged user who leaves IT loses access on the very next request (no token trust)', async () => {
+  test('leaving the IT department does not remove the person\'s own project log', async () => {
     const org = await createOrg();
     const { user, token } = await seedItUser(org);
 
@@ -126,7 +125,7 @@ describe('IT timesheet — multi-project daily log (Date / Project / Hours / Des
     await prisma.user.update({ where: { id: user.id }, data: { department_id: null } });
 
     const after = await authed(request(app).get('/api/v1/timesheets/my-log').query({ month: 7, year: 2026 }), token);
-    expect(after.status).toBe(403);
+    expect(after.status).toBe(200);
   });
 
   test('the Excel export produces a real workbook with the title, legend, itemized rows, and a Weekly Holiday row for a weekend with nothing logged', async () => {

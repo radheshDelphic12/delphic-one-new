@@ -3,32 +3,11 @@ const { authenticate, authorize, requireOrgMembership } = require('../../middlew
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
-const { LEAVE_DAY_MESSAGE } = require('../leave/leave.service');
-const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema } = require('./attendance.validation');
+const autoAttendance = require('./autoAttendance.service');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
-
-router.post(
-  '/check-in',
-  asyncHandler(async (req, res) => {
-    const result = await service.checkIn(req.user.org_id, req.user.org_membership_id);
-    if (result.error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
-    if (result.error === 'already_checked_in') return fail(res, 409, 'Already checked in today');
-    return created(res, result.record);
-  })
-);
-
-router.post(
-  '/check-out',
-  asyncHandler(async (req, res) => {
-    const result = await service.checkOut(req.user.org_id, req.user.org_membership_id);
-    if (result.error === 'leave_day') return fail(res, 422, LEAVE_DAY_MESSAGE(result.leave));
-    if (result.error === 'not_checked_in') return fail(res, 409, 'Not checked in today');
-    if (result.error === 'already_checked_out') return fail(res, 409, 'Already checked out today');
-    return ok(res, result.record);
-  })
-);
 
 router.get(
   '/me',
@@ -106,6 +85,25 @@ router.get(
   '/import-template',
   authorize('admin'),
   asyncHandler(async (req, res) => ok(res, await service.importTemplate(req.user.org_id, templateQuerySchema.parse(req.query))))
+);
+
+// Previous-month backfill (admin): marks applicable employees present on each working day of a PAST month.
+// Never the current / a future month; existing records, leave, weekends and holidays are skipped; audited.
+router.post(
+  '/backfill-month',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = backfillMonthSchema.parse(req.body);
+    const result = await autoAttendance.backfillMonth(req.user.org_id, req.user.id, body);
+    if (result.error === 'month_not_past') return fail(res, 422, 'Pick a previous month - the current or a future month cannot be backfilled');
+    return ok(res, result);
+  })
+);
+
+router.get(
+  '/backfill-month/runs',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await autoAttendance.listBackfillRuns(req.user.org_id)))
 );
 
 router.get(

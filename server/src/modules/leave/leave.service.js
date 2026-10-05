@@ -4,11 +4,28 @@ const { pickCalendarId } = require('../calendars/calendars.service');
 const workHours = require('../timesheets/workHours.service');
 
 const DEFAULT_LEAVE_TYPES = [
-  { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
-  { id: '00000000-0000-4000-8000-000000000002', name: 'Sick Leave', paid: true, annual_quota: 12 },
-  { id: '00000000-0000-4000-8000-000000000003', name: 'Earned Leave', paid: true, annual_quota: 18 },
+  { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12, overflow_to_unpaid: true },
+  { id: '00000000-0000-4000-8000-000000000002', name: 'Sick Leave', paid: true, annual_quota: 12, overflow_to_unpaid: true },
+  { id: '00000000-0000-4000-8000-000000000003', name: 'Earned Leave', paid: true, annual_quota: 18, overflow_to_unpaid: true },
   { id: '00000000-0000-4000-8000-000000000004', name: 'Unpaid Leave', paid: false, annual_quota: 0 },
+  // Comp Off is part of the balance: its entitlement is the admin-set figure plus one day for every
+  // overtime day approved as comp off (credit), so it can be taken without touching other balances.
+  { id: '00000000-0000-4000-8000-000000000005', name: 'Comp Off', paid: true, annual_quota: 0, overflow_to_unpaid: true },
 ];
+
+const isCompOff = (leaveType) => String(leaveType.name).trim().toLowerCase() === 'comp off';
+
+// Comp-off days earned in a year: one per overtime day the manager / admin approved as comp off.
+async function compOffCredits(orgId, membershipIds, year) {
+  if (!membershipIds.length) return new Map();
+  const range = yearRange(year);
+  const rows = await prisma.timesheetDayOvertime.groupBy({
+    by: ['org_membership_id'],
+    where: { org_id: orgId, org_membership_id: { in: membershipIds }, status: 'comp_off', date: { gte: range.gte, lte: range.lte } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.org_membership_id, r._count._all]));
+}
 
 async function ensureDefaultTypes(orgId) {
   const existing = await prisma.leaveType.findMany({ where: { org_id: orgId }, select: { name: true } });
@@ -40,7 +57,7 @@ async function listTypes(orgId) {
 
 const DAY_MS = 86400000;
 
-const KNOWN_CODES = { 'casual leave': 'CL', 'earned leave': 'EL', 'sick leave': 'SL', 'unpaid leave': 'UL' };
+const KNOWN_CODES = { 'casual leave': 'CL', 'earned leave': 'EL', 'sick leave': 'SL', 'unpaid leave': 'UL', 'comp off': 'CO' };
 
 // CL / EL / SL / UL for the standard types; initials for any custom type.
 function leaveCode(name) {
@@ -149,22 +166,27 @@ function summariseUsage(requests, { year, today, countDays = calendarDays }) {
 
 // The employee's entitlement for a type/year: the admin-set figure if there is
 // one, else the legacy accrued value, else the type's annual quota. null = no cap.
-function entitlementFor(leaveType, balance) {
-  if (balance && balance.allocated !== null && balance.allocated !== undefined) return Number(balance.allocated);
-  if (balance && Number(balance.accrued) > 0) return Number(balance.accrued);
-  return leaveType.annual_quota === null || leaveType.annual_quota === undefined ? null : Number(leaveType.annual_quota);
+function entitlementFor(leaveType, balance, credit = 0) {
+  let base;
+  if (balance && balance.allocated !== null && balance.allocated !== undefined) base = Number(balance.allocated);
+  else if (balance && Number(balance.accrued) > 0) base = Number(balance.accrued);
+  else base = leaveType.annual_quota === null || leaveType.annual_quota === undefined ? null : Number(leaveType.annual_quota);
+  return base === null ? null : base + credit;
 }
 
-function balanceRow(leaveType, balance, usage, { year, today }) {
-  const entitlement = entitlementFor(leaveType, balance);
-  // Unpaid leave (and any type with no quota) is uncapped — there is no balance to run out of.
-  const unlimited = !leaveType.paid || entitlement === null;
+function balanceRow(leaveType, balance, usage, { year, today, credit = 0 }) {
+  const entitlement = entitlementFor(leaveType, balance, credit);
+  // Unpaid leave, a type excluded from the balance, and any type with no quota are uncapped - there is no balance to run out of.
+  const unlimited = !leaveType.paid || leaveType.counts_in_balance === false || entitlement === null;
   const allocated = unlimited ? 0 : entitlement;
   return {
     leave_type_id: leaveType.id,
     leave_type_name: leaveType.name,
     code: leaveCode(leaveType.name),
     paid: leaveType.paid,
+    counts_in_balance: leaveType.counts_in_balance !== false,
+    overflow_to_unpaid: Boolean(leaveType.overflow_to_unpaid),
+    comp_off_credit: credit || 0,
     year,
     as_of: today.getUTCFullYear() === year ? today.toISOString().slice(0, 10) : null,
     allocated,
@@ -185,8 +207,8 @@ function yearRange(year) {
 async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) {
   await ensureDefaultTypes(orgId);
   const range = yearRange(year);
-  const [leaveTypes, balances, requests] = await Promise.all([
-    prisma.leaveType.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } }),
+  const [leaveTypes, balances, requests, credits] = await Promise.all([
+    prisma.leaveType.findMany({ where: { org_id: orgId, is_applicable: true }, orderBy: { name: 'asc' } }),
     prisma.leaveBalance.findMany({ where: { org_membership_id: orgMembershipId, year } }),
     prisma.leaveRequest.findMany({
       where: {
@@ -197,11 +219,12 @@ async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) 
         to_date: { gte: range.gte },
       },
     }),
+    compOffCredits(orgId, [orgMembershipId], year),
   ]);
   const balanceByType = new Map(balances.map((b) => [b.leave_type_id, b]));
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   return leaveTypes.map((leaveType) =>
-    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today })
+    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today, credit: isCompOff(leaveType) ? credits.get(orgMembershipId) || 0 : 0 })
   );
 }
 
@@ -211,7 +234,7 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
   await ensureDefaultTypes(orgId);
   const range = yearRange(year);
   const [leaveTypes, memberships, balances, requests] = await Promise.all([
-    prisma.leaveType.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } }),
+    prisma.leaveType.findMany({ where: { org_id: orgId, is_applicable: true }, orderBy: { name: 'asc' } }),
     prisma.orgMembership.findMany({
       where: {
         org_id: orgId,
@@ -238,20 +261,21 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
   }
 
   const counters = await leaveDayCounters(orgId, memberships.map((m) => m.id), range.gte, range.lte);
+  const credits = await compOffCredits(orgId, memberships.map((m) => m.id), year);
   const employees = memberships.map((m) => ({
     org_membership_id: m.id,
     name: m.person?.name || 'Unknown',
     department: m.department?.name || null,
     balances: leaveTypes.map((leaveType) => {
       const key = keyOf(m.id, leaveType.id);
-      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today });
+      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today, credit: isCompOff(leaveType) ? credits.get(m.id) || 0 : 0 });
     }),
   }));
 
   return {
     year,
     as_of: today.toISOString().slice(0, 10),
-    types: leaveTypes.map((t) => ({ id: t.id, name: t.name, code: leaveCode(t.name), paid: t.paid, annual_quota: t.annual_quota })),
+    types: leaveTypes.map((t) => ({ id: t.id, name: t.name, code: leaveCode(t.name), paid: t.paid, annual_quota: t.annual_quota, counts_in_balance: t.counts_in_balance, overflow_to_unpaid: t.overflow_to_unpaid })),
     employees,
   };
 }
@@ -274,10 +298,30 @@ async function setEntitlement(orgId, { org_membership_id, leave_type_id, year, a
   return { balance: rows.find((r) => r.leave_type_id === leave_type_id) };
 }
 
-async function createType(orgId, { name, paid, annual_quota }) {
+async function createType(orgId, { name, paid, annual_quota, is_applicable, counts_in_balance, overflow_to_unpaid }) {
   const existing = await prisma.leaveType.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
-  const leaveType = await prisma.leaveType.create({ data: { org_id: orgId, name, paid, annual_quota } });
+  const leaveType = await prisma.leaveType.create({
+    data: {
+      org_id: orgId, name, paid, annual_quota,
+      ...(is_applicable === undefined ? {} : { is_applicable }),
+      ...(counts_in_balance === undefined ? {} : { counts_in_balance }),
+      ...(overflow_to_unpaid === undefined ? {} : { overflow_to_unpaid }),
+    },
+  });
+  return { leaveType };
+}
+
+// Admin / HR: change how a leave type behaves (applicable, counts in balance, spills into unpaid, paid, quota).
+async function updateType(orgId, adminUser, typeId, patch) {
+  const existing = await prisma.leaveType.findFirst({ where: { id: typeId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  if (patch.name && patch.name !== existing.name && (await prisma.leaveType.findUnique({ where: { org_id_name: { org_id: orgId, name: patch.name } } }))) return { error: 'name_taken' };
+  const { reason: note, ...data } = patch;
+  const leaveType = await prisma.leaveType.update({ where: { id: typeId }, data });
+  await prisma.auditLog.create({
+    data: { org_id: orgId, actor_id: adminUser.id, action: 'leave_type_edit', entity_type: 'leave_type', entity_id: typeId, reason: note || 'leave type configuration', snapshot: { before: existing, after: leaveType } },
+  });
   return { leaveType };
 }
 
@@ -311,6 +355,7 @@ async function findOverlap(orgId, orgMembershipId, candidate) {
 // already taken or booked (approved) minus days already requested (pending) —
 // all live, see summariseUsage. Unpaid types and types with no quota are uncapped.
 async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, excludeRequestId = null) {
+  if (leaveType.counts_in_balance === false) return Infinity;
   const range = yearRange(year);
   const [balance, requests] = await Promise.all([
     prisma.leaveBalance.findUnique({
@@ -328,7 +373,8 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, exclud
       },
     }),
   ]);
-  const entitlement = entitlementFor(leaveType, balance);
+  const credit = isCompOff(leaveType) ? (await compOffCredits(orgId, [orgMembershipId], year)).get(orgMembershipId) || 0 : 0;
+  const entitlement = entitlementFor(leaveType, balance, credit);
   if (entitlement === null) return Infinity;
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst(), countDays });
@@ -413,6 +459,7 @@ async function createRequest(
 ) {
   const leaveType = await prisma.leaveType.findFirst({ where: { id: leave_type_id, org_id: orgId } });
   if (!leaveType) return { error: 'leave_type_not_found' };
+  if (leaveType.is_applicable === false) return { error: 'type_not_applicable' };
 
   const overlap = await findOverlap(orgId, orgMembershipId, { from_date, to_date, is_half_day, half_day_session });
   if (overlap) return { error: 'overlaps_existing' };
@@ -428,7 +475,7 @@ async function createRequest(
         org_id: orgId,
         org_membership_id: orgMembershipId,
         date: { gte: from_date, lte: to_date },
-        OR: [{ status: { in: ['present', 'wfh', 'half_day'] } }, { check_in_at: { not: null } }],
+        status: { in: ['present', 'wfh', 'half_day'] },
       },
       orderBy: { date: 'asc' },
       select: { date: true },
@@ -443,7 +490,10 @@ async function createRequest(
 
   if (leaveType.paid) {
     const remaining = await remainingPaidDays(orgId, orgMembershipId, leaveType, from_date.getUTCFullYear());
-    if (needed > remaining) return { error: 'insufficient_balance', remaining, needed };
+    if (needed > remaining) {
+      if (!leaveType.overflow_to_unpaid) return { error: 'insufficient_balance', remaining, needed };
+      return createWithOverflow(orgId, orgMembershipId, leaveType, { from_date, to_date, is_half_day, half_day_session, reason }, { remaining: Math.max(remaining, 0), needed, countDays });
+    }
   }
 
   const request = await prisma.leaveRequest.create({
@@ -460,6 +510,85 @@ async function createRequest(
     include: { leave_type: true },
   });
   return { request: { ...request, days: needed } };
+}
+
+// The balance runs out part-way: the days the balance still covers stay on the requested (paid) type and the rest
+// become Unpaid Leave, so salary pays only what the balance covers. Two requests (paid part, unpaid part) are
+// created; with nothing left the whole request is Unpaid Leave.
+async function createWithOverflow(orgId, orgMembershipId, leaveType, { from_date, to_date, is_half_day, half_day_session, reason }, { remaining, needed, countDays }) {
+  await ensureDefaultTypes(orgId);
+  const unpaidType = (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false, name: 'Unpaid Leave' } })) || (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false } }));
+  if (!unpaidType) return { error: 'insufficient_balance', remaining, needed };
+  const note = (text) => [reason, text].filter(Boolean).join(' - ');
+  const make = (type, from, to, extra = {}) => prisma.leaveRequest.create({
+    data: { org_id: orgId, org_membership_id: orgMembershipId, leave_type_id: type.id, from_date: from, to_date: to, is_half_day: Boolean(is_half_day), half_day_session: is_half_day ? half_day_session : null, reason: extra.reason ?? reason },
+    include: { leave_type: true },
+  });
+  // Last date still fully covered by the balance (working days counted up to it).
+  let lastPaid = null;
+  for (let d = new Date(from_date); d <= to_date; d = new Date(d.getTime() + DAY_MS)) {
+    if (countDays(from_date, d) <= remaining + 1e-9) lastPaid = new Date(d);
+    else break;
+  }
+  const paidDays = lastPaid ? countDays(from_date, lastPaid) : 0;
+  if (!lastPaid || paidDays <= 0 || is_half_day) {
+    const whole = await make(unpaidType, from_date, to_date, { reason: note(`${leaveType.name} balance used up`) });
+    return { request: { ...whole, days: needed }, overflow: { to_unpaid_days: needed, paid_days: 0 } };
+  }
+  const nextDay = new Date(lastPaid.getTime() + DAY_MS);
+  const paid = await make(leaveType, from_date, lastPaid);
+  const unpaid = nextDay <= to_date ? await make(unpaidType, nextDay, to_date, { reason: note(`${leaveType.name} balance used up`) }) : null;
+  return {
+    request: { ...paid, days: paidDays },
+    overflow: unpaid ? { request: { ...unpaid, days: Math.round((needed - paidDays) * 10) / 10 }, to_unpaid_days: Math.round((needed - paidDays) * 10) / 10, paid_days: paidDays } : null,
+  };
+}
+
+// A pending paid request whose balance ends part-way is split when it is approved: the original keeps the days
+// the balance covers, and a new (pending, then approved with it) Unpaid Leave request takes the rest.
+async function splitAtApproval(orgId, existing, leaveType, { remaining, needed, countDays }) {
+  await ensureDefaultTypes(orgId);
+  const unpaidType = (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false, name: 'Unpaid Leave' } })) || (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false } }));
+  if (!unpaidType) return { error: 'insufficient_balance', remaining, needed };
+  let lastPaid = null;
+  if (!existing.is_half_day) {
+    for (let d = new Date(existing.from_date); d <= existing.to_date; d = new Date(d.getTime() + DAY_MS)) {
+      if (countDays(existing.from_date, d) <= remaining + 1e-9) lastPaid = new Date(d);
+      else break;
+    }
+  }
+  const paidDays = lastPaid ? countDays(existing.from_date, lastPaid) : 0;
+  const note = [existing.reason, `${leaveType.name} balance used up`].filter(Boolean).join(' - ');
+  if (!lastPaid || paidDays <= 0) {
+    return { update: { leave_type_id: unpaidType.id, reason: note }, unpaid: null, unpaidDays: needed };
+  }
+  const nextDay = new Date(lastPaid.getTime() + DAY_MS);
+  const unpaid = nextDay <= existing.to_date
+    ? await prisma.leaveRequest.create({
+      data: { org_id: orgId, org_membership_id: existing.org_membership_id, leave_type_id: unpaidType.id, from_date: nextDay, to_date: existing.to_date, is_half_day: false, reason: note },
+    })
+    : null;
+  return { update: { to_date: lastPaid }, unpaid, unpaidDays: Math.round((needed - paidDays) * 10) / 10 };
+}
+
+// Leave Managers: people (besides admins) who process leave requests for the company. An admin keeps final control.
+async function isLeaveManager(orgId, orgMembershipId) {
+  if (!orgMembershipId) return false;
+  const m = await prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { is_leave_manager: true } });
+  return Boolean(m?.is_leave_manager);
+}
+
+async function listLeaveManagers(orgId) {
+  const rows = await prisma.orgMembership.findMany({ where: { org_id: orgId, is_leave_manager: true }, select: { id: true, person: { select: { name: true } } }, orderBy: { person: { name: 'asc' } } });
+  return rows.map((r) => ({ org_membership_id: r.id, name: r.person?.name || null }));
+}
+
+async function setLeaveManager(orgId, adminUser, orgMembershipId, value) {
+  const m = await prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { id: true, is_leave_manager: true } });
+  if (!m) return { error: 'membership_not_found' };
+  await prisma.orgMembership.update({ where: { id: orgMembershipId }, data: { is_leave_manager: value } });
+  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: adminUser.id, action: 'leave_manager_set', entity_type: 'org_membership', entity_id: orgMembershipId, reason: value ? 'made Leave Manager' : 'removed as Leave Manager', snapshot: { before: m.is_leave_manager, after: value } } });
+  return { is_leave_manager: value };
 }
 
 // Admin applies leave for an employee, or for themselves (org_membership_id
@@ -481,7 +610,14 @@ async function createRequestForEmployee(orgId, actor, { org_membership_id, auto_
     await prisma.leaveRequest.update({ where: { id: result.request.id }, data: { status: 'cancelled', decision_reason: 'Auto-approval failed' } });
     return decided;
   }
-  return { request: { ...result.request, ...decided.request } };
+  // The unpaid overflow part of a split request is approved with it.
+  let overflow = result.overflow || null;
+  if (overflow?.request) {
+    const overflowDecided = await decide(orgId, overflow.request.id, actor.org_membership_id, { status: 'approved', reason: 'Applied and approved by admin' }, actor.user_id);
+    if (overflowDecided.error) await prisma.leaveRequest.update({ where: { id: overflow.request.id }, data: { status: 'cancelled', decision_reason: 'Auto-approval failed' } });
+    else overflow = { ...overflow, request: { ...overflow.request, ...overflowDecided.request } };
+  }
+  return { request: { ...result.request, ...decided.request }, overflow };
 }
 
 async function listMine(orgId, orgMembershipId, { status, page, limit }) {
@@ -535,6 +671,7 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
   const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   if (existing.status !== 'pending') return { error: 'not_pending' };
+  let split = null;
 
   // Approval is what makes leave real, so it re-checks what apply checked: a
   // timesheet logged since then, and (paid leave) the balance still covering it.
@@ -546,14 +683,22 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
       const countDays = await leaveDayCounter(orgId, existing.org_membership_id, existing.from_date, existing.to_date);
       const needed = requestedDays(existing, countDays);
       const remaining = await remainingPaidDays(orgId, existing.org_membership_id, leaveType, existing.from_date.getUTCFullYear(), existing.id);
-      if (needed > remaining) return { error: 'insufficient_balance', remaining, needed };
+      if (needed > remaining) {
+        if (!leaveType.overflow_to_unpaid) return { error: 'insufficient_balance', remaining, needed };
+        // The balance runs out before the leave does: what it still covers stays paid, the rest becomes Unpaid Leave.
+        split = await splitAtApproval(orgId, existing, leaveType, { remaining: Math.max(remaining, 0), needed, countDays });
+        if (split.error) return split;
+      }
     }
   }
 
   const request = await prisma.leaveRequest.update({
     where: { id: requestId },
-    data: { status, approver_id: approverMembershipId, decided_at: new Date(), decision_reason: reason },
+    data: { status, approver_id: approverMembershipId, decided_at: new Date(), decision_reason: reason, ...(split?.update || {}) },
   });
+  if (split?.unpaid) {
+    await prisma.leaveRequest.update({ where: { id: split.unpaid.id }, data: { status, approver_id: approverMembershipId, decided_at: new Date(), decision_reason: reason } });
+  }
 
   // No balance write: what an employee has used is computed live from their
   // approved requests (see summariseUsage), so approving is only the status change.
@@ -570,6 +715,37 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
       new_value: { status },
     });
   }
+  return { request, ...(split?.unpaid ? { overflow: { request: split.unpaid, to_unpaid_days: split.unpaidDays } } : {}) };
+}
+
+// An approved paid leave can be turned into Unpaid Leave after the fact. The days stay approved.
+// Salary then treats them as unpaid. Admin and Leave Managers can do this.
+async function markApprovedUnpaid(orgId, requestId, approverMembershipId, { reason }, actorUserId = null) {
+  const existing = await prisma.leaveRequest.findFirst({ where: { id: requestId, org_id: orgId }, include: { leave_type: true } });
+  if (!existing) return { error: 'not_found' };
+  if (existing.status !== 'approved') return { error: 'not_approved' };
+  if (!existing.leave_type?.paid) return { error: 'already_unpaid' };
+  await ensureDefaultTypes(orgId);
+  const unpaidType = (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false, name: 'Unpaid Leave' } }))
+    || (await prisma.leaveType.findFirst({ where: { org_id: orgId, paid: false } }));
+  if (!unpaidType) return { error: 'no_unpaid_type' };
+  const note = [existing.reason, reason || 'Marked unpaid after approval'].filter(Boolean).join(' - ');
+  const request = await prisma.leaveRequest.update({
+    where: { id: requestId },
+    data: { leave_type_id: unpaidType.id, reason: note, approver_id: approverMembershipId, decision_reason: reason || 'Marked unpaid after approval' },
+    include: { leave_type: true },
+  });
+  await detectFinanceChange(orgId, {
+    source_type: 'leave',
+    source_id: requestId,
+    from_date: existing.from_date,
+    to_date: existing.to_date,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Approved ${existing.leave_type.name} marked unpaid`.slice(0, 500),
+    old_value: { leave_type: existing.leave_type.name, paid: true },
+    new_value: { leave_type: unpaidType.name, paid: false },
+  });
   return { request };
 }
 
@@ -638,6 +814,11 @@ const LEAVE_DAY_MESSAGE = (leave) =>
   `You're on approved ${leave.leave_type} leave on that date — attendance, timesheet and project hours are disabled for leave days`;
 
 module.exports = {
+  isLeaveManager,
+  listLeaveManagers,
+  setLeaveManager,
+  updateType,
+  compOffCredits,
   listTypes,
   listMyBalances,
   balancesOverview,
@@ -651,6 +832,7 @@ module.exports = {
   listMine,
   listTeam,
   decide,
+  markApprovedUnpaid,
   revoke,
   cancel,
   leaveDayFor,

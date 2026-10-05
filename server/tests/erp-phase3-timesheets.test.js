@@ -49,6 +49,12 @@ async function seedAccountAndRequirement(orgId, ownerId, salesOwnerId) {
   return { account, requirement };
 }
 
+async function assignTo(orgId, membershipId, accountId, createdBy) {
+  await prisma.projectMemberAssignment.create({
+    data: { org_id: orgId, account_id: accountId, org_membership_id: membershipId, created_by: createdBy },
+  });
+}
+
 describe('Phase 3 — new timesheets routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
     const user = await createUser({ role: 'recruiter', withOrg: false });
@@ -63,6 +69,7 @@ describe('Phase 3 — logging hours, multi-project allocation', () => {
     const { org, admin } = await seedOrgAdmin();
     const { access_token, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     const res = await authed(request(app).post('/api/v1/timesheets/entries'), access_token).send({
       date: '2026-09-10',
@@ -78,11 +85,13 @@ describe('Phase 3 — logging hours, multi-project allocation', () => {
 
   test('an employee splits one day across two projects (4h + 4h)', async () => {
     const { org, admin } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
+    const { access_token, membership } = await seedOrgEmployee(org);
     const { account: accountA } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
     const accountB = await prisma.account.create({
       data: { type: 'client', name: 'Second Client', stage: 'active', owner_id: admin.id, org_id: org.id },
     });
+    await assignTo(org.id, membership.id, accountA.id, admin.id);
+    await assignTo(org.id, membership.id, accountB.id, admin.id);
 
     const a = await authed(request(app).post('/api/v1/timesheets/entries'), access_token).send({
       date: '2026-09-10',
@@ -103,8 +112,9 @@ describe('Phase 3 — logging hours, multi-project allocation', () => {
 
   test('total hours logged for one day cannot exceed 24', async () => {
     const { org, admin } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
+    const { access_token, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     await authed(request(app).post('/api/v1/timesheets/entries'), access_token).send({
       date: '2026-09-10',
@@ -121,8 +131,9 @@ describe('Phase 3 — logging hours, multi-project allocation', () => {
 
   test('a requirement must belong to the given account', async () => {
     const { org, admin } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
+    const { access_token, membership } = await seedOrgEmployee(org);
     const { account: accountA } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, accountA.id, admin.id);
     const { requirement: reqB } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
 
     const res = await authed(request(app).post('/api/v1/timesheets/entries'), access_token).send({
@@ -153,8 +164,9 @@ describe('Phase 3 — logging hours, multi-project allocation', () => {
 describe('Phase 3 — approval + editing', () => {
   test('owner can edit hours while still submitted; not after approval', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
+    const { access_token: empToken, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     const created = await authed(request(app).post('/api/v1/timesheets/entries'), empToken).send({
       date: '2026-09-10',
@@ -182,8 +194,9 @@ describe('Phase 3 — approval + editing', () => {
 
   test('a non-admin cannot decide an entry', async () => {
     const { org, admin } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
+    const { access_token, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
     const created = await authed(request(app).post('/api/v1/timesheets/entries'), access_token).send({
       date: '2026-09-10',
       account_id: account.id,
@@ -199,8 +212,9 @@ describe('Phase 3 — approval + editing', () => {
 describe('Phase 3 — daily lock + regularization tickets', () => {
   test('admin locks a day; further entries and edits on that day are frozen', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
+    const { access_token: empToken, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     const entry = await authed(request(app).post('/api/v1/timesheets/entries'), empToken).send({
       date: '2026-09-10',
@@ -229,8 +243,9 @@ describe('Phase 3 — daily lock + regularization tickets', () => {
 
   test('a regularization ticket is required (and only valid) for a locked day, and approving it applies the change', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
+    const { access_token: empToken, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     const entry = await authed(request(app).post('/api/v1/timesheets/entries'), empToken).send({
       date: '2026-09-10',
@@ -276,8 +291,9 @@ describe('Phase 3 — daily lock + regularization tickets', () => {
 
   test('a rejected ticket does not change the entry', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
+    const { access_token: empToken, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     const entry = await authed(request(app).post('/api/v1/timesheets/entries'), empToken).send({
       date: '2026-09-10',
@@ -310,8 +326,9 @@ describe('Phase 3 — daily lock + regularization tickets', () => {
 describe('Phase 3 — admin team view', () => {
   test('admin lists every entry across employees for the org', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
+    const { access_token: empToken, membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await assignTo(org.id, membership.id, account.id, admin.id);
 
     await authed(request(app).post('/api/v1/timesheets/entries'), empToken).send({
       date: '2026-09-10',

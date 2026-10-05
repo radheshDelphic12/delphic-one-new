@@ -5,7 +5,23 @@ const createLeaveTypeSchema = z.object({
   name: z.string().min(1).max(100),
   paid: z.boolean().default(true),
   annual_quota: z.coerce.number().int().min(0).optional(),
+  is_applicable: z.boolean().optional(),
+  counts_in_balance: z.boolean().optional(),
+  overflow_to_unpaid: z.boolean().optional(),
 });
+
+// Admin / HR: reconfigure a leave type (all optional, at least one).
+const updateLeaveTypeSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    paid: z.boolean().optional(),
+    annual_quota: z.coerce.number().int().min(0).nullable().optional(),
+    is_applicable: z.boolean().optional(),
+    counts_in_balance: z.boolean().optional(),
+    overflow_to_unpaid: z.boolean().optional(),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => Object.keys(v).filter((k) => k !== 'reason').length > 0, { message: 'Nothing to change' });
 
 const leaveRequestShape = {
   leave_type_id: z.string().uuid(),
@@ -79,6 +95,7 @@ const revokeSchema = z.object({ reason: z.string().max(500).optional() });
 
 module.exports = {
   createLeaveTypeSchema,
+  updateLeaveTypeSchema,
   createLeaveRequestSchema,
   adminLeaveRequestSchema,
   decisionSchema,

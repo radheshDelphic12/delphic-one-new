@@ -155,7 +155,7 @@ export function printLockedRecord(rec, orgName) {
     detail = `<h2>Salary</h2><div class="calc">
       <div>Employee: ${escapeHtml(s.employee?.name)}${s.employee?.employee_code ? ` (${escapeHtml(s.employee.employee_code)})` : ''}${s.employee?.department ? ` · ${escapeHtml(s.employee.department)}` : ''}</div>
       <div>Monthly CTC: ${escapeHtml(amountText(s.ctc))} · per hour ${escapeHtml(amountText(b.hourly_rate))}</div>
-      <div>Working days ${escapeHtml(b.working_days)} × ${escapeHtml(b.shift_hours)}h = expected ${escapeHtml(b.expected_hours)}h; paid ${escapeHtml(b.paid_hours)}h; short ${escapeHtml(b.deficit_hours || 0)}h</div>
+      <div>Working days ${escapeHtml(b.working_days)} × ${escapeHtml(b.shift_hours)}h. Paid ${escapeHtml(b.paid_hours)}h. Unpaid ${escapeHtml(b.deficit_hours || 0)}h${b.source === 'approved_timesheets' ? ' below the approved project timesheet hours' : ' from absent days, unmarked days, or unpaid leave'}.</div>
       <div>Overtime approved: ${escapeHtml(b.ot_approved_hours || 0)}h = ${escapeHtml(amountText(s.ot_amount))}</div>
       <div>Gross ${escapeHtml(amountText(s.gross))} − deductions ${escapeHtml(amountText(s.deductions))} = net ${escapeHtml(amountText(s.net))}</div></div>`;
   } else if (rec.kind === 'vendor_bill' || rec.kind === 'vendor_payment') {

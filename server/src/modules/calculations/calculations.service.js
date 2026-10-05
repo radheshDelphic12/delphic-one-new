@@ -28,6 +28,8 @@ const logger = require('../../config/logger');
 const { userNames } = require('../../lib/vertical');
 const billingEngine = require('./engines/billing.engine');
 const salaryEngine = require('./engines/salary.engine');
+const lockAudit = require('./lockAudit.service');
+const financialLock = require('./financialLock');
 const vendorEngine = require('./engines/vendorPayment.engine');
 const resourceEngine = require('./engines/resourceRevenue.engine');
 const financialsEngine = require('./engines/financials.engine');
@@ -63,6 +65,8 @@ const SOURCE_KINDS = {
   timesheet: ['billing', 'salary', 'salary_employee', 'resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
   // An admin's + / - tweak to a project's month (or a change of its billing basis).
   billing_adjustment: ['billing', 'financials'],
+  // A monthly salary adjustment (TDS, OT adjustment, variable pay, reimbursement, other).
+  salary_adjustment: ['salary', 'salary_employee', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).
   allocation: ['resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
 };
@@ -217,6 +221,8 @@ async function computeLive(orgId, kind, scopeKey, period, { account = null, now 
     const blockers = [];
     const orgLock = await findCalc(orgId, 'salary', 'org', period);
     if (orgLock && FROZEN_STATUSES.includes(orgLock.status)) blockers.push({ code: 'org_salary_locked', message: 'The whole month\'s salary is already locked.' });
+    // Attendance-based pay: a working day nobody marked is unpaid - mark it (or approve leave) before locking.
+    if (line.breakdown?.unmarked_days > 0) blockers.push({ code: 'unmarked_attendance', count: line.breakdown.unmarked_days, message: `${line.breakdown.unmarked_days} working day${line.breakdown.unmarked_days === 1 ? ' has' : 's have'} no attendance marking - mark ${line.breakdown.unmarked_days === 1 ? 'it' : 'them'} (present / half day / absent) or approve leave first.` });
     raw.readiness = { can_lock: true, blockers, warnings: [] };
   } else if (kind === 'vendor_bill') {
     raw = await vendorEngine.computeVendorPayments(orgId, { ...period, vendor_account_id: scopeKey });
@@ -253,6 +259,9 @@ async function computeLive(orgId, kind, scopeKey, period, { account = null, now 
     const open = periodOpenBlocker(period, now);
     if (open && !readiness.blockers.some((b) => b.code === 'period_open')) readiness.blockers = [...readiness.blockers, open];
   }
+  // The stages run in order: timesheets locked -> calculations locked -> financials locked.
+  const order = await financialLock.lockOrderBlockers(orgId, kind, scopeKey, period);
+  if (order.length) readiness.blockers = [...readiness.blockers.filter((b) => !order.some((o) => o.code === b.code)), ...order];
   readiness.can_lock = readiness.blockers.length === 0;
   return { raw: { ...raw, readiness }, amount: round2(amount), currency, label, readiness };
 }
@@ -386,10 +395,12 @@ async function listCalculations(orgId, { period_month, period_year, kind, status
 
 // --- Actions --------------------------------------------------------------
 
-async function audit(db, orgId, actorId, action, calc, reason, snapshot = {}) {
+async function audit(db, orgId, actorId, action, calc, reason, snapshot = {}, opts = {}) {
   await db.auditLog.create({
     data: { org_id: orgId, actor_id: actorId, action, entity_type: 'financial_calculation', entity_id: calc.id, reason: reason || action, snapshot: { kind: calc.kind, scope_key: calc.scope_key, period_month: calc.period_month, period_year: calc.period_year, ...snapshot } },
   });
+  // The same event on the lock audit trail (stage, previous / new status, employee / project, month).
+  await lockAudit.recordCalculation(db, orgId, actorId, action, calc, reason, { previous_status: opts.previous_status ?? null, bulk_id: opts.bulk_id ?? null });
 }
 
 async function ensureCalc(db, orgId, kind, scopeKey, period, userId, label) {
@@ -402,7 +413,7 @@ async function ensureCalc(db, orgId, kind, scopeKey, period, userId, label) {
 }
 
 // Mark the live figures as reviewed (not final).
-async function review(orgId, user, kind, scopeKey, period, { reason } = {}) {
+async function review(orgId, user, kind, scopeKey, period, { reason, bulk_id } = {}) {
   const existing = await findCalc(orgId, kind, scopeKey, period);
   if (existing && FROZEN_STATUSES.includes(existing.status)) return { error: 'already_locked' };
   const live = await computeLive(orgId, kind, scopeKey, period);
@@ -410,7 +421,7 @@ async function review(orgId, user, kind, scopeKey, period, { reason } = {}) {
   const calc = await prisma.$transaction(async (tx) => {
     const row = await ensureCalc(tx, orgId, kind, scopeKey, period, user.id, live.label);
     const updated = await tx.financialCalculation.update({ where: { id: row.id }, data: { status: 'reviewed', reviewed_by: user.id, reviewed_at: new Date() } });
-    await audit(tx, orgId, user.id, 'calculation_review', updated, reason, { live_amount: live.amount });
+    await audit(tx, orgId, user.id, 'calculation_review', updated, reason, { live_amount: live.amount }, { previous_status: existing?.status || null, bulk_id });
     return updated;
   });
   return getState(orgId, kind, calc.scope_key, period);
@@ -433,7 +444,7 @@ async function writeVersion(tx, calc, live, userId, reason) {
 }
 
 // Lock (finalize): the live figures become an immutable version.
-async function lock(orgId, user, kind, scopeKey, period, { reason } = {}) {
+async function lock(orgId, user, kind, scopeKey, period, { reason, bulk_id } = {}) {
   const existing = await findCalc(orgId, kind, scopeKey, period);
   if (existing && FROZEN_STATUSES.includes(existing.status)) return { error: existing.status === 'change_detected' ? 'change_detected' : 'already_locked' };
   const live = await computeLive(orgId, kind, scopeKey, period);
@@ -442,7 +453,7 @@ async function lock(orgId, user, kind, scopeKey, period, { reason } = {}) {
   const { updated, version } = await prisma.$transaction(async (tx) => {
     const row = await ensureCalc(tx, orgId, kind, scopeKey, period, user.id, live.label);
     const result = await writeVersion(tx, row, live, user.id, reason);
-    await audit(tx, orgId, user.id, 'calculation_lock', result.updated, reason, { version: result.version.version, amount: live.amount });
+    await audit(tx, orgId, user.id, 'calculation_lock', result.updated, reason, { version: result.version.version, amount: live.amount }, { previous_status: existing?.status || null, bulk_id });
     return result;
   });
   await afterLock(orgId, user, updated, version, live);
@@ -451,7 +462,7 @@ async function lock(orgId, user, kind, scopeKey, period, { reason } = {}) {
 
 // Explicit recalculation of a locked month after a reviewed change: a NEW
 // version; the previous ones stay as they were.
-async function recalculate(orgId, user, kind, scopeKey, period, { reason } = {}) {
+async function recalculate(orgId, user, kind, scopeKey, period, { reason, bulk_id } = {}) {
   const existing = await findCalc(orgId, kind, scopeKey, period);
   if (!existing || !FROZEN_STATUSES.includes(existing.status)) return { error: 'not_locked' };
   const live = await computeLive(orgId, kind, scopeKey, period);
@@ -464,7 +475,7 @@ async function recalculate(orgId, user, kind, scopeKey, period, { reason } = {})
       version: result.version.version,
       previous_amount: previous ? Number(previous.amount) : null,
       amount: live.amount,
-    });
+    }, { previous_status: existing.status, bulk_id });
     return result;
   });
   await afterLock(orgId, user, updated, version, live);
@@ -473,7 +484,7 @@ async function recalculate(orgId, user, kind, scopeKey, period, { reason } = {})
 
 // Back to live so the month can be corrected, reviewed and locked again.
 // Versions already written are kept.
-async function reopen(orgId, user, kind, scopeKey, period, { reason } = {}) {
+async function reopen(orgId, user, kind, scopeKey, period, { reason, bulk_id } = {}) {
   const existing = await findCalc(orgId, kind, scopeKey, period);
   if (!existing || !FROZEN_STATUSES.includes(existing.status)) return { error: 'not_locked' };
   if (kind === 'billing') {
@@ -482,7 +493,7 @@ async function reopen(orgId, user, kind, scopeKey, period, { reason } = {}) {
   }
   await prisma.$transaction(async (tx) => {
     const updated = await tx.financialCalculation.update({ where: { id: existing.id }, data: { status: 'reopened', reopened_by: user.id, reopened_at: new Date() } });
-    await audit(tx, orgId, user.id, 'calculation_reopen', updated, reason, { version: existing.current_version });
+    await audit(tx, orgId, user.id, 'calculation_reopen', updated, reason, { version: existing.current_version }, { previous_status: existing.status, bulk_id });
   });
   return getState(orgId, kind, existing.scope_key, period);
 }
@@ -496,7 +507,7 @@ async function dismissChange(orgId, user, changeId, { reason } = {}) {
     const stillOpen = await tx.financialCalculationChange.count({ where: { calculation_id: change.calculation_id, status: 'open' } });
     let calc = change.calculation;
     if (!stillOpen && calc.status === 'change_detected') calc = await tx.financialCalculation.update({ where: { id: calc.id }, data: { status: 'locked', change_detected_at: null } });
-    await audit(tx, orgId, user.id, 'calculation_change_dismiss', calc, reason, { change_id: changeId });
+    await audit(tx, orgId, user.id, 'calculation_change_dismiss', calc, reason, { change_id: changeId }, { previous_status: change.calculation.status });
   });
   const calc = change.calculation;
   return getState(orgId, calc.kind, calc.scope_key, { period_month: calc.period_month, period_year: calc.period_year });
@@ -625,6 +636,7 @@ async function flagChange(orgId, { source_type, source_id = null, date = null, f
       }),
       prisma.financialCalculation.update({ where: { id: calc.id }, data: { status: 'change_detected', change_detected_at: new Date() } }),
     ]);
+    await lockAudit.recordLockedChange(orgId, calc, { changed_by, description, org_membership_id, account_id });
     flagged += 1;
   }
   return { flagged };

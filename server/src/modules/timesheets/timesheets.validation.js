@@ -1,9 +1,8 @@
 const { z } = require('zod');
 const { requiredDate, optionalDate } = require('../../lib/zodDate');
 
-// `account_id` is optional: a non-IT employee logs just Date/Hours/Notes with no
-// project (stored as non-billable general time). IT staff must send a project,
-// and only one assigned to them — enforced in timesheets.service.createEntry.
+// `account_id` is required. The old non-IT timesheet (date, hours and notes, no
+// project) is gone. A project is enforced in timesheets.service.createEntry.
 // There is deliberately no `module_name` any more (unknown keys are stripped).
 const createEntrySchema = z.object({
   date: requiredDate,
@@ -98,6 +97,31 @@ const decideOvertimeSchema = z
 
 // Sunday -> Saturday week containing `date` (default today); managers/admins
 // may pass someone else's org_membership_id.
+// Approval chain switches (admin).
+const approvalPolicySchema = z
+  .object({ timesheet_manager_approval: z.boolean().optional(), timesheet_admin_approval: z.boolean().optional() })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' });
+
+// Timesheet Dashboard: a month, optionally one person's calendar.
+const dashboardQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+  org_membership_id: z.string().uuid().optional(),
+});
+
+// A project's team timesheet for one month (visible to people allocated to the project).
+const projectTeamQuerySchema = z.object({
+  account_id: z.string().uuid(),
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+});
+
+// The project's day (client / project timesheet): what the team has logged that day (no cap).
+const projectDayQuerySchema = z.object({
+  account_id: z.string().uuid(),
+  date: requiredDate,
+});
+
 const weekQuerySchema = z.object({
   date: optionalDate,
   org_membership_id: z.string().uuid().optional(),
@@ -111,6 +135,41 @@ const hoursQuerySchema = z.object({
 }).refine((v) => v.to >= v.from && (v.to - v.from) / 86400000 <= 62, { message: 'Pick a range of up to 62 days', path: ['to'] });
 
 const adminDeleteEntrySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+// Bulk delete from the Timesheet Dashboard: only the listed logs are deleted (an admin gives one reason for all).
+const bulkDeleteEntriesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  reason: z.string().trim().min(3).max(500).optional(),
+});
+
+// Overtime tickets (attendance-paid people): raised by the employee, decided by the manager / admin.
+const createOvertimeTicketSchema = z.object({
+  date: requiredDate,
+  hours: z.coerce.number().min(0.25).max(12),
+  account_id: z.string().uuid().nullable().optional(),
+  reason: z.string().trim().min(3, 'Say why the overtime was needed').max(500),
+});
+
+const decideOvertimeTicketSchema = z
+  .object({ status: z.enum(['approved', 'rejected']), reason: z.string().trim().max(500).optional() })
+  .refine((v) => v.status !== 'rejected' || Boolean(v.reason), { message: 'A reason is required when rejecting', path: ['reason'] });
+
+const listOvertimeTicketsQuerySchema = z.object({
+  scope: z.enum(['mine', 'to_decide', 'all']).default('mine'),
+  status: z.enum(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']).optional(),
+  from: optionalDate,
+  to: optionalDate,
+});
+
+const adminUpdateOvertimeTicketSchema = z
+  .object({
+    hours: z.coerce.number().min(0.25).max(12).optional(),
+    date: requiredDate.optional(),
+    account_id: z.string().uuid().nullable().optional(),
+    ticket_reason: z.string().trim().min(3).max(500).optional(),
+    status: z.enum(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']).optional(),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .refine((v) => Object.keys(v).some((k) => k !== 'reason' && v[k] !== undefined), { message: 'Provide at least one field to change' });
 
 // A rejection must always tell the employee why.
 const decideEntrySchema = z
@@ -122,6 +181,23 @@ const decideEntrySchema = z
 
 const lockDaySchema = z.object({
   date: requiredDate,
+});
+
+// Stage 1 (timesheet lock): a month of one or many employees' timesheets.
+const lockMonthQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+});
+const lockMonthSchema = lockMonthQuerySchema.extend({
+  org_membership_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+  all_with_entries: z.boolean().optional(),
+  // Lock even though entries are still waiting for approval (admin override; a reason is required).
+  force: z.boolean().optional(),
+  reason: z.string().trim().max(500).optional(),
+}).refine((v) => !v.force || Boolean(v.reason), { message: 'Give a reason to lock with entries still pending', path: ['reason'] }).refine((v) => v.org_membership_ids || v.all_with_entries, { message: 'Select employees (or all with entries)', path: ['org_membership_ids'] });
+const reopenMonthSchema = lockMonthQuerySchema.extend({
+  org_membership_ids: z.array(z.string().uuid()).min(1).max(500),
+  reason: z.string().trim().min(3).max(500),
 });
 
 const listQuerySchema = z.object({
@@ -183,12 +259,24 @@ const createRegularizationRequestSchema = z.object({
 });
 
 module.exports = {
+  projectDayQuerySchema,
+  projectTeamQuerySchema,
+  dashboardQuerySchema,
+  approvalPolicySchema,
   createEntrySchema,
   updateEntrySchema,
   decideEntrySchema,
   lockDaySchema,
+  lockMonthQuerySchema,
+  lockMonthSchema,
+  reopenMonthSchema,
   adminUpdateEntrySchema,
   adminDeleteEntrySchema,
+  bulkDeleteEntriesSchema,
+  createOvertimeTicketSchema,
+  decideOvertimeTicketSchema,
+  listOvertimeTicketsQuerySchema,
+  adminUpdateOvertimeTicketSchema,
   adminCreateEntrySchema,
   importEntriesSchema,
   bulkApproveSchema,

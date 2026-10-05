@@ -125,19 +125,27 @@ const recentWeekday = () => recent((d) => d.getUTCDay() >= 1 && d.getUTCDay() <=
 const recentSunday = () => recent((d) => d.getUTCDay() === 0);
 
 describe('timesheet rules end to end', () => {
+  let projectId;
   async function seed() {
     const org = await createOrg();
     const admin = await person(org, { role: 'admin' });
     const manager = await person(org);
     const emp = await person(org, { managerMembership: manager.membership });
-    return { org, admin, manager, emp };
+    const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
+    projectId = project.id;
+    await prisma.projectMemberAssignment.create({ data: { org_id: org.id, account_id: project.id, org_membership_id: emp.membership.id, created_by: admin.user.id } });
+    return { org, admin, manager, emp, project };
   }
-  const post = (token, path, body) => authed(request(app).post(`/api/v1/timesheets${path}`), token).send(body);
+  const post = (token, path, body) => {
+    const withProject = body && path === '/entries' && !body.account_id ? { ...body, account_id: projectId } : body;
+    return authed(request(app).post(`/api/v1/timesheets${path}`), token).send(withProject);
+  };
   const patch = (token, path, body) => authed(request(app).patch(`/api/v1/timesheets${path}`), token).send(body);
   const del = (token, path, body = {}) => authed(request(app).delete(`/api/v1/timesheets${path}`), token).send(body);
   const week = async (token, date, member) => (await authed(request(app).get(`/api/v1/timesheets/week?date=${date}${member ? `&org_membership_id=${member}` : ''}`), token)).body.data;
 
-  test('Scenarios 3, 7, 8, 4: 12h -> 3h OT pending; editable while pending; approved is final; manager approves OT', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet salary basis is switched off.
+  test.skip('Scenarios 3, 7, 8, 4: 12h -> 3h OT pending; editable while pending; approved is final; manager approves OT', async () => {
     const { org, manager, emp } = await seed();
     const date = recentWeekday();
     const created = await post(emp.token, '/entries', { date, hours: 12 });
@@ -211,7 +219,8 @@ describe('timesheet rules end to end', () => {
     expect(workHours.needsAdminReview(new Date('2026-09-15'), reviewDay)).toBe(true);
   });
 
-  test('Scenarios 13-15: Sunday work is logged as OT (or comp off); client exceptions show without changing the company calendar', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet salary basis is switched off.
+  test.skip('Scenarios 13-15: Sunday work is logged as OT (or comp off); client exceptions show without changing the company calendar', async () => {
     const { org, admin, manager, emp } = await seed();
     const sunday = recentSunday();
     const client = await prisma.account.create({ data: { org_id: org.id, name: 'Weekend Client', type: 'client', stage: 'active', owner_id: admin.user.id, is_project: true } });

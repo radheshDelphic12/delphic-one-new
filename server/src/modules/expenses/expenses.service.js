@@ -225,6 +225,8 @@ async function decideVendorPayment(orgId, paymentId, adminUserId, { status, reas
   const payment = await prisma.vendorPayment.findFirst({ where: { id: paymentId, org_id: orgId } });
   if (!payment) return { error: 'not_found' };
   if (payment.status !== 'pending') return { error: 'already_decided' };
+  const frozen = await require('../calculations/financialLock').assertOpen(orgId, payment.period_month, payment.period_year);
+  if (frozen) return frozen;
 
   const updated = await prisma.vendorPayment.update({
     where: { id: paymentId },
@@ -238,6 +240,8 @@ async function markVendorPaymentPaid(orgId, paymentId) {
   const payment = await prisma.vendorPayment.findFirst({ where: { id: paymentId, org_id: orgId } });
   if (!payment) return { error: 'not_found' };
   if (payment.status !== 'approved') return { error: 'not_approved' };
+  const frozen = await require('../calculations/financialLock').assertOpen(orgId, payment.period_month, payment.period_year);
+  if (frozen) return frozen;
 
   const updated = await prisma.vendorPayment.update({ where: { id: paymentId }, data: { status: 'paid', paid_at: new Date() } });
   return { payment: updated };
