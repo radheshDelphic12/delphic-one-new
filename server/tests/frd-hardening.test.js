@@ -42,6 +42,7 @@ const logEntry = async (p, date, hours = 8) => {
   if (!projectByToken.has(p.token)) {
     const account = await createActiveClientAccount(p.user.id);
     await prisma.account.update({ where: { id: account.id }, data: { org_id: p.membership.org_id } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: p.membership.org_id, account_id: account.id, org_membership_id: p.membership.id, created_by: p.user.id } });
     projectByToken.set(p.token, account.id);
   }
   return authed(request(app).post(api('/timesheets/entries')), p.token).send({ date, hours, notes: 'work', account_id: projectByToken.get(p.token) });
