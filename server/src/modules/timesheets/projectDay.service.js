@@ -22,30 +22,44 @@ function activeOn(date) {
 async function allocatedOn(orgId, accountId, date) {
   const rows = await prisma.projectMemberAssignment.findMany({
     where: { org_id: orgId, account_id: accountId, ...activeOn(date) },
-    select: { org_membership_id: true, billable_hours_per_day: true, org_membership: { select: { person: { select: { name: true } } } } },
+    select: { org_membership_id: true, billable_hours_per_day: true, org_membership: { select: { worker_type: true, person: { select: { name: true, department: { select: { name: true } } } } } } },
   });
   const byPerson = new Map();
   for (const r of rows) {
     const hours = r.billable_hours_per_day !== null && r.billable_hours_per_day !== undefined ? Number(r.billable_hours_per_day) : DEFAULT_HOURS_PER_DAY;
     const cur = byPerson.get(r.org_membership_id);
-    if (!cur || hours > cur.billable_hours_per_day) byPerson.set(r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.org_membership?.person?.name || 'Unknown', billable_hours_per_day: hours });
+    if (!cur || hours > cur.billable_hours_per_day) byPerson.set(r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.org_membership?.person?.name || 'Unknown', billable_hours_per_day: hours, worker_type: r.org_membership?.worker_type, department_name: r.org_membership?.person?.department?.name });
   }
   return [...byPerson.values()];
 }
 
+// IT staff and contractors are the client timesheet. A project with a billing rate is a client project.
+function onClientTimesheet(person) {
+  return person?.worker_type === 'contractor' || person?.department_name?.toLowerCase() === 'it' || person?.person?.department?.name?.toLowerCase() === 'it';
+}
+
+async function isClientBilled(orgId, accountId) {
+  const rate = await prisma.billingRate.findFirst({ where: { org_id: orgId, account_id: accountId }, select: { id: true } });
+  return Boolean(rate);
+}
+
 // What the team has logged on one project day (informational, never a limit).
+// On a client project, non-IT hours are left out.
 async function projectDay(orgId, accountId, date, { orgMembershipId = null } = {}) {
+  const billed = await isClientBilled(orgId, accountId);
   const [resources, entries] = await Promise.all([
     allocatedOn(orgId, accountId, date),
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, account_id: accountId, date, status: { in: COUNTED } },
-      select: { org_membership_id: true, hours: true, org_membership: { select: { person: { select: { name: true } } } } },
+      select: { org_membership_id: true, hours: true, org_membership: { select: { worker_type: true, person: { select: { name: true, department: { select: { name: true } } } } } } },
     }),
   ]);
-  const people = new Map(resources.map((r) => [r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.name, logged: 0 }]));
+  const visibleResources = billed ? resources.filter((r) => onClientTimesheet(r)) : resources;
+  const people = new Map(visibleResources.map((r) => [r.org_membership_id, { org_membership_id: r.org_membership_id, name: r.name, logged: 0 }]));
   let logged = 0;
   let mine = 0;
   for (const e of entries) {
+    if (billed && !onClientTimesheet(e.org_membership)) continue;
     const hours = Number(e.hours);
     logged += hours;
     if (e.org_membership_id === orgMembershipId) mine += hours;
@@ -71,27 +85,33 @@ async function isAssignedToProject(orgId, orgMembershipId, accountId, from, to) 
 // The project's team timesheet for a month: assigned members, who has logged, per-member totals,
 // the date-wise log and the project total. Rejected entries are left out.
 async function projectTeamTimesheet(orgId, accountId, from, to) {
+  const billed = await isClientBilled(orgId, accountId);
   const [assigned, entries] = await Promise.all([
     prisma.projectMemberAssignment.findMany({
       where: { org_id: orgId, account_id: accountId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }] },
-      select: { org_membership_id: true, org_membership: { select: { person: { select: { name: true } } } } },
+      select: { org_membership_id: true, org_membership: { select: { worker_type: true, person: { select: { name: true, department: { select: { name: true } } } } } } },
     }),
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, account_id: accountId, date: { gte: from, lte: to }, status: { not: 'rejected' } },
-      select: { org_membership_id: true, date: true, hours: true, status: true, org_membership: { select: { person: { select: { name: true } } } } },
+      select: { org_membership_id: true, date: true, hours: true, status: true, org_membership: { select: { worker_type: true, person: { select: { name: true, department: { select: { name: true } } } } } } },
       orderBy: { date: 'asc' },
     }),
   ]);
+  const show = (membership) => !billed || onClientTimesheet(membership);
   const members = new Map();
   const touch = (id, name, assignedFlag) => {
     if (!members.has(id)) members.set(id, { org_membership_id: id, name: name || 'Unknown', assigned: false, total_hours: 0, approved_hours: 0, days: {} });
     if (assignedFlag) members.get(id).assigned = true;
     return members.get(id);
   };
-  for (const a of assigned) touch(a.org_membership_id, a.org_membership?.person?.name, true);
+  for (const a of assigned) {
+    if (!show(a.org_membership)) continue;
+    touch(a.org_membership_id, a.org_membership?.person?.name, true);
+  }
   const byDate = new Map();
   let total = 0;
   for (const e of entries) {
+    if (!show(e.org_membership)) continue;
     const hours = Number(e.hours);
     const m = touch(e.org_membership_id, e.org_membership?.person?.name, false);
     const day = ymd(e.date);

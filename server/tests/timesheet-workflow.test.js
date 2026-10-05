@@ -89,8 +89,43 @@ describe('non-IT vs IT timesheet fields', () => {
     expect(forbidden.body.message).toContain("aren't allocated to that project");
     expect((await log(dev.token, { date: '2026-09-15', hours: 4, account_id: mine.id })).status).toBe(201);
 
+    const other = await person(org);
+    const notTheirs = await project(org, other.user.id);
+    expect((await log(other.token, { date: '2026-09-15', hours: 4, account_id: notTheirs.id })).status).toBe(403);
+    const theirs = await project(org, other.user.id, other.membership);
+    expect((await log(other.token, { date: '2026-09-15', hours: 4, account_id: theirs.id })).status).toBe(201);
+
     const list = await authed(request(app).get('/api/v1/timesheets/my-projects'), dev.token);
     expect(list.body.data.map((a) => a.id)).toEqual([mine.id]);
+  });
+
+  test('a non-IT timesheet is not billable and does not appear on a client project timesheet', async () => {
+    const org = await createOrg();
+    const dept = await prisma.department.create({ data: { org_id: org.id, name: 'IT' } });
+    const dev = await person(org, { dept });
+    const hr = await person(org);
+    const clientProject = await project(org, dev.user.id, dev.membership, hr.membership);
+    await prisma.billingRate.create({
+      data: { org_id: org.id, account_id: clientProject.id, rate_type: 'hourly', rate: 1000, effective_from: new Date('2026-09-01'), created_by: dev.user.id },
+    });
+    const internal = await project(org, hr.user.id, hr.membership);
+
+    const onClient = await log(hr.token, { date: '2026-09-15', hours: 3, account_id: clientProject.id });
+    expect(onClient.status).toBe(201);
+    expect(onClient.body.data.billable).toBe(false);
+    const onInternal = await log(hr.token, { date: '2026-09-16', hours: 4, account_id: internal.id });
+    expect(onInternal.status).toBe(201);
+    expect(onInternal.body.data.billable).toBe(false);
+    expect((await log(dev.token, { date: '2026-09-15', hours: 5, account_id: clientProject.id })).status).toBe(201);
+
+    const day = await authed(request(app).get('/api/v1/timesheets/project-day'), dev.token).query({ account_id: clientProject.id, date: '2026-09-15' });
+    expect(day.status).toBe(200);
+    expect(day.body.data.logged).toBe(5);
+    expect(day.body.data.people.map((p) => p.name)).not.toContain(hr.user.name);
+
+    const internalDay = await authed(request(app).get('/api/v1/timesheets/project-day'), hr.token).query({ account_id: internal.id, date: '2026-09-16' });
+    expect(internalDay.body.data.logged).toBe(4);
+    expect(internalDay.body.data.people.map((p) => p.name)).toContain(hr.user.name);
   });
 });
 

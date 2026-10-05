@@ -28,6 +28,7 @@ function monthRange({ month, year }) {
 const SCOPES = {
   it: { people: 'IT members', team: 'IT team', all: 'All IT members', empty: 'No one is in the IT department yet.' },
   non_it: { people: 'Non-IT members', team: 'Non-IT team', all: 'All non-IT members', empty: 'Everyone is in the IT department.' },
+  all: { people: 'Everyone', team: 'All staff', all: 'All members', empty: 'No timesheets for this month.' },
 };
 
 /**
@@ -77,8 +78,12 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
 
   // IT: only the IT department. Non-IT: everyone outside it — everyone at all
   // when there is no IT department.
-  const deptParams = scope === 'it' ? { department_id: itDept?.id } : { exclude_department_id: itDept?.id || undefined };
-  const ready = scope === 'it' ? Boolean(itDept) : itDept !== undefined;
+  const deptParams = scope === 'it'
+    ? { department_id: itDept?.id }
+    : scope === 'non_it'
+      ? { exclude_department_id: itDept?.id || undefined }
+      : {};
+  const ready = scope === 'all' || (scope === 'it' ? Boolean(itDept) : itDept !== undefined);
 
   function loadLocks() {
     apiClient.get('/timesheets/locks').then(({ data }) => setLocks((data.data || []).map((l) => String(l.date).slice(0, 10)))).catch(() => setLocks([]));
