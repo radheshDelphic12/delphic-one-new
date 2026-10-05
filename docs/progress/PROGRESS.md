@@ -2,6 +2,14 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-05 — Salary is attendance-only for everyone; timesheet tabs removed; CI test fixes; main merged into Zephyr branch
+
+- Salary: `payroll.service.payBasisOf` always returns `attendance` (timesheets no longer feed pay). Logged hours never create overtime (`workHours.syncDayOvertime` is a no-op; OT is ticket based for every non-contractor); auto attendance covers all active full-time employees; the Payroll "Pay basis" tab is removed. `OrgMembership.pay_basis` column kept (no DROP).
+- Client: removed the Timesheets, IT Timesheet and Team Monitoring tabs from Time & Attendance, and the "Calendar: ... change under People -> Calendars" line from the project drawer. Timesheet pages/endpoints still exist, only hidden. Open question: whether to remove the "Project team (Employee <-> Project), cost rates & budget" section (or just Billable hrs/day).
+- Tests: salary-lock tests now mark the month's weekdays present (unmarked days block a lock); overtime-ticket and auto-attendance tests updated; 6 tests that cover timesheet-based pay / pay-basis switching are `test.skip` with a note (attendance-pay-basis, timesheet-payroll-rules, erp-phase4-payroll).
+- Deploy: pushed to `origin/staging` (via local `staging-deploy`, which tracks it) and deployed `delphic-one-new-staging` on Render with the CLI. Not on `main`.
+- Branches: `origin/main` merged into `zephyr-bug-fix-new-implementation` (conflict was only PROGRESS.md line endings); line endings normalized to main's LF. The Zephyr branch is main plus 323 added lines (docs, `zephyr_foundation` migration, schema, 4 lines in `db.js`).
+
 ## 2026-10-05 — Salary lock ignores days outside employment
 
 - A working day before `joined_at` or after `left_at` is unpaid, and it is no longer an unmarked attendance day. The salary lock only asks for attendance on days the person was employed. Pay stays prorated against the full month.
