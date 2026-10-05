@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-10-05: Auto attendance test skipped non-IT staff
+
+**Root cause:** The daily job marks every active full-time employee. The test still treated a non-IT full-time employee as out of scope, and it compared the clock in UTC, so the late-shift assertion depended on when CI ran.
+
+**Failure symptoms:** `auto-attendance.test.js` failed because the non-IT membership was in the marked list.
+
+**Fix details:** The test now expects a non-IT full-time employee to be marked, a contractor not to be marked, and runs the day at 10:00 IST so a 23:59 shift stays unmarked no matter when CI runs.
+
+**Consulted sources:** `autoAttendance.service.js` `applicableMembers`; CI shard 3/4.
+
+**Prevention guidance:** Attendance tests must follow worker type, not department. Pass a fixed instant into `runDaily` when the assertion depends on the shift start.
+
 ## 2026-10-05: Salary lock counted days before joining as unmarked
 
 **Root cause:** Attendance pay walks every company working day of the month. A day with no attendance and no full-day leave incremented `unmarked_days`, and that count blocks the salary lock. `joined_at` and `left_at` were not part of the day loop, so a person who joined late in the month was blocked for every working day before they started.
