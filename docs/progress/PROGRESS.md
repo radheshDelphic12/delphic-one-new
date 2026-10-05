@@ -2,6 +2,38 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-05 — Zephyr Z5-Z8 built: money ledger, overview, financials, hardening (uncommitted)
+
+- All nine Zephyr phases (Z0-Z8) are now built on branch `zephyr-bug-fix-new-implementation`. Z5 ledger (revenue / expense, actual or planned, work order and milestone links, CSV import, project Money tab, party statement), Z6 Overview (presets, tiles, 12-month chart, profit by project, valuation, drill-down), Z7 Financials (plans, plan vs actual, projection, month close with stale flag, P&L by month / project / party with Excel + PDF). Migration `zephyr_money`.
+- Z8: idempotent demo seed (`npm run zephyr:seed`), test guide [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md), admin-editability pass (paid slips reopenable by admin with a reason; document details editable).
+- Tests: Zephyr suites 71/71 (foundation 10, parties 9, leads 11, projects 12, people 9, ledger 10, financials 10), run a few files at a time. Shared-infra suites re-run: erp-verticals, workspace-isolation, auth, auth-workspace, uploads-auth, recruitment-access-uploads (14/14 alone; two timeouts under load in a combined run) all pass. Lint 0 errors, client build OK, API smoke 59/59 as admin / manager / staff on the seeded database. Not done: browser click-through, commit / push.
+
+## 2026-10-05 — Zephyr Z4 Employee/Contractor built (uncommitted)
+
+- Roster, project assignments (100% cap), monthly salary slips (fixed monthly / daily x days, approve -> pay, project split) and staff 'My work'. Admin-only pay and login access. Migration `zephyr_people_salaries`. Home page company card removed.
+- Tests: Zephyr suites 51/51 on the private DB (people 9 new). Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z3 Projects built (uncommitted)
+
+- `/api/v1/zephyr/projects` (projects, milestones with weighted progress, vendor work orders, won lead -> project) and pages `/zephyr/projects` and `/zephyr/projects/:id` (Overview / Milestones / Work orders / Documents / Money placeholder). Migration `zephyr_projects`.
+- Tests: `zephyr-projects` 12/12 on the private DB. Lint and client build pass. Still to do: browser QA; staff assigned-project access with Z4.
+
+## 2026-10-05 — Zephyr Z2 Leads built (uncommitted)
+
+- `/api/v1/zephyr/leads` (stages, activities, follow-ups, summary, admin reopen) and page `/zephyr/leads` (board + list, follow-ups panel). Migration `zephyr_leads`. Won -> project conversion comes with Z3.
+- Tests: `zephyr-leads` 11/11 on the private DB. Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z1 Client/Vendor built (uncommitted)
+
+- Client/Vendor directory: `/api/v1/zephyr/parties` (CRUD, search, tabs, CSV import, admin-only soft delete) and `/zephyr/documents` (category, ref no, expiry; downloads via `/uploads`). Page `/zephyr/parties` with add/edit drawer, documents panel and expiry badges. Migration `zephyr_parties_documents`.
+- Tests: `zephyr-parties` + `zephyr-foundation` 19/19 on the private DB. Lint and client build pass. Still to do: browser QA, run upload-related Delphic suites.
+
+## 2026-10-05 — Zephyr Z0 foundation built: standalone API, Zephyr-branded shell (uncommitted)
+
+- Server `modules/zephyr` at `/api/v1/zephyr`: role resolution (org admin / `ZxPerson` manager / staff), `GET /me`, audited valuation settings, editable categories, people + login link, audit log. Test `zephyr-foundation.test.js` 10/10 (private DB).
+- Client: Zephyr logo (`public/zephyr-logo.png`) and green theme from it (`styles/theme.css`; Tailwind `primary` and `canvas` now CSS-variable driven, Delphic defaults unchanged), role-based Zephyr sidebar, `/zephyr` home, coming-soon section pages, `/zephyr/settings`. Zephyr users are kept off Delphic pages. Seed: Zephyr org modules `['zephyr']`.
+- Details and next steps (Z1 Client/Vendor): [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Still to do: wider run of shared-infra suites, browser QA.
+
 ## 2026-10-05 — Salary is attendance-only for everyone; timesheet tabs removed; CI test fixes; main merged into Zephyr branch
 
 - Salary: `payroll.service.payBasisOf` always returns `attendance` (timesheets no longer feed pay). Logged hours never create overtime (`workHours.syncDayOvertime` is a no-op; OT is ticket based for every non-contractor); auto attendance covers all active full-time employees; the Payroll "Pay basis" tab is removed. `OrgMembership.pay_basis` column kept (no DROP).

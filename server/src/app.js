@@ -46,6 +46,7 @@ const externalAccessRoutes = require('./modules/externalAccess/externalAccess.ro
 const orgChartRoutes = require('./modules/orgChart/orgChart.routes');
 const tradingRoutes = require('./modules/trading/trading.routes');
 const leadsRoutes = require('./modules/leads/leads.routes');
+const zephyrRoutes = require('./modules/zephyr/zephyr.routes');
 const contractsRoutes = require('./modules/contracts/contracts.routes');
 const projectsRoutes = require('./modules/projects/projects.routes');
 const financialsRoutes = require('./modules/financials/financials.routes');
@@ -132,6 +133,7 @@ app.use('/api/v1/external-access', requireFinanceModule('external_access'), exte
 app.use('/api/v1/org-chart', orgChartRoutes);
 app.use('/api/v1/trading', tradingRoutes);
 app.use('/api/v1/leads', leadsRoutes);
+app.use('/api/v1/zephyr', zephyrRoutes);
 app.use('/api/v1/contracts', contractsRoutes);
 app.use('/api/v1/projects', projectsRoutes);
 app.use('/api/v1/financials', financialsRoutes);

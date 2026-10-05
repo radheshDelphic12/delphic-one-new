@@ -1,8 +1,24 @@
 import { ROLE_COPY } from '../../pages/dashboard/dashboardWidgets.js';
 
+const ZEPHYR_TITLES = {
+  '/zephyr': ['Zephyr Infrastructure', 'Construction, property trading and property management.'],
+  '/zephyr/leads': ['Leads', 'Opportunities from first contact to won or lost.'],
+  '/zephyr/parties': ['Client / Vendor', 'Clients, vendors and subcontractors in one directory.'],
+  '/zephyr/projects': ['Projects', 'Own and client projects, milestones and work orders.'],
+  '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
+  '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],
+  '/zephyr/financials': ['Financials', 'Plan vs actual, month close and projections.'],
+  '/zephyr/my-work': ['My work', 'Your assigned projects, profile and salary slips.'],
+  '/zephyr/settings': ['Zephyr setup', 'Valuation, categories and the audit log.'],
+};
+const zephyrEntry = (pathname) => (/^\/zephyr\/projects\/[^/]+$/.test(pathname) ? ['Project', 'Milestones, vendor work orders and documents.'] : ZEPHYR_TITLES[pathname] || ZEPHYR_TITLES['/zephyr']);
+const zephyrTitle = (pathname) => zephyrEntry(pathname)[0];
+const zephyrSubtitle = (pathname) => zephyrEntry(pathname)[1];
+
 /** Page title shown in the app header for the active route. */
 export function headerTitleForPath(pathname, user) {
   if (pathname === '/') return user?.name ? `${user.name}'s Dashboard` : 'Dashboard';
+  if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
   if (pathname.startsWith('/requirements')) return 'Requirements';
@@ -30,6 +46,7 @@ export function headerTitleForPath(pathname, user) {
 
 /** Subtitle shown directly under the header title on the same canvas background. */
 export function headerSubtitleForPath(pathname, user) {
+  if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {
     return 'Requirements as rows, candidates by stage. Drag or use stage buttons.';

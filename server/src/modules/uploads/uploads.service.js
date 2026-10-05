@@ -46,6 +46,21 @@ async function resolveFile(filename, user) {
     return finish(filename, projectDoc.title);
   }
 
+  // Zephyr documents: same org, and a Zephyr role that may touch that owner type.
+  const zxDoc = await prisma.zxDocument.findFirst({
+    where: { file_url: fileUrl, deleted_at: null },
+    select: { org_id: true, owner_type: true, title: true, file_name: true },
+  });
+  if (zxDoc) {
+    if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
+    if (zxDoc.org_id !== user.org_id) return { error: 'forbidden' };
+    const { resolveZxRole, capsFor } = require('../zephyr/access');
+    const zx = await resolveZxRole(user);
+    const cap = require('../zephyr/documents.service').capFor(zxDoc.owner_type);
+    if (!zx.role || !capsFor(zx.role).includes(cap)) return { error: 'forbidden' };
+    return finish(filename, zxDoc.file_name || zxDoc.title);
+  }
+
   return { error: 'not_found' };
 }
 

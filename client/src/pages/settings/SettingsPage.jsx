@@ -178,7 +178,8 @@ export default function SettingsPage() {
   const { user, logout } = useAuth();
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab');
-  const canSeeDeleted = userCan(user, 'deleteRecords');
+  // Zephyr is standalone: the Deleted-records panel lists Delphic records, so it stays off there.
+  const canSeeDeleted = userCan(user, 'deleteRecords') && !user?.active_org?.enabled_modules?.includes('zephyr');
   const TABS = useMemo(
     () => (canSeeDeleted ? [...BASE_TABS, DELETED_TAB] : BASE_TABS),
     [canSeeDeleted]

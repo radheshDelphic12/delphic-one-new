@@ -115,6 +115,18 @@ const ORG_SCOPED_ON_CREATE = new Set([
   'ZxCategory',
   'ZxAudit',
   'ZxPerson',
+  'ZxParty',
+  'ZxDocument',
+  'ZxLead',
+  'ZxLeadActivity',
+  'ZxProject',
+  'ZxMilestone',
+  'ZxWorkOrder',
+  'ZxAssignment',
+  'ZxSalaryRecord',
+  'ZxLedgerEntry',
+  'ZxPlan',
+  'ZxPeriodClose',
   // Deliberately NOT 'GroupBillingCharge' — its org_id is the org being
   // charged, which is routinely a different org than the caller's own, so
   // auto-stamping the caller's org_id here would be actively wrong. The
