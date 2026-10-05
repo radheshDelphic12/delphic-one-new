@@ -22,10 +22,11 @@ async function seed() {
   const adminUser = await createUser({ role: 'admin' });
   await createOrgMembership(adminUser.id, org.id, { role: 'admin' });
   const adminToken = (await loginAs(adminUser)).access_token;
-  const person = async (name, { it = true, shiftStart = 0, joined = new Date('2020-01-01T00:00:00Z') } = {}) => {
+  const person = async (name, { it = true, shiftStart = 0, joined = new Date('2020-01-01T00:00:00Z'), workerType = null } = {}) => {
     const user = await createUser({ role: 'recruiter', name });
     if (it) await prisma.user.update({ where: { id: user.id }, data: { department_id: dept.id } });
     const membership = await createOrgMembership(user.id, org.id, { role: 'recruiter', joined_at: joined });
+    if (workerType) await prisma.orgMembership.update({ where: { id: membership.id }, data: { worker_type: workerType } });
     if (shiftStart !== null) {
       const shift = await prisma.shift.create({ data: { org_id: org.id, name: `S${name}`, start_minutes: shiftStart, end_minutes: 1439, grace_minutes: 0 } });
       await prisma.orgMembership.update({ where: { id: membership.id }, data: { shift_id: shift.id } });
@@ -38,23 +39,27 @@ async function seed() {
 describe('daily attendance process', () => {
   test('marks only today, only once the start time has passed, never overwrites, never a future date', async () => {
     const ctx = await seed();
-    const early = await ctx.person('Early', { shiftStart: 0 }); // started at 00:00 - already passed
+    const early = await ctx.person('Early', { shiftStart: 0 }); // started at 00:00
     const late = await ctx.person('Late', { shiftStart: 1439 }); // starts at 23:59
-    const outsider = await ctx.person('NotIt', { it: false }); // not IT, not attendance-paid
+    const otherDept = await ctx.person('NotIt', { it: false, shiftStart: 0 }); // full-time, not IT: still marked
+    const contractor = await ctx.person('Vendor', { workerType: 'contractor', shiftStart: 0 });
     const today = todayIst();
+    // 10:00 IST on today's business date, so the result does not depend on when CI runs.
+    const now = new Date(`${ymd(today)}T10:00:00+05:30`);
 
-    const result = await autoAttendance.runDaily(ctx.org.id, new Date());
+    const result = await autoAttendance.runDaily(ctx.org.id, now);
     const records = await prisma.attendanceRecord.findMany({ where: { org_id: ctx.org.id } });
+    const marked = records.map((r) => r.org_membership_id);
 
-    // Weekends are not working days; otherwise only the early starter is marked.
+    // Weekends are not working days. On a weekday every full-time employee whose start has passed is marked.
     if (isWeekday(today)) {
-      expect(result.created).toBeGreaterThanOrEqual(1);
-      expect(records.map((r) => r.org_membership_id)).toContain(early.membership.id);
+      expect(result.created).toBeGreaterThanOrEqual(2);
+      expect(marked).toEqual(expect.arrayContaining([early.membership.id, otherDept.membership.id]));
     } else {
       expect(records).toHaveLength(0);
     }
-    expect(records.map((r) => r.org_membership_id)).not.toContain(outsider.membership.id);
-    if (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() < 1439 - 330) expect(records.map((r) => r.org_membership_id)).not.toContain(late.membership.id);
+    expect(marked).not.toContain(contractor.membership.id);
+    expect(marked).not.toContain(late.membership.id);
     // Every record is for today - nothing in the future.
     for (const r of records) expect(ymd(r.date)).toBe(ymd(today));
     expect(await prisma.attendanceRecord.count({ where: { org_id: ctx.org.id, date: { gt: today } } })).toBe(0);
@@ -62,7 +67,7 @@ describe('daily attendance process', () => {
     // Idempotent: a second run creates nothing and keeps an admin's correction.
     if (isWeekday(today)) {
       await prisma.attendanceRecord.updateMany({ where: { org_membership_id: early.membership.id }, data: { status: 'wfh' } });
-      expect((await autoAttendance.runDaily(ctx.org.id, new Date())).created).toBe(0);
+      expect((await autoAttendance.runDaily(ctx.org.id, now)).created).toBe(0);
       expect((await prisma.attendanceRecord.findFirst({ where: { org_membership_id: early.membership.id } })).status).toBe('wfh');
     }
   });
