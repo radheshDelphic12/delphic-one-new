@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, ListChecks, Lock, NotebookPen, Users } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, ListChecks, Lock, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -26,12 +26,10 @@ const BASE_TABS = [
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
 ];
-// Everyone logs project hours here. Client projects are for billing. Salary still comes from attendance.
+// IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
 const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
-// Admin: the client project timesheet (IT and contractors). Non-IT hours stay off this screen.
+// Admin: the client project timesheet (IT and contractors).
 const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList };
-// Admin: hours non-IT staff log, including the Internal project. Not used for client billing.
-const INTERNAL_TIMESHEETS_TAB = { key: 'internal-timesheets', label: 'Internal Timesheets', icon: NotebookPen };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
 const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
 // Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
@@ -41,16 +39,17 @@ const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardChe
 export default function TimeAttendanceHubPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isIt = user?.department?.name?.toLowerCase() === 'it';
   const [isApprover, setIsApprover] = useState(false);
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
   const TABS = [
     ...BASE_TABS.slice(0, 2),
-    LOG_TAB,
+    ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, INTERNAL_TIMESHEETS_TAB, LOCKS_TAB] : []),
+    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB] : []),
   ];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
@@ -77,19 +76,13 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
-      {section === 'log' && (
+      {section === 'log' && isIt && (
         <div className="space-y-3">
-          <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Log hours on a project you are assigned to. A client project is for billing and shows on Project Timesheets. Internal hours show on Internal Timesheets and are not billed. Your salary still comes from attendance.</p>
+          <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Log hours against a project you are assigned to. These hours are for client billing. Your salary still comes from attendance.</p>
           <ItTimesheetPage />
         </div>
       )}
       {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
-      {section === 'internal-timesheets' && isAdmin && (
-        <div className="space-y-3">
-          <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-xs text-tertiary-600">Hours logged by people outside IT, including the Internal project. These hours are not on the client timesheet and are not billed. Salary still comes from attendance.</p>
-          <ItTimesheetAdminView scope="non_it" />
-        </div>
-      )}
       {section === 'dashboard' && <TimesheetDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}

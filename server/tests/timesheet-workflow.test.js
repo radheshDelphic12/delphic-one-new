@@ -25,8 +25,8 @@ afterAll(async () => {
 const projectByToken = new Map();
 const actorByToken = new Map();
 
-async function person(org, { role = 'employee', dept, managerMembership } = {}) {
-  const user = await createUser({ role });
+async function person(org, { role = 'employee', dept, managerMembership, name } = {}) {
+  const user = await createUser({ role, name });
   if (dept) await prisma.user.update({ where: { id: user.id }, data: { department_id: dept.id } });
   const membership = await createOrgMembership(user.id, org.id, { role });
   if (managerMembership) {
@@ -102,8 +102,8 @@ describe('non-IT vs IT timesheet fields', () => {
   test('a non-IT timesheet is not billable and does not appear on a client project timesheet', async () => {
     const org = await createOrg();
     const dept = await prisma.department.create({ data: { org_id: org.id, name: 'IT' } });
-    const dev = await person(org, { dept });
-    const hr = await person(org);
+    const dev = await person(org, { dept, name: 'Dev IT' });
+    const hr = await person(org, { name: 'Hina HR' });
     const clientProject = await project(org, dev.user.id, dev.membership, hr.membership);
     await prisma.billingRate.create({
       data: { org_id: org.id, account_id: clientProject.id, rate_type: 'hourly', rate: 1000, effective_from: new Date('2026-09-01'), created_by: dev.user.id },

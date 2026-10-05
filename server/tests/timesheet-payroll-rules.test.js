@@ -133,6 +133,7 @@ describe('timesheet rules end to end', () => {
     const emp = await person(org, { managerMembership: manager.membership });
     const project = await prisma.account.create({ data: { org_id: org.id, name: 'Project', type: 'client', stage: 'active', owner_id: admin.user.id } });
     projectId = project.id;
+    await prisma.projectMemberAssignment.create({ data: { org_id: org.id, account_id: project.id, org_membership_id: emp.membership.id, created_by: admin.user.id } });
     return { org, admin, manager, emp, project };
   }
   const post = (token, path, body) => {
