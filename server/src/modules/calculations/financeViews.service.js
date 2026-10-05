@@ -1,6 +1,6 @@
 // Finance views built on Live Analytics:
 //   - the month-wise project view: pick a month, see every project that was running in it with its client,
-//     billing type, assigned resources, logged hours, billing amount, invoice / payment status and financial
+//     billing type, contract type, assigned resources, logged hours, billing amount, invoice / payment status and financial
 //     (lock) status - to reconcile  Active projects -> Timesheet -> Billing -> Invoice -> Payment -> Financial status;
 //   - the Sales and Salary month-wise Excel exports.
 
@@ -77,6 +77,8 @@ async function monthProjects(orgId, { period_month, period_year }, now = new Dat
       project: row.project.name,
       project_code: row.project.code,
       client: row.project.client_name,
+      // Manage Services / Projects (ReqType). Null when the project has no category yet.
+      service_category: row.project.service_category || null,
       billing_type: billingTypeOf(row),
       assigned_resources: [...people.values()].sort(),
       resources_count: people.size,

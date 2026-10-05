@@ -5,16 +5,22 @@ import { downloadFile } from '../../lib/downloadFile.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
+import { PROJECT_CATEGORIES, categoryLabel } from '../../lib/projectCategories.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const ATTENTION = { invoice_not_generated: 'Invoice not generated', invoice_not_sent: 'Invoice not sent', payment_pending: 'Payment pending', billing_blocked: 'Billing blocked' };
 const INVOICE_FILTERS = [['all', 'All invoices'], ['generated', 'Invoice generated'], ['not_generated', 'Invoice not generated'], ['paid', 'Paid'], ['unpaid', 'Unpaid'], ['sent', 'Sent'], ['unsent', 'Unsent']];
+const CONTRACT_TYPE_FILTERS = [
+  ['all', 'All'],
+  ...PROJECT_CATEGORIES.filter((c) => !c.disabled).map((c) => [c.value, c.label]),
+  ['none', 'No category'],
+];
 
 const money = (n, currency = 'INR') => `${currency} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 /**
  * Finance month-wise project view: pick a month and see the projects that were running in it with their
- * client, billing type, assigned resources, logged hours, billing amount, invoice / payment status and
+ * client, contract type, billing type, assigned resources, logged hours, billing amount, invoice / payment status and
  * financial (lock) status - to reconcile Active projects -> Timesheet -> Billing -> Invoice -> Payment
  * -> Financial status. Also the Sales / Salary Excel exports for the month.
  */
@@ -24,6 +30,7 @@ export default function MonthProjectsTab() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [invoiceFilter, setInvoiceFilter] = useState('all');
+  const [contractType, setContractType] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [view, setView] = useState(null);
 
@@ -54,12 +61,16 @@ export default function MonthProjectsTab() {
       || (invoiceFilter === 'unpaid' && inv.generated && !inv.paid)
       || (invoiceFilter === 'sent' && inv.sent)
       || (invoiceFilter === 'unsent' && inv.generated && !inv.sent);
-    return okInvoice && (typeFilter === 'all' || p.billing_type === typeFilter);
+    const okContract = contractType === 'all'
+      || (contractType === 'none' && !p.service_category)
+      || p.service_category === contractType;
+    return okInvoice && okContract && (typeFilter === 'all' || p.billing_type === typeFilter);
   });
 
   const columns = [
     { key: 'project', header: 'Project', render: (p) => <span>{p.project}{p.project_code && <span className="block text-xs text-tertiary-500">{p.project_code}</span>}</span> },
     { key: 'client', header: 'Client', render: (p) => p.client || '—' },
+    { key: 'contract_type', header: 'Contract type', render: (p) => categoryLabel(p.service_category) },
     { key: 'type', header: 'Billing type', render: (p) => p.billing_type || '—' },
     { key: 'resources', header: 'Assigned resources', render: (p) => (p.assigned_resources.length ? p.assigned_resources.join(', ') : '—') },
     { key: 'hours', header: 'Logged hours', render: (p) => `${p.logged_hours}h` },
@@ -87,6 +98,9 @@ export default function MonthProjectsTab() {
           </label>
           <label className="text-xs font-medium text-tertiary-600">Invoice
             <select value={invoiceFilter} onChange={(e) => setInvoiceFilter(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{INVOICE_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">Contract type
+            <select value={contractType} onChange={(e) => setContractType(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{CONTRACT_TYPE_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </label>
           <label className="text-xs font-medium text-tertiary-600">Billing type
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm"><option value="all">All</option><option value="monthly">Monthly</option><option value="hourly">Hourly</option><option value="mixed">Mixed</option></select>

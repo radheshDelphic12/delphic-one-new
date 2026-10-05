@@ -145,6 +145,8 @@ async function listRuns(orgId, { status }) {
 //                         (leave and attendance never double count), and a past working day
 //                         with no marking and no leave is "unmarked" - unpaid, listed in
 //                         `unmarked_days` and blocking the salary lock until an admin marks it.
+//                         Days before joined_at and after left_at are outside employment:
+//                         unpaid (the month's rate still covers them), but not unmarked.
 //                         Project timesheets only feed client billing; overtime is
 //                         ticket based (phase 3), so the timesheet never creates OT here.
 // The rules below are described for the timesheet basis; both share the deficit logic.
@@ -171,13 +173,30 @@ const OT_MULTIPLIER = 1;
 // A day's share of the shift for an attendance marking (anything else pays nothing).
 const ATTENDANCE_DAY_SHARE = { present: 1, wfh: 1, half_day: 0.5 };
 
+// The calendar day of a timestamp, at UTC midnight, so a join time later that
+// day still counts as employed on the joining date.
+function calendarDay(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function isEmployedOn(day, joinedAt, leftAt) {
+  const joined = calendarDay(joinedAt);
+  const left = calendarDay(leftAt);
+  if (joined && day < joined) return false;
+  if (left && day > left) return false;
+  return true;
+}
+
 // 'attendance' only when an admin chose it; everyone else keeps the timesheet basis.
 // Salary is paid from attendance for everyone (timesheets no longer feed pay).
 function payBasisOf() {
   return 'attendance';
 }
 
-function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null, payBasis = 'timesheet', ticketsByDate = new Map() }) {
+function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null, payBasis = 'timesheet', ticketsByDate = new Map(), joinedAt = null, leftAt = null }) {
   const r2 = (n) => Math.round(n * 100) / 100;
   const attendanceMode = payBasis === 'attendance';
   let half_days = 0;
@@ -215,6 +234,18 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
     } else working_days += 1;
     const expected = isWorking ? shiftHours : 0;
     expected_hours += expected;
+
+    // Before joining and after leaving the person was not employed. Those days
+    // stay in the month's expected hours, so pay is prorated, but attendance
+    // is not required and the salary lock does not call them unmarked.
+    if (isWorking && !isEmployedOn(day, joinedAt, leftAt)) {
+      if (asOf && day > asOf) upcoming_days += 1;
+      else {
+        deficit_hours += expected;
+        projected_deficit_hours += expected;
+      }
+      continue;
+    }
 
     const att = attendanceByDate.get(key);
     if (att && (att.status === 'present' || att.status === 'wfh' || att.status === 'half_day')) present_days += 1;

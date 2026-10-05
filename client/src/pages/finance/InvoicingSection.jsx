@@ -86,7 +86,7 @@ function ComputeRevenueDrawer({ open, onClose, onSubmit }) {
       </>
     }>
       <form id="compute-revenue-form" onSubmit={submit} className="space-y-3">
-        <p className="text-xs text-tertiary-500">Computes revenue from approved + billable timesheet hours × billing rate, for every project with a billing rate, from its Agreement Start Date. Hourly = logged hours × rate; monthly = the rate spread over the month&apos;s working days against a 160-hour benchmark. Capped at 31 days per run.</p>
+        <p className="text-xs text-tertiary-500">Computes revenue from approved + billable project timesheet hours × billing rate, for every project with a billing rate, from its Agreement Start Date. Hourly = logged hours × rate; monthly = the rate spread over the month&apos;s working days against a 160-hour benchmark. Capped at 31 days per run.</p>
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-xs font-medium text-tertiary-600">From<input required type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
           <label className="block text-xs font-medium text-tertiary-600">To<input required type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>

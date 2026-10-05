@@ -2,6 +2,15 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-05 — Salary lock ignores days outside employment
+
+- A working day before `joined_at` or after `left_at` is unpaid, and it is no longer an unmarked attendance day. The salary lock only asks for attendance on days the person was employed. Pay stays prorated against the full month.
+
+## 2026-10-05 — Finance Month View: contract type filter
+
+- `GET /calculations/finance/month-projects` now includes `service_category` on each project. Finance → Month View has a Contract type dropdown (All, Manage Services, Projects, No category) and a Contract type column. The table filters in the browser; invoice and billing type filters are unchanged.
+- The month-view assertion in `finance-frd.test.js` expects `service_category: 'managed_services'`. That test did not run: Postgres on port 5434 was not reachable.
+
 ## 2026-10-02 — FRD slices 2-4: approval chain, 3-stage lock audit, leave types, per-resource billing, finance views, salary adjustments (uncommitted)
 
 - Migration `20261002100000_approval_locks_leave_billing` (additive). Backend + client UI built; everything is documented in [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md) ("slices 2-4").

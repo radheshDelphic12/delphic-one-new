@@ -36,28 +36,40 @@ function escapeHtml(value) {
  * animated-transform containing blocks entirely, which a same-page
  * @media print rule would otherwise fight with.
  */
-function printPayslip(payslip, orgName) {
-  const b = payslip.breakdown || {};
-  const rows = [
+// Older payslips were frozen from approved timesheet hours. Current ones are attendance.
+function payslipFacts(b, moneyValue) {
+  if (b.source === 'approved_timesheets') {
+    return [
+      ['Working days', b.working_days],
+      ['Expected hours', b.expected_hours],
+      ['Approved hours paid', b.paid_hours],
+      ['Short hours', b.deficit_hours],
+      ['Approved overtime (h)', b.ot_approved_hours],
+      ['Overtime amount', b.ot_amount == null ? undefined : (moneyValue ? moneyValue(b.ot_amount) : b.ot_amount)],
+      ['Hourly rate', b.hourly_rate == null ? undefined : (moneyValue ? moneyValue(b.hourly_rate) : b.hourly_rate)],
+    ];
+  }
+  return [
     ['Working days', b.working_days],
     ['Weekend days', b.weekend_days],
     ['Holidays', b.holiday_days],
-    ['Present days', b.present_days],
+    ['Present / work from home', b.present_days != null ? Math.max(0, b.present_days - (b.half_days || 0)) : undefined],
     ['Half days', b.half_days],
-    ['Paid leave days', b.paid_leave_days],
-    ['Unpaid leave days', b.unpaid_leave_days],
-    ['Unpaid (no record) days', b.unpaid_days],
-    ['Loss-of-pay days', b.lop_days],
-    ['Paid days', b.paid_days],
-    ['Overtime (minutes)', b.overtime_minutes],
-    // Timesheet-based payslips (approved hours + approved OT).
-    ['Expected hours', b.expected_hours],
-    ['Approved hours paid', b.paid_hours],
-    ['Short hours', b.deficit_hours],
+    ['Absent', b.absent_days],
+    ['Unmarked', b.unmarked_days],
+    ['Paid leave', b.paid_leave_days],
+    ['Unpaid leave', b.unpaid_leave_days],
+    ['Paid hours', b.paid_hours],
+    ['Unpaid hours', b.deficit_hours],
     ['Approved overtime (h)', b.ot_approved_hours],
-    ['Overtime amount', b.ot_amount],
-    ['Hourly rate', b.hourly_rate],
-  ].filter(([, v]) => v !== undefined);
+    ['Overtime amount', b.ot_amount == null ? undefined : (moneyValue ? moneyValue(b.ot_amount) : b.ot_amount)],
+    ['Hourly rate', b.hourly_rate == null ? undefined : (moneyValue ? moneyValue(b.hourly_rate) : b.hourly_rate)],
+  ];
+}
+
+function printPayslip(payslip, orgName) {
+  const b = payslip.breakdown || {};
+  const rows = payslipFacts(b).filter(([, v]) => v !== undefined);
 
   const win = window.open('', '_blank', 'width=820,height=960');
   if (!win) return;
@@ -117,18 +129,9 @@ function PayslipDrawer({ open, payslip, onClose }) {
             </div>
           </div>
           <div>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">{b.source === 'approved_timesheets' ? 'Timesheet breakdown (approved hours)' : 'Attendance breakdown'}</h4>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">{b.source === 'approved_timesheets' ? 'Timesheet breakdown (older payslip)' : 'Attendance breakdown'}</h4>
             <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
-              {[
-                ['Working days', b.working_days], ['Weekend days', b.weekend_days], ['Holidays', b.holiday_days],
-                ['Present days', b.present_days], ['Half days', b.half_days], ['Paid leave', b.paid_leave_days],
-                ['Unpaid leave', b.unpaid_leave_days], ['Unpaid (no record)', b.unpaid_days],
-                ['Loss-of-pay days', b.lop_days], ['Paid days', b.paid_days],
-                ['Overtime (min)', b.overtime_minutes], ['Per-day pay', b.per_day_pay !== undefined ? money(b.per_day_pay) : undefined],
-                ['Expected hours', b.expected_hours], ['Approved hours paid', b.paid_hours], ['Short hours', b.deficit_hours],
-                ['Approved OT (h)', b.ot_approved_hours], ['OT amount', b.ot_amount !== undefined ? money(b.ot_amount) : undefined],
-                ['Pending (not paid)', b.pending_hours !== undefined ? `${b.pending_hours}h` : undefined], ['Hourly rate', b.hourly_rate !== undefined ? money(b.hourly_rate) : undefined],
-              ].filter(([, v]) => v !== undefined).map(([label, value]) => (
+              {payslipFacts(b, money).filter(([, v]) => v !== undefined && v !== null).map(([label, value]) => (
                 <div key={label} className="flex justify-between border-b border-tertiary-50 pb-1">
                   <dt className="text-tertiary-500">{label}</dt>
                   <dd className="font-medium text-tertiary-800">{value}</dd>

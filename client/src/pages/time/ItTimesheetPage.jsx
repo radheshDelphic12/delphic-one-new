@@ -12,7 +12,6 @@ import LeaveDayNotice from './LeaveDayNotice.jsx';
 import ProjectDayHint from '../../components/finance/ProjectDayHint.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
 import NoteText from '../../components/NoteText.jsx';
-import WeekHoursView from './WeekHoursView.jsx';
 import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -358,8 +357,6 @@ export default function ItTimesheetPage() {
           </div>
         )}
       </section>
-
-      <WeekHoursView canDeleteOwn reloadKey={weekKey} onChanged={load} />
 
       <RegularisationSection requireProject projectOptions={projectOptions} onChanged={load} />
     </div>

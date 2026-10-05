@@ -86,6 +86,26 @@ describe('attendance pay basis - the computation', () => {
     expect(net).toBe(198000);
   });
 
+  test('working days before the joining date are unpaid but not unmarked', () => {
+    // September has 22 working days. Joining on the 21st leaves the first 20 outside employment.
+    const joinedAt = new Date(`${DAYS[20]}T15:30:00.000Z`);
+    const afterJoin = new Map(DAYS.slice(20).map((k) => [k, { status: 'present' }]));
+    const { breakdown: b, net } = pay({ attendanceByDate: afterJoin, joinedAt });
+    expect(b).toMatchObject({ unmarked_days: 0, paid_hours: 18, deficit_hours: 180, working_days: 22 });
+    expect(net).toBe(18000);
+    // A working day after joining that nobody marked still blocks the lock.
+    const missed = pay({ attendanceByDate: new Map([[DAYS[20], { status: 'present' }]]), joinedAt });
+    expect(missed.breakdown.unmarked_days).toBe(1);
+  });
+
+  test('working days after the leaving date are unpaid but not unmarked', () => {
+    const leftAt = new Date(DAYS[1]);
+    const whileEmployed = new Map(DAYS.slice(0, 2).map((k) => [k, { status: 'present' }]));
+    const { breakdown: b, net } = pay({ attendanceByDate: whileEmployed, leftAt });
+    expect(b).toMatchObject({ unmarked_days: 0, paid_hours: 18, deficit_hours: 180 });
+    expect(net).toBe(18000);
+  });
+
   test('live "as of" mode: days after the date are upcoming, not unmarked', () => {
     const asOf = new Date(DAYS[9]);
     const attendanceByDate = new Map(DAYS.slice(0, 10).map((k) => [k, { status: 'present' }]));
