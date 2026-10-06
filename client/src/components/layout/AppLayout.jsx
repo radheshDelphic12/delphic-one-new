@@ -160,17 +160,17 @@ export default function AppLayout() {
           to="/zephyr"
           onClick={() => setMobileOpen(false)}
           aria-label="Zephyr Infrastructure home"
-          className="group mx-2 mb-3 block overflow-hidden rounded-2xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
         >
-          <div className="flex justify-center px-4 pb-2 pt-5">
-            <img src="/zephyr-logo.png" alt="Zephyr Infrastructure" className="h-24 w-auto object-contain transition group-hover:scale-105" />
+          <div className="flex justify-center px-3 pb-1 pt-2.5">
+            <img src={user?.active_org?.logo_url || '/zephyr-logo.png'} alt={user?.active_org?.name || 'Zephyr Infrastructure'} className="h-14 w-auto max-w-full object-contain transition group-hover:scale-105" />
           </div>
-          <div className="flex items-center gap-2 px-4 pb-3.5">
+          <div className="flex items-center gap-2 px-4 pb-2">
             <span className="h-px flex-1 bg-primary-200" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-500">Infrastructure</span>
+            <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-primary-500">Infrastructure</span>
             <span className="h-px flex-1 bg-primary-200" />
           </div>
-          <div className="h-1 bg-[rgb(var(--zx-earth))]" />
+          <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
         </Link>
       )}
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">

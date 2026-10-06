@@ -4,7 +4,7 @@ const prisma = require('../../config/db');
 const { userNames } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
 const { ownerOk, personOk } = require('./leads.service');
-const { SERVICE_KEYS } = require('./serviceTypes');
+const serviceTypes = require('./serviceTypes');
 const { cleanDetails, detailsInput } = require('./projectDetails');
 
 const KINDS = ['self', 'client'];
@@ -20,7 +20,7 @@ const money = z.preprocess((v) => (v === '' ? null : v), z.coerce.number().min(0
 const projectFields = {
   name: z.string().trim().min(1).max(200),
   kind: z.enum(KINDS),
-  service_type: z.enum(SERVICE_KEYS),
+  service_type: serviceTypes.serviceKey,
   party_id: uuidOrNull,
   location: text(200),
   status: z.enum(STATUSES),
@@ -68,7 +68,7 @@ const workOrderUpdateSchema = z.object(workOrderFields).partial();
 const listQuerySchema = z.object({
   status: z.enum([...STATUSES, 'open']).optional(),
   kind: z.enum(KINDS).optional(),
-  service_type: z.enum(SERVICE_KEYS).optional(),
+  service_type: serviceTypes.serviceKey.optional(),
   party_id: z.string().uuid().optional(),
   assignee_id: z.string().uuid().optional(),
   contractor_id: z.string().uuid().optional(),
@@ -184,7 +184,7 @@ async function summary(orgId) {
   const by_status = Object.fromEntries(STATUSES.map((s) => [s, projects.filter((p) => p.status === s).length]));
   const live = projects.filter((p) => LIVE_STATUSES.includes(p.status));
   const by_service = Object.fromEntries(
-    SERVICE_KEYS.map((k) => {
+    (await serviceTypes.keys(orgId)).map((k) => {
       const rows = projects.filter((p) => p.service_type === k);
       return [k, { total: rows.length, live: rows.filter((p) => LIVE_STATUSES.includes(p.status)).length, completed: rows.filter((p) => p.status === 'completed').length, contract_value: sum(rows, (p) => p.contract_value), revenue: sum(rows, (p) => p.actual_revenue), cost: sum(rows, (p) => p.actual_cost) }];
     })

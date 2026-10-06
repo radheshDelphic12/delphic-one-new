@@ -7,7 +7,7 @@ const { fail } = require('../../utils/response');
 const CAPS = {
   admin: [
     'leads', 'parties', 'projects', 'projectsEdit', 'people', 'peoplePay', 'salaries', 'ledger', 'ledgerSalaries',
-    'overview', 'overviewValuation', 'financials', 'settings', 'audit', 'delete', 'myWork',
+    'overview', 'overviewValuation', 'financials', 'settings', 'users', 'audit', 'delete', 'myWork',
     'properties', 'propertiesEdit', 'propertyFinance', 'rent', 'rentEdit', 'trading', 'tasks', 'tasksAll',
   ],
   manager: ['leads', 'parties', 'projects', 'projectsEdit', 'people', 'ledger', 'overview', 'myWork', 'properties', 'propertiesEdit', 'rent', 'rentEdit', 'tasks', 'tasksAll'],

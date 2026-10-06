@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileUp, Plus, Search, Share2, Trash2, X } from 'lucide-react';
+import { FileUp, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 import { csvToObjects, downloadText } from '../../lib/zephyr/csv.js';
@@ -124,9 +124,15 @@ function EntryForm({ initial, fixedProject, isAdmin, categories, projects, parti
   );
 }
 
-function GroupExpenseForm({ categories, projects, properties, parties, saving, onSubmit, onCancel }) {
-  const [v, setV] = useState({ entry_date: today(), category_id: '', party_id: '', amount: '', tax: '', basis: 'equal', description: '', reference: '' });
-  const [rows, setRows] = useState([{ target: '', share: 1 }, { target: '', share: 1 }]);
+function GroupExpenseForm({ initial, categories, projects, properties, parties, saving, onSubmit, onCancel }) {
+  // `initial` is the list of existing shares; they reopen as exact amounts so nothing shifts by rounding.
+  const first = initial?.[0];
+  const [v, setV] = useState(initial
+    ? { entry_date: String(first.entry_date).slice(0, 10), category_id: first.category?.id || '', party_id: first.party?.id || '', amount: String(Math.round(initial.reduce((a, r) => a + r.amount, 0) * 100) / 100), tax: String(Math.round(initial.reduce((a, r) => a + (r.tax || 0), 0) * 100) / 100), basis: 'amount', description: first.description || '', reference: first.reference || '' }
+    : { entry_date: today(), category_id: '', party_id: '', amount: '', tax: '', basis: 'equal', description: '', reference: '' });
+  const [rows, setRows] = useState(initial
+    ? initial.map((r) => ({ target: r.project_id ? `project:${r.project_id}` : `property:${r.property_id}`, share: r.amount }))
+    : [{ target: '', share: 1 }, { target: '', share: 1 }]);
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   const setRow = (i, key) => (e) => setRows((cur) => cur.map((r, idx) => (idx === i ? { ...r, [key]: e.target.value } : r)));
   const cats = categories.filter((c) => c.kind === 'expense' && c.active);
@@ -180,7 +186,7 @@ function GroupExpenseForm({ categories, projects, properties, parties, saving, o
       </div>
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={saving || !check}>{saving ? 'Saving…' : 'Book shared expense'}</button>
+        <button type="submit" className="btn-primary" disabled={saving || !check}>{saving ? 'Saving…' : initial ? 'Save changes' : 'Book shared expense'}</button>
       </div>
     </form>
   );
@@ -303,8 +309,9 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
   async function saveGroup(body) {
     setSaving(true);
     try {
-      await zephyrApi.createGroupExpense(body);
-      pushSuccess('Shared expense booked');
+      if (drawer?.shares) await zephyrApi.updateGroupExpense(drawer.shares[0].source_id, body);
+      else await zephyrApi.createGroupExpense(body);
+      pushSuccess(drawer?.shares ? 'Shared expense updated' : 'Shared expense booked');
       setDrawer(null);
       await load();
       onChanged?.();
@@ -385,8 +392,8 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
 
       <DataTable columns={columns} rows={data.rows} loading={fetching && data.rows.length === 0} emptyLabel="No entries match. Add revenue or expense as it happens." onRowClick={(entry) => setDrawer({ entry })} maxHeight="56vh" />
 
-      <Drawer open={Boolean(drawer)} onClose={() => setDrawer(null)} size="xl" tone={drawer?.entry ? 'edit' : 'create'} title={drawer?.group ? 'Shared expense' : drawer?.entry ? 'Edit entry' : 'New entry'}>
-        {drawer?.group && <GroupExpenseForm categories={categories} projects={projects} properties={properties} parties={parties} saving={saving} onSubmit={saveGroup} onCancel={() => setDrawer(null)} />}
+      <Drawer open={Boolean(drawer)} onClose={() => setDrawer(null)} size="xl" tone={drawer?.entry ? 'edit' : 'create'} title={drawer?.group ? (drawer.shares ? 'Edit shared expense' : 'Shared expense') : drawer?.entry ? 'Edit entry' : 'New entry'}>
+        {drawer?.group && <GroupExpenseForm initial={drawer.shares} categories={categories} projects={projects} properties={properties} parties={parties} saving={saving} onSubmit={saveGroup} onCancel={() => setDrawer(null)} />}
         {drawer && !drawer.group && drawer.entry?.source_type ? (
           <div className="space-y-4">
             <div className="rounded-xl border bg-primary-50/50 p-3 text-sm text-tertiary-800">
@@ -399,6 +406,7 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
               <div><dt className="text-xs text-tertiary-500">Service</dt><dd>{drawer.entry.service_type ? serviceLabel(drawer.entry.service_type) : '—'}</dd></div>
               <div className="sm:col-span-2"><dt className="text-xs text-tertiary-500">Description</dt><dd>{drawer.entry.description || '—'}</dd></div>
             </dl>
+            {drawer.entry.source_type === 'group_expense' && isAdmin && <div className="flex justify-end"><button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => setDrawer({ group: true, shares: data.rows.filter((r) => r.source_id === drawer.entry.source_id) })}><Pencil className="h-4 w-4" />Edit shared expense</button></div>}
             {drawer.entry.source_type === 'group_expense' && canDelete && <div className="flex justify-end"><button type="button" className="inline-flex items-center gap-1.5 rounded-xl border border-danger-200 px-3 py-1.5 text-sm font-medium text-danger-600 hover:bg-danger-50" onClick={() => removeGroup(drawer.entry)}><Trash2 className="h-4 w-4" />Delete shared expense</button></div>}
           </div>
         ) : null}

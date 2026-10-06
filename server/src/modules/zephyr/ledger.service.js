@@ -4,7 +4,7 @@ const { pageArgs, pagination } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
 const { markStale, isClosed } = require('./periods');
 const crypto = require('crypto');
-const { SERVICE_KEYS } = require('./serviceTypes');
+const serviceTypes = require('./serviceTypes');
 const money = require('./money.service');
 const { ensureCategories } = require('./core.service');
 
@@ -24,7 +24,7 @@ const entryFields = {
   party_id: uuidOrNull,
   work_order_id: uuidOrNull,
   milestone_id: uuidOrNull,
-  service_type: z.preprocess((v) => (v === '' ? null : v), z.enum(SERVICE_KEYS).nullable().optional()),
+  service_type: z.preprocess((v) => (v === '' ? null : v), serviceTypes.serviceKey.nullable().optional()),
   property_id: uuidOrNull,
   unit_id: uuidOrNull,
   amount: z.coerce.number().positive().max(1e13),
@@ -43,7 +43,7 @@ const listQuerySchema = z.object({
   project_id: z.string().uuid().optional(),
   party_id: z.string().uuid().optional(),
   category_id: z.string().uuid().optional(),
-  service_type: z.enum(SERVICE_KEYS).optional(),
+  service_type: serviceTypes.serviceKey.optional(),
   property_id: z.string().uuid().optional(),
   unit_id: z.string().uuid().optional(),
   from: dateStr.optional(),
@@ -342,6 +342,16 @@ async function removeGroupExpense(orgId, actorId, groupId) {
   return { ok: true };
 }
 
+async function updateGroupExpense(orgId, actorId, groupId, input) {
+  const rows = await prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, source_type: 'group_expense', source_id: groupId, deleted_at: null } });
+  if (rows.length === 0) return { error: 'not_found' };
+  if (await locked(orgId, ...rows.map((r) => ({ ...r, entry_date: dayOf(r.entry_date) })))) return { error: 'period_closed' };
+  const made = await createGroupExpense(orgId, actorId, input);
+  if (made.error) return made;
+  await removeGroupExpense(orgId, actorId, groupId);
+  return made;
+}
+
 async function listGroupExpenses(orgId) {
   const rows = await prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, source_type: 'group_expense', deleted_at: null }, include: INCLUDE, orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }] });
   const groups = new Map();
@@ -436,4 +446,4 @@ async function partyStatement(orgId, partyId) {
 }
 
 module.exports = {
-  groupExpenseSchema, createGroupExpense, removeGroupExpense, listGroupExpenses, bookCommission, createEntrySchema, updateEntrySchema, importSchema, listQuerySchema, list, get, create, update, remove, importRows, projectMoney, partyStatement };
+  groupExpenseSchema, createGroupExpense, updateGroupExpense, removeGroupExpense, listGroupExpenses, bookCommission, createEntrySchema, updateEntrySchema, importSchema, listQuerySchema, list, get, create, update, remove, importRows, projectMoney, partyStatement };

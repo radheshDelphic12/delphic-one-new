@@ -42,6 +42,21 @@ function Detail({ label, children }) {
 
 function MilestonesTab({ project, canEdit, closed, apply }) {
   const [form, setForm] = useState({ name: '', due_date: '', weight: 1, billing_amount: '' });
+  const [editId, setEditId] = useState(null);
+  const [draft, setDraft] = useState({});
+  const startEdit = (m) => {
+    setEditId(m.id);
+    setDraft({ name: m.name, due_date: dayOf(m.due_date), weight: m.weight, billing_amount: m.billing_amount ?? '' });
+  };
+  async function saveEdit(m) {
+    const ok = await apply(() => zephyrApi.updateMilestone(project.id, m.id, {
+      name: draft.name.trim(),
+      due_date: draft.due_date || null,
+      weight: Number(draft.weight || 1),
+      billing_amount: draft.billing_amount === '' ? null : Number(draft.billing_amount),
+    }), 'Milestone saved');
+    if (ok) setEditId(null);
+  }
 
   async function add(e) {
     e.preventDefault();
@@ -68,9 +83,9 @@ function MilestonesTab({ project, canEdit, closed, apply }) {
               const overdue = m.due_date && dayOf(m.due_date) < today() && m.percent_done < 100;
               return (
                 <tr key={m.id}>
-                  <td className="px-4 py-2.5 font-medium text-tertiary-900">{m.name}</td>
-                  <td className={`px-4 py-2.5 ${overdue ? 'font-medium text-red-600' : 'text-tertiary-600'}`}>{m.due_date ? dateLabel(m.due_date) : '—'}{overdue ? ' · overdue' : ''}</td>
-                  <td className="px-4 py-2.5 text-tertiary-600">{m.weight}</td>
+                  <td className="px-4 py-2.5 font-medium text-tertiary-900">{editId === m.id ? <input className="w-full rounded-lg border px-2 py-1 text-sm" aria-label="Milestone name" value={draft.name} maxLength={200} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /> : m.name}</td>
+                  <td className={`px-4 py-2.5 ${overdue ? 'font-medium text-red-600' : 'text-tertiary-600'}`}>{editId === m.id ? <input type="date" className="rounded-lg border px-2 py-1 text-sm" aria-label="Milestone due date" value={draft.due_date} onChange={(e) => setDraft({ ...draft, due_date: e.target.value })} /> : <>{m.due_date ? dateLabel(m.due_date) : '—'}{overdue ? ' · overdue' : ''}</>}</td>
+                  <td className="px-4 py-2.5 text-tertiary-600">{editId === m.id ? <input type="number" min="1" max="100" className="w-16 rounded-lg border px-2 py-1 text-sm" aria-label="Milestone weight" value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: e.target.value })} /> : m.weight}</td>
                   <td className="px-4 py-2.5">
                     <input
                       type="number" min="0" max="100" defaultValue={m.percent_done} disabled={!editable} aria-label={`${m.name} percent done`}
@@ -78,7 +93,7 @@ function MilestonesTab({ project, canEdit, closed, apply }) {
                       onBlur={(e) => Number(e.target.value) !== m.percent_done && apply(() => zephyrApi.updateMilestone(project.id, m.id, { percent_done: Number(e.target.value) }))}
                     />
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{m.billing_amount ? rupees(m.billing_amount) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{editId === m.id ? <input type="number" min="0" className="w-28 rounded-lg border px-2 py-1 text-right text-sm" aria-label="Milestone billing" value={draft.billing_amount} onChange={(e) => setDraft({ ...draft, billing_amount: e.target.value })} /> : m.billing_amount ? rupees(m.billing_amount) : '—'}</td>
                   <td className="px-4 py-2.5">
                     {m.billing_amount ? (
                       <label className="inline-flex items-center gap-1.5 text-xs text-tertiary-600">
@@ -87,7 +102,7 @@ function MilestonesTab({ project, canEdit, closed, apply }) {
                       </label>
                     ) : '—'}
                   </td>
-                  <td className="px-2">{editable && <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label={`Delete ${m.name}`} onClick={() => apply(() => zephyrApi.deleteMilestone(project.id, m.id))}><Trash2 className="h-4 w-4" /></button>}</td>
+                  <td className="whitespace-nowrap px-2">{editable && (editId === m.id ? (<><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-primary-700 hover:bg-primary-50" onClick={() => saveEdit(m)}>Save</button><button type="button" className="rounded-lg px-2 py-1 text-xs text-tertiary-500 hover:bg-tertiary-50" onClick={() => setEditId(null)}>Cancel</button></>) : <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label={`Edit ${m.name}`} onClick={() => startEdit(m)}><Pencil className="h-4 w-4" /></button>)}{editable && <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label={`Delete ${m.name}`} onClick={() => apply(() => zephyrApi.deleteMilestone(project.id, m.id))}><Trash2 className="h-4 w-4" /></button>}</td>
                 </tr>
               );
             })}

@@ -34,7 +34,7 @@ function StatusPill({ due }) {
   );
 }
 
-function DuesTable({ dues, canEdit, onPay, onWaive, showMonth }) {
+function DuesTable({ dues, canEdit, onPay, onWaive, onEditAmount, showMonth }) {
   if (dues.length === 0) return <Empty>Nothing here.</Empty>;
   return (
     <div className={`${card} overflow-x-auto p-0 md:p-0`}>
@@ -55,6 +55,7 @@ function DuesTable({ dues, canEdit, onPay, onWaive, showMonth }) {
               <td className="px-2 text-right">
                 {canEdit && d.balance > 0 && <button type="button" className="btn-secondary" onClick={() => onPay(d)}>Record payment</button>}
                 {canEdit && d.status !== 'paid' && d.status !== 'waived' && <button type="button" className="ml-1 rounded-lg px-2 py-1 text-xs font-medium text-tertiary-500 hover:bg-primary-50" onClick={() => onWaive(d)}>Waive</button>}
+                {canEdit && d.status !== 'waived' && <button type="button" className="ml-1 rounded-lg px-2 py-1 text-xs font-medium text-tertiary-500 hover:bg-primary-50" onClick={() => onEditAmount(d)}>Edit rent</button>}
                 {canEdit && d.status === 'waived' && <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-tertiary-500 hover:bg-primary-50" onClick={() => onWaive(d, true)}>Undo waiver</button>}
               </td>
             </tr>
@@ -142,7 +143,8 @@ export default function ZephyrRentPage() {
   const close = () => setDrawer(null);
 
   async function pay(body) {
-    if (await run(() => zephyrApi.payRent(drawer.due.id, body), 'Payment recorded')) close();
+    const edit = drawer.payment;
+    if (await run(() => (edit ? zephyrApi.updateRentPayment(edit.id, body) : zephyrApi.payRent(drawer.due.id, body)), edit ? 'Payment updated' : 'Payment recorded')) close();
   }
   async function waive(due, undo) {
     if (undo) return void (await run(() => zephyrApi.updateRentDue(due.id, { waived: false }), 'Waiver removed'));
@@ -150,11 +152,19 @@ export default function ZephyrRentPage() {
     if (!reason?.trim()) return undefined;
     return run(() => zephyrApi.updateRentDue(due.id, { waived: true, waived_reason: reason.trim() }), 'Rent waived');
   }
+  async function editAmount(due) {
+    const value = window.prompt(`Rent for ${monthLabel(due.period)} (${due.tenant.name}). Change the amount due:`, String(due.amount));
+    if (value === null) return;
+    const amount = Number(value);
+    if (!(amount > 0)) return pushError('Enter an amount above zero', 'Not saved');
+    await run(() => zephyrApi.updateRentDue(due.id, { amount }), 'Rent amount updated');
+  }
   async function removePayment(p) {
     if (window.confirm(`Reverse the ${rupees(p.amount)} payment from ${p.tenant?.name}? The rental income entry is removed too.`)) await run(() => zephyrApi.deleteRentPayment(p.id), 'Payment reversed', 'Could not reverse');
   }
   async function saveLease(values) {
-    if (await run(() => zephyrApi.createLease(values), 'Lease created')) close();
+    const edit = drawer.lease;
+    if (await run(() => (edit ? zephyrApi.updateLease(edit.id, values) : zephyrApi.createLease(values)), edit ? 'Lease updated' : 'Lease created')) close();
   }
   async function endLease(l) {
     const reason = window.prompt(`End the lease of ${l.tenant?.name} on ${l.unit?.name}? Optionally say why:`, '');
@@ -196,7 +206,7 @@ export default function ZephyrRentPage() {
             <select value={filters.status} onChange={setFilter('status')} className="rounded-xl border px-3 py-1.5 text-sm" aria-label="Status"><option value="">All statuses</option>{Object.entries(RENT_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
             <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tertiary-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tenant or unit…" aria-label="Search rent" className="w-44 rounded-xl border py-1.5 pl-9 pr-3 text-sm" /></div>
           </div>
-          {!dues ? <Empty>Loading…</Empty> : <DuesTable dues={dues} canEdit={canEdit} onPay={(due) => setDrawer({ kind: 'pay', due })} onWaive={waive} />}
+          {!dues ? <Empty>Loading…</Empty> : <DuesTable dues={dues} canEdit={canEdit} onPay={(due) => setDrawer({ kind: 'pay', due })} onWaive={waive} onEditAmount={editAmount} />}
           {rentSummary?.by_property?.length > 1 && (
             <section className={card}>
               <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">By property</h3>
@@ -209,7 +219,7 @@ export default function ZephyrRentPage() {
       {tab === 'overdue' && (
         <div className="space-y-3">
           {overdue && overdue.length > 0 && <div className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800"><AlertTriangle className="h-4 w-4" />{overdue.length} rent{overdue.length === 1 ? ' is' : 's are'} overdue, {rupees(overdue.reduce((a, d) => a + d.balance, 0))} in total.</div>}
-          {!overdue ? <Empty>Loading…</Empty> : overdue.length === 0 ? <Empty>No rent is overdue. Everything due so far has been received.</Empty> : <DuesTable dues={overdue} canEdit={canEdit} onPay={(due) => setDrawer({ kind: 'pay', due })} onWaive={waive} showMonth />}
+          {!overdue ? <Empty>Loading…</Empty> : overdue.length === 0 ? <Empty>No rent is overdue. Everything due so far has been received.</Empty> : <DuesTable dues={overdue} canEdit={canEdit} onEditAmount={editAmount} onPay={(due) => setDrawer({ kind: 'pay', due })} onWaive={waive} showMonth />}
         </div>
       )}
 
@@ -226,7 +236,12 @@ export default function ZephyrRentPage() {
                 { key: 'amount', header: 'Amount', render: (r) => <span className="tabular-nums">{rupees(r.amount)}</span> },
                 { key: 'method', header: 'Method', render: (r) => `${METHOD_LABEL[r.method] || r.method}${r.reference ? ` · ${r.reference}` : ''}` },
                 { key: 'by', header: 'Collected by', render: (r) => r.collected_by?.name || 'Directly' },
-                { key: 'x', header: '', render: (r) => canEdit && <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Reverse payment" onClick={() => removePayment(r)}><Trash2 className="h-4 w-4" /></button> },
+                { key: 'x', header: '', render: (r) => canEdit && (
+                  <span className="inline-flex gap-1">
+                    <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit payment" onClick={() => setDrawer({ kind: 'pay', payment: r, due: { tenant: r.tenant, property: r.property, unit: r.unit, period: monthLabel(r.period) } })}><Pencil className="h-4 w-4" /></button>
+                    <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Reverse payment" onClick={() => removePayment(r)}><Trash2 className="h-4 w-4" /></button>
+                  </span>
+                ) },
               ]}
               rows={payments}
               maxHeight="60vh"
@@ -250,7 +265,12 @@ export default function ZephyrRentPage() {
                 { key: 'rent', header: 'Monthly rent', render: (r) => <span className="tabular-nums">{rupees(r.monthly_rent)}</span> },
                 { key: 'due', header: 'Due day', render: (r) => r.due_day },
                 { key: 'status', header: 'Status', render: (r) => <Pill tone={r.status === 'active' ? 'green' : 'gray'}>{r.status === 'active' ? 'Active' : 'Ended'}</Pill> },
-                { key: 'x', header: '', render: (r) => canEdit && r.status === 'active' && <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => endLease(r)}>End lease</button> },
+                { key: 'x', header: '', render: (r) => canEdit && r.status === 'active' && (
+                  <span className="inline-flex gap-1">
+                    <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-primary-700 hover:bg-primary-50" onClick={() => setDrawer({ kind: 'lease', lease: r })}>Edit</button>
+                    <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => endLease(r)}>End lease</button>
+                  </span>
+                ) },
               ]}
               rows={leases}
               maxHeight="60vh"
@@ -287,9 +307,9 @@ export default function ZephyrRentPage() {
         </div>
       )}
 
-      <Drawer open={Boolean(drawer)} onClose={close} size="xl" tone={drawer?.tenant ? 'edit' : 'create'} title={{ pay: 'Record rent payment', lease: 'New lease', tenant: drawer?.tenant ? `Edit ${drawer.tenant.name}` : 'Add tenant' }[drawer?.kind] || ''}>
-        {drawer?.kind === 'pay' && <PaymentForm due={drawer.due} people={people} saving={saving} onSubmit={pay} onCancel={close} />}
-        {drawer?.kind === 'lease' && <LeaseForm tenants={tenants || []} units={units} saving={saving} onSubmit={saveLease} onCancel={close} onNewTenant={() => setDrawer({ kind: 'tenant', back: 'lease' })} />}
+      <Drawer open={Boolean(drawer)} onClose={close} size="xl" tone={drawer?.tenant ? 'edit' : 'create'} title={{ pay: drawer?.payment ? 'Edit rent payment' : 'Record rent payment', lease: drawer?.lease ? 'Edit lease' : 'New lease', tenant: drawer?.tenant ? `Edit ${drawer.tenant.name}` : 'Add tenant' }[drawer?.kind] || ''}>
+        {drawer?.kind === 'pay' && <PaymentForm due={drawer.due} initial={drawer.payment} people={people} saving={saving} onSubmit={pay} onCancel={close} />}
+        {drawer?.kind === 'lease' && <LeaseForm initial={drawer.lease} tenants={tenants || []} units={units} saving={saving} onSubmit={saveLease} onCancel={close} onNewTenant={() => setDrawer({ kind: 'tenant', back: 'lease' })} />}
         {drawer?.kind === 'tenant' && (
           <div className="space-y-6">
             <TenantForm initial={drawer.tenant} saving={saving} onSubmit={saveTenant} onCancel={drawer.back ? () => setDrawer({ kind: drawer.back }) : close} />

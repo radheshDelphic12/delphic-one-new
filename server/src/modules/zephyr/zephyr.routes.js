@@ -8,19 +8,35 @@ const documents = require('./documents.service');
 const leads = require('./leads.service');
 const projects = require('./projects.service');
 const people = require('./people.service');
+const usersSvc = require('./users.service');
+const account = require('./account.service');
 const salaries = require('./salaries.service');
 const ledger = require('./ledger.service');
 const overviewSvc = require('./overview.service');
 const financials = require('./financials.service');
-const { authenticate, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, requireOrgMembership, loadSuperadminFlag } = require('../../middleware/auth');
 const requireModule = require('../../middleware/requireModule');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const { zxAccess, zxAuthorize } = require('./access');
 const core = require('./core.service');
+const serviceTypes = require('./serviceTypes');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership, requireModule('zephyr'), zxAccess);
+
+// A service on a write must be one of this company's services (built-in or added by its admin).
+router.use(
+  asyncHandler(async (req, res, next) => {
+    if (req.method === 'GET' || !req.body) return next();
+    const used = [req.body.service_type, req.body.service, ...(Array.isArray(req.body.interested_services) ? req.body.interested_services : [])].filter((k) => typeof k === 'string' && k);
+    if (used.length && !req.path.startsWith('/service-types')) {
+      const known = new Set(await serviceTypes.keys(orgId(req)));
+      if (used.some((k) => !known.has(k))) return fail(res, 422, 'Unknown service');
+    }
+    return next();
+  })
+);
 
 const ERRORS = {
   not_found: [404, 'Record not found'],
@@ -129,6 +145,34 @@ router.delete(
     return result.error ? failPeople(res, result) : ok(res, { id: req.params.id });
   })
 );
+// Company branding (admin only).
+const settingsCap = zxAuthorize('settings');
+router.get('/company', settingsCap, asyncHandler(async (req, res) => ok(res, await account.getCompany(orgId(req)))));
+router.patch('/company', settingsCap, asyncHandler(async (req, res) => ok(res, (await account.updateCompany(orgId(req), req.user.id, account.companySchema.parse(req.body))).org)));
+
+// Org user management (admin only): edit profiles and deactivate / reactivate accounts for this company.
+const USER_ERRORS = {
+  not_found: [404, 'User not found'],
+  email_taken: [409, 'That email is already in use'],
+  forbidden_superadmin: [403, 'Only a superadmin can change a superadmin'],
+  self_deactivate: [422, 'You cannot deactivate your own account'],
+  last_admin: [422, 'This is the last active admin of the company'],
+};
+const usersCap = zxAuthorize('users');
+const uactor = (req) => ({ id: req.user.id, is_superadmin: Boolean(req.user.is_superadmin) });
+const sendUser = (res, result) => {
+  if (!result.error) return ok(res, result.user);
+  const mapped = USER_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+};
+router.get('/users', usersCap, asyncHandler(async (req, res) => ok(res, await usersSvc.list(orgId(req), usersSvc.listQuerySchema.parse(req.query)))));
+router.post('/users', usersCap, asyncHandler(async (req, res) => {
+  const result = await usersSvc.create(orgId(req), uactor(req), usersSvc.createUserSchema.parse(req.body));
+  return result.error ? sendUser(res, result) : ok(res, result.user, {}, 201);
+}));
+router.patch('/users/:id', usersCap, loadSuperadminFlag, asyncHandler(async (req, res) => sendUser(res, await usersSvc.update(orgId(req), uactor(req), req.params.id, usersSvc.updateUserSchema.parse(req.body)))));
+router.post('/users/:id/status', usersCap, loadSuperadminFlag, asyncHandler(async (req, res) => sendUser(res, await usersSvc.setActive(orgId(req), uactor(req), req.params.id, usersSvc.statusSchema.parse(req.body)))));
+
 const sendOk = (res, result) => (result.error ? failPeople(res, result) : ok(res, { ok: true }));
 router.post('/people/:id/assignments', peopleCap, asyncHandler(async (req, res) => sendOk(res, await people.addAssignment(orgId(req), req.user.id, req.params.id, people.assignmentCreateSchema.parse(req.body)))));
 router.patch('/people/:id/assignments/:aid', peopleCap, asyncHandler(async (req, res) => sendOk(res, await people.updateAssignment(orgId(req), req.user.id, req.params.id, req.params.aid, people.assignmentUpdateSchema.parse(req.body)))));
@@ -206,9 +250,16 @@ router.delete(
   })
 );
 
-// --- Service types (R0): the five Zephyr services, labels editable by an admin ---
-const serviceTypes = require('./serviceTypes');
+// --- Service types (R0): the five Zephyr services (labels editable) plus any an admin adds ---
 router.get('/service-types', asyncHandler(async (req, res) => ok(res, await serviceTypes.list(orgId(req)))));
+router.post(
+  '/service-types',
+  zxAuthorize('settings'),
+  asyncHandler(async (req, res) => {
+    const result = await serviceTypes.create(orgId(req), req.user.id, serviceTypes.createServiceSchema.parse(req.body));
+    return result.error ? failFor(res, result) : ok(res, result.service, {}, 201);
+  })
+);
 router.patch(
   '/service-types/:key',
   zxAuthorize('settings'),
@@ -310,8 +361,16 @@ router.patch(
   '/leads/:id/activities/:activityId',
   leadsCap,
   asyncHandler(async (req, res) => {
-    const result = await leads.setFollowUpDone(orgId(req), req.params.id, req.params.activityId, req.body?.follow_up_done);
+    const result = await leads.updateActivity(orgId(req), req.params.id, req.params.activityId, leads.activityUpdateSchema.parse(req.body));
     return result.error ? failLead(res, result) : ok(res, result.activity);
+  })
+);
+router.delete(
+  '/leads/:id/activities/:activityId',
+  leadsCap,
+  asyncHandler(async (req, res) => {
+    const result = await leads.removeActivity(orgId(req), req.params.id, req.params.activityId);
+    return result.error ? failLead(res, result) : ok(res, { id: req.params.activityId });
   })
 );
 
@@ -401,7 +460,6 @@ const MONEY_ERRORS = {
   no_commission: [422, 'Enter the property value and commission percent first'],
   no_closing_date: [422, 'Enter the deal or closing date first'],
   already_booked: [409, 'The commission is already booked'],
-  future_actual: [422, 'An actual entry cannot be dated in the future. Mark it planned instead'],
 };
 function failMoney(res, result) {
   const mapped = MONEY_ERRORS[result.error];
@@ -421,6 +479,10 @@ router.get('/ledger/group-expenses', zxAuthorize('ledgerSalaries'), asyncHandler
 router.post('/ledger/group-expenses', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
   const result = await ledger.createGroupExpense(orgId(req), req.user.id, ledger.groupExpenseSchema.parse(req.body));
   return result.error ? failMoney(res, result) : ok(res, result, {}, 201);
+}));
+router.put('/ledger/group-expenses/:gid', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
+  const result = await ledger.updateGroupExpense(orgId(req), req.user.id, req.params.gid, ledger.groupExpenseSchema.parse(req.body));
+  return result.error ? failMoney(res, result) : ok(res, result);
 }));
 router.delete('/ledger/group-expenses/:gid', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
   const result = await ledger.removeGroupExpense(orgId(req), req.user.id, req.params.gid);
@@ -555,6 +617,7 @@ const properties = require('./properties.service');
 const PROPERTY_ERRORS = {
   not_found: [404, 'Record not found'],
   finance_only: [403, 'Costs, valuation and financing are for admin and finance'],
+  system_event: [409, 'This timeline entry was written by the system (rent, sale, status). Change it where it came from'],
   duplicate_unit: [409, 'A unit with that name already exists in this property / floor'],
   sold_via_sale: [409, 'A unit becomes sold only by recording a sale'],
   rented_via_lease: [409, 'A unit becomes rented only by adding a lease'],
@@ -595,7 +658,10 @@ router.post('/properties/:id/loans', pFin, asyncHandler(async (req, res) => send
 router.patch('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.updateLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid, properties.loanUpdateSchema.parse(req.body)))));
 router.delete('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid))));
 router.post('/properties/:id/valuations', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.addValuation(orgId(req), req.user.id, pCtx(req), req.params.id, properties.valuationSchema.parse(req.body)), 201)));
+router.patch('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.updateValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid, properties.valuationSchema.omit({ unit_id: true }).partial().parse(req.body)))));
 router.delete('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid))));
+router.patch('/properties/:id/events/:eid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.updateEvent(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid, properties.eventSchema.omit({ unit_id: true }).partial().parse(req.body)))));
+router.delete('/properties/:id/events/:eid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.removeEvent(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid))));
 router.post('/properties/:id/events', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.addNote(orgId(req), req.user.id, pCtx(req), req.params.id, properties.eventSchema.parse(req.body)), 201)));
 
 // --- Tenants, leases, rent (R4) ---
@@ -649,6 +715,7 @@ router.post('/rent/generate', rEdit, asyncHandler(async (req, res) => ok(res, aw
 router.get('/rent/payments', rView, asyncHandler(async (req, res) => ok(res, await rent.listPayments(orgId(req), { property_id: req.query.property_id, tenant_id: req.query.tenant_id, from: req.query.from, to: req.query.to }))));
 router.patch('/rent/dues/:id', rEdit, asyncHandler(async (req, res) => sendRent('due')(res, await rent.updateDue(orgId(req), req.user.id, req.params.id, rent.dueUpdateSchema.parse(req.body)))));
 router.post('/rent/dues/:id/payments', rEdit, asyncHandler(async (req, res) => sendRent('due', 201)(res, await rent.recordPayment(orgId(req), req.user.id, req.params.id, rent.paymentSchema.parse(req.body)))));
+router.patch('/rent/payments/:id', rEdit, asyncHandler(async (req, res) => sendRent('due')(res, await rent.updatePayment(orgId(req), req.user.id, req.params.id, rent.paymentSchema.partial().parse(req.body)))));
 router.delete('/rent/payments/:id', rEdit, asyncHandler(async (req, res) => sendRent('due')(res, await rent.removePayment(orgId(req), req.user.id, req.params.id))));
 
 // --- Property trading: sales (R5) ---
@@ -676,6 +743,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await sales.create(orgId(req), req.user.id, req.params.id, sales.saleSchema.parse(req.body));
     return result.error ? failSale(res, result) : ok(res, result.sale, {}, 201);
+  })
+);
+router.patch(
+  '/properties/:id/sales/:sid',
+  tradingCap,
+  asyncHandler(async (req, res) => {
+    const result = await sales.update(orgId(req), req.user.id, req.params.id, req.params.sid, sales.saleUpdateSchema.parse(req.body));
+    return result.error ? failSale(res, result) : ok(res, result.sale);
   })
 );
 router.delete(

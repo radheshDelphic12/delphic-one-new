@@ -158,6 +158,7 @@ function ActivityPanel({ lead, canEdit, onChanged }) {
   const [rows, setRows] = useState(null);
   const [form, setForm] = useState({ kind: 'call', summary: '', follow_up_date: '' });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // { id, kind, summary, follow_up_date }
   const load = useCallback(() => zephyrApi.leadActivities(lead.id).then(setRows, (e) => pushError(zephyrError(e), 'Could not load activity')), [lead.id, pushError]);
   useEffect(() => {
     setRows(null);
@@ -176,6 +177,32 @@ function ActivityPanel({ lead, canEdit, onChanged }) {
       pushError(zephyrError(err, 'Could not add activity'), 'Could not save');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await zephyrApi.updateLeadActivity(lead.id, editing.id, { kind: editing.kind, summary: editing.summary.trim(), follow_up_date: editing.follow_up_date || null });
+      setEditing(null);
+      await load();
+      onChanged();
+    } catch (err) {
+      pushError(zephyrError(err, 'Could not save the change'), 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeRow(a) {
+    if (!window.confirm('Remove this entry from the activity log?')) return;
+    try {
+      await zephyrApi.deleteLeadActivity(lead.id, a.id);
+      await load();
+      onChanged();
+    } catch (err) {
+      pushError(zephyrError(err, 'Could not remove'), 'Could not remove');
     }
   }
 
@@ -203,7 +230,16 @@ function ActivityPanel({ lead, canEdit, onChanged }) {
       {rows === null && <div className="text-sm text-tertiary-500">Loading…</div>}
       {rows?.length === 0 && <div className="rounded-xl border border-dashed p-4 text-center text-sm text-tertiary-400">Nothing logged yet.</div>}
       <ul className="space-y-2">
-        {rows?.map((a) => (
+        {rows?.map((a) => (editing?.id === a.id ? (
+          <li key={a.id} className="rounded-xl border bg-primary-50/40 p-3">
+            <form onSubmit={saveEdit} className="grid gap-2 sm:grid-cols-[8rem_1fr_9rem_auto] sm:items-end">
+              <label className={labelCls}>Type<select className={inputCls} value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value })}>{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select></label>
+              <label className={labelCls}>What happened<input className={inputCls} value={editing.summary} onChange={(e) => setEditing({ ...editing, summary: e.target.value })} required maxLength={1000} /></label>
+              <label className={labelCls}>Follow up on<input type="date" className={inputCls} value={editing.follow_up_date} onChange={(e) => setEditing({ ...editing, follow_up_date: e.target.value })} /></label>
+              <span className="flex gap-2"><button type="submit" className="btn-primary" disabled={busy || !editing.summary.trim()}>Save</button><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button></span>
+            </form>
+          </li>
+        ) : (
           <li key={a.id} className="flex items-start gap-3 rounded-xl border bg-white p-3">
             <span className="mt-0.5 rounded-lg bg-primary-50 px-2 py-0.5 text-[11px] font-medium capitalize text-primary-700">{a.kind}</span>
             <div className="min-w-0 flex-1">
@@ -220,8 +256,14 @@ function ActivityPanel({ lead, canEdit, onChanged }) {
                 <Check className="h-4 w-4" />
               </button>
             )}
+            {canEdit && (
+              <span className="flex shrink-0 gap-0.5">
+                <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit activity" onClick={() => setEditing({ id: a.id, kind: a.kind, summary: a.summary, follow_up_date: a.follow_up_date ? dayOf(a.follow_up_date) : '' })}><Pencil className="h-4 w-4" /></button>
+                <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove activity" onClick={() => removeRow(a)}><Trash2 className="h-4 w-4" /></button>
+              </span>
+            )}
           </li>
-        ))}
+        )))}
       </ul>
     </section>
   );

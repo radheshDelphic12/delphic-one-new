@@ -10,6 +10,9 @@ const settingsSchema = z.object({
   valuation_multiple: z.coerce.number().min(0).max(1000).optional(),
   valuation_manual: z.coerce.number().min(0).nullable().optional(),
   project_prefix: z.string().trim().min(1).max(12).optional(),
+  lead_prefix: z.string().trim().min(1).max(12).optional(),
+  property_prefix: z.string().trim().min(1).max(12).optional(),
+  task_prefix: z.string().trim().min(1).max(12).optional(),
   reason: z.string().trim().max(500).optional(),
 });
 const categoryCreateSchema = z.object({
@@ -34,6 +37,9 @@ const settingOut = (s) => ({
   valuation_multiple: num(s.valuation_multiple),
   valuation_manual: num(s.valuation_manual),
   project_prefix: s.project_prefix,
+  lead_prefix: s.lead_prefix,
+  property_prefix: s.property_prefix,
+  task_prefix: s.task_prefix,
 });
 
 // Created lazily with defaults so a Zephyr org needs no seeding step.

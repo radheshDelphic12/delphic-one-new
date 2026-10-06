@@ -29,28 +29,32 @@ export function TenantForm({ initial, saving, onSubmit, onCancel }) {
 }
 
 /** New lease for a unit. `units` is [{ id, name, property? }] to pick from, or pass `unit` to fix it. */
-export function LeaseForm({ tenants, units, unit, saving, onSubmit, onCancel, onNewTenant }) {
-  const [v, setV] = useState({ tenant_id: '', unit_id: unit?.id || '', start_date: today(), end_date: '', monthly_rent: '', security_deposit: '', due_day: 1, payment_method: '', notes: '' });
+export function LeaseForm({ initial, tenants, units, unit, saving, onSubmit, onCancel, onNewTenant }) {
+  const [v, setV] = useState(initial
+    ? { tenant_id: initial.tenant_id, unit_id: initial.unit_id, start_date: String(initial.start_date).slice(0, 10), end_date: initial.end_date ? String(initial.end_date).slice(0, 10) : '', monthly_rent: initial.monthly_rent, security_deposit: initial.security_deposit ?? '', due_day: initial.due_day, payment_method: initial.payment_method || '', notes: initial.notes || '' }
+    : { tenant_id: '', unit_id: unit?.id || '', start_date: today(), end_date: '', monthly_rent: '', security_deposit: '', due_day: 1, payment_method: '', notes: '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit(toBody({ ...v, due_day: Number(v.due_day) }, { numbers: ['monthly_rent', 'security_deposit'] }));
+        const body = toBody({ ...v, due_day: Number(v.due_day) }, { numbers: ['monthly_rent', 'security_deposit'] });
+        if (initial) { delete body.tenant_id; delete body.unit_id; delete body.start_date; }
+        onSubmit(body);
       }}
       className="space-y-4"
     >
       <Section title="Lease">
         <label className={labelCls}>Tenant
-          <select className={inputCls} value={v.tenant_id} onChange={set('tenant_id')} required><option value="">Select a tenant…</option>{tenants.filter((t) => t.status === 'active').map((t) => <option key={t.id} value={t.id}>{t.name}{t.company_name ? ` · ${t.company_name}` : ''}</option>)}</select>
+          <select className={inputCls} value={v.tenant_id} onChange={set('tenant_id')} required disabled={Boolean(initial)}><option value="">Select a tenant…</option>{tenants.filter((t) => t.status === 'active').map((t) => <option key={t.id} value={t.id}>{t.name}{t.company_name ? ` · ${t.company_name}` : ''}</option>)}</select>
           {onNewTenant && <button type="button" className="mt-1 text-xs font-medium text-primary-700 hover:underline" onClick={onNewTenant}>+ New tenant</button>}
         </label>
         {unit ? (
           <div className={labelCls}>Unit<div className="mt-1 rounded-xl border bg-primary-50/50 px-3 py-2 text-sm text-tertiary-900">{unit.name}</div></div>
         ) : (
-          <label className={labelCls}>Unit<select className={inputCls} value={v.unit_id} onChange={set('unit_id')} required><option value="">Select a unit…</option>{units.map((u) => <option key={u.id} value={u.id}>{u.property ? `${u.property} · ` : ''}{u.name}</option>)}</select></label>
+          <label className={labelCls}>Unit<select className={inputCls} value={v.unit_id} onChange={set('unit_id')} required disabled={Boolean(initial)}><option value="">Select a unit…</option>{units.map((u) => <option key={u.id} value={u.id}>{u.property ? `${u.property} · ` : ''}{u.name}</option>)}</select></label>
         )}
-        <label className={labelCls}>Lease start<input type="date" className={inputCls} value={v.start_date} onChange={set('start_date')} required /></label>
+        <label className={labelCls}>Lease start<input type="date" className={inputCls} value={v.start_date} onChange={set('start_date')} required disabled={Boolean(initial)} /></label>
         <label className={labelCls}>Lease end (optional)<input type="date" className={inputCls} min={v.start_date} value={v.end_date} onChange={set('end_date')} /></label>
         <label className={labelCls}>Monthly rent (₹)<input type="number" min="1" className={inputCls} value={v.monthly_rent} onChange={set('monthly_rent')} required /></label>
         <label className={labelCls}>Security deposit (₹)<input type="number" min="0" className={inputCls} value={v.security_deposit} onChange={set('security_deposit')} /></label>
@@ -65,16 +69,19 @@ export function LeaseForm({ tenants, units, unit, saving, onSubmit, onCancel, on
 }
 
 /** Record rent received against one due. */
-export function PaymentForm({ due, people, saving, onSubmit, onCancel }) {
-  const [v, setV] = useState({ amount: due.balance, paid_on: today(), method: 'upi', reference: '', collected_by_person_id: '', notes: '' });
+export function PaymentForm({ due, initial, people, saving, onSubmit, onCancel }) {
+  const [v, setV] = useState(initial
+    ? { amount: initial.amount, paid_on: String(initial.paid_on).slice(0, 10), method: initial.method, reference: initial.reference || '', collected_by_person_id: initial.collected_by_person_id || '', notes: initial.notes || '' }
+    : { amount: due.balance, paid_on: today(), method: 'upi', reference: '', collected_by_person_id: '', notes: '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(toBody(v, { numbers: ['amount'] })); }} className="space-y-4">
       <div className="rounded-xl bg-primary-50 px-3 py-2 text-sm text-primary-900">
-        {due.tenant?.name} · {due.property?.name} / {due.unit?.name} · {due.period}. Rent {rupees(due.amount)}, paid {rupees(due.paid_amount)}, balance <strong>{rupees(due.balance)}</strong>.
+        {due.tenant?.name} · {due.property?.name} / {due.unit?.name} · {due.period}.{' '}
+        {initial ? <>Editing a payment of <strong>{rupees(initial.amount)}</strong>. The rental income entry is rebuilt with the new figures.</> : <>Rent {rupees(due.amount)}, paid {rupees(due.paid_amount)}, balance <strong>{rupees(due.balance)}</strong>.</>}
       </div>
       <Section title="Payment">
-        <label className={labelCls}>Amount (₹)<input type="number" min="1" max={due.balance} step="0.01" className={inputCls} value={v.amount} onChange={set('amount')} required autoFocus /></label>
+        <label className={labelCls}>Amount (₹)<input type="number" min="1" max={initial ? undefined : due.balance} step="0.01" className={inputCls} value={v.amount} onChange={set('amount')} required autoFocus /></label>
         <label className={labelCls}>Payment date<input type="date" className={inputCls} max={today()} value={v.paid_on} onChange={set('paid_on')} required /></label>
         <label className={labelCls}>Method<select className={inputCls} value={v.method} onChange={set('method')}>{PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
         <label className={labelCls}>Reference number<input className={inputCls} value={v.reference} onChange={set('reference')} maxLength={120} placeholder="UPI / cheque / receipt no." /></label>
@@ -82,7 +89,7 @@ export function PaymentForm({ due, people, saving, onSubmit, onCancel }) {
         <label className={labelCls}>Notes<input className={inputCls} value={v.notes} onChange={set('notes')} maxLength={500} /></label>
       </Section>
       <p className="text-xs text-tertiary-500">This is booked as rental income in the money ledger for the payment date.</p>
-      <Actions saving={saving} onCancel={onCancel} label="Record payment" />
+      <Actions saving={saving} onCancel={onCancel} label={initial ? 'Save changes' : 'Record payment'} />
     </form>
   );
 }

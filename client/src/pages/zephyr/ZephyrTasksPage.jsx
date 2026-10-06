@@ -129,7 +129,7 @@ export default function ZephyrTasksPage() {
     zephyrApi.people({ status: 'active' }).then(setPeople, () => setPeople([]));
     if (zxCan(me, 'properties')) zephyrApi.properties({}).then(setProperties, () => setProperties([]));
     if (zxCan(me, 'projects')) zephyrApi.projects({ status: 'open' }).then(setProjects, () => setProjects([]));
-    if (zxCan(me, 'rent')) zephyrApi.rentDues({ month: new Date().toISOString().slice(0, 7), status: '' }).then((d) => setDues(d.filter((x) => x.balance > 0)), () => setDues([]));
+    if (zxCan(me, 'rent')) zephyrApi.rentDues({ month: new Date().toISOString().slice(0, 7) }).then((d) => setDues(d.filter((x) => x.balance > 0)), () => setDues([]));
   }, [all, me]);
 
   const task = drawer?.task;

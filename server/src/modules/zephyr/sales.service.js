@@ -122,4 +122,30 @@ async function remove(orgId, actorId, propertyId, saleId, reason) {
   return { ok: true };
 }
 
-module.exports = { saleSchema, listQuerySchema, list, create, remove };
+// Editing a sale reverses it and records it again with the new figures, so the ledger, the unit
+// status and the realized profit are all rebuilt from the same rules.
+async function update(orgId, actorId, propertyId, saleId, input) {
+  const sale = await prisma.zxPropertySale.findFirst({ where: { id: saleId, property_id: propertyId, org_id: orgId, deleted_at: null } });
+  if (!sale) return { error: 'not_found' };
+  const old = { unit_id: sale.unit_id, buyer_party_id: sale.buyer_party_id, sale_value: num(sale.sale_value), sale_date: dayOf(sale.sale_date), selling_costs: num(sale.selling_costs), notes: sale.notes };
+  const next = {
+    unit_id: sale.unit_id,
+    buyer_party_id: input.buyer_party_id === undefined ? old.buyer_party_id : input.buyer_party_id,
+    sale_value: input.sale_value ?? old.sale_value,
+    sale_date: input.sale_date ?? old.sale_date,
+    selling_costs: input.selling_costs ?? old.selling_costs,
+    notes: input.notes === undefined ? old.notes : input.notes,
+  };
+  if (next.sale_date > todayStr()) return { error: 'future_sale' };
+  if (!(await posting.periodsOpen(orgId, [old.sale_date, next.sale_date]))) return { error: 'period_closed' };
+  const removed = await remove(orgId, actorId, propertyId, saleId, 'Edited');
+  if (removed.error) return removed;
+  const made = await create(orgId, actorId, propertyId, next);
+  if (made.error) {
+    await create(orgId, actorId, propertyId, old);
+    return made;
+  }
+  return made;
+}
+
+module.exports = { saleSchema, saleUpdateSchema: saleSchema.omit({ unit_id: true }).partial(), listQuerySchema, list, create, update, remove };

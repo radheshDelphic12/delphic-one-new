@@ -312,7 +312,7 @@ async function listPayments(orgId, query) {
   const um = new Map(units.map((u) => [u.id, u]));
   const pm = new Map(people.map((p) => [p.id, p]));
   return rows.map((r) => ({
-    id: r.id, rent_due_id: r.rent_due_id, period: r.rent_due.period, amount: num(r.amount), paid_on: dayOf(r.paid_on), method: r.method, reference: r.reference, notes: r.notes,
+    id: r.id, rent_due_id: r.rent_due_id, period: r.rent_due.period, amount: num(r.amount), paid_on: dayOf(r.paid_on), method: r.method, reference: r.reference, notes: r.notes, collected_by_person_id: r.collected_by_person_id,
     tenant: tm.get(r.tenant_id) || null, unit: um.get(r.unit_id) ? { id: r.unit_id, name: um.get(r.unit_id).name } : null, property: um.get(r.unit_id)?.property || null, collected_by: pm.get(r.collected_by_person_id) || null,
   }));
 }
@@ -358,6 +358,33 @@ async function removePayment(orgId, actorId, paymentId) {
   return { due: dueOut(await prisma.zxRentDue.findUnique({ where: { id: p.rent_due_id } })) };
 }
 
+async function updatePayment(orgId, actorId, paymentId, input) {
+  const p = await prisma.zxRentPayment.findFirst({ where: { id: paymentId, org_id: orgId, deleted_at: null } });
+  if (!p) return { error: 'not_found' };
+  const due = await prisma.zxRentDue.findFirst({ where: { id: p.rent_due_id, org_id: orgId } });
+  const old = { amount: num(p.amount), paid_on: dayOf(p.paid_on), method: p.method, reference: p.reference, collected_by_person_id: p.collected_by_person_id, notes: p.notes };
+  const next = {
+    amount: input.amount ?? old.amount,
+    paid_on: input.paid_on ?? old.paid_on,
+    method: input.method ?? old.method,
+    reference: input.reference === undefined ? old.reference : input.reference,
+    collected_by_person_id: input.collected_by_person_id === undefined ? old.collected_by_person_id : input.collected_by_person_id,
+    notes: input.notes === undefined ? old.notes : input.notes,
+  };
+  if (next.paid_on > todayStr()) return { error: 'future_payment' };
+  const room = num(due.amount) - num(due.paid_amount) + old.amount;
+  if (next.amount > room + 0.001) return { error: 'exceeds_balance', balance: room };
+  if (!(await posting.periodsOpen(orgId, [old.paid_on, next.paid_on]))) return { error: 'period_closed' };
+  const removed = await removePayment(orgId, actorId, paymentId);
+  if (removed.error) return removed;
+  const made = await recordPayment(orgId, actorId, p.rent_due_id, next);
+  if (made.error) {
+    await recordPayment(orgId, actorId, p.rent_due_id, old);
+    return made;
+  }
+  return made;
+}
+
 async function updateDue(orgId, actorId, dueId, input) {
   const due = await prisma.zxRentDue.findFirst({ where: { id: dueId, org_id: orgId } });
   if (!due) return { error: 'not_found' };
@@ -376,7 +403,7 @@ async function updateDue(orgId, actorId, dueId, input) {
 module.exports = {
   PAYMENT_METHODS,
   tenantCreateSchema, tenantUpdateSchema, leaseCreateSchema, leaseUpdateSchema, leaseEndSchema, paymentSchema, dueUpdateSchema, duesQuerySchema, summaryQuerySchema,
-  dueStatus, dueOut, generate, generateForLease,
+  dueStatus, dueOut, generate, generateForLease, updatePayment,
   listTenants, getTenant, createTenant, updateTenant, removeTenant, listLeases, getLease, createLease, updateLease, endLease,
   listDues, listOverdue, rentSummary, listPayments, recordPayment, removePayment, updateDue,
 };

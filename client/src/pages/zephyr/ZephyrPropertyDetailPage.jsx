@@ -59,18 +59,18 @@ function UnitForm({ initial, canFinance, saving, onSubmit, onCancel }) {
   );
 }
 
-function ValuationForm({ units, saving, onSubmit, onCancel }) {
-  const [v, setV] = useState({ unit_id: '', value: '', as_of: today(), notes: '' });
+function ValuationForm({ initial, units, saving, onSubmit, onCancel }) {
+  const [v, setV] = useState({ unit_id: initial?.unit_id || '', value: initial?.value ?? '', as_of: initial ? dayOf(initial.as_of) : today(), notes: initial?.notes || '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(toBody(v, { numbers: ['value'] })); }} className="space-y-4">
+    <form onSubmit={(e) => { e.preventDefault(); const body = toBody(v, { numbers: ['value'] }); if (initial) delete body.unit_id; onSubmit(body); }} className="space-y-4">
       <Section title="Manual valuation" hint="Valuation is entered by hand. It shows as unrealized appreciation and never counts as income until the property is sold.">
-        <label className={labelCls}>Applies to<select className={inputCls} value={v.unit_id} onChange={set('unit_id')}><option value="">Whole property</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+        <label className={labelCls}>Applies to<select className={inputCls} value={v.unit_id} onChange={set('unit_id')} disabled={Boolean(initial)}><option value="">Whole property</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
         <label className={labelCls}>Current estimated value (₹)<input type="number" min="0" className={inputCls} value={v.value} onChange={set('value')} required autoFocus /></label>
         <label className={labelCls}>Valuation date<input type="date" className={inputCls} max={today()} value={v.as_of} onChange={set('as_of')} required /></label>
         <label className={`${labelCls} sm:col-span-2`}>Notes<textarea className={inputCls} rows={2} value={v.notes} onChange={set('notes')} maxLength={500} /></label>
       </Section>
-      <Actions saving={saving} onCancel={onCancel} label="Save valuation" />
+      <Actions saving={saving} onCancel={onCancel} label={initial ? 'Save changes' : 'Save valuation'} />
     </form>
   );
 }
@@ -97,8 +97,8 @@ function LoanForm({ initial, saving, onSubmit, onCancel }) {
   );
 }
 
-function SaleForm({ property, unit, parties, saving, onSubmit, onCancel }) {
-  const [v, setV] = useState({ sale_value: '', sale_date: today(), selling_costs: '', buyer_party_id: '', notes: '' });
+function SaleForm({ initial, property, unit, parties, saving, onSubmit, onCancel }) {
+  const [v, setV] = useState({ sale_value: initial?.sale_value ?? '', sale_date: initial ? dayOf(initial.sale_date) : today(), selling_costs: initial?.selling_costs || '', buyer_party_id: initial?.buyer_party_id || '', notes: initial?.notes || '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   const basis = unit ? null : property.total_invested;
   const profit = v.sale_value !== '' && basis != null ? Number(v.sale_value) - basis - (Number(v.selling_costs) || 0) : null;
@@ -113,25 +113,25 @@ function SaleForm({ property, unit, parties, saving, onSubmit, onCancel }) {
         <label className={`${labelCls} sm:col-span-2`}>Notes<textarea className={inputCls} rows={2} value={v.notes} onChange={set('notes')} maxLength={1000} /></label>
       </Section>
       {profit !== null && <div className="rounded-xl border px-3 py-2 text-sm">Expected net realized profit: <strong className={profit < 0 ? 'text-red-600' : 'text-green-700'}>{rupees(profit)}</strong> <span className="text-tertiary-500">(sale value − total investment {rupees(basis)} − selling costs)</span></div>}
-      <Actions saving={saving} onCancel={onCancel} label="Record sale" />
+      <Actions saving={saving} onCancel={onCancel} label={initial ? 'Save changes' : 'Record sale'} />
     </form>
   );
 }
 
-function EventForm({ units, saving, onSubmit, onCancel, canFinance }) {
-  const [v, setV] = useState({ kind: 'note', event_date: today(), title: '', amount: '', unit_id: '', notes: '' });
+function EventForm({ initial, units, saving, onSubmit, onCancel, canFinance }) {
+  const [v, setV] = useState({ kind: initial?.kind || 'note', event_date: initial ? dayOf(initial.event_date) : today(), title: initial?.title || '', amount: initial?.amount ?? '', unit_id: initial?.unit_id || '', notes: initial?.notes || '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
   return (
-    <form onSubmit={(e) => { e.preventDefault(); const body = toBody(v, { numbers: ['amount'] }); if (!canFinance) delete body.amount; onSubmit(body); }} className="space-y-4">
+    <form onSubmit={(e) => { e.preventDefault(); const body = toBody(v, { numbers: ['amount'] }); if (!canFinance) delete body.amount; if (initial) delete body.unit_id; onSubmit(body); }} className="space-y-4">
       <Section title="Timeline entry">
         <label className={labelCls}>Type<select className={inputCls} value={v.kind} onChange={set('kind')}>{EVENT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select></label>
         <label className={labelCls}>Date<input type="date" className={inputCls} value={v.event_date} onChange={set('event_date')} required /></label>
         <label className={`${labelCls} sm:col-span-2`}>What happened<input className={inputCls} value={v.title} onChange={set('title')} required maxLength={200} autoFocus placeholder="Construction started, plastering done…" /></label>
-        <label className={labelCls}>Unit (optional)<select className={inputCls} value={v.unit_id} onChange={set('unit_id')}><option value="">Whole property</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+        <label className={labelCls}>Unit (optional)<select className={inputCls} value={v.unit_id} onChange={set('unit_id')} disabled={Boolean(initial)}><option value="">Whole property</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
         {canFinance && <label className={labelCls}>Amount (₹, optional)<input type="number" min="0" className={inputCls} value={v.amount} onChange={set('amount')} /></label>}
         <label className={`${labelCls} sm:col-span-2`}>Notes<textarea className={inputCls} rows={2} value={v.notes} onChange={set('notes')} maxLength={1000} /></label>
       </Section>
-      <Actions saving={saving} onCancel={onCancel} label="Add to timeline" />
+      <Actions saving={saving} onCancel={onCancel} label={initial ? 'Save changes' : 'Add to timeline'} />
     </form>
   );
 }
@@ -294,7 +294,8 @@ export default function ZephyrPropertyDetailPage() {
     if (window.confirm(`Remove ${u.name}?`)) await run(() => zephyrApi.deleteUnit(p.id, u.id), 'Unit removed', 'Could not remove');
   }
   async function saveLease(values) {
-    if (await run(() => zephyrApi.createLease(values), 'Lease created')) {
+    const edit = drawer.lease;
+    if (await run(() => (edit ? zephyrApi.updateLease(edit.id, values) : zephyrApi.createLease(values)), edit ? 'Lease updated' : 'Lease created')) {
       await refreshAll();
       close();
     }
@@ -325,13 +326,15 @@ export default function ZephyrPropertyDetailPage() {
     if (window.confirm('Remove this loan?')) await run(() => zephyrApi.deleteLoan(p.id, l.id), 'Loan removed', 'Could not remove');
   }
   async function saveValuation(values) {
-    if (await run(() => zephyrApi.addValuation(p.id, values), 'Valuation saved')) close();
+    const edit = drawer.valuation;
+    if (await run(() => (edit ? zephyrApi.updateValuation(p.id, edit.id, values) : zephyrApi.addValuation(p.id, values)), 'Valuation saved')) close();
   }
   async function removeValuation(v) {
     if (window.confirm('Remove this valuation entry?')) await run(() => zephyrApi.deleteValuation(p.id, v.id), 'Valuation removed', 'Could not remove');
   }
   async function saveSale(values) {
-    if (await run(() => zephyrApi.sellProperty(p.id, values).then(() => load()), 'Sale recorded')) {
+    const edit = drawer.sale;
+    if (await run(() => (edit ? zephyrApi.updateSale(p.id, edit.id, values) : zephyrApi.sellProperty(p.id, values)).then(() => load()), edit ? 'Sale updated' : 'Sale recorded')) {
       await loadSales();
       close();
     }
@@ -341,8 +344,12 @@ export default function ZephyrPropertyDetailPage() {
     if (!reason?.trim()) return;
     if (await run(() => zephyrApi.reverseSale(p.id, s.id, reason.trim()).then(() => load()), 'Sale reversed', 'Could not reverse')) await loadSales();
   }
+  async function removeEvent(e) {
+    if (window.confirm('Remove this timeline entry?')) await run(() => zephyrApi.deletePropertyEvent(p.id, e.id), 'Entry removed', 'Could not remove');
+  }
   async function saveEvent(values) {
-    if (await run(() => zephyrApi.addPropertyEvent(p.id, values), 'Added to the timeline')) close();
+    const edit = drawer.event;
+    if (await run(() => (edit ? zephyrApi.updatePropertyEvent(p.id, edit.id, values) : zephyrApi.addPropertyEvent(p.id, values)), edit ? 'Entry saved' : 'Added to the timeline')) close();
   }
   async function removeProperty() {
     if (!window.confirm(`Delete ${p.code} ${p.name}?`)) return;
@@ -458,7 +465,7 @@ export default function ZephyrPropertyDetailPage() {
                       <td className="px-4 py-2.5 text-right tabular-nums">{rupees(l.monthly_rent)}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums">{rupees(l.security_deposit)}</td>
                       <td className="px-4 py-2.5"><Pill tone={l.status === 'active' ? 'green' : 'gray'}>{l.status === 'active' ? 'Active' : 'Ended'}</Pill></td>
-                      <td className="px-2 text-right">{canRent && l.status === 'active' && <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => endLease(l)}>End lease</button>}</td>
+                      <td className="px-2 text-right">{canRent && l.status === 'active' && <><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-primary-700 hover:bg-primary-50" onClick={() => setDrawer({ kind: 'lease', lease: l })}>Edit</button><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => endLease(l)}>End lease</button></>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -489,7 +496,7 @@ export default function ZephyrPropertyDetailPage() {
                 {p.valuations.map((v) => (
                   <li key={v.id} className="flex items-center justify-between gap-3 px-3 py-2">
                     <span className="min-w-0 truncate text-tertiary-700">{dateLabel(v.as_of)}{v.unit_id ? ` · ${units.find((u) => u.id === v.unit_id)?.name || 'unit'}` : ''}{v.notes ? ` · ${v.notes}` : ''}</span>
-                    <span className="inline-flex shrink-0 items-center gap-2"><span className="font-medium tabular-nums">{rupees(v.value)}</span><button type="button" className="rounded-lg p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove valuation" onClick={() => removeValuation(v)}><Trash2 className="h-4 w-4" /></button></span>
+                    <span className="inline-flex shrink-0 items-center gap-2"><span className="font-medium tabular-nums">{rupees(v.value)}</span><button type="button" className="rounded-lg p-1 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit valuation" onClick={() => setDrawer({ kind: 'valuation', valuation: v })}><Pencil className="h-4 w-4" /></button><button type="button" className="rounded-lg p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove valuation" onClick={() => removeValuation(v)}><Trash2 className="h-4 w-4" /></button></span>
                   </li>
                 ))}
               </ul>
@@ -527,7 +534,7 @@ export default function ZephyrPropertyDetailPage() {
                   {sales.map((s) => (
                     <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                       <span className="min-w-0"><span className="font-medium text-tertiary-900">{s.unit ? s.unit.name : 'Whole property'}</span><span className="block text-xs text-tertiary-500">{dateLabel(s.sale_date)}{s.buyer ? ` · ${s.buyer.name}` : ''} · held {s.holding_days ?? '—'} days</span></span>
-                      <span className="inline-flex items-center gap-3"><span className="text-right"><span className="block tabular-nums">{rupees(s.sale_value)}</span><span className={`block text-xs tabular-nums ${s.realized_profit < 0 ? 'text-red-600' : 'text-green-700'}`}>profit {rupees(s.realized_profit)}</span></span><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => reverseSale(s)}>Reverse</button></span>
+                      <span className="inline-flex items-center gap-3"><span className="text-right"><span className="block tabular-nums">{rupees(s.sale_value)}</span><span className={`block text-xs tabular-nums ${s.realized_profit < 0 ? 'text-red-600' : 'text-green-700'}`}>profit {rupees(s.realized_profit)}</span></span><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-danger-600 hover:bg-danger-50" onClick={() => reverseSale(s)}>Reverse</button><button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-primary-700 hover:bg-primary-50" onClick={() => setDrawer({ kind: 'sale', sale: s, unit: s.unit ? units.find((u) => u.id === s.unit_id) : null })}>Edit</button></span>
                     </li>
                   ))}
                 </ul>
@@ -548,6 +555,12 @@ export default function ZephyrPropertyDetailPage() {
                   <div className="flex flex-wrap items-center gap-2"><Pill tone={EVENT_TONE[e.kind]}>{e.kind}</Pill><span className="text-xs text-tertiary-500">{dateLabel(e.event_date)}</span>{e.amount != null && canFinance && <span className="text-xs font-medium tabular-nums text-tertiary-700">{rupees(e.amount)}</span>}</div>
                   <div className="mt-0.5 text-sm font-medium text-tertiary-900">{e.title}</div>
                   {e.notes && <div className="text-xs text-tertiary-500">{e.notes}</div>}
+                  {canEdit && !e.source_type && (
+                    <div className="mt-1 flex gap-3 text-xs">
+                      <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => setDrawer({ kind: 'event', event: e })}>Edit</button>
+                      <button type="button" className="font-medium text-danger-600 hover:underline" onClick={() => removeEvent(e)}>Remove</button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ol>
@@ -558,17 +571,17 @@ export default function ZephyrPropertyDetailPage() {
       {tab === 'documents' && <section className={card}><ZephyrDocuments ownerType="property" ownerId={p.id} canEdit={canEdit} /></section>}
 
       <Drawer open={Boolean(drawer)} onClose={close} size="xl" tone={['unit', 'property', 'loan'].includes(drawer?.kind) && (drawer.unit || drawer.loan || drawer.kind === 'property') ? 'edit' : 'create'}
-        title={{ property: `Edit ${p.code}`, unit: drawer?.unit ? `Edit ${drawer.unit.name}` : 'Add unit', lease: 'New lease', tenant: 'New tenant', valuation: 'Update valuation', loan: drawer?.loan ? 'Edit loan' : 'Add loan', sale: drawer?.unit ? `Sell ${drawer.unit.name}` : 'Sell property', event: 'Add to timeline' }[drawer?.kind] || ''}>
+        title={{ property: `Edit ${p.code}`, unit: drawer?.unit ? `Edit ${drawer.unit.name}` : 'Add unit', lease: drawer?.lease ? 'Edit lease' : 'New lease', tenant: 'New tenant', valuation: drawer?.valuation ? 'Edit valuation' : 'Update valuation', loan: drawer?.loan ? 'Edit loan' : 'Add loan', sale: drawer?.sale ? 'Edit sale' : drawer?.unit ? `Sell ${drawer.unit.name}` : 'Sell property', event: drawer?.event ? 'Edit timeline entry' : 'Add to timeline' }[drawer?.kind] || ''}>
         {drawer?.kind === 'property' && <PropertyForm initial={p} canFinance={canFinance} saving={saving} onSubmit={saveProperty} onCancel={close} />}
         {drawer?.kind === 'unit' && <UnitForm initial={drawer.unit} canFinance={canFinance} saving={saving} onSubmit={saveUnit} onCancel={close} />}
         {drawer?.kind === 'lease' && (
-          <LeaseForm tenants={tenants} unit={drawer.unit} units={units.filter((u) => !u.tenant && u.status !== 'sold' && u.ownership === 'zephyr')} saving={saving} onSubmit={saveLease} onCancel={close} onNewTenant={() => setDrawer({ ...drawer, kind: 'tenant', back: 'lease' })} />
+          <LeaseForm initial={drawer.lease} tenants={tenants} unit={drawer.unit} units={units.filter((u) => !u.tenant && u.status !== 'sold' && u.ownership === 'zephyr')} saving={saving} onSubmit={saveLease} onCancel={close} onNewTenant={() => setDrawer({ ...drawer, kind: 'tenant', back: 'lease' })} />
         )}
         {drawer?.kind === 'tenant' && <TenantForm saving={saving} onSubmit={saveTenant} onCancel={() => setDrawer({ ...drawer, kind: drawer.back || 'lease' })} />}
-        {drawer?.kind === 'valuation' && <ValuationForm units={units} saving={saving} onSubmit={saveValuation} onCancel={close} />}
+        {drawer?.kind === 'valuation' && <ValuationForm initial={drawer.valuation} units={units} saving={saving} onSubmit={saveValuation} onCancel={close} />}
         {drawer?.kind === 'loan' && <LoanForm initial={drawer.loan} saving={saving} onSubmit={saveLoan} onCancel={close} />}
-        {drawer?.kind === 'sale' && <SaleForm property={p} unit={drawer.unit} parties={parties} saving={saving} onSubmit={saveSale} onCancel={close} />}
-        {drawer?.kind === 'event' && <EventForm units={units} canFinance={canFinance} saving={saving} onSubmit={saveEvent} onCancel={close} />}
+        {drawer?.kind === 'sale' && <SaleForm initial={drawer.sale} property={p} unit={drawer.unit} parties={parties} saving={saving} onSubmit={saveSale} onCancel={close} />}
+        {drawer?.kind === 'event' && <EventForm initial={drawer.event} units={units} canFinance={canFinance} saving={saving} onSubmit={saveEvent} onCancel={close} />}
       </Drawer>
     </div>
   );

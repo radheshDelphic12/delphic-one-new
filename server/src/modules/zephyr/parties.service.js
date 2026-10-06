@@ -2,7 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const { pageArgs, pagination } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
-const { SERVICE_KEYS } = require('./serviceTypes');
+const serviceTypes = require('./serviceTypes');
 
 const KINDS = ['client', 'vendor', 'both'];
 const STATUSES = ['active', 'inactive', 'hold'];
@@ -30,7 +30,7 @@ const partyFields = {
   state: text(120),
   country: text(120),
   company_name: text(200),
-  interested_services: z.array(z.enum(SERVICE_KEYS)).max(5).optional(),
+  interested_services: z.array(serviceTypes.serviceKey).max(20).optional(),
   vendor_category: text(120),
   materials_services: text(1000),
   payment_terms: text(200),
@@ -44,7 +44,7 @@ const importSchema = z.object({ rows: z.array(z.record(z.any())).min(1).max(500)
 const listQuerySchema = z.object({
   tab: z.enum(['all', 'client', 'vendor']).default('all'),
   status: z.enum([...STATUSES, 'all']).default('all'),
-  service: z.enum(SERVICE_KEYS).optional(),
+  service: serviceTypes.serviceKey.optional(),
   vendor_category: z.string().trim().max(120).optional(),
   q: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),

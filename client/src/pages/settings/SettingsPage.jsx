@@ -10,6 +10,7 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
 import { userCan } from '../../lib/permissions.js';
+import { isZephyrOrg } from '../../lib/zephyr/useZephyr.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
@@ -51,6 +52,42 @@ function Card({ title, description, children }) {
 }
 
 function AccountTab({ user, onLogout }) {
+  const { patchSession } = useAuth();
+  const { pushError, pushSuccess } = useAlerts();
+  const canEdit = user?.role === 'admin';
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', phone: '' });
+
+  function startEdit() {
+    setForm({ name: user?.name || '', email: user?.email || '', phone: user?.phone || '' });
+    setEditing(true);
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    const patch = {};
+    if (form.name.trim() && form.name.trim() !== user.name) patch.name = form.name.trim();
+    if (form.email.trim() && form.email.trim() !== user.email) patch.email = form.email.trim();
+    if (form.phone.trim() !== (user.phone || '')) patch.phone = form.phone.trim() || null;
+    if (Object.keys(patch).length === 0) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await apiClient.patch(`/users/${user.id}`, patch);
+      const saved = res.data.data;
+      patchSession({ user: { name: saved.name, email: saved.email, phone: saved.phone } });
+      pushSuccess('Profile updated');
+      setEditing(false);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update profile'), 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const rows = [
     ['Name', user?.name || '—'],
     ['Email', user?.email || '—'],
@@ -70,18 +107,42 @@ function AccountTab({ user, onLogout }) {
             <div className="truncate text-xs text-tertiary-500">{user?.email}</div>
           </div>
         </div>
-        <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-          {rows.map(([label, value]) => (
-            <div key={label}>
-              <dt className="text-xs font-medium uppercase tracking-wide text-tertiary-400">{label}</dt>
-              <dd className="mt-0.5 text-sm text-tertiary-800">{value}</dd>
+        {editing ? (
+          <form onSubmit={saveProfile} className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs font-medium text-tertiary-500">Name
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-xs font-medium text-tertiary-500">Email (login)
+              <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-xs font-medium text-tertiary-500">Phone
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+            <div className="flex items-end gap-2">
+              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+              <button type="button" className="btn-secondary" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
             </div>
-          ))}
-        </dl>
-        <p className="mt-4 text-xs text-tertiary-400">
-          Need a name, email or role change? Ask an admin on the{' '}
-          <Link to="/users" className="text-primary-700 hover:underline">Users</Link> page.
-        </p>
+          </form>
+        ) : (
+          <>
+            <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              {rows.map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-tertiary-400">{label}</dt>
+                  <dd className="mt-0.5 text-sm text-tertiary-800">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {canEdit ? (
+              <button type="button" className="btn-secondary mt-4" onClick={startEdit}>Edit profile</button>
+            ) : (
+              <p className="mt-4 text-xs text-tertiary-400">
+                Need a name, email or role change? Ask an admin on the{' '}
+                <Link to="/users" className="text-primary-700 hover:underline">Users</Link> page.
+              </p>
+            )}
+          </>
+        )}
       </Card>
 
       <Card title="Session" description="Sign out of this browser. You'll need your credentials to sign back in.">
@@ -180,9 +241,12 @@ export default function SettingsPage() {
   const requested = params.get('tab');
   // Zephyr is standalone: the Deleted-records panel lists Delphic records, so it stays off there.
   const canSeeDeleted = userCan(user, 'deleteRecords') && !user?.active_org?.enabled_modules?.includes('zephyr');
-  const TABS = useMemo(
-    () => (canSeeDeleted ? [...BASE_TABS, DELETED_TAB] : BASE_TABS),
-    [canSeeDeleted]
+  // Zephyr has no HR profile (reporting line, bank, emergency contact, documents), so "My details" is hidden there.
+  const hideDetails = isZephyrOrg(user);
+  const TABS = useMemo(() => {
+    const base = hideDetails ? BASE_TABS.filter((t) => t.key !== 'details') : BASE_TABS;
+    return canSeeDeleted ? [...base, DELETED_TAB] : base;
+  }, [canSeeDeleted, hideDetails]
   );
   const active = useMemo(
     () => (TABS.some((t) => t.key === requested) ? requested : 'account'),

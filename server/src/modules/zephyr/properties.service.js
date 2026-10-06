@@ -412,7 +412,51 @@ async function removeValuation(orgId, actorId, ctx, propertyId, valuationId) {
   return get(orgId, ctx, propertyId);
 }
 
+async function updateValuation(orgId, actorId, ctx, propertyId, valuationId, input) {
+  const row = await prisma.zxPropertyValuation.findFirst({ where: { id: valuationId, property_id: propertyId, org_id: orgId } });
+  if (!row) return { error: 'not_found' };
+  if (input.as_of && input.as_of > todayStr()) return { error: 'future_valuation' };
+  const data = {
+    ...(input.value !== undefined ? { value: input.value } : {}),
+    ...(input.as_of ? { as_of: toDate(input.as_of) } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
+  };
+  const next = await prisma.zxPropertyValuation.update({ where: { id: valuationId }, data });
+  if (row.unit_id) {
+    const latest = await prisma.zxPropertyValuation.findFirst({ where: { org_id: orgId, unit_id: row.unit_id }, orderBy: [{ as_of: 'desc' }, { created_at: 'desc' }] });
+    await prisma.zxPropertyUnit.update({ where: { id: row.unit_id }, data: latest ? { valuation: latest.value, valuation_date: latest.as_of } : { valuation: null, valuation_date: null } });
+  } else await syncLatestValuation(orgId, propertyId);
+  await writeAudit(null, { orgId, actorId, entity: 'property_valuation', entityId: valuationId, action: 'update', before: { value: num(row.value), as_of: dayOf(row.as_of) }, after: { value: num(next.value), as_of: dayOf(next.as_of) } });
+  return get(orgId, ctx, propertyId);
+}
+
 // ---- timeline notes ----
+async function updateEvent(orgId, actorId, ctx, propertyId, eventId, input) {
+  const row = await prisma.zxPropertyEvent.findFirst({ where: { id: eventId, property_id: propertyId, org_id: orgId } });
+  if (!row) return { error: 'not_found' };
+  if (row.source_type) return { error: 'system_event' };
+  if (input.amount !== null && input.amount !== undefined && !ctx.canFinance) return { error: 'finance_only' };
+  const data = {
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.event_date ? { event_date: toDate(input.event_date) } : {}),
+    ...(input.title ? { title: input.title } : {}),
+    ...(input.amount !== undefined ? { amount: input.amount } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
+  };
+  await prisma.zxPropertyEvent.update({ where: { id: eventId }, data });
+  await writeAudit(null, { orgId, actorId, entity: 'property_event', entityId: eventId, action: 'update', before: { title: row.title }, after: { title: data.title || row.title } });
+  return get(orgId, ctx, propertyId);
+}
+
+async function removeEvent(orgId, actorId, ctx, propertyId, eventId) {
+  const row = await prisma.zxPropertyEvent.findFirst({ where: { id: eventId, property_id: propertyId, org_id: orgId } });
+  if (!row) return { error: 'not_found' };
+  if (row.source_type) return { error: 'system_event' };
+  await prisma.zxPropertyEvent.delete({ where: { id: eventId } });
+  await writeAudit(null, { orgId, actorId, entity: 'property_event', entityId: eventId, action: 'delete', before: { title: row.title } });
+  return get(orgId, ctx, propertyId);
+}
+
 async function addNote(orgId, actorId, ctx, propertyId, input) {
   if (!(await liveProperty(orgId, propertyId))) return { error: 'not_found' };
   if (input.amount !== null && input.amount !== undefined && !ctx.canFinance) return { error: 'finance_only' };
@@ -424,5 +468,5 @@ module.exports = {
   PROPERTY_TYPES, PROPERTY_STATUSES, UNIT_STATUSES, FINANCE_FIELDS, EVENT_KINDS,
   createPropertySchema, updatePropertySchema, listQuerySchema, unitCreateSchema, unitUpdateSchema, loanCreateSchema, loanUpdateSchema, valuationSchema, eventSchema,
   addEvent, cashFlowFor, propertyOut, liveProperty,
-  list, summary, rentableUnits, get, create, update, remove, addUnit, updateUnit, removeUnit, addLoan, updateLoan, removeLoan, addValuation, removeValuation, addNote,
+  list, summary, rentableUnits, get, create, update, remove, addUnit, updateUnit, removeUnit, addLoan, updateLoan, removeLoan, addValuation, updateValuation, removeValuation, addNote, updateEvent, removeEvent,
 };

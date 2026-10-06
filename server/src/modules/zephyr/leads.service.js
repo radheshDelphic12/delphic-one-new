@@ -3,7 +3,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../../config/db');
 const { userNames } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
-const { SERVICE_KEYS } = require('./serviceTypes');
+const serviceTypes = require('./serviceTypes');
 
 // Pipeline: new -> in_discussion -> negotiation -> won. A lead can be parked (on_hold) or end as
 // closed (no deal, no reason needed) or dropped (needs a reason). Won / closed / dropped are locked
@@ -26,7 +26,7 @@ const detailsSchema = z
 
 const leadFields = {
   name: z.string().trim().min(1).max(200),
-  service_type: z.enum(SERVICE_KEYS),
+  service_type: serviceTypes.serviceKey,
   company: text(200),
   party_id: uuidOrNull,
   contact_name: text(200),
@@ -53,10 +53,11 @@ const createLeadSchema = z.object({ ...leadFields, stage: z.enum(OPEN_STAGES).de
 const updateLeadSchema = z.object(leadFields).partial();
 const stageSchema = z.object({ stage: z.enum(STAGES), lost_reason: text(500), reason: text(500) });
 const reopenSchema = z.object({ stage: z.enum(OPEN_STAGES).default('negotiation'), reason: z.string().trim().min(1).max(500) });
+const activityUpdateSchema = z.object({ kind: z.enum(KINDS), summary: z.string().trim().min(1).max(1000), follow_up_date: dateOnly.nullable(), follow_up_done: z.boolean() }).partial();
 const activitySchema = z.object({ kind: z.enum(KINDS).default('note'), summary: z.string().trim().min(1).max(1000), follow_up_date: dateOnly.optional() });
 const listQuerySchema = z.object({
   stage: z.enum([...STAGES, 'open', 'closed']).optional(),
-  service_type: z.enum(SERVICE_KEYS).optional(),
+  service_type: serviceTypes.serviceKey.optional(),
   owner_id: z.string().uuid().optional(),
   assignee_id: z.string().uuid().optional(),
   contractor_id: z.string().uuid().optional(),
@@ -175,7 +176,7 @@ async function summary(orgId) {
   const rows = await prisma.zxLead.findMany({ where: { org_id: orgId, deleted_at: null }, select: { stage: true, service_type: true, estimated_value: true } });
   const blank = () => ({ count: 0, value: 0 });
   const byStage = Object.fromEntries(STAGES.map((s) => [s, blank()]));
-  const byService = Object.fromEntries(SERVICE_KEYS.map((k) => [k, { ...blank(), open: 0, won: 0, by_stage: Object.fromEntries(STAGES.map((s) => [s, 0])) }]));
+  const byService = Object.fromEntries((await serviceTypes.keys(orgId)).map((k) => [k, { ...blank(), open: 0, won: 0, by_stage: Object.fromEntries(STAGES.map((s) => [s, 0])) }]));
   for (const r of rows) {
     const value = num(r.estimated_value) || 0;
     byStage[r.stage].count += 1;
@@ -356,8 +357,36 @@ async function setFollowUpDone(orgId, leadId, activityId, done) {
   return { activity: await prisma.zxLeadActivity.update({ where: { id: activityId }, data: { follow_up_done: Boolean(done) } }) };
 }
 
+// An activity can be corrected or removed (the log is the team's own notes). Closed leads stay frozen.
+async function updateActivity(orgId, leadId, activityId, input) {
+  const lead = await prisma.zxLead.findFirst({ where: { id: leadId, org_id: orgId, deleted_at: null } });
+  if (!lead) return { error: 'not_found' };
+  const activity = await prisma.zxLeadActivity.findFirst({ where: { id: activityId, lead_id: leadId, org_id: orgId } });
+  if (!activity) return { error: 'not_found' };
+  const onlyDone = Object.keys(input).every((k) => k === 'follow_up_done');
+  if (!onlyDone && isClosed(lead)) return { error: 'lead_closed' };
+  const data = {
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.summary ? { summary: input.summary } : {}),
+    ...(input.follow_up_date !== undefined ? { follow_up_date: toDate(input.follow_up_date), ...(input.follow_up_date ? {} : { follow_up_done: false }) } : {}),
+    ...(input.follow_up_done !== undefined ? { follow_up_done: Boolean(input.follow_up_done) } : {}),
+  };
+  if (data.follow_up_done && !(data.follow_up_date ?? activity.follow_up_date)) return { error: 'not_found' };
+  return { activity: await prisma.zxLeadActivity.update({ where: { id: activityId }, data }) };
+}
+
+async function removeActivity(orgId, leadId, activityId) {
+  const lead = await prisma.zxLead.findFirst({ where: { id: leadId, org_id: orgId, deleted_at: null } });
+  if (!lead) return { error: 'not_found' };
+  if (isClosed(lead)) return { error: 'lead_closed' };
+  const activity = await prisma.zxLeadActivity.findFirst({ where: { id: activityId, lead_id: leadId, org_id: orgId } });
+  if (!activity) return { error: 'not_found' };
+  await prisma.zxLeadActivity.delete({ where: { id: activityId } });
+  return { ok: true };
+}
+
 module.exports = {
   STAGES, OPEN_STAGES, DONE_STAGES,
-  createLeadSchema, updateLeadSchema, stageSchema, reopenSchema, activitySchema, listQuerySchema,
-  ownerOk, personOk, listOwners, list, summary, followUps, get, create, update, changeStage, reopen, remove, listActivities, addActivity, setFollowUpDone,
+  createLeadSchema, updateLeadSchema, stageSchema, reopenSchema, activitySchema, activityUpdateSchema, listQuerySchema,
+  ownerOk, personOk, listOwners, list, summary, followUps, get, create, update, changeStage, reopen, remove, listActivities, addActivity, setFollowUpDone, updateActivity, removeActivity,
 };

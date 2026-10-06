@@ -87,6 +87,7 @@ npx jest --runInBand tests/zephyr-ledger.test.js tests/zephyr-financials.test.js
 | `zephyr-finance-links` | ledger dimensions, P&L by service / property / party, appreciation outside the P&L, period lock, shared expenses, commission booking |
 | `zephyr-financials` | overview and valuation, plans, projection, month close, statements, Excel / PDF |
 | `zephyr-tasks` | task lifecycle, assignee scope, reopen, rent collection through a task |
+| `zephyr-admin-edits` | admin can edit valuations, manual timeline entries, rent payments, sales, shared expenses and lead activities; code prefixes; manager is refused |
 | `zephyr-reports` | service-wise reports, dashboard per role, the finance role |
 
 Zephyr suites: 122 tests, all passing (foundation 10 + parties 9, services 9 + leads 12, projects 12 + people 9, property 8 + rent 8, trading 5 + finance-links 7, tasks 5 + reports 8, ledger 10 + financials 10).

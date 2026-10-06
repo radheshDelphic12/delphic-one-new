@@ -8,6 +8,17 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
 - Services master (five fixed keys, renameable); leads and projects per service with new stage / status sets; client / vendor fields; properties, units, tenants, leases, monthly rent dues with computed overdue, rent payments posting to the ledger, loans, manual valuation (unrealized, never in the P&L), whole-property and unit sales (realized profit in the P&L), consulting commission, shared (group) expenses, tasks, a `finance` role, P&L by service / property / client-vendor, service-wise reports, a new Home dashboard, and Properties / Rent / Tasks screens. A closed month is now a hard lock.
 - Tests: Zephyr suites 122/122 (run two files at a time); lint 0 errors; client build OK; API smoke 128/128 across admin / manager / staff / finance on the rebuilt demo (`ZEPHYR_RESET=1 npm run zephyr:seed`, new login `finance@zephyrinfra.in`). Not done: expense-claim approval flow, browser click-through by a person, staging deploy and re-seed.
 
+## 2026-10-06 — Zephyr R0-R9 + UI polish pushed to staging and deployed
+
+- `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`646ef0d..fd121d1`) and deployed on Render (`render deploys create srv-datoc5e0tbcc73elv730 --commit fd121d1 --wait --confirm`, deploy `dep-db2cvgahabec73cve19g`). Health 200 after a short 502 while the service booted; admin login and the Zephyr `me`, `dashboard`, `service-types`, `properties`, `leads`, `projects`, `overview` endpoints return 200 (the new migrations ran on boot).
+- Staging still holds the OLD demo (7 leads, 4 projects, 0 properties, no `finance@` login). To show the new demo, run the Zephyr seed against the Neon direct host with `ZEPHYR_RESET=1` (see TESTING-ZEPHYR.md section 5). Not done yet.
+- Final theme: the original Zephyr green restored (screenshot reviewed by the owner), very slightly dimmed surfaces, light-green selected side-menu item with a green edge, new logo card (new `zephyr-logo.png`, also set as the org logo in the seed). `D:\Zephyr-Feature-Guide.docx` rebuilt with document control and a what-is-new table.
+
+## 2026-10-06 — Zephyr: admin can edit everything (local, not pushed)
+
+- Browser pass with Playwright (Edge, `vite preview` of the built client; the dev server overloads a headless browser) found records admin could add but not edit. Closed: valuation, manual timeline entry, rent payment, sale, shared expense, lead activity, lease, rent due amount, milestone fields and the lead / property / task code prefixes (details in the plan work log). New `server/tests/zephyr-admin-edits.test.js`; the rent, property, trading, finance-links, foundation, ledger and leads suites still pass.
+- Tasks page bug fixed (empty `status` query gave a 422 so the rent picker never filled).
+
 ## 2026-10-06 — Zephyr UI polish (local, not pushed)
 
 - Shared `FilterBar` for Client / Vendor, Leads, Projects and Properties (search + one Filters menu + chips); Leads service / stage strips replaced by dropdowns with counts; Client / Vendor drawers close after save; softer Zephyr theme; simpler Home (greeting card with quick tiles, plain-language money cards, By service table); `StatCard` `tone` for amber / red warning cards. Client lint clean, build OK; not yet clicked through by a person. Rent, Tasks, People and Revenue & Profit still have the old filter rows.

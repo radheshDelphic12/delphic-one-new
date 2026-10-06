@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, Handshake, HardHat, KeyRound, Paintbrush } from 'lucide-react';
+import { Briefcase, Building2, Handshake, HardHat, KeyRound, Paintbrush } from 'lucide-react';
 import { useAuth } from '../authContext.jsx';
 import { zephyrApi } from './api.js';
 
@@ -12,7 +12,12 @@ export const SERVICES = [
   { key: 'property_trading', label: 'Property Trading', short: 'Trading', icon: Building2, tone: 'green' },
   { key: 'real_estate_consulting', label: 'Real Estate Consulting', short: 'Consulting', icon: Handshake, tone: 'cyan' },
 ];
-export const SERVICE_META = Object.fromEntries(SERVICES.map((s) => [s.key, s]));
+const BUILT_IN_META = Object.fromEntries(SERVICES.map((s) => [s.key, s]));
+// Services an admin adds (key `custom_*`) have no special icon or colour.
+const customMeta = (key) => ({ key, label: key, short: key, icon: Briefcase, tone: 'gray' });
+export const SERVICE_META = new Proxy(BUILT_IN_META, {
+  get: (target, key) => target[key] ?? (typeof key === 'string' && key.startsWith('custom_') ? customMeta(key) : undefined),
+});
 
 const cache = new Map();
 
@@ -39,10 +44,12 @@ export function useServiceTypes() {
       live = false;
     };
   }, [orgId]);
-  const services = SERVICES.map((s) => {
+  const builtIn = SERVICES.map((s) => {
     const row = rows?.find((r) => r.key === s.key);
     return { ...s, label: row?.label || s.label, active: row ? row.active : true, sort_order: row?.sort_order ?? 0 };
-  }).sort((a, b) => a.sort_order - b.sort_order);
+  });
+  const added = (rows || []).filter((r) => !BUILT_IN_META[r.key]).map((r) => ({ ...customMeta(r.key), label: r.label, short: r.label, active: r.active, sort_order: r.sort_order }));
+  const services = [...builtIn, ...added].sort((a, b) => a.sort_order - b.sort_order);
   const label = (key) => services.find((s) => s.key === key)?.label || (key ? key : 'No service');
   return { services, label, active: services.filter((s) => s.active), refresh: () => { cache.delete(orgId); } };
 }
