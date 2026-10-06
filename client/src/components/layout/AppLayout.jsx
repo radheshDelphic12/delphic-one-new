@@ -15,6 +15,8 @@ import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 
 import { canSeeMeetingsCalendar } from '../../lib/departments.js';
+import { isZephyrOrg, useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
+import { zephyrNavFor } from '../../lib/zephyr/sections.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -73,25 +75,44 @@ function OrgCreateDrawer({ open, onClose }) {
 const CONTRACTOR_NAV = [{ to: '/', label: 'My Portal', end: true, icon: LayoutDashboard }];
 const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
 
+// Zephyr Infrastructure is a standalone workspace: its users see only the
+// Zephyr sections plus their own notifications and personal settings.
+const ZEPHYR_EXTRA_NAV = [{ to: '/settings', label: 'Settings', icon: Settings }];
+const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings', '/notifications'].includes(pathname);
+
 export default function AppLayout() {
   const { user, logout, isGroupSuperadmin } = useAuth();
   const { pathname, search } = useLocation();
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
   const isContractor = user?.worker_type === 'contractor';
+  const isZephyr = isZephyrOrg(user);
+  const { me: zxMe } = useZephyr();
   const navItems = useMemo(
-    () =>
-      isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
+    () => {
+      if (isZephyr) {
+        const setup = zxCan(zxMe, 'settings') ? [{ to: '/zephyr/settings', label: 'Zephyr setup', icon: Settings }] : [];
+        return [...zephyrNavFor(zxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
+      return isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
         if (item.hiddenForAdmin && user?.role === 'admin') return false;
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
         if (item.meetingsCalendar && !canSeeMeetingsCalendar(user)) return false;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
         return !item.capability || can(item.capability);
-      }),
+      });
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe]
   );
+
+  // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
+  useEffect(() => {
+    if (!isZephyr) return undefined;
+    document.documentElement.classList.add('theme-zephyr');
+    return () => document.documentElement.classList.remove('theme-zephyr');
+  }, [isZephyr]);
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -134,6 +155,24 @@ export default function AppLayout() {
       <div className="px-2 py-3">
         <WorkspaceSwitcher collapsed={collapsed} onCreate={() => setOrgCreateOpen(true)} />
       </div>
+      {isZephyr && !collapsed && (
+        <Link
+          to="/zephyr"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Zephyr Infrastructure home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-3 pb-1 pt-2.5">
+            <img src={user?.active_org?.logo_url || '/zephyr-logo.png'} alt={user?.active_org?.name || 'Zephyr Infrastructure'} className="h-14 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="flex items-center gap-2 px-4 pb-2">
+            <span className="h-px flex-1 bg-primary-200" />
+            <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-primary-500">Infrastructure</span>
+            <span className="h-px flex-1 bg-primary-200" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
+        </Link>
+      )}
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -148,7 +187,7 @@ export default function AppLayout() {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-[#105AA9] text-white shadow-sm'
+                    ? 'bg-primary-600 text-white shadow-sm'
                     : 'text-tertiary-600 hover:bg-tertiary-50 hover:text-tertiary-900'
                 } ${collapsed ? 'justify-center px-2' : ''}`
               }
@@ -319,7 +358,7 @@ export default function AppLayout() {
           <div className="px-4 pb-6 pt-0 md:px-6">
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) ? <Navigate to="/zephyr" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

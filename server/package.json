@@ -21,6 +21,8 @@
     "test:changed": "jest --runInBand --onlyChanged",
     "test:branch": "jest --runInBand --changedSince=main",
     "test:related": "jest --runInBand --passWithNoTests --findRelatedTests",
+    "zephyr:seed": "node prisma/zephyr/seed.js",
+    "zephyr:seed-admin": "node prisma/zephyr/seed-admin.js",
     "erp:seed:locations": "node prisma/erp/seed-locations-calendars.js",
     "erp:seed:multi-org": "node prisma/erp/seed-multi-org-demo.js",
     "erp:seed:verticals": "node prisma/erp/seed-verticals-demo.js",

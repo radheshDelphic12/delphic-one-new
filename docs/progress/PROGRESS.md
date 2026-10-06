@@ -2,6 +2,81 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
+
+- Built to the owner's 44-section brief on top of the Z0-Z8 base (plan, decisions and log: [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md)). Two migrations: `zephyr_services_leads_projects` and `zephyr_real_estate`.
+- Services master (five fixed keys, renameable); leads and projects per service with new stage / status sets; client / vendor fields; properties, units, tenants, leases, monthly rent dues with computed overdue, rent payments posting to the ledger, loans, manual valuation (unrealized, never in the P&L), whole-property and unit sales (realized profit in the P&L), consulting commission, shared (group) expenses, tasks, a `finance` role, P&L by service / property / client-vendor, service-wise reports, a new Home dashboard, and Properties / Rent / Tasks screens. A closed month is now a hard lock.
+- Tests: Zephyr suites 122/122 (run two files at a time); lint 0 errors; client build OK; API smoke 128/128 across admin / manager / staff / finance on the rebuilt demo (`ZEPHYR_RESET=1 npm run zephyr:seed`, new login `finance@zephyrinfra.in`). Not done: expense-claim approval flow, browser click-through by a person, staging deploy and re-seed.
+
+## 2026-10-06 — Zephyr R0-R9 + UI polish pushed to staging and deployed
+
+- `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`646ef0d..fd121d1`) and deployed on Render (`render deploys create srv-datoc5e0tbcc73elv730 --commit fd121d1 --wait --confirm`, deploy `dep-db2cvgahabec73cve19g`). Health 200 after a short 502 while the service booted; admin login and the Zephyr `me`, `dashboard`, `service-types`, `properties`, `leads`, `projects`, `overview` endpoints return 200 (the new migrations ran on boot).
+- Staging still holds the OLD demo (7 leads, 4 projects, 0 properties, no `finance@` login). To show the new demo, run the Zephyr seed against the Neon direct host with `ZEPHYR_RESET=1` (see TESTING-ZEPHYR.md section 5). Not done yet.
+- Final theme: the original Zephyr green restored (screenshot reviewed by the owner), very slightly dimmed surfaces, light-green selected side-menu item with a green edge, new logo card (new `zephyr-logo.png`, also set as the org logo in the seed). `D:\Zephyr-Feature-Guide.docx` rebuilt with document control and a what-is-new table.
+
+## 2026-10-06 — Zephyr: admin can edit everything (local, not pushed)
+
+- Browser pass with Playwright (Edge, `vite preview` of the built client; the dev server overloads a headless browser) found records admin could add but not edit. Closed: valuation, manual timeline entry, rent payment, sale, shared expense, lead activity, lease, rent due amount, milestone fields and the lead / property / task code prefixes (details in the plan work log). New `server/tests/zephyr-admin-edits.test.js`; the rent, property, trading, finance-links, foundation, ledger and leads suites still pass.
+- Tasks page bug fixed (empty `status` query gave a 422 so the rent picker never filled).
+
+## 2026-10-06 — Zephyr UI polish (local, not pushed)
+
+- Shared `FilterBar` for Client / Vendor, Leads, Projects and Properties (search + one Filters menu + chips); Leads service / stage strips replaced by dropdowns with counts; Client / Vendor drawers close after save; softer Zephyr theme; simpler Home (greeting card with quick tiles, plain-language money cards, By service table); `StatCard` `tone` for amber / red warning cards. Client lint clean, build OK; not yet clicked through by a person. Rent, Tasks, People and Revenue & Profit still have the old filter rows.
+- `D:\Zephyr-Feature-Guide.docx` was rebuilt again for this UI; if Word has the file open it is saved as `Zephyr-Feature-Guide-updated.docx` instead.
+
+## 2026-10-06 — Zephyr real-estate / construction plan written (no code yet)
+
+- Product owner supplied a 44-section brief (five services: civil construction, interior design, property management, property trading, real-estate consulting; properties, units, tenants, rent, loans, valuation, trading, consulting, tasks, service P&L). Gap analysis against the built Zx module and a phased plan R0-R9 are in [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md).
+- Owner confirmed (2026-10-06): Zephyr leads stay `ZxLead`; Delphic finance/expense concepts (approval flow, group expenses, snapshot locking) are re-built inside Zx tables, Delphic modules untouched; the Z0-Z8 UI was a sample and is reshaped; phase order R0-R9 and the new sidebar approved.
+- **R0-R2 started, uncommitted:** `schema.prisma` adds `ZxServiceType`, lead/project service fields (`service_type`, `details` JSON, expected dates/profit, assignee/contractor), lead code prefix/seq and party fields (company, state, country, hold, interested services, vendor category); migration `20261006090000_zephyr_services_leads_projects` drafted, not yet applied or tested. Lead stage and project status sets renamed; data migration, fixtures and seed still to update. No tests run for this slice yet.
+
+## 2026-10-05 — Zephyr committed, pushed to staging, deployed and seeded on Neon
+
+- Branch `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`git push origin <branch>:staging`, fast-forward, up to `3467895`) and deployed on Render with `render deploys create srv-datoc5e0tbcc73elv730 --commit <sha> --wait --confirm`. Boot runs `prisma migrate deploy`: 73 migrations, none pending, so the Zephyr tables are on Neon.
+- Fix after the first browser check: closing the Revenue & Profit drill-down drawer (X) crashed with "Cannot read properties of null (reading 'metric')" because the list still read `drill` while the drawer closed; the list now renders only when `drill` is set (`ZephyrOverviewPage.jsx`).
+- Staging Zephyr data seeded by hand on the Neon DB: `node prisma/zephyr/seed.js` with `ALLOW_DESTRUCTIVE_SEED=1` and the Neon DIRECT host (no `-pooler`, no `channel_binding`, `connect_timeout=120&pool_timeout=120&connection_limit=3`). The pooler URL timed out in Prisma both here and on the user's PC. Admin login verified through the staging API (health 200). Logins: see [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md).
+- Not automated: `server/scripts/staging-bootstrap.js` does not run the Zephyr seed (a step with the guard bypass was refused). Re-seed by hand if the Neon DB is reset. Not done: browser click-through of the staging site, manager and staff logins on staging.
+
+## 2026-10-05 — Zephyr Z5-Z8 built: money ledger, overview, financials, hardening (uncommitted)
+
+- All nine Zephyr phases (Z0-Z8) are now built on branch `zephyr-bug-fix-new-implementation`. Z5 ledger (revenue / expense, actual or planned, work order and milestone links, CSV import, project Money tab, party statement), Z6 Overview (presets, tiles, 12-month chart, profit by project, valuation, drill-down), Z7 Financials (plans, plan vs actual, projection, month close with stale flag, P&L by month / project / party with Excel + PDF). Migration `zephyr_money`.
+- Z8: idempotent demo seed (`npm run zephyr:seed`), test guide [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md), admin-editability pass (paid slips reopenable by admin with a reason; document details editable).
+- Tests: Zephyr suites 71/71 (foundation 10, parties 9, leads 11, projects 12, people 9, ledger 10, financials 10), run a few files at a time. Shared-infra suites re-run: erp-verticals, workspace-isolation, auth, auth-workspace, uploads-auth, recruitment-access-uploads (14/14 alone; two timeouts under load in a combined run) all pass. Lint 0 errors, client build OK, API smoke 59/59 as admin / manager / staff on the seeded database. Not done: browser click-through, commit / push.
+
+## 2026-10-05 — Zephyr Z4 Employee/Contractor built (uncommitted)
+
+- Roster, project assignments (100% cap), monthly salary slips (fixed monthly / daily x days, approve -> pay, project split) and staff 'My work'. Admin-only pay and login access. Migration `zephyr_people_salaries`. Home page company card removed.
+- Tests: Zephyr suites 51/51 on the private DB (people 9 new). Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z3 Projects built (uncommitted)
+
+- `/api/v1/zephyr/projects` (projects, milestones with weighted progress, vendor work orders, won lead -> project) and pages `/zephyr/projects` and `/zephyr/projects/:id` (Overview / Milestones / Work orders / Documents / Money placeholder). Migration `zephyr_projects`.
+- Tests: `zephyr-projects` 12/12 on the private DB. Lint and client build pass. Still to do: browser QA; staff assigned-project access with Z4.
+
+## 2026-10-05 — Zephyr Z2 Leads built (uncommitted)
+
+- `/api/v1/zephyr/leads` (stages, activities, follow-ups, summary, admin reopen) and page `/zephyr/leads` (board + list, follow-ups panel). Migration `zephyr_leads`. Won -> project conversion comes with Z3.
+- Tests: `zephyr-leads` 11/11 on the private DB. Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z1 Client/Vendor built (uncommitted)
+
+- Client/Vendor directory: `/api/v1/zephyr/parties` (CRUD, search, tabs, CSV import, admin-only soft delete) and `/zephyr/documents` (category, ref no, expiry; downloads via `/uploads`). Page `/zephyr/parties` with add/edit drawer, documents panel and expiry badges. Migration `zephyr_parties_documents`.
+- Tests: `zephyr-parties` + `zephyr-foundation` 19/19 on the private DB. Lint and client build pass. Still to do: browser QA, run upload-related Delphic suites.
+
+## 2026-10-05 — Zephyr Z0 foundation built: standalone API, Zephyr-branded shell (uncommitted)
+
+- Server `modules/zephyr` at `/api/v1/zephyr`: role resolution (org admin / `ZxPerson` manager / staff), `GET /me`, audited valuation settings, editable categories, people + login link, audit log. Test `zephyr-foundation.test.js` 10/10 (private DB).
+- Client: Zephyr logo (`public/zephyr-logo.png`) and green theme from it (`styles/theme.css`; Tailwind `primary` and `canvas` now CSS-variable driven, Delphic defaults unchanged), role-based Zephyr sidebar, `/zephyr` home, coming-soon section pages, `/zephyr/settings`. Zephyr users are kept off Delphic pages. Seed: Zephyr org modules `['zephyr']`.
+- Details and next steps (Z1 Client/Vendor): [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Still to do: wider run of shared-infra suites, browser QA.
+
+## 2026-10-05 — Salary is attendance-only for everyone; timesheet tabs removed; CI test fixes; main merged into Zephyr branch
+
+- Salary: `payroll.service.payBasisOf` always returns `attendance` (timesheets no longer feed pay). Logged hours never create overtime (`workHours.syncDayOvertime` is a no-op; OT is ticket based for every non-contractor); auto attendance covers all active full-time employees; the Payroll "Pay basis" tab is removed. `OrgMembership.pay_basis` column kept (no DROP).
+- Client: removed the Timesheets, IT Timesheet and Team Monitoring tabs from Time & Attendance, and the "Calendar: ... change under People -> Calendars" line from the project drawer. Timesheet pages/endpoints still exist, only hidden. Open question: whether to remove the "Project team (Employee <-> Project), cost rates & budget" section (or just Billable hrs/day).
+- Tests: salary-lock tests now mark the month's weekdays present (unmarked days block a lock); overtime-ticket and auto-attendance tests updated; 6 tests that cover timesheet-based pay / pay-basis switching are `test.skip` with a note (attendance-pay-basis, timesheet-payroll-rules, erp-phase4-payroll).
+- Deploy: pushed to `origin/staging` (via local `staging-deploy`, which tracks it) and deployed `delphic-one-new-staging` on Render with the CLI. Not on `main`.
+- Branches: `origin/main` merged into `zephyr-bug-fix-new-implementation` (conflict was only PROGRESS.md line endings); line endings normalized to main's LF. The Zephyr branch is main plus 323 added lines (docs, `zephyr_foundation` migration, schema, 4 lines in `db.js`).
+
 ## 2026-10-05 — Salary lock ignores days outside employment
 
 - A working day before `joined_at` or after `left_at` is unpaid, and it is no longer an unmarked attendance day. The salary lock only asks for attendance on days the person was employed. Pay stays prorated against the full month.
@@ -26,6 +101,10 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
 - Removed the project hour cap, the Project Calendar from Time & Attendance, and check-in / check-out (endpoints, header button, Today card, columns, prompt). Salary never read check-in/out; legacy columns kept (no DROP).
 - Added: Timesheet Dashboard (`/timesheets/dashboard`, `/timesheets/dashboard/calendar`), Project Team timesheet (`/timesheets/project-team`, assigned users + admin only), daily auto attendance job (today only, after the start time, never future), admin previous-month backfill with preview + audit, audit rows for manual marking / import.
 - Tests: new `auto-attendance.test.js`, `project-timesheet.test.js` (replaces `project-timesheet-cap.test.js`); check-in tests removed from `erp-phase2*`, `erp-multiproject-calendars`, `timesheet-workflow`. Detail + the list of FRD sections still open: [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md).
+
+## 2026-10-01 — Zephyr Infrastructure workspace: plan + docs — branch `zephyr-bug-fix-new-implementation`
+
+New work stream for the Zephyr group with only six sections (Leads, Client/Vendor, Projects, Revenue/Expense/Salaries/Profit/Valuation, Employee/Contractor management, Financials). Audited what exists (leads/contracts/projects/people are in place; Client/Vendor directory, company money overview and Zephyr-reachable Financials are the gaps) and wrote a phased plan. Revised later the same day to a standalone `Zx` module (no Delphic Global reuse), 9 phases Z0-Z8. Plan and live work log: [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Plan v4 (reviewed against platform code, admin/manager/staff access model, fixed-rate salaries) approved. Z0 started and **paused**: schema + migration `zephyr_foundation` + org-stamp registration done (uncommitted); server module, client shell and tests not started. See the work log in the spec for resume notes.
 
 ## 2026-10-01 — Finance: contract-based billing, invoices in Live Analytics, per-record locks, Financials = locked only — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
 

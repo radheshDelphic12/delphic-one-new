@@ -1,0 +1,66 @@
+/* Brand palette tokens (space-separated RGB so Tailwind opacity works).
+   Defaults are the Delphic blue; `.theme-zephyr` re-skins the app with the
+   Zephyr Infrastructure palette taken from its logo: charcoal mark, earth-brown
+   base bar, sage-green waves. AppLayout toggles the class on <html> so drawers
+   and modals (portals) pick it up too. */
+:root {
+  --p-50: 238 245 252;
+  --p-100: 216 232 246;
+  --p-200: 180 208 236;
+  --p-300: 130 176 221;
+  --p-400: 74 139 201;
+  --p-500: 31 108 181;
+  --p-600: 16 90 169;
+  --p-700: 14 74 139;
+  --p-800: 16 63 116;
+  --p-900: 18 55 97;
+}
+
+.theme-zephyr {
+  /* Zephyr green: sage greens from the logo's waves, with the earth-brown accent.
+     Surfaces are only a touch dimmer than plain white so they stay easy on the eyes. */
+  --p-50: 240 247 242;
+  --p-100: 220 235 224;
+  --p-200: 188 217 196;
+  --p-300: 148 194 162;
+  --p-400: 106 167 126;
+  --p-500: 91 163 114;
+  --p-600: 70 138 92;
+  --p-700: 56 111 74;
+  --p-800: 47 90 61;
+  --p-900: 38 72 50;
+
+  --color-bg: 240 245 241;
+  --color-sidebar: 232 240 235;
+  --color-border: 214 225 217;
+  --color-border-subtle: 224 233 226;
+  --zx-surface: 251 252 251;
+  --color-primary: 70 138 92;
+  --color-primary-soft: 240 247 242;
+
+  /* Logo accents */
+  --zx-charcoal: 89 89 89;
+  --zx-earth: 139 106 86;
+}
+
+.theme-zephyr .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(91 163 114 / 0.1), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(139 106 86 / 0.05), transparent 52%);
+}
+
+.theme-zephyr .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(70 138 92 / 0.12);
+}
+
+/* Side menu: the open page is a light green pill with a green edge, not a solid block. */
+.theme-zephyr nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.75);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--p-600));
+}
+
+/* Cards, tables, drawers and modals use a very soft off-white instead of glaring pure white. */
+.theme-zephyr .bg-white {
+  background-color: rgb(var(--zx-surface));
+}

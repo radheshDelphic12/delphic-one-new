@@ -439,6 +439,7 @@ model User {
   notifications_authored          Notification[]                  @relation("NotificationActor")
   notification_preferences        NotificationPreference[]
   org_memberships                 OrgMembership[]                 @relation("OrgMembershipPerson")
+  zx_people                       ZxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1853,6 +1854,36 @@ model Org {
   financial_plans    FinancialPlan[]
   resource_mappings  ResourceMapping[]
 
+  // Zephyr Infrastructure workspace (standalone Zx* module).
+  zx_settings   ZxSetting[]
+  zx_service_types ZxServiceType[]
+  zx_properties ZxProperty[]
+  zx_property_units ZxPropertyUnit[]
+  zx_property_loans ZxPropertyLoan[]
+  zx_property_valuations ZxPropertyValuation[]
+  zx_property_events ZxPropertyEvent[]
+  zx_tenants    ZxTenant[]
+  zx_leases     ZxLease[]
+  zx_rent_dues  ZxRentDue[]
+  zx_rent_payments ZxRentPayment[]
+  zx_property_sales ZxPropertySale[]
+  zx_tasks      ZxTask[]
+  zx_categories ZxCategory[]
+  zx_audit      ZxAudit[]
+  zx_people     ZxPerson[]
+  zx_parties    ZxParty[]
+  zx_documents  ZxDocument[]
+  zx_leads      ZxLead[]
+  zx_lead_activities ZxLeadActivity[]
+  zx_projects   ZxProject[]
+  zx_milestones ZxMilestone[]
+  zx_work_orders ZxWorkOrder[]
+  zx_assignments ZxAssignment[]
+  zx_salary_records ZxSalaryRecord[]
+  zx_ledger_entries ZxLedgerEntry[]
+  zx_plans      ZxPlan[]
+  zx_period_closes ZxPeriodClose[]
+
   // Backfilled onto every existing tenant-scoped table in this same
   // migration (nullable — Phase 1 flips these to NOT NULL once app code
   // always supplies org_id on write).
@@ -3254,4 +3285,783 @@ model FinancialCalculationChange {
 
   @@index([calculation_id, status])
   @@map("financial_calculation_changes")
+}
+
+// ---------------------------------------------------------------------------
+// Zephyr Infrastructure workspace (standalone Zx* module, 2026-10).
+// Nothing here references Delphic Global business tables. Every row is
+// org-scoped; services must filter by org_id explicitly (reads are not
+// auto-filtered). See docs/features/ZEPHYR-INFRASTRUCTURE.md.
+// ---------------------------------------------------------------------------
+
+// One row per org: company-level Zephyr settings (valuation, numbering).
+model ZxSetting {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @unique @db.Uuid
+  org                Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency           String   @default("INR")
+  valuation_method   String   @default("revenue_multiple") // manual | revenue_multiple | profit_multiple
+  valuation_multiple Decimal  @default(3) @db.Decimal(8, 2)
+  valuation_manual   Decimal? @db.Decimal(16, 2)
+  project_prefix     String   @default("ZX-P")
+  project_seq        Int      @default(0)
+  lead_prefix        String   @default("ZL")
+  lead_seq           Int      @default(0)
+  property_prefix    String   @default("ZP")
+  property_seq       Int      @default(0)
+  task_prefix        String   @default("ZT")
+  task_seq           Int      @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@map("zx_settings")
+}
+
+// Admin-editable revenue / expense categories (not hard-coded).
+model ZxCategory {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  org        Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind       String // revenue | expense
+  name       String
+  active     Boolean   @default(true)
+  sort_order Int       @default(0)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
+  entries    ZxLedgerEntry[]
+
+  @@unique([org_id, kind, name])
+  @@index([org_id, kind])
+  @@map("zx_categories")
+}
+
+// Zephyr's own audit trail (before/after JSON, actor, optional reason).
+model ZxAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("zx_audit")
+}
+
+// The Zephyr people roster. Z0 holds only what roles need (name, optional
+// login, access role); Z4 extends it with employment and pay fields.
+// access_role: manager | staff | none. Org-membership admins are Zephyr
+// admins regardless of this row.
+model ZxPerson {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name        String
+  user_id     String?   @db.Uuid
+  user        User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role String    @default("none")
+  active      Boolean   @default(true)
+  kind        String    @default("employee")
+  designation String?
+  phone       String?
+  email       String?
+  joining_date DateTime? @db.Date
+  leaving_date DateTime? @db.Date
+  pay_basis   String?
+  rate        Decimal?  @db.Decimal(14, 2)
+  vendor_party_id String? @db.Uuid
+  vendor_party ZxParty? @relation(fields: [vendor_party_id], references: [id], onDelete: SetNull)
+  notes       String?
+  assignments ZxAssignment[]
+  salary_records ZxSalaryRecord[]
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+  deleted_at  DateTime?
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("zx_people")
+}
+
+// Z1: one directory of clients and vendors / subcontractors.
+// kind: client | vendor | both. status: active | inactive.
+model ZxParty {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind          String    @default("client")
+  name          String
+  contact_name  String?
+  phone         String?
+  email         String?
+  gstin         String?
+  pan           String?
+  address       String?
+  city          String?
+  state         String?
+  country       String?
+  company_name  String?
+  interested_services String[] @default([])
+  vendor_category     String?
+  materials_services  String?
+  payment_terms String?
+  status        String    @default("active") // active | inactive | hold
+  notes         String?
+  created_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+  leads         ZxLead[]
+  projects      ZxProject[]
+  work_orders   ZxWorkOrder[]
+  contractor_people ZxPerson[]
+  ledger_entries ZxLedgerEntry[]
+
+  @@index([org_id, kind, status])
+  @@index([org_id, name])
+  @@map("zx_parties")
+}
+
+// Z1: files with a category, reference number and expiry, owned by a Zephyr
+// record (owner_type party | project | person | lead). Polymorphic owner, so no FK;
+// the service validates the owner belongs to the same org.
+model ZxDocument {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  owner_type  String
+  owner_id    String    @db.Uuid
+  category    String    @default("other")
+  title       String
+  ref_no      String?
+  issue_date  DateTime? @db.Date
+  expiry_date DateTime? @db.Date
+  file_url    String
+  file_name   String?
+  size_bytes  Int?
+  uploaded_by String?   @db.Uuid
+  created_at  DateTime  @default(now())
+  deleted_at  DateTime?
+
+  @@index([org_id, owner_type, owner_id])
+  @@index([org_id, expiry_date])
+  @@map("zx_documents")
+}
+
+// Z2: Zephyr leads, first contact to won / lost.
+// category: self_project | client_project | other. stage: new | contacted | site_visit |
+// proposal | negotiation | won | lost. A self_project lead states its basis
+// (investor | customer_deal | project_type) and the value for that basis.
+model ZxLead {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name               String
+  category           String    @default("client_project")
+  self_project_basis String?
+  basis_value        String?
+  party_id           String?   @db.Uuid
+  party              ZxParty?  @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  contact_name       String?
+  phone              String?
+  email              String?
+  source             String?
+  location           String?
+  estimated_value    Decimal?  @db.Decimal(16, 2)
+  expected_close     DateTime? @db.Date
+  stage              String    @default("new") // new | in_discussion | negotiation | on_hold | won | closed | dropped
+  lost_reason        String?
+  owner_id           String?   @db.Uuid
+  notes              String?
+  project_id         String?   @db.Uuid
+  closed_at          DateTime?
+  code               String?
+  service_type       String?
+  company            String?
+  address            String?
+  city               String?
+  state              String?
+  assignee_id        String?   @db.Uuid
+  contractor_id      String?   @db.Uuid
+  expected_start     DateTime? @db.Date
+  expected_end       DateTime? @db.Date
+  expected_profit    Decimal?  @db.Decimal(16, 2)
+  property_ref       String?
+  description        String?
+  details            Json?
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  deleted_at         DateTime?
+  activities         ZxLeadActivity[]
+
+  @@index([org_id, stage])
+  @@index([org_id, owner_id])
+  @@index([org_id, service_type])
+  @@map("zx_leads")
+}
+
+// Z2: calls, visits, meetings and notes on a lead; stage moves are logged here too.
+model ZxLeadActivity {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String    @db.Uuid
+  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  lead_id          String    @db.Uuid
+  lead             ZxLead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  kind             String    @default("note")
+  summary          String
+  follow_up_date   DateTime? @db.Date
+  follow_up_done   Boolean   @default(false)
+  created_by       String?   @db.Uuid
+  created_at       DateTime  @default(now())
+
+  @@index([lead_id, created_at])
+  @@index([org_id, follow_up_date])
+  @@map("zx_lead_activities")
+}
+
+// Z3: a Zephyr project. kind: self (own-developed) | client. status: planning | active |
+// on_hold | completed | cancelled. code = settings.project_prefix + running number.
+// progress_pct is the manual figure, used only while the project has no milestones
+// (otherwise progress is the weighted average of milestone percent_done).
+model ZxProject {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  kind           String    @default("client")
+  party_id       String?   @db.Uuid
+  party          ZxParty?  @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  lead_id        String?   @db.Uuid
+  location       String?
+  status         String    @default("planned") // planned | active | on_hold | completed | cancelled | closed
+  start_date     DateTime? @db.Date
+  end_date       DateTime? @db.Date
+  contract_value Decimal?  @db.Decimal(16, 2)
+  budget         Decimal?  @db.Decimal(16, 2)
+  progress_pct   Int       @default(0)
+  manager_id     String?   @db.Uuid
+  notes          String?
+  service_type   String?
+  actual_end     DateTime? @db.Date
+  agreement_ref  String?
+  property_id    String?   @db.Uuid
+  expected_profit Decimal? @db.Decimal(16, 2)
+  assignee_id    String?   @db.Uuid
+  contractor_id  String?   @db.Uuid
+  description    String?
+  details        Json?
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+  milestones     ZxMilestone[]
+  work_orders    ZxWorkOrder[]
+  assignments    ZxAssignment[]
+  ledger_entries ZxLedgerEntry[]
+  plans          ZxPlan[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@index([org_id, service_type])
+  @@map("zx_projects")
+}
+
+// Z3: a billable / trackable step of a project. status follows percent_done
+// (0 pending, 1-99 in_progress, 100 done); weight sets its share of project progress.
+model ZxMilestone {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  project_id     String    @db.Uuid
+  project        ZxProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  name           String
+  due_date       DateTime? @db.Date
+  weight         Int       @default(1)
+  percent_done   Int       @default(0)
+  status         String    @default("pending")
+  billing_amount Decimal?  @db.Decimal(16, 2)
+  billed         Boolean   @default(false)
+  sort_order     Int       @default(0)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+  ledger_entries ZxLedgerEntry[]
+
+  @@index([project_id, sort_order])
+  @@map("zx_milestones")
+}
+
+// Z3: work given to a vendor / subcontractor (a ZxParty of kind vendor or both) on a project.
+// status: draft | issued | in_progress | completed | cancelled. billed_to_date <= value.
+model ZxWorkOrder {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  project_id     String    @db.Uuid
+  project        ZxProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  vendor_id      String    @db.Uuid
+  vendor         ZxParty   @relation(fields: [vendor_id], references: [id])
+  wo_number      String?
+  scope          String
+  value          Decimal   @db.Decimal(16, 2)
+  billed_to_date Decimal   @default(0) @db.Decimal(16, 2)
+  status         String    @default("draft")
+  issued_on      DateTime? @db.Date
+  notes          String?
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+  ledger_entries ZxLedgerEntry[]
+
+  @@index([project_id])
+  @@index([org_id, vendor_id])
+  @@map("zx_work_orders")
+}
+
+// Z4: a person on a project. allocation_pct is the share of their time; a person's
+// overlapping assignments may not add up to more than 100.
+model ZxAssignment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  person_id      String    @db.Uuid
+  person         ZxPerson  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  project_id     String    @db.Uuid
+  project        ZxProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  role           String?
+  from_date      DateTime? @db.Date
+  to_date        DateTime? @db.Date
+  allocation_pct Int       @default(100)
+  created_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@index([person_id])
+  @@index([project_id])
+  @@map("zx_assignments")
+}
+
+// Z4: one pay slip per person per month (month = YYYY-MM). pay_basis / rate are
+// snapshotted when the slip is generated. status: draft | approved | paid.
+// project_split = [{ project_id, pct, amount }] (cost allocation across projects).
+model ZxSalaryRecord {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  person_id     String    @db.Uuid
+  person        ZxPerson  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  month         String
+  pay_basis     String
+  rate          Decimal   @db.Decimal(14, 2)
+  days          Decimal?  @db.Decimal(6, 2)
+  gross         Decimal   @default(0) @db.Decimal(14, 2)
+  deductions    Decimal   @default(0) @db.Decimal(14, 2)
+  net           Decimal   @default(0) @db.Decimal(14, 2)
+  status        String    @default("draft")
+  project_split Json?
+  paid_on       DateTime? @db.Date
+  approved_by   String?   @db.Uuid
+  approved_at   DateTime?
+  notes         String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([person_id, month])
+  @@index([org_id, month])
+  @@map("zx_salary_records")
+}
+
+// Z5: the money ledger. type: revenue | expense. status: planned | actual (only actual
+// counts in the books). amount excludes tax; tax is tracked separately (GST). Salaries are
+// NOT ledger entries - they come from approved / paid ZxSalaryRecord rows. Documents attach
+// via ZxDocument (owner_type = entry).
+model ZxLedgerEntry {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String       @db.Uuid
+  org           Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entry_date    DateTime     @db.Date
+  type          String
+  category_id   String       @db.Uuid
+  category      ZxCategory   @relation(fields: [category_id], references: [id])
+  project_id    String?      @db.Uuid
+  project       ZxProject?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  party_id      String?      @db.Uuid
+  party         ZxParty?     @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  work_order_id String?      @db.Uuid
+  work_order    ZxWorkOrder? @relation(fields: [work_order_id], references: [id], onDelete: SetNull)
+  milestone_id  String?      @db.Uuid
+  milestone     ZxMilestone? @relation(fields: [milestone_id], references: [id], onDelete: SetNull)
+  amount        Decimal      @db.Decimal(16, 2)
+  tax           Decimal      @default(0) @db.Decimal(16, 2)
+  status        String       @default("actual")
+  payment_mode  String?
+  reference     String?
+  description   String?
+  service_type  String?
+  property_id   String?      @db.Uuid
+  unit_id       String?      @db.Uuid
+  source_type   String?
+  source_id     String?      @db.Uuid
+  created_by    String?      @db.Uuid
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@index([org_id, entry_date])
+  @@index([org_id, project_id])
+  @@index([org_id, party_id])
+  @@index([org_id, property_id])
+  @@index([org_id, source_type, source_id])
+  @@map("zx_ledger_entries")
+}
+
+// Z7: planned figures for a month, company-wide (project_id null) or for one project.
+model ZxPlan {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String     @db.Uuid
+  org              Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month            String
+  project_id       String?    @db.Uuid
+  project          ZxProject? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  planned_revenue  Decimal    @default(0) @db.Decimal(16, 2)
+  planned_expense  Decimal    @default(0) @db.Decimal(16, 2)
+  planned_salaries Decimal    @default(0) @db.Decimal(16, 2)
+  notes            String?
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @default(now()) @updatedAt
+
+  @@index([org_id, month])
+  @@map("zx_plans")
+}
+
+// Z7: a month's lock. status open | closed. snapshot = totals at close time; stale is set
+// when a ledger entry or slip dated in the closed month changes afterwards (the snapshot is
+// never silently rewritten - an admin reopens and re-closes).
+model ZxPeriodClose {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month         String
+  status        String    @default("open")
+  snapshot      Json?
+  closed_by     String?   @db.Uuid
+  closed_at     DateTime?
+  reopen_reason String?
+  reopened_at   DateTime?
+  stale         Boolean   @default(false)
+  stale_at      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("zx_period_closes")
+}
+
+model ZxServiceType {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  active     Boolean  @default(true)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, key])
+  @@map("zx_service_types")
+}
+
+// --- Zephyr real-estate (R3-R8) ---------------------------------------------------------------
+// A property can be managed and traded at once; the lifecycle lives on its units.
+model ZxProperty {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String    @db.Uuid
+  org                 Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                String
+  name                String
+  property_type       String    @default("other") // plot | house | building | shops | office | commercial_complex | other
+  address             String?
+  city                String?
+  state               String?
+  location            String?
+  area_value          Decimal?  @db.Decimal(14, 2)
+  area_unit           String    @default("sqft")
+  current_use         String?
+  status              String    @default("active") // active | under_construction | under_renovation | held | sold | inactive
+  notes               String?
+  purchase_date       DateTime? @db.Date
+  purchase_cost       Decimal   @default(0) @db.Decimal(16, 2)
+  brokerage           Decimal   @default(0) @db.Decimal(16, 2)
+  documentation_cost  Decimal   @default(0) @db.Decimal(16, 2)
+  registration_cost   Decimal   @default(0) @db.Decimal(16, 2)
+  construction_cost   Decimal   @default(0) @db.Decimal(16, 2)
+  renovation_cost     Decimal   @default(0) @db.Decimal(16, 2)
+  other_cost          Decimal   @default(0) @db.Decimal(16, 2)
+  valuation           Decimal?  @db.Decimal(16, 2)
+  valuation_date      DateTime? @db.Date
+  valuation_notes     String?
+  created_by          String?   @db.Uuid
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
+  deleted_at          DateTime?
+  units               ZxPropertyUnit[]
+  loans               ZxPropertyLoan[]
+  valuations          ZxPropertyValuation[]
+  events              ZxPropertyEvent[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@map("zx_properties")
+}
+
+model ZxPropertyUnit {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id    String    @db.Uuid
+  property       ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  name           String
+  building       String?
+  floor          String?
+  unit_type      String?
+  area_value     Decimal?  @db.Decimal(14, 2)
+  status         String    @default("available") // available | rented | sold | held | under_construction | under_renovation | vacant
+  ownership      String    @default("zephyr") // zephyr | third_party
+  allocated_cost Decimal?  @db.Decimal(16, 2)
+  valuation      Decimal?  @db.Decimal(16, 2)
+  valuation_date DateTime? @db.Date
+  notes          String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+  leases         ZxLease[]
+
+  @@index([org_id, property_id])
+  @@map("zx_property_units")
+}
+
+model ZxPropertyLoan {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id        String    @db.Uuid
+  property           ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  financing_type     String    @default("bank_loan") // bank_loan | private_loan | other
+  lender             String?
+  loan_amount        Decimal   @default(0) @db.Decimal(16, 2)
+  outstanding_amount Decimal   @default(0) @db.Decimal(16, 2)
+  emi_amount         Decimal   @default(0) @db.Decimal(16, 2)
+  emi_frequency      String    @default("monthly") // monthly | quarterly | yearly
+  interest_rate      Decimal?  @db.Decimal(6, 3)
+  start_date         DateTime? @db.Date
+  end_date           DateTime? @db.Date
+  status             String    @default("active") // active | closed
+  notes              String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  deleted_at         DateTime?
+
+  @@index([org_id, property_id])
+  @@map("zx_property_loans")
+}
+
+model ZxPropertyValuation {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String     @db.Uuid
+  org         Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id String     @db.Uuid
+  property    ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  unit_id     String?    @db.Uuid
+  value       Decimal    @db.Decimal(16, 2)
+  as_of       DateTime   @db.Date
+  notes       String?
+  created_by  String?    @db.Uuid
+  created_at  DateTime   @default(now())
+
+  @@index([org_id, property_id, as_of])
+  @@map("zx_property_valuations")
+}
+
+model ZxPropertyEvent {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String     @db.Uuid
+  org         Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id String     @db.Uuid
+  property    ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  unit_id     String?    @db.Uuid
+  kind        String // purchase | construction | renovation | valuation | rent | sale | loan | status | note
+  event_date  DateTime   @db.Date
+  title       String
+  amount      Decimal?   @db.Decimal(16, 2)
+  notes       String?
+  source_type String?
+  source_id   String?    @db.Uuid
+  created_by  String?    @db.Uuid
+  created_at  DateTime   @default(now())
+
+  @@index([org_id, property_id, event_date])
+  @@map("zx_property_events")
+}
+
+model ZxTenant {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name         String
+  company_name String?
+  phone        String?
+  email        String?
+  status       String    @default("active") // active | inactive
+  notes        String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+  leases       ZxLease[]
+
+  @@index([org_id])
+  @@map("zx_tenants")
+}
+
+model ZxLease {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String         @db.Uuid
+  org              Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  tenant_id        String         @db.Uuid
+  tenant           ZxTenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  unit_id          String         @db.Uuid
+  unit             ZxPropertyUnit @relation(fields: [unit_id], references: [id], onDelete: Cascade)
+  property_id      String         @db.Uuid
+  start_date       DateTime       @db.Date
+  end_date         DateTime?      @db.Date
+  monthly_rent     Decimal        @db.Decimal(16, 2)
+  security_deposit Decimal        @default(0) @db.Decimal(16, 2)
+  due_day          Int            @default(1)
+  payment_method   String?
+  status           String         @default("active") // active | ended
+  ended_on         DateTime?      @db.Date
+  notes            String?
+  created_by       String?        @db.Uuid
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @default(now()) @updatedAt
+  deleted_at       DateTime?
+  dues             ZxRentDue[]
+
+  @@index([org_id, unit_id])
+  @@index([org_id, tenant_id])
+  @@map("zx_leases")
+}
+
+model ZxRentDue {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  lease_id      String    @db.Uuid
+  lease         ZxLease   @relation(fields: [lease_id], references: [id], onDelete: Cascade)
+  property_id   String    @db.Uuid
+  unit_id       String    @db.Uuid
+  tenant_id     String    @db.Uuid
+  period        String // YYYY-MM
+  amount        Decimal   @db.Decimal(16, 2)
+  due_date      DateTime  @db.Date
+  paid_amount   Decimal   @default(0) @db.Decimal(16, 2)
+  waived        Boolean   @default(false)
+  waived_reason String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  payments      ZxRentPayment[]
+
+  @@unique([lease_id, period])
+  @@index([org_id, period])
+  @@index([org_id, property_id])
+  @@map("zx_rent_dues")
+}
+
+model ZxRentPayment {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String    @db.Uuid
+  org                    Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  rent_due_id            String    @db.Uuid
+  rent_due               ZxRentDue @relation(fields: [rent_due_id], references: [id], onDelete: Cascade)
+  lease_id               String    @db.Uuid
+  tenant_id              String    @db.Uuid
+  property_id            String    @db.Uuid
+  unit_id                String    @db.Uuid
+  amount                 Decimal   @db.Decimal(16, 2)
+  paid_on                DateTime  @db.Date
+  method                 String // cash | upi | bank_transfer | cheque | other
+  reference              String?
+  collected_by_person_id String?   @db.Uuid
+  notes                  String?
+  ledger_entry_id        String?   @db.Uuid
+  created_by             String?   @db.Uuid
+  created_at             DateTime  @default(now())
+  deleted_at             DateTime?
+
+  @@index([org_id, property_id, paid_on])
+  @@map("zx_rent_payments")
+}
+
+model ZxPropertySale {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id        String    @db.Uuid
+  unit_id            String?   @db.Uuid
+  buyer_party_id     String?   @db.Uuid
+  sale_value         Decimal   @db.Decimal(16, 2)
+  sale_date          DateTime  @db.Date
+  selling_costs      Decimal   @default(0) @db.Decimal(16, 2)
+  cost_basis         Decimal   @db.Decimal(16, 2)
+  realized_profit    Decimal   @db.Decimal(16, 2)
+  holding_days       Int?
+  notes              String?
+  revenue_entry_id   String?   @db.Uuid
+  cost_entry_id      String?   @db.Uuid
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+  deleted_at         DateTime?
+
+  @@index([org_id, property_id])
+  @@index([org_id, sale_date])
+  @@map("zx_property_sales")
+}
+
+model ZxTask {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code          String
+  person_id     String?   @db.Uuid
+  property_id   String?   @db.Uuid
+  unit_id       String?   @db.Uuid
+  project_id    String?   @db.Uuid
+  task_type     String    @default("other") // visit_property | collect_rent | inspect | coordinate_vendor | collect_documents | verify_work | follow_up_tenant | follow_up_client | collect_payment | update_property | other
+  title         String
+  description   String?
+  due_date      DateTime? @db.Date
+  priority      String    @default("normal") // low | normal | high
+  status        String    @default("pending") // pending | in_progress | completed | cancelled
+  amount        Decimal?  @db.Decimal(16, 2)
+  completed_on  DateTime? @db.Date
+  rent_due_id   String?   @db.Uuid
+  notes         String?
+  created_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@index([org_id, person_id])
+  @@map("zx_tasks")
 }

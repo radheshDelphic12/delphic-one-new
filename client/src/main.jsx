@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { AuthProvider } from './lib/authContext.jsx';
 import { AlertProvider } from './lib/alerts/alertContext.jsx';
 import { NotificationsProvider } from './lib/notifications/notificationsContext.jsx';
+import './styles/theme.css';
 import './styles/global.css';
 
 // AuthProvider → AlertProvider → NotificationsProvider: the notifications context

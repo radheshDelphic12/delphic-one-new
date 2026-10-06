@@ -35,6 +35,22 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import ZephyrHomePage from '../pages/zephyr/ZephyrHomePage.jsx';
+import ZephyrSectionPage from '../pages/zephyr/ZephyrSectionPage.jsx';
+import ZephyrPartiesPage from '../pages/zephyr/ZephyrPartiesPage.jsx';
+import ZephyrLeadsPage from '../pages/zephyr/ZephyrLeadsPage.jsx';
+import ZephyrProjectsPage from '../pages/zephyr/ZephyrProjectsPage.jsx';
+import ZephyrPeoplePage from '../pages/zephyr/ZephyrPeoplePage.jsx';
+import ZephyrOverviewPage from '../pages/zephyr/ZephyrOverviewPage.jsx';
+import ZephyrFinancialsPage from '../pages/zephyr/ZephyrFinancialsPage.jsx';
+import ZephyrMyWorkPage from '../pages/zephyr/ZephyrMyWorkPage.jsx';
+import ZephyrProjectDetailPage from '../pages/zephyr/ZephyrProjectDetailPage.jsx';
+import ZephyrSettingsPage from '../pages/zephyr/ZephyrSettingsPage.jsx';
+import ZephyrPropertiesPage from '../pages/zephyr/ZephyrPropertiesPage.jsx';
+import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.jsx';
+import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
+import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
+import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
@@ -76,6 +92,8 @@ const ADMIN_HOME = '/finance';
  */
 function HomePage() {
   const { user } = useAuth();
+  // Zephyr is a standalone workspace with its own home.
+  if (isZephyrOrg(user)) return <Navigate to="/zephyr" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -125,6 +143,15 @@ function RequireMasterWorkspace({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.active_org?.is_master_workspace) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Zephyr workspace needs the `zephyr` module on the ACTIVE company. */
+function RequireZephyr({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isZephyrOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -212,6 +239,23 @@ export default function App() {
         <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced
+            by the server; AppLayout keeps Zephyr users off every Delphic page. */}
+        <Route path="zephyr" element={<RequireZephyr><ZephyrHomePage /></RequireZephyr>} />
+        <Route path="zephyr/settings" element={<RequireZephyr><ZephyrSettingsPage /></RequireZephyr>} />
+        <Route path="zephyr/overview" element={<RequireZephyr><ZephyrOverviewPage /></RequireZephyr>} />
+        <Route path="zephyr/financials" element={<RequireZephyr><ZephyrFinancialsPage /></RequireZephyr>} />
+        <Route path="zephyr/people" element={<RequireZephyr><ZephyrPeoplePage /></RequireZephyr>} />
+        <Route path="zephyr/my-work" element={<RequireZephyr><ZephyrMyWorkPage /></RequireZephyr>} />
+        <Route path="zephyr/projects" element={<RequireZephyr><ZephyrProjectsPage /></RequireZephyr>} />
+        <Route path="zephyr/projects/:id" element={<RequireZephyr><ZephyrProjectDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/properties" element={<RequireZephyr><ZephyrPropertiesPage /></RequireZephyr>} />
+        <Route path="zephyr/properties/:id" element={<RequireZephyr><ZephyrPropertyDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/rent" element={<RequireZephyr><ZephyrRentPage /></RequireZephyr>} />
+        <Route path="zephyr/tasks" element={<RequireZephyr><ZephyrTasksPage /></RequireZephyr>} />
+        <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
+        <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />
+        <Route path="zephyr/:section" element={<RequireZephyr><ZephyrSectionPage /></RequireZephyr>} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
