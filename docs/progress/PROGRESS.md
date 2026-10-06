@@ -2,6 +2,13 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-05 — Zephyr committed, pushed to staging, deployed and seeded on Neon
+
+- Branch `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`git push origin <branch>:staging`, fast-forward, up to `3467895`) and deployed on Render with `render deploys create srv-datoc5e0tbcc73elv730 --commit <sha> --wait --confirm`. Boot runs `prisma migrate deploy`: 73 migrations, none pending, so the Zephyr tables are on Neon.
+- Fix after the first browser check: closing the Revenue & Profit drill-down drawer (X) crashed with "Cannot read properties of null (reading 'metric')" because the list still read `drill` while the drawer closed; the list now renders only when `drill` is set (`ZephyrOverviewPage.jsx`).
+- Staging Zephyr data seeded by hand on the Neon DB: `node prisma/zephyr/seed.js` with `ALLOW_DESTRUCTIVE_SEED=1` and the Neon DIRECT host (no `-pooler`, no `channel_binding`, `connect_timeout=120&pool_timeout=120&connection_limit=3`). The pooler URL timed out in Prisma both here and on the user's PC. Admin login verified through the staging API (health 200). Logins: see [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md).
+- Not automated: `server/scripts/staging-bootstrap.js` does not run the Zephyr seed (a step with the guard bypass was refused). Re-seed by hand if the Neon DB is reset. Not done: browser click-through of the staging site, manager and staff logins on staging.
+
 ## 2026-10-05 — Zephyr Z5-Z8 built: money ledger, overview, financials, hardening (uncommitted)
 
 - All nine Zephyr phases (Z0-Z8) are now built on branch `zephyr-bug-fix-new-implementation`. Z5 ledger (revenue / expense, actual or planned, work order and milestone links, CSV import, project Money tab, party statement), Z6 Overview (presets, tiles, 12-month chart, profit by project, valuation, drill-down), Z7 Financials (plans, plan vs actual, projection, month close with stale flag, P&L by month / project / party with Excel + PDF). Migration `zephyr_money`.

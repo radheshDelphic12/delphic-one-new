@@ -67,3 +67,19 @@ npx jest --runInBand tests/zephyr-people.test.js tests/zephyr-ledger.test.js tes
 | `zephyr-financials` | overview and valuation, plans, projection, month close and stale flag, statements, Excel / PDF |
 
 CI runs the whole server suite sharded; do not run it all locally (see AGENTS.md "Testing + CI speed rule").
+
+## 5. Staging (Render + Neon)
+
+Staging URL: https://delphic-one-new-staging.onrender.com/login (same logins and password as section 1; the free Render plan sleeps, the first load can take up to a minute).
+
+- Deploy: push the branch (`git push origin zephyr-bug-fix-new-implementation:staging`), then `render deploys create srv-datoc5e0tbcc73elv730 --commit <sha> --wait --confirm`. The boot step runs `prisma migrate deploy` itself. Never push `main`.
+- Seed (once, by hand; idempotent, deletes nothing, but the guard needs the flag for a non-local host). Use the Neon **direct** host from the Render `DATABASE_URL`, not the `-pooler` one, and no `channel_binding`:
+
+```powershell
+cd server
+$env:DATABASE_URL="postgresql://<user>:<password>@<direct-host>/neondb?sslmode=require&connect_timeout=120&pool_timeout=120&connection_limit=3"
+$env:ALLOW_DESTRUCTIVE_SEED="1"   # exactly 1
+npm run zephyr:seed
+```
+
+- Never commit the connection string or password. Rotate the Neon password if it was pasted anywhere.
