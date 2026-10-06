@@ -74,16 +74,18 @@ function ProjectTable({ rows, showSalaries, onOpen }) {
 
 function DrillDrawer({ drill, range, onClose }) {
   const { pushError } = useAlerts();
-  const [rows, setRows] = useState(null);
+  // Rows are kept with the drill they were loaded for, so a stale list from an earlier drill (revenue / expense)
+  // is never rendered as pay slips (it has no `person`) when the Salaries tile is opened.
+  const [loaded, setLoaded] = useState({ drill: null, rows: null });
+  const rows = loaded.drill === drill ? loaded.rows : null;
   useEffect(() => {
     if (!drill) return;
-    setRows(null);
     const base = { from: range.from, to: range.to };
     const project = drill.project?.project_id ? { project_id: drill.project.project_id } : drill.project ? { unallocated: true } : {};
     const request = drill.metric === 'salaries'
       ? zephyrApi.overviewSalaries({ ...base, ...project })
       : zephyrApi.ledger({ ...base, type: drill.metric, status: 'actual', limit: 200, ...(project.project_id ? { project_id: project.project_id } : {}) }).then((r) => (project.unallocated ? r.data.filter((e) => !e.project_id) : r.data));
-    request.then(setRows, (e) => pushError(zephyrError(e, 'Could not load the rows'), 'Load failed'));
+    request.then((data) => setLoaded({ drill, rows: data }), (e) => pushError(zephyrError(e, 'Could not load the rows'), 'Load failed'));
   }, [drill, range, pushError]);
   const title = drill ? `${{ revenue: 'Revenue', expense: 'Expense', salaries: 'Salaries' }[drill.metric]}${drill.project ? ` · ${drill.project.name}` : ''}` : '';
   return (
@@ -94,7 +96,7 @@ function DrillDrawer({ drill, range, onClose }) {
         {drill && rows?.map((r) => (
           <li key={r.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
             <div className="min-w-0">
-              <div className="truncate font-medium text-tertiary-900">{drill.metric === 'salaries' ? r.person.name : r.category?.name}</div>
+              <div className="truncate font-medium text-tertiary-900">{drill.metric === 'salaries' ? r.person?.name : r.category?.name}</div>
               <div className="truncate text-xs text-tertiary-500">{drill.metric === 'salaries' ? `${r.month} · ${r.status}` : [dateLabel(r.entry_date), r.project?.code, r.party?.name, r.reference].filter(Boolean).join(' · ')}</div>
             </div>
             <div className="shrink-0 tabular-nums">{rupees(r.amount)}</div>
