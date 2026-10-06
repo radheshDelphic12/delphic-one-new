@@ -1,11 +1,15 @@
 const { z } = require('zod');
+const { Prisma } = require('@prisma/client');
 const prisma = require('../../config/db');
 const { userNames } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
-const { ownerOk } = require('./leads.service');
+const { ownerOk, personOk } = require('./leads.service');
+const { SERVICE_KEYS } = require('./serviceTypes');
+const { cleanDetails, detailsInput } = require('./projectDetails');
 
 const KINDS = ['self', 'client'];
-const STATUSES = ['planning', 'active', 'on_hold', 'completed', 'cancelled'];
+const STATUSES = ['planned', 'active', 'on_hold', 'completed', 'cancelled', 'closed'];
+const LIVE_STATUSES = ['planned', 'active', 'on_hold'];
 const WO_STATUSES = ['draft', 'issued', 'in_progress', 'completed', 'cancelled'];
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
@@ -16,20 +20,29 @@ const money = z.preprocess((v) => (v === '' ? null : v), z.coerce.number().min(0
 const projectFields = {
   name: z.string().trim().min(1).max(200),
   kind: z.enum(KINDS),
+  service_type: z.enum(SERVICE_KEYS),
   party_id: uuidOrNull,
   location: text(200),
   status: z.enum(STATUSES),
   start_date: dateOnly.optional(),
   end_date: dateOnly.optional(),
+  actual_end: dateOnly.optional(),
+  agreement_ref: text(200),
+  property_id: uuidOrNull,
   contract_value: money,
   budget: money,
+  expected_profit: money,
+  assignee_id: uuidOrNull,
+  contractor_id: uuidOrNull,
+  description: text(4000),
+  details: detailsInput,
   progress_pct: z.coerce.number().int().min(0).max(100),
   manager_id: uuidOrNull,
   notes: text(2000),
 };
-const createProjectSchema = z.object({ ...projectFields, kind: projectFields.kind.default('client'), status: projectFields.status.default('planning'), progress_pct: projectFields.progress_pct.default(0) });
+const createProjectSchema = z.object({ ...projectFields, kind: projectFields.kind.default('client'), status: projectFields.status.default('planned'), progress_pct: projectFields.progress_pct.default(0) });
 const updateProjectSchema = z.object(projectFields).partial();
-const fromLeadSchema = z.object({ start_date: dateOnly.optional(), end_date: dateOnly.optional(), manager_id: uuidOrNull });
+const fromLeadSchema = z.object({ start_date: dateOnly.optional(), end_date: dateOnly.optional(), manager_id: uuidOrNull, party_id: uuidOrNull });
 const milestoneFields = {
   name: z.string().trim().min(1).max(200),
   due_date: dateOnly.optional(),
@@ -55,7 +68,13 @@ const workOrderUpdateSchema = z.object(workOrderFields).partial();
 const listQuerySchema = z.object({
   status: z.enum([...STATUSES, 'open']).optional(),
   kind: z.enum(KINDS).optional(),
+  service_type: z.enum(SERVICE_KEYS).optional(),
   party_id: z.string().uuid().optional(),
+  assignee_id: z.string().uuid().optional(),
+  contractor_id: z.string().uuid().optional(),
+  location: z.string().trim().max(100).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(300).default(200),
 });
@@ -65,9 +84,9 @@ const dayOf = (v) => (v ? new Date(v).toISOString().slice(0, 10) : null);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 const sum = (rows, f) => rows.reduce((a, r) => a + (num(f(r)) || 0), 0);
-const isClosed = (p) => p.status === 'completed' || p.status === 'cancelled';
+const isClosed = (p) => p.status === 'completed' || p.status === 'cancelled' || p.status === 'closed';
 const milestoneStatus = (pct) => (pct >= 100 ? 'done' : pct > 0 ? 'in_progress' : 'pending');
-const snapshot = (p) => ({ code: p.code, name: p.name, kind: p.kind, status: p.status, contract_value: num(p.contract_value), budget: num(p.budget), manager_id: p.manager_id });
+const snapshot = (p) => ({ code: p.code, name: p.name, kind: p.kind, service_type: p.service_type, status: p.status, contract_value: num(p.contract_value), budget: num(p.budget), manager_id: p.manager_id });
 
 // Weighted milestone progress; the manual figure applies only while there are no milestones.
 function progressOf(milestones, manual) {
@@ -89,6 +108,9 @@ async function checkRefs(orgId, kind, input) {
     if (kind === 'client' && party.kind === 'vendor') return 'party_not_client';
   }
   if (input.manager_id && !(await ownerOk(orgId, input.manager_id))) return 'manager_invalid';
+  if (input.property_id && !(await prisma.zxProperty.findFirst({ where: { id: input.property_id, org_id: orgId, deleted_at: null }, select: { id: true } }))) return 'property_not_found';
+  if (input.assignee_id && !(await personOk(orgId, input.assignee_id, 'employee'))) return 'assignee_invalid';
+  if (input.contractor_id && !(await personOk(orgId, input.contractor_id, 'contractor'))) return 'contractor_invalid';
   if (input.start_date && input.end_date && input.end_date < input.start_date) return 'bad_dates';
   return null;
 }
@@ -111,17 +133,29 @@ function rollups(project, milestones, workOrders) {
 async function decorate(orgId, projects) {
   if (projects.length === 0) return [];
   const ids = projects.map((p) => p.id);
-  const [milestones, workOrders, names, parties] = await Promise.all([
+  const [milestones, workOrders, names, parties, actuals, people] = await Promise.all([
     prisma.zxMilestone.findMany({ where: { org_id: orgId, project_id: { in: ids }, deleted_at: null } }),
     prisma.zxWorkOrder.findMany({ where: { org_id: orgId, project_id: { in: ids }, deleted_at: null } }),
     userNames(projects.map((p) => p.manager_id)),
     prisma.zxParty.findMany({ where: { org_id: orgId, id: { in: [...new Set(projects.map((p) => p.party_id).filter(Boolean))] } }, select: { id: true, name: true } }),
+    prisma.zxLedgerEntry.groupBy({ by: ['project_id', 'type'], where: { org_id: orgId, project_id: { in: ids }, deleted_at: null, status: 'actual' }, _sum: { amount: true } }),
+    prisma.zxPerson.findMany({ where: { org_id: orgId, id: { in: [...new Set(projects.flatMap((p) => [p.assignee_id, p.contractor_id]).filter(Boolean))] } }, select: { id: true, name: true } }),
   ]);
+  const personMap = new Map(people.map((x) => [x.id, x]));
+  const actualOf = (id, type) => num(actuals.find((a) => a.project_id === id && a.type === type)?._sum.amount) || 0;
   const partyMap = new Map(parties.map((p) => [p.id, p]));
   return projects.map((p) => ({
     ...p,
     contract_value: num(p.contract_value),
     budget: num(p.budget),
+    expected_profit: num(p.expected_profit),
+    // contract value less the budgeted cost, unless an expected profit was entered
+    expected_profit_calc: p.expected_profit !== null ? num(p.expected_profit) : p.contract_value !== null && p.budget !== null ? num(p.contract_value) - num(p.budget) : null,
+    actual_revenue: actualOf(p.id, 'revenue'),
+    actual_cost: actualOf(p.id, 'expense'),
+    actual_profit: actualOf(p.id, 'revenue') - actualOf(p.id, 'expense'),
+    assignee: personMap.get(p.assignee_id) || null,
+    contractor: personMap.get(p.contractor_id) || null,
     manager: names.get(p.manager_id) || null,
     party: partyMap.get(p.party_id) || null,
     ...rollups(p, milestones.filter((m) => m.project_id === p.id), workOrders.filter((w) => w.project_id === p.id)),
@@ -132,8 +166,13 @@ async function list(orgId, query) {
   const where = {
     org_id: orgId,
     deleted_at: null,
-    ...(query.status === 'open' ? { status: { in: ['planning', 'active', 'on_hold'] } } : query.status ? { status: query.status } : {}),
+    ...(query.status === 'open' ? { status: { in: LIVE_STATUSES } } : query.status ? { status: query.status } : {}),
     ...(query.kind ? { kind: query.kind } : {}),
+    ...(query.service_type ? { service_type: query.service_type } : {}),
+    ...(query.assignee_id ? { assignee_id: query.assignee_id } : {}),
+    ...(query.contractor_id ? { contractor_id: query.contractor_id } : {}),
+    ...(query.location ? { location: { contains: query.location, mode: 'insensitive' } } : {}),
+    ...(query.from || query.to ? { start_date: { ...(query.from ? { gte: toDate(query.from) } : {}), ...(query.to ? { lte: toDate(query.to) } : {}) } } : {}),
     ...(query.party_id ? { party_id: query.party_id } : {}),
     ...(query.q ? { OR: ['name', 'code', 'location'].map((f) => ({ [f]: { contains: query.q, mode: 'insensitive' } })) } : {}),
   };
@@ -143,10 +182,17 @@ async function list(orgId, query) {
 async function summary(orgId) {
   const projects = await decorate(orgId, await prisma.zxProject.findMany({ where: { org_id: orgId, deleted_at: null } }));
   const by_status = Object.fromEntries(STATUSES.map((s) => [s, projects.filter((p) => p.status === s).length]));
-  const live = projects.filter((p) => p.status === 'active' || p.status === 'planning' || p.status === 'on_hold');
+  const live = projects.filter((p) => LIVE_STATUSES.includes(p.status));
+  const by_service = Object.fromEntries(
+    SERVICE_KEYS.map((k) => {
+      const rows = projects.filter((p) => p.service_type === k);
+      return [k, { total: rows.length, live: rows.filter((p) => LIVE_STATUSES.includes(p.status)).length, completed: rows.filter((p) => p.status === 'completed').length, contract_value: sum(rows, (p) => p.contract_value), revenue: sum(rows, (p) => p.actual_revenue), cost: sum(rows, (p) => p.actual_cost) }];
+    })
+  );
   return {
     total: projects.length,
     by_status,
+    by_service,
     live_count: live.length,
     live_contract_value: sum(live.filter((p) => p.kind === 'client'), (p) => p.contract_value),
     live_budget: sum(live.filter((p) => p.kind === 'self'), (p) => p.budget),
@@ -177,10 +223,14 @@ async function get(orgId, id) {
 async function create(orgId, actorId, input) {
   const bad = await checkRefs(orgId, input.kind, input);
   if (bad) return { error: bad };
-  const { start_date, end_date, ...rest } = input;
+  const cleaned = cleanDetails(input.service_type, input.details);
+  if (cleaned.error) return cleaned;
+  const { start_date, end_date, actual_end, details, ...rest } = input;
   const project = await prisma.$transaction(async (tx) => {
     const code = await nextCode(tx, orgId);
-    return tx.zxProject.create({ data: { org_id: orgId, created_by: actorId, code, ...rest, start_date: toDate(start_date), end_date: toDate(end_date) } });
+    return tx.zxProject.create({
+      data: { org_id: orgId, created_by: actorId, code, ...rest, start_date: toDate(start_date), end_date: toDate(end_date), actual_end: toDate(actual_end), details: cleaned.details || undefined },
+    });
   });
   await writeAudit(null, { orgId, actorId, entity: 'project', entityId: project.id, action: 'create', after: snapshot(project) });
   return get(orgId, project.id);
@@ -192,9 +242,15 @@ async function createFromLead(orgId, actorId, leadId, input) {
   if (!lead) return { error: 'lead_not_found' };
   if (lead.stage !== 'won') return { error: 'lead_not_won' };
   if (lead.project_id) return { error: 'lead_converted' };
-  const kind = lead.category === 'self_project' ? 'self' : 'client';
-  const bad = await checkRefs(orgId, kind, { manager_id: input.manager_id, start_date: input.start_date, end_date: input.end_date });
+  if (!lead.service_type) return { error: 'service_missing' };
+  const kind = 'client';
+  const partyId = input.party_id || lead.party_id;
+  const startDay = input.start_date || dayOf(lead.expected_start);
+  const endDay = input.end_date || dayOf(lead.expected_end);
+  const bad = await checkRefs(orgId, kind, { manager_id: input.manager_id, party_id: input.party_id, start_date: startDay, end_date: endDay });
   if (bad) return { error: bad };
+  // Lead facts the service section can use travel with the project; the rest stay on the lead.
+  const carried = Array.isArray(lead.details) && lead.details.length ? { lead_details: lead.details } : null;
   const project = await prisma.$transaction(async (tx) => {
     const claimed = await tx.zxLead.updateMany({ where: { id: leadId, org_id: orgId, project_id: null }, data: { updated_at: new Date() } });
     if (claimed.count !== 1) return null;
@@ -207,16 +263,21 @@ async function createFromLead(orgId, actorId, leadId, input) {
         code,
         name: lead.name,
         kind,
-        party_id: lead.party_id,
+        party_id: partyId,
         lead_id: lead.id,
-        location: lead.location,
-        status: 'planning',
-        start_date: toDate(input.start_date),
-        end_date: toDate(input.end_date),
-        contract_value: kind === 'client' ? value : null,
-        budget: kind === 'self' ? value : null,
+        service_type: lead.service_type,
+        location: lead.location || lead.city,
+        status: 'planned',
+        start_date: toDate(startDay),
+        end_date: toDate(endDay),
+        contract_value: value,
+        expected_profit: lead.expected_profit,
         manager_id: input.manager_id || lead.owner_id,
+        assignee_id: lead.assignee_id,
+        contractor_id: lead.contractor_id,
+        description: lead.description,
         notes: lead.notes,
+        details: carried || undefined,
       },
     });
     await tx.zxLead.update({ where: { id: leadId }, data: { project_id: created.id } });
@@ -239,10 +300,24 @@ async function update(orgId, actorId, id, input) {
     const open = await prisma.zxMilestone.count({ where: { project_id: id, deleted_at: null, percent_done: { lt: 100 } } });
     if (open > 0) return { error: 'milestones_incomplete' };
   }
-  const { start_date, end_date, ...rest } = input;
+  let cleaned = null;
+  if (input.details !== undefined || input.service_type) {
+    // changing the service starts a fresh section; otherwise the section is re-validated as given
+    const serviceChanged = input.service_type && input.service_type !== before.service_type;
+    cleaned = cleanDetails(merged.service_type, input.details !== undefined ? input.details : serviceChanged ? null : before.details);
+    if (cleaned.error) return cleaned;
+  }
+  const { start_date, end_date, actual_end, details, ...rest } = input;
+  const finishing = ['completed', 'closed'].includes(input.status) && !['completed', 'closed'].includes(before.status) && actual_end === undefined && !before.actual_end;
   await prisma.zxProject.update({
     where: { id },
-    data: { ...rest, ...(start_date !== undefined ? { start_date: toDate(start_date) } : {}), ...(end_date !== undefined ? { end_date: toDate(end_date) } : {}) },
+    data: {
+      ...rest,
+      ...(start_date !== undefined ? { start_date: toDate(start_date) } : {}),
+      ...(end_date !== undefined ? { end_date: toDate(end_date) } : {}),
+      ...(actual_end !== undefined ? { actual_end: toDate(actual_end) } : finishing ? { actual_end: toDate(todayStr()) } : {}),
+      ...(cleaned ? { details: cleaned.details === null ? Prisma.DbNull : cleaned.details } : {}),
+    },
   });
   const after = await prisma.zxProject.findUnique({ where: { id } });
   await writeAudit(null, { orgId, actorId, entity: 'project', entityId: id, action: 'update', before: snapshot(before), after: snapshot(after) });

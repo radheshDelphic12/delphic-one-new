@@ -206,15 +206,29 @@ router.delete(
   })
 );
 
+// --- Service types (R0): the five Zephyr services, labels editable by an admin ---
+const serviceTypes = require('./serviceTypes');
+router.get('/service-types', asyncHandler(async (req, res) => ok(res, await serviceTypes.list(orgId(req)))));
+router.patch(
+  '/service-types/:key',
+  zxAuthorize('settings'),
+  asyncHandler(async (req, res) => {
+    const key = serviceTypes.serviceKey.safeParse(req.params.key);
+    if (!key.success) return fail(res, 404, 'Unknown service');
+    const result = await serviceTypes.update(orgId(req), req.user.id, key.data, serviceTypes.updateServiceSchema.parse(req.body));
+    return result.error ? failFor(res, result) : ok(res, result.service);
+  })
+);
+
 // --- Leads (Z2) ---
 const LEAD_ERRORS = {
   not_found: [404, 'Lead not found'],
-  lead_closed: [409, 'A won or lost lead can no longer be changed'],
+  lead_closed: [409, 'A won, closed or dropped lead can no longer be changed'],
   same_stage: [422, 'The lead is already in that stage'],
-  lost_reason_required: [422, 'Say why the lead was lost'],
+  lost_reason_required: [422, 'Say why the lead was dropped'],
   party_not_found: [422, 'That client / vendor does not exist'],
   owner_invalid: [422, 'The owner must be an admin or a manager'],
-  not_closed: [409, 'Only a won or lost lead can be reopened'],
+  not_closed: [409, 'Only a won, closed or dropped lead can be reopened'],
   has_project: [409, 'This lead already became a project and cannot be reopened'],
 };
 function failLead(res, result) {
@@ -308,8 +322,12 @@ const PROJECT_ERRORS = {
   work_order_not_found: [404, 'Work order not found'],
   lead_not_found: [404, 'Lead not found'],
   lead_not_won: [409, 'Only a won lead can become a project'],
+  service_missing: [422, 'Choose the lead service type before converting it'],
+  property_not_found: [422, 'That property does not exist'],
+  assignee_invalid: [422, 'The assigned employee must be an active employee on the roster'],
+  contractor_invalid: [422, 'The assigned contractor must be an active contractor on the roster'],
   lead_converted: [409, 'This lead already became a project'],
-  project_closed: [409, 'A completed or cancelled project can no longer be changed'],
+  project_closed: [409, 'A completed, cancelled or closed project can no longer be changed'],
   party_not_found: [422, 'That client does not exist'],
   party_not_client: [422, 'A client project needs a client, not a vendor-only party'],
   manager_invalid: [422, 'The project manager must be an admin or a manager'],
@@ -322,6 +340,7 @@ const PROJECT_ERRORS = {
   cancel_billed: [409, 'A work order with billing against it cannot be cancelled or deleted'],
 };
 function failProject(res, result) {
+  if (result.error === 'invalid') return fail(res, 422, result.message || 'Validation failed');
   const mapped = PROJECT_ERRORS[result.error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
 }
@@ -373,6 +392,16 @@ const MONEY_ERRORS = {
   already_closed: [409, 'That month is already closed'],
   draft_slips: [409, 'Approve or delete the draft salary slips of that month before closing it'],
   not_closed: [409, 'That month is not closed'],
+  period_closed: [409, 'That month is closed. An admin must reopen it first'],
+  system_entry: [409, 'This entry was created by rent, a sale or a shared expense. Change it where it came from'],
+  unit_needs_property: [422, 'Pick the property before the unit'],
+  bad_split: [422, 'The shares must add up to the amount (or to 100 percent)'],
+  allocation_target: [422, 'Each share needs a project or a property'],
+  not_consulting: [409, 'Only a consulting project earns a commission'],
+  no_commission: [422, 'Enter the property value and commission percent first'],
+  no_closing_date: [422, 'Enter the deal or closing date first'],
+  already_booked: [409, 'The commission is already booked'],
+  future_actual: [422, 'An actual entry cannot be dated in the future. Mark it planned instead'],
 };
 function failMoney(res, result) {
   const mapped = MONEY_ERRORS[result.error];
@@ -381,12 +410,25 @@ function failMoney(res, result) {
 const ledgerCap = zxAuthorize('ledger');
 const overviewCap = zxAuthorize('overview');
 const financialsCap = zxAuthorize('financials');
-const mctx = (req) => ({ isAdmin: req.zx.role === 'admin' });
+const mctx = (req) => ({ isAdmin: req.zx.role === 'admin', fullLedger: ['admin', 'finance'].includes(req.zx.role), canFinance: req.zx.caps.includes('propertyFinance') });
 const sendEntry = (res, result, status = 200) => (result.error ? failMoney(res, result) : ok(res, result.entry, {}, status));
 
 router.get('/ledger', ledgerCap, asyncHandler(async (req, res) => {
   const result = await ledger.list(orgId(req), mctx(req), ledger.listQuerySchema.parse(req.query));
   return ok(res, result.data, { pagination: result.pagination, totals: result.totals });
+}));
+router.get('/ledger/group-expenses', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => ok(res, await ledger.listGroupExpenses(orgId(req)))));
+router.post('/ledger/group-expenses', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
+  const result = await ledger.createGroupExpense(orgId(req), req.user.id, ledger.groupExpenseSchema.parse(req.body));
+  return result.error ? failMoney(res, result) : ok(res, result, {}, 201);
+}));
+router.delete('/ledger/group-expenses/:gid', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
+  const result = await ledger.removeGroupExpense(orgId(req), req.user.id, req.params.gid);
+  return result.error ? failMoney(res, result) : ok(res, { id: req.params.gid });
+}));
+router.post('/projects/:id/book-commission', zxAuthorize('ledgerSalaries'), asyncHandler(async (req, res) => {
+  const result = await ledger.bookCommission(orgId(req), req.user.id, req.params.id);
+  return result.error ? failMoney(res, result) : ok(res, result.entry, {}, 201);
 }));
 router.post('/ledger/import', zxAuthorize('settings'), asyncHandler(async (req, res) => ok(res, await ledger.importRows(orgId(req), req.user.id, ledger.importSchema.parse(req.body).rows))));
 router.post('/ledger', ledgerCap, asyncHandler(async (req, res) => sendEntry(res, await ledger.create(orgId(req), req.user.id, mctx(req), ledger.createEntrySchema.parse(req.body)), 201)));
@@ -506,6 +548,190 @@ router.delete(
     return ok(res, { id: req.params.id });
   })
 );
+
+
+// --- Properties, units, loans, valuation (R3) ---
+const properties = require('./properties.service');
+const PROPERTY_ERRORS = {
+  not_found: [404, 'Record not found'],
+  finance_only: [403, 'Costs, valuation and financing are for admin and finance'],
+  duplicate_unit: [409, 'A unit with that name already exists in this property / floor'],
+  sold_via_sale: [409, 'A unit becomes sold only by recording a sale'],
+  rented_via_lease: [409, 'A unit becomes rented only by adding a lease'],
+  unit_sold: [409, 'This unit is sold. Reverse the sale first'],
+  unit_has_lease: [409, 'End the active lease on this unit first'],
+  has_active_leases: [409, 'End the active leases in this property first'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  future_valuation: [422, 'A valuation cannot be dated in the future'],
+};
+function failProperty(res, result) {
+  const mapped = PROPERTY_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+}
+const pView = zxAuthorize('properties');
+const pEdit = zxAuthorize('propertiesEdit');
+const pFin = zxAuthorize('propertyFinance');
+const pCtx = (req) => ({ isAdmin: req.zx.role === 'admin', canFinance: req.zx.caps.includes('propertyFinance') });
+const sendProperty = (res, result, status = 200) => (result.error ? failProperty(res, result) : ok(res, result.property, {}, status));
+
+router.get('/units/rentable', zxAuthorize('rent'), asyncHandler(async (req, res) => ok(res, await properties.rentableUnits(orgId(req)))));
+router.get('/properties/summary', pView, asyncHandler(async (req, res) => ok(res, await properties.summary(orgId(req), pCtx(req)))));
+router.get('/properties', pView, asyncHandler(async (req, res) => ok(res, await properties.list(orgId(req), pCtx(req), properties.listQuerySchema.parse(req.query)))));
+router.post('/properties', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.create(orgId(req), req.user.id, pCtx(req), properties.createPropertySchema.parse(req.body)), 201)));
+router.get('/properties/:id', pView, asyncHandler(async (req, res) => sendProperty(res, await properties.get(orgId(req), pCtx(req), req.params.id))));
+router.patch('/properties/:id', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.update(orgId(req), req.user.id, pCtx(req), req.params.id, properties.updatePropertySchema.parse(req.body)))));
+router.delete(
+  '/properties/:id',
+  zxAuthorize('delete'),
+  asyncHandler(async (req, res) => {
+    const result = await properties.remove(orgId(req), req.user.id, req.params.id);
+    return result.error ? failProperty(res, result) : ok(res, { id: req.params.id });
+  })
+);
+router.post('/properties/:id/units', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.addUnit(orgId(req), req.user.id, pCtx(req), req.params.id, properties.unitCreateSchema.parse(req.body)), 201)));
+router.patch('/properties/:id/units/:uid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.updateUnit(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.uid, properties.unitUpdateSchema.parse(req.body)))));
+router.delete('/properties/:id/units/:uid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.removeUnit(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.uid))));
+router.post('/properties/:id/loans', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.addLoan(orgId(req), req.user.id, pCtx(req), req.params.id, properties.loanCreateSchema.parse(req.body)), 201)));
+router.patch('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.updateLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid, properties.loanUpdateSchema.parse(req.body)))));
+router.delete('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid))));
+router.post('/properties/:id/valuations', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.addValuation(orgId(req), req.user.id, pCtx(req), req.params.id, properties.valuationSchema.parse(req.body)), 201)));
+router.delete('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid))));
+router.post('/properties/:id/events', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.addNote(orgId(req), req.user.id, pCtx(req), req.params.id, properties.eventSchema.parse(req.body)), 201)));
+
+// --- Tenants, leases, rent (R4) ---
+const rent = require('./rent.service');
+const RENT_ERRORS = {
+  not_found: [404, 'Record not found'],
+  duplicate_tenant: [409, 'That tenant already exists'],
+  tenant_has_lease: [409, 'End the tenant\'s active leases first'],
+  tenant_inactive: [422, 'That tenant is inactive'],
+  unit_not_rentable: [422, 'That unit is sold or not owned by Zephyr, so it cannot be let'],
+  lease_overlap: [409, 'This unit already has a lease in that period'],
+  lease_ended: [409, 'This lease has ended'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  due_waived: [409, 'This rent is waived'],
+  future_payment: [422, 'A payment cannot be dated in the future'],
+  exceeds_balance: [422, 'The payment is more than the balance due'],
+  period_closed: [409, 'That month is closed. An admin must reopen it first'],
+  collector_invalid: [422, 'The collector must be someone on the Zephyr roster'],
+  waive_reason_required: [422, 'Say why this rent is waived'],
+  below_paid: [422, 'The rent cannot be set below what has already been paid'],
+};
+function failRent(res, result) {
+  const mapped = RENT_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+}
+const rView = zxAuthorize('rent');
+const rEdit = zxAuthorize('rentEdit');
+const sendRent = (key, status = 200) => (res, result) => (result.error ? failRent(res, result) : ok(res, result[key], {}, status));
+
+router.get('/tenants', rView, asyncHandler(async (req, res) => ok(res, await rent.listTenants(orgId(req), { q: req.query.q }))));
+router.post('/tenants', rEdit, asyncHandler(async (req, res) => sendRent('tenant', 201)(res, await rent.createTenant(orgId(req), req.user.id, rent.tenantCreateSchema.parse(req.body)))));
+router.get('/tenants/:id', rView, asyncHandler(async (req, res) => sendRent('tenant')(res, await rent.getTenant(orgId(req), req.params.id))));
+router.patch('/tenants/:id', rEdit, asyncHandler(async (req, res) => sendRent('tenant')(res, await rent.updateTenant(orgId(req), req.user.id, req.params.id, rent.tenantUpdateSchema.parse(req.body)))));
+router.delete(
+  '/tenants/:id',
+  zxAuthorize('delete'),
+  asyncHandler(async (req, res) => {
+    const result = await rent.removeTenant(orgId(req), req.user.id, req.params.id);
+    return result.error ? failRent(res, result) : ok(res, { id: req.params.id });
+  })
+);
+router.get('/leases', rView, asyncHandler(async (req, res) => ok(res, await rent.listLeases(orgId(req), { status: req.query.status, property_id: req.query.property_id, unit_id: req.query.unit_id, tenant_id: req.query.tenant_id }))));
+router.post('/leases', rEdit, asyncHandler(async (req, res) => sendRent('lease', 201)(res, await rent.createLease(orgId(req), req.user.id, rent.leaseCreateSchema.parse(req.body)))));
+router.get('/leases/:id', rView, asyncHandler(async (req, res) => sendRent('lease')(res, await rent.getLease(orgId(req), req.params.id))));
+router.patch('/leases/:id', rEdit, asyncHandler(async (req, res) => sendRent('lease')(res, await rent.updateLease(orgId(req), req.user.id, req.params.id, rent.leaseUpdateSchema.parse(req.body)))));
+router.post('/leases/:id/end', rEdit, asyncHandler(async (req, res) => sendRent('lease')(res, await rent.endLease(orgId(req), req.user.id, req.params.id, rent.leaseEndSchema.parse(req.body || {})))));
+router.get('/rent/summary', rView, asyncHandler(async (req, res) => ok(res, await rent.rentSummary(orgId(req), rent.summaryQuerySchema.parse(req.query).month))));
+router.get('/rent/overdue', rView, asyncHandler(async (req, res) => ok(res, await rent.listOverdue(orgId(req)))));
+router.get('/rent/dues', rView, asyncHandler(async (req, res) => ok(res, await rent.listDues(orgId(req), rent.duesQuerySchema.parse(req.query)))));
+router.post('/rent/generate', rEdit, asyncHandler(async (req, res) => ok(res, await rent.generate(orgId(req)))));
+router.get('/rent/payments', rView, asyncHandler(async (req, res) => ok(res, await rent.listPayments(orgId(req), { property_id: req.query.property_id, tenant_id: req.query.tenant_id, from: req.query.from, to: req.query.to }))));
+router.patch('/rent/dues/:id', rEdit, asyncHandler(async (req, res) => sendRent('due')(res, await rent.updateDue(orgId(req), req.user.id, req.params.id, rent.dueUpdateSchema.parse(req.body)))));
+router.post('/rent/dues/:id/payments', rEdit, asyncHandler(async (req, res) => sendRent('due', 201)(res, await rent.recordPayment(orgId(req), req.user.id, req.params.id, rent.paymentSchema.parse(req.body)))));
+router.delete('/rent/payments/:id', rEdit, asyncHandler(async (req, res) => sendRent('due')(res, await rent.removePayment(orgId(req), req.user.id, req.params.id))));
+
+// --- Property trading: sales (R5) ---
+const sales = require('./sales.service');
+const SALE_ERRORS = {
+  not_found: [404, 'Record not found'],
+  buyer_not_found: [422, 'That buyer is not in the directory'],
+  buyer_is_vendor: [422, 'The buyer must be a client, not a vendor-only party'],
+  future_sale: [422, 'A sale cannot be dated in the future'],
+  sold_before_purchase: [422, 'The sale date is before the purchase date'],
+  already_sold: [409, 'Already sold'],
+  unit_not_owned: [422, 'Zephyr does not own that unit'],
+  has_active_lease: [409, 'End the active lease before selling'],
+  period_closed: [409, 'That month is closed. An admin must reopen it first'],
+};
+function failSale(res, result) {
+  const mapped = SALE_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+}
+const tradingCap = zxAuthorize('trading');
+router.get('/sales', tradingCap, asyncHandler(async (req, res) => ok(res, await sales.list(orgId(req), sales.listQuerySchema.parse(req.query)))));
+router.post(
+  '/properties/:id/sales',
+  tradingCap,
+  asyncHandler(async (req, res) => {
+    const result = await sales.create(orgId(req), req.user.id, req.params.id, sales.saleSchema.parse(req.body));
+    return result.error ? failSale(res, result) : ok(res, result.sale, {}, 201);
+  })
+);
+router.delete(
+  '/properties/:id/sales/:sid',
+  tradingCap,
+  asyncHandler(async (req, res) => {
+    const result = await sales.remove(orgId(req), req.user.id, req.params.id, req.params.sid, String(req.body?.reason || req.query.reason || '').slice(0, 500) || null);
+    return result.error ? failSale(res, result) : ok(res, { id: req.params.sid });
+  })
+);
+
+// --- Operational tasks for employees and contractors (R8) ---
+const tasks = require('./tasks.service');
+const TASK_ERRORS = {
+  not_found: [404, 'Task not found'],
+  person_invalid: [422, 'Assign the task to an active person on the Zephyr roster'],
+  ref_not_found: [422, 'A linked property, project or rent due does not exist'],
+  ref_mismatch: [422, 'The unit or rent due does not belong to that property'],
+  unit_needs_property: [422, 'Pick the property before the unit'],
+  task_closed: [409, 'This task is already finished or cancelled'],
+  not_closed: [409, 'Only a finished or cancelled task can be reopened'],
+  use_complete: [422, 'Complete a task with the Complete action'],
+  forbidden_status: [403, 'Only a manager can cancel a task'],
+  future_date: [422, 'A task cannot be completed in the future'],
+  no_rent_due: [422, 'Only a rent task can record a payment'],
+  exceeds_balance: [422, 'The payment is more than the balance due'],
+  future_payment: [422, 'A payment cannot be dated in the future'],
+  period_closed: [409, 'That month is closed. An admin must reopen it first'],
+  due_waived: [409, 'This rent is waived'],
+};
+function failTask(res, result) {
+  const mapped = TASK_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+}
+const tasksCap = zxAuthorize('tasks');
+const tasksAllCap = zxAuthorize('tasksAll');
+const tctx = (req) => ({ all: req.zx.caps.includes('tasksAll'), personId: req.zx.person_id });
+const sendTask = (res, result, status = 200) => (result.error ? failTask(res, result) : ok(res, result.task, {}, status));
+
+router.get('/tasks/summary', tasksCap, asyncHandler(async (req, res) => ok(res, await tasks.summary(orgId(req), tctx(req)))));
+router.get('/tasks', tasksCap, asyncHandler(async (req, res) => ok(res, await tasks.list(orgId(req), tctx(req), tasks.listQuerySchema.parse(req.query)))));
+router.post('/tasks', tasksAllCap, asyncHandler(async (req, res) => sendTask(res, await tasks.create(orgId(req), req.user.id, tasks.createTaskSchema.parse(req.body)), 201)));
+router.get('/tasks/:id', tasksCap, asyncHandler(async (req, res) => sendTask(res, await tasks.get(orgId(req), tctx(req), req.params.id))));
+router.patch('/tasks/:id', tasksAllCap, asyncHandler(async (req, res) => sendTask(res, await tasks.update(orgId(req), req.user.id, req.params.id, tasks.updateTaskSchema.parse(req.body)))));
+router.post('/tasks/:id/status', tasksCap, asyncHandler(async (req, res) => sendTask(res, await tasks.setStatus(orgId(req), req.user.id, tctx(req), req.params.id, tasks.statusSchema.parse(req.body)))));
+router.post('/tasks/:id/complete', tasksCap, asyncHandler(async (req, res) => sendTask(res, await tasks.complete(orgId(req), req.user.id, tctx(req), req.params.id, tasks.completeSchema.parse(req.body || {})))));
+router.post('/tasks/:id/reopen', zxAuthorize('settings'), asyncHandler(async (req, res) => sendTask(res, await tasks.reopen(orgId(req), req.user.id, req.params.id, tasks.reopenSchema.parse(req.body)))));
+router.delete('/tasks/:id', zxAuthorize('delete'), asyncHandler(async (req, res) => {
+  const result = await tasks.remove(orgId(req), req.user.id, req.params.id);
+  return result.error ? failTask(res, result) : ok(res, { id: req.params.id });
+}));
+
+// --- Reports and the home dashboard (R9) ---
+const reports = require('./reports.service');
+router.get('/dashboard', asyncHandler(async (req, res) => ok(res, await reports.dashboard(orgId(req), { ...mctx(req), ...pCtx(req), personId: req.zx.person_id }, req.zx.caps))));
+router.get('/reports/services', zxAuthorize('overview'), asyncHandler(async (req, res) => ok(res, await reports.serviceReport(orgId(req), { ...mctx(req), ...pCtx(req) }, reports.servicesQuerySchema.parse(req.query)))));
 
 router.get(
   '/audit',

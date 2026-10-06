@@ -9,6 +9,12 @@
  */
 const { PrismaClient } = require('@prisma/client');
 const money = require('../../src/modules/zephyr/money.service');
+const propsSvc = require('../../src/modules/zephyr/properties.service');
+const rentSvc = require('../../src/modules/zephyr/rent.service');
+const salesSvc = require('../../src/modules/zephyr/sales.service');
+const ledgerSvc = require('../../src/modules/zephyr/ledger.service');
+const tasksSvc = require('../../src/modules/zephyr/tasks.service');
+const projSvc = require('../../src/modules/zephyr/projects.service');
 
 const prisma = new PrismaClient();
 
@@ -21,6 +27,20 @@ const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0,
 async function nextCode(orgId) {
   const s = await prisma.zxSetting.update({ where: { org_id: orgId }, data: { project_seq: { increment: 1 } } });
   return `${s.project_prefix}-${String(s.project_seq).padStart(3, '0')}`;
+}
+
+// Removes the demo business of one company; the company, its logins (and their roster rows), settings,
+// categories and service types stay. Counters go back to zero so codes start again at 1.
+async function resetDemo(orgId) {
+  const where = { org_id: orgId };
+  const steps = [
+    'zxRentPayment', 'zxRentDue', 'zxLease', 'zxTenant', 'zxPropertySale', 'zxTask', 'zxPropertyEvent', 'zxPropertyValuation', 'zxPropertyLoan', 'zxPropertyUnit', 'zxProperty',
+    'zxLedgerEntry', 'zxPlan', 'zxPeriodClose', 'zxSalaryRecord', 'zxAssignment', 'zxWorkOrder', 'zxMilestone', 'zxProject', 'zxLeadActivity', 'zxLead', 'zxDocument', 'zxParty', 'zxAudit',
+  ];
+  for (const model of steps) await prisma[model].deleteMany({ where });
+  await prisma.zxPerson.deleteMany({ where: { ...where, user_id: null } });
+  await prisma.zxSetting.updateMany({ where, data: { project_seq: 0, lead_seq: 0, property_seq: 0, task_seq: 0 } });
+  console.log('  ~ Zephyr demo data cleared');
 }
 
 async function seedDemo(org, adminUserId) {
@@ -37,15 +57,18 @@ async function seedDemo(org, adminUserId) {
 
   // ---- clients and vendors ----
   const mkParty = (name, kind, extra = {}) => prisma.zxParty.create({ data: { org_id: orgId, name, kind, created_by: adminUserId, status: 'active', ...extra } });
-  const skyline = await mkParty('Skyline Builders Pvt Ltd', 'client', { contact_name: 'Anil Rao', phone: '9822001101', email: 'anil@skyline.example', city: 'Pune', gstin: '27AABCS1234F1Z5', pan: 'AABCS1234F', payment_terms: 'Net 30, 10% advance' });
-  const lotus = await mkParty('Lotus Realty', 'client', { contact_name: 'Meena Joshi', phone: '9893002202', email: 'meena@lotus.example', city: 'Indore', gstin: '23AAACL5678K1Z2', payment_terms: 'Milestone based' });
-  const green = await mkParty('Green Valley Developers', 'client', { contact_name: 'Harish Gupta', phone: '9425003303', city: 'Bhopal', payment_terms: 'Net 45' });
-  const steel = await mkParty('Steel India Pvt Ltd', 'vendor', { contact_name: 'Rakesh Das', phone: '9811004404', city: 'Mumbai', gstin: '27AAACS9999M1ZP', payment_terms: '30 days from delivery' });
-  const rmc = await mkParty('Ready Mix Concrete Co', 'vendor', { contact_name: 'Suresh Pillai', phone: '9890005505', city: 'Pune', payment_terms: 'Weekly settlement' });
-  const patel = await mkParty('Patel Constructions', 'vendor', { contact_name: 'Jayesh Patel', phone: '9879006606', city: 'Ahmedabad', payment_terms: 'Per running bill' });
-  const sharma = await mkParty('Sharma Electricals', 'vendor', { contact_name: 'Vikas Sharma', phone: '9826007707', city: 'Indore' });
-  const orbit = await mkParty('Orbit Equipment Rentals', 'both', { contact_name: 'Neha Kulkarni', phone: '9850008808', city: 'Pune', payment_terms: 'Monthly rental invoice' });
-  await mkParty('Old Quarry Supplies', 'vendor', { status: 'inactive', notes: 'Stopped supplying in 2025' });
+  const skyline = await mkParty('Skyline Builders Pvt Ltd', 'client', { company_name: 'Skyline Builders', state: 'Maharashtra', country: 'India', interested_services: ['civil_construction', 'interior_design'], contact_name: 'Anil Rao', phone: '9822001101', email: 'anil@skyline.example', city: 'Pune', gstin: '27AABCS1234F1Z5', pan: 'AABCS1234F', payment_terms: 'Net 30, 10% advance' });
+  const lotus = await mkParty('Lotus Realty', 'client', { company_name: 'Lotus Realty LLP', state: 'Madhya Pradesh', country: 'India', interested_services: ['interior_design', 'property_management'], contact_name: 'Meena Joshi', phone: '9893002202', email: 'meena@lotus.example', city: 'Indore', gstin: '23AAACL5678K1Z2', payment_terms: 'Milestone based' });
+  const green = await mkParty('Green Valley Developers', 'client', { state: 'Madhya Pradesh', country: 'India', interested_services: ['civil_construction', 'interior_design'], contact_name: 'Harish Gupta', phone: '9425003303', city: 'Bhopal', payment_terms: 'Net 45' });
+  const steel = await mkParty('Steel India Pvt Ltd', 'vendor', { vendor_category: 'Material supplier', materials_services: 'TMT rebar, structural steel', state: 'Maharashtra', country: 'India', contact_name: 'Rakesh Das', phone: '9811004404', city: 'Mumbai', gstin: '27AAACS9999M1ZP', payment_terms: '30 days from delivery' });
+  const rmc = await mkParty('Ready Mix Concrete Co', 'vendor', { vendor_category: 'Material supplier', materials_services: 'RMC M20-M40, pumping', state: 'Maharashtra', country: 'India', contact_name: 'Suresh Pillai', phone: '9890005505', city: 'Pune', payment_terms: 'Weekly settlement' });
+  const patel = await mkParty('Patel Constructions', 'vendor', { vendor_category: 'Civil contractor', materials_services: 'Block work, plastering, RCC', state: 'Gujarat', country: 'India', contact_name: 'Jayesh Patel', phone: '9879006606', city: 'Ahmedabad', payment_terms: 'Per running bill' });
+  const sharma = await mkParty('Sharma Electricals', 'vendor', { vendor_category: 'Service provider', materials_services: 'Electrical works, lighting', state: 'Madhya Pradesh', country: 'India', contact_name: 'Vikas Sharma', phone: '9826007707', city: 'Indore' });
+  const orbit = await mkParty('Orbit Equipment Rentals', 'both', { vendor_category: 'Service provider', materials_services: 'Scaffolding, lift rental', interested_services: ['civil_construction'], state: 'Maharashtra', country: 'India', contact_name: 'Neha Kulkarni', phone: '9850008808', city: 'Pune', payment_terms: 'Monthly rental invoice' });
+  await mkParty('Old Quarry Supplies', 'vendor', { status: 'inactive', vendor_category: 'Material supplier', notes: 'Stopped supplying in 2025' });
+  const mehta = await mkParty('Mehta Family Office', 'client', { contact_name: 'Rajesh Mehta', phone: '9820012345', email: 'rajesh@mehta.example', city: 'Mumbai', state: 'Maharashtra', country: 'India', interested_services: ['real_estate_consulting', 'property_trading'], payment_terms: 'Commission on closing' });
+  await mkParty('Horizon Labour Contractors', 'vendor', { vendor_category: 'Labour contractor', materials_services: 'Skilled and unskilled labour gangs', city: 'Indore', state: 'Madhya Pradesh', country: 'India', status: 'hold', notes: 'On hold until the pending dues are settled' });
+  const buyer = await mkParty('Anand Traders', 'client', { contact_name: 'Anand Shah', phone: '9825054321', city: 'Pune', state: 'Maharashtra', country: 'India', interested_services: ['property_trading'] });
 
   // ---- people ----
   const person = async (name, kind, designation, basis, rate, extra = {}) =>
@@ -69,32 +92,49 @@ async function seedDemo(org, adminUserId) {
   await person('Ritu Sen', 'employee', 'Site Engineer', 'monthly', 58000, { active: false, leaving_date: D(dateIn(monthsAgo(5), 28)), joining_date: D(dateIn(monthsAgo(24), 1)) });
 
   // ---- leads ----
-  const lead = (name, category, stage, extra = {}) =>
-    prisma.zxLead.create({ data: { org_id: orgId, name, category, stage, owner_id: managerUser?.id || adminUserId, created_by: adminUserId, ...extra } });
+  const leadSeq = { n: 0 };
+  const lead = (name, service_type, stage, extra = {}) => {
+    leadSeq.n += 1;
+    return prisma.zxLead.create({ data: { org_id: orgId, name, service_type, stage, code: `ZL-${String(leadSeq.n).padStart(4, '0')}`, owner_id: managerUser?.id || adminUserId, created_by: adminUserId, ...extra } });
+  };
   const act = (leadId, kind, summary, extra = {}) => prisma.zxLeadActivity.create({ data: { org_id: orgId, lead_id: leadId, kind, summary, created_by: adminUserId, ...extra } });
-  const l1 = await lead('Orchid Heights Tower C', 'client_project', 'proposal', { party_id: skyline.id, estimated_value: 12500000, expected_close: D(inDays(40)), location: 'Baner, Pune', source: 'Repeat client', contact_name: 'Anil Rao' });
+  const l1 = await lead('Orchid Heights Tower C', 'civil_construction', 'negotiation', {
+    party_id: skyline.id, company: 'Skyline Builders', contact_name: 'Anil Rao', estimated_value: 12500000, expected_profit: 2200000, expected_start: D(inDays(60)), expected_end: D(inDays(420)), location: 'Baner, Pune', city: 'Pune', state: 'Maharashtra',
+    source: 'Repeat client', assignee_id: karan.id, contractor_id: patelPerson.id, description: 'Structure and finishing of Tower C, 18 floors.', details: [{ label: 'Floors', value: '18' }, { label: 'Built-up area', value: '2.4 lakh sq ft' }],
+  });
   await act(l1.id, 'meeting', 'Shared drawings and the draft BOQ', { follow_up_date: D(inDays(3)) });
-  const l2 = await lead('Riverside Row Houses', 'self_project', 'negotiation', { self_project_basis: 'investor', basis_value: 'R. Mehta', estimated_value: 8000000, expected_close: D(inDays(25)), location: 'Kolar Road, Bhopal', source: 'Investor network' });
+  const l2 = await lead('Riverside Row Houses', 'civil_construction', 'in_discussion', { company: 'R. Mehta (investor)', estimated_value: 8000000, expected_profit: 1300000, expected_close: D(inDays(25)), location: 'Kolar Road, Bhopal', city: 'Bhopal', source: 'Investor network', assignee_id: karan.id });
   await act(l2.id, 'call', 'Investor wants a 24-month schedule', { follow_up_date: D(inDays(-2)) });
-  const l3 = await lead('Lotus Mall Fit-out', 'client_project', 'site_visit', { party_id: lotus.id, estimated_value: 3200000, expected_close: D(inDays(60)), location: 'Vijay Nagar, Indore' });
+  const l3 = await lead('Lotus Mall Fit-out', 'interior_design', 'in_discussion', { party_id: lotus.id, estimated_value: 3200000, expected_profit: 640000, expected_close: D(inDays(60)), location: 'Vijay Nagar, Indore', city: 'Indore', assignee_id: divya.id });
   await act(l3.id, 'visit', 'Site visit booked for next week', { follow_up_date: D(inDays(6)) });
-  await lead('Green Valley Clubhouse', 'client_project', 'new', { party_id: green.id, estimated_value: 2100000, source: 'Website enquiry' });
-  const lost = await lead('City Mall Parking', 'client_project', 'lost', { estimated_value: 4500000, lost_reason: 'Client chose a competitor on price', closed_at: new Date(), source: 'Tender' });
-  await act(lost.id, 'note', 'Stage: negotiation -> lost (Client chose a competitor on price)');
+  await lead('Green Valley Clubhouse', 'interior_design', 'new', { party_id: green.id, estimated_value: 2100000, source: 'Website enquiry', assignee_id: divya.id });
+  await lead('Orchid Arcade maintenance contract', 'property_management', 'new', { company: 'Orchid Arcade Owners Association', estimated_value: 900000, city: 'Pune', source: 'Referral', description: 'Annual management of a 24-shop arcade: rent collection, upkeep and tenant follow-up.' });
+  const hold = await lead('Super Corridor plot purchase', 'property_trading', 'on_hold', { estimated_value: 6000000, expected_profit: 1200000, city: 'Indore', location: 'Super Corridor', description: 'Buy, hold and resell. Waiting for the seller to clear title.' });
+  await act(hold.id, 'note', 'Stage: in_discussion -> on_hold (title not clear yet)');
+  const lost = await lead('City Mall Parking', 'civil_construction', 'dropped', { estimated_value: 4500000, lost_reason: 'Client chose a competitor on price', closed_at: new Date(), source: 'Tender' });
+  await act(lost.id, 'note', 'Stage: negotiation -> dropped (Client chose a competitor on price)');
+  await lead('Hotel feasibility study', 'real_estate_consulting', 'closed', { estimated_value: 400000, closed_at: new Date(), notes: 'Study delivered, client not proceeding.' });
 
   // won leads become projects
-  const wonA = await lead('Skyline Towers - Phase 1', 'client_project', 'won', { party_id: skyline.id, estimated_value: 48000000, location: 'Hinjewadi, Pune', closed_at: new Date() });
-  const wonC = await lead('Meadow Villas', 'self_project', 'won', { self_project_basis: 'project_type', basis_value: 'Gated villa community', estimated_value: 30000000, location: 'Sehore Road, Bhopal', closed_at: new Date() });
+  const wonA = await lead('Skyline Towers - Phase 1', 'civil_construction', 'won', { party_id: skyline.id, estimated_value: 48000000, expected_profit: 8000000, location: 'Hinjewadi, Pune', closed_at: new Date() });
+  const wonC = await lead('Meadow Villas', 'civil_construction', 'won', { company: 'Own development', estimated_value: 30000000, location: 'Sehore Road, Bhopal', closed_at: new Date(), description: 'Gated villa community developed by Zephyr itself.' });
+  const wonE = await lead('Mumbai apartment purchase for Mehta', 'real_estate_consulting', 'won', { party_id: mehta.id, estimated_value: 300000, location: 'Mumbai', city: 'Mumbai', closed_at: new Date(), description: 'Find and close a Rs 3 crore apartment in Mumbai on a 1% brokerage.' });
+  await prisma.zxSetting.update({ where: { org_id: orgId }, data: { lead_seq: leadSeq.n } });
 
   // ---- projects ----
   const mkProject = async (fields) => {
     const code = await nextCode(orgId);
     return prisma.zxProject.create({ data: { org_id: orgId, code, created_by: adminUserId, manager_id: managerUser?.id || adminUserId, ...fields } });
   };
-  const pA = await mkProject({ name: wonA.name, kind: 'client', party_id: skyline.id, lead_id: wonA.id, location: wonA.location, status: 'active', start_date: D(dateIn(monthsAgo(7), 1)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 14), 1)), contract_value: 48000000, budget: 39000000 });
-  const pB = await mkProject({ name: 'Lotus Plaza Interiors', kind: 'client', party_id: lotus.id, location: 'Vijay Nagar, Indore', status: 'active', start_date: D(dateIn(monthsAgo(5), 10)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 4), 1)), contract_value: 18000000, budget: 14000000 });
-  const pC = await mkProject({ name: wonC.name, kind: 'self', lead_id: wonC.id, location: wonC.location, status: 'active', start_date: D(dateIn(monthsAgo(6), 1)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 18), 1)), contract_value: 42000000, budget: 30000000 });
-  const pD = await mkProject({ name: 'Old Mill Renovation', kind: 'client', party_id: green.id, location: 'Bhopal', status: 'completed', start_date: D(dateIn(monthsAgo(12), 1)), end_date: D(dateIn(monthsAgo(3), 20)), contract_value: 9000000, budget: 7000000, progress_pct: 100 });
+  const pA = await mkProject({ service_type: 'civil_construction', assignee_id: karan.id, contractor_id: patelPerson.id, agreement_ref: 'AGR-SKY-2025-01', description: 'Two-tower RCC structure and finishing.', details: { site: 'Hinjewadi Phase 2', units_count: 2, scope: 'Excavation to handover', phases: [{ name: 'Excavation and foundation', status: 'done' }, { name: 'Structure', status: 'in_progress' }, { name: 'Finishing', status: 'pending' }] }, expected_profit: 8000000, name: wonA.name, kind: 'client', party_id: skyline.id, lead_id: wonA.id, location: wonA.location, status: 'active', start_date: D(dateIn(monthsAgo(7), 1)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 14), 1)), contract_value: 48000000, budget: 39000000 });
+  const pB = await mkProject({ service_type: 'interior_design', assignee_id: divya.id, details: { property: 'Lotus Plaza, 2nd floor', design_scope: 'Retail fit-out and lighting', renovation_scope: 'False ceiling, flooring, joinery', material_cost: 6500000, labour_cost: 2400000, vendor_cost: 1700000, other_expenses: 300000 }, name: 'Lotus Plaza Interiors', kind: 'client', party_id: lotus.id, location: 'Vijay Nagar, Indore', status: 'active', start_date: D(dateIn(monthsAgo(5), 10)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 4), 1)), contract_value: 18000000, budget: 14000000 });
+  const pC = await mkProject({ service_type: 'civil_construction', assignee_id: karan.id, details: { site: 'Meadow Villas, Sehore Road', units_count: 24, phases: [{ name: 'Land development', status: 'done' }, { name: 'Phase 1 villas', status: 'in_progress' }, { name: 'Phase 2 villas', status: 'pending' }] }, name: wonC.name, kind: 'self', lead_id: wonC.id, location: wonC.location, status: 'active', start_date: D(dateIn(monthsAgo(6), 1)), end_date: D(dateIn(money.addMonths(money.currentMonth(), 18), 1)), contract_value: 42000000, budget: 30000000 });
+  const pD = await mkProject({ service_type: 'civil_construction', name: 'Old Mill Renovation', kind: 'client', party_id: green.id, location: 'Bhopal', status: 'completed', start_date: D(dateIn(monthsAgo(12), 1)), end_date: D(dateIn(monthsAgo(3), 20)), contract_value: 9000000, budget: 7000000, progress_pct: 100 });
+  const pE = await mkProject({
+    service_type: 'real_estate_consulting', name: wonE.name, kind: 'client', party_id: mehta.id, lead_id: wonE.id, location: 'Mumbai', status: 'completed', start_date: D(inDays(-70)), end_date: D(inDays(-12)), actual_end: D(inDays(-12)), progress_pct: 100,
+    details: { desired_property_type: '3 BHK apartment', required_location: 'Bandra West, Mumbai', client_budget: 30000000, property_value: 29500000, commission_pct: 1, commission_amount: 295000, deal_date: inDays(-20), closing_date: inDays(-12) },
+  });
+  await prisma.zxLead.update({ where: { id: wonE.id }, data: { project_id: pE.id } });
   await prisma.zxLead.update({ where: { id: wonA.id }, data: { project_id: pA.id } });
   await prisma.zxLead.update({ where: { id: wonC.id }, data: { project_id: pC.id } });
   await act(wonA.id, 'note', `Converted to project ${pA.code}`);
@@ -194,7 +234,6 @@ async function seedDemo(org, adminUserId) {
     if (back <= 7) await entry(month, at(8), 'revenue', 'Project billing', r(3600000), { project_id: pA.id, party_id: skyline.id, reference: `INV-A-${month}` });
     if (back <= 5) await entry(month, at(18), 'revenue', 'Project billing', r(1400000), { project_id: pB.id, party_id: lotus.id, reference: `INV-B-${month}` });
     if (back === 3) await entry(month, 20, 'revenue', 'Project billing', 9000000, { project_id: pD.id, party_id: green.id, reference: 'INV-D-FINAL' });
-    if (back % 3 === 0) await entry(month, at(25), 'revenue', 'Rental income', 180000, { reference: `RENT-${month}` });
     await entry(month, at(5), 'expense', 'Materials', r(1100000), { project_id: pA.id, party_id: steel.id, work_order_id: woSteel.id, reference: `STL-${month}` });
     await entry(month, at(10), 'expense', 'Materials', r(800000), { project_id: pA.id, party_id: rmc.id, work_order_id: woRmc.id, reference: `RMC-${month}` });
     await entry(month, at(12), 'expense', 'Labour', r(520000), { project_id: pA.id, payment_mode: 'cash' });
@@ -213,6 +252,74 @@ async function seedDemo(org, adminUserId) {
     await entry(month, 20, 'expense', 'Subcontractor', 600000, { project_id: pA.id, party_id: patel.id, work_order_id: woPatel.id, status: 'planned' });
   }
 
+  // ---- real estate: properties, units, tenants, rent, loans, valuation, a sale, tasks, a shared expense ----
+  const fin = { isAdmin: true, canFinance: true };
+  const mkProp = async (body) => (await propsSvc.create(orgId, adminUserId, fin, propsSvc.createPropertySchema.parse(body))).property;
+  const mkUnit = async (propertyId, body) => propsSvc.addUnit(orgId, adminUserId, fin, propertyId, propsSvc.unitCreateSchema.parse(body));
+  const xyz = await mkProp({ name: 'XYZ Commercial Complex', property_type: 'commercial_complex', address: 'MG Road', city: 'Indore', state: 'Madhya Pradesh', location: 'MG Road, near Regal Square', area_value: 5200, current_use: 'Rental', purchase_date: dateIn(monthsAgo(14), 8), purchase_cost: 12000000, brokerage: 120000, documentation_cost: 40000, registration_cost: 600000, construction_cost: 6500000 });
+  for (const [name, floor, area] of [['Shop 1', 'Ground', 600], ['Shop 2', 'Ground', 550], ['Shop 3', 'Ground', 500], ['Shop 4', 'First', 450], ['Shop 5', 'First', 450]]) await mkUnit(xyz.id, { name, floor, area_value: area, unit_type: 'Shop' });
+  const xyzUnits = (await propsSvc.get(orgId, fin, xyz.id)).property.units;
+  const unit = (n) => xyzUnits.find((u) => u.name === n);
+  await propsSvc.addLoan(orgId, adminUserId, fin, xyz.id, propsSvc.loanCreateSchema.parse({ financing_type: 'bank_loan', lender: 'State Bank of India', loan_amount: 8000000, outstanding_amount: 7400000, emi_amount: 85000, emi_frequency: 'monthly', interest_rate: 9.1, start_date: dateIn(monthsAgo(13), 1), end_date: dateIn(money.addMonths(money.currentMonth(), 100), 1) }));
+  await propsSvc.addValuation(orgId, adminUserId, fin, xyz.id, { value: 17500000, as_of: inDays(-120), notes: 'Broker opinion, shell complete' });
+  await propsSvc.addValuation(orgId, adminUserId, fin, xyz.id, { value: 24000000, as_of: inDays(-9), notes: 'Registered valuer report' });
+  await propsSvc.addNote(orgId, adminUserId, fin, xyz.id, { kind: 'construction', event_date: dateIn(monthsAgo(8), 1), title: 'Construction started', amount: null });
+  await propsSvc.addNote(orgId, adminUserId, fin, xyz.id, { kind: 'construction', event_date: dateIn(monthsAgo(3), 12), title: 'Construction completed', amount: 6500000 });
+
+  const tenantsAll = {};
+  for (const [key, name, company, phone] of [['abc', 'ABC Pvt Ltd', 'ABC Pvt Ltd', '9810011111'], ['sun', 'Sunrise Pharmacy', 'Sunrise Healthcare', '9810022222'], ['qm', 'Quick Mart', 'Quick Mart Retail', '9810033333']]) {
+    tenantsAll[key] = (await rentSvc.createTenant(orgId, adminUserId, rentSvc.tenantCreateSchema.parse({ name, company_name: company, phone }))).tenant;
+  }
+  const lease = async (tenant, u, startMonthsAgo, rentAmount, deposit, dueDay, method) => (await rentSvc.createLease(orgId, adminUserId, rentSvc.leaseCreateSchema.parse({ tenant_id: tenant.id, unit_id: unit(u).id, start_date: dateIn(monthsAgo(startMonthsAgo), 1), monthly_rent: rentAmount, security_deposit: deposit, due_day: dueDay, payment_method: method }))).lease;
+  const lAbc = await lease(tenantsAll.abc, 'Shop 3', 6, 60000, 180000, 1, 'bank_transfer');
+  const lSun = await lease(tenantsAll.sun, 'Shop 4', 6, 45000, 135000, 5, 'cash');
+  const lQm = await lease(tenantsAll.qm, 'Shop 2', 3, 52000, 156000, 1, 'upi');
+  // every earlier month is paid on time; Sunrise paid only part of last month; this month ABC has paid
+  for (const l of [lAbc, lSun, lQm]) {
+    const dues = await prisma.zxRentDue.findMany({ where: { lease_id: l.id }, orderBy: { period: 'asc' } });
+    for (const d of dues) {
+      const isThis = d.period === money.currentMonth();
+      const isLast = d.period === monthsAgo(1);
+      if (isThis && l.id !== lAbc.id) continue;
+      if (isThis && dateIn(d.period, l.due_day + 1) > today()) continue;
+      const amount = isLast && l.id === lSun.id ? 20000 : Number(d.amount);
+      await rentSvc.recordPayment(orgId, adminUserId, d.id, { amount, paid_on: isThis ? today() : dateIn(d.period, l.due_day + 1), method: l.id === lSun.id ? 'cash' : l.payment_method || 'bank_transfer', reference: `RCPT-${d.period}`, collected_by_person_id: l.id === lSun.id ? arjun.id : null, notes: null });
+    }
+  }
+  // Shop 1 sold two months ago
+  await salesSvc.create(orgId, adminUserId, xyz.id, salesSvc.saleSchema.parse({ unit_id: unit('Shop 1').id, sale_value: 6500000, sale_date: dateIn(monthsAgo(2), 14), selling_costs: 65000, buyer_party_id: buyer.id, notes: 'Sold to Anand Traders' }));
+  await propsSvc.updateUnit(orgId, adminUserId, fin, xyz.id, unit('Shop 5').id, { status: 'under_renovation', notes: 'Fit-out for a future tenant' });
+  // property operating expenses
+  const propEntry = (month, day, categoryName, amount, description) => prisma.zxLedgerEntry.create({ data: { org_id: orgId, entry_date: D(dateIn(month, day)), type: 'expense', category_id: cat('expense', categoryName), amount, tax: 0, status: 'actual', payment_mode: 'bank', created_by: adminUserId, property_id: xyz.id, service_type: 'property_management', description } });
+  for (const back of [5, 4, 3, 2, 1]) {
+    await propEntry(monthsAgo(back), 6, 'Maintenance & repairs', 12000 + back * 1500, 'Common area maintenance');
+    await propEntry(monthsAgo(back), 9, 'Property tax & utilities', 8500, 'Electricity and water, common areas');
+  }
+
+  const plot = await mkProp({ name: 'Super Corridor Plot', property_type: 'plot', city: 'Indore', state: 'Madhya Pradesh', location: 'Super Corridor, Sector B', area_value: 4000, current_use: 'Held for resale', status: 'held', purchase_date: dateIn(monthsAgo(5), 20), purchase_cost: 4200000, brokerage: 42000, documentation_cost: 18000, registration_cost: 252000 });
+  await propsSvc.addValuation(orgId, adminUserId, fin, plot.id, { value: 5200000, as_of: inDays(-15), notes: 'Nearby plots sold at higher rates' });
+  const lake = await mkProp({ name: 'Lakeview Flats', property_type: 'building', city: 'Bhopal', state: 'Madhya Pradesh', location: 'Kolar Road', area_value: 3200, current_use: 'Under development', status: 'under_construction', purchase_date: dateIn(monthsAgo(9), 3), purchase_cost: 7500000, registration_cost: 450000, construction_cost: 3800000 });
+  for (const [name, floor] of [['Flat 101', 'First'], ['Flat 102', 'First'], ['Flat 201', 'Second'], ['Flat 202', 'Second']]) await mkUnit(lake.id, { name, floor, unit_type: '2 BHK', area_value: 800, status: 'under_construction' });
+  await propsSvc.addValuation(orgId, adminUserId, fin, lake.id, { value: 14500000, as_of: inDays(-30), notes: 'Estimated on completion' });
+  const godown = await mkProp({ name: 'Old Godown, Pune', property_type: 'building', city: 'Pune', state: 'Maharashtra', current_use: 'Sold', status: 'held', purchase_date: dateIn(monthsAgo(14), 2), purchase_cost: 9000000, brokerage: 90000, registration_cost: 540000, renovation_cost: 500000 });
+  await salesSvc.create(orgId, adminUserId, godown.id, salesSvc.saleSchema.parse({ sale_value: 12400000, sale_date: dateIn(monthsAgo(3), 15), selling_costs: 150000, buyer_party_id: buyer.id, notes: 'Whole property sold after renovation' }));
+
+  // consulting commission on the completed Mumbai deal
+  await ledgerSvc.bookCommission(orgId, adminUserId, pE.id);
+  await prisma.zxLedgerEntry.create({ data: { org_id: orgId, entry_date: D(inDays(-15)), type: 'expense', category_id: cat('expense', 'Other expense'), amount: 18000, tax: 0, status: 'actual', payment_mode: 'upi', created_by: adminUserId, project_id: pE.id, service_type: 'real_estate_consulting', description: 'Site visits and travel for the buyer' } });
+
+  // one security contract shared by two projects and a property
+  await ledgerSvc.createGroupExpense(orgId, adminUserId, ledgerSvc.groupExpenseSchema.parse({ entry_date: dateIn(monthsAgo(1), 15), category_id: cat('expense', 'Site overheads'), amount: 90000, basis: 'equal', description: 'Shared security agency, monthly', allocations: [{ project_id: pA.id, share: 1 }, { project_id: pB.id, share: 1 }, { property_id: xyz.id, share: 1 }] }));
+
+  // operational tasks
+  const sunDue = await prisma.zxRentDue.findFirst({ where: { lease_id: lSun.id, period: money.currentMonth() } });
+  const mk = (body) => tasksSvc.create(orgId, adminUserId, tasksSvc.createTaskSchema.parse(body));
+  if (sunDue) await mk({ title: 'Collect this month rent from Sunrise Pharmacy (Shop 4)', task_type: 'collect_rent', person_id: arjun.id, property_id: xyz.id, rent_due_id: sunDue.id, due_date: inDays(-1), priority: 'high' });
+  await mk({ title: 'Inspect Lakeview Flats: slab and plumbing progress', task_type: 'inspect', person_id: rohan.id, property_id: lake.id, due_date: inDays(3) });
+  await mk({ title: 'Verify block work quality, Tower 1 (Skyline)', task_type: 'verify_work', person_id: karan.id, project_id: pA.id, due_date: inDays(5), priority: 'high' });
+  await mk({ title: 'Collect NOC and tax receipts for the Super Corridor plot', task_type: 'collect_documents', person_id: priya.id, property_id: plot.id, due_date: inDays(10) });
+  await mk({ title: 'Follow up with Quick Mart on lease renewal', task_type: 'follow_up_tenant', person_id: arjun.id, property_id: xyz.id, due_date: inDays(14), priority: 'low' });
+
   // ---- plans (company-wide) for six months back and three ahead ----
   for (let back = 6; back >= -3; back -= 1) {
     const month = monthsAgo(back);
@@ -230,7 +337,7 @@ async function seedDemo(org, adminUserId) {
 
   // settings: show the three valuation modes are all editable, start on revenue multiple
   await prisma.zxSetting.update({ where: { org_id: orgId }, data: { valuation_method: 'revenue_multiple', valuation_multiple: 2.5 } });
-  console.log('  + Zephyr demo: 9 parties, 7 leads, 4 projects, 10 people, pay slips, 9 months of ledger, plans, closed months');
+  console.log('  + Zephyr demo: clients and vendors, leads for all five services, 5 projects, 4 properties with units, tenants, rent, a loan, valuations and two sales, tasks, shared expense, 9 months of ledger, plans, closed months');
 }
 
-module.exports = { seedDemo, prisma };
+module.exports = { seedDemo, resetDemo, prisma };

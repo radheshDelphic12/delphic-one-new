@@ -17,7 +17,7 @@ import ZephyrSalaries from '../../components/zephyr/ZephyrSalaries.jsx';
 const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
 const KIND_LABEL = { employee: 'Employee', contractor: 'Contractor' };
-const ACCESS_LABEL = { none: 'No login access', manager: 'Manager', staff: 'Staff' };
+const ACCESS_LABEL = { none: 'No login access', manager: 'Manager', staff: 'Staff', finance: 'Finance' };
 const PAY_LABEL = { monthly: 'Monthly salary', daily: 'Daily rate' };
 const EMPTY = { name: '', kind: 'employee', designation: '', phone: '', email: '', joining_date: '', leaving_date: '', vendor_party_id: '', notes: '', active: true, pay_basis: '', rate: '', user_id: '', access_role: 'none' };
 const dayOf = (v) => (v ? String(v).slice(0, 10) : '');

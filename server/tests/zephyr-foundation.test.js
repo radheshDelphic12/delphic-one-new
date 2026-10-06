@@ -52,7 +52,11 @@ describe('zephyr access', () => {
 
     const s = (await authed(request(app).get('/api/v1/zephyr/me'), staff.token)).body.data;
     expect(s.role).toBe('staff');
-    expect(s.caps).toEqual(['myWork']);
+    expect(s.caps).toEqual(['myWork', 'tasks']);
+    expect(m.caps).toEqual(expect.arrayContaining(['properties', 'propertiesEdit', 'rent', 'rentEdit', 'tasksAll']));
+    expect(m.caps).not.toContain('propertyFinance');
+    expect(m.caps).not.toContain('trading');
+    expect(a.caps).toEqual(expect.arrayContaining(['propertyFinance', 'trading', 'tasksAll']));
   });
 
   test('a member with no Zephyr person row or access_role none is refused', async () => {

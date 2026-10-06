@@ -23,8 +23,8 @@ const categoryUpdateSchema = z.object({
   sort_order: z.coerce.number().int().min(0).max(9999).optional(),
 });
 const DEFAULT_CATEGORIES = {
-  revenue: ['Project billing', 'Property sale', 'Rental income', 'Other income'],
-  expense: ['Materials', 'Labour', 'Subcontractor', 'Equipment', 'Site overheads', 'Office', 'Other expense'],
+  revenue: ['Project billing', 'Property sale', 'Rental income', 'Consulting commission', 'Other income'],
+  expense: ['Materials', 'Labour', 'Subcontractor', 'Equipment', 'Site overheads', 'Office', 'Maintenance & repairs', 'Property tax & utilities', 'Other expense'],
 };
 
 const num = (v) => (v == null ? null : Number(v));

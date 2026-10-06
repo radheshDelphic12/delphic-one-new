@@ -2,6 +2,23 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
+
+- Built to the owner's 44-section brief on top of the Z0-Z8 base (plan, decisions and log: [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md)). Two migrations: `zephyr_services_leads_projects` and `zephyr_real_estate`.
+- Services master (five fixed keys, renameable); leads and projects per service with new stage / status sets; client / vendor fields; properties, units, tenants, leases, monthly rent dues with computed overdue, rent payments posting to the ledger, loans, manual valuation (unrealized, never in the P&L), whole-property and unit sales (realized profit in the P&L), consulting commission, shared (group) expenses, tasks, a `finance` role, P&L by service / property / client-vendor, service-wise reports, a new Home dashboard, and Properties / Rent / Tasks screens. A closed month is now a hard lock.
+- Tests: Zephyr suites 122/122 (run two files at a time); lint 0 errors; client build OK; API smoke 128/128 across admin / manager / staff / finance on the rebuilt demo (`ZEPHYR_RESET=1 npm run zephyr:seed`, new login `finance@zephyrinfra.in`). Not done: expense-claim approval flow, browser click-through by a person, staging deploy and re-seed.
+
+## 2026-10-06 — Zephyr UI polish (local, not pushed)
+
+- Shared `FilterBar` for Client / Vendor, Leads, Projects and Properties (search + one Filters menu + chips); Leads service / stage strips replaced by dropdowns with counts; Client / Vendor drawers close after save; softer Zephyr theme; simpler Home (greeting card with quick tiles, plain-language money cards, By service table); `StatCard` `tone` for amber / red warning cards. Client lint clean, build OK; not yet clicked through by a person. Rent, Tasks, People and Revenue & Profit still have the old filter rows.
+- `D:\Zephyr-Feature-Guide.docx` was rebuilt again for this UI; if Word has the file open it is saved as `Zephyr-Feature-Guide-updated.docx` instead.
+
+## 2026-10-06 — Zephyr real-estate / construction plan written (no code yet)
+
+- Product owner supplied a 44-section brief (five services: civil construction, interior design, property management, property trading, real-estate consulting; properties, units, tenants, rent, loans, valuation, trading, consulting, tasks, service P&L). Gap analysis against the built Zx module and a phased plan R0-R9 are in [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md).
+- Owner confirmed (2026-10-06): Zephyr leads stay `ZxLead`; Delphic finance/expense concepts (approval flow, group expenses, snapshot locking) are re-built inside Zx tables, Delphic modules untouched; the Z0-Z8 UI was a sample and is reshaped; phase order R0-R9 and the new sidebar approved.
+- **R0-R2 started, uncommitted:** `schema.prisma` adds `ZxServiceType`, lead/project service fields (`service_type`, `details` JSON, expected dates/profit, assignee/contractor), lead code prefix/seq and party fields (company, state, country, hold, interested services, vendor category); migration `20261006090000_zephyr_services_leads_projects` drafted, not yet applied or tested. Lead stage and project status sets renamed; data migration, fixtures and seed still to update. No tests run for this slice yet.
+
 ## 2026-10-05 — Zephyr committed, pushed to staging, deployed and seeded on Neon
 
 - Branch `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`git push origin <branch>:staging`, fast-forward, up to `3467895`) and deployed on Render with `render deploys create srv-datoc5e0tbcc73elv730 --commit <sha> --wait --confirm`. Boot runs `prisma migrate deploy`: 73 migrations, none pending, so the Zephyr tables are on Neon.

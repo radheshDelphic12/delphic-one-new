@@ -3,7 +3,7 @@ const prisma = require('../../config/db');
 const { writeAudit } = require('./audit');
 
 const KINDS = ['employee', 'contractor'];
-const ACCESS_ROLES = ['manager', 'staff', 'none'];
+const ACCESS_ROLES = ['manager', 'staff', 'finance', 'none'];
 const PAY_BASES = ['monthly', 'daily'];
 // Fields only an org admin may set: who can log in, and what a person is paid.
 const ADMIN_ONLY = ['access_role', 'user_id', 'pay_basis', 'rate'];
@@ -181,7 +181,7 @@ async function allocationProblem(orgId, personId, from, to, pct, excludeId) {
 async function liveProject(orgId, projectId) {
   const project = await prisma.zxProject.findFirst({ where: { id: projectId, org_id: orgId, deleted_at: null }, select: { id: true, status: true } });
   if (!project) return { error: 'project_not_found' };
-  if (project.status === 'completed' || project.status === 'cancelled') return { error: 'project_closed' };
+  if (['completed', 'cancelled', 'closed'].includes(project.status)) return { error: 'project_closed' };
   return { project };
 }
 

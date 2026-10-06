@@ -4,6 +4,7 @@ const PDFDocument = require('pdfkit');
 const prisma = require('../../config/db');
 const { writeAudit } = require('./audit');
 const money = require('./money.service');
+const serviceTypes = require('./serviceTypes');
 
 const monthStr = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Use YYYY-MM');
 const amount = z.coerce.number().min(0).max(1e13);
@@ -22,9 +23,13 @@ const rangeSchema = z.object({ from: monthStr.optional(), to: monthStr.optional(
 const closeSchema = z.object({ month: monthStr });
 const reopenSchema = z.object({ month: monthStr, reason: z.string().trim().min(1).max(500) });
 const statementSchema = z.object({
-  group: z.enum(['month', 'project', 'party']).default('month'),
+  group: z.enum(['month', 'project', 'party', 'service', 'property']).default('month'),
   from: monthStr.optional(),
   to: monthStr.optional(),
+  service_type: z.string().optional(),
+  property_id: z.string().uuid().optional(),
+  party_id: z.string().uuid().optional(),
+  project_id: z.string().uuid().optional(),
   format: z.enum(['json', 'xlsx', 'pdf']).default('json'),
 });
 
@@ -216,8 +221,8 @@ async function reopenMonth(orgId, actorId, month, reason) {
 }
 
 // ---- statements (P&L by month / project / party) ----
-async function partyRows(orgId, from, to) {
-  const entries = await money.actualEntries(orgId, from, to);
+async function partyRows(orgId, from, to, filters = {}) {
+  const entries = await money.actualEntries(orgId, from, to, {}, filters);
   const parties = await prisma.zxParty.findMany({ where: { org_id: orgId }, select: { id: true, name: true } });
   const names = new Map(parties.map((p) => [p.id, p.name]));
   const acc = new Map();
@@ -233,15 +238,20 @@ async function statement(orgId, query) {
   const r = defaultRange(query, 11);
   const from = money.monthStart(r.from);
   const to = money.monthEnd(r.to);
+  const filters = Object.fromEntries(['service_type', 'property_id', 'party_id', 'project_id'].filter((k) => query[k]).map((k) => [k, query[k]]));
   let rows;
-  if (query.group === 'project') rows = (await money.byProject(orgId, from, to)).map((p) => ({ name: p.code ? `${p.code} ${p.name}` : p.name, revenue: p.revenue, expense: p.expense, salaries: p.salaries, profit: p.profit }));
-  else if (query.group === 'party') rows = await partyRows(orgId, from, to);
-  else rows = (await money.monthly(orgId, r.from, r.to)).map((m) => ({ name: m.month, revenue: m.revenue, expense: m.expense, salaries: m.salaries, profit: m.profit }));
+  if (query.group === 'service' || query.group === 'property') {
+    const dim = await money.byDimension(orgId, from, to, query.group, { filters });
+    const labels = query.group === 'service' ? await serviceTypes.labels(orgId) : new Map((await prisma.zxProperty.findMany({ where: { org_id: orgId }, select: { id: true, code: true, name: true } })).map((p) => [p.id, `${p.code} ${p.name}`]));
+    rows = dim.map((r) => ({ name: r.key ? labels.get(r.key) || r.key : query.group === 'service' ? 'No service' : 'No property', revenue: r.revenue, expense: r.expense, salaries: r.salaries, profit: r.profit })).sort((x, y) => y.profit - x.profit);
+  } else if (query.group === 'project') rows = (await money.byProject(orgId, from, to, { filters })).map((p) => ({ name: p.code ? `${p.code} ${p.name}` : p.name, revenue: p.revenue, expense: p.expense, salaries: p.salaries, profit: p.profit }));
+  else if (query.group === 'party') rows = await partyRows(orgId, from, to, filters);
+  else rows = (await money.monthly(orgId, r.from, r.to, { filters })).map((m) => ({ name: m.month, revenue: m.revenue, expense: m.expense, salaries: m.salaries, profit: m.profit }));
   const t = (k) => round2(rows.reduce((a, row) => a + (row[k] || 0), 0));
-  return { group: query.group, from: r.from, to: r.to, rows, totals: { name: 'Total', revenue: t('revenue'), expense: t('expense'), salaries: query.group === 'party' ? null : t('salaries'), profit: t('profit') } };
+  return { group: query.group, from: r.from, to: r.to, rows, totals: { name: 'Total', revenue: t('revenue'), expense: t('expense'), salaries: ['party', 'property'].includes(query.group) ? null : t('salaries'), profit: t('profit') } };
 }
 
-const GROUP_LABEL = { month: 'Month', project: 'Project', party: 'Client / vendor' };
+const GROUP_LABEL = { month: 'Month', project: 'Project', party: 'Client / vendor', service: 'Service', property: 'Property' };
 
 async function exportXlsx(stmt) {
   const wb = new ExcelJS.Workbook();

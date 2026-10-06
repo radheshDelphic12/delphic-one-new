@@ -1,9 +1,10 @@
 export const PROJECT_STATUSES = [
-  { value: 'planning', label: 'Planning', tone: 'blue' },
+  { value: 'planned', label: 'Planned', tone: 'blue' },
   { value: 'active', label: 'Active', tone: 'green' },
   { value: 'on_hold', label: 'On hold', tone: 'amber' },
   { value: 'completed', label: 'Completed', tone: 'gray' },
   { value: 'cancelled', label: 'Cancelled', tone: 'red' },
+  { value: 'closed', label: 'Closed', tone: 'gray' },
 ];
 export const STATUS_META = Object.fromEntries(PROJECT_STATUSES.map((s) => [s.value, s]));
 export const PROJECT_KINDS = [

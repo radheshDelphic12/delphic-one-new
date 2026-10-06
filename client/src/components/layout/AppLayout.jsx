@@ -156,8 +156,21 @@ export default function AppLayout() {
         <WorkspaceSwitcher collapsed={collapsed} onCreate={() => setOrgCreateOpen(true)} />
       </div>
       {isZephyr && !collapsed && (
-        <Link to="/zephyr" className="mx-2 mb-2 block overflow-hidden rounded-2xl border border-primary-100 bg-primary-50" onClick={() => setMobileOpen(false)}>
-          <img src="/zephyr-logo.png" alt="Zephyr Infrastructure" className="mx-auto h-28 w-auto object-contain" />
+        <Link
+          to="/zephyr"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Zephyr Infrastructure home"
+          className="group mx-2 mb-3 block overflow-hidden rounded-2xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 pb-2 pt-5">
+            <img src="/zephyr-logo.png" alt="Zephyr Infrastructure" className="h-24 w-auto object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="flex items-center gap-2 px-4 pb-3.5">
+            <span className="h-px flex-1 bg-primary-200" />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-500">Infrastructure</span>
+            <span className="h-px flex-1 bg-primary-200" />
+          </div>
+          <div className="h-1 bg-[rgb(var(--zx-earth))]" />
         </Link>
       )}
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">

@@ -6,6 +6,10 @@ import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 
 export const DOC_CATEGORIES = [
   { value: 'agreement', label: 'Agreement' },
+  { value: 'lease', label: 'Lease agreement' },
+  { value: 'sale_deed', label: 'Sale deed' },
+  { value: 'valuation', label: 'Valuation report' },
+  { value: 'tax', label: 'Tax / municipal receipt' },
   { value: 'work_order', label: 'Work order' },
   { value: 'license', label: 'License / registration' },
   { value: 'gst', label: 'GST certificate' },

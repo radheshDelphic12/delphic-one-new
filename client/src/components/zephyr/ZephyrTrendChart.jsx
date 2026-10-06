@@ -3,7 +3,7 @@ import { compact, shortMonth } from '../../lib/format.js';
 import { chartTooltipStyle } from '../../lib/chartTheme.js';
 
 // Zephyr palette: sage green for money in, earth brown for money out, charcoal for profit (from the logo).
-export const ZX_CHART = { revenue: '#5BA372', expense: '#8B6A56', salaries: '#C9B8A8', profit: '#555555', grid: '#E0E9E2' };
+export const ZX_CHART = { revenue: '#6B7F8C', expense: '#A9704F', salaries: '#CDBFB0', profit: '#3A3735', grid: '#E2DDD5' };
 
 /**
  * Month-by-month revenue / expense bars with a profit line. `rows` = [{ month, revenue, expense, salaries?, profit }].

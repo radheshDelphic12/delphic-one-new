@@ -46,6 +46,10 @@ import ZephyrFinancialsPage from '../pages/zephyr/ZephyrFinancialsPage.jsx';
 import ZephyrMyWorkPage from '../pages/zephyr/ZephyrMyWorkPage.jsx';
 import ZephyrProjectDetailPage from '../pages/zephyr/ZephyrProjectDetailPage.jsx';
 import ZephyrSettingsPage from '../pages/zephyr/ZephyrSettingsPage.jsx';
+import ZephyrPropertiesPage from '../pages/zephyr/ZephyrPropertiesPage.jsx';
+import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.jsx';
+import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
+import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
 import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
@@ -245,6 +249,10 @@ export default function App() {
         <Route path="zephyr/my-work" element={<RequireZephyr><ZephyrMyWorkPage /></RequireZephyr>} />
         <Route path="zephyr/projects" element={<RequireZephyr><ZephyrProjectsPage /></RequireZephyr>} />
         <Route path="zephyr/projects/:id" element={<RequireZephyr><ZephyrProjectDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/properties" element={<RequireZephyr><ZephyrPropertiesPage /></RequireZephyr>} />
+        <Route path="zephyr/properties/:id" element={<RequireZephyr><ZephyrPropertyDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/rent" element={<RequireZephyr><ZephyrRentPage /></RequireZephyr>} />
+        <Route path="zephyr/tasks" element={<RequireZephyr><ZephyrTasksPage /></RequireZephyr>} />
         <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
         <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />
         <Route path="zephyr/:section" element={<RequireZephyr><ZephyrSectionPage /></RequireZephyr>} />

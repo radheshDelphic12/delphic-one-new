@@ -278,7 +278,7 @@ function CloseTab() {
   );
 }
 
-const GROUPS = [['month', 'By month'], ['project', 'By project'], ['party', 'By client / vendor']];
+const GROUPS = [['month', 'By month'], ['project', 'By project'], ['service', 'By service'], ['property', 'By property'], ['party', 'By client / vendor']];
 
 function StatementsTab() {
   const { pushError } = useAlerts();

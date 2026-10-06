@@ -1,17 +1,24 @@
 import { ROLE_COPY } from '../../pages/dashboard/dashboardWidgets.js';
 
 const ZEPHYR_TITLES = {
-  '/zephyr': ['Zephyr Infrastructure', 'Construction, property trading and property management.'],
+  '/zephyr': ['Dashboard', 'Your business at a glance.'],
   '/zephyr/leads': ['Leads', 'Opportunities from first contact to won or lost.'],
   '/zephyr/parties': ['Client / Vendor', 'Clients, vendors and subcontractors in one directory.'],
   '/zephyr/projects': ['Projects', 'Own and client projects, milestones and work orders.'],
+  '/zephyr/properties': ['Properties', 'Properties and units: investment, valuation, loans, tenants and sales.'],
+  '/zephyr/rent': ['Rent', 'Monthly rent due, collected, pending and overdue.'],
+  '/zephyr/tasks': ['Tasks', 'Operational tasks for employees and contractors.'],
   '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
   '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],
   '/zephyr/financials': ['Financials', 'Plan vs actual, month close and projections.'],
   '/zephyr/my-work': ['My work', 'Your assigned projects, profile and salary slips.'],
-  '/zephyr/settings': ['Zephyr setup', 'Valuation, categories and the audit log.'],
+  '/zephyr/settings': ['Zephyr setup', 'Services, valuation, categories and the audit log.'],
 };
-const zephyrEntry = (pathname) => (/^\/zephyr\/projects\/[^/]+$/.test(pathname) ? ['Project', 'Milestones, vendor work orders and documents.'] : ZEPHYR_TITLES[pathname] || ZEPHYR_TITLES['/zephyr']);
+const zephyrEntry = (pathname) => {
+  if (/^\/zephyr\/projects\/[^/]+$/.test(pathname)) return ['Project', 'Milestones, vendor work orders and documents.'];
+  if (/^\/zephyr\/properties\/[^/]+$/.test(pathname)) return ['Property', 'Units, tenants, rent, finance and timeline.'];
+  return ZEPHYR_TITLES[pathname] || ZEPHYR_TITLES['/zephyr'];
+};
 const zephyrTitle = (pathname) => zephyrEntry(pathname)[0];
 const zephyrSubtitle = (pathname) => zephyrEntry(pathname)[1];
 

@@ -5,6 +5,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 import { useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
 import { KIND_LABEL, PROJECT_STATUSES, STATUS_META, WO_META, WO_STATUSES, rupees } from '../../lib/zephyr/projectMeta.js';
+import { useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
 import { dateLabel } from '../../lib/format.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
@@ -12,7 +13,8 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import ZephyrProjectMoney from '../../components/zephyr/ZephyrProjectMoney.jsx';
-import { ProgressBar, ProjectForm, cleanProjectBody } from './ZephyrProjectsPage.jsx';
+import { SECTION_TITLES, ServiceSectionView } from '../../components/zephyr/ZephyrServiceSection.jsx';
+import { ProgressBar, ProjectForm, ServiceBadge, cleanProjectBody } from './ZephyrProjectsPage.jsx';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: Layers },
@@ -216,6 +218,9 @@ export default function ZephyrProjectDetailPage() {
   const [saving, setSaving] = useState(false);
   const [parties, setParties] = useState([]);
   const [managers, setManagers] = useState([]);
+  const [people, setPeople] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const { label: serviceLabel, active: activeServices } = useServiceTypes();
 
   const load = useCallback(
     () => zephyrApi.project(id).then(setProject, (e) => (e?.response?.status === 404 ? setMissing(true) : pushError(zephyrError(e), 'Could not load project'))),
@@ -228,6 +233,8 @@ export default function ZephyrProjectDetailPage() {
   useEffect(() => {
     zephyrApi.parties({ status: 'active', limit: 200 }).then((r) => setParties(r.data), () => setParties([]));
     zephyrApi.leadOwners().then(setManagers, () => setManagers([]));
+    zephyrApi.people({ status: 'active' }).then(setPeople, () => setPeople([]));
+    zephyrApi.properties({}).then(setProperties, () => setProperties([]));
   }, []);
 
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading…</div>;
@@ -236,7 +243,7 @@ export default function ZephyrProjectDetailPage() {
 
   const canEdit = zxCan(me, 'projectsEdit');
   const canDelete = zxCan(me, 'delete');
-  const closed = project.status === 'completed' || project.status === 'cancelled';
+  const closed = ['completed', 'cancelled', 'closed'].includes(project.status);
   const vendors = parties.filter((p) => p.kind !== 'client');
 
   // Runs a mutation that returns the refreshed project; shows the server's reason on failure.
@@ -260,6 +267,16 @@ export default function ZephyrProjectDetailPage() {
     if (ok) setEditing(false);
   }
 
+  async function bookCommission() {
+    try {
+      await zephyrApi.bookCommission(project.id);
+      pushSuccess('Commission booked as revenue');
+      await load();
+    } catch (e) {
+      pushError(zephyrError(e, 'Could not book the commission'), 'Could not save');
+    }
+  }
+
   async function remove() {
     if (!window.confirm(`Delete ${project.code} ${project.name}?`)) return;
     try {
@@ -280,6 +297,7 @@ export default function ZephyrProjectDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-tertiary-500">{project.code}</span>
             <Pill tone={STATUS_META[project.status]?.tone}>{STATUS_META[project.status]?.label}</Pill>
+            <ServiceBadge service={project.service_type} label={serviceLabel(project.service_type)} />
             <Pill tone={project.kind === 'self' ? 'purple' : 'blue'}>{KIND_LABEL[project.kind]}</Pill>
           </div>
           <h2 className="mt-1 font-heading text-xl font-bold text-tertiary-900">{project.name}</h2>
@@ -302,23 +320,45 @@ export default function ZephyrProjectDetailPage() {
       {tab === 'overview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label={project.kind === 'client' ? 'Contract value' : 'Budget'} value={rupees(project.kind === 'client' ? project.contract_value : project.budget)} />
+            <StatCard label="Contract / estimated value" value={rupees(project.contract_value ?? project.budget)} hint={project.budget != null && project.contract_value != null ? `budget ${rupees(project.budget)}` : undefined} />
+            <StatCard label="Expected profit" value={project.expected_profit_calc == null ? '—' : rupees(project.expected_profit_calc)} hint={project.expected_profit == null && project.expected_profit_calc != null ? 'contract value − budget' : 'as entered'} />
+            <StatCard label="Revenue booked" value={rupees(project.actual_revenue)} hint="actual money entries" />
+            <StatCard label="Actual profit" value={rupees(project.actual_profit)} hint={`cost booked ${rupees(project.actual_cost)}`} tone={project.actual_profit < 0 ? 'danger' : undefined} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             <StatCard label="Milestone billing" value={rupees(project.billing_billed)} hint={`of ${rupees(project.billing_planned)} planned`} />
             <StatCard label="Committed to vendors" value={rupees(project.wo_value)} hint={`${rupees(project.wo_billed)} billed so far`} />
-            <StatCard label="Milestones" value={`${project.milestones_done}/${project.milestones_total}`} hint={project.milestones_overdue ? `${project.milestones_overdue} overdue` : 'on track'} accent={Boolean(project.milestones_overdue)} />
+            <StatCard label="Milestones" value={`${project.milestones_done}/${project.milestones_total}`} hint={project.milestones_overdue ? `${project.milestones_overdue} overdue` : 'on track'} tone={project.milestones_overdue ? 'danger' : undefined} />
           </div>
           <section className={card}>
             <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Detail label="Client">{project.party?.name}</Detail>
               <Detail label="Project manager">{project.manager?.name}</Detail>
+              <Detail label="Assigned employee">{project.assignee?.name}</Detail>
+              <Detail label="Assigned contractor">{project.contractor?.name}</Detail>
               <Detail label="Location">{project.location}</Detail>
+              <Detail label="Agreement reference">{project.agreement_ref}</Detail>
+              <Detail label="Property">{project.property_id && (zxCan(me, 'properties') ? <Link to={`/zephyr/properties/${project.property_id}`} className="text-primary-700 hover:underline">{properties.find((x) => x.id === project.property_id)?.name || 'Open the property'}</Link> : (properties.find((x) => x.id === project.property_id)?.name || 'Linked'))}</Detail>
               <Detail label="Start date">{project.start_date ? dateLabel(project.start_date) : null}</Detail>
-              <Detail label="End date">{project.end_date ? dateLabel(project.end_date) : null}</Detail>
-              {project.kind === 'client' && project.budget != null && <Detail label="Planned cost">{rupees(project.budget)}</Detail>}
-              {project.kind === 'self' && project.contract_value != null && <Detail label="Expected sale value">{rupees(project.contract_value)}</Detail>}
+              <Detail label="Expected end">{project.end_date ? dateLabel(project.end_date) : null}</Detail>
+              <Detail label="Actual end">{project.actual_end ? dateLabel(project.actual_end) : null}</Detail>
+              {project.lead_id && <Detail label="Source lead"><Link to="/zephyr/leads" className="text-primary-700 hover:underline">Converted from a lead</Link></Detail>}
+              <div className="sm:col-span-2 lg:col-span-3"><Detail label="Description"><span className="whitespace-pre-wrap">{project.description}</span></Detail></div>
               <div className="sm:col-span-2 lg:col-span-3"><Detail label="Notes"><span className="whitespace-pre-wrap">{project.notes}</span></Detail></div>
             </dl>
           </section>
+          {project.service_type && (
+            <section className={card}>
+              <h3 className="mb-3 font-heading text-sm font-semibold text-tertiary-900">{SECTION_TITLES[project.service_type]}</h3>
+              <ServiceSectionView service={project.service_type} details={project.details} />
+              {project.service_type === 'real_estate_consulting' && zxCan(me, 'ledgerSalaries') && project.details?.commission_amount > 0 && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-primary-50/50 px-3 py-2.5 text-sm">
+                  <span>Commission {rupees(project.details.commission_amount)} ({project.details.commission_pct}% of {rupees(project.details.property_value)}). Book it once as consulting revenue.</span>
+                  <button type="button" className="btn-primary" onClick={bookCommission}>Book commission revenue</button>
+                </div>
+              )}
+            </section>
+          )}
         </div>
       )}
       {tab === 'milestones' && <MilestonesTab project={project} canEdit={canEdit} closed={closed} apply={apply} />}
@@ -347,7 +387,7 @@ export default function ZephyrProjectDetailPage() {
       {tab === 'money' && zxCan(me, 'ledger') && <ZephyrProjectMoney project={project} isAdmin={zxCan(me, 'overviewValuation')} canDelete={canDelete} onChanged={load} />}
 
       <Drawer open={editing} onClose={() => setEditing(false)} size="xl" tone="edit" title={`Edit ${project.code}`}>
-        {editing && <ProjectForm initial={project} parties={parties} managers={managers} saving={saving} onSubmit={saveEdit} onCancel={() => setEditing(false)} hasMilestones={project.milestones.length > 0} />}
+        {editing && <ProjectForm initial={project} parties={parties} managers={managers} employees={people.filter((p) => p.kind === 'employee')} contractors={people.filter((p) => p.kind === 'contractor')} properties={properties} services={activeServices} saving={saving} onSubmit={saveEdit} onCancel={() => setEditing(false)} hasMilestones={project.milestones.length > 0} />}
       </Drawer>
     </div>
   );

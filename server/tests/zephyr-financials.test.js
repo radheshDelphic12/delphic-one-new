@@ -43,8 +43,8 @@ async function seed(token) {
   const a = api(token);
   const cats = (await a.get('/categories')).body.data;
   const cat = (kind, name) => cats.find((c) => c.kind === kind && c.name === name).id;
-  const p1 = (await a.post('/projects', { name: 'Tower A', kind: 'client', status: 'active' })).body.data;
-  const p2 = (await a.post('/projects', { name: 'Villas', kind: 'self', status: 'active' })).body.data;
+  const p1 = (await a.post('/projects', { service_type: 'civil_construction', name: 'Tower A', kind: 'client', status: 'active' })).body.data;
+  const p2 = (await a.post('/projects', { service_type: 'civil_construction', name: 'Villas', kind: 'self', status: 'active' })).body.data;
   const client = (await a.post('/parties', { name: 'Big Client', kind: 'client' })).body.data;
   const vendor = (await a.post('/parties', { name: 'Big Vendor', kind: 'vendor' })).body.data;
   const entry = (month, type, amount, extra = {}) =>
@@ -234,14 +234,18 @@ describe('zephyr financials: month close', () => {
     let row = (await a.get(`/financials/closes?from=${prev}&to=${prev}`)).body.data[0];
     expect(row).toMatchObject({ month: prev, status: 'closed', stale: false });
 
-    // a new entry dated inside the closed month does not rewrite the snapshot, it flags it
-    const late = await s.entry(prev, 'expense', 5000, { project_id: s.p1.id });
+    // a closed month is locked: an entry dated inside it is refused, so the snapshot cannot drift
+    const refused = await s.entry(prev, 'expense', 5000, { project_id: s.p1.id });
+    expect(refused.status).toBe(409);
     row = (await a.get(`/financials/closes?from=${prev}&to=${prev}`)).body.data[0];
-    expect(row.stale).toBe(true);
+    expect(row).toMatchObject({ stale: false, status: 'closed' });
     expect(row.snapshot.summary.expense).toBe(30000);
-    expect(row.live.expense).toBe(35000);
+    expect(row.live.expense).toBe(30000);
+    const existing = (await a.get('/ledger?type=expense')).body.data[0];
+    expect((await a.patch(`/ledger/${existing.id}`, { amount: 1 })).status).toBe(409);
+    expect((await a.del(`/ledger/${existing.id}`)).status).toBe(409);
     const pva = (await a.get(`/financials/plan-vs-actual?from=${prev}&to=${prev}`)).body.data.rows[0];
-    expect(pva).toMatchObject({ status: 'closed', stale: true });
+    expect(pva).toMatchObject({ status: 'closed', stale: false });
 
     expect((await a.post('/financials/reopen', { month: prev })).status).toBe(422);
     expect((await a.post('/financials/reopen', { month: addMonths(prev, -1), reason: 'x' })).status).toBe(409);
@@ -249,9 +253,10 @@ describe('zephyr financials: month close', () => {
     row = (await a.get(`/financials/closes?from=${prev}&to=${prev}`)).body.data[0];
     expect(row).toMatchObject({ status: 'open', stale: false, reopen_reason: 'Late bill added', snapshot: null });
 
+    const late = await s.entry(prev, 'expense', 5000, { project_id: s.p1.id });
+    expect(late.status).toBe(201);
     const reclosed = await a.post('/financials/close', { month: prev });
     expect(reclosed.body.data.snapshot.summary.expense).toBe(35000);
-    expect(late.status).toBe(201);
     const audit = (await a.get('/audit?entity=period')).body.data.map((r) => r.action);
     expect(audit).toEqual(expect.arrayContaining(['close', 'reopen']));
   });

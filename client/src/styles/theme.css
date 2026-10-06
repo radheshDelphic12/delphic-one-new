@@ -17,35 +17,43 @@
 }
 
 .theme-zephyr {
-  --p-50: 240 247 242;
-  --p-100: 220 235 224;
-  --p-200: 188 217 196;
-  --p-300: 148 194 162;
-  --p-400: 106 167 126;
-  --p-500: 91 163 114;
-  --p-600: 70 138 92;
-  --p-700: 56 111 74;
-  --p-800: 47 90 61;
-  --p-900: 38 72 50;
+  /* Taken from the logo: warm charcoal mark and an earth-brown base bar.
+     Charcoal is the working colour; the earth tone is the accent. */
+  --p-50: 246 244 241;
+  --p-100: 236 232 226;
+  --p-200: 219 212 203;
+  --p-300: 186 176 164;
+  --p-400: 140 128 116;
+  --p-500: 105 96 88;
+  --p-600: 77 72 68;
+  --p-700: 58 54 51;
+  --p-800: 44 41 39;
+  --p-900: 32 30 29;
 
-  --color-bg: 246 249 246;
-  --color-sidebar: 238 245 240;
-  --color-border: 224 233 226;
-  --color-border-subtle: 232 239 234;
-  --color-primary: 70 138 92;
-  --color-primary-soft: 240 247 242;
+  --color-bg: 233 230 225;
+  --color-sidebar: 223 219 212;
+  --color-border: 205 199 190;
+  --color-border-subtle: 214 209 201;
+  --zx-surface: 248 246 243;
+  --color-primary: 77 72 68;
+  --color-primary-soft: 246 244 241;
 
   /* Logo accents */
-  --zx-charcoal: 85 85 85;
+  --zx-charcoal: 89 89 89;
   --zx-earth: 139 106 86;
 }
 
 .theme-zephyr .dashboard-canvas-glow {
   background-image:
-    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(91 163 114 / 0.1), transparent 58%),
-    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(139 106 86 / 0.05), transparent 52%);
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(139 106 86 / 0.1), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(58 54 51 / 0.06), transparent 52%);
 }
 
 .theme-zephyr .shadow-card {
-  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(70 138 92 / 0.12);
+  box-shadow: 0 1px 2px 0 rgb(32 30 29 / 0.06), 0 8px 24px -6px rgb(32 30 29 / 0.16);
+}
+
+/* Cards, tables, drawers and modals use a soft warm off-white instead of glaring pure white. */
+.theme-zephyr .bg-white {
+  background-color: rgb(var(--zx-surface));
 }

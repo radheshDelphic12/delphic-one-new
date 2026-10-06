@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { History, Landmark, Plus, Tags, Trash2 } from 'lucide-react';
+import { Briefcase, History, Landmark, Plus, Tags, Trash2 } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 import { useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
+import { SERVICE_META, useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 
 const TABS = [
+  { key: 'services', label: 'Services', icon: Briefcase },
   { key: 'valuation', label: 'Valuation', icon: Landmark },
   { key: 'categories', label: 'Categories', icon: Tags },
   { key: 'audit', label: 'Audit log', icon: History },
@@ -188,15 +190,61 @@ function AuditTab() {
   );
 }
 
+function ServicesTab() {
+  const { pushError, pushSuccess } = useAlerts();
+  const { services, refresh } = useServiceTypes();
+  const [drafts, setDrafts] = useState({});
+  const [busy, setBusy] = useState('');
+
+  async function save(service, patch) {
+    setBusy(service.key);
+    try {
+      await zephyrApi.updateServiceType(service.key, patch);
+      refresh();
+      setDrafts((d) => ({ ...d, [service.key]: undefined }));
+      pushSuccess('Saved. Reload the page to see the new name everywhere.');
+    } catch (e) {
+      pushError(zephyrError(e, 'Could not save'), 'Could not save');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <section className={card}>
+      <h3 className="font-heading text-sm font-semibold text-tertiary-900">Zephyr services</h3>
+      <p className="mt-1 text-xs text-tertiary-500">The five services every lead and project belongs to. You can rename or hide a service; the underlying service stays the same, so history and reports are not affected.</p>
+      <ul className="mt-4 divide-y">
+        {services.map((s) => {
+          const Icon = SERVICE_META[s.key].icon;
+          const draft = drafts[s.key] ?? s.label;
+          return (
+            <li key={s.key} className="flex flex-wrap items-center gap-3 py-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600"><Icon className="h-4 w-4" /></span>
+              <input className="min-w-[14rem] flex-1 rounded-xl border px-3 py-2 text-sm" value={draft} maxLength={80} aria-label={`${SERVICE_META[s.key].label} name`} onChange={(e) => setDrafts((d) => ({ ...d, [s.key]: e.target.value }))} />
+              <button type="button" className="btn-secondary" disabled={busy === s.key || !draft.trim() || draft.trim() === s.label} onClick={() => save(s, { label: draft.trim() })}>Rename</button>
+              <label className="inline-flex items-center gap-2 text-sm text-tertiary-700">
+                <input type="checkbox" checked={s.active} disabled={busy === s.key} onChange={(e) => save(s, { active: e.target.checked })} />
+                Offered
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export default function ZephyrSettingsPage() {
   const { me, loading } = useZephyr();
-  const [tab, setTab] = useState('valuation');
+  const [tab, setTab] = useState('services');
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading…</div>;
   if (!zxCan(me, 'settings')) return <Navigate to="/zephyr" replace />;
 
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
+      {tab === 'services' && <ServicesTab />}
       {tab === 'valuation' && <ValuationTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'audit' && <AuditTab />}

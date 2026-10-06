@@ -2,7 +2,9 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const { pageArgs, pagination } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
-const { markStale } = require('./periods');
+const { markStale, isClosed } = require('./periods');
+const crypto = require('crypto');
+const { SERVICE_KEYS } = require('./serviceTypes');
 const money = require('./money.service');
 const { ensureCategories } = require('./core.service');
 
@@ -22,6 +24,9 @@ const entryFields = {
   party_id: uuidOrNull,
   work_order_id: uuidOrNull,
   milestone_id: uuidOrNull,
+  service_type: z.preprocess((v) => (v === '' ? null : v), z.enum(SERVICE_KEYS).nullable().optional()),
+  property_id: uuidOrNull,
+  unit_id: uuidOrNull,
   amount: z.coerce.number().positive().max(1e13),
   tax: z.preprocess((v) => (v === '' || v === null ? 0 : v), z.coerce.number().min(0).max(1e13)),
   status: z.enum(STATUSES),
@@ -38,6 +43,9 @@ const listQuerySchema = z.object({
   project_id: z.string().uuid().optional(),
   party_id: z.string().uuid().optional(),
   category_id: z.string().uuid().optional(),
+  service_type: z.enum(SERVICE_KEYS).optional(),
+  property_id: z.string().uuid().optional(),
+  unit_id: z.string().uuid().optional(),
   from: dateStr.optional(),
   to: dateStr.optional(),
   q: z.string().trim().max(100).optional(),
@@ -67,6 +75,11 @@ function out(e) {
     party_id: e.party_id,
     work_order_id: e.work_order_id,
     milestone_id: e.milestone_id,
+    service_type: e.service_type || e.project?.service_type || null,
+    property_id: e.property_id,
+    unit_id: e.unit_id,
+    source_type: e.source_type,
+    source_id: e.source_id,
     payment_mode: e.payment_mode,
     reference: e.reference,
     description: e.description,
@@ -75,7 +88,7 @@ function out(e) {
 }
 const INCLUDE = {
   category: { select: { id: true, name: true } },
-  project: { select: { id: true, code: true, name: true } },
+  project: { select: { id: true, code: true, name: true, service_type: true } },
   party: { select: { id: true, name: true } },
   work_order: { select: { id: true, wo_number: true } },
   milestone: { select: { id: true, name: true } },
@@ -106,7 +119,22 @@ async function resolveLinks(orgId, m, { categoryChanged }) {
     if (m.project_id && m.project_id !== ms.project_id) return { error: 'link_mismatch' };
     data.project_id = ms.project_id;
   }
-  if (data.project_id && !(await prisma.zxProject.findFirst({ where: { id: data.project_id, org_id: orgId, deleted_at: null }, select: { id: true } }))) return { error: 'link_not_found' };
+  let project = null;
+  if (data.project_id) {
+    project = await prisma.zxProject.findFirst({ where: { id: data.project_id, org_id: orgId, deleted_at: null }, select: { id: true, service_type: true } });
+    if (!project) return { error: 'link_not_found' };
+  }
+  if (data.property_id) {
+    const prop = await prisma.zxProperty.findFirst({ where: { id: data.property_id, org_id: orgId, deleted_at: null }, select: { id: true } });
+    if (!prop) return { error: 'link_not_found' };
+  }
+  if (data.unit_id) {
+    if (!data.property_id) return { error: 'unit_needs_property' };
+    const unit = await prisma.zxPropertyUnit.findFirst({ where: { id: data.unit_id, property_id: data.property_id, org_id: orgId, deleted_at: null }, select: { id: true } });
+    if (!unit) return { error: 'link_mismatch' };
+  }
+  // an entry on a project inherits that project's service unless one was chosen
+  if (!data.service_type && project?.service_type) data.service_type = project.service_type;
   if (data.party_id) {
     const party = await prisma.zxParty.findFirst({ where: { id: data.party_id, org_id: orgId, deleted_at: null }, select: { kind: true } });
     if (!party) return { error: 'link_not_found' };
@@ -123,12 +151,13 @@ async function list(orgId, ctx, query) {
   const where = {
     org_id: orgId,
     deleted_at: null,
-    ...(!ctx.isAdmin ? { type: 'expense', project_id: { not: null } } : {}),
-    ...(query.type && ctx.isAdmin ? { type: query.type } : {}),
+    ...(!ctx.fullLedger ? { type: 'expense', project_id: { not: null } } : {}),
+    ...(query.type && ctx.fullLedger ? { type: query.type } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.project_id ? { project_id: query.project_id } : {}),
     ...(query.party_id ? { party_id: query.party_id } : {}),
     ...(query.category_id ? { category_id: query.category_id } : {}),
+    ...(query.service_type || query.property_id || query.unit_id ? money.entryWhere({ service_type: query.service_type, property_id: query.property_id, unit_id: query.unit_id }) : {}),
     ...(query.from || query.to ? { entry_date: { ...(query.from ? { gte: money.toDate(query.from) } : {}), ...(query.to ? { lte: money.toDate(query.to) } : {}) } } : {}),
     ...(query.q ? { OR: [{ reference: { contains: query.q, mode: 'insensitive' } }, { description: { contains: query.q, mode: 'insensitive' } }] } : {}),
   };
@@ -147,14 +176,21 @@ async function list(orgId, ctx, query) {
 
 async function get(orgId, ctx, id) {
   const e = await prisma.zxLedgerEntry.findFirst({ where: { id, org_id: orgId, deleted_at: null }, include: INCLUDE });
-  if (!e || (!ctx.isAdmin && !managerAllowed(e))) return { error: 'not_found' };
+  if (!e || (!ctx.fullLedger && !managerAllowed(e))) return { error: 'not_found' };
   return { entry: out(e) };
+}
+
+// A closed month is locked: nothing actual may be added, changed or removed inside it until an admin reopens it.
+async function locked(orgId, ...entries) {
+  for (const e of entries) if (e && e.status === 'actual' && (await isClosed(orgId, e.entry_date))) return true;
+  return false;
 }
 
 async function create(orgId, actorId, ctx, input) {
   const resolved = await resolveLinks(orgId, input, { categoryChanged: true });
   if (resolved.error) return resolved;
-  if (!ctx.isAdmin && !managerAllowed(resolved.data)) return { error: 'manager_scope' };
+  if (!ctx.fullLedger && !managerAllowed(resolved.data)) return { error: 'manager_scope' };
+  if (await locked(orgId, resolved.data)) return { error: 'period_closed' };
   const e = await prisma.zxLedgerEntry.create({ data: { org_id: orgId, created_by: actorId, ...resolved.data, entry_date: money.toDate(resolved.data.entry_date) }, include: INCLUDE });
   await writeAudit(null, { orgId, actorId, entity: 'ledger', entityId: e.id, action: 'create', after: snapshot(e) });
   if (e.status === 'actual') await markStale(orgId, e.entry_date);
@@ -163,11 +199,13 @@ async function create(orgId, actorId, ctx, input) {
 
 async function update(orgId, actorId, ctx, id, input) {
   const before = await prisma.zxLedgerEntry.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
-  if (!before || (!ctx.isAdmin && !managerAllowed(before))) return { error: 'not_found' };
+  if (!before || (!ctx.fullLedger && !managerAllowed(before))) return { error: 'not_found' };
+  if (before.source_type) return { error: 'system_entry' };
   const merged = {
     entry_date: dayOf(before.entry_date), type: before.type, category_id: before.category_id, project_id: before.project_id, party_id: before.party_id,
     work_order_id: before.work_order_id, milestone_id: before.milestone_id, amount: num(before.amount), tax: num(before.tax), status: before.status,
-    payment_mode: before.payment_mode, reference: before.reference, description: before.description, ...input,
+    payment_mode: before.payment_mode, reference: before.reference, description: before.description,
+    service_type: before.service_type, property_id: before.property_id, unit_id: before.unit_id, ...input,
   };
   // Changing the project drops links that belong to the old one unless they are re-sent.
   if (input.project_id !== undefined && input.project_id !== before.project_id) {
@@ -180,7 +218,8 @@ async function update(orgId, actorId, ctx, id, input) {
   }
   const resolved = await resolveLinks(orgId, merged, { categoryChanged: input.category_id !== undefined || (input.type && input.type !== before.type) });
   if (resolved.error) return resolved;
-  if (!ctx.isAdmin && !managerAllowed(resolved.data)) return { error: 'manager_scope' };
+  if (!ctx.fullLedger && !managerAllowed(resolved.data)) return { error: 'manager_scope' };
+  if (await locked(orgId, before, resolved.data)) return { error: 'period_closed' };
   const e = await prisma.zxLedgerEntry.update({ where: { id }, data: { ...resolved.data, entry_date: money.toDate(resolved.data.entry_date) }, include: INCLUDE });
   await writeAudit(null, { orgId, actorId, entity: 'ledger', entityId: id, action: 'update', before: snapshot(before), after: snapshot(e) });
   if (before.status === 'actual') await markStale(orgId, before.entry_date);
@@ -191,6 +230,8 @@ async function update(orgId, actorId, ctx, id, input) {
 async function remove(orgId, actorId, id) {
   const before = await prisma.zxLedgerEntry.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
   if (!before) return { error: 'not_found' };
+  if (before.source_type) return { error: 'system_entry' };
+  if (await locked(orgId, before)) return { error: 'period_closed' };
   await prisma.zxLedgerEntry.update({ where: { id }, data: { deleted_at: new Date() } });
   await writeAudit(null, { orgId, actorId, entity: 'ledger', entityId: id, action: 'delete', before: snapshot(before) });
   if (before.status === 'actual') await markStale(orgId, before.entry_date);
@@ -227,12 +268,108 @@ async function importRows(orgId, actorId, rows) {
     if (!parsed.success) { const i = parsed.error.issues[0]; fail(`${i.path.join('.') || 'row'}: ${i.message}`); continue; }
     const resolved = await resolveLinks(orgId, parsed.data, { categoryChanged: false });
     if (resolved.error) { fail(resolved.error.replace(/_/g, ' ')); continue; }
+    if (await locked(orgId, resolved.data)) { fail('that month is closed'); continue; }
     await prisma.zxLedgerEntry.create({ data: { org_id: orgId, created_by: actorId, ...resolved.data, entry_date: money.toDate(resolved.data.entry_date) } });
     if (resolved.data.status === 'actual') await markStale(orgId, resolved.data.entry_date);
     created += 1;
   }
   if (created > 0) await writeAudit(null, { orgId, actorId, entity: 'ledger', action: 'import', after: { created, skipped: skipped.length } });
   return { created, skipped };
+}
+
+// ---- group expenses: one shared cost split across several projects / properties / units ----
+const allocationSchema = z.object({
+  project_id: uuidOrNull,
+  property_id: uuidOrNull,
+  unit_id: uuidOrNull,
+  share: z.coerce.number().positive().max(1e13),
+});
+const groupExpenseSchema = z.object({
+  entry_date: dateStr,
+  category_id: z.string().uuid(),
+  party_id: uuidOrNull,
+  amount: z.coerce.number().positive().max(1e13),
+  tax: z.preprocess((v) => (v === '' || v === null ? 0 : v), z.coerce.number().min(0).max(1e13)).default(0),
+  payment_mode: z.preprocess((v) => (v === '' ? null : v), z.enum(MODES).nullable().optional()),
+  reference: text(120),
+  description: text(500),
+  basis: z.enum(['equal', 'percent', 'amount']).default('equal'),
+  allocations: z.array(allocationSchema).min(2).max(30),
+});
+
+// Splits `total` over shares (equal, percent or fixed amounts); the last row takes the rounding remainder.
+function splitAmounts(total, basis, allocations) {
+  if (basis === 'amount') {
+    const sum = allocations.reduce((a, x) => a + x.share, 0);
+    return Math.abs(sum - total) < 0.01 ? allocations.map((x) => money.round2(x.share)) : null;
+  }
+  const weights = basis === 'equal' ? allocations.map(() => 1) : allocations.map((x) => x.share);
+  const weightSum = weights.reduce((a, b) => a + b, 0);
+  if (basis === 'percent' && Math.abs(weightSum - 100) > 0.01) return null;
+  const parts = weights.map((w) => money.round2((total * w) / weightSum));
+  parts[parts.length - 1] = money.round2(total - parts.slice(0, -1).reduce((a, b) => a + b, 0));
+  return parts;
+}
+
+async function createGroupExpense(orgId, actorId, input) {
+  const amounts = splitAmounts(input.amount, input.basis, input.allocations);
+  if (!amounts) return { error: 'bad_split' };
+  const taxes = splitAmounts(input.tax, 'amount', amounts.map((a) => ({ share: money.round2((input.tax * a) / input.amount) }))) || amounts.map(() => 0);
+  const groupId = crypto.randomUUID();
+  const made = [];
+  for (const [i, alloc] of input.allocations.entries()) {
+    if (!alloc.project_id && !alloc.property_id) return { error: 'allocation_target' };
+    const resolved = await resolveLinks(orgId, { entry_date: input.entry_date, type: 'expense', category_id: input.category_id, project_id: alloc.project_id || null, property_id: alloc.property_id || null, unit_id: alloc.unit_id || null, party_id: input.party_id || null, amount: amounts[i], tax: taxes[i], status: 'actual', payment_mode: input.payment_mode, reference: input.reference, description: input.description }, { categoryChanged: i === 0 });
+    if (resolved.error) return resolved;
+    made.push(resolved.data);
+  }
+  if (await locked(orgId, made[0])) return { error: 'period_closed' };
+  const rows = [];
+  for (const data of made) {
+    rows.push(await prisma.zxLedgerEntry.create({ data: { org_id: orgId, created_by: actorId, ...data, entry_date: money.toDate(data.entry_date), source_type: 'group_expense', source_id: groupId }, include: INCLUDE }));
+  }
+  await writeAudit(null, { orgId, actorId, entity: 'ledger', entityId: groupId, action: 'group_expense', after: { date: input.entry_date, amount: input.amount, parts: rows.length } });
+  await markStale(orgId, input.entry_date);
+  return { group_id: groupId, entries: rows.map(out) };
+}
+
+async function removeGroupExpense(orgId, actorId, groupId) {
+  const rows = await prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, source_type: 'group_expense', source_id: groupId, deleted_at: null } });
+  if (rows.length === 0) return { error: 'not_found' };
+  if (await locked(orgId, ...rows.map((r) => ({ ...r, entry_date: dayOf(r.entry_date) })))) return { error: 'period_closed' };
+  await prisma.zxLedgerEntry.updateMany({ where: { org_id: orgId, source_type: 'group_expense', source_id: groupId }, data: { deleted_at: new Date() } });
+  await writeAudit(null, { orgId, actorId, entity: 'ledger', entityId: groupId, action: 'group_expense_delete', before: { parts: rows.length, amount: money.round2(rows.reduce((a, r) => a + num(r.amount), 0)) } });
+  return { ok: true };
+}
+
+async function listGroupExpenses(orgId) {
+  const rows = await prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, source_type: 'group_expense', deleted_at: null }, include: INCLUDE, orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }] });
+  const groups = new Map();
+  for (const r of rows) {
+    const g = groups.get(r.source_id) || { group_id: r.source_id, entry_date: dayOf(r.entry_date), category: r.category?.name || null, description: r.description, amount: 0, parts: [] };
+    g.amount = money.round2(g.amount + num(r.amount));
+    g.parts.push(out(r));
+    groups.set(r.source_id, g);
+  }
+  return [...groups.values()];
+}
+
+// ---- consulting commission: one revenue entry per project, kept in step with its details ----
+async function bookCommission(orgId, actorId, projectId) {
+  const project = await prisma.zxProject.findFirst({ where: { id: projectId, org_id: orgId, deleted_at: null } });
+  if (!project) return { error: 'not_found' };
+  if (project.service_type !== 'real_estate_consulting') return { error: 'not_consulting' };
+  const d = project.details || {};
+  if (!(Number(d.commission_amount) > 0)) return { error: 'no_commission' };
+  const when = d.closing_date || d.deal_date;
+  if (!when) return { error: 'no_closing_date' };
+  if (when > todayStr()) return { error: 'future_actual' };
+  const posting = require('./ledgerPosting');
+  const existing = await prisma.zxLedgerEntry.findFirst({ where: { org_id: orgId, source_type: 'consulting_commission', source_id: projectId, deleted_at: null } });
+  if (existing) return { error: 'already_booked' };
+  if (!(await posting.periodsOpen(orgId, [when]))) return { error: 'period_closed' };
+  const entry = await posting.post(orgId, actorId, { entry_date: when, type: 'revenue', category: 'Consulting commission', amount: Number(d.commission_amount), project_id: projectId, party_id: project.party_id, description: `Commission ${d.commission_pct}% on ${money.round2(Number(d.property_value)).toLocaleString('en-IN')} - ${project.name}`, service_type: 'real_estate_consulting', source_type: 'consulting_commission', source_id: projectId });
+  return { entry };
 }
 
 async function projectMoney(orgId, ctx, projectId) {
@@ -298,4 +435,5 @@ async function partyStatement(orgId, partyId) {
   };
 }
 
-module.exports = { createEntrySchema, updateEntrySchema, importSchema, listQuerySchema, list, get, create, update, remove, importRows, projectMoney, partyStatement };
+module.exports = {
+  groupExpenseSchema, createGroupExpense, removeGroupExpense, listGroupExpenses, bookCommission, createEntrySchema, updateEntrySchema, importSchema, listQuerySchema, list, get, create, update, remove, importRows, projectMoney, partyStatement };

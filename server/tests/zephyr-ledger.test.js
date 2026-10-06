@@ -39,8 +39,8 @@ async function world(token) {
   const cat = (kind, name) => cats.find((c) => c.kind === kind && c.name === name).id;
   const client = (await a.post('/parties', { name: 'Skyline Builders', kind: 'client' })).body.data;
   const vendor = (await a.post('/parties', { name: 'Steel Supplier', kind: 'vendor' })).body.data;
-  const project = (await a.post('/projects', { name: 'Tower A', kind: 'client', party_id: client.id, status: 'active', budget: 1000000, contract_value: 5000000 })).body.data;
-  const other = (await a.post('/projects', { name: 'Tower B', kind: 'client', status: 'active' })).body.data;
+  const project = (await a.post('/projects', { service_type: 'civil_construction', name: 'Tower A', kind: 'client', party_id: client.id, status: 'active', budget: 1000000, contract_value: 5000000 })).body.data;
+  const other = (await a.post('/projects', { service_type: 'civil_construction', name: 'Tower B', kind: 'client', status: 'active' })).body.data;
   const ms = (await a.post(`/projects/${project.id}/milestones`, { name: 'Slab', billing_amount: 100000 })).body.data.milestones[0];
   const wo = (await a.post(`/projects/${project.id}/work-orders`, { vendor_id: vendor.id, scope: 'Rebar', value: 400000, status: 'issued' })).body.data.work_orders[0];
   return { a, cat, client, vendor, project, other, ms, wo };

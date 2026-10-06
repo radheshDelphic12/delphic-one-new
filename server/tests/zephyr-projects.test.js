@@ -35,7 +35,7 @@ const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().s
 
 async function projectWithParty(a, extra = {}) {
   const party = (await a.post('/parties', { name: `Client ${Math.random()}`, kind: 'client' })).body.data;
-  const res = await a.post('/projects', { name: 'Tower A', kind: 'client', party_id: party.id, contract_value: 9000000, ...extra });
+  const res = await a.post('/projects', { service_type: 'civil_construction', name: 'Tower A', kind: 'client', party_id: party.id, contract_value: 9000000, ...extra });
   return { party, project: res.body.data, res };
 }
 
@@ -45,8 +45,8 @@ describe('zephyr projects CRUD', () => {
     const a = api(token);
     const { party, res } = await projectWithParty(a, { manager_id: admin.id, start_date: day(0), end_date: day(90) });
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ code: 'ZX-P-001', status: 'planning', contract_value: 9000000, progress: 0 });
-    const second = await a.post('/projects', { name: 'Own villas', kind: 'self', budget: 4000000 });
+    expect(res.body.data).toMatchObject({ code: 'ZX-P-001', status: 'planned', contract_value: 9000000, progress: 0 });
+    const second = await a.post('/projects', { service_type: 'civil_construction', name: 'Own villas', kind: 'self', budget: 4000000 });
     expect(second.body.data.code).toBe('ZX-P-002');
     const list = (await a.get('/projects')).body.data;
     expect(list).toHaveLength(2);
@@ -62,12 +62,12 @@ describe('zephyr projects CRUD', () => {
     const { org, token } = await setupZephyr();
     const a = api(token);
     const vendor = (await a.post('/parties', { name: 'Only Vendor', kind: 'vendor' })).body.data;
-    expect((await a.post('/projects', { name: 'X', kind: 'client', party_id: vendor.id })).status).toBe(422);
-    expect((await a.post('/projects', { name: 'X', kind: 'self', party_id: vendor.id })).status).toBe(201);
+    expect((await a.post('/projects', { service_type: 'civil_construction', name: 'X', kind: 'client', party_id: vendor.id })).status).toBe(422);
+    expect((await a.post('/projects', { service_type: 'civil_construction', name: 'X', kind: 'self', party_id: vendor.id })).status).toBe(201);
     const staff = await addMember(org, 'staff');
-    expect((await a.post('/projects', { name: 'Y', manager_id: staff.user.id })).status).toBe(422);
-    expect((await a.post('/projects', { name: 'Y', start_date: day(5), end_date: day(1) })).status).toBe(422);
-    const p = (await a.post('/projects', { name: 'Edit me' })).body.data;
+    expect((await a.post('/projects', { service_type: 'civil_construction', name: 'Y', manager_id: staff.user.id })).status).toBe(422);
+    expect((await a.post('/projects', { service_type: 'civil_construction', name: 'Y', start_date: day(5), end_date: day(1) })).status).toBe(422);
+    const p = (await a.post('/projects', { service_type: 'civil_construction', name: 'Edit me' })).body.data;
     const edited = await a.patch(`/projects/${p.id}`, { status: 'active', location: 'Indore', progress_pct: 40 });
     expect(edited.body.data).toMatchObject({ status: 'active', location: 'Indore', progress: 40 });
     const audit = (await a.get('/audit?entity=project')).body.data.map((r) => r.action);
@@ -77,7 +77,7 @@ describe('zephyr projects CRUD', () => {
 
 describe('zephyr lead -> project conversion', () => {
   async function wonLead(a, extra = {}) {
-    const lead = (await a.post('/leads', { name: 'Won deal', estimated_value: 7000000, location: 'Pune', ...extra })).body.data;
+    const lead = (await a.post('/leads', { service_type: 'civil_construction', name: 'Won deal', estimated_value: 7000000, location: 'Pune', ...extra })).body.data;
     await a.post(`/leads/${lead.id}/stage`, { stage: 'won' });
     return lead;
   }
@@ -86,31 +86,45 @@ describe('zephyr lead -> project conversion', () => {
     const { token } = await setupZephyr();
     const a = api(token);
     const party = (await a.post('/parties', { name: 'Buyer', kind: 'client' })).body.data;
-    const open = (await a.post('/leads', { name: 'Not yet' })).body.data;
+    const open = (await a.post('/leads', { service_type: 'civil_construction', name: 'Not yet' })).body.data;
     expect((await a.post(`/projects/from-lead/${open.id}`)).status).toBe(409);
 
     const lead = await wonLead(a, { party_id: party.id });
     const res = await a.post(`/projects/from-lead/${lead.id}`, { start_date: day(7) });
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ kind: 'client', name: 'Won deal', contract_value: 7000000, budget: null, location: 'Pune', lead_id: lead.id });
+    expect(res.body.data).toMatchObject({ kind: 'client', name: 'Won deal', contract_value: 7000000, location: 'Pune', lead_id: lead.id, service_type: 'civil_construction' });
     expect(res.body.data.party.id).toBe(party.id);
     expect((await a.post(`/projects/from-lead/${lead.id}`)).status).toBe(409);
     expect((await a.get(`/leads/${lead.id}`)).body.data.project_id).toBe(res.body.data.id);
     expect((await a.post(`/leads/${lead.id}/reopen`, { reason: 'try' })).status).toBe(409);
   });
 
-  test('a self-project lead becomes a self project with a budget', async () => {
-    const { token } = await setupZephyr();
+  test('conversion carries service, assignees, dates, profit and details; the lead stays for history', async () => {
+    const { org, token } = await setupZephyr();
     const a = api(token);
-    const lead = await wonLead(a, { category: 'self_project', self_project_basis: 'investor', basis_value: 'R. Mehta' });
+    const emp = await prisma.zxPerson.create({ data: { org_id: org.id, name: 'Lead Emp', kind: 'employee' } });
+    const con = await prisma.zxPerson.create({ data: { org_id: org.id, name: 'Lead Con', kind: 'contractor' } });
+    const lead = await wonLead(a, {
+      service_type: 'interior_design', assignee_id: emp.id, contractor_id: con.id, expected_start: day(3), expected_end: day(60),
+      expected_profit: 900000, description: 'Flat renovation', details: [{ label: 'Floor', value: '12' }],
+    });
     const res = await a.post(`/projects/from-lead/${lead.id}`);
-    expect(res.body.data).toMatchObject({ kind: 'self', budget: 7000000, contract_value: null });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({
+      service_type: 'interior_design', status: 'planned', contract_value: 7000000, expected_profit: 900000, expected_profit_calc: 900000,
+      description: 'Flat renovation', start_date: expect.stringContaining(day(3)), end_date: expect.stringContaining(day(60)),
+    });
+    expect(res.body.data.assignee.name).toBe('Lead Emp');
+    expect(res.body.data.contractor.name).toBe('Lead Con');
+    expect(res.body.data.details).toEqual({ lead_details: [{ label: 'Floor', value: '12' }] });
+    const kept = (await a.get(`/leads/${lead.id}`)).body.data;
+    expect(kept).toMatchObject({ stage: 'won', project_id: res.body.data.id, code: 'ZL-0001' });
   });
 
   test('another org cannot convert a lead it does not own', async () => {
     const a = await setupZephyr('zephyr-a');
     const b = await setupZephyr('zephyr-b');
-    const lead = (await api(a.token).post('/leads', { name: 'A deal' })).body.data;
+    const lead = (await api(a.token).post('/leads', { service_type: 'civil_construction', name: 'A deal' })).body.data;
     await api(a.token).post(`/leads/${lead.id}/stage`, { stage: 'won' });
     expect((await api(b.token).post(`/projects/from-lead/${lead.id}`)).status).toBe(404);
   });
@@ -200,11 +214,11 @@ describe('zephyr projects access and isolation', () => {
     const { org, token } = await setupZephyr();
     const manager = await addMember(org, 'manager');
     const staff = await addMember(org, 'staff');
-    const p = (await api(manager.token).post('/projects', { name: 'By manager', manager_id: manager.user.id })).body.data;
+    const p = (await api(manager.token).post('/projects', { service_type: 'civil_construction', name: 'By manager', manager_id: manager.user.id })).body.data;
     expect((await api(manager.token).patch(`/projects/${p.id}`, { status: 'active' })).status).toBe(200);
     expect((await api(manager.token).del(`/projects/${p.id}`)).status).toBe(403);
     expect((await api(staff.token).get('/projects')).status).toBe(403);
-    expect((await api(staff.token).post('/projects', { name: 'no' })).status).toBe(403);
+    expect((await api(staff.token).post('/projects', { service_type: 'civil_construction', name: 'no' })).status).toBe(403);
     expect((await api(token).del(`/projects/${p.id}`)).status).toBe(200);
     expect((await api(token).get(`/projects/${p.id}`)).status).toBe(404);
   });

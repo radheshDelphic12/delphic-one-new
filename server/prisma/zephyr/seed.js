@@ -21,11 +21,12 @@ const LOGINS = [
   { name: 'Zephyr Admin', email: 'admin@zephyrinfra.in', role: 'admin', access_role: null },
   { name: 'Meera Kapoor', email: 'manager@zephyrinfra.in', role: 'employee', access_role: 'manager' },
   { name: 'Rohan Verma', email: 'staff@zephyrinfra.in', role: 'employee', access_role: 'staff' },
+  { name: 'Priya Nair', email: 'finance@zephyrinfra.in', role: 'employee', access_role: 'finance' },
 ];
 const ROSTER_ONLY = ['Site Supervisor - Arjun Nair', 'Civil Contractor - Patel Constructions', 'Electrician - Sanjay Rao'];
 const CATEGORIES = {
-  revenue: ['Project billing', 'Property sale', 'Rental income', 'Other income'],
-  expense: ['Materials', 'Labour', 'Subcontractor', 'Equipment', 'Site overheads', 'Office', 'Other expense'],
+  revenue: ['Project billing', 'Property sale', 'Rental income', 'Consulting commission', 'Other income'],
+  expense: ['Materials', 'Labour', 'Subcontractor', 'Equipment', 'Site overheads', 'Office', 'Maintenance & repairs', 'Property tax & utilities', 'Other expense'],
 };
 
 async function main() {
@@ -39,6 +40,7 @@ async function main() {
         org_group_id: group.id,
         name: 'Zephyr Infrastructure',
         slug: 'zephyr',
+        logo_url: '/zephyr-logo.png',
         timezone: 'Asia/Kolkata',
         default_currency: 'INR',
         enabled_modules: ['zephyr'],
@@ -49,6 +51,8 @@ async function main() {
     org = await prisma.org.update({ where: { id: org.id }, data: { enabled_modules: ['zephyr'] } });
     console.log('  ~ org modules set to [zephyr]');
   }
+
+  if (org.logo_url !== '/zephyr-logo.png') org = await prisma.org.update({ where: { id: org.id }, data: { logo_url: '/zephyr-logo.png' } });
 
   const password_hash = await bcrypt.hash(PASSWORD, 10);
   for (const login of LOGINS) {
@@ -64,6 +68,9 @@ async function main() {
       await prisma.zxPerson.create({ data: { org_id: org.id, name: login.name, user_id: user.id, access_role: login.access_role } });
     }
   }
+
+  // ZEPHYR_RESET=1 clears the demo business (never the company, logins or settings) so it can be rebuilt.
+  if (process.env.ZEPHYR_RESET === '1') await require('./demo').resetDemo(org.id);
 
   // The demo step renames these placeholders, so only create them on the very first run.
   if ((await prisma.zxParty.count({ where: { org_id: org.id } })) === 0) {
@@ -96,6 +103,7 @@ async function main() {
   console.log(`  admin    admin@zephyrinfra.in / ${PASSWORD}`);
   console.log(`  manager  manager@zephyrinfra.in / ${PASSWORD}`);
   console.log(`  staff    staff@zephyrinfra.in / ${PASSWORD}`);
+  console.log(`  finance  finance@zephyrinfra.in / ${PASSWORD}`);
 }
 
 main()

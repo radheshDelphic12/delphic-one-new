@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const money = require('./money.service');
+const serviceTypes = require('./serviceTypes');
+const properties = require('./properties.service');
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const querySchema = z
@@ -8,6 +10,10 @@ const querySchema = z
     preset: z.enum(['month', 'last_month', 'quarter', 'fy', 't12', 'custom']).default('month'),
     from: dateStr.optional(),
     to: dateStr.optional(),
+    service_type: serviceTypes.serviceKey.optional(),
+    property_id: z.string().uuid().optional(),
+    project_id: z.string().uuid().optional(),
+    party_id: z.string().uuid().optional(),
   })
   .superRefine((v, ctx) => {
     if (v.preset !== 'custom') return;
@@ -25,8 +31,8 @@ function previousRange(from, to) {
   return { from: prevFrom, to: prevTo };
 }
 
-async function byCategory(orgId, from, to) {
-  const entries = await money.actualEntries(orgId, from, to);
+async function byCategory(orgId, from, to, filters = {}) {
+  const entries = await money.actualEntries(orgId, from, to, {}, filters);
   const cats = await prisma.zxCategory.findMany({ where: { org_id: orgId }, select: { id: true, name: true } });
   const names = new Map(cats.map((c) => [c.id, c.name]));
   const acc = new Map();
@@ -46,15 +52,41 @@ async function overview(orgId, ctx, query) {
   const includeSalaries = ctx.isAdmin;
   const endMonth = range.to.slice(0, 7);
   const prev = previousRange(range.from, range.to);
-  const [current, previous, trend, projects, categories, valuation] = await Promise.all([
-    money.summary(orgId, range.from, range.to, { includeSalaries }),
-    money.summary(orgId, prev.from, prev.to, { includeSalaries }),
-    money.monthly(orgId, money.addMonths(endMonth, -11), endMonth, { includeSalaries }),
-    money.byProject(orgId, range.from, range.to, { includeSalaries }),
-    byCategory(orgId, range.from, range.to),
+  const filters = Object.fromEntries(['service_type', 'property_id', 'project_id', 'party_id'].filter((k) => query[k]).map((k) => [k, query[k]]));
+  const opts = { includeSalaries, filters };
+  const [current, previous, trend, projects, categories, valuation, byService, byProperty, byParty, labels, props, parties] = await Promise.all([
+    money.summary(orgId, range.from, range.to, opts),
+    money.summary(orgId, prev.from, prev.to, opts),
+    money.monthly(orgId, money.addMonths(endMonth, -11), endMonth, opts),
+    money.byProject(orgId, range.from, range.to, opts),
+    byCategory(orgId, range.from, range.to, filters),
     ctx.isAdmin ? money.valuation(orgId) : null,
+    money.byDimension(orgId, range.from, range.to, 'service', opts),
+    ctx.canFinance ? money.byDimension(orgId, range.from, range.to, 'property', opts) : [],
+    money.byDimension(orgId, range.from, range.to, 'party', opts),
+    serviceTypes.labels(orgId),
+    ctx.canFinance ? prisma.zxProperty.findMany({ where: { org_id: orgId }, select: { id: true, name: true, code: true } }) : [],
+    prisma.zxParty.findMany({ where: { org_id: orgId }, select: { id: true, name: true } }),
   ]);
-  return { range, summary: current, previous: { ...prev, revenue: previous.revenue, expense: previous.expense, salaries: previous.salaries, profit: previous.profit }, trend, by_project: projects, by_category: categories, valuation };
+  const propName = new Map(props.map((p) => [p.id, `${p.code} ${p.name}`]));
+  const partyName = new Map(parties.map((p) => [p.id, p.name]));
+  const named = (rows, nameOf, none) => rows.map((r) => ({ ...r, name: r.key ? nameOf(r.key) : none })).sort((x, y) => y.revenue + y.expense - (x.revenue + x.expense));
+  // Appreciation is shown beside the P&L, never inside it: it is unrealized until a property sells.
+  const unrealized = ctx.canFinance && !query.service_type && !query.project_id && !query.party_id ? await properties.summary(orgId, { canFinance: true }).then((p) => ({ valuation: p.valuation, total_invested: p.total_invested, appreciation: p.appreciation, appreciation_pct: p.appreciation_pct, valued_properties: p.valued_properties })) : null;
+  return {
+    range,
+    filters,
+    summary: current,
+    previous: { ...prev, revenue: previous.revenue, expense: previous.expense, salaries: previous.salaries, profit: previous.profit },
+    trend,
+    by_project: projects,
+    by_category: categories,
+    by_service: named(byService, (k) => labels.get(k) || k, 'No service'),
+    by_property: named(byProperty, (k) => propName.get(k) || 'Removed property', 'No property'),
+    by_party: named(byParty, (k) => partyName.get(k) || 'Removed party', 'No client / vendor'),
+    valuation,
+    unrealized,
+  };
 }
 
 // Pay slips behind the Salaries tile (admin only).

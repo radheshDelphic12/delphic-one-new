@@ -35,7 +35,7 @@ const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().s
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 async function makeProject(a, name = 'Tower A', extra = {}) {
-  return (await a.post('/projects', { name, kind: 'client', ...extra })).body.data;
+  return (await a.post('/projects', { service_type: 'civil_construction', name, kind: 'client', ...extra })).body.data;
 }
 async function makePerson(a, body) {
   return (await a.post('/people', body)).body.data;

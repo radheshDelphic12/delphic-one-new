@@ -55,11 +55,41 @@ function resolveRange(preset = 'month', from, to) {
   }
 }
 
-async function actualEntries(orgId, from, to, extra = {}) {
-  return prisma.zxLedgerEntry.findMany({
-    where: { org_id: orgId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) }, ...extra },
-    select: { entry_date: true, type: true, amount: true, tax: true, project_id: true, party_id: true, category_id: true },
+// Report filters: service (an entry's own service, else its project's), property, unit, project, client / vendor.
+function entryWhere(f = {}) {
+  const and = [];
+  if (f.service_type) and.push({ OR: [{ service_type: f.service_type }, { service_type: null, project: { service_type: f.service_type } }] });
+  if (f.property_id) and.push({ property_id: f.property_id });
+  if (f.unit_id) and.push({ unit_id: f.unit_id });
+  if (f.project_id) and.push({ project_id: f.project_id });
+  if (f.party_id) and.push({ party_id: f.party_id });
+  return and.length ? { AND: and } : {};
+}
+
+async function actualEntries(orgId, from, to, extra = {}, filters = {}) {
+  const rows = await prisma.zxLedgerEntry.findMany({
+    where: { org_id: orgId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) }, ...extra, ...entryWhere(filters) },
+    select: { entry_date: true, type: true, amount: true, tax: true, project_id: true, party_id: true, category_id: true, service_type: true, property_id: true, unit_id: true, source_type: true, project: { select: { service_type: true } } },
   });
+  return rows.map(({ project, ...e }) => ({ ...e, service: e.service_type || project?.service_type || null }));
+}
+
+// Pay slips are split over projects, so they follow a filter only through its projects: a property or
+// client / vendor filter cannot be attributed to salaries, so those reports leave salaries out.
+async function salaryScope(orgId, f = {}) {
+  if (f.property_id || f.unit_id || f.party_id) return { mode: 'none' };
+  if (f.project_id) return { mode: 'projects', ids: new Set([f.project_id]) };
+  if (f.service_type) {
+    const rows = await prisma.zxProject.findMany({ where: { org_id: orgId, service_type: f.service_type }, select: { id: true } });
+    return { mode: 'projects', ids: new Set(rows.map((r) => r.id)) };
+  }
+  return { mode: 'all' };
+}
+function slipPortion(slip, scope) {
+  if (scope.mode === 'none') return 0;
+  if (scope.mode === 'all') return num(slip.net);
+  const split = Array.isArray(slip.project_split) ? slip.project_split : [];
+  return split.filter((x) => scope.ids.has(x.project_id)).reduce((a, x) => a + num(x.amount), 0);
 }
 
 // Approved + paid slips whose month falls in [from, to].
@@ -70,8 +100,10 @@ async function slips(orgId, from, to) {
   });
 }
 
-async function summary(orgId, from, to, { includeSalaries = true } = {}) {
-  const [entries, slipRows] = await Promise.all([actualEntries(orgId, from, to), includeSalaries ? slips(orgId, from, to) : []]);
+async function summary(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
+  const scope = await salaryScope(orgId, filters);
+  if (scope.mode === 'none') includeSalaries = false;
+  const [entries, slipRows] = await Promise.all([actualEntries(orgId, from, to, {}, filters), includeSalaries ? slips(orgId, from, to) : []]);
   let revenue = 0;
   let expense = 0;
   let taxIn = 0;
@@ -85,7 +117,7 @@ async function summary(orgId, from, to, { includeSalaries = true } = {}) {
       taxOut += num(e.tax);
     }
   }
-  const salaries = slipRows.reduce((a, s) => a + num(s.net), 0);
+  const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0);
   const profit = revenue - expense - salaries;
   return {
     from,
@@ -102,9 +134,11 @@ async function summary(orgId, from, to, { includeSalaries = true } = {}) {
 }
 
 // One row per month in [fromMonth, toMonth], zero-filled.
-async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true } = {}) {
+async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filters = {} } = {}) {
+  const scope = await salaryScope(orgId, filters);
+  if (scope.mode === 'none') includeSalaries = false;
   const [entries, slipRows] = await Promise.all([
-    actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth)),
+    actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth), {}, filters),
     includeSalaries ? slips(orgId, monthStart(fromMonth), monthEnd(toMonth)) : [],
   ]);
   const rows = new Map(monthsBetween(fromMonth, toMonth).map((m) => [m, { month: m, revenue: 0, expense: 0, salaries: 0 }]));
@@ -114,7 +148,7 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true } = {
   }
   for (const s of slipRows) {
     const row = rows.get(s.month);
-    if (row) row.salaries += num(s.net);
+    if (row) row.salaries += slipPortion(s, scope);
   }
   return [...rows.values()].map((r) => ({
     month: r.month,
@@ -126,9 +160,11 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true } = {
 }
 
 // Profit per project; money with no project, and slips with no split, land in an "Unallocated" row (project_id null).
-async function byProject(orgId, from, to, { includeSalaries = true } = {}) {
+async function byProject(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
+  const scope = await salaryScope(orgId, filters);
+  if (scope.mode === 'none') includeSalaries = false;
   const [entries, slipRows, projects] = await Promise.all([
-    actualEntries(orgId, from, to),
+    actualEntries(orgId, from, to, {}, filters),
     includeSalaries ? slips(orgId, from, to) : [],
     prisma.zxProject.findMany({ where: { org_id: orgId, deleted_at: null }, select: { id: true, code: true, name: true, kind: true } }),
   ]);
@@ -140,8 +176,9 @@ async function byProject(orgId, from, to, { includeSalaries = true } = {}) {
   for (const e of entries) row(e.project_id || null)[e.type === 'revenue' ? 'revenue' : 'expense'] += num(e.amount);
   for (const s of slipRows) {
     const split = Array.isArray(s.project_split) ? s.project_split : [];
-    if (split.length === 0) row(null).salaries += num(s.net);
-    else for (const part of split) row(part.project_id).salaries += num(part.amount);
+    if (split.length === 0) {
+      if (scope.mode === 'all') row(null).salaries += num(s.net);
+    } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(part.project_id).salaries += num(part.amount);
   }
   const meta = new Map(projects.map((p) => [p.id, p]));
   return [...rows.values()]
@@ -156,6 +193,41 @@ async function byProject(orgId, from, to, { includeSalaries = true } = {}) {
       profit: round2(r.revenue - r.expense - (includeSalaries ? r.salaries : 0)),
     }))
     .sort((a, b) => b.profit - a.profit);
+}
+
+// Revenue, expense and profit grouped by one dimension: 'service' | 'property' | 'party'.
+// Salaries are attributed only to the service dimension (through each slip's projects).
+async function byDimension(orgId, from, to, dim, { includeSalaries = true, filters = {} } = {}) {
+  const scope = await salaryScope(orgId, filters);
+  const withSalaries = includeSalaries && scope.mode !== 'none' && dim === 'service';
+  const [entries, slipRows, projects] = await Promise.all([
+    actualEntries(orgId, from, to, {}, filters),
+    withSalaries ? slips(orgId, from, to) : [],
+    withSalaries ? prisma.zxProject.findMany({ where: { org_id: orgId }, select: { id: true, service_type: true } }) : [],
+  ]);
+  const rows = new Map();
+  const row = (key) => {
+    if (!rows.has(key)) rows.set(key, { key, revenue: 0, expense: 0, salaries: 0 });
+    return rows.get(key);
+  };
+  const keyOf = (e) => (dim === 'service' ? e.service : dim === 'property' ? e.property_id : e.party_id) || null;
+  for (const e of entries) row(keyOf(e))[e.type === 'revenue' ? 'revenue' : 'expense'] += num(e.amount);
+  if (withSalaries) {
+    const serviceOf = new Map(projects.map((p) => [p.id, p.service_type]));
+    for (const s of slipRows) {
+      const split = Array.isArray(s.project_split) ? s.project_split : [];
+      if (split.length === 0) {
+        if (scope.mode === 'all') row(null).salaries += num(s.net);
+      } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(serviceOf.get(part.project_id) || null).salaries += num(part.amount);
+    }
+  }
+  return [...rows.values()].map((r) => ({
+    key: r.key,
+    revenue: round2(r.revenue),
+    expense: round2(r.expense),
+    salaries: withSalaries ? round2(r.salaries) : null,
+    profit: round2(r.revenue - r.expense - (withSalaries ? r.salaries : 0)),
+  }));
 }
 
 // Month-by-month figures for one project (salaries come from the slips' project split).
@@ -190,5 +262,5 @@ async function valuation(orgId) {
 
 module.exports = {
   round2, num, dayOf, monthOf, toDate, addMonths, monthsBetween, monthStart, monthEnd, currentMonth, resolveRange,
-  actualEntries, slips, summary, monthly, byProject, byProjectMonthly, valuation,
+  actualEntries, entryWhere, slips, summary, monthly, byProject, byDimension, byProjectMonthly, valuation,
 };

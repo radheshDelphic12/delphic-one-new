@@ -6,7 +6,7 @@ const env = require('../../config/env');
 const { writeAudit } = require('./audit');
 
 const ALLOWED_EXT = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.xlsx', '.csv'];
-const CATEGORIES = ['agreement', 'work_order', 'license', 'gst', 'pan', 'insurance', 'invoice', 'other'];
+const CATEGORIES = ['agreement', 'lease', 'sale_deed', 'valuation', 'tax', 'work_order', 'license', 'gst', 'pan', 'insurance', 'invoice', 'other'];
 
 // Which Zephyr capability lets a role touch documents of each owner type, and
 // the table that proves the owner exists in the caller's org. Later phases add
@@ -15,6 +15,9 @@ const OWNERS = {
   entry: { cap: 'ledger', exists: (orgId, id) => prisma.zxLedgerEntry.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
   project: { cap: 'projects', exists: (orgId, id) => prisma.zxProject.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
   lead: { cap: 'leads', exists: (orgId, id) => prisma.zxLead.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
+  property: { cap: 'properties', exists: (orgId, id) => prisma.zxProperty.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
+  tenant: { cap: 'rent', exists: (orgId, id) => prisma.zxTenant.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
+  lease: { cap: 'rent', exists: (orgId, id) => prisma.zxLease.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
   party: { cap: 'parties', exists: (orgId, id) => prisma.zxParty.findFirst({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true } }) },
 };
 

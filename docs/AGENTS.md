@@ -34,6 +34,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [RD-NOTIFICATIONS-AND-CALENDAR.md](features/RD-NOTIFICATIONS-AND-CALENDAR.md) — role-aware in-app notifications, interview calendar (month + agenda), interviewer feedback, reminder cron; email + MS Teams extension points (Built 2026-09-04, branch feature/notifications-calendar)
 - [FINANCE-CALCULATIONS-AND-LOCKING.md](features/FINANCE-CALCULATIONS-AND-LOCKING.md) — attendance-based salary, Managed Services billing on the project calendar, overtime, resource revenue, vendor payments, and the shared lock / version / change-detection system behind Live Analytics → Financials (Built 2026-09-29)
 - [ZEPHYR-INFRASTRUCTURE.md](features/ZEPHYR-INFRASTRUCTURE.md) — Zephyr Infrastructure company workspace: standalone `Zx` module (no Delphic Global reuse), six sections only, phases Z0-Z8 all built + live work log (branch `zephyr-bug-fix-new-implementation`, 2026-10)
+- [ZEPHYR-REAL-ESTATE-PLAN.md](features/ZEPHYR-REAL-ESTATE-PLAN.md) — Zephyr real-estate/construction brief: plan + work log R0-R9 (services, properties, units, rent, trading, consulting, tasks, finance role, service P&L); phases R0-R9 built and tested locally 2026-10-06 (log in section 8)
 
 ### UI
 

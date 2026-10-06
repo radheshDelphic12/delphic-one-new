@@ -2,9 +2,10 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const { pageArgs, pagination } = require('../../lib/vertical');
 const { writeAudit } = require('./audit');
+const { SERVICE_KEYS } = require('./serviceTypes');
 
 const KINDS = ['client', 'vendor', 'both'];
-const STATUSES = ['active', 'inactive'];
+const STATUSES = ['active', 'inactive', 'hold'];
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
@@ -26,6 +27,12 @@ const partyFields = {
   pan: upperId(PAN_RE, 'PAN must be 10 characters, e.g. ABCDE1234F'),
   address: text(500),
   city: text(120),
+  state: text(120),
+  country: text(120),
+  company_name: text(200),
+  interested_services: z.array(z.enum(SERVICE_KEYS)).max(5).optional(),
+  vendor_category: text(120),
+  materials_services: text(1000),
   payment_terms: text(200),
   status: z.enum(STATUSES),
   notes: text(2000),
@@ -37,6 +44,8 @@ const importSchema = z.object({ rows: z.array(z.record(z.any())).min(1).max(500)
 const listQuerySchema = z.object({
   tab: z.enum(['all', 'client', 'vendor']).default('all'),
   status: z.enum([...STATUSES, 'all']).default('all'),
+  service: z.enum(SERVICE_KEYS).optional(),
+  vendor_category: z.string().trim().max(120).optional(),
   q: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -52,7 +61,7 @@ async function nameTaken(orgId, name, excludeId) {
   return Boolean(found);
 }
 
-const snapshot = (p) => ({ kind: p.kind, name: p.name, status: p.status, gstin: p.gstin, pan: p.pan });
+const snapshot = (p) => ({ kind: p.kind, name: p.name, status: p.status, gstin: p.gstin, pan: p.pan, interested_services: p.interested_services, vendor_category: p.vendor_category });
 
 async function expiringCounts(orgId, ids) {
   if (ids.length === 0) return new Map();
@@ -72,9 +81,11 @@ async function list(orgId, query) {
     ...(query.tab === 'client' ? { kind: { in: ['client', 'both'] } } : {}),
     ...(query.tab === 'vendor' ? { kind: { in: ['vendor', 'both'] } } : {}),
     ...(query.status !== 'all' ? { status: query.status } : {}),
+    ...(query.service ? { interested_services: { has: query.service } } : {}),
+    ...(query.vendor_category ? { vendor_category: { equals: query.vendor_category, mode: 'insensitive' } } : {}),
     ...(query.q
       ? {
-          OR: ['name', 'contact_name', 'email', 'phone', 'gstin', 'city'].map((f) => ({ [f]: { contains: query.q, mode: 'insensitive' } })),
+          OR: ['name', 'company_name', 'contact_name', 'email', 'phone', 'gstin', 'city', 'state'].map((f) => ({ [f]: { contains: query.q, mode: 'insensitive' } })),
         }
       : {}),
   };
@@ -84,13 +95,14 @@ async function list(orgId, query) {
     prisma.zxParty.groupBy({ by: ['kind'], where: { org_id: orgId, deleted_at: null, status: 'active' }, _count: { _all: true } }),
   ]);
   const expiring = await expiringCounts(orgId, rows.map((r) => r.id));
+  const categories = [...new Set((await prisma.zxParty.findMany({ where: { org_id: orgId, deleted_at: null, vendor_category: { not: null } }, select: { vendor_category: true } })).map((p) => p.vendor_category))].sort();
   const byKind = Object.fromEntries(counts.map((c) => [c.kind, c._count._all]));
   const clients = (byKind.client || 0) + (byKind.both || 0);
   const vendors = (byKind.vendor || 0) + (byKind.both || 0);
   return {
     data: rows.map((r) => ({ ...r, docs_attention: expiring.get(r.id) || 0 })),
     pagination: pagination(query.page, query.limit, total),
-    summary: { clients, vendors, active: clients + vendors - (byKind.both || 0) },
+    summary: { clients, vendors, active: clients + vendors - (byKind.both || 0), vendor_categories: categories },
   };
 }
 
@@ -132,8 +144,10 @@ async function importRows(orgId, actorId, rows) {
   const valid = [];
   rows.forEach((raw, index) => {
     const row = index + 1;
+    const services = typeof raw.interested_services === 'string' ? raw.interested_services.split(/[;|,]/).map((x) => x.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean) : raw.interested_services;
     const parsed = createPartySchema.safeParse({
       ...raw,
+      ...(services ? { interested_services: services } : {}),
       kind: String(raw.kind || 'client').trim().toLowerCase() || 'client',
       status: String(raw.status || 'active').trim().toLowerCase() || 'active',
     });
