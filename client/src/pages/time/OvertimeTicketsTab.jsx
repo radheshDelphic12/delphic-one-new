@@ -5,9 +5,133 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { useOrgMembershipOptions } from '../../lib/lookups.js';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
+
+const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
+const labelCls = 'text-xs font-medium text-tertiary-600';
+
+/**
+ * Admin form: apply overtime for any employee (mode "apply"), or correct an existing ticket (mode "edit").
+ * Every change needs a reason and is kept on the ticket history and the audit log.
+ */
+function AdminTicketModal({ mode, ticket, onClose, onDone }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const members = useOrgMembershipOptions(mode === 'apply');
+  const editing = mode === 'edit';
+  const [projects, setProjects] = useState([]);
+  const [f, setF] = useState(() => ({
+    org_membership_id: '',
+    date: editing ? ticket.date : todayIso(),
+    hours: editing ? String(ticket.hours) : '',
+    account_id: editing ? ticket.account_id || '' : '',
+    status: editing ? ticket.status : 'approved',
+    reason: editing ? ticket.reason || '' : '',
+    admin_reason: '',
+  }));
+  const [saving, setSaving] = useState(false);
+  const set = (key, value) => setF((cur) => ({ ...cur, [key]: value }));
+
+  // Only the projects this employee is assigned to on that day are offered; a project that no longer
+  // applies after the employee or the date changes is cleared.
+  const memberId = editing ? ticket.org_membership_id : f.org_membership_id;
+  useEffect(() => {
+    if (!memberId) { setProjects([]); return undefined; }
+    let live = true;
+    apiClient
+      .get('/timesheets/overtime-tickets/employee-projects', { params: { org_membership_id: memberId, date: f.date || undefined } })
+      .then(({ data }) => {
+        if (!live) return;
+        setProjects(data.data || []);
+        setF((cur) => (cur.account_id && !(data.data || []).some((x) => x.id === cur.account_id) ? { ...cur, account_id: '' } : cur));
+      })
+      .catch(() => { if (live) setProjects([]); });
+    return () => { live = false; };
+  }, [memberId, f.date]);
+  const ok = Number(f.hours) > 0 && f.reason.trim().length >= 3 && (editing ? f.admin_reason.trim().length >= 3 : Boolean(f.org_membership_id));
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      if (editing) {
+        await apiClient.patch(`/timesheets/overtime-tickets/${ticket.id}/admin`, {
+          date: f.date,
+          hours: Number(f.hours),
+          account_id: f.account_id || null,
+          status: f.status,
+          ticket_reason: f.reason.trim(),
+          reason: f.admin_reason.trim(),
+        });
+        pushSuccess('Overtime updated');
+      } else {
+        await apiClient.post('/timesheets/overtime-tickets/admin', {
+          org_membership_id: f.org_membership_id,
+          date: f.date,
+          hours: Number(f.hours),
+          account_id: f.account_id || null,
+          status: f.status,
+          reason: f.reason.trim(),
+        });
+        pushSuccess(f.status === 'approved' ? 'Overtime applied and approved' : 'Overtime ticket created');
+      }
+      onDone();
+      onClose();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not save the overtime'), 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open wide title={editing ? `Edit overtime: ${ticket.employee}` : 'Apply overtime for an employee'} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {!editing && (
+            <div className="sm:col-span-2">
+              <span className={labelCls}>Employee</span>
+              <SearchableSelect value={f.org_membership_id} onChange={(v) => set('org_membership_id', v)} options={members} placeholder="Choose the employee" />
+            </div>
+          )}
+          <label className={labelCls}>Date<input required type="date" max={todayIso()} value={f.date} onChange={(e) => set('date', e.target.value)} className={inputCls} /></label>
+          <label className={labelCls}>Hours<input required type="number" min="0.25" max="12" step="0.25" value={f.hours} onChange={(e) => set('hours', e.target.value)} className={inputCls} /></label>
+          <label className={labelCls}>Project (billed to the client if it bills overtime)
+            <select value={f.account_id} onChange={(e) => set('account_id', e.target.value)} disabled={!memberId} className={inputCls}>
+              <option value="">{memberId ? 'No project / internal' : 'Choose the employee first'}</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.code ? `${p.name} · ${p.code}` : p.name}</option>)}
+            </select>
+            {memberId && projects.length === 0 && <span className="mt-0.5 block text-[11px] font-normal text-tertiary-400">No project is assigned to this employee on that date.</span>}
+          </label>
+          <label className={labelCls}>Status
+            <select value={f.status} onChange={(e) => set('status', e.target.value)} className={inputCls}>
+              <option value="approved">Approved (paid and billed)</option>
+              <option value="pending">Pending (still to be decided)</option>
+              {editing && <option value="manager_approved">Waiting for admin</option>}
+              {editing && <option value="rejected">Rejected</option>}
+              {editing && <option value="cancelled">Cancelled</option>}
+            </select>
+          </label>
+          <label className={`${labelCls} sm:col-span-2`}>{editing ? 'Why overtime was needed' : 'Reason for the overtime'}
+            <input required minLength={3} maxLength={500} value={f.reason} onChange={(e) => set('reason', e.target.value)} className={inputCls} />
+          </label>
+          {editing && (
+            <label className={`${labelCls} sm:col-span-2`}>Reason for this change (kept in the history)
+              <input required minLength={3} maxLength={500} value={f.admin_reason} onChange={(e) => set('admin_reason', e.target.value)} className={inputCls} />
+            </label>
+          )}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={saving || !ok}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Apply overtime'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 /**
  * Overtime tickets. People paid from attendance raise a ticket (day, hours, project, reason); their
@@ -24,6 +148,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const [form, setForm] = useState({ date: todayIso(), hours: '', account_id: '', reason: '' });
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState(null);
+  const [adminModal, setAdminModal] = useState(null); // { mode: 'apply' } | { mode: 'edit', ticket }
 
   const fail = (err, text) => pushError(apiErrorMessage(err, text), 'Something went wrong');
 
@@ -66,13 +191,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const showHistory = (t) => apiClient.get(`/timesheets/overtime-tickets/${t.id}/history`).then(({ data }) => setHistory({ ticket: t, events: data.data.events })).catch((e) => fail(e, 'Failed to load the history'));
   const historyButton = (t) => <button type="button" className="btn-ghost text-xs" onClick={() => showHistory(t)}>History</button>;
   const cancel = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/cancel`), 'Ticket cancelled');
-  const adminEdit = (t) => {
-    const hours = window.prompt(`New hours for ${t.employee} on ${t.date} (now ${t.hours}h):`, String(t.hours));
-    if (hours === null || !(Number(hours) > 0)) return undefined;
-    const reason = window.prompt('Reason for the change (required):');
-    if (reason === null || reason.trim().length < 3) { pushError('A reason is required', 'Not changed'); return undefined; }
-    return call(() => apiClient.patch(`/timesheets/overtime-tickets/${t.id}/admin`, { hours: Number(hours), reason: reason.trim() }), 'Ticket updated');
-  };
+  const adminEdit = (t) => setAdminModal({ mode: 'edit', ticket: t });
   const adminDelete = (t) => {
     const reason = window.prompt(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
     if (reason === null) return undefined;
@@ -136,10 +255,15 @@ export default function OvertimeTicketsTab({ isAdmin }) {
 
       {isAdmin && (
         <section className="space-y-3 border-t border-tertiary-100 pt-6">
-          <h2 className="font-heading text-sm font-semibold text-tertiary-900">All overtime tickets</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-heading text-sm font-semibold text-tertiary-900">All overtime tickets</h2>
+            <button type="button" className="btn-primary" onClick={() => setAdminModal({ mode: 'apply' })}>Apply overtime for an employee</button>
+          </div>
           <DataTable columns={allColumns} rows={all} emptyLabel="No overtime tickets yet" />
         </section>
       )}
+
+      {adminModal && <AdminTicketModal mode={adminModal.mode} ticket={adminModal.ticket} onClose={() => setAdminModal(null)} onDone={load} />}
 
       <Modal open={Boolean(history)} title="Overtime ticket history" onClose={() => setHistory(null)} footer={<button type="button" className="btn-primary" onClick={() => setHistory(null)}>Close</button>}>
         {history && (
