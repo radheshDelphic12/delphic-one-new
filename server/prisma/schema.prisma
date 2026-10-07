@@ -1894,6 +1894,7 @@ model Org {
   gx_ledger_entries GxLedgerEntry[]
   gx_tasks GxTask[]
   gx_period_closes GxPeriodClose[]
+  gx_asset_values  GxAssetValue[]
   zx_parties    ZxParty[]
   zx_documents  ZxDocument[]
   zx_leads      ZxLead[]
@@ -4550,4 +4551,21 @@ model GxPeriodClose {
 
   @@unique([org_id, month])
   @@map("gx_period_closes")
+}
+
+// Admin-recorded asset value per month for the valuation: (net profit x 240) + (asset value x 3).
+// A month without its own figure carries forward the latest earlier one.
+model GxAssetValue {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month       String
+  asset_value Decimal  @db.Decimal(16, 2)
+  notes       String?
+  updated_by  String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("gx_asset_values")
 }

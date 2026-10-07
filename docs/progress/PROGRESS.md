@@ -2,6 +2,10 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-07 — Gulati valuation section (local, uncommitted)
+
+- Gulati Finance > Valuation tab: (net profit x 240) + (asset value x 3) per month, admin-entered asset values (`gx_asset_values`, carry-forward), live or closed-months-only profit. Tests in server/tests/gulati-trading.test.js pass (13/13) and gulati-admin-edits (8/8).
+
 ## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
 
 - Built to the owner's 44-section brief on top of the Z0-Z8 base (plan, decisions and log: [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md)). Two migrations: `zephyr_services_leads_projects` and `zephyr_real_estate`.

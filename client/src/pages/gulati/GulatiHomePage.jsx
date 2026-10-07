@@ -76,7 +76,7 @@ export default function GulatiHomePage() {
           <Kpi label="Expenses" value={<Money v={fin.deal_expenses + fin.company_expenses} />} onClick={go('/gulati/finance?tab=expenses')} />
           <Kpi label="Receivables" value={<Money v={fin.receivables} />} hint="from clients" onClick={go('/gulati/deals?status=all&flag=client_due')} />
           <Kpi label="Payables" value={<Money v={fin.payables} />} hint="to vendors" onClick={go('/gulati/deals?status=all&flag=vendor_due')} />
-          {fin.valuation && <Kpi label="Valuation" value={fin.valuation.value === null ? '-' : <Money v={fin.valuation.value} />} hint="from last 12 months" onClick={go('/gulati/finance')} />}
+          {fin.valuation && <Kpi label="Valuation" value={fin.valuation.value === null ? '-' : <Money v={fin.valuation.value} />} hint="(profit x 240) + (assets x 3)" onClick={go('/gulati/finance')} />}
         </Block>
       )}
 

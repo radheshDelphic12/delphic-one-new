@@ -10,6 +10,7 @@ import { downloadText } from '../../lib/zephyr/csv.js';
 import Modal from '../../components/ui/Modal.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import GulatiValuationTab from './GulatiValuationTab.jsx';
 import GulatiTrendChart from '../../components/gulati/GulatiTrendChart.jsx';
 import { Area, DateInput, Empty, Kpi, Money, Num, Select, Text, card, dayOf, inputCls, labelCls, today, toBody, withReason } from '../../components/gulati/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
@@ -211,6 +212,7 @@ export default function GulatiFinancePage() {
     { key: 'overview', label: 'Overview' },
     { key: 'pnl', label: 'P&L' },
     { key: 'types', label: 'By trading type' },
+    ...(gxCan(me, 'valuation') ? [{ key: 'valuation', label: 'Valuation' }] : []),
     ...(gxCan(me, 'ledger') ? [{ key: 'expenses', label: 'Expenses' }] : []),
     ...(gxCan(me, 'financials') ? [{ key: 'close', label: 'Month close' }] : []),
   ];
@@ -241,13 +243,13 @@ export default function GulatiFinancePage() {
             <Kpi label="Outstanding payables" value={<Money v={overview.payables} />} />
             <Kpi label="Active deal value" value={<Money v={overview.active_deal_value} />} hint={`${overview.active_deals} active deals`} />
             <Kpi label="Completed deal value" value={<Money v={overview.completed_deal_value} />} hint={`${overview.completed_deals} completed deals`} />
-            {overview.valuation && <Kpi label="Company valuation" value={overview.valuation.value === null ? '-' : <Money v={overview.valuation.value} />} hint={`${overview.valuation.method.replace('_', ' ')} on the last 12 months`} />}
+            {overview.valuation && <Kpi label="Company valuation" value={overview.valuation.value === null ? '-' : <Money v={overview.valuation.value} />} hint={`(profit x 240) + (assets x 3), ${overview.valuation.month}`} />}
           </div>
           <section className={card}>
             <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Monthly performance</h3>
             {pnl?.by_month.length ? <GulatiTrendChart rows={pnl.by_month} /> : <Empty>No sales or purchases recorded yet.</Empty>}
           </section>
-          <p className="text-xs text-tertiary-400">Valuation is derived from these figures through the method set in Gulati setup. It is never edited by an individual deal.</p>
+          <p className="text-xs text-tertiary-400">Valuation = (net profit x 240) + (asset value x 3); see the Valuation tab for the monthly working. It is never edited by an individual deal.</p>
         </div>
       )}
 
@@ -300,6 +302,7 @@ export default function GulatiFinancePage() {
         </div>
       )}
 
+      {tab === 'valuation' && gxCan(me, 'valuation') && <GulatiValuationTab />}
       {tab === 'expenses' && gxCan(me, 'ledger') && <ExpensesTab me={me} dealOptions={deals} partyOptions={partyOptions} />}
       {tab === 'close' && gxCan(me, 'financials') && <PeriodsTab canClose={gxCan(me, 'closeMonth')} />}
     </div>

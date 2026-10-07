@@ -166,18 +166,88 @@ async function overview(orgId, f, caps = []) {
   return out;
 }
 
-// Valuation is its own setting-driven method: it only reads financial performance, a deal never edits it.
+// Valuation = (Gulati net profit x 240) + (asset value x 3), the same formula as Delphic Global, month by month.
+// Profit is Gulati's own (deals + company-level entries). It only reads financial performance: a deal never edits it.
+const PROFIT_FACTOR = 240;
+const ASSET_FACTOR = 3;
+const valuationOf = (profit, assetValue) => round2(profit * PROFIT_FACTOR + assetValue * ASSET_FACTOR);
+const assetSchema = z.object({ month: monthStr, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
+const trendSchema = z.object({ from: monthStr.optional(), to: monthStr.optional(), state: z.enum(['live', 'closed']).optional() });
+
+const monthIdx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
+const monthAt = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+
+// Every month from -> to (default: the last 12 months), oldest first. state "live" reads each month's live profit,
+// "closed" only the figures frozen when a month was closed (0 until it is closed).
+async function valuationTrend(orgId, q = {}) {
+  const to = q.to || monthOf(new Date());
+  const from = q.from || monthAt(monthIdx(to) - 11);
+  if (from > to || monthIdx(to) - monthIdx(from) > 119) return { error: 'bad_range' };
+  const state = q.state || 'live';
+  const [assets, closes] = await Promise.all([
+    prisma.gxAssetValue.findMany({ where: { org_id: orgId }, orderBy: { month: 'asc' } }),
+    prisma.gxPeriodClose.findMany({ where: { org_id: orgId, status: 'closed' } }),
+  ]);
+  const closed = new Map(closes.map((c) => [c.month, c]));
+  const keys = [];
+  for (let i = monthIdx(from); i <= monthIdx(to); i += 1) keys.push(monthAt(i));
+  const profitOf = async (month) => {
+    if (state === 'closed') {
+      const snap = closed.get(month)?.snapshot;
+      return { profit: round2(num(snap?.net_profit) || 0), revenue: round2(num(snap?.sales_revenue) || 0), closed: Boolean(snap) };
+    }
+    const t = (await pnl(orgId, { month })).totals;
+    return { profit: t.net_profit, revenue: t.sales_revenue, closed: closed.has(month) };
+  };
+  const figures = [];
+  for (let i = 0; i < keys.length; i += 4) figures.push(...(await Promise.all(keys.slice(i, i + 4).map(profitOf))));
+  const months = keys.map((month, i) => {
+    const exact = assets.find((r) => r.month === month);
+    const earlier = exact ? null : [...assets].reverse().find((r) => r.month < month);
+    const asset = exact || earlier;
+    const asset_value = asset ? num(asset.asset_value) : 0;
+    const f = figures[i];
+    return {
+      month,
+      revenue: f.revenue,
+      profit: f.profit,
+      closed: f.closed,
+      profit_x: round2(f.profit * PROFIT_FACTOR),
+      asset_value,
+      asset_value_carried: Boolean(earlier),
+      asset_value_id: exact?.id || null,
+      asset_notes: exact?.notes || null,
+      asset_value_x: round2(asset_value * ASSET_FACTOR),
+      valuation: valuationOf(f.profit, asset_value),
+    };
+  });
+  return { currency: 'INR', state, from, to, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, months };
+}
+
+// Headline figure: the formula for the current month.
 async function valuation(orgId) {
-  const s = await core.ensureSettings(orgId);
-  const end = dayOf(new Date());
-  const start = dayOf(new Date(Date.UTC(new Date().getUTCFullYear() - 1, new Date().getUTCMonth() + 1, 1)));
-  const t = (await pnl(orgId, { from: start, to: end })).totals;
-  const mult = num(s.valuation_multiple);
-  let value = null;
-  if (s.valuation_method === 'manual') value = num(s.valuation_manual);
-  else if (s.valuation_method === 'revenue_multiple') value = round2(mult * t.sales_revenue);
-  else value = round2(mult * Math.max(0, t.net_profit));
-  return { method: s.valuation_method, multiple: mult, manual: num(s.valuation_manual), value, trailing_revenue: t.sales_revenue, trailing_net_profit: t.net_profit, as_of: end };
+  const t = await valuationTrend(orgId, { from: monthOf(new Date()), to: monthOf(new Date()), state: 'live' });
+  const m = t.months[0];
+  return { value: m.valuation, month: m.month, profit: m.profit, asset_value: m.asset_value, formula: t.formula };
+}
+
+async function setAssetValue(orgId, actorId, input) {
+  if (input.month > monthOf(new Date())) return { error: 'future_month' };
+  const before = await prisma.gxAssetValue.findUnique({ where: { org_id_month: { org_id: orgId, month: input.month } } });
+  const data = { asset_value: input.asset_value, notes: input.notes ?? null, updated_by: actorId };
+  const row = before
+    ? await prisma.gxAssetValue.update({ where: { id: before.id }, data })
+    : await prisma.gxAssetValue.create({ data: { org_id: orgId, month: input.month, ...data } });
+  await writeAudit(null, { orgId, actorId, entity: 'asset_value', entityId: row.id, action: before ? 'update' : 'create', before: before ? { month: before.month, asset_value: num(before.asset_value) } : null, after: { month: row.month, asset_value: num(row.asset_value) } });
+  return { asset: { id: row.id, month: row.month, asset_value: num(row.asset_value), notes: row.notes } };
+}
+
+async function deleteAssetValue(orgId, actorId, month) {
+  const before = await prisma.gxAssetValue.findUnique({ where: { org_id_month: { org_id: orgId, month } } });
+  if (!before) return { error: 'not_found' };
+  await prisma.gxAssetValue.delete({ where: { id: before.id } });
+  await writeAudit(null, { orgId, actorId, entity: 'asset_value', entityId: before.id, action: 'delete', before: { month, asset_value: num(before.asset_value) } });
+  return { month };
 }
 
 // ---- month lock ----
@@ -290,4 +360,4 @@ async function dashboard(orgId, caps) {
   return out;
 }
 
-module.exports = { filterSchema, closeSchema, reopenSchema, pnl, tradingReport, overview, valuation, periods, closeMonth, reopenMonth, dashboard };
+module.exports = { assetSchema, trendSchema, valuationTrend, setAssetValue, deleteAssetValue, filterSchema, closeSchema, reopenSchema, pnl, tradingReport, overview, valuation, periods, closeMonth, reopenMonth, dashboard };

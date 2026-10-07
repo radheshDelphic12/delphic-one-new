@@ -25,6 +25,7 @@ async function addMember(org, accessRole, kind = 'employee') {
 const api = (token) => ({
   post: (path, body) => authed(request(app).post(`/api/v1/gulati${path}`), token).send(body),
   get: (path) => authed(request(app).get(`/api/v1/gulati${path}`), token),
+  put: (path, body) => authed(request(app).put(`/api/v1/gulati${path}`), token).send(body),
   patch: (path, body) => authed(request(app).patch(`/api/v1/gulati${path}`), token).send(body),
   del: (path) => authed(request(app).delete(`/api/v1/gulati${path}`), token),
 });
@@ -189,6 +190,18 @@ describe('gulati lead to deal and deal finance', () => {
     const ov = (await a.get('/finance/overview')).body.data;
     expect(ov.net_profit).toBe(8 * LAKH - 10000);
     expect(ov.valuation).toBeTruthy();
+    // Valuation = (net profit x 240) + (asset value x 3), month by month; asset value carries forward.
+    expect((await a.put('/finance/asset-values', { month: '2026-03', asset_value: 1000000, notes: 'Stock + equipment' })).status).toBe(200);
+    const vt = (await a.get('/finance/valuation?from=2026-03&to=2026-04')).body.data;
+    expect(vt.formula).toEqual({ profit: 240, asset_value: 3 });
+    const net = 8 * LAKH - 10000;
+    expect(vt.months[0]).toMatchObject({ month: '2026-03', profit: net, asset_value: 1000000, asset_value_carried: false, valuation: net * 240 + 3000000 });
+    expect(vt.months[1]).toMatchObject({ month: '2026-04', profit: 0, asset_value: 1000000, asset_value_carried: true, valuation: 3000000 });
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-04&state=closed')).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get('/finance/valuation?from=2026-05&to=2026-04')).status).toBe(422);
+    expect((await a.put('/finance/asset-values', { month: '2099-01', asset_value: 1 })).status).toBe(422);
+    expect((await a.del('/finance/asset-values/2026-03')).status).toBe(200);
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-03')).body.data.months[0].valuation).toBe(net * 240);
   });
 
   test('partial sourcing and supply track ordered / sourced / supplied / remaining', async () => {
