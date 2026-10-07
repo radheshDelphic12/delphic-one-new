@@ -141,16 +141,17 @@ export default function FinancialTrendsTab() {
         </p>
       </div>
       {rangeError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{rangeError}</p>}
+      {loading && data && <p role="status" className="text-xs font-medium text-primary-700">Updating for the new filter…</p>}
 
       {rangeError ? null : loading && !data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div aria-busy={loading} className={`grid gap-4 transition-opacity xl:grid-cols-2 ${loading && data ? 'opacity-50' : ''}`}>
           <TrendChart title="Revenue — month on month" subtitle={`${VIEW_NAME[state]} revenue per month (Financials)`} data={rows} dataKey="revenue" name="Revenue" color={CHART_COLORS.success} />
           <TrendChart title="Profit — month on month" subtitle={`${VIEW_NAME[state]} revenue less salaries and expenses (Financials)`} data={rows} dataKey="profit" name="Profit" color={CHART_COLORS.primary} />
           <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Delphic profit × 240) + (Asset value × 3)" data={rows} dataKey="valuation" name="Valuation" color={CHART_COLORS.purple} />
         </div>
       )}
       {rows.length > 0 && (
-        <section className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white" aria-label="How the valuation is worked out">
+        <section className={`overflow-x-auto rounded-2xl border border-tertiary-100 bg-white transition-opacity ${loading && data ? 'opacity-50' : ''}`} aria-label="How the valuation is worked out">
           <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">How each month&apos;s valuation is worked out</h3>
           <table className="mt-2 w-full text-sm">
             <thead className="text-left text-xs text-tertiary-500"><tr>
