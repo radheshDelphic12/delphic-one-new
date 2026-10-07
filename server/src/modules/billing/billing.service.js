@@ -119,6 +119,12 @@ async function computeDayRevenue(orgId, date) {
       continue;
     }
 
+    // A fixed-bid contract value is billed through invoices, never as daily revenue.
+    if (rateRow.rate_type === 'one_time') {
+      skipped.push({ account_id, requirement_id, date: ymd(date), reason: 'fixed_bid' });
+      continue;
+    }
+
     let revenue;
     if (rateRow.rate_type === 'hourly') {
       revenue = round2(hours * Number(rateRow.rate));
@@ -533,7 +539,7 @@ async function getProjectProfile(orgId, accountId) {
 // never overwritten) starting on the agreement start date — or today, if no
 // agreement date is set — so nothing already billed is rewritten.
 async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
-  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true, is_project: true, service_category: true } });
+  const existing = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: { id: true, name: true, project_name: true, agreement_start_date: true, agreement_end_date: true, client_account_id: true, is_project: true } });
   if (!existing) return { error: 'account_not_found' };
   // Finance never edits a plain Accounts-catalogue client. An older client row
   // already worked on as a project (predates is_project) is a project here —
@@ -579,13 +585,12 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.billable_day_hours !== undefined) data.billable_day_hours = patch.billable_day_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
-  const category = patch.service_category !== undefined ? patch.service_category : existing.service_category;
   await prisma.$transaction(async (tx) => {
     if (Object.keys(data).length) await tx.account.update({ where: { id: accountId }, data });
     if (patch.billing) {
       const { rate, currency } = patch.billing;
-      // A fixed-bid project's rate is its one-time total contract value; every other project keeps the chosen type.
-      const rate_type = category === fixedBid.FIXED_CATEGORY ? 'one_time' : patch.billing.rate_type;
+      // The client sends one_time for a fixed-bid project (rate = total contract value); the type is stored as given.
+      const { rate_type } = patch.billing;
       await tx.billingRate.create({
         data: {
           org_id: orgId,

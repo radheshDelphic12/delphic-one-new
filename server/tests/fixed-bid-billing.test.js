@@ -31,7 +31,6 @@ async function addProject(ctx, name, { category, rate_type, rate }) {
   expect(res.status).toBe(201);
   const patch = await authed(request(app).patch(api(`/billing/projects/${res.body.data.id}`)), ctx.adminToken).send({
     agreement_start_date: '2026-01-01',
-    // Whatever the picker sends, a fixed-bid project's rate is stored as one-time.
     billing: { rate_type, rate, currency: 'INR' },
   });
   expect(patch.status).toBe(200);
@@ -47,7 +46,7 @@ const records = async (ctx, period, state = 'locked') => (await authed(request(a
 describe('Fixed-bid billing', () => {
   test('rate is a one-time contract value; several invoices capped at the total; lock makes them financial', async () => {
     const ctx = await seed();
-    const project = await addProject(ctx, 'Fixed Co', { category: 'project', rate_type: 'monthly', rate: 500000 });
+    const project = await addProject(ctx, 'Fixed Co', { category: 'project', rate_type: 'one_time', rate: 500000 });
     expect(project).toMatchObject({ billing_type: 'one_time', rate: 500000, monthly_amount_inr: null });
     expect(project.fixed_bid).toMatchObject({ total: 500000, invoiced: 0, billed: 0, balance: 500000, remaining_to_invoice: 500000 });
 
