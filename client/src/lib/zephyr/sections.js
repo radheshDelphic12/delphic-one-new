@@ -14,7 +14,7 @@ export const ZEPHYR_SECTIONS = [
   { key: 'overview', to: '/zephyr/overview', label: 'Revenue & Profit', blurb: 'Revenue, expense, salaries, profit and valuation, live.', icon: FileBarChart2, cap: 'overview', phase: 'Z6', built: true },
   { key: 'people', to: '/zephyr/people', label: 'Employee / Contractor', blurb: 'People roster, assignments and monthly salary records.', icon: UserCog, cap: 'people', phase: 'Z4', built: true },
   { key: 'tasks', to: '/zephyr/tasks', label: 'Tasks', blurb: 'Visits, rent collection and follow-ups for employees and contractors.', icon: ListChecks, cap: 'tasks', phase: 'R8', built: true },
-  { key: 'financials', to: '/zephyr/financials', label: 'Financials', blurb: 'Plan vs actual, month close, projections and statements.', icon: LineChart, cap: 'financials', phase: 'Z7', built: true },
+  { key: 'financials', to: '/zephyr/financials', label: 'Financials', blurb: 'Revenue, profit and valuation, month on month.', icon: LineChart, cap: 'overviewValuation', phase: 'Z7', built: true },
 ];
 
 export const ZEPHYR_HOME = { to: '/zephyr', label: 'Home', icon: LayoutDashboard, end: true };

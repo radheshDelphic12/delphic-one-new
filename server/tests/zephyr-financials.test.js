@@ -99,20 +99,33 @@ describe('zephyr overview', () => {
     expect(drill[0]).toMatchObject({ amount: 30000, net: 60000 });
   });
 
-  test('valuation follows the setting: revenue multiple, profit multiple, manual', async () => {
-    const { token } = await setupZephyr();
+  test('valuation = (profit x 240) + (asset value x 3) per month; asset value is admin-recorded and carries forward', async () => {
+    const { org, token } = await setupZephyr();
+    const manager = await addMember(org, 'manager');
     const s = await seed(token);
     const { a } = s;
-    await s.entry(addMonths(thisMonth(), -2), 'revenue', 1000000);
-    await s.entry(addMonths(thisMonth(), -2), 'expense', 400000);
-    let v = (await a.get('/overview')).body.data.valuation;
-    expect(v).toMatchObject({ method: 'revenue_multiple', multiple: 3, basis_amount: 1000000, value: 3000000 });
-    await a.patch('/settings', { valuation_method: 'profit_multiple', valuation_multiple: 5, reason: 'switch' });
-    v = (await a.get('/overview')).body.data.valuation;
-    expect(v).toMatchObject({ method: 'profit_multiple', basis_amount: 600000, value: 3000000 });
-    await a.patch('/settings', { valuation_method: 'manual', valuation_manual: 7777777 });
-    v = (await a.get('/overview')).body.data.valuation;
-    expect(v).toMatchObject({ method: 'manual', value: 7777777 });
+    const m2 = addMonths(thisMonth(), -2);
+    await s.entry(m2, 'revenue', 1000000);
+    await s.entry(m2, 'expense', 400000);
+    expect((await a.put('/financials/asset-values', { month: m2, asset_value: 2000000, notes: 'Equipment and stock' })).status).toBe(200);
+    const vt = (await a.get(`/financials/valuation?from=${m2}&to=${addMonths(m2, 1)}`)).body.data;
+    expect(vt.formula).toEqual({ profit: 240, asset_value: 3 });
+    expect(vt.months[0]).toMatchObject({ month: m2, revenue: 1000000, profit: 600000, asset_value: 2000000, asset_value_carried: false, valuation: 600000 * 240 + 6000000 });
+    expect(vt.months[1]).toMatchObject({ profit: 0, asset_value: 2000000, asset_value_carried: true, valuation: 6000000 });
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=locked`)).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=unlocked`)).body.data.months[0].profit).toBe(600000); // open month, live figures
+    // closing the month freezes its figures: Locked now reads them, Unlocked stops counting the month
+    expect((await a.post('/financials/close', { month: m2 })).status).toBe(200);
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=locked`)).body.data.months[0]).toMatchObject({ closed: true, revenue: 1000000, profit: 600000, valuation: 600000 * 240 + 6000000 });
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=unlocked`)).body.data.months[0].profit).toBe(0);
+    expect((await a.get(`/financials/valuation?from=${thisMonth()}&to=${m2}`)).status).toBe(422);
+    expect((await a.put('/financials/asset-values', { month: '2099-01', asset_value: 1 })).status).toBe(422);
+    expect((await a.get('/overview')).body.data.valuation).toMatchObject({ month: thisMonth(), asset_value: 2000000, value: 6000000 });
+    expect((await api(manager.token).get('/financials/valuation')).status).toBe(403);
+    expect((await api(manager.token).put('/financials/asset-values', { month: m2, asset_value: 1 })).status).toBe(403);
+    expect((await a.del(`/financials/asset-values/${m2}`)).status).toBe(200);
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}`)).body.data.months[0].valuation).toBe(600000 * 240);
+    expect((await a.del(`/financials/asset-values/${m2}`)).status).toBe(404);
   });
 
   test('a manager sees revenue, expense and profit per project but no salaries or valuation', async () => {
