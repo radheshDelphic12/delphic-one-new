@@ -112,7 +112,12 @@ describe('zephyr overview', () => {
     expect(vt.formula).toEqual({ profit: 240, asset_value: 3 });
     expect(vt.months[0]).toMatchObject({ month: m2, revenue: 1000000, profit: 600000, asset_value: 2000000, asset_value_carried: false, valuation: 600000 * 240 + 6000000 });
     expect(vt.months[1]).toMatchObject({ profit: 0, asset_value: 2000000, asset_value_carried: true, valuation: 6000000 });
-    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=closed`)).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=locked`)).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=unlocked`)).body.data.months[0].profit).toBe(600000); // open month, live figures
+    // closing the month freezes its figures: Locked now reads them, Unlocked stops counting the month
+    expect((await a.post('/financials/close', { month: m2 })).status).toBe(200);
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=locked`)).body.data.months[0]).toMatchObject({ closed: true, revenue: 1000000, profit: 600000, valuation: 600000 * 240 + 6000000 });
+    expect((await a.get(`/financials/valuation?from=${m2}&to=${m2}&state=unlocked`)).body.data.months[0].profit).toBe(0);
     expect((await a.get(`/financials/valuation?from=${thisMonth()}&to=${m2}`)).status).toBe(422);
     expect((await a.put('/financials/asset-values', { month: '2099-01', asset_value: 1 })).status).toBe(422);
     expect((await a.get('/overview')).body.data.valuation).toMatchObject({ month: thisMonth(), asset_value: 2000000, value: 6000000 });

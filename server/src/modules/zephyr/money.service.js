@@ -255,28 +255,29 @@ const PROFIT_FACTOR = 240;
 const ASSET_FACTOR = 3;
 const valuationOf = (profit, assetValue) => round2(profit * PROFIT_FACTOR + assetValue * ASSET_FACTOR);
 const assetSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
-const trendSchema = z.object({ from: assetSchema.shape.month.optional(), to: assetSchema.shape.month.optional(), state: z.enum(['live', 'closed']).optional() });
+const trendSchema = z.object({ from: assetSchema.shape.month.optional(), to: assetSchema.shape.month.optional(), state: z.enum(['locked', 'unlocked', 'all']).optional() });
 
 const monthIdx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
 const monthAt = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
 
-// Every month from -> to (default: the last 12 months), oldest first. state "live" reads each month's live figures,
-// "closed" only the figures frozen when a month was closed (0 until it is closed).
+// Every month from -> to (default: the last 12 months), oldest first. state "locked" reads only the figures frozen
+// when a month was closed (0 until it is closed), "unlocked" the live figures of months that are not closed, "all" every month live.
 async function valuationTrend(orgId, q = {}) {
   const to = q.to || currentMonth();
   const from = q.from || monthAt(monthIdx(to) - 11);
   if (from > to || monthIdx(to) - monthIdx(from) > 119) return { error: 'bad_range' };
-  const state = q.state || 'live';
+  const state = q.state || 'all';
   const [assets, closes, live] = await Promise.all([
     prisma.zxAssetValue.findMany({ where: { org_id: orgId }, orderBy: { month: 'asc' } }),
     prisma.zxPeriodClose.findMany({ where: { org_id: orgId, status: 'closed' } }),
-    state === 'live' ? monthly(orgId, from, to) : null,
+    state === 'locked' ? null : monthly(orgId, from, to),
   ]);
   const closed = new Map(closes.map((c) => [c.month, c]));
   const liveBy = new Map((live || []).map((r) => [r.month, r]));
   const months = monthsBetween(from, to).map((month) => {
-    const snap = closed.get(month)?.snapshot;
-    const fig = state === 'live' ? liveBy.get(month) : { revenue: num(snap?.revenue) || 0, profit: num(snap?.profit) || 0 };
+    const snap = closed.get(month)?.snapshot?.summary; // the figures frozen when the month was closed
+    const isClosed = closed.has(month);
+    const fig = state === 'locked' ? { revenue: num(snap?.revenue) || 0, profit: num(snap?.profit) || 0 } : state === 'unlocked' && isClosed ? { revenue: 0, profit: 0 } : liveBy.get(month);
     const exact = assets.find((r) => r.month === month);
     const earlier = exact ? null : [...assets].reverse().find((r) => r.month < month);
     const asset = exact || earlier;
@@ -302,7 +303,7 @@ async function valuationTrend(orgId, q = {}) {
 // Headline figure: the formula for the current month.
 async function valuation(orgId) {
   const cm = currentMonth();
-  const m = (await valuationTrend(orgId, { from: cm, to: cm, state: 'live' })).months[0];
+  const m = (await valuationTrend(orgId, { from: cm, to: cm, state: 'all' })).months[0];
   return { value: m.valuation, month: m.month, profit: m.profit, asset_value: m.asset_value, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, as_of: new Date().toISOString().slice(0, 10) };
 }
 
