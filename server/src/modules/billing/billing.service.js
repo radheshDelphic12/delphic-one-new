@@ -4,6 +4,7 @@ const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
 const exchangeRates = require('./exchangeRates.service');
+const fixedBid = require('./fixedBid.service');
 
 const { activeOn } = allocations;
 
@@ -115,6 +116,12 @@ async function computeDayRevenue(orgId, date) {
     const rateRow = await resolveRate(orgId, account_id, requirement_id, date);
     if (!rateRow) {
       skipped.push({ account_id, requirement_id, date: ymd(date), reason: 'no_billing_rate' });
+      continue;
+    }
+
+    // A fixed-bid contract value is billed through invoices, never as daily revenue.
+    if (rateRow.rate_type === 'one_time') {
+      skipped.push({ account_id, requirement_id, date: ymd(date), reason: 'fixed_bid' });
       continue;
     }
 
@@ -412,7 +419,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
   const { toInr, rateFor } = exchangeRates.inrConverter(fx || new Map([['INR', 1]]));
   const exchangeRate = rateFor(currency);
   const inr = (amount) => (amount === null || exchangeRate === null ? null : toInr(amount, currency));
-  const monthlyAmount = !rate ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : Number(rate.rate) * hours.hours;
+  const monthlyAmount = !rate || rate.rate_type === 'one_time' ? null : rate.rate_type === 'monthly' ? Number(rate.rate) : Number(rate.rate) * hours.hours;
   return {
     id: account.id,
     project_code: account.project_code || null,
@@ -427,8 +434,10 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     // INR per 1 unit of `currency` (1 for INR); null when finance hasn't set it.
     exchange_rate: exchangeRate,
     rate_inr: rate ? inr(Number(rate.rate)) : null,
-    // The contract per month in INR: fixed monthly fee, or hourly rate x contract hours.
+    // The contract per month in INR: fixed monthly fee, or hourly rate x contract hours (none for a one-time fixed bid).
     monthly_amount_inr: inr(monthlyAmount),
+    // Fixed-bid projects: total / invoiced / billed (locked) / balance, filled by the callers.
+    fixed_bid: null,
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
     contract_status: account.contract_status,
@@ -499,11 +508,13 @@ async function listProjectProfiles(orgId) {
   const now = todayUtc();
   const { monthContractByProject } = require('./projectPnl.service');
   const billing = await monthContractByProject(orgId, accounts, { period_month: now.getUTCMonth() + 1, period_year: now.getUTCFullYear() }, fx);
+  const fixedSummaries = await fixedBid.summaries(orgId, accounts.filter(fixedBid.isFixedBid).map((a) => a.id));
   return accounts.map((a) => {
     // Every row listed here matches projectListWhere, so all are editable.
     const profile = serializeProfile(a, ratesByAccount.get(a.id) || [], a.project_calendar, { editable: true, fx });
     if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
     profile.this_month = billing.get(a.id) || null;
+    if (fixedBid.isFixedBid(a)) profile.fixed_bid = fixedSummaries.get(a.id) || null;
     return profile;
   });
 }
@@ -519,6 +530,7 @@ async function getProjectProfile(orgId, accountId) {
   ]);
   const profile = serializeProfile(account, rates, account.project_calendar, { editable, fx });
   if (!profile.calendar && fallback) profile.calendar = { id: fallback.id, name: fallback.name, kind: fallback.kind };
+  if (fixedBid.isFixedBid(account)) profile.fixed_bid = await fixedBid.summaryFor(orgId, accountId);
   return { profile };
 }
 
@@ -576,7 +588,9 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   await prisma.$transaction(async (tx) => {
     if (Object.keys(data).length) await tx.account.update({ where: { id: accountId }, data });
     if (patch.billing) {
-      const { rate_type, rate, currency } = patch.billing;
+      const { rate, currency } = patch.billing;
+      // The client sends one_time for a fixed-bid project (rate = total contract value); the type is stored as given.
+      const { rate_type } = patch.billing;
       await tx.billingRate.create({
         data: {
           org_id: orgId,

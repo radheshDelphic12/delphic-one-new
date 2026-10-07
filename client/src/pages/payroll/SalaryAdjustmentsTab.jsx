@@ -88,6 +88,8 @@ export default function SalaryAdjustmentsTab() {
   ];
   const salaryColumns = [
     { key: 'employee', header: 'Employee', render: (r) => r.employee },
+    { key: 'bank_account_number', header: 'Bank account number', render: (r) => r.bank_account_number || <span className="text-tertiary-400">Not added</span> },
+    { key: 'bank_ifsc', header: 'IFSC code', render: (r) => r.bank_ifsc || <span className="text-tertiary-400">Not added</span> },
     { key: 'salary', header: 'Basic / fixed salary', render: (r) => money(r.salary) },
     { key: 'variable_pay', header: 'Variable pay', render: (r) => money(r.variable_pay) },
     { key: 'ot', header: 'Approved OT', render: (r) => money(r.ot) },

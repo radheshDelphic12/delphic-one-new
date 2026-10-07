@@ -33,7 +33,7 @@ const billingQuerySchema = monthSchema.extend({
   status: z.enum(['all', 'approved', 'pending', 'rejected']).default('all'),
   // Finance: which invoices to list (generated / not generated / paid / unpaid / sent / unsent) and the billing type.
   invoice_status: z.enum(invoiceStatus.FILTERS).default('all'),
-  billing_type: z.enum(['all', 'monthly', 'hourly', 'mixed']).default('all'),
+  billing_type: z.enum(['all', 'monthly', 'hourly', 'one_time', 'mixed']).default('all'),
   include_overtime: bool.default(true),
   date_from: z.coerce.date().optional(),
   date_to: z.coerce.date().optional(),

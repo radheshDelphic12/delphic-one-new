@@ -51,6 +51,17 @@ import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.j
 import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
 import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
 import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
+import GulatiHomePage from '../pages/gulati/GulatiHomePage.jsx';
+import GulatiPartiesPage from '../pages/gulati/GulatiPartiesPage.jsx';
+import GulatiLeadsPage from '../pages/gulati/GulatiLeadsPage.jsx';
+import GulatiDealsPage from '../pages/gulati/GulatiDealsPage.jsx';
+import GulatiDealDetailPage from '../pages/gulati/GulatiDealDetailPage.jsx';
+import GulatiFinancePage from '../pages/gulati/GulatiFinancePage.jsx';
+import GulatiTasksPage from '../pages/gulati/GulatiTasksPage.jsx';
+import GulatiPeoplePage from '../pages/gulati/GulatiPeoplePage.jsx';
+import GulatiMyWorkPage from '../pages/gulati/GulatiMyWorkPage.jsx';
+import GulatiSettingsPage from '../pages/gulati/GulatiSettingsPage.jsx';
+import { isGulatiOrg } from '../lib/gulati/useGulati.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
@@ -94,6 +105,8 @@ function HomePage() {
   const { user } = useAuth();
   // Zephyr is a standalone workspace with its own home.
   if (isZephyrOrg(user)) return <Navigate to="/zephyr" replace />;
+  // Gulati Industries is a standalone workspace with its own home.
+  if (isGulatiOrg(user)) return <Navigate to="/gulati" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -152,6 +165,15 @@ function RequireZephyr({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isZephyrOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Gulati workspace needs the `gulati` module on the ACTIVE company. */
+function RequireGulati({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isGulatiOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -256,6 +278,19 @@ export default function App() {
         <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
         <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />
         <Route path="zephyr/:section" element={<RequireZephyr><ZephyrSectionPage /></RequireZephyr>} />
+
+        {/* Gulati Industries: standalone trading workspace. Module + role gating is enforced by the server. */}
+        <Route path="gulati" element={<RequireGulati><GulatiHomePage /></RequireGulati>} />
+        <Route path="gulati/parties" element={<RequireGulati><GulatiPartiesPage /></RequireGulati>} />
+        <Route path="gulati/leads" element={<RequireGulati><GulatiLeadsPage /></RequireGulati>} />
+        <Route path="gulati/deals" element={<RequireGulati><GulatiDealsPage /></RequireGulati>} />
+        <Route path="gulati/deals/:id" element={<RequireGulati><GulatiDealDetailPage /></RequireGulati>} />
+        <Route path="gulati/finance" element={<RequireGulati><GulatiFinancePage /></RequireGulati>} />
+        <Route path="gulati/tasks" element={<RequireGulati><GulatiTasksPage /></RequireGulati>} />
+        <Route path="gulati/people" element={<RequireGulati><GulatiPeoplePage /></RequireGulati>} />
+        <Route path="gulati/my-work" element={<RequireGulati><GulatiMyWorkPage /></RequireGulati>} />
+        <Route path="gulati/settings" element={<RequireGulati><GulatiSettingsPage /></RequireGulati>} />
+        <Route path="gulati/*" element={<Navigate to="/gulati" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route

@@ -85,6 +85,8 @@ const createInvoiceSchema = z.object({
   invoice_date: invoiceDate,
   notes: z.string().trim().max(1000).nullable().optional(),
   currency: INVOICE_CURRENCY,
+  // Fixed-bid projects only: what this invoice bills (<= what is left of the contract value).
+  amount: z.coerce.number().positive().max(1e12).optional(),
 });
 
 // Deleting an invoice: a reason is required once it has been sent / paid.
@@ -103,6 +105,7 @@ const updateInvoiceSchema = z.object({
 const previewInvoiceQuerySchema = z.object({
   account_id: z.string().uuid(),
   currency: INVOICE_CURRENCY,
+  amount: z.coerce.number().positive().max(1e12).optional(),
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
@@ -320,7 +323,7 @@ const updateProjectProfileSchema = z
     billable_day_hours: z.coerce.number().min(1).max(24).optional(),
     billing: z
       .object({
-        rate_type: z.enum(['hourly', 'monthly']),
+        rate_type: z.enum(['hourly', 'monthly', 'one_time']),
         rate: z.coerce.number().positive(),
         currency: CURRENCY.default('INR'),
         effective_from: optionalDate,

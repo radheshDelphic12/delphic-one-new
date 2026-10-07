@@ -90,7 +90,10 @@ export default function FinalizedFinancialsTab() {
           {state === 'all' && 'Locked and unlocked records side by side.'}
           {c && ` ${lockedCount} locked${state !== 'locked' ? ` · ${unlockedCount} unlocked` : ''} record(s).`}
         </p>
+        {loading && data && <p role="status" className="pb-1.5 text-xs font-medium text-primary-700">Updating for the new filter…</p>}
       </div>
+
+      <div aria-busy={loading} className={`space-y-5 transition-opacity ${loading && data ? 'pointer-events-none opacity-50' : ''}`}>
 
       <div className="flex flex-wrap gap-2" aria-label="Records per month">
         {(data?.months || []).map((m) => (
@@ -155,6 +158,7 @@ export default function FinalizedFinancialsTab() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

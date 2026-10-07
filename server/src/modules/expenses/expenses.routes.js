@@ -85,7 +85,7 @@ router.get(
   '/claims/me',
   asyncHandler(async (req, res) => {
     const query = listMyClaimsQuerySchema.parse(req.query);
-    const result = await service.listMyClaims(req.user.org_id, req.user.org_membership_id, query);
+    const result = await service.listMyClaims(req.user.org_id, req.user.org_membership_id, query, req.user.id);
     return ok(res, result.data, { pagination: result.pagination });
   })
 );

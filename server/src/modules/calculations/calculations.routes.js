@@ -55,12 +55,15 @@ const ERRORS = {
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
-  not_supported: [422, 'Invoicing is not enabled for this project type yet (fixed price / recruitment)'],
+  not_supported: [422, 'Invoicing is not enabled for this project type yet (recruitment)'],
   account_not_found: [404, 'Project not found'],
   before_agreement_start: [422, 'That month ends before the client agreement starts — nothing is billed before the Agreement Start Date'],
   after_agreement_end: [422, 'That month starts after the client agreement ended — nothing is billed after the Agreement End Date'],
   already_resolved: [409, 'That change has already been resolved'],
   financial_locked: [423, 'This month is financially locked - reopen the financial lock before changing its invoices'],
+  billing_locked: [423, "This project's billing for that month is locked - a fixed-bid project is invoiced before its month is locked"],
+  fixed_bid_exceeds_balance: [422, 'That invoice is more than what is left of the fixed-bid contract value'],
+  fixed_bid_exhausted: [422, 'The fixed-bid contract value has already been fully invoiced'],
 };
 
 function failFor(res, result) {

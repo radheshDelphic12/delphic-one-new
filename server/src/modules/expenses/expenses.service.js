@@ -105,8 +105,11 @@ async function updateClaim(orgId, claimId, actor, patch) {
   return { claim: updated };
 }
 
-async function listMyClaims(orgId, orgMembershipId, { status, page, limit, ...filters }) {
-  const where = { org_id: orgId, org_membership_id: orgMembershipId, ...(status ? { status } : {}), ...(await claimFilterWhere(orgId, filters)) };
+// Only claims the user filed themselves: submitted_by is null for a self-filed
+// claim, and holds the admin's user id when filed on someone's behalf.
+async function listMyClaims(orgId, orgMembershipId, { status, page, limit, ...filters }, userId = null) {
+  const own = userId ? { OR: [{ submitted_by: null }, { submitted_by: userId }] } : { submitted_by: null };
+  const where = { org_id: orgId, org_membership_id: orgMembershipId, ...own, ...(status ? { status } : {}), ...(await claimFilterWhere(orgId, filters)) };
   const [data, total] = await Promise.all([
     prisma.expenseClaim.findMany({
       where,

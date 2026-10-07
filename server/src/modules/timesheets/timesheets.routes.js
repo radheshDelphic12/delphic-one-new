@@ -20,6 +20,8 @@ const {
   decideOvertimeTicketSchema,
   listOvertimeTicketsQuerySchema,
   adminUpdateOvertimeTicketSchema,
+  adminCreateOvertimeTicketSchema,
+  employeeProjectsQuerySchema,
   createEntrySchema,
   updateEntrySchema,
   decideEntrySchema,
@@ -67,6 +69,8 @@ const ENTRY_ERRORS = {
   already_decided: [409, 'Entry has already been approved or rejected — approved and rejected timesheets are final; ask for a regularisation'],
   member_not_found: [404, 'Employee not found'],
   not_team_member: [403, 'You can only view timesheets of people who report to you'],
+  employee_not_found: [404, 'Employee not found in this company'],
+  ticket_project_not_assigned: [422, 'That project is not assigned to this employee on that date'],
   tickets_not_applicable: [422, 'Overtime tickets are for people paid from attendance. Your overtime comes from your timesheet hours (or you are a vendor resource: log overtime on your timesheet)'],
   exceeds_ticket_hours: [422, 'Overtime tickets for one day cannot add up to more than 12 hours'],
   own_ticket: [403, "You can't approve your own overtime ticket"],
@@ -418,6 +422,29 @@ router.post(
     const result = await tickets.cancelTicket(req.user.org_id, req.user.org_membership_id, req.params.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.ticket);
+  })
+);
+
+// Projects one employee is assigned to on a day (the project list of the admin's OT form).
+router.get(
+  '/overtime-tickets/employee-projects',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { org_membership_id, date } = employeeProjectsQuerySchema.parse(req.query);
+    const member = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: req.user.org_id }, select: { id: true } });
+    if (!member) return failFor(res, 'employee_not_found');
+    return ok(res, await tickets.assignedProjects(req.user.org_id, org_membership_id, date));
+  })
+);
+
+// Admin applies overtime for any employee.
+router.post(
+  '/overtime-tickets/admin',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await tickets.adminCreateTicket(req.user.org_id, req.user, adminCreateOvertimeTicketSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.ticket);
   })
 );
 

@@ -17,7 +17,28 @@ const planQuerySchema = z.object({
   period_month: z.coerce.number().int().min(1).max(12),
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
+const periodIdxOf = (year, month) => year * 12 + (month - 1);
 const monthsQuerySchema = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) });
+// A start and an end month (inclusive, at most 36 months apart); without them, the last `months` months.
+const trendsQuerySchema = z
+  .object({
+    months: z.coerce.number().int().min(1).max(36).default(12),
+    from_year: z.coerce.number().int().min(2000).max(2100).optional(),
+    from_month: z.coerce.number().int().min(1).max(12).optional(),
+    to_year: z.coerce.number().int().min(2000).max(2100).optional(),
+    to_month: z.coerce.number().int().min(1).max(12).optional(),
+    // The same three views as the Financials tab: finalized only, live not-yet-locked, or both.
+    state: z.enum(['locked', 'unlocked', 'all']).default('locked'),
+  })
+  .refine((q) => [q.from_year, q.from_month, q.to_year, q.to_month].every((v) => v === undefined) || [q.from_year, q.from_month, q.to_year, q.to_month].every((v) => v !== undefined), { message: 'Give the start and end month together' })
+  .refine((q) => q.from_year === undefined || periodIdxOf(q.to_year, q.to_month) >= periodIdxOf(q.from_year, q.from_month), { message: 'The end month cannot be before the start month' })
+  .refine((q) => q.from_year === undefined || periodIdxOf(q.to_year, q.to_month) - periodIdxOf(q.from_year, q.from_month) < 36, { message: 'Pick at most 36 months' });
+const assetValueSchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  asset_value: z.coerce.number().min(0).max(1e13),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
 const projectionQuerySchema = z.object({
   months: z.coerce.number().int().min(3).max(24).default(12),
   horizon: z.coerce.number().int().min(1).max(12).default(6),
@@ -266,7 +287,85 @@ async function orgProjection(orgId, opts = {}) {
   return { projection: await projectionForOrg(org, opts) };
 }
 
+// --- Financial trends (Financials page charts) ---
+
+// Valuation = (Delphic profit x 240) + (Asset Value x 3), exactly. Delphic profit is this workspace's own
+// profit for the month in the selected view (Locked / Unlocked / All), the same figure the Profit chart shows.
+const DELPHIC_PROFIT_FACTOR = 240;
+const ASSET_VALUE_FACTOR = 3;
+const valuationOf = (delphicProfit, assetValue) => round2(delphicProfit * DELPHIC_PROFIT_FACTOR + assetValue * ASSET_VALUE_FACTOR);
+
+
+// Month on month: Revenue and Profit are the Financials figures (the same
+// records the Financials tab shows: locked, unlocked or all); valuation uses that same Delphic profit;
+// Asset Value is the admin-recorded
+// figure for the month, carried forward from the latest earlier one.
+// Every calendar month from (from_year, from_month) to (to_year, to_month), oldest first.
+function monthRange(from_year, from_month, to_year, to_month) {
+  const out = [];
+  for (let i = periodIdxOf(from_year, from_month); i <= periodIdxOf(to_year, to_month); i += 1) {
+    const d = new Date(Date.UTC(Math.floor(i / 12), i % 12, 1));
+    // start / end bound every per-month query (without them a month would read all dates).
+    out.push({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, key: monthKey(d), start: d, end: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)) });
+  }
+  return out;
+}
+
+async function trends(orgId, { months = 12, from_year, from_month, to_year, to_month, state = 'locked' } = {}, now = new Date()) {
+  const records = require('../calculations/records.service');
+  const wins = from_year === undefined ? monthWindow(months, now) : monthRange(from_year, from_month, to_year, to_month);
+  const assetRows = await prisma.financialAssetValue.findMany({ where: { org_id: orgId }, orderBy: [{ period_year: 'asc' }, { period_month: 'asc' }] });
+  const assetAt = (win) => {
+    const exact = assetRows.find((r) => r.period_year === win.year && r.period_month === win.month);
+    if (exact) return { value: Number(exact.asset_value), carried: false };
+    const earlier = assetRows.filter((r) => periodIdxOf(r.period_year, r.period_month) < periodIdxOf(win.year, win.month)).pop();
+    return earlier ? { value: Number(earlier.asset_value), carried: true } : { value: 0, carried: false };
+  };
+
+  const monthRow = async (win) => {
+    const view = { period_year: win.year, from_month: win.month, to_month: win.month, state };
+    const rec = await records.financialRecords(orgId, view, now);
+    const delphicProfit = rec.totals.profit;
+    const asset = assetAt(win);
+    return {
+      month: win.key,
+      period_month: win.month,
+      period_year: win.year,
+      revenue: rec.totals.revenue,
+      profit: rec.totals.profit,
+      delphic_profit: delphicProfit,
+      delphic_profit_x: round2(delphicProfit * DELPHIC_PROFIT_FACTOR),
+      asset_value_x: round2(asset.value * ASSET_VALUE_FACTOR),
+      asset_value: asset.value,
+      asset_value_carried: asset.carried,
+      valuation: valuationOf(delphicProfit, asset.value),
+    };
+  };
+  const rows = [];
+  for (let i = 0; i < wins.length; i += 4) rows.push(...(await Promise.all(wins.slice(i, i + 4).map(monthRow))));
+  return {
+    currency: 'INR',
+    state,
+    formula: { delphic_profit: DELPHIC_PROFIT_FACTOR, asset_value: ASSET_VALUE_FACTOR },
+    months: rows,
+  };
+}
+
+async function upsertAssetValue(orgId, userId, { period_month, period_year, asset_value, notes }) {
+  const row = await prisma.financialAssetValue.upsert({
+    where: { org_id_period_year_period_month: { org_id: orgId, period_year, period_month } },
+    create: { org_id: orgId, period_year, period_month, asset_value, notes: notes || null, updated_by: userId },
+    update: { asset_value, notes: notes || null, updated_by: userId },
+  });
+  return { ...row, asset_value: Number(row.asset_value) };
+}
+
 module.exports = {
+  trendsQuerySchema,
+  assetValueSchema,
+  valuationOf,
+  trends,
+  upsertAssetValue,
   planLineSchema,
   planQuerySchema,
   monthsQuerySchema,

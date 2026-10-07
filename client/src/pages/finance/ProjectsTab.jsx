@@ -24,10 +24,11 @@ function money(n) {
 
 function billingLabel(row) {
   if (!row.billing_type) return <span className="text-tertiary-400">Not set</span>;
-  const suffix = row.billing_type === 'hourly' ? '/hr' : '/mo';
+  const oneTime = row.billing_type === 'one_time';
+  const suffix = row.billing_type === 'hourly' ? '/hr' : oneTime ? '' : '/mo';
   return (
     <span>
-      <span className="capitalize">{row.billing_type}</span>
+      <span className="capitalize">{oneTime ? 'One time' : row.billing_type}</span>
       <span className="ml-1.5 text-xs text-tertiary-500">{row.currency} {money(row.rate)}{suffix}</span>
       {row.billing_type === 'hourly' && row.estimated_monthly_hours ? (
         <span className="block text-xs text-tertiary-500">Est. {row.estimated_monthly_hours}h/mo ≈ {row.currency} {money(row.estimated_monthly_hours * row.rate)}</span>
@@ -53,11 +54,24 @@ function InrLine({ row, suffix }) {
   );
 }
 
+// Fixed-bid projects: what has been billed (locked months) and what is left of the contract value.
+function FixedBidCell({ row, field }) {
+  const f = row.fixed_bid;
+  if (!f) return <span className="text-xs text-tertiary-300">—</span>;
+  return (
+    <span className="whitespace-nowrap text-right">
+      <span className={`font-medium tabular-nums ${field === 'balance' && f.balance <= 0 ? 'text-success-700' : 'text-tertiary-900'}`}>{f.currency} {money(f[field])}</span>
+      {field === 'balance' && <span className="block text-xs text-tertiary-500" title="Invoices raised, locked or not">Invoiced {money(f.invoiced)} of {money(f.total)}</span>}
+    </span>
+  );
+}
+
 // This month's contract amount in INR — the figures the total above adds up —
 // with why it differs from the full monthly contract, if it does.
 function ThisMonthCell({ row }) {
   const t = row.this_month;
   if (!t || !t.billing_type) return <span className="text-xs text-tertiary-400">No rate</span>;
+  if (t.note === 'fixed_bid') return <span className="text-xs text-tertiary-500" title="A fixed-bid project bills only through its invoices">Invoice-based</span>;
   const reason = t.note === 'before_agreement_start' ? 'Agreement not started'
     : t.note === 'after_agreement_end' ? 'Agreement ended'
     : t.prorated_days ? `Prorated: ${t.prorated_days} days in agreement`
@@ -128,6 +142,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
   if (!project || !form) return <Drawer open={false} onClose={onClose} title="" />;
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const fixedBidProject = form.service_category === 'project';
   const monthly = form.billing_type === 'monthly';
   const hourly = form.billing_type === 'hourly';
   const estimatedAmount = hourly && Number(form.estimated_monthly_hours) > 0 && form.rate !== '' ? Number(form.estimated_monthly_hours) * Number(form.rate) : null;
@@ -214,7 +229,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
             </label>
             <label className="block text-xs font-medium text-tertiary-600">
               Category
-              <select value={form.service_category} onChange={(e) => set('service_category', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <select value={form.service_category} onChange={(e) => { set('service_category', e.target.value); if (e.target.value === 'project') set('billing_type', 'one_time'); else if (form.billing_type === 'one_time') set('billing_type', ''); }} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
                 <option value="">Not set</option>
                 {PROJECT_CATEGORIES.map((c) => <option key={c.value} value={c.value} disabled={c.disabled}>{c.label}</option>)}
               </select>
@@ -228,12 +243,13 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 Billing type
                 <select value={form.billing_type} onChange={(e) => set('billing_type', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
                   <option value="">Not set</option>
-                  <option value="hourly">Hourly</option>
-                  <option value="monthly">Monthly</option>
+                  {!fixedBidProject && <option value="hourly">Hourly</option>}
+                  {!fixedBidProject && <option value="monthly">Monthly</option>}
+                  {fixedBidProject && <option value="one_time">One time (fixed bid)</option>}
                 </select>
               </label>
               <label className="block text-xs font-medium text-tertiary-600">
-                {monthly ? 'Monthly rate' : 'Hourly rate'}
+                {fixedBidProject ? 'Total contract value' : monthly ? 'Monthly rate' : 'Hourly rate'}
                 <input type="number" min="0" step="0.01" value={form.rate} onChange={(e) => set('rate', e.target.value)} disabled={!form.billing_type} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50" />
               </label>
               <label className="block text-xs font-medium text-tertiary-600">
@@ -420,6 +436,8 @@ export default function ProjectsTab() {
     { key: 'start', header: 'Agreement', render: (row) => <AgreementDates row={row} /> },
     { key: 'contract', header: 'Contract', render: (row) => <ContractPill contract={row.contract} /> },
     { key: 'this_month', header: 'This month (INR)', render: (row) => <ThisMonthCell row={row} /> },
+    { key: 'fixed_billed', header: 'Billed', render: (row) => <FixedBidCell row={row} field="billed" /> },
+    { key: 'fixed_balance', header: 'Balance', render: (row) => <FixedBidCell row={row} field="balance" /> },
     { key: 'open', header: '', render: (row) => <button type="button" className="btn-ghost text-xs" onClick={() => setSelected(row)}>Open</button> },
   ];
 

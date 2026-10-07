@@ -265,6 +265,8 @@ function parent(key, label, nodes) {
 
 const monthIdx = (y, m) => y * 12 + (m - 1);
 
+const MONTH_CONCURRENCY = 4;
+
 async function financialRecords(orgId, { period_year, from_month = 1, to_month = 12, state = 'locked' }, now = new Date()) {
   const wantLocked = state !== 'unlocked';
   const wantLive = state !== 'locked';
@@ -278,16 +280,12 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
   const today = todayIst(now);
   const nowIdx = monthIdx(today.getUTCFullYear(), today.getUTCMonth() + 1);
 
-  const revenue = [];
-  const salaries = { it: [], nonIt: [] };
-  const claims = [];
-  const charges = [];
-  const vendors = [];
-  const counts = { locked: { billing: 0, salary: 0, expense: 0, vendor: 0 }, unlocked: { billing: 0, salary: 0, expense: 0, vendor: 0 } };
-  const months = [];
-  let projects = null;
-
-  for (let m = from_month; m <= to_month; m += 1) {
+  const L0 = () => ({ revenue: [], fixedRevenue: [], salaries: { it: [], nonIt: [] }, claims: [], charges: [], vendors: [], counts: { locked: { billing: 0, salary: 0, expense: 0, vendor: 0 }, unlocked: { billing: 0, salary: 0, expense: 0, vendor: 0 } } });
+  // Live projects are listed once, before the months fan out.
+  const projects = wantLive ? await billingEngine.listProjects(orgId, {}) : null;
+  // Each month is independent, so months run a few at a time (not one after another) and are merged in month order.
+  const doMonth = async (m) => {
+    const L = L0();
     const period = { period_month: m, period_year };
     const [billing, salary, expense, vendor, orgSalary, orgVendor] = await Promise.all([
       calculations.lockedRecords(orgId, 'billing', period),
@@ -300,25 +298,25 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
     const monthCounts = { locked: 0, unlocked: 0 };
     const addSalary = (line, locked) => {
       const node = leaf(`employee:${line.org_membership_id}`, line.name, line.net, locked);
-      (line.is_it ? salaries.it : salaries.nonIt).push(node);
+      (line.is_it ? L.salaries.it : L.salaries.nonIt).push(node);
     };
     const addExpense = (r, amountInr, locked) => {
       const node = leaf(`${r.type}:${r.category || 'Uncategorised'}`, r.category || 'Uncategorised', amountInr, locked);
-      (r.type === 'charge' ? charges : claims).push(node);
+      (r.type === 'charge' ? L.charges : L.claims).push(node);
     };
 
     if (wantLocked) {
       for (const [, rec] of billing) {
         const amountInr = rec.snapshot.amount_inr ?? toInr(rec.amount, rec.currency);
-        revenue.push(leaf(`project:${rec.calc.scope_key}`, rec.calc.scope_label || rec.snapshot.project?.name || 'Project', amountInr, true));
-        counts.locked.billing += 1;
+        (rec.snapshot.fixed_bid ? L.fixedRevenue : L.revenue).push(leaf(`project:${rec.calc.scope_key}`, rec.calc.scope_label || rec.snapshot.project?.name || 'Project', amountInr, true));
+        L.counts.locked.billing += 1;
         monthCounts.locked += 1;
       }
       for (const [, rec] of salary) {
         const line = rec.snapshot.lines?.[0];
         if (!line) continue;
         addSalary(line, true);
-        counts.locked.salary += 1;
+        L.counts.locked.salary += 1;
         monthCounts.locked += 1;
       }
       // A whole-month salary lock covers everyone without their own lock.
@@ -326,21 +324,21 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
         for (const line of orgSalary.snapshot.lines || []) {
           if (salary.has(line.org_membership_id)) continue;
           addSalary(line, true);
-          counts.locked.salary += 1;
+          L.counts.locked.salary += 1;
           monthCounts.locked += 1;
         }
       }
       for (const [, rec] of vendor) {
         const v = rec.snapshot.vendors?.[0];
-        vendors.push(leaf(`vendor:${rec.calc.scope_key}`, v?.vendor?.name || rec.calc.scope_label || 'Vendor', rec.amount, true));
-        counts.locked.vendor += 1;
+        L.vendors.push(leaf(`vendor:${rec.calc.scope_key}`, v?.vendor?.name || rec.calc.scope_label || 'Vendor', rec.amount, true));
+        L.counts.locked.vendor += 1;
         monthCounts.locked += 1;
       }
       if (orgVendor) {
         for (const v of orgVendor.snapshot.vendors || []) {
           if (!v.vendor || vendor.has(v.vendor.id)) continue;
-          vendors.push(leaf(`vendor:${v.vendor.id}`, v.vendor.name, v.amount_inr, true));
-          counts.locked.vendor += 1;
+          L.vendors.push(leaf(`vendor:${v.vendor.id}`, v.vendor.name, v.amount_inr, true));
+          L.counts.locked.vendor += 1;
           monthCounts.locked += 1;
         }
       }
@@ -348,22 +346,21 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
         const r = rec.snapshot.record;
         if (!r) continue;
         addExpense(r, rec.amount, true);
-        counts.locked.expense += 1;
+        L.counts.locked.expense += 1;
         monthCounts.locked += 1;
       }
     }
 
     // Live (unlocked) records only for months that have started.
     if (wantLive && monthIdx(period_year, m) <= nowIdx) {
-      projects = projects || (await billingEngine.listProjects(orgId, {}));
       for (const account of projects) {
         if (billing.has(account.id)) continue;
         const raw = await billingEngine.computeProjectMonth(orgId, account, period, now);
         if (!raw?.supported) continue;
         const amount = billingEngine.lockedAmount(raw);
         if (!amount) continue;
-        revenue.push(leaf(`project:${account.id}`, `${raw.project.code ? `${raw.project.code} · ` : ''}${raw.project.name}`, toInr(amount, raw.currency), false));
-        counts.unlocked.billing += 1;
+        (raw.fixed_bid ? L.fixedRevenue : L.revenue).push(leaf(`project:${account.id}`, `${raw.project.code ? `${raw.project.code} · ` : ''}${raw.project.name}`, toInr(amount, raw.currency), false));
+        L.counts.unlocked.billing += 1;
         monthCounts.unlocked += 1;
       }
       if (!orgSalary) {
@@ -371,7 +368,7 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
         for (const line of result.lines) {
           if (salary.has(line.org_membership_id)) continue;
           addSalary(line, false);
-          counts.unlocked.salary += 1;
+          L.counts.unlocked.salary += 1;
           monthCounts.unlocked += 1;
         }
       }
@@ -379,22 +376,47 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
         const result = await vendorEngine.computeVendorPayments(orgId, period);
         for (const v of result.vendors) {
           if (!v.vendor || vendor.has(v.vendor.id) || !v.amount_inr) continue;
-          vendors.push(leaf(`vendor:${v.vendor.id}`, v.vendor.name, v.amount_inr, false));
-          counts.unlocked.vendor += 1;
+          L.vendors.push(leaf(`vendor:${v.vendor.id}`, v.vendor.name, v.amount_inr, false));
+          L.counts.unlocked.vendor += 1;
           monthCounts.unlocked += 1;
         }
       }
       for (const r of await monthExpenseRows(orgId, period)) {
         if (expense.has(r.scope_key)) continue;
         addExpense(r, toInr(r.amount, r.currency), false);
-        counts.unlocked.expense += 1;
+        L.counts.unlocked.expense += 1;
         monthCounts.unlocked += 1;
       }
     }
-    months.push({ ...period, locked_records: monthCounts.locked, unlocked_records: monthCounts.unlocked });
+    return { L, month: { ...period, locked_records: monthCounts.locked, unlocked_records: monthCounts.unlocked } };
+  };
+  const monthNumbers = [];
+  for (let m = from_month; m <= to_month; m += 1) monthNumbers.push(m);
+  const results = [];
+  for (let i = 0; i < monthNumbers.length; i += MONTH_CONCURRENCY) {
+    results.push(...(await Promise.all(monthNumbers.slice(i, i + MONTH_CONCURRENCY).map(doMonth))));
+  }
+  const revenue = [];
+  const fixedRevenue = [];
+  const salaries = { it: [], nonIt: [] };
+  const claims = [];
+  const charges = [];
+  const vendors = [];
+  const counts = L0().counts;
+  const months = [];
+  for (const { L, month } of results) {
+    revenue.push(...L.revenue);
+    fixedRevenue.push(...L.fixedRevenue);
+    salaries.it.push(...L.salaries.it);
+    salaries.nonIt.push(...L.salaries.nonIt);
+    claims.push(...L.claims);
+    charges.push(...L.charges);
+    vendors.push(...L.vendors);
+    for (const side of ['locked', 'unlocked']) for (const k of Object.keys(counts[side])) counts[side][k] += L.counts[side][k];
+    months.push(month);
   }
 
-  const revenueNode = parent('revenue', 'Revenue / Sales', [group('managed_services', 'Managed Services Revenue', revenue)]);
+  const revenueNode = parent('revenue', 'Revenue / Sales', [group('managed_services', 'Managed Services Revenue', revenue), group('fixed_price', 'Project Revenue (fixed price)', fixedRevenue)]);
   const salariesNode = parent('salaries', 'Salaries', [group('it_salaries', 'IT Salaries', salaries.it), group('non_it_salaries', 'Non-IT Salaries', salaries.nonIt)]);
   const expensesNode = parent('expenses', 'Expenses', [
     group('group_charges', 'Group Charges', charges),

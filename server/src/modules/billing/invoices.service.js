@@ -9,6 +9,11 @@
 //              dates cut a partial month), never scaled by timesheet hours;
 //     hourly:  approved billable hours × rate;
 //     overtime only where the project bills it.
+//   Fixed-bid project (service category "project"): the billing rate is the TOTAL
+//   contract value. Any number of invoices may be raised, each for an amount the
+//   user enters, as long as the project's invoices never add up to more than the
+//   contract value. The month's invoices are its Billing & Sales amount, and
+//   locking that month (the existing lock) is what makes them financially effective.
 //   Currency is the project's billing-rate currency; the project and client
 //   shown are the project's own (project_name, linked client), never the
 //   account row's `name` (often the client it was created from).
@@ -28,6 +33,7 @@ const chargesService = require('./charges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
 const financialLock = require('../calculations/financialLock');
+const fixedBid = require('./fixedBid.service');
 
 // Lazy: calculations.service loads the engines, which load billing.service.
 const calculations = () => require('../calculations/calculations.service');
@@ -86,7 +92,7 @@ async function convertToCurrency(orgId, details, lines, target) {
 
 // The project month an invoice is built from, with how its amount was worked out.
 // `currency` (optional) invoices in a currency other than the project's rate currency.
-async function clientInvoiceSource(orgId, accountId, period, currency) {
+async function clientInvoiceSource(orgId, accountId, period, currency, { amount, replacing = 0 } = {}) {
   const account = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId, type: 'client' }, select: billingEngine.PROJECT_SELECT });
   if (!account) return { error: 'account_not_found' };
   // Nothing is invoiced outside the agreement dates.
@@ -94,6 +100,7 @@ async function clientInvoiceSource(orgId, accountId, period, currency) {
   const monthEnd = new Date(Date.UTC(period.period_year, period.period_month, 0));
   if (account.agreement_start_date && account.agreement_start_date > monthEnd) return { error: 'before_agreement_start', agreement_start: ymd(account.agreement_start_date) };
   if (account.agreement_end_date && account.agreement_end_date < monthStart) return { error: 'after_agreement_end', agreement_end: ymd(account.agreement_end_date) };
+  if (fixedBid.isFixedBid(account)) return fixedBidSource(orgId, account, period, { amount, replacing, currency });
   const calc = await calculations().findCalc(orgId, 'billing', accountId, period);
   const frozen = calc && calculations().FROZEN_STATUSES.includes(calc.status);
   if (frozen && calc.status === 'change_detected') return { error: 'change_detected' };
@@ -130,11 +137,51 @@ async function clientInvoiceSource(orgId, accountId, period, currency) {
   };
 }
 
-async function previewClientInvoice(orgId, accountId, period, currency) {
-  const src = await clientInvoiceSource(orgId, accountId, period, currency);
+// Fixed bid: one invoice for `amount` (default: everything still uninvoiced) against the
+// contract value. `replacing` is the amount of an invoice being edited (it frees its own share).
+async function fixedBidSource(orgId, account, period, { amount, replacing = 0, currency }) {
+  if (await fixedBid.monthLocked(orgId, account.id, period)) return { error: 'billing_locked' };
+  const summary = await fixedBid.summaryFor(orgId, account.id);
+  if (!summary || !(summary.total > 0)) return { error: 'no_billing_rate' };
+  if (currency && currency !== summary.currency) return { error: 'fixed_bid_currency', currency: summary.currency };
+  const available = round2(summary.remaining_to_invoice + replacing);
+  const asked = amount !== undefined && amount !== null;
+  const value = asked ? round2(Number(amount)) : Math.max(available, 0);
+  if (asked && !(value > 0)) return { error: 'nothing_to_invoice' };
+  if (value > available) return { error: 'fixed_bid_exceeds_balance', remaining: available, total: summary.total, currency: summary.currency };
+  const contractCharges = await prisma.contractCharge.findMany({ where: { org_id: orgId, account_id: account.id }, orderBy: { created_at: 'asc' } });
+  const worked = chargesService.applyCharges(value, contractCharges, 1);
+  const details = {
+    billing_type: 'one_time',
+    rate: summary.total,
+    currency: summary.currency,
+    base_amount: value,
+    overtime_amount: 0,
+    adjustment_amount: 0,
+    adjustments: [],
+    amount: value,
+    fixed_bid: { total: summary.total, invoiced_before: round2(summary.invoiced - replacing), remaining_after: round2(available - value) },
+    subtotal: value,
+    charges: worked.lines,
+    total_amount: worked.total,
+  };
+  return {
+    account,
+    project: billingEngine.describeProject(account),
+    details,
+    lines: [{ resource: 'Fixed-bid project invoice', hours: 0, overtime_hours: 0, base_amount: value, overtime_amount: 0, revenue: value }],
+    version: null,
+    source: 'live',
+    fixed_bid: true,
+    summary,
+  };
+}
+
+async function previewClientInvoice(orgId, accountId, period, currency, amount) {
+  const src = await clientInvoiceSource(orgId, accountId, period, currency, { amount });
   if (src.error) return src;
   const [existing, suggested] = await Promise.all([
-    prisma.clientInvoice.findUnique({ where: { client_account_id_period_month_period_year: { client_account_id: accountId, ...period } }, select: { id: true, invoice_number: true, status: true, invoice_date: true } }),
+    prisma.clientInvoice.findFirst({ where: { client_account_id: accountId, org_id: orgId, ...period }, orderBy: { created_at: 'desc' }, select: { id: true, invoice_number: true, status: true, invoice_date: true } }),
     suggestClientNumber(orgId, period.period_year),
   ]);
   return {
@@ -149,22 +196,25 @@ async function previewClientInvoice(orgId, accountId, period, currency) {
       currency: src.details.currency,
       source: src.source,
       calculation_version: src.version?.version || null,
-      existing: existing ? { ...existing, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
-      suggested_number: existing?.invoice_number || suggested,
+      fixed_bid: src.fixed_bid ? src.summary : null,
+      // A fixed-bid project always gets a NEW invoice; a monthly one refreshes its draft.
+      existing: existing && !src.fixed_bid ? { ...existing, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
+      suggested_number: (!src.fixed_bid && existing?.invoice_number) || suggested,
     },
   };
 }
 
 // Creates the project's invoice for the month, or refreshes it while it is
 // still a draft. Sent / paid invoices are never rewritten.
-async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency }) {
+async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency, amount }) {
   const period = { period_month, period_year };
   const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
   if (frozen) return frozen;
-  const src = await clientInvoiceSource(orgId, account_id, period, currency);
+  const src = await clientInvoiceSource(orgId, account_id, period, currency, { amount });
   if (src.error) return src;
-  if (!(src.details.amount > 0)) return { error: 'nothing_to_invoice' };
-  const existing = await prisma.clientInvoice.findUnique({ where: { client_account_id_period_month_period_year: { client_account_id: account_id, ...period } } });
+  if (!(src.details.amount > 0)) return { error: src.fixed_bid ? 'fixed_bid_exhausted' : 'nothing_to_invoice' };
+  // Fixed bid: every call is a new invoice (the cap above keeps the total within the contract).
+  const existing = src.fixed_bid ? null : await prisma.clientInvoice.findFirst({ where: { org_id: orgId, client_account_id: account_id, ...period } });
   if (existing && existing.status !== 'draft') return { error: 'invoice_sent' };
   const number = (invoice_number || '').trim() || existing?.invoice_number || (await suggestClientNumber(orgId, period_year));
   const clash = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, invoice_number: number, ...(existing ? { NOT: { id: existing.id } } : {}) }, select: { id: true } });
@@ -235,6 +285,16 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
   const draft = invoice.status === 'draft';
   const why = (reason || '').trim();
   if (!draft && !why) return { error: 'reason_required' };
+  // Fixed bid: a locked month's invoices are final, and an edit may not push the project past its contract value.
+  const account = await prisma.account.findFirst({ where: { id: invoice.client_account_id }, select: { service_category: true } });
+  if (fixedBid.isFixedBid(account)) {
+    if (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year })) return { error: 'billing_locked' };
+    if (currency && currency !== invoice.currency) return { error: 'fixed_bid_currency', currency: invoice.currency };
+    if (amount !== undefined) {
+      const over = await fixedBid.checkWithinBalance(orgId, invoice.client_account_id, amount, Number(invoice.amount));
+      if (over) return over;
+    }
+  }
   if (currency && currency !== invoice.currency) {
     if (!draft) return { error: 'invoice_sent' };
     const regenerated = await generateClientInvoice(orgId, user, {
@@ -297,6 +357,8 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   if (frozen) return frozen;
   const why = (reason || '').trim();
   if (invoice.status !== 'draft' && !why) return { error: 'reason_required' };
+  const account = await prisma.account.findFirst({ where: { id: invoice.client_account_id }, select: { service_category: true } });
+  if (fixedBid.isFixedBid(account) && (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year }))) return { error: 'billing_locked' };
   await prisma.clientInvoice.delete({ where: { id: invoice.id } });
   await prisma.auditLog.create({
     data: {

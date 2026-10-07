@@ -87,7 +87,9 @@ function ProjectMonthDrawer({ row, filters, onClose, onChanged, onInvoice }) {
           <p className="text-xs text-tertiary-500">
             {!data.supported ? data.note : (
               <>
-                {data.billing_type === 'monthly'
+                {data.billing_type === 'one_time'
+                  ? `Fixed bid, one time: contract value ${inr(data.rate, data.currency)}. This month bills only the invoices raised for it (${inr(data.totals?.final_amount ?? 0, data.currency)}); lock the month to make them final. The rest of the contract stays unbilled until invoiced.`
+                  : data.billing_type === 'monthly'
                   ? `Monthly contract ${inr(data.rate, data.currency)} over this project's ${data.working_days} working days (${data.calendar?.name || 'default calendar'}): every working day inside the agreement bills ${inr(data.rate / Math.max(data.working_days, 1), data.currency)}, whatever hours were logged — a full month bills exactly the rate.`
                   : data.billing_type === 'hourly' ? `Hourly: approved hours × ${inr(data.rate, data.currency)}.` : 'No billing rate set for this project.'}
                 {data.minimum && ` Committed minimum ${data.minimum.hours}h/month: ${data.minimum.met ? 'met' : `${data.minimum.shortfall_hours}h short so far`} (billing is still approved hours × rate).`}
@@ -149,7 +151,7 @@ export default function BillingSalesTab() {
       </button>
     ) },
     { key: 'type', header: 'Type', render: (r) => (r.supported ? categoryLabel(r.project.service_category) || 'Managed services' : <span className="text-xs text-amber-800" title={r.note}>{categoryLabel(r.project.service_category)} · not enabled</span>) },
-    { key: 'billing', header: 'Billing', render: (r) => (r.billing_type ? <span className="text-xs">{r.resource_rates?.length ? 'Mixed - ' : ''}{r.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} {inr(r.rate, r.currency)} · {r.working_days} WD{r.overtime.enabled ? ` · OT ${r.overtime.multiplier}×` : ' · no OT'}</span> : <span className="text-xs text-tertiary-400">Not set</span>) },
+    { key: 'billing', header: 'Billing', render: (r) => (r.billing_type ? <span className="text-xs">{r.resource_rates?.length ? 'Mixed - ' : ''}{r.billing_type === 'one_time' ? 'One time' : r.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} {inr(r.rate, r.currency)}{r.billing_type === 'one_time' ? ' · contract' : ` · ${r.working_days} WD${r.overtime.enabled ? ` · OT ${r.overtime.multiplier}×` : ' · no OT'}`}</span> : <span className="text-xs text-tertiary-400">Not set</span>) },
     { key: 'hours', header: 'Approved / pending / rejected', render: (r) => <span className="text-xs tabular-nums">{hrs(r.totals.approved_hours)}{r.totals.overtime_hours ? ` +${r.totals.overtime_hours}h OT` : ''} · {hrs(r.totals.pending_hours)} · {hrs(r.totals.rejected_hours)}</span> },
     { key: 'amount', header: 'Amount', render: (r) => (
       <span className="tabular-nums">
@@ -171,7 +173,7 @@ export default function BillingSalesTab() {
     ) },
     { key: 'approval', header: 'Approval', render: (r) => <StatusBadge status={r.totals.rejected_days ? 'rejected' : r.totals.pending_days ? 'pending' : r.totals.approved_days ? 'approved' : 'no_entries'} size="xs" /> },
     { key: 'lock', header: 'Lock', render: (r) => <RecordLockButton kind="billing" scopeKey={r.project.id} period={{ period_month: r.period_month, period_year: r.period_year }} lock={r.lock} label={`${r.project.name} billing`} onChanged={() => refresh?.()} /> },
-    { key: 'adjust', header: 'Adjust', render: (r) => (r.supported && r.billing_type ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor(r)}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
+    { key: 'adjust', header: 'Adjust', render: (r) => (r.supported && r.billing_type && r.billing_type !== 'one_time' ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor(r)}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
     { key: 'invoice_state', header: 'Invoice status', render: (r) => (r.invoice?.generated ? <span className="text-xs">{r.invoice.number || 'Generated'}<span className="block text-tertiary-500">{r.invoice.sent ? 'Sent' : 'Unsent'} · {r.invoice.paid ? 'Paid' : 'Unpaid'}</span></span> : <span className="text-xs text-tertiary-400">Not generated</span>) },
     { key: 'invoice', header: 'Invoice', render: (r) => (r.supported && r.billing_type ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ account_id: r.project.id, period_month: r.period_month, period_year: r.period_year })} /> : <span className="text-xs text-tertiary-400">—</span>) },
   ];
@@ -228,6 +230,7 @@ export default function BillingSalesTab() {
             <option value="all">All</option>
             <option value="monthly">Monthly</option>
             <option value="hourly">Hourly</option>
+            <option value="one_time">One time (fixed bid)</option>
             <option value="mixed">Mixed (per resource)</option>
           </select>
         </Filter>

@@ -479,6 +479,70 @@ async function listMyPayslips(orgId, orgMembershipId, { page, limit }) {
   return { data, pagination: { page, limit, total } };
 }
 
+// The payslip's printable detail: who the employee is and where the money goes, the month's
+// leaves taken and balances as of now, the salary structure breakup, and the adjustments itemized.
+// Built on read from the employee's own records, so a payslip never needs re-processing for it.
+// Basic first, then HRA, then everything else in the order stored.
+const componentRank = (name) => { const i = ['basic', 'hra'].indexOf(String(name).toLowerCase()); return i === -1 ? 9 : i; };
+const SLIP_LEAVES = [['CL', 'Casual'], ['SL', 'Sick'], ['EL', 'Earned'], ['CO', 'Compensatory Off']];
+
+async function payslipDetail(orgId, payslip) {
+  const leaveService = require('../leave/leave.service');
+  const salaryAdjustments = require('./salaryAdjustments.service');
+  const { period_start, period_end } = periodBounds(payslip.payroll_run.period_month, payslip.payroll_run.period_year);
+  const member = await prisma.orgMembership.findFirst({
+    where: { id: payslip.org_membership_id, org_id: orgId },
+    select: {
+      employee_code: true,
+      aadhaar_number: true,
+      pan_number: true,
+      bank_account_number: true,
+      bank_ifsc: true,
+      person: { select: { name: true } },
+      department: { select: { name: true } },
+      team: { select: { name: true } },
+      designation: { select: { name: true } },
+    },
+  });
+  const [structure, adjustments, balances, taken] = await Promise.all([
+    prisma.salaryStructure.findFirst({ where: { org_id: orgId, org_membership_id: payslip.org_membership_id, effective_from: { lte: period_end } }, orderBy: { effective_from: 'desc' } }),
+    salaryAdjustments.list(orgId, { period_month: payslip.payroll_run.period_month, period_year: payslip.payroll_run.period_year, org_membership_id: payslip.org_membership_id }),
+    leaveService.listMyBalances(orgId, payslip.org_membership_id, new Date().getUTCFullYear()),
+    leaveService.leaveTakenInRange(orgId, payslip.org_membership_id, period_start, period_end),
+  ]);
+  const leaves = SLIP_LEAVES.map(([code, label]) => {
+    const row = balances.find((b) => b.code === code);
+    return { code, label, taken: row ? taken.get(row.leave_type_id) || 0 : 0, balance: row ? (row.remaining === null ? null : row.remaining) : null };
+  });
+  const items = adjustments.map((a) => ({ id: a.id, label: a.label, note: a.note, amount: a.amount, sign: a.sign }));
+  const round = (n) => Math.round(n * 100) / 100;
+  return {
+    employee: member && {
+      employee_code: member.employee_code || null,
+      name: member.person?.name || null,
+      department: member.department?.name || null,
+      team: member.team?.name || null,
+      designation: member.designation?.name || null,
+      aadhaar_number: member.aadhaar_number || null,
+      pan_number: member.pan_number || null,
+      bank_account_number: member.bank_account_number || null,
+      bank_ifsc: member.bank_ifsc || null,
+    },
+    leaves,
+    salary: structure && { monthly_ctc: Number(structure.ctc), components: Object.entries(structure.components || {}).map(([name, amount]) => ({ name, amount: Number(amount) })).sort((x, y) => componentRank(x.name) - componentRank(y.name)) },
+    additions: items.filter((i) => i.sign > 0),
+    other_deductions: items.filter((i) => i.sign < 0),
+    totals: {
+      gross: Number(payslip.gross),
+      loss_of_pay: Number(payslip.deductions),
+      additions: round(items.filter((i) => i.sign > 0).reduce((s, i) => s + i.amount, 0)),
+      adjustment_deductions: round(items.filter((i) => i.sign < 0).reduce((s, i) => s + i.amount, 0)),
+      net_paid: Number(payslip.net),
+    },
+  };
+}
+
+// An employee reads only their own payslip (another's reads as not found); an admin reads any in the org.
 async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
   const payslip = await prisma.payslip.findFirst({
     where: { id: payslipId, org_id: orgId },
@@ -486,7 +550,7 @@ async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
   });
   if (!payslip) return { error: 'not_found' };
   if (!isAdmin && payslip.org_membership_id !== orgMembershipId) return { error: 'not_found' };
-  return { payslip };
+  return { payslip: { ...payslip, detail: await payslipDetail(orgId, payslip) } };
 }
 
 module.exports = {
