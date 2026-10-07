@@ -6,7 +6,7 @@ import { gulatiApi, gulatiError } from '../../lib/gulati/api.js';
 import { resetMasters } from '../../lib/gulati/meta.js';
 import { useGulati, gxCan } from '../../lib/gulati/useGulati.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
-import { Empty, Num, Select, Text, card, dayOf } from '../../components/gulati/ui.jsx';
+import { Empty, Select, Text, card, dayOf } from '../../components/gulati/ui.jsx';
 import { titleCase } from '../../lib/format.js';
 
 const TABS = [
@@ -64,7 +64,7 @@ function General() {
   async function saveSettings(e) {
     e.preventDefault();
     try {
-      const body = { valuation_method: s.valuation_method, valuation_multiple: Number(s.valuation_multiple), valuation_manual: s.valuation_method === 'manual' && s.valuation_manual !== null && s.valuation_manual !== '' ? Number(s.valuation_manual) : s.valuation_manual === '' ? null : s.valuation_manual, lead_prefix: s.lead_prefix, deal_prefix: s.deal_prefix, task_prefix: s.task_prefix, ...(reason.trim() ? { reason: reason.trim() } : {}) };
+      const body = { lead_prefix: s.lead_prefix, deal_prefix: s.deal_prefix, task_prefix: s.task_prefix, ...(reason.trim() ? { reason: reason.trim() } : {}) };
       setS(await gulatiApi.updateSettings(body));
       setReason('');
       pushSuccess('Settings saved');
@@ -83,11 +83,8 @@ function General() {
         <div className="flex justify-end"><button type="submit" className="btn-primary">Save company</button></div>
       </form>
       <form onSubmit={saveSettings} className={`${card} space-y-3`}>
-        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Valuation and numbering</h3>
-        <p className="text-xs text-tertiary-500">The valuation is derived from the company financial performance. It is separate from the profit of any single deal.</p>
-        <Select label="Valuation method" value={s.valuation_method} onChange={set('valuation_method')} options={[{ value: 'revenue_multiple', label: 'Revenue multiple (last 12 months)' }, { value: 'profit_multiple', label: 'Net profit multiple (last 12 months)' }, { value: 'manual', label: 'Manual value' }]} />
-        <Num label="Multiple" value={s.valuation_multiple} onChange={set('valuation_multiple')} />
-        {s.valuation_method === 'manual' && <Num label="Manual valuation" value={s.valuation_manual ?? ''} onChange={set('valuation_manual')} />}
+        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Numbering</h3>
+        <p className="text-xs text-tertiary-500">Valuation is fixed at (net profit x 240) + (asset value x 3); record asset values in Finance, Valuation tab. Here you set the code prefixes.</p>
         <div className="grid grid-cols-3 gap-2">
           <Text label="Lead prefix" value={s.lead_prefix} onChange={set('lead_prefix')} maxLength={12} />
           <Text label="Deal prefix" value={s.deal_prefix} onChange={set('deal_prefix')} maxLength={12} />

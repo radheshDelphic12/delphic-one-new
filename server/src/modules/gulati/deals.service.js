@@ -44,7 +44,7 @@ const updateDealSchema = z.object({ ...dealFields, reason: reasonField }).partia
 const statusSchema = z.object({ status: z.enum(STATUSES), reason: text(500), actual_end: dateOnly.optional() });
 const convertSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), start_date: dateOnly.optional() });
 const listQuerySchema = z.object({
-  status: z.enum([...STATUSES, 'active', 'done']).optional(),
+  status: z.enum([...STATUSES, 'active', 'done', 'all']).optional(),
   trading_type: z.string().trim().max(40).optional(),
   party_id: z.string().uuid().optional(),
   vendor_id: z.string().uuid().optional(),
@@ -149,7 +149,7 @@ async function list(orgId, query, scope = {}) {
     deleted_at: null,
     ...(query.status === 'active' ? { status: { in: ACTIVE } } : {}),
     ...(query.status === 'done' ? { status: { in: DONE } } : {}),
-    ...(query.status && !['active', 'done'].includes(query.status) ? { status: query.status } : {}),
+    ...(query.status && !['active', 'done', 'all'].includes(query.status) ? { status: query.status } : {}),
     ...(query.trading_type ? { trading_type: query.trading_type } : {}),
     ...(query.party_id ? { party_id: query.party_id } : {}),
     ...(query.vendor_id ? { vendor_id: query.vendor_id } : {}),
