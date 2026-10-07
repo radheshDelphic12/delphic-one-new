@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
+import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import SalaryAdjustmentsTab from './SalaryAdjustmentsTab.jsx';
+import SalaryPaymentsTab from './SalaryPaymentsTab.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -657,6 +658,8 @@ function MemberCell({ membership }) {
 
 const BASE_TABS = [{ key: 'my-payslips', label: 'My Payslips', icon: FileText }];
 const ADMIN_TABS = [
+  // Paid or not, with the transaction details, for every employee and month.
+  { key: 'salary-payments', label: 'Salary Payments', icon: Banknote },
   // Salary from attendance / check-ins on each employee's calendar — what a
   // run processes (and, once the month is locked, exactly the locked figures).
   { key: 'attendance-salary', label: 'Attendance Salary', icon: CalendarCheck },
@@ -710,6 +713,7 @@ export default function PayrollHubPage() {
         </div>
       )}
       {section === 'my-payslips' && <MyPayslipsTab />}
+      {section === 'salary-payments' && isAdmin && <SalaryPaymentsTab filters={people} />}
       {section === 'attendance-salary' && isAdmin && <AttendanceSalaryTab people={people} endpoint="/payroll/attendance-salary" />}
       {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
       {section === 'adjustments' && isAdmin && <SalaryAdjustmentsTab />}

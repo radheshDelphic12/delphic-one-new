@@ -81,6 +81,28 @@ const listSalaryAdjustmentsQuerySchema = z.object({
   period_year: z.coerce.number().int().min(2000).max(2100).optional(),
   org_membership_id: z.string().uuid().optional(),
 });
+const PAYMENT_MODES = ['bank_transfer', 'upi', 'cheque', 'cash', 'other'];
+const monthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const optText = (max) => z.string().trim().max(max).optional().nullable().transform((v) => v || null);
+// Salary payments dashboard: every month from -> to (default: last 6 months), filtered by status and people.
+const salaryPaymentsQuerySchema = payrollFiltersSchema.extend({
+  from: monthKey.optional(),
+  to: monthKey.optional(),
+  status: z.enum(['all', 'paid', 'not_paid']).default('all'),
+});
+// status "paid" saves the transaction details; "not_paid" clears them (the change is audited either way).
+const salaryPaymentSchema = z.object({
+  org_membership_id: z.string().uuid(),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  status: z.enum(['paid', 'not_paid']),
+  paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  amount_paid: z.coerce.number().min(0).max(1000000000).optional(),
+  payment_mode: z.enum(PAYMENT_MODES).optional().nullable(),
+  transaction_id: optText(120),
+  bank_name: optText(120),
+  notes: optText(500),
+});
 const deleteSalaryAdjustmentSchema = z.object({ reason: z.string().trim().min(3).max(500) });
 
 module.exports = {
@@ -97,4 +119,7 @@ module.exports = {
   createRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
+  salaryPaymentsQuerySchema,
+  salaryPaymentSchema,
+  PAYMENT_MODES,
 };

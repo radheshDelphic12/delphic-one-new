@@ -2,6 +2,11 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-08 — Salary payment status + Salary Payments dashboard (local, uncommitted)
+
+- Payroll > **Salary Payments** tab (admin): every employee's salary for every month in a From/To range (default last 6 months, max 24), filter by status (All / Paid / Not paid), employee, department and team. KPI cards (payable, paid, not paid), a month-wise summary and a detail table. Each row can be marked Paid with transaction details (paid on, amount, mode, transaction ID / UTR, bank, notes), edited, or set back to Not paid (details cleared). All changes audited (`salary_payment_create/update/clear`).
+- New table `salary_payments` (migration `20261008090000_salary_payments`, additive; no row = not paid). API `GET /payroll/salary-payments`, `PUT /payroll/salary-payments`, admin only. Test: server/tests/salary-payments.test.js (2/2). The older salary views (Attendance Salary, Adjustments, Live Analytics > Salary) are unchanged.
+
 ## 2026-10-07 — Gulati Industries (G0-G9), Financials valuation, admin OT apply (committed locally, not pushed)
 
 - Gulati Industries trading workspace (copper cathode + trading of deals) built Zephyr-style; plan, decisions and admin-editability matrix in [features/GULATI-INDUSTRIES.md](../features/GULATI-INDUSTRIES.md), test guide [testing/TESTING-GULATI.md](../testing/TESTING-GULATI.md); demo seed `npm run gulati:seed` (server).
