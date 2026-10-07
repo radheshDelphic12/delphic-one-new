@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { CalendarCheck, FileSpreadsheet, FileText, LineChart, Lock, LockOpen, Target } from 'lucide-react';
+import { CalendarCheck, FileSpreadsheet, FileText, LineChart, Lock, LockOpen, Target, TrendingUp } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 import { downloadText } from '../../lib/zephyr/csv.js';
@@ -10,11 +10,13 @@ import { dateLabel, shortMonth } from '../../lib/format.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import ZephyrValuationTab from './ZephyrValuationTab.jsx';
 import ZephyrTrendChart from '../../components/zephyr/ZephyrTrendChart.jsx';
 
 const TABS = [
   { key: 'plan', label: 'Plan vs actual', icon: Target },
   { key: 'projection', label: 'Projection', icon: LineChart },
+  { key: 'valuation', label: 'Valuation', icon: TrendingUp, admin: true },
   { key: 'close', label: 'Month close', icon: CalendarCheck },
   { key: 'statements', label: 'Statements', icon: FileText },
 ];
@@ -354,9 +356,10 @@ export default function ZephyrFinancialsPage() {
   if (!zxCan(me, 'financials')) return <Navigate to="/zephyr" replace />;
   return (
     <div className="mt-4 space-y-4">
-      <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
+      <SectionTabs tabs={TABS.filter((t) => !t.admin || zxCan(me, 'overviewValuation'))} value={tab} onChange={setTab} />
       {tab === 'plan' && <PlanTab projects={projects} />}
       {tab === 'projection' && <ProjectionTab />}
+      {tab === 'valuation' && zxCan(me, 'overviewValuation') && <ZephyrValuationTab />}
       {tab === 'close' && <CloseTab />}
       {tab === 'statements' && <StatementsTab />}
     </div>

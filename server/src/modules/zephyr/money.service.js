@@ -1,4 +1,6 @@
+const { z } = require('zod');
 const prisma = require('../../config/db');
+const { writeAudit } = require('./audit');
 
 // One place that turns ledger entries and pay slips into figures, so the Overview (Z6) and
 // Financials (Z7) never disagree.
@@ -6,8 +8,7 @@ const prisma = require('../../config/db');
 //   expense  = actual expense entries (amount, tax excluded)
 //   salaries = approved + paid pay slips (net), by the slip's month
 //   profit   = revenue - expense - salaries            margin = profit / revenue
-//   valuation = settings method: manual value | revenue multiple x trailing-12-month revenue
-//               | profit multiple x trailing-12-month profit
+//   valuation = (profit x 240) + (asset value x 3) per month, asset value recorded by an admin
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => (v === null || v === undefined ? 0 : Number(v));
@@ -248,19 +249,84 @@ async function byProjectMonthly(orgId, fromMonth, toMonth, projectId) {
   }
   return [...rows.values()].map((r) => ({ month: r.month, revenue: round2(r.revenue), expense: round2(r.expense), salaries: round2(r.salaries), profit: round2(r.revenue - r.expense - r.salaries) }));
 }
+// Valuation = (Zephyr profit x 240) + (asset value x 3), the same formula as Delphic Global, month by month.
+// Profit is Zephyr's own: revenue - expense - approved salaries.
+const PROFIT_FACTOR = 240;
+const ASSET_FACTOR = 3;
+const valuationOf = (profit, assetValue) => round2(profit * PROFIT_FACTOR + assetValue * ASSET_FACTOR);
+const assetSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
+const trendSchema = z.object({ from: assetSchema.shape.month.optional(), to: assetSchema.shape.month.optional(), state: z.enum(['live', 'closed']).optional() });
+
+const monthIdx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
+const monthAt = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+
+// Every month from -> to (default: the last 12 months), oldest first. state "live" reads each month's live figures,
+// "closed" only the figures frozen when a month was closed (0 until it is closed).
+async function valuationTrend(orgId, q = {}) {
+  const to = q.to || currentMonth();
+  const from = q.from || monthAt(monthIdx(to) - 11);
+  if (from > to || monthIdx(to) - monthIdx(from) > 119) return { error: 'bad_range' };
+  const state = q.state || 'live';
+  const [assets, closes, live] = await Promise.all([
+    prisma.zxAssetValue.findMany({ where: { org_id: orgId }, orderBy: { month: 'asc' } }),
+    prisma.zxPeriodClose.findMany({ where: { org_id: orgId, status: 'closed' } }),
+    state === 'live' ? monthly(orgId, from, to) : null,
+  ]);
+  const closed = new Map(closes.map((c) => [c.month, c]));
+  const liveBy = new Map((live || []).map((r) => [r.month, r]));
+  const months = monthsBetween(from, to).map((month) => {
+    const snap = closed.get(month)?.snapshot;
+    const fig = state === 'live' ? liveBy.get(month) : { revenue: num(snap?.revenue) || 0, profit: num(snap?.profit) || 0 };
+    const exact = assets.find((r) => r.month === month);
+    const earlier = exact ? null : [...assets].reverse().find((r) => r.month < month);
+    const asset = exact || earlier;
+    const asset_value = asset ? num(asset.asset_value) : 0;
+    const profit = round2(fig?.profit || 0);
+    return {
+      month,
+      revenue: round2(fig?.revenue || 0),
+      profit,
+      closed: closed.has(month),
+      profit_x: round2(profit * PROFIT_FACTOR),
+      asset_value,
+      asset_value_carried: Boolean(earlier),
+      asset_value_id: exact?.id || null,
+      asset_notes: exact?.notes || null,
+      asset_value_x: round2(asset_value * ASSET_FACTOR),
+      valuation: valuationOf(profit, asset_value),
+    };
+  });
+  return { currency: 'INR', state, from, to, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, months };
+}
+
+// Headline figure: the formula for the current month.
 async function valuation(orgId) {
-  const settings = await prisma.zxSetting.findUnique({ where: { org_id: orgId } });
-  const method = settings?.valuation_method || 'revenue_multiple';
-  const multiple = num(settings?.valuation_multiple ?? 3);
   const cm = currentMonth();
-  const base = { method, multiple, as_of: new Date().toISOString().slice(0, 10) };
-  if (method === 'manual') return { ...base, basis: 'manual', basis_amount: null, value: settings?.valuation_manual == null ? null : num(settings.valuation_manual) };
-  const t12 = await summary(orgId, monthStart(addMonths(cm, -11)), monthEnd(cm));
-  const basisAmount = method === 'profit_multiple' ? t12.profit : t12.revenue;
-  return { ...base, basis: method === 'profit_multiple' ? 'trailing 12-month profit' : 'trailing 12-month revenue', basis_amount: basisAmount, value: round2(Math.max(basisAmount, 0) * multiple) };
+  const m = (await valuationTrend(orgId, { from: cm, to: cm, state: 'live' })).months[0];
+  return { value: m.valuation, month: m.month, profit: m.profit, asset_value: m.asset_value, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, as_of: new Date().toISOString().slice(0, 10) };
+}
+
+async function setAssetValue(orgId, actorId, input) {
+  if (input.month > currentMonth()) return { error: 'future_month' };
+  const before = await prisma.zxAssetValue.findUnique({ where: { org_id_month: { org_id: orgId, month: input.month } } });
+  const data = { asset_value: input.asset_value, notes: input.notes ?? null, updated_by: actorId };
+  const row = before
+    ? await prisma.zxAssetValue.update({ where: { id: before.id }, data })
+    : await prisma.zxAssetValue.create({ data: { org_id: orgId, month: input.month, ...data } });
+  await writeAudit(null, { orgId, actorId, entity: 'asset_value', entityId: row.id, action: before ? 'update' : 'create', before: before ? { month: before.month, asset_value: num(before.asset_value) } : null, after: { month: row.month, asset_value: num(row.asset_value) } });
+  return { asset: { id: row.id, month: row.month, asset_value: num(row.asset_value), notes: row.notes } };
+}
+
+async function deleteAssetValue(orgId, actorId, month) {
+  const before = await prisma.zxAssetValue.findUnique({ where: { org_id_month: { org_id: orgId, month } } });
+  if (!before) return { error: 'not_found' };
+  await prisma.zxAssetValue.delete({ where: { id: before.id } });
+  await writeAudit(null, { orgId, actorId, entity: 'asset_value', entityId: before.id, action: 'delete', before: { month, asset_value: num(before.asset_value) } });
+  return { month };
 }
 
 module.exports = {
   round2, num, dayOf, monthOf, toDate, addMonths, monthsBetween, monthStart, monthEnd, currentMonth, resolveRange,
   actualEntries, entryWhere, slips, summary, monthly, byProject, byDimension, byProjectMonthly, valuation,
+  assetSchema, trendSchema, valuationTrend, setAssetValue, deleteAssetValue,
 };

@@ -2,6 +2,10 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-07 — Zephyr valuation section (local, uncommitted)
+
+- Zephyr Financials > Valuation tab: (Zephyr profit x 240) + (asset value x 3) per month, same as Delphic Global, with Revenue / Profit / Valuation month-on-month graphs. Profit = revenue - expense - approved salaries. Admin-entered asset values (`zx_asset_values`, migration `20261007160000`, carry-forward); live or closed-months-only profit. The Overview valuation tile uses the same figure; the old method / multiple / manual setting is retired from the UI. Test in server/tests/zephyr-financials.test.js (10/10).
+
 ## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
 
 - Built to the owner's 44-section brief on top of the Z0-Z8 base (plan, decisions and log: [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md)). Two migrations: `zephyr_services_leads_projects` and `zephyr_real_estate`.
