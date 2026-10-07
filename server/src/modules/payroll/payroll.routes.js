@@ -4,6 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./payroll.service');
 const adjustmentsService = require('./salaryAdjustments.service');
+const paymentsService = require('./salaryPayments.service');
 const {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
@@ -18,6 +19,8 @@ const {
   updateSalaryAdjustmentSchema,
   listSalaryAdjustmentsQuerySchema,
   deleteSalaryAdjustmentSchema,
+  salaryPaymentsQuerySchema,
+  salaryPaymentSchema,
 } = require('./payroll.validation');
 
 const router = express.Router();
@@ -27,6 +30,9 @@ const ERRORS = {
   membership_not_found: [404, 'Org membership not found'],
   not_found: [404, 'Not found'],
   already_processed: [409, 'That payroll run has already been processed'],
+  bad_range: [422, 'Choose a valid month range (at most 24 months)'],
+  future_paid_on: [422, 'The payment date cannot be in the future'],
+  paid_on_required: [422, 'Enter the date the salary was paid'],
   nobody_selected: [422, 'Pick at least one person, or the IT department'],
 };
 
@@ -208,6 +214,26 @@ router.delete(
     const result = await adjustmentsService.remove(req.user.org_id, req.user, req.params.id, deleteSalaryAdjustmentSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
+  })
+);
+
+// Salary payment status (paid or not, plus the transaction details) for every employee and month. Admin only.
+router.get(
+  '/salary-payments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await paymentsService.dashboard(req.user.org_id, salaryPaymentsQuerySchema.parse(req.query));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
+);
+router.put(
+  '/salary-payments',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await paymentsService.save(req.user.org_id, req.user, salaryPaymentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.payment);
   })
 );
 
