@@ -153,6 +153,18 @@ const decideOvertimeTicketSchema = z
   .object({ status: z.enum(['approved', 'rejected']), reason: z.string().trim().max(500).optional() })
   .refine((v) => v.status !== 'rejected' || Boolean(v.reason), { message: 'A reason is required when rejecting', path: ['reason'] });
 
+// Admin applies overtime for an employee. status: approved (default, paid straight away) or pending (still to be decided).
+const adminCreateOvertimeTicketSchema = z.object({
+  org_membership_id: z.string().uuid(),
+  date: requiredDate,
+  hours: z.coerce.number().min(0.25).max(12),
+  account_id: z.string().uuid().nullable().optional(),
+  status: z.enum(['approved', 'pending']).default('approved'),
+  reason: z.string().trim().min(3, 'Say why the overtime was applied').max(500),
+});
+
+const employeeProjectsQuerySchema = z.object({ org_membership_id: z.string().uuid(), date: optionalDate });
+
 const listOvertimeTicketsQuerySchema = z.object({
   scope: z.enum(['mine', 'to_decide', 'all']).default('mine'),
   status: z.enum(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']).optional(),
@@ -274,6 +286,8 @@ module.exports = {
   adminDeleteEntrySchema,
   bulkDeleteEntriesSchema,
   createOvertimeTicketSchema,
+  adminCreateOvertimeTicketSchema,
+  employeeProjectsQuerySchema,
   decideOvertimeTicketSchema,
   listOvertimeTicketsQuerySchema,
   adminUpdateOvertimeTicketSchema,

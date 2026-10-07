@@ -127,6 +127,65 @@ describe('Phase 3 - overtime tickets', () => {
     expect((await decide(manager, t2.id, { status: 'approved' })).status).toBe(409); // a cancelled ticket cannot be approved
   });
 
+  test('an admin can apply overtime for any employee: approved straight away, paid, audited; pending stays a projection; guards hold; the admin can then edit it', async () => {
+    const ctx = await seed();
+    const manager = await ctx.person('Manager', { role: 'admin' });
+    const dev = await ctx.person('Dev', { manager, basis: 'attendance' });
+    const apply = (token, body) => authed(request(app).post('/api/v1/timesheets/overtime-tickets/admin'), token).send(body);
+
+    // Only an admin may apply it, and the employee must belong to this company.
+    expect((await apply(dev.token, { org_membership_id: dev.membership.id, date: TICKET_DAY, hours: 2, reason: 'Release night' })).status).toBe(403);
+    expect((await apply(ctx.adminToken, { org_membership_id: '00000000-0000-4000-8000-000000000000', date: TICKET_DAY, hours: 2, reason: 'Release night' })).status).toBe(404);
+    expect((await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: TICKET_DAY, hours: 2 })).status).toBe(422); // a reason is required
+    expect((await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: '2099-01-01', hours: 2, reason: 'Future' })).status).toBe(422);
+
+    // Applied as approved: counted and paid at once (3h x 1000), with the admin on the decision.
+    const applied = await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: TICKET_DAY, hours: 3, reason: 'Employee forgot to raise the ticket' });
+    expect(applied.status).toBe(201);
+    expect(applied.body.data).toMatchObject({ status: 'approved', hours: 3, employee: 'Dev', decision_reason: 'Applied by admin' });
+    expect((await salaryOf(ctx, dev)).ot_amount).toBe(3000);
+    // The same day cannot exceed 12h of tickets.
+    expect((await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: TICKET_DAY, hours: 10, reason: 'Too much' })).status).toBe(422);
+
+    // Applied as pending: only the projection moves until somebody decides it.
+    const pending = await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: DAYS[7], hours: 2, status: 'pending', reason: 'Hotfix' });
+    expect(pending.body.data.status).toBe('pending');
+    const line = await salaryOf(ctx, dev);
+    expect(line.ot_amount).toBe(3000);
+    expect(line.breakdown.ot_pending_hours).toBe(2);
+
+    // It shows in the admin list, has history and an audit row, and the admin can correct it afterwards.
+    const all = await authed(request(app).get('/api/v1/timesheets/overtime-tickets').query({ scope: 'all' }), ctx.adminToken);
+    expect(all.body.data.tickets.map((t) => t.id)).toEqual(expect.arrayContaining([applied.body.data.id, pending.body.data.id]));
+    const history = await authed(request(app).get(`/api/v1/timesheets/overtime-tickets/${applied.body.data.id}/history`), ctx.adminToken);
+    expect(history.body.data.events.map((e) => e.action)).toContain('admin_created');
+    expect((await prisma.auditLog.findMany({ where: { org_id: ctx.org.id, entity_type: 'overtime_ticket', action: 'overtime_ticket_create' } })).length).toBe(2);
+    const edit = await authed(request(app).patch(`/api/v1/timesheets/overtime-tickets/${applied.body.data.id}/admin`), ctx.adminToken).send({ hours: 5, date: DAYS[5], ticket_reason: 'Corrected hours and day', reason: 'Checked against the release log' });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data).toMatchObject({ hours: 5, date: DAYS[5], reason: 'Corrected hours and day', status: 'approved' });
+    expect((await salaryOf(ctx, dev)).ot_amount).toBe(5000);
+
+    // The project list is the employee's own: only projects assigned to them on that day can be picked.
+    const mine = await ctx.project('Assigned Co');
+    const other = await ctx.project('Not Assigned Co');
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: mine.id, org_membership_id: dev.membership.id, start_date: new Date('2026-09-01'), end_date: new Date('2026-09-30'), created_by: ctx.adminUser.id } });
+    const listFor = (membershipId, date) => authed(request(app).get('/api/v1/timesheets/overtime-tickets/employee-projects').query({ org_membership_id: membershipId, ...(date ? { date } : {}) }), ctx.adminToken);
+    expect((await listFor(dev.membership.id, TICKET_DAY)).body.data.map((x) => x.id)).toEqual([mine.id]);
+    expect((await listFor(dev.membership.id, '2026-08-15')).body.data).toEqual([]); // before the assignment started
+    expect((await authed(request(app).get('/api/v1/timesheets/overtime-tickets/employee-projects').query({ org_membership_id: dev.membership.id }), dev.token)).status).toBe(403);
+    expect((await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: DAYS[9], hours: 1, account_id: other.id, reason: 'Wrong project' })).status).toBe(422);
+    const withProject = await apply(ctx.adminToken, { org_membership_id: dev.membership.id, date: DAYS[9], hours: 1, account_id: mine.id, reason: 'On the assigned project' });
+    expect(withProject.status).toBe(201);
+    expect(withProject.body.data.account_id).toBe(mine.id);
+    const badEdit = await authed(request(app).patch(`/api/v1/timesheets/overtime-tickets/${withProject.body.data.id}/admin`), ctx.adminToken).send({ account_id: other.id, reason: 'Move it to the wrong project' });
+    expect(badEdit.status).toBe(422);
+
+    // A contractor keeps the timesheet overtime flow: no ticket can be applied for them.
+    const contractor = await ctx.person('Contractor', { basis: 'attendance' });
+    await prisma.orgMembership.update({ where: { id: contractor.membership.id }, data: { worker_type: 'contractor' } });
+    expect((await apply(ctx.adminToken, { org_membership_id: contractor.membership.id, date: TICKET_DAY, hours: 2, reason: 'Contractor' })).status).toBe(422);
+  });
+
   test('timesheet overtime hours are refused for attendance-paid people - they raise a ticket instead', async () => {
     const ctx = await seed();
     const dev = await ctx.person('Dev', { basis: 'attendance' });
