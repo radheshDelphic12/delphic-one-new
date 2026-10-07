@@ -177,12 +177,17 @@ const SALES_COLUMNS = [
 
 async function salaryRows(orgId, { period_month, period_year, department_id, team_id }, now = new Date()) {
   const result = await live.salaryLive(orgId, { period_month, period_year, department_id, team_id }, now);
+  // Bank details come from each employee's saved profile (Settings -> My details).
+  const banks = new Map((await prisma.orgMembership.findMany({ where: { org_id: orgId, id: { in: result.lines.map((l) => l.org_membership_id) } }, select: { id: true, bank_account_number: true, bank_ifsc: true } })).map((m) => [m.id, m]));
   return result.lines.map((l) => {
     const a = l.adjustments || {};
+    const bank = banks.get(l.org_membership_id) || {};
     return {
       employee: l.name,
       employee_code: l.employee_code || '',
       department: l.department || '',
+      bank_account_number: bank.bank_account_number || '',
+      bank_ifsc: bank.bank_ifsc || '',
       salary: l.base_net ?? l.net,
       tds: a.tds || 0,
       ot: round2((l.ot_amount || 0) + (a.ot_adjustment || 0)),
@@ -238,6 +243,8 @@ const SALARY_COLUMNS = [
   { header: 'Employee', key: 'employee', width: 26 },
   { header: 'Code', key: 'employee_code', width: 12 },
   { header: 'Department', key: 'department', width: 18 },
+  { header: 'Account Number', key: 'bank_account_number', width: 24 },
+  { header: 'IFSC Code', key: 'bank_ifsc', width: 16 },
   { header: 'Salary', key: 'salary', width: 14 },
   { header: 'TDS', key: 'tds', width: 12 },
   { header: 'OT', key: 'ot', width: 12 },

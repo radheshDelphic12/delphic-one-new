@@ -322,6 +322,8 @@ const PERSONAL_SELECT = {
   bank_account_number: true,
   bank_ifsc: true,
   bank_branch: true,
+  aadhaar_number: true,
+  pan_number: true,
   emergency_contact_name: true,
   emergency_contact_relation: true,
   emergency_contact_phone: true,

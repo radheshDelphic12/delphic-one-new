@@ -2026,6 +2026,9 @@ model OrgMembership {
   bank_account_number         String?
   bank_ifsc                   String?
   bank_branch                 String?
+  // Identity numbers printed on the payslip (employee-editable like the bank details).
+  aadhaar_number              String?
+  pan_number                  String?
   emergency_contact_name      String?
   emergency_contact_relation  String?
   emergency_contact_phone     String?

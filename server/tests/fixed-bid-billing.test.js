@@ -140,7 +140,14 @@ describe('Financial trends', () => {
 
     // Use "now" = Oct 2026 so the window ends in a known month.
     const financials = require('../src/modules/financials/financials.service');
-    const result = await financials.trends(ctx.org.id, { months: 3, state: 'locked' }, new Date('2026-10-20T00:00:00Z'));
+    const result = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 8, to_year: 2026, to_month: 10, state: 'all' }, new Date('2026-10-20T00:00:00Z'));
+    // Locked view: sub-companies have locked nothing, so their profit (and its x240) is 0; asset value still counts.
+    const lockedView = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 9, to_year: 2026, to_month: 9, state: 'locked' }, new Date('2026-10-20T00:00:00Z'));
+    expect(lockedView.months[0]).toMatchObject({ revenue: 100000, sub_company_profit: 0, valuation: 15000 });
+    // The unlocked view has no locked invoices; a single-month range works too.
+    const unlocked = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 9, to_year: 2026, to_month: 9, state: 'unlocked' }, new Date('2026-10-20T00:00:00Z'));
+    expect(unlocked.months).toHaveLength(1);
+    expect(unlocked.months[0].revenue).toBe(0);
     expect(result.months.map((m) => m.month)).toEqual(['2026-08', '2026-09', '2026-10']);
     const [aug, sep, oct] = result.months;
     expect(aug).toMatchObject({ revenue: 0, sub_company_profit: 0, asset_value: 5000, asset_value_carried: false, valuation: 15000 });
@@ -149,8 +156,9 @@ describe('Financial trends', () => {
     expect(financials.valuationOf(2, 3)).toBe(489);
 
     // And over HTTP.
-    const http = await authed(request(app).get(api('/financials/trends')), ctx.adminToken).query({ months: 3 });
+    const http = await authed(request(app).get(api('/financials/trends')), ctx.adminToken).query({ from_year: 2026, from_month: 8, to_year: 2026, to_month: 10, state: 'all' });
     expect(http.status).toBe(200);
     expect(http.body.data.months).toHaveLength(3);
+    expect((await authed(request(app).get(api('/financials/trends')), ctx.adminToken).query({ from_year: 2026, from_month: 10, to_year: 2026, to_month: 8 })).status).toBe(422);
   });
 });
