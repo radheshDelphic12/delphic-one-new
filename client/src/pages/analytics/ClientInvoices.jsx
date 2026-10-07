@@ -16,7 +16,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 /** Invoice fields + the live preview of how the amount is worked out. */
-function InvoicePreview({ preview }) {
+function InvoicePreview({ preview, fixedAmount }) {
   if (!preview) return null;
   const d = preview.details;
   const p = preview.project;
@@ -25,16 +25,20 @@ function InvoicePreview({ preview }) {
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
         <dt className="text-tertiary-500">Project</dt><dd className="font-medium text-tertiary-900">{p.name}{p.code ? ` · ${p.code}` : ''}</dd>
         <dt className="text-tertiary-500">Client</dt><dd className="font-medium text-tertiary-900">{p.client_name || '—'}</dd>
-        <dt className="text-tertiary-500">Billing type</dt><dd>{d.billing_type === 'monthly' ? 'Monthly' : 'Hourly'}</dd>
+        <dt className="text-tertiary-500">Billing type</dt><dd>{d.billing_type === 'one_time' ? 'One time (fixed bid)' : d.billing_type === 'monthly' ? 'Monthly' : 'Hourly'}</dd>
         <dt className="text-tertiary-500">Currency</dt><dd>{preview.currency}{d.conversion ? ` (converted from ${d.conversion.from_currency} @ ${d.conversion.exchange_rate})` : ''}</dd>
-        <dt className="text-tertiary-500">Rate</dt><dd>{amountText(d.rate, d.currency)}{d.billing_type === 'hourly' ? ' / hour' : ' / month'}</dd>
+        <dt className="text-tertiary-500">Rate</dt><dd>{amountText(d.rate, d.currency)}{d.billing_type === 'hourly' ? ' / hour' : d.billing_type === 'one_time' ? ' (contract value)' : ' / month'}</dd>
         <dt className="text-tertiary-500">Billing period</dt><dd>{d.period_from ? `${dateText(d.period_from)} – ${dateText(d.period_to)}` : periodLabel(preview)}</dd>
         <dt className="text-tertiary-500">Source</dt><dd>{preview.source === 'locked' ? `Locked billing v${preview.calculation_version}` : 'Live (not locked yet)'}</dd>
       </dl>
+      {preview.fixed_bid ? (
+        <p className="border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">Fixed-bid contract {amountText(preview.fixed_bid.total, preview.currency)}: this invoice bills only the amount entered above; GST / TDS charges on the contract are added when it is generated.{Number(fixedAmount) > 0 ? ` Invoice amount ${amountText(Number(fixedAmount), preview.currency)}.` : ''}</p>
+      ) : (
       <ul className="space-y-0.5 border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">
         {billingCalculationLines(d).map((line) => <li key={line}>{line}</li>)}
       </ul>
-      {(d.charges || []).length > 0 && (
+      )}
+      {!preview.fixed_bid && (d.charges || []).length > 0 && (
         <ul className="space-y-0.5 border-t border-tertiary-200 pt-2 text-xs text-tertiary-700">
           <li className="flex justify-between"><span>Final approved amount</span><span className="tabular-nums">{amountText(preview.amount, preview.currency)}</span></li>
           {d.charges.map((c) => (
@@ -45,7 +49,7 @@ function InvoicePreview({ preview }) {
           ))}
         </ul>
       )}
-      <p className="text-right text-base font-semibold text-tertiary-900">{(d.charges || []).length > 0 ? 'Total payable ' : ''}{amountText(preview.total_amount ?? preview.amount, preview.currency)}</p>
+      {!preview.fixed_bid && <p className="text-right text-base font-semibold text-tertiary-900">{(d.charges || []).length > 0 ? 'Total payable ' : ''}{amountText(preview.total_amount ?? preview.amount, preview.currency)}</p>}
     </div>
   );
 }
@@ -77,6 +81,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       notes: editing?.notes || '',
       currency: editing?.currency || '',
       amount: '',
+      fixedAmount: '',
       reason: '',
     });
     setNumberEdited(Boolean(editing));
@@ -103,12 +108,15 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   const sentStatus = editing ? editing.status !== 'draft' : preview?.existing && preview.existing.status !== 'draft';
   const locked = !editing && sentStatus;
   const reasonMissing = Boolean(editing) && sentStatus && !form.reason.trim();
+  // Fixed bid: the contract value is split into several invoices, each for an amount entered here.
+  const fixed = preview?.fixed_bid || (editing?.details?.billing_type === 'one_time' ? editing.details.fixed_bid : null);
 
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
       const fields = { invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...(form.currency ? { currency: form.currency } : {}) };
+      if (!editing && preview?.fixed_bid) fields.amount = Number(form.fixedAmount || preview.amount);
       if (editing) {
         if (form.amount !== '' && Number(form.amount) !== Number(editing.amount)) fields.amount = Number(form.amount);
         if (form.reason.trim()) fields.reason = form.reason.trim();
@@ -136,7 +144,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || reasonMissing || !form.invoice_number.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || reasonMissing || !form.invoice_number.trim() || (!editing && Boolean(preview?.fixed_bid) && !(Number(form.fixedAmount) > 0))}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
@@ -148,7 +156,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
           </label>
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Invoice currency
-            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={Boolean(editing) && sentStatus} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
+            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={(Boolean(editing) && sentStatus) || Boolean(fixed)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
               <option value="">Project billing currency{preview && !form.currency ? ` (${preview.currency})` : ''}</option>
               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -164,6 +172,13 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
+          {!editing && preview?.fixed_bid && (
+            <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
+              Invoice amount ({preview.currency})
+              <input required type="number" step="0.01" min="0.01" max={preview.fixed_bid.remaining_to_invoice} value={form.fixedAmount} onChange={(e) => set('fixedAmount', e.target.value)} placeholder={String(preview.fixed_bid.remaining_to_invoice)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              <span className="mt-0.5 block font-normal text-tertiary-400">Fixed-bid contract {amountText(preview.fixed_bid.total, preview.currency)} · already invoiced {amountText(preview.fixed_bid.invoiced, preview.currency)} · at most {amountText(preview.fixed_bid.remaining_to_invoice, preview.currency)} can still be invoiced.</span>
+            </label>
+          )}
           {editing && (
             <label className="block text-xs font-medium text-tertiary-600">
               Amount ({form.currency || editing.currency})
@@ -185,7 +200,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
         {previewError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{previewError}</p>}
         {locked && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Invoice {preview.existing.invoice_number} for this project and month is already {preview.existing.status} — it can no longer be changed.</p>}
         {preview?.existing && !locked && <p className="text-xs text-tertiary-500">A draft invoice ({preview.existing.invoice_number}) exists for this project and month — saving refreshes it.</p>}
-        <InvoicePreview preview={preview} />
+        <InvoicePreview preview={preview} fixedAmount={form.fixedAmount} />
       </form>
     </Drawer>
   );
@@ -239,7 +254,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     { key: 'project', header: 'Project', render: (r) => <span>{r.project?.name || '—'}{r.project?.code && <span className="block text-xs text-tertiary-500">{r.project.code}</span>}</span> },
     { key: 'client', header: 'Client', render: (r) => r.project?.client_name || '—' },
     { key: 'period', header: 'Period', render: (r) => (r.details?.period_from ? `${dateText(r.details.period_from)} – ${dateText(r.details.period_to)}` : periodLabel(r)) },
-    { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
+    { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'one_time' ? 'One time' : r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
     { key: 'amount', header: 'Amount', render: (r) => (
       <span className="tabular-nums">
         <span className="font-medium">{amountText(r.total_amount ?? r.amount, r.currency)}</span>

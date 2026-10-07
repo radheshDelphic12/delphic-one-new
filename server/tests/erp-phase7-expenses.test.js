@@ -336,6 +336,10 @@ describe('Expense claims — Manager -> HR -> Finance, admin on behalf, Other, d
     const own = await authed(request(app).post('/api/v1/expenses/claims'), other.access_token).send({ org_membership_id: emp.membership.id, location_id: location.id, category: 'Travel', amount: 50 });
     expect(own.body.data.org_membership_id).toBe(other.membership.id);
 
+    // "My claims" lists only what the employee filed themselves, not claims an admin filed for them.
+    const mineEmp = await authed(request(app).get('/api/v1/expenses/claims/me'), emp.access_token);
+    expect(mineEmp.body.data.map((c) => c.id)).not.toContain(filed.body.data.id);
+
     // Delete by mistake: someone else can't; the owner can while it's pending; not once decided.
     expect((await authed(request(app).delete(`/api/v1/expenses/claims/${filed.body.data.id}`), other.access_token)).status).toBe(404);
     expect((await authed(request(app).delete(`/api/v1/expenses/claims/${filed.body.data.id}`), emp.access_token)).status).toBe(200);

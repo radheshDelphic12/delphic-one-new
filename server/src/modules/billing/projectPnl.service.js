@@ -455,6 +455,8 @@ async function monthContractByProject(orgId, accounts, { period_month, period_ye
     const from = account.agreement_start_date && account.agreement_start_date > start ? account.agreement_start_date : start;
     const to = account.agreement_end_date && account.agreement_end_date < end ? account.agreement_end_date : end;
     if (!rate) row.note = 'no_billing_rate';
+    // Fixed bid: the rate is the one-time contract total, never a monthly amount (see Balance on the project).
+    else if (rate.rate_type === 'one_time') row.note = 'fixed_bid';
     else if (to < from) {
       row.note = account.agreement_start_date && account.agreement_start_date > end ? 'before_agreement_start' : 'after_agreement_end';
       row.amount = 0;

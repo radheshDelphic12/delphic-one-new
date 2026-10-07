@@ -18,6 +18,16 @@ const planQuerySchema = z.object({
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
 const monthsQuerySchema = z.object({ months: z.coerce.number().int().min(1).max(36).default(12) });
+const trendsQuerySchema = z.object({
+  months: z.coerce.number().int().min(2).max(36).default(12),
+  state: z.enum(['locked', 'all']).default('locked'),
+});
+const assetValueSchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  asset_value: z.coerce.number().min(0).max(1e13),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
 const projectionQuerySchema = z.object({
   months: z.coerce.number().int().min(3).max(24).default(12),
   horizon: z.coerce.number().int().min(1).max(12).default(6),
@@ -266,7 +276,78 @@ async function orgProjection(orgId, opts = {}) {
   return { projection: await projectionForOrg(org, opts) };
 }
 
+// --- Financial trends (Financials page charts) ---
+
+// Valuation = (Profit from Sub Company x 240) + (Asset Value x 3), exactly.
+const SUB_COMPANY_PROFIT_FACTOR = 240;
+const ASSET_VALUE_FACTOR = 3;
+const valuationOf = (subCompanyProfit, assetValue) => round2(subCompanyProfit * SUB_COMPANY_PROFIT_FACTOR + assetValue * ASSET_VALUE_FACTOR);
+
+const periodIdx = (year, month) => year * 12 + (month - 1);
+
+// Month on month: Revenue and Profit are the Financials figures (the same
+// records the Financials tab shows - locked ones by default, `state: all` adds the
+// live ones); Profit from Sub Company is the other active group companies'
+// profit for the month (their live actuals); Asset Value is the admin-recorded
+// figure for the month, carried forward from the latest earlier one.
+async function trends(orgId, { months = 12, state = 'locked' } = {}, now = new Date()) {
+  const records = require('../calculations/records.service');
+  const wins = monthWindow(months, now);
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true } });
+  const [subs, assetRows] = await Promise.all([
+    org ? prisma.org.findMany({ where: { org_group_id: org.org_group_id, status: 'active', is_master_workspace: false, id: { not: orgId } }, select: { id: true, name: true } }) : [],
+    prisma.financialAssetValue.findMany({ where: { org_id: orgId }, orderBy: [{ period_year: 'asc' }, { period_month: 'asc' }] }),
+  ]);
+  const assetAt = (win) => {
+    const exact = assetRows.find((r) => r.period_year === win.year && r.period_month === win.month);
+    if (exact) return { value: Number(exact.asset_value), carried: false };
+    const earlier = assetRows.filter((r) => periodIdx(r.period_year, r.period_month) < periodIdx(win.year, win.month)).pop();
+    return earlier ? { value: Number(earlier.asset_value), carried: true } : { value: 0, carried: false };
+  };
+
+  const rows = [];
+  for (const win of wins) {
+    const rec = await records.financialRecords(orgId, { period_year: win.year, from_month: win.month, to_month: win.month, state }, now);
+    let subProfit = 0;
+    for (const sub of subs) subProfit += (await actualsForMonth(sub.id, win)).profit;
+    subProfit = round2(subProfit);
+    const asset = assetAt(win);
+    rows.push({
+      month: win.key,
+      period_month: win.month,
+      period_year: win.year,
+      revenue: rec.totals.revenue,
+      profit: rec.totals.profit,
+      sub_company_profit: subProfit,
+      asset_value: asset.value,
+      asset_value_carried: asset.carried,
+      valuation: valuationOf(subProfit, asset.value),
+    });
+  }
+  return {
+    currency: 'INR',
+    state,
+    formula: { sub_company_profit: SUB_COMPANY_PROFIT_FACTOR, asset_value: ASSET_VALUE_FACTOR },
+    sub_companies: subs.map((x) => x.name),
+    months: rows,
+  };
+}
+
+async function upsertAssetValue(orgId, userId, { period_month, period_year, asset_value, notes }) {
+  const row = await prisma.financialAssetValue.upsert({
+    where: { org_id_period_year_period_month: { org_id: orgId, period_year, period_month } },
+    create: { org_id: orgId, period_year, period_month, asset_value, notes: notes || null, updated_by: userId },
+    update: { asset_value, notes: notes || null, updated_by: userId },
+  });
+  return { ...row, asset_value: Number(row.asset_value) };
+}
+
 module.exports = {
+  trendsQuerySchema,
+  assetValueSchema,
+  valuationOf,
+  trends,
+  upsertAssetValue,
   planLineSchema,
   planQuerySchema,
   monthsQuerySchema,

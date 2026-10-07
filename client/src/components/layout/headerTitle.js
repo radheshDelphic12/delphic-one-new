@@ -75,7 +75,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/finance')) return 'Expenses, vendor payments, billing rates, accounting, group charges, and CA/audit access.';
   if (pathname.startsWith('/payroll')) return 'Salary structures, payroll runs, and payslips.';
   if (pathname.startsWith('/analytics')) return 'Real-time billing, resource revenue, salary, expenses, and vendor amounts. Click any row to open the record.';
-  if (pathname.startsWith('/financials')) return 'Monthly financials, plan vs actual, projections, and valuation.';
+  if (pathname.startsWith('/financials')) return 'Finalized financials by category, with revenue, profit and valuation trends month on month.';
   if (pathname.startsWith('/trading')) return 'Suppliers, consumers, goods, rate cards, and current transactions.';
   if (pathname.startsWith('/leads')) return 'Lead pipeline, categorised by self project, client project, or other.';
   if (pathname.startsWith('/contracts')) return 'Construction and recurring-revenue contracts, with monthly expected revenue.';

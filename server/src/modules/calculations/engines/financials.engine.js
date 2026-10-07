@@ -4,7 +4,7 @@
 // still open.
 //
 //   Revenue   Managed Services Revenue   Billing & Sales (per project, locked month if locked)
-//             Project Revenue (fixed price) — calculation not enabled yet (0, flagged)
+//             Project Revenue (fixed price) — the project's invoices of the month (locked month if locked)
 //             Trading sales / Self-project revenue / Recurring contracts (other verticals)
 //   Salaries  IT Salaries / Non-IT Salaries — attendance-based salary (locked month if locked)
 //   Expenses  Group Charges (by category) / Employee Reimbursements (by category)
@@ -55,15 +55,15 @@ async function computeFinancialMonth(orgId, { period_month, period_year }, resol
 
   // --- Revenue: Billing & Sales per project ---
   const projects = await billingEngine.listProjects(orgId, {});
-  let fixedPriceProjects = 0;
   const managedChildren = [];
+  const fixedChildren = [];
   for (const account of projects) {
     const month = await resolve('billing', account.id, period);
     if (!month) continue;
-    if (!month.raw.supported) { if (month.raw.engine === 'fixed_price') fixedPriceProjects += 1; continue; }
+    if (!month.raw.supported) continue;
     const amount = toInr(billingEngine.lockedAmount(month.raw), month.raw.currency);
     if (!amount) continue;
-    managedChildren.push(leaf(`project:${account.id}`, `${month.raw.project.code ? `${month.raw.project.code} · ` : ''}${month.raw.project.name}`, amount, { locked: month.locked, version: month.version }));
+    (month.raw.fixed_bid ? fixedChildren : managedChildren).push(leaf(`project:${account.id}`, `${month.raw.project.code ? `${month.raw.project.code} · ` : ''}${month.raw.project.name}`, amount, { locked: month.locked, version: month.version }));
     sources.push({ kind: 'billing', scope_key: account.id, locked: month.locked, version: month.version || null });
   }
 
@@ -99,7 +99,7 @@ async function computeFinancialMonth(orgId, { period_month, period_year }, resol
 
   const revenueChildren = [
     node('managed_services', 'Managed Services Revenue', managedChildren),
-    leaf('fixed_price', 'Project Revenue (fixed price)', 0, { note: fixedPriceProjects ? `${fixedPriceProjects} fixed-price project(s) — calculation not enabled yet` : null }),
+    node('fixed_price', 'Project Revenue (fixed price)', fixedChildren),
   ];
   if (Number(tradeSales._sum.amount || 0)) revenueChildren.push(leaf('trading', 'Trading Sales', Number(tradeSales._sum.amount)));
   if (selfProject.revenue) revenueChildren.push(leaf('self_projects', 'Self-Project Revenue', selfProject.revenue));

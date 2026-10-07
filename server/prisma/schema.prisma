@@ -116,6 +116,9 @@ enum PayrollRunStatus {
 enum BillingRateType {
   hourly
   monthly
+  // Fixed-bid / fixed-price projects: `rate` is the TOTAL contract value, billed
+  // through several invoices (never a recurring monthly amount).
+  one_time
 }
 
 // Forward-only: draft -> sent -> paid (see billing.service.transitionInvoice).
@@ -1452,8 +1455,10 @@ model ClientInvoice {
   creator                User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
   created_at             DateTime            @default(now())
 
-  @@unique([client_account_id, period_month, period_year])
+  // One invoice per project and month is enforced in invoices.service for monthly
+  // / hourly projects; a fixed-bid project may raise several (capped by its contract value).
   @@unique([org_id, invoice_number])
+  @@index([client_account_id, period_year, period_month])
   @@index([org_id])
   @@map("client_invoices")
 }
@@ -1950,6 +1955,7 @@ model Org {
   project_cost_rates      ProjectMemberAssignment[]
   project_vendor_invoices ProjectVendorInvoice[]
   assets                  Asset[]
+  financial_asset_values  FinancialAssetValue[]
   exchange_rates          ExchangeRate[]
 
   // Finance categories + the calculation lock/version system.
@@ -4064,4 +4070,23 @@ model ZxTask {
   @@index([org_id, status])
   @@index([org_id, person_id])
   @@map("zx_tasks")
+}
+
+// Financials -> Valuation chart: the asset value an admin records for a month
+// (Valuation = sub-company profit x 240 + asset value x 3). No asset price is
+// held anywhere else, so this is the single source of truth for it.
+model FinancialAssetValue {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id])
+  period_month Int
+  period_year  Int
+  asset_value  Decimal  @db.Decimal(16, 2)
+  notes        String?
+  updated_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, period_year, period_month])
+  @@map("financial_asset_values")
 }
