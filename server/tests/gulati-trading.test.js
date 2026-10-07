@@ -197,7 +197,13 @@ describe('gulati lead to deal and deal finance', () => {
     const net = 8 * LAKH - 10000;
     expect(vt.months[0]).toMatchObject({ month: '2026-03', profit: net, asset_value: 1000000, asset_value_carried: false, valuation: net * 240 + 3000000 });
     expect(vt.months[1]).toMatchObject({ month: '2026-04', profit: 0, asset_value: 1000000, asset_value_carried: true, valuation: 3000000 });
-    expect((await a.get('/finance/valuation?from=2026-03&to=2026-04&state=closed')).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-04&state=locked')).body.data.months[0].profit).toBe(0); // not closed yet
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-03&state=unlocked')).body.data.months[0].profit).toBe(net); // open month, live figures
+    // closing the month freezes its figures: Locked reads them, Unlocked stops counting the month
+    expect((await a.post('/finance/periods/2026-03/close', {})).status).toBe(200);
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-03&state=locked')).body.data.months[0]).toMatchObject({ closed: true, profit: net });
+    expect((await a.get('/finance/valuation?from=2026-03&to=2026-03&state=unlocked')).body.data.months[0].profit).toBe(0);
+    expect((await a.post('/finance/periods/2026-03/reopen', { reason: 'test reopen' })).status).toBe(200);
     expect((await a.get('/finance/valuation?from=2026-05&to=2026-04')).status).toBe(422);
     expect((await a.put('/finance/asset-values', { month: '2099-01', asset_value: 1 })).status).toBe(422);
     expect((await a.del('/finance/asset-values/2026-03')).status).toBe(200);

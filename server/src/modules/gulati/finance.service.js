@@ -172,18 +172,18 @@ const PROFIT_FACTOR = 240;
 const ASSET_FACTOR = 3;
 const valuationOf = (profit, assetValue) => round2(profit * PROFIT_FACTOR + assetValue * ASSET_FACTOR);
 const assetSchema = z.object({ month: monthStr, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
-const trendSchema = z.object({ from: monthStr.optional(), to: monthStr.optional(), state: z.enum(['live', 'closed']).optional() });
+const trendSchema = z.object({ from: monthStr.optional(), to: monthStr.optional(), state: z.enum(['locked', 'unlocked', 'all']).optional() });
 
 const monthIdx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
 const monthAt = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
 
-// Every month from -> to (default: the last 12 months), oldest first. state "live" reads each month's live profit,
-// "closed" only the figures frozen when a month was closed (0 until it is closed).
+// Every month from -> to (default: the last 12 months), oldest first. state "locked" reads only closed months (their
+// frozen figures, 0 until a month is closed), "unlocked" the live figures of months that are not closed, "all" every month live.
 async function valuationTrend(orgId, q = {}) {
   const to = q.to || monthOf(new Date());
   const from = q.from || monthAt(monthIdx(to) - 11);
   if (from > to || monthIdx(to) - monthIdx(from) > 119) return { error: 'bad_range' };
-  const state = q.state || 'live';
+  const state = q.state || 'all';
   const [assets, closes] = await Promise.all([
     prisma.gxAssetValue.findMany({ where: { org_id: orgId }, orderBy: { month: 'asc' } }),
     prisma.gxPeriodClose.findMany({ where: { org_id: orgId, status: 'closed' } }),
@@ -192,10 +192,11 @@ async function valuationTrend(orgId, q = {}) {
   const keys = [];
   for (let i = monthIdx(from); i <= monthIdx(to); i += 1) keys.push(monthAt(i));
   const profitOf = async (month) => {
-    if (state === 'closed') {
+    if (state === 'locked') {
       const snap = closed.get(month)?.snapshot;
       return { profit: round2(num(snap?.net_profit) || 0), revenue: round2(num(snap?.sales_revenue) || 0), closed: Boolean(snap) };
     }
+    if (state === 'unlocked' && closed.has(month)) return { profit: 0, revenue: 0, closed: true };
     const t = (await pnl(orgId, { month })).totals;
     return { profit: t.net_profit, revenue: t.sales_revenue, closed: closed.has(month) };
   };
@@ -226,7 +227,7 @@ async function valuationTrend(orgId, q = {}) {
 
 // Headline figure: the formula for the current month.
 async function valuation(orgId) {
-  const t = await valuationTrend(orgId, { from: monthOf(new Date()), to: monthOf(new Date()), state: 'live' });
+  const t = await valuationTrend(orgId, { from: monthOf(new Date()), to: monthOf(new Date()), state: 'all' });
   const m = t.months[0];
   return { value: m.valuation, month: m.month, profit: m.profit, asset_value: m.asset_value, formula: t.formula };
 }

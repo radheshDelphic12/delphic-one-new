@@ -2,6 +2,12 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (local, uncommitted)
+
+- New sidebar entry **Financials** (`/gulati/financials`, just above "Gulati setup", admin capability `valuation`) with one section, **Financial trends**, laid out like Delphic Global and Zephyr: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table with a **Lock month / Reopen** button per month, and the asset value form (with remove). Page: `GulatiFinancialsPage.jsx`.
+- **Finance** (`/gulati/finance`) keeps its original tabs (Overview, P&L, By trading type, Expenses, Month close); only the Valuation tab I had added there was moved out into Financials. The home page Valuation KPI links to Financials.
+- `GET /gulati/finance/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months, Unlocked = live figures of months not closed, All = live. Test gulati-trading (13/13).
+
 ## 2026-10-07 — Gulati valuation section (local, uncommitted)
 
 - Gulati Finance > Valuation tab: (net profit x 240) + (asset value x 3) per month, admin-entered asset values (`gx_asset_values`, carry-forward), live or closed-months-only profit. Tests in server/tests/gulati-trading.test.js pass (13/13) and gulati-admin-edits (8/8).

@@ -1,4 +1,4 @@
-import { Briefcase, FileBarChart2, Handshake, LayoutDashboard, ListChecks, Target, UserCog, Users } from 'lucide-react';
+import { Briefcase, FileBarChart2, Handshake, LayoutDashboard, ListChecks, Target, TrendingUp, UserCog, Users } from 'lucide-react';
 
 /**
  * The Gulati product. `cap` is the Gulati capability (server access.js) needed to see a section.
@@ -10,6 +10,8 @@ export const GULATI_SECTIONS = [
   { key: 'finance', to: '/gulati/finance', label: 'Finance', blurb: 'P&L, trading-type reports, expenses and month close.', icon: FileBarChart2, cap: 'overview' },
   { key: 'tasks', to: '/gulati/tasks', label: 'Tasks', blurb: 'Follow-ups, sourcing and delivery work for employees and contractors.', icon: ListChecks, cap: 'tasks' },
   { key: 'people', to: '/gulati/people', label: 'Employee / Contractor', blurb: 'People roster, logins and access roles.', icon: UserCog, cap: 'people' },
+  // Sits just above "Gulati setup" in the sidebar.
+  { key: 'financials', to: '/gulati/financials', label: 'Financials', blurb: 'Revenue, profit and valuation, month on month.', icon: TrendingUp, cap: 'valuation' },
 ];
 
 export const GULATI_HOME = { to: '/gulati', label: 'Dashboard', icon: LayoutDashboard, end: true };
