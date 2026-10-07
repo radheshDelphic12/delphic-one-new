@@ -10,7 +10,7 @@ const ZEPHYR_TITLES = {
   '/zephyr/tasks': ['Tasks', 'Operational tasks for employees and contractors.'],
   '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
   '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],
-  '/zephyr/financials': ['Financials', 'Plan vs actual, month close and projections.'],
+  '/zephyr/financials': ['Financials', 'Revenue, profit and valuation, month on month.'],
   '/zephyr/my-work': ['My work', 'Your assigned projects, profile and salary slips.'],
   '/zephyr/settings': ['Zephyr setup', 'Services, valuation, categories and the audit log.'],
 };

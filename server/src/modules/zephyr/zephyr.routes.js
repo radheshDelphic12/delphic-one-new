@@ -13,6 +13,7 @@ const account = require('./account.service');
 const salaries = require('./salaries.service');
 const ledger = require('./ledger.service');
 const overviewSvc = require('./overview.service');
+const money = require('./money.service');
 const financials = require('./financials.service');
 const { authenticate, requireOrgMembership, loadSuperadminFlag } = require('../../middleware/auth');
 const requireModule = require('../../middleware/requireModule');
@@ -438,6 +439,8 @@ router.delete('/projects/:id/work-orders/:wid', projectsEdit, asyncHandler(async
 // --- Money: ledger (Z5), overview (Z6), financials (Z7) ---
 const MONEY_ERRORS = {
   not_found: [404, 'Record not found'],
+  bad_range: [422, 'Choose a valid month range (at most 10 years)'],
+  future_month: [422, 'A future month cannot be used'],
   future_actual: [422, 'An actual entry cannot be dated in the future. Mark it planned instead'],
   category_invalid: [422, 'Pick an active category of the same kind (revenue or expense)'],
   wo_expense_only: [422, 'Only an expense can be linked to a work order'],
@@ -512,6 +515,19 @@ router.get('/parties/:id/statement', ledgerCap, zxAuthorize('parties'), asyncHan
 router.get('/overview', overviewCap, asyncHandler(async (req, res) => ok(res, await overviewSvc.overview(orgId(req), mctx(req), overviewSvc.querySchema.parse(req.query)))));
 router.get('/overview/salaries', salariesCap, asyncHandler(async (req, res) => ok(res, await overviewSvc.salaryRows(orgId(req), overviewSvc.drillSchema.parse(req.query)))));
 
+const valuationCap = zxAuthorize('overviewValuation');
+router.get('/financials/valuation', valuationCap, asyncHandler(async (req, res) => {
+  const result = await money.valuationTrend(orgId(req), money.trendSchema.parse(req.query));
+  return result.error ? failMoney(res, result) : ok(res, result);
+}));
+router.put('/financials/asset-values', valuationCap, asyncHandler(async (req, res) => {
+  const result = await money.setAssetValue(orgId(req), req.user.id, money.assetSchema.parse(req.body));
+  return result.error ? failMoney(res, result) : ok(res, result.asset);
+}));
+router.delete('/financials/asset-values/:month', valuationCap, asyncHandler(async (req, res) => {
+  const result = await money.deleteAssetValue(orgId(req), req.user.id, money.assetSchema.shape.month.parse(req.params.month));
+  return result.error ? failMoney(res, result) : ok(res, { month: result.month });
+}));
 router.get('/financials/plans', financialsCap, asyncHandler(async (req, res) => ok(res, await financials.listPlans(orgId(req), financials.rangeSchema.parse(req.query)))));
 router.put('/financials/plans', financialsCap, asyncHandler(async (req, res) => {
   const result = await financials.savePlan(orgId(req), req.user.id, financials.planSchema.parse(req.body));

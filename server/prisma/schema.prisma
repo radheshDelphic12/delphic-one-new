@@ -1888,6 +1888,7 @@ model Org {
 
   // Zephyr Infrastructure workspace (standalone Zx* module).
   zx_settings   ZxSetting[]
+  zx_asset_values ZxAssetValue[]
   zx_service_types ZxServiceType[]
   zx_properties ZxProperty[]
   zx_property_units ZxPropertyUnit[]
@@ -3818,6 +3819,23 @@ model ZxPeriodClose {
 
   @@unique([org_id, month])
   @@map("zx_period_closes")
+}
+
+// Admin-recorded asset value per month for the valuation: (profit x 240) + (asset value x 3).
+// A month without its own figure carries forward the latest earlier one.
+model ZxAssetValue {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month       String
+  asset_value Decimal  @db.Decimal(16, 2)
+  notes       String?
+  updated_by  String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("zx_asset_values")
 }
 
 model ZxServiceType {
