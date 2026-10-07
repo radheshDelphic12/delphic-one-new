@@ -61,6 +61,21 @@ async function resolveFile(filename, user) {
     return finish(filename, zxDoc.file_name || zxDoc.title);
   }
 
+  // Gulati documents: same rule against the Gulati role model.
+  const gxDoc = await prisma.gxDocument.findFirst({
+    where: { file_url: fileUrl, deleted_at: null },
+    select: { org_id: true, owner_type: true, title: true, file_name: true },
+  });
+  if (gxDoc) {
+    if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
+    if (gxDoc.org_id !== user.org_id) return { error: 'forbidden' };
+    const { resolveGxRole, capsFor } = require('../gulati/access');
+    const gx = await resolveGxRole(user);
+    const cap = require('../gulati/documents.service').capFor(gxDoc.owner_type);
+    if (!gx.role || !capsFor(gx.role).includes(cap)) return { error: 'forbidden' };
+    return finish(filename, gxDoc.file_name || gxDoc.title);
+  }
+
   return { error: 'not_found' };
 }
 

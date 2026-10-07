@@ -64,3 +64,112 @@
 .theme-zephyr .bg-white {
   background-color: rgb(var(--zx-surface));
 }
+
+/* Gulati Industries: calm sage green taken from the logo's petals (#67A87A at 500), on cooler
+   teal-leaning surfaces so it reads as a different company from Zephyr, with a copper accent
+   (a nod to Copper Cathode) used sparingly for key figures and the active tab. */
+.theme-gulati {
+  --p-50: 242 248 244;
+  --p-100: 225 239 230;
+  --p-200: 195 223 204;
+  --p-300: 156 200 171;
+  --p-400: 130 184 150;
+  --p-500: 103 168 122;
+  --p-600: 80 138 98;
+  --p-700: 63 110 78;
+  --p-800: 52 88 63;
+  --p-900: 42 72 51;
+
+  --color-bg: 243 247 246;
+  --color-sidebar: 232 240 238;
+  --color-border: 213 226 222;
+  --color-border-subtle: 224 234 231;
+  --zx-surface: 252 253 253;
+  --color-primary: 80 138 98;
+  --color-primary-soft: 242 248 244;
+
+  --gx-copper: 176 106 59;
+}
+
+.theme-gulati .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(103 168 122 / 0.09), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(176 106 59 / 0.045), transparent 52%);
+}
+
+.theme-gulati .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(63 110 78 / 0.12);
+}
+
+.theme-gulati nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.7);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--gx-copper));
+}
+
+.theme-gulati .bg-white {
+  background-color: rgb(var(--zx-surface));
+}
+
+/* Copper accent: key money figures and the selected tab underline. */
+.theme-gulati .gx-copper {
+  color: rgb(var(--gx-copper));
+}
+.theme-gulati [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--gx-copper));
+  color: rgb(var(--p-800));
+}
+
+/* Gulati Industries: calm sage green taken from the logo's petals (#67A87A at 500), on cooler
+   teal-leaning surfaces so it reads as a different company from Zephyr, with a copper accent
+   (a nod to Copper Cathode) used sparingly for key figures and the selected tab. */
+.theme-gulati {
+  --p-50: 242 248 244;
+  --p-100: 225 239 230;
+  --p-200: 195 223 204;
+  --p-300: 156 200 171;
+  --p-400: 130 184 150;
+  --p-500: 103 168 122;
+  --p-600: 80 138 98;
+  --p-700: 63 110 78;
+  --p-800: 52 88 63;
+  --p-900: 42 72 51;
+
+  --color-bg: 243 247 246;
+  --color-sidebar: 232 240 238;
+  --color-border: 213 226 222;
+  --color-border-subtle: 224 234 231;
+  --zx-surface: 252 253 253;
+  --color-primary: 80 138 98;
+  --color-primary-soft: 242 248 244;
+
+  --gx-copper: 176 106 59;
+}
+
+.theme-gulati .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(103 168 122 / 0.09), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(176 106 59 / 0.045), transparent 52%);
+}
+
+.theme-gulati .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(63 110 78 / 0.12);
+}
+
+.theme-gulati nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.7);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--gx-copper));
+}
+
+.theme-gulati .bg-white {
+  background-color: rgb(var(--zx-surface));
+}
+
+.theme-gulati .gx-copper {
+  color: rgb(var(--gx-copper));
+}
+.theme-gulati [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--gx-copper));
+  color: rgb(var(--p-800));
+}

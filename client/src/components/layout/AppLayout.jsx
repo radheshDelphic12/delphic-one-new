@@ -17,6 +17,8 @@ import ErrorBoundary from '../ErrorBoundary.jsx';
 import { canSeeMeetingsCalendar } from '../../lib/departments.js';
 import { isZephyrOrg, useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
 import { zephyrNavFor } from '../../lib/zephyr/sections.js';
+import { gulatiNavFor } from '../../lib/gulati/sections.js';
+import { isGulatiOrg, useGulati, gxCan } from '../../lib/gulati/useGulati.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -79,6 +81,8 @@ const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
 // Zephyr sections plus their own notifications and personal settings.
 const ZEPHYR_EXTRA_NAV = [{ to: '/settings', label: 'Settings', icon: Settings }];
 const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings', '/notifications'].includes(pathname);
+// Gulati Industries is standalone in the same way.
+const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
 
 export default function AppLayout() {
   const { user, logout, isGroupSuperadmin } = useAuth();
@@ -88,8 +92,14 @@ export default function AppLayout() {
   const isContractor = user?.worker_type === 'contractor';
   const isZephyr = isZephyrOrg(user);
   const { me: zxMe } = useZephyr();
+  const isGulati = isGulatiOrg(user);
+  const { me: gxMe } = useGulati();
   const navItems = useMemo(
     () => {
+      if (isGulati) {
+        const setup = gxCan(gxMe, 'settings') ? [{ to: '/gulati/settings', label: 'Gulati setup', icon: Settings }] : [];
+        return [...gulatiNavFor(gxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
       if (isZephyr) {
         const setup = zxCan(zxMe, 'settings') ? [{ to: '/zephyr/settings', label: 'Zephyr setup', icon: Settings }] : [];
         return [...zephyrNavFor(zxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
@@ -104,7 +114,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe]
   );
 
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
@@ -113,6 +123,13 @@ export default function AppLayout() {
     document.documentElement.classList.add('theme-zephyr');
     return () => document.documentElement.classList.remove('theme-zephyr');
   }, [isZephyr]);
+
+  // Gulati gets its own calm green palette from the logo.
+  useEffect(() => {
+    if (!isGulati) return undefined;
+    document.documentElement.classList.add('theme-gulati');
+    return () => document.documentElement.classList.remove('theme-gulati');
+  }, [isGulati]);
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -171,6 +188,23 @@ export default function AppLayout() {
             <span className="h-px flex-1 bg-primary-200" />
           </div>
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
+        </Link>
+      )}
+      {isGulati && !collapsed && (
+        <Link
+          to="/gulati"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Gulati Industries home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex items-center gap-3 px-3 py-2.5">
+            <img src={user?.active_org?.logo_url || '/gulati-logo.svg'} alt={user?.active_org?.name || 'Gulati Industries'} className="h-11 w-11 shrink-0 object-contain transition group-hover:rotate-12" />
+            <div className="min-w-0 leading-tight">
+              <div className="truncate font-heading text-[13px] font-semibold uppercase tracking-wide text-primary-900">Gulati</div>
+              <div className="text-[9px] font-semibold uppercase tracking-[0.22em] text-primary-600">Industries</div>
+            </div>
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--gx-copper))]" />
         </Link>
       )}
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">
@@ -358,7 +392,7 @@ export default function AppLayout() {
           <div className="px-4 pb-6 pt-0 md:px-6">
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) ? <Navigate to="/zephyr" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) ? <Navigate to="/gulati" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>
