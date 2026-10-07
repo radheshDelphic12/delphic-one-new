@@ -57,6 +57,7 @@ import GulatiLeadsPage from '../pages/gulati/GulatiLeadsPage.jsx';
 import GulatiDealsPage from '../pages/gulati/GulatiDealsPage.jsx';
 import GulatiDealDetailPage from '../pages/gulati/GulatiDealDetailPage.jsx';
 import GulatiFinancePage from '../pages/gulati/GulatiFinancePage.jsx';
+import GulatiFinancialsPage from '../pages/gulati/GulatiFinancialsPage.jsx';
 import GulatiTasksPage from '../pages/gulati/GulatiTasksPage.jsx';
 import GulatiPeoplePage from '../pages/gulati/GulatiPeoplePage.jsx';
 import GulatiMyWorkPage from '../pages/gulati/GulatiMyWorkPage.jsx';
@@ -286,6 +287,7 @@ export default function App() {
         <Route path="gulati/deals" element={<RequireGulati><GulatiDealsPage /></RequireGulati>} />
         <Route path="gulati/deals/:id" element={<RequireGulati><GulatiDealDetailPage /></RequireGulati>} />
         <Route path="gulati/finance" element={<RequireGulati><GulatiFinancePage /></RequireGulati>} />
+        <Route path="gulati/financials" element={<RequireGulati><GulatiFinancialsPage /></RequireGulati>} />
         <Route path="gulati/tasks" element={<RequireGulati><GulatiTasksPage /></RequireGulati>} />
         <Route path="gulati/people" element={<RequireGulati><GulatiPeoplePage /></RequireGulati>} />
         <Route path="gulati/my-work" element={<RequireGulati><GulatiMyWorkPage /></RequireGulati>} />

@@ -28,6 +28,7 @@ const GULATI_TITLES = {
   '/gulati/parties': ['Client / Vendor', 'Clients and the vendors you source from.'],
   '/gulati/deals': ['Trading Deals', 'Purchases, sales, quantities, payments and profit.'],
   '/gulati/finance': ['Finance', 'P&L, trading-type reports, expenses and month close.'],
+  '/gulati/financials': ['Financials', 'Revenue, profit and valuation, month on month.'],
   '/gulati/tasks': ['Tasks', 'Follow-ups, sourcing and delivery work.'],
   '/gulati/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
   '/gulati/my-work': ['My work', 'Your assigned leads, deals and tasks.'],

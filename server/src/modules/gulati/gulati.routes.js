@@ -28,6 +28,7 @@ const ERRORS = {
   duplicate: [409, 'That name already exists'],
   duplicate_name: [409, 'A client or vendor with that name already exists'],
   manual_value_required: [422, 'A manual valuation needs a value'],
+  bad_range: [422, 'Choose a valid month range (at most 10 years)'],
   party_not_found: [422, 'Client not found'],
   vendor_not_found: [422, 'Vendor not found'],
   deal_not_found: [422, 'Deal not found'],
@@ -207,6 +208,9 @@ router.get('/dashboard', can('dashboard'), A(async (req, res) => ok(res, await f
 router.get('/finance/overview', can('overview'), A(async (req, res) => ok(res, await finance.overview(orgId(req), fparse(req), req.gx.caps))));
 router.get('/finance/pnl', can('overview'), A(async (req, res) => ok(res, await finance.pnl(orgId(req), fparse(req)))));
 router.get('/finance/trading-report', can('overview'), A(async (req, res) => ok(res, await finance.tradingReport(orgId(req), fparse(req)))));
+router.get('/finance/valuation', can('valuation'), A(async (req, res) => { const r = await finance.valuationTrend(orgId(req), finance.trendSchema.parse(req.query)); return r.error ? failFor(res, r) : ok(res, r); }));
+router.put('/finance/asset-values', can('valuation'), A(async (req, res) => send('asset')(res, await finance.setAssetValue(orgId(req), actor(req), finance.assetSchema.parse(req.body)))));
+router.delete('/finance/asset-values/:month', can('valuation'), A(async (req, res) => send('month')(res, await finance.deleteAssetValue(orgId(req), actor(req), finance.assetSchema.shape.month.parse(req.params.month)))));
 router.get('/finance/periods', can('financials'), A(async (req, res) => ok(res, await finance.periods(orgId(req)))));
 router.post('/finance/periods/:month/close', can('closeMonth'), A(async (req, res) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(req.params.month)) return fail(res, 422, 'Use YYYY-MM');
