@@ -97,31 +97,85 @@ function AssetValueForm({ rows, onSaved }) {
  * (profit from sub-companies × 240) + (asset value × 3). All values come from
  * GET /financials/trends - nothing is computed or hardcoded here.
  */
+const STATES = [
+  { key: 'locked', label: 'Locked', hint: 'Finalized records only' },
+  { key: 'unlocked', label: 'Unlocked', hint: 'Live records not locked yet' },
+  { key: 'all', label: 'All', hint: 'Locked + unlocked' },
+];
+
+const VIEW_NAME = { locked: 'Finalized (locked)', unlocked: 'Live (unlocked)', all: 'Locked + unlocked' };
+const monthValue = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const monthIndex = (value) => { const [y, m] = value.split('-').map(Number); return y * 12 + m - 1; };
+
 export default function FinancialTrendsTab() {
-  const [months, setMonths] = useState(12);
+  const now = new Date();
+  // Default window: the last 12 months, ending this month.
+  const [from, setFrom] = useState(() => monthValue(new Date(now.getFullYear(), now.getMonth() - 11, 1)));
+  const [to, setTo] = useState(() => monthValue(now));
   const [state, setState] = useState('locked');
-  const { data, loading, refresh } = useLiveData(() => apiClient.get('/financials/trends', { params: { months, state } }).then((r) => r.data.data), { deps: [months, state] });
+  const rangeError = !from || !to ? 'Pick a start and an end month.' : monthIndex(to) < monthIndex(from) ? 'The end month cannot be before the start month.' : monthIndex(to) - monthIndex(from) >= 36 ? 'Pick at most 36 months.' : '';
+  const params = useMemo(() => { const [fy, fm] = from.split('-').map(Number); const [ty, tm] = to.split('-').map(Number); return { from_year: fy, from_month: fm, to_year: ty, to_month: tm, state }; }, [from, to, state]);
+  const { data, loading, refresh } = useLiveData(() => (rangeError ? Promise.resolve(null) : apiClient.get('/financials/trends', { params }).then((r) => r.data.data)), { deps: [from, to, state, rangeError] });
   const rows = useMemo(() => data?.months.map((m) => ({ ...m, label: shortMonth(m.month) })) || [], [data]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-3">
-        <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5" role="group" aria-label="Locked / all">
-          {[['locked', 'Locked'], ['all', 'Locked + live']].map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setState(key)} aria-pressed={state === key} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${state === key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
+        <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5" role="group" aria-label="Locked / unlocked / all">
+          {STATES.map(({ key, label, hint }) => (
+            <button key={key} type="button" title={hint} onClick={() => setState(key)} aria-pressed={state === key} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${state === key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
           ))}
         </div>
-        <label className="text-xs font-medium text-tertiary-600">Months
-          <select value={months} onChange={(e) => setMonths(Number(e.target.value))} className="ml-2 rounded-xl border px-2 py-1 text-sm">{[6, 12, 24].map((m) => <option key={m} value={m}>{m}</option>)}</select>
-        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs font-medium text-tertiary-600">Start month
+            <input type="month" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">End month
+            <input type="month" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
+          </label>
+        </div>
+        <p className="w-full text-xs text-tertiary-500">
+          {state === 'locked' && "Revenue and profit count locked (finalized) records only. Valuation counts only what the sub-companies have locked too (their profit is 0 until they lock). Switch to Unlocked or All to include their live profit."}
+          {state === 'unlocked' && 'Live records that are not locked yet — projections, not final.'}
+          {state === 'all' && 'Locked and unlocked records together.'}
+        </p>
       </div>
+      {rangeError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{rangeError}</p>}
 
-      {loading && !data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
+      {rangeError ? null : loading && !data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
         <div className="grid gap-4 xl:grid-cols-2">
-          <TrendChart title="Revenue — month on month" subtitle="Finalized revenue per month (Financials)" data={rows} dataKey="revenue" name="Revenue" color={CHART_COLORS.success} />
-          <TrendChart title="Profit — month on month" subtitle="Revenue less salaries and expenses (Financials)" data={rows} dataKey="profit" name="Profit" color={CHART_COLORS.primary} />
+          <TrendChart title="Revenue — month on month" subtitle={`${VIEW_NAME[state]} revenue per month (Financials)`} data={rows} dataKey="revenue" name="Revenue" color={CHART_COLORS.success} />
+          <TrendChart title="Profit — month on month" subtitle={`${VIEW_NAME[state]} revenue less salaries and expenses (Financials)`} data={rows} dataKey="profit" name="Profit" color={CHART_COLORS.primary} />
           <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Profit from sub-companies × 240) + (Asset value × 3)" data={rows} dataKey="valuation" name="Valuation" color={CHART_COLORS.purple} />
         </div>
+      )}
+      {rows.length > 0 && (
+        <section className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white" aria-label="How the valuation is worked out">
+          <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">How each month&apos;s valuation is worked out</h3>
+          <table className="mt-2 w-full text-sm">
+            <thead className="text-left text-xs text-tertiary-500"><tr>
+              <th className="px-4 py-2 font-medium">Month</th>
+              <th className="px-3 py-2 text-right font-medium">Profit from sub-companies</th>
+              <th className="px-3 py-2 text-right font-medium">× 240</th>
+              <th className="px-3 py-2 text-right font-medium">Asset value</th>
+              <th className="px-3 py-2 text-right font-medium">× 3</th>
+              <th className="px-3 py-2 text-right font-medium">Valuation</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.month} className="border-t border-tertiary-100">
+                  <td className="px-4 py-2">{r.label}</td>
+                  <td className="px-3 py-2 text-right tabular-nums" title={(r.sub_company_breakdown || []).map((x) => `${x.name}: ${inr(x.profit)}`).join('\n')}>{inr(r.sub_company_profit)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{inr(r.sub_company_profit_x)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{inr(r.asset_value)}{r.asset_value_carried ? <span className="ml-1 text-[10px] text-tertiary-400">carried</span> : null}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{inr(r.asset_value_x)}</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary-700">{inr(r.valuation)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-4 pb-3 pt-2 text-xs text-tertiary-500">Sub-companies{data?.sub_companies?.length ? ` (${data.sub_companies.join(', ')})` : ''} Profit from sub-companies is their locked profit in the Locked view and their live profit in Unlocked / All. Hover a figure for the per-company split.</p>
+        </section>
       )}
       {rows.length > 0 && <AssetValueForm rows={rows} onSaved={refresh} />}
       {data?.sub_companies?.length === 0 && <p className="text-xs text-tertiary-500">No other active company in this group yet, so profit from sub-companies is 0.</p>}

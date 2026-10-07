@@ -101,6 +101,8 @@ const personalDetailsSchema = z
     bank_account_number: optionalText(34).refine((v) => !v || /^[A-Za-z0-9 -]{4,34}$/.test(v), 'Enter a valid account number'),
     bank_ifsc: optionalText(20).transform((v) => (v ? v.toUpperCase() : v)).refine((v) => !v || /^[A-Z0-9]{4,20}$/.test(v), 'Enter a valid IFSC / SWIFT code'),
     bank_branch: optionalText(120),
+    aadhaar_number: optionalText(14).transform((v) => (v ? v.replace(/\s+/g, '') : v)).refine((v) => !v || /^[0-9]{12}$/.test(v), 'Aadhaar must be 12 digits'),
+    pan_number: optionalText(10).transform((v) => (v ? v.toUpperCase() : v)).refine((v) => !v || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(v), 'Enter a valid PAN (e.g. ABCDE1234F)'),
     emergency_contact_name: optionalText(120),
     emergency_contact_relation: optionalText(60),
     emergency_contact_phone: optionalText(30).refine((v) => !v || /^[+0-9 ()-]{6,30}$/.test(v), 'Enter a valid phone number'),

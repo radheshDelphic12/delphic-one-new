@@ -204,6 +204,20 @@ function yearRange(year) {
   return { gte: new Date(Date.UTC(year, 0, 1)), lte: new Date(Date.UTC(year, 11, 31)) };
 }
 
+// Approved leave days taken inside [from, to] per leave type id (half days count 0.5) - the payslip's "leaves taken".
+async function leaveTakenInRange(orgId, orgMembershipId, from, to) {
+  const requests = await prisma.leaveRequest.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', from_date: { lte: to }, to_date: { gte: from } },
+  });
+  const countDays = await leaveDayCounter(orgId, orgMembershipId, from, to);
+  const taken = new Map();
+  for (const r of requests) {
+    const days = r.is_half_day ? 0.5 : overlapDays(r.from_date, r.to_date, from, to, countDays);
+    taken.set(r.leave_type_id, (taken.get(r.leave_type_id) || 0) + days);
+  }
+  return taken;
+}
+
 async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) {
   await ensureDefaultTypes(orgId);
   const range = yearRange(year);
@@ -821,6 +835,7 @@ module.exports = {
   compOffCredits,
   listTypes,
   listMyBalances,
+  leaveTakenInRange,
   balancesOverview,
   setEntitlement,
   createType,

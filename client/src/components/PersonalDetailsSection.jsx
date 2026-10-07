@@ -14,13 +14,18 @@ const BANK_FIELDS = [
   ['bank_ifsc', 'IFSC / SWIFT code'],
   ['bank_branch', 'Branch'],
 ];
+// Printed on the payslip alongside the bank account.
+const IDENTITY_FIELDS = [
+  ['aadhaar_number', 'Aadhaar number'],
+  ['pan_number', 'PAN'],
+];
 const EMERGENCY_FIELDS = [
   ['emergency_contact_name', 'Contact name'],
   ['emergency_contact_relation', 'Relationship'],
   ['emergency_contact_phone', 'Phone', 'tel'],
   ['emergency_contact_email', 'Email', 'email'],
 ];
-const ALL_FIELDS = [...BANK_FIELDS, ...EMERGENCY_FIELDS];
+const ALL_FIELDS = [...BANK_FIELDS, ...IDENTITY_FIELDS, ...EMERGENCY_FIELDS];
 
 // "XXXX XXXX 1234" — the full number only shows in the edit form.
 function maskAccount(value) {
@@ -94,7 +99,7 @@ export default function PersonalDetailsSection({ membershipId, self = false }) {
     <>
       <Card icon={Landmark} title="Bank details" action={editButton}>
         <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {BANK_FIELDS.map(([key, label]) => (
+          {[...BANK_FIELDS, ...IDENTITY_FIELDS].map(([key, label]) => (
             <PeekField key={key} label={label}>{key === 'bank_account_number' ? maskAccount(details[key]) || show(key) : show(key)}</PeekField>
           ))}
         </dl>
@@ -129,7 +134,7 @@ export default function PersonalDetailsSection({ membershipId, self = false }) {
       >
         {form && (
           <form id="personal-details-form" onSubmit={save} className="space-y-6">
-            {[['Bank details', BANK_FIELDS], ['Emergency contact', EMERGENCY_FIELDS]].map(([heading, fields]) => (
+            {[['Bank details', BANK_FIELDS], ['Identity (for the payslip)', IDENTITY_FIELDS], ['Emergency contact', EMERGENCY_FIELDS]].map(([heading, fields]) => (
               <fieldset key={heading} className="grid gap-3 sm:grid-cols-2">
                 <legend className="mb-2 font-heading text-sm font-semibold text-tertiary-900">{heading}</legend>
                 {fields.map(([key, label, type]) => (
