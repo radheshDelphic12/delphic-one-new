@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
+import { Area as ChartArea, AreaChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { gulatiApi, gulatiError } from '../../lib/gulati/api.js';
-import { inr } from '../../lib/gulati/meta.js';
+import { inr as inrShort } from '../../lib/gulati/meta.js';
 import Modal from '../../components/ui/Modal.jsx';
 import { Area, Kpi, Money, Num, card, inputCls, labelCls } from '../../components/gulati/ui.jsx';
-import { shortMonth } from '../../lib/format.js';
+import { compact, shortMonth } from '../../lib/format.js';
+import { chartTooltipStyle } from '../../lib/chartTheme.js';
+import ChartCard from '../../components/ui/ChartCard.jsx';
+import { GX_CHART } from '../../components/gulati/GulatiTrendChart.jsx';
 
+const inr = (n) => `${Number(n) < 0 ? '-' : ''}₹${Math.abs(Number(n || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 const monthsAgo = (n) => {
   const d = new Date();
@@ -15,6 +20,36 @@ const monthsAgo = (n) => {
   return d.toISOString().slice(0, 7);
 };
 const Th = ({ children, right }) => <th className={`px-3 py-2 font-medium ${right ? 'text-right' : 'text-left'}`}>{children}</th>;
+
+const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
+
+// One month-on-month line: smooth line with a soft fill, a value on every point and the exact amount in the tooltip.
+function TrendChart({ title, subtitle, data, dataKey, color, name, className = '' }) {
+  const gradientId = `gx-trend-${dataKey}`;
+  return (
+    <ChartCard title={title} subtitle={subtitle} className={className}>
+      <div className="h-72" data-testid={`gx-trend-${dataKey}`}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 22, right: 16, left: 4, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity={0.22} />
+                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke={GX_CHART.grid} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+            <YAxis tickFormatter={rupee} tick={{ fontSize: 11 }} width={64} />
+            <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => [inr(v), name]} />
+            <ChartArea type="monotone" dataKey={dataKey} name={name} stroke={color} strokeWidth={2} fill={`url(#${gradientId})`} dot={{ r: 2.5, fill: color, strokeWidth: 0 }} activeDot={{ r: 4 }} isAnimationActive={false}>
+              <LabelList dataKey={dataKey} position="top" formatter={(v) => (v ? rupee(v) : '')} style={{ fontSize: 10, fill: '#6B7280' }} />
+            </ChartArea>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  );
+}
 
 // Valuation = (Gulati net profit x 240) + (asset value x 3), month by month, with the working shown for each month.
 export default function GulatiValuationTab() {
@@ -25,7 +60,7 @@ export default function GulatiValuationTab() {
   const [edit, setEdit] = useState(null);
   const [saving, setSaving] = useState(false);
   const alertsRef = useRef({ pushError });
-  alertsRef.current = { pushError };
+  useEffect(() => { alertsRef.current = { pushError }; });
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -50,6 +85,7 @@ export default function GulatiValuationTab() {
 
   const months = data?.months || [];
   const latest = months[months.length - 1];
+  const chartRows = months.map((m) => ({ ...m, label: shortMonth(m.month) }));
   const f = data?.formula || { profit: 240, asset_value: 3 };
   return (
     <div className="space-y-4">
@@ -74,9 +110,17 @@ export default function GulatiValuationTab() {
         {latest && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Kpi label={`Valuation, ${shortMonth(latest.month)}`} value={<Money v={latest.valuation} />} tone="gx-copper" />
-            <Kpi label={`Net profit x ${f.profit}`} value={<Money v={latest.profit_x} signed />} hint={`${inr(latest.profit)} net profit`} />
-            <Kpi label={`Asset value x ${f.asset_value}`} value={<Money v={latest.asset_value_x} />} hint={`${inr(latest.asset_value)}${latest.asset_value_carried ? ' (carried forward)' : ''}`} />
+            <Kpi label={`Net profit x ${f.profit}`} value={<Money v={latest.profit_x} signed />} hint={`${inrShort(latest.profit)} net profit`} />
+            <Kpi label={`Asset value x ${f.asset_value}`} value={<Money v={latest.asset_value_x} />} hint={`${inrShort(latest.asset_value)}${latest.asset_value_carried ? ' (carried forward)' : ''}`} />
             <Kpi label="Net profit (month)" value={<Money v={latest.profit} signed />} hint={latest.closed ? 'Month closed' : 'Month open'} />
+          </div>
+        )}
+
+        {months.length > 0 && (
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <TrendChart title="Revenue — month on month" subtitle="Gulati sales revenue per month" data={chartRows} dataKey="revenue" name="Revenue" color={GX_CHART.sales} />
+            <TrendChart title="Profit — month on month" subtitle="Gulati net profit per month" data={chartRows} dataKey="profit" name="Net profit" color={GX_CHART.net} />
+            <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Net profit × 240) + (Asset value × 3)" data={chartRows} dataKey="valuation" name="Valuation" color={GX_CHART.cost} />
           </div>
         )}
 
