@@ -156,6 +156,61 @@ async function cancelTicket(orgId, orgMembershipId, ticketId) {
   return { ticket: serialize(updated) };
 }
 
+// Projects an employee is assigned to on a given day (assignment span covers it); for the admin's OT form.
+async function assignedProjects(orgId, orgMembershipId, date) {
+  const day = date || todayIst();
+  const rows = await prisma.projectMemberAssignment.findMany({
+    where: {
+      org_id: orgId,
+      org_membership_id: orgMembershipId,
+      AND: [{ OR: [{ start_date: null }, { start_date: { lte: new Date(day) } }] }, { OR: [{ end_date: null }, { end_date: { gte: new Date(day) } }] }],
+    },
+    include: { account: { select: { id: true, name: true, project_name: true, project_code: true } } },
+  });
+  const seen = new Map();
+  for (const r of rows) {
+    if (!seen.has(r.account.id)) seen.set(r.account.id, { id: r.account.id, name: r.account.project_name || r.account.name, code: r.account.project_code || null });
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function isAssigned(orgId, orgMembershipId, accountId, date) {
+  return (await assignedProjects(orgId, orgMembershipId, typeof date === 'string' ? date : ymd(date))).some((p) => p.id === accountId);
+}
+
+// Admin applies overtime for any employee (e.g. the employee forgot to raise it). The ticket is created as
+// approved (paid and billed like any approved ticket) or pending, with a reason; audited and flagged to finance.
+async function adminCreateTicket(orgId, adminUser, { org_membership_id, date, hours, account_id, status = 'approved', reason }) {
+  const target = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true, person_id: true } });
+  if (!target) return { error: 'employee_not_found' };
+  if (!(await usesTickets(target.id))) return { error: 'tickets_not_applicable' };
+  if (date > todayIst()) return { error: 'future_date' };
+  if (account_id && !(await prisma.account.findFirst({ where: { id: account_id, org_id: orgId }, select: { id: true } }))) return { error: 'account_not_found' };
+  if (account_id && !(await isAssigned(orgId, target.id, account_id, date))) return { error: 'ticket_project_not_assigned' };
+  if ((await dayTotal(target.id, date)) + hours > MAX_DAY_HOURS + 1e-9) return { error: 'exceeds_ticket_hours' };
+  const approved = status === 'approved';
+  const row = await prisma.overtimeTicket.create({
+    data: {
+      org_id: orgId,
+      org_membership_id: target.id,
+      date,
+      hours,
+      account_id: account_id || null,
+      reason,
+      status,
+      ...(approved ? { decided_by: adminUser.id, decided_at: new Date(), decision_reason: 'Applied by admin' } : {}),
+    },
+    include: INCLUDE,
+  });
+  await recordEvent(row.id, 'admin_created', { to: status, actorId: adminUser.id, reason, detail: { date: ymd(row.date), hours: Number(row.hours) } });
+  await prisma.auditLog.create({
+    data: { org_id: orgId, actor_id: adminUser.id, action: 'overtime_ticket_create', entity_type: 'overtime_ticket', entity_id: row.id, reason, snapshot: serialize(row) },
+  });
+  await trail(orgId, adminUser, row, 'admin_apply', null, status, `Overtime ${Number(row.hours)}h applied by an admin (${status})`, reason);
+  if (approved) await raiseFinanceChange(orgId, adminUser.id, row, `Overtime applied by admin (${Number(row.hours)}h)`, null, { status, hours: Number(row.hours) });
+  return { ticket: serialize(row) };
+}
+
 // Admin correction: hours, day, project, reason, status. A reason is required and audited.
 async function adminUpdateTicket(orgId, adminUser, ticketId, { reason, ticket_reason, ...patch }) {
   const row = await prisma.overtimeTicket.findFirst({ where: { id: ticketId, org_id: orgId }, include: INCLUDE });
@@ -163,6 +218,7 @@ async function adminUpdateTicket(orgId, adminUser, ticketId, { reason, ticket_re
   const next = { hours: patch.hours ?? Number(row.hours), date: patch.date ?? row.date };
   if ((await dayTotal(row.org_membership_id, next.date, row.id)) + next.hours > MAX_DAY_HOURS + 1e-9 && ['pending', 'approved'].includes(patch.status || row.status)) return { error: 'exceeds_ticket_hours' };
   if (patch.account_id && !(await prisma.account.findFirst({ where: { id: patch.account_id, org_id: orgId }, select: { id: true } }))) return { error: 'account_not_found' };
+  if (patch.account_id && patch.account_id !== row.account_id && !(await isAssigned(orgId, row.org_membership_id, patch.account_id, next.date))) return { error: 'ticket_project_not_assigned' };
   const data = { ...patch, ...(ticket_reason !== undefined ? { reason: ticket_reason } : {}) };
   if (patch.status && patch.status !== row.status) Object.assign(data, { decided_by: adminUser.id, decided_at: new Date(), decision_reason: reason });
   const updated = await prisma.overtimeTicket.update({ where: { id: ticketId }, data, include: INCLUDE });
@@ -197,4 +253,4 @@ async function ticketHistory(orgId, actor, ticketId) {
   return { ticket: serialize(row), events: events.map((e) => ({ id: e.id, action: e.action, from_status: e.from_status, to_status: e.to_status, actor: e.actor_id ? { id: e.actor_id, name: names.get(e.actor_id) || null } : null, reason: e.reason, detail: e.detail, created_at: e.created_at })) };
 }
 
-module.exports = { ticketHistory, createTicket, listTickets, decideTicket, cancelTicket, adminUpdateTicket, adminDeleteTicket, usesTickets, round2 };
+module.exports = { ticketHistory, createTicket, adminCreateTicket, assignedProjects, listTickets, decideTicket, cancelTicket, adminUpdateTicket, adminDeleteTicket, usesTickets, round2 };

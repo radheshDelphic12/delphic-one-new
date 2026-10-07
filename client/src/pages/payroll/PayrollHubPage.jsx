@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
+import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import SalaryAdjustmentsTab from './SalaryAdjustmentsTab.jsx';
+import SalaryPaymentsTab from './SalaryPaymentsTab.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -91,7 +92,7 @@ function payslipHtml(payslip, orgName) {
     <style>
       body { font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; padding: 28px 36px; }
       .head { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #105aa9; padding-bottom: 12px; margin-bottom: 14px; }
-      .head img { height: 64px; }
+      .head img { height: 64px; width: auto; }
       .head .t { text-align: right; }
       h1 { font-size: 20px; margin: 0; } .sub { color: #64748b; font-size: 12px; margin-top: 2px; }
       h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #105aa9; margin: 16px 0 6px; }
@@ -104,7 +105,7 @@ function payslipHtml(payslip, orgName) {
       .foot { margin-top: 22px; color: #94a3b8; font-size: 11px; text-align: center; }
     </style></head><body>
     <div class="head">
-      <img src="${window.location.origin}/delphic-logo.png" alt="Delphic" />
+      <img src="${window.location.origin}/delphic-logo.svg" alt="Delphic" />
       <div class="t"><h1>Salary Slip</h1><div class="sub">${escapeHtml(orgName || 'Delphic')} · ${escapeHtml(period)}</div></div>
     </div>
     <h2>Employee &amp; bank details</h2>
@@ -189,7 +190,7 @@ function PayslipDrawer({ open, payslip, onClose }) {
       {payslip && (
         <div className="space-y-5">
           <div className="flex items-center justify-between border-b-2 border-primary-600 pb-3">
-            <img src="/delphic-logo.png" alt="Delphic" className="h-12" />
+            <img src="/delphic-logo.svg" alt="Delphic" className="h-12 w-auto" />
             <div className="text-right">
               <p className="font-heading text-lg font-semibold text-tertiary-900">Salary Slip</p>
               <p className="text-xs text-tertiary-500">{user?.active_org?.name || 'Delphic'} · {period}</p>
@@ -657,6 +658,8 @@ function MemberCell({ membership }) {
 
 const BASE_TABS = [{ key: 'my-payslips', label: 'My Payslips', icon: FileText }];
 const ADMIN_TABS = [
+  // Paid or not, with the transaction details, for every employee and month.
+  { key: 'salary-payments', label: 'Salary Payments', icon: Banknote },
   // Salary from attendance / check-ins on each employee's calendar — what a
   // run processes (and, once the month is locked, exactly the locked figures).
   { key: 'attendance-salary', label: 'Attendance Salary', icon: CalendarCheck },
@@ -710,6 +713,7 @@ export default function PayrollHubPage() {
         </div>
       )}
       {section === 'my-payslips' && <MyPayslipsTab />}
+      {section === 'salary-payments' && isAdmin && <SalaryPaymentsTab filters={people} />}
       {section === 'attendance-salary' && isAdmin && <AttendanceSalaryTab people={people} endpoint="/payroll/attendance-salary" />}
       {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
       {section === 'adjustments' && isAdmin && <SalaryAdjustmentsTab />}
