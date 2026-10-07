@@ -35,6 +35,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [FINANCE-CALCULATIONS-AND-LOCKING.md](features/FINANCE-CALCULATIONS-AND-LOCKING.md) — attendance-based salary, Managed Services billing on the project calendar, overtime, resource revenue, vendor payments, and the shared lock / version / change-detection system behind Live Analytics → Financials (Built 2026-09-29)
 - [ZEPHYR-INFRASTRUCTURE.md](features/ZEPHYR-INFRASTRUCTURE.md) — Zephyr Infrastructure company workspace: standalone `Zx` module (no Delphic Global reuse), six sections only, phases Z0-Z8 all built + live work log (branch `zephyr-bug-fix-new-implementation`, 2026-10)
 - [ZEPHYR-REAL-ESTATE-PLAN.md](features/ZEPHYR-REAL-ESTATE-PLAN.md) — Zephyr real-estate/construction brief: plan + work log R0-R9 (services, properties, units, rent, trading, consulting, tasks, finance role, service P&L); phases R0-R9 built and tested locally 2026-10-06 (log in section 8)
+- [GULATI-INDUSTRIES.md](features/GULATI-INDUSTRIES.md) - Gulati Industries trading workspace (Copper Cathode and other deals): standalone `Gx` module mirroring Zephyr, phases G0-G9 built locally 2026-10-07 (branch `gulati_industry_bug_and_implementation`), admin-editability matrix in section 10
 - [ZEPHYR-MAIN-RELEASE.md](guides/ZEPHYR-MAIN-RELEASE.md) — 2026-10-06 runbook to promote staging -> main: 8 additive `zx_*` migrations, data-rewriting UPDATEs in #7, safe sequence (migrate status, dump + rehearsal, human-only ff merge), rollback
 
 ### UI
@@ -47,6 +48,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 
 - [TESTING-ZEPHYR.md](testing/TESTING-ZEPHYR.md) — Zephyr workspace: run locally, demo seed (
 pm run zephyr:seed), logins per role, walkthrough + test map
+- [TESTING-GULATI.md](testing/TESTING-GULATI.md) - Gulati workspace: run locally, demo seed (`npm run gulati:seed`), logins per role, walkthrough + test map
 - [TESTING-DEMO-SEED.md](testing/TESTING-DEMO-SEED.md) — team roster + LeadMinds/Jira/vendor seed walkthrough
 - [TESTING-RD-103-104.md](testing/TESTING-RD-103-104.md) — requirements UI
 - [TESTING-RD-107-108.md](testing/TESTING-RD-107-108.md) — submissions UI
