@@ -185,7 +185,7 @@ function OverviewTab({ isAdmin, canFinance }) {
             <Tile label="Profit" value={rupees(s.profit)} change={delta(s.profit, p.profit)} tone={s.profit < 0 ? 'text-red-600' : 'text-tertiary-900'} sub={isAdmin ? undefined : 'before salaries'} />
             <Tile label="Margin" value={s.margin === null ? '—' : `${s.margin}%`} sub="profit / revenue" />
             {isAdmin && (
-              <Tile label="Valuation" value={v?.value == null ? '—' : rupees(v.value)} sub={v ? (v.method === 'manual' ? 'set manually' : `${v.multiple}x ${v.basis}`) : ''} />
+              <Tile label="Valuation" value={v?.value == null ? '—' : rupees(v.value)} sub={v ? '(profit x 240) + (assets x 3)' : ''} />
             )}
           </div>
 

@@ -1,364 +1,229 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { CalendarCheck, FileSpreadsheet, FileText, LineChart, Lock, LockOpen, Target } from 'lucide-react';
+import { Area, AreaChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Lock, LockOpen, TrendingUp } from 'lucide-react';
+import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
-import { downloadText } from '../../lib/zephyr/csv.js';
 import { useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
 import { rupees } from '../../lib/zephyr/projectMeta.js';
-import { dateLabel, shortMonth } from '../../lib/format.js';
-import Drawer from '../../components/ui/Drawer.jsx';
-import Pill from '../../components/ui/Pill.jsx';
+import { chartTooltipStyle } from '../../lib/chartTheme.js';
+import { compact, shortMonth } from '../../lib/format.js';
+import ChartCard from '../../components/ui/ChartCard.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
-import ZephyrTrendChart from '../../components/zephyr/ZephyrTrendChart.jsx';
+import { ZX_CHART } from '../../components/zephyr/ZephyrTrendChart.jsx';
 
-const TABS = [
-  { key: 'plan', label: 'Plan vs actual', icon: Target },
-  { key: 'projection', label: 'Projection', icon: LineChart },
-  { key: 'close', label: 'Month close', icon: CalendarCheck },
-  { key: 'statements', label: 'Statements', icon: FileText },
+const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
+const monthValue = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const monthIndex = (value) => { const [y, m] = value.split('-').map(Number); return y * 12 + m - 1; };
+
+const STATES = [
+  { key: 'locked', label: 'Locked', hint: 'Closed months only' },
+  { key: 'unlocked', label: 'Unlocked', hint: 'Live figures of months that are not closed yet' },
+  { key: 'all', label: 'All', hint: 'Closed + open months' },
 ];
-const card = 'rounded-2xl border bg-white p-4 shadow-soft md:p-5';
-const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
-const labelCls = 'block text-xs font-medium text-tertiary-600';
-const cm = () => new Date().toISOString().slice(0, 7);
-const shift = (month, delta) => {
-  const [y, m] = month.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
-};
-const varClass = (v, goodWhenUp) => (v === 0 ? 'text-tertiary-500' : (v > 0) === goodWhenUp ? 'text-green-700' : 'text-red-600');
+const VIEW_NAME = { locked: 'Finalized (closed months)', unlocked: 'Live (open months)', all: 'Closed + open months' };
 
-function RangePicker({ from, to, onChange }) {
+/** One month-on-month line: smooth line with a soft fill, a value on every point and the exact amount in the tooltip. */
+function TrendChart({ title, subtitle, data, dataKey, color, name, className = '' }) {
+  const gradientId = `zx-trend-${dataKey}`;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm text-tertiary-600">
-      <label className="flex items-center gap-1.5">From<input type="month" value={from} max={to} onChange={(e) => e.target.value && onChange({ from: e.target.value, to })} className="rounded-xl border px-2 py-1.5" /></label>
-      <label className="flex items-center gap-1.5">To<input type="month" value={to} min={from} onChange={(e) => e.target.value && onChange({ from, to: e.target.value })} className="rounded-xl border px-2 py-1.5" /></label>
-    </div>
+    <ChartCard title={title} subtitle={subtitle} className={className}>
+      <div className="h-72" data-testid={`zx-trend-${dataKey}`}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 22, right: 16, left: 4, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity={0.22} />
+                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke={ZX_CHART.grid} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+            <YAxis tickFormatter={rupee} tick={{ fontSize: 11 }} width={64} />
+            <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => [rupees(v), name]} />
+            <Area type="monotone" dataKey={dataKey} name={name} stroke={color} strokeWidth={2} fill={`url(#${gradientId})`} dot={{ r: 2.5, fill: color, strokeWidth: 0 }} activeDot={{ r: 4 }} isAnimationActive={false}>
+              <LabelList dataKey={dataKey} position="top" formatter={(v) => (v ? rupee(v) : '')} style={{ fontSize: 10, fill: '#6B7280' }} />
+            </Area>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
   );
 }
 
-function PlanForm({ month, project, projects, existing, saving, onSubmit, onCancel }) {
-  const [v, setV] = useState({ month, project_id: project || '', planned_revenue: existing?.planned_revenue ?? 0, planned_expense: existing?.planned_expense ?? 0, planned_salaries: existing?.planned_salaries ?? 0, notes: existing?.notes || '' });
-  const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit({ month: v.month, project_id: v.project_id || null, planned_revenue: Number(v.planned_revenue || 0), planned_expense: Number(v.planned_expense || 0), planned_salaries: Number(v.planned_salaries || 0), notes: v.notes.trim() || null });
-      }}
-      className="space-y-4"
-    >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className={labelCls}>Month<input type="month" className={inputCls} value={v.month} onChange={set('month')} required /></label>
-        <label className={labelCls}>Applies to<select className={inputCls} value={v.project_id} onChange={set('project_id')}><option value="">Whole company</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
-        <label className={labelCls}>Planned revenue (INR)<input type="number" min="0" className={inputCls} value={v.planned_revenue} onChange={set('planned_revenue')} /></label>
-        <label className={labelCls}>Planned expense (INR)<input type="number" min="0" className={inputCls} value={v.planned_expense} onChange={set('planned_expense')} /></label>
-        <label className={labelCls}>Planned salaries (INR)<input type="number" min="0" className={inputCls} value={v.planned_salaries} onChange={set('planned_salaries')} /></label>
-        <label className={labelCls}>Notes<input className={inputCls} value={v.notes} onChange={set('notes')} maxLength={500} /></label>
-      </div>
-      <p className="text-xs text-tertiary-500">Saving again for the same month and scope replaces the figures. A whole-company plan is used when it exists; otherwise project plans add up.</p>
-      <div className="flex justify-end gap-2">
-        <button type="button" className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save plan'}</button>
-      </div>
-    </form>
-  );
-}
-
-function PlanTab({ projects }) {
+/** The asset value (x3 in the valuation) an admin records for a month. */
+function AssetValueForm({ rows, onSaved }) {
   const { pushError, pushSuccess } = useAlerts();
-  const [range, setRange] = useState({ from: shift(cm(), -5), to: shift(cm(), 2) });
-  const [project, setProject] = useState('');
-  const [data, setData] = useState(null);
-  const [plans, setPlans] = useState([]);
-  const [form, setForm] = useState(null);
+  const [month, setMonth] = useState(() => rows[rows.length - 1]?.month || monthValue(new Date()));
+  const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const current = rows.find((r) => r.month === month);
 
-  const load = useCallback(async () => {
-    try {
-      const params = { ...range, ...(project ? { project_id: project } : {}) };
-      const [pva, pl] = await Promise.all([zephyrApi.planVsActual(params), zephyrApi.plans(range)]);
-      setData(pva);
-      setPlans(pl);
-    } catch (e) {
-      pushError(zephyrError(e, 'Could not load plan vs actual'), 'Load failed');
-    }
-  }, [range, project, pushError]);
-  useEffect(() => {
-    setData(null);
-    load();
-  }, [load]);
-
-  async function save(body) {
+  async function save(event) {
+    event.preventDefault();
     setSaving(true);
     try {
-      await zephyrApi.savePlan(body);
-      pushSuccess('Plan saved');
-      setForm(null);
-      await load();
-    } catch (e) {
-      pushError(zephyrError(e, 'Could not save the plan'), 'Could not save');
+      await zephyrApi.setAssetValue({ month, asset_value: Number(value) });
+      pushSuccess('Asset value saved');
+      setValue('');
+      onSaved();
+    } catch (err) {
+      pushError(zephyrError(err, 'Failed to save the asset value'), 'Could not save');
     } finally {
       setSaving(false);
     }
   }
-  async function removePlan(id) {
+  async function remove() {
+    if (!window.confirm(`Remove the asset value recorded for ${shortMonth(month)}? Later months will carry forward the earlier figure.`)) return;
     try {
-      await zephyrApi.deletePlan(id);
-      await load();
-    } catch (e) {
-      pushError(zephyrError(e), 'Could not delete');
+      await zephyrApi.deleteAssetValue(month);
+      pushSuccess('Asset value removed');
+      onSaved();
+    } catch (err) {
+      pushError(zephyrError(err, 'Failed to remove the asset value'), 'Could not remove');
     }
   }
 
-  const chartRows = data?.rows.map((r) => ({ month: r.month, revenue: r.actual.revenue, expense: r.actual.expense, salaries: r.actual.salaries, profit: r.actual.profit })) || [];
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <RangePicker {...range} onChange={setRange} />
-          <select value={project} onChange={(e) => setProject(e.target.value)} className="rounded-xl border px-3 py-1.5 text-sm" aria-label="Project"><option value="">Whole company</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select>
-        </div>
-        <button type="button" className="btn-primary" onClick={() => setForm({ month: cm() })}>Plan a month</button>
-      </div>
-
-      {data && <section className={card}><ZephyrTrendChart rows={chartRows} height={220} /></section>}
-
-      <div className="overflow-x-auto rounded-2xl border bg-white shadow-soft">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-primary-50/60 text-xs uppercase tracking-wide text-tertiary-500">
-            <tr><th className="px-4 py-2.5">Month</th><th className="px-4 py-2.5 text-right">Revenue plan</th><th className="px-4 py-2.5 text-right">Revenue actual</th><th className="px-4 py-2.5 text-right">Expense plan</th><th className="px-4 py-2.5 text-right">Expense actual</th><th className="px-4 py-2.5 text-right">Profit plan</th><th className="px-4 py-2.5 text-right">Profit actual</th><th className="px-4 py-2.5 text-right">Variance</th><th className="px-4 py-2.5" /></tr>
-          </thead>
-          <tbody className="divide-y">
-            {!data && <tr><td colSpan={9} className="px-4 py-6 text-center text-tertiary-400">Loading…</td></tr>}
-            {data?.rows.map((r) => (
-              <tr key={r.month}>
-                <td className="px-4 py-2.5 font-medium">{shortMonth(r.month)} {r.status === 'closed' && <Lock className="ml-1 inline h-3 w-3 text-tertiary-400" />}{r.stale && <span className="ml-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">stale</span>}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-tertiary-500">{r.has_plan ? rupees(r.planned.revenue) : '—'}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.actual.revenue)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-tertiary-500">{r.has_plan ? rupees(r.planned.expense) : '—'}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.actual.expense)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-tertiary-500">{r.has_plan ? rupees(r.planned.profit) : '—'}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums font-medium">{rupees(r.actual.profit)}</td>
-                <td className={`px-4 py-2.5 text-right tabular-nums ${r.has_plan ? varClass(r.variance.profit, true) : 'text-tertiary-300'}`}>{r.has_plan ? `${r.variance.profit > 0 ? '+' : ''}${rupees(r.variance.profit)}` : '—'}</td>
-                <td className="px-2 text-right"><button type="button" className="text-xs font-medium text-primary-700 hover:underline" onClick={() => setForm({ month: r.month })}>{r.has_plan ? 'Edit plan' : 'Add plan'}</button></td>
-              </tr>
-            ))}
-          </tbody>
-          {data && (
-            <tfoot className="border-t bg-primary-50/40 text-sm font-medium">
-              <tr><td className="px-4 py-2.5">Total</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.planned.revenue)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.actual.revenue)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.planned.expense)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.actual.expense)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.planned.profit)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.actual.profit)}</td><td colSpan={2} /></tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-
-      {plans.length > 0 && (
-        <section className={card}>
-          <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Saved plans</h3>
-          <ul className="divide-y text-sm">
-            {plans.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 py-2">
-                <span><span className="font-mono text-xs text-tertiary-500">{p.month}</span> · {p.project ? `${p.project.code} ${p.project.name}` : 'Whole company'} · revenue {rupees(p.planned_revenue)}, expense {rupees(p.planned_expense)}, salaries {rupees(p.planned_salaries)}</span>
-                <button type="button" className="text-xs font-medium text-danger-600 hover:underline" onClick={() => removePlan(p.id)}>Delete</button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <Drawer open={Boolean(form)} onClose={() => setForm(null)} size="md" tone="edit" title="Plan a month">
-        {form && <PlanForm key={form.month + (project || '')} month={form.month} project={project} projects={projects} existing={plans.find((p) => p.month === form.month && (p.project_id || '') === (project || ''))} saving={saving} onSubmit={save} onCancel={() => setForm(null)} />}
-      </Drawer>
-    </div>
+    <form onSubmit={save} className="flex flex-wrap items-end gap-3 rounded-2xl border border-tertiary-100 bg-white p-3" aria-label="Record asset value">
+      <label className="text-xs font-medium text-tertiary-600">Month
+        <input type="month" required max={monthValue(new Date())} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
+      </label>
+      <label className="text-xs font-medium text-tertiary-600">Asset value (₹)
+        <input required type="number" min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} placeholder={current ? String(current.asset_value) : '0'} className="mt-1 block w-44 rounded-xl border px-3 py-1.5 text-sm" />
+      </label>
+      <button type="submit" className="btn-primary" disabled={saving || value === ''}>{saving ? 'Saving…' : 'Save asset value'}</button>
+      {current?.asset_value_id && <button type="button" className="btn-secondary" onClick={remove}>Remove this month&apos;s value</button>}
+      <p className="pb-1.5 text-xs text-tertiary-500">
+        Valuation = (Zephyr profit × 240) + (Asset value × 3). A month without a recorded asset value uses the latest earlier one{current ? ` — ${shortMonth(month)} currently ${rupees(current.asset_value)}${current.asset_value_carried ? ' (carried forward)' : ''}` : ''}.
+      </p>
+    </form>
   );
 }
 
-const CONF_TONE = { high: 'green', medium: 'amber', low: 'red', insufficient: 'gray' };
-const CONF_TEXT = { high: 'High confidence', medium: 'Medium confidence', low: 'Low confidence', insufficient: 'Not enough history' };
-
-function ProjectionTab() {
-  const { pushError } = useAlerts();
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    zephyrApi.projection().then(setData, (e) => pushError(zephyrError(e, 'Could not load the projection'), 'Load failed'));
-  }, [pushError]);
-  if (!data) return <div className="py-10 text-center text-sm text-tertiary-500">Loading…</div>;
-  const rows = data.series.revenue.points.map((p, i) => ({
-    month: p.month,
-    revenue: p.value ?? 0,
-    expense: data.series.expense.points[i].value ?? 0,
-    salaries: data.series.salaries.points[i].value ?? 0,
-    profit: data.series.profit.points[i].value ?? 0,
-  }));
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Pill tone={CONF_TONE[data.confidence]}>{CONF_TEXT[data.confidence]}</Pill>
-        <span className="text-sm text-tertiary-500">{data.basis_months ? `Straight-line trend over ${data.basis_months} completed month${data.basis_months === 1 ? '' : 's'} (${shortMonth(data.from)} – ${shortMonth(data.to)}). The running month is left out of the fit.` : 'Record at least three completed months of money to project the next six.'}</span>
-      </div>
-      {data.confidence !== 'insufficient' ? (
-        <>
-          <section className={card}><ZephyrTrendChart rows={rows} height={240} /></section>
-          <div className="overflow-x-auto rounded-2xl border bg-white shadow-soft">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-primary-50/60 text-xs uppercase tracking-wide text-tertiary-500"><tr><th className="px-4 py-2.5">Month</th><th className="px-4 py-2.5 text-right">Revenue</th><th className="px-4 py-2.5 text-right">Expense</th><th className="px-4 py-2.5 text-right">Salaries</th><th className="px-4 py-2.5 text-right">Profit</th></tr></thead>
-              <tbody className="divide-y">
-                {rows.map((r) => (
-                  <tr key={r.month}><td className="px-4 py-2.5 font-medium">{shortMonth(r.month)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.revenue)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.expense)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.salaries)}</td><td className={`px-4 py-2.5 text-right tabular-nums font-medium ${r.profit < 0 ? 'text-red-600' : ''}`}>{rupees(r.profit)}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-tertiary-400">Fit quality (R²): revenue {data.series.revenue.r2 ?? '—'}, expense {data.series.expense.r2 ?? '—'}, salaries {data.series.salaries.r2 ?? '—'}. This is a trend, not a forecast of specific deals.</p>
-        </>
-      ) : <div className={`${card} text-sm text-tertiary-500`}>Once three or more finished months have entries or approved salary slips, the next six months appear here.</div>}
-    </div>
-  );
-}
-
-function CloseTab() {
+/**
+ * Financial Trends — Revenue, Profit and Valuation, month on month, for Zephyr. Valuation is
+ * (Zephyr profit × 240) + (asset value × 3), the same formula as Delphic Global. All values come
+ * from GET /zephyr/financials/valuation - nothing is computed or hardcoded here.
+ */
+function FinancialTrends() {
+  const now = new Date();
+  // Default window: the last 12 months, ending this month.
+  const [from, setFrom] = useState(() => monthValue(new Date(now.getFullYear(), now.getMonth() - 11, 1)));
+  const [to, setTo] = useState(() => monthValue(now));
+  const [state, setState] = useState('all');
+  const rangeError = !from || !to ? 'Pick a start and an end month.' : monthIndex(to) < monthIndex(from) ? 'The end month cannot be before the start month.' : monthIndex(to) - monthIndex(from) >= 36 ? 'Pick at most 36 months.' : null;
+  const { data, loading, refresh } = useLiveData(() => (rangeError ? Promise.resolve(null) : zephyrApi.valuation({ from, to, state })), { deps: [from, to, state, rangeError] });
+  const rows = useMemo(() => data?.months.map((m) => ({ ...m, label: shortMonth(m.month) })) || [], [data]);
   const { pushError, pushSuccess } = useAlerts();
-  const [range, setRange] = useState({ from: shift(cm(), -11), to: shift(cm(), -1) });
-  const [rows, setRows] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const load = useCallback(() => zephyrApi.closes(range).then(setRows, (e) => pushError(zephyrError(e, 'Could not load month status'), 'Load failed')), [range, pushError]);
-  useEffect(() => {
-    setRows(null);
-    load();
-  }, [load]);
+  const [lockBusy, setLockBusy] = useState(null);
+  const thisMonth = monthValue(new Date());
 
-  async function act(action, success) {
-    setBusy(true);
+  // Locking a finished month freezes its revenue, expense, salaries and profit; the Locked view and the valuation then read those.
+  async function toggleLock(r) {
+    let reason;
+    if (r.closed) {
+      reason = window.prompt(`Reopen ${r.label}? Give a reason (required):`);
+      if (reason === null) return;
+      if (!reason.trim()) { pushError('A reason is required to reopen a month', 'Not reopened'); return; }
+    } else if (!window.confirm(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;
+    setLockBusy(r.month);
     try {
-      await action();
-      pushSuccess(success);
-      await load();
-    } catch (e) {
-      pushError(zephyrError(e, 'Could not update'), 'Could not update');
+      if (r.closed) await zephyrApi.reopenMonth(r.month, reason.trim());
+      else await zephyrApi.closeMonth(r.month);
+      pushSuccess(r.closed ? `${r.label} reopened` : `${r.label} locked`);
+      refresh();
+    } catch (err) {
+      pushError(zephyrError(err, 'Could not update the month'), 'Could not update');
     } finally {
-      setBusy(false);
+      setLockBusy(null);
     }
   }
+
   return (
     <div className="space-y-4">
-      <RangePicker {...range} onChange={setRange} />
-      <div className="overflow-x-auto rounded-2xl border bg-white shadow-soft">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-primary-50/60 text-xs uppercase tracking-wide text-tertiary-500"><tr><th className="px-4 py-2.5">Month</th><th className="px-4 py-2.5">Status</th><th className="px-4 py-2.5 text-right">Revenue</th><th className="px-4 py-2.5 text-right">Expense</th><th className="px-4 py-2.5 text-right">Salaries</th><th className="px-4 py-2.5 text-right">Profit</th><th className="px-4 py-2.5 text-right">Action</th></tr></thead>
-          <tbody className="divide-y">
-            {!rows && <tr><td colSpan={7} className="px-4 py-6 text-center text-tertiary-400">Loading…</td></tr>}
-            {rows?.map((r) => {
-              const figures = r.status === 'closed' ? r.snapshot.summary : r.live;
-              return (
-                <tr key={r.month}>
-                  <td className="px-4 py-2.5 font-medium">{shortMonth(r.month)}</td>
-                  <td className="px-4 py-2.5">
-                    {r.status === 'closed' ? <span className="inline-flex items-center gap-1.5"><Pill tone="gray">Closed</Pill>{r.stale && <span title="Money dated in this month changed after it was closed" className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">Changed since close</span>}</span> : <Pill tone="blue">Open</Pill>}
-                    {r.reopen_reason && r.status === 'open' && <div className="mt-0.5 text-[11px] text-tertiary-400">Reopened: {r.reopen_reason}</div>}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{rupees(figures.revenue)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{rupees(figures.expense)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{rupees(figures.salaries)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-medium">{rupees(figures.profit)}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    {r.status === 'open'
-                      ? <button type="button" disabled={busy} className="inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline" onClick={() => act(() => zephyrApi.closeMonth(r.month), `${shortMonth(r.month)} closed`)}><Lock className="h-3.5 w-3.5" />Close month</button>
-                      : <button type="button" disabled={busy} className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:underline" onClick={() => { const reason = window.prompt('Why is this month being reopened?'); if (reason?.trim()) act(() => zephyrApi.reopenMonth(r.month, reason.trim()), `${shortMonth(r.month)} reopened`); }}><LockOpen className="h-3.5 w-3.5" />Reopen</button>}
-                    {r.status === 'closed' && r.stale && <div className="text-[11px] text-tertiary-400">Live profit {rupees(r.live.profit)}</div>}
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-3">
+        <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5" role="group" aria-label="Locked / unlocked / all">
+          {STATES.map(({ key, label, hint }) => (
+            <button key={key} type="button" title={hint} onClick={() => setState(key)} aria-pressed={state === key} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${state === key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs font-medium text-tertiary-600">Start month
+            <input type="month" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">End month
+            <input type="month" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
+          </label>
+        </div>
+        <p className="w-full text-xs text-tertiary-500">
+          {state === 'locked' && 'Revenue, profit and valuation count closed (finalized) months only. Switch to Unlocked or All to include months that are still open.'}
+          {state === 'unlocked' && 'Live figures of months that are not closed yet — projections, not final.'}
+          {state === 'all' && 'Closed and open months together, from live figures.'}
+        </p>
+      </div>
+      {rangeError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{rangeError}</p>}
+      {loading && data && <p role="status" className="text-xs font-medium text-primary-700">Updating for the new filter…</p>}
+
+      {rangeError ? null : loading && !data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
+        <div aria-busy={loading} className={`grid gap-4 transition-opacity xl:grid-cols-2 ${loading && data ? 'opacity-50' : ''}`}>
+          <TrendChart title="Revenue — month on month" subtitle={`${VIEW_NAME[state]} revenue per month`} data={rows} dataKey="revenue" name="Revenue" color={ZX_CHART.revenue} />
+          <TrendChart title="Profit — month on month" subtitle={`${VIEW_NAME[state]} revenue less expense and salaries`} data={rows} dataKey="profit" name="Profit" color={ZX_CHART.profit} />
+          <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Zephyr profit × 240) + (Asset value × 3)" data={rows} dataKey="valuation" name="Valuation" color={ZX_CHART.expense} />
+        </div>
+      )}
+      {rows.length > 0 && (
+        <section className={`overflow-x-auto rounded-2xl border border-tertiary-100 bg-white transition-opacity ${loading && data ? 'opacity-50' : ''}`} aria-label="How the valuation is worked out">
+          <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">How each month&apos;s valuation is worked out</h3>
+          <table className="mt-2 w-full text-sm">
+            <thead className="text-left text-xs text-tertiary-500"><tr>
+              <th className="px-4 py-2 font-medium">Month</th>
+              <th className="px-3 py-2 text-right font-medium">Zephyr profit</th>
+              <th className="px-3 py-2 text-right font-medium">× 240</th>
+              <th className="px-3 py-2 text-right font-medium">Asset value</th>
+              <th className="px-3 py-2 text-right font-medium">× 3</th>
+              <th className="px-3 py-2 text-right font-medium">Valuation</th>
+              <th className="px-3 py-2 text-right font-medium">Lock</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.month} className="border-t border-tertiary-100">
+                  <td className="px-4 py-2">{r.label}{r.closed && <span className="ml-1.5 text-[10px] text-tertiary-400">closed</span>}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{rupees(r.profit)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{rupees(r.profit_x)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{rupees(r.asset_value)}{r.asset_value_carried ? <span className="ml-1 text-[10px] text-tertiary-400">carried</span> : null}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{rupees(r.asset_value_x)}</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary-700">{rupees(r.valuation)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {r.closed ? (
+                      <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" disabled={lockBusy === r.month} onClick={() => toggleLock(r)}><LockOpen className="h-3.5 w-3.5" />Reopen</button>
+                    ) : r.month < thisMonth ? (
+                      <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" disabled={lockBusy === r.month} onClick={() => toggleLock(r)}><Lock className="h-3.5 w-3.5" />Lock month</button>
+                    ) : <span className="text-[11px] text-tertiary-400" title="A month can be locked once it is over">in progress</span>}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-tertiary-400">Closing a month saves its totals as a snapshot. Money dated in a closed month can still be entered; it flags the month as changed, and you reopen and close again to refresh the snapshot. All draft salary slips of the month must be approved or deleted first.</p>
+              ))}
+            </tbody>
+          </table>
+          <p className="px-4 pb-3 pt-2 text-xs text-tertiary-500">Zephyr profit is the same profit shown in the Profit chart: revenue less expense and approved salaries. Use Lock month on a finished month to freeze its figures (Locked view and valuation then read them); Reopen undoes it with a reason. A month cannot be locked while it has draft salary slips.</p>
+        </section>
+      )}
+      {rows.length > 0 && <AssetValueForm rows={rows} onSaved={refresh} />}
     </div>
   );
 }
 
-const GROUPS = [['month', 'By month'], ['project', 'By project'], ['service', 'By service'], ['property', 'By property'], ['party', 'By client / vendor']];
-
-function StatementsTab() {
-  const { pushError } = useAlerts();
-  const [group, setGroup] = useState('month');
-  const [range, setRange] = useState({ from: shift(cm(), -11), to: cm() });
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    setData(null);
-    zephyrApi.statement({ group, ...range }).then(setData, (e) => pushError(zephyrError(e, 'Could not load the statement'), 'Load failed'));
-  }, [group, range, pushError]);
-
-  async function download(format) {
-    try {
-      const blob = await zephyrApi.statementFile({ group, ...range, format });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `zephyr-pnl-${group}-${range.from}-${range.to}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } catch (e) {
-      pushError(zephyrError(e, 'Download failed'), 'Download failed');
-    }
-  }
-  function csv() {
-    const lines = [['Name', 'Revenue', 'Expense', 'Salaries', 'Profit'], ...[...data.rows, data.totals].map((r) => [r.name, r.revenue, r.expense, r.salaries ?? '', r.profit])];
-    downloadText(`zephyr-pnl-${group}.csv`, lines.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'));
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex overflow-hidden rounded-xl border bg-white text-sm">
-            {GROUPS.map(([key, label]) => <button key={key} type="button" onClick={() => setGroup(key)} className={`px-3 py-1.5 ${group === key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-primary-50'}`}>{label}</button>)}
-          </div>
-          <RangePicker {...range} onChange={setRange} />
-        </div>
-        <div className="flex gap-2">
-          <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => download('xlsx')}><FileSpreadsheet className="h-4 w-4" />Excel</button>
-          <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => download('pdf')}><FileText className="h-4 w-4" />PDF</button>
-          <button type="button" className="btn-secondary" disabled={!data} onClick={csv}>CSV</button>
-        </div>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border bg-white shadow-soft">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-primary-50/60 text-xs uppercase tracking-wide text-tertiary-500"><tr><th className="px-4 py-2.5">{GROUPS.find(([k]) => k === group)[1].replace('By ', '')}</th><th className="px-4 py-2.5 text-right">Revenue</th><th className="px-4 py-2.5 text-right">Expense</th><th className="px-4 py-2.5 text-right">Salaries</th><th className="px-4 py-2.5 text-right">Profit</th></tr></thead>
-          <tbody className="divide-y">
-            {!data && <tr><td colSpan={5} className="px-4 py-6 text-center text-tertiary-400">Loading…</td></tr>}
-            {data?.rows.map((r) => (
-              <tr key={r.name}><td className="px-4 py-2.5 font-medium">{group === 'month' ? shortMonth(r.name) : r.name}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.revenue)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(r.expense)}</td><td className="px-4 py-2.5 text-right tabular-nums">{r.salaries === null ? '—' : rupees(r.salaries)}</td><td className={`px-4 py-2.5 text-right tabular-nums font-medium ${r.profit < 0 ? 'text-red-600' : ''}`}>{rupees(r.profit)}</td></tr>
-            ))}
-          </tbody>
-          {data && <tfoot className="border-t bg-primary-50/40 font-medium"><tr><td className="px-4 py-2.5">Total</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.revenue)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.expense)}</td><td className="px-4 py-2.5 text-right tabular-nums">{data.totals.salaries === null ? '—' : rupees(data.totals.salaries)}</td><td className="px-4 py-2.5 text-right tabular-nums">{rupees(data.totals.profit)}</td></tr></tfoot>}
-        </table>
-      </div>
-      {group === 'party' && <p className="text-xs text-tertiary-400">Salaries are not charged to clients or vendors, so profit here is revenue minus expense.</p>}
-      {data && <p className="text-xs text-tertiary-400">{dateLabel(`${data.from}-01`)} to {dateLabel(`${data.to}-28`)} · actual entries and approved or paid pay slips.</p>}
-    </div>
-  );
-}
+const TABS = [{ key: 'trends', label: 'Financial trends', icon: TrendingUp }];
 
 export default function ZephyrFinancialsPage() {
   const { me, loading } = useZephyr();
-  const [tab, setTab] = useState('plan');
-  const [projects, setProjects] = useState([]);
-  useEffect(() => {
-    zephyrApi.projects({}).then(setProjects, () => setProjects([]));
-  }, []);
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading…</div>;
-  if (!zxCan(me, 'financials')) return <Navigate to="/zephyr" replace />;
+  if (!zxCan(me, 'overviewValuation')) return <Navigate to="/zephyr" replace />;
   return (
     <div className="mt-4 space-y-4">
-      <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
-      {tab === 'plan' && <PlanTab projects={projects} />}
-      {tab === 'projection' && <ProjectionTab />}
-      {tab === 'close' && <CloseTab />}
-      {tab === 'statements' && <StatementsTab />}
+      <SectionTabs tabs={TABS} value="trends" onChange={() => {}} />
+      <FinancialTrends />
     </div>
   );
 }

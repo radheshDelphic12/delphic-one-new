@@ -21,8 +21,6 @@ const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-p
 const labelCls = 'block text-xs font-medium text-tertiary-600';
 const card = 'rounded-2xl border bg-white p-4 shadow-soft md:p-5';
 
-const METHOD_LABEL = { manual: 'Manual value', revenue_multiple: 'Revenue multiple (trailing 12 months)', profit_multiple: 'Profit multiple (trailing 12 months)' };
-
 function ValuationTab() {
   const { pushError, pushInfo } = useAlerts();
   const [form, setForm] = useState(null);
@@ -41,9 +39,6 @@ function ValuationTab() {
     setSaving(true);
     try {
       const next = await zephyrApi.updateSettings({
-        valuation_method: form.valuation_method,
-        valuation_multiple: Number(form.valuation_multiple),
-        valuation_manual: form.valuation_method === 'manual' ? Number(form.valuation_manual) : form.valuation_manual,
         project_prefix: form.project_prefix,
         lead_prefix: form.lead_prefix,
         property_prefix: form.property_prefix,
@@ -62,25 +57,7 @@ function ValuationTab() {
 
   return (
     <form onSubmit={save} className={`${card} max-w-xl space-y-4`}>
-      <label className={labelCls}>
-        Valuation method
-        <select className={inputCls} value={form.valuation_method} onChange={(e) => set('valuation_method', e.target.value)}>
-          {Object.entries(METHOD_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-      </label>
-      {form.valuation_method === 'manual' ? (
-        <label className={labelCls}>
-          Company value ({form.currency})
-          <input type="number" min="0" className={inputCls} value={form.valuation_manual ?? ''} onChange={(e) => set('valuation_manual', e.target.value)} required />
-        </label>
-      ) : (
-        <label className={labelCls}>
-          Multiple (x)
-          <input type="number" min="0" step="0.1" className={inputCls} value={form.valuation_multiple} onChange={(e) => set('valuation_multiple', e.target.value)} required />
-        </label>
-      )}
+      <p className="text-xs text-tertiary-500">Valuation is fixed at (profit x 240) + (asset value x 3). Record asset values in Financials, Valuation tab. Here you set the code prefixes.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {[['project_prefix', 'Project code prefix'], ['lead_prefix', 'Lead code prefix'], ['property_prefix', 'Property code prefix'], ['task_prefix', 'Task code prefix']].map(([key, label]) => (
           <label key={key} className={labelCls}>
