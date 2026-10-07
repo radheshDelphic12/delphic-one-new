@@ -91,7 +91,7 @@ function payslipHtml(payslip, orgName) {
     <style>
       body { font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; padding: 28px 36px; }
       .head { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #105aa9; padding-bottom: 12px; margin-bottom: 14px; }
-      .head img { height: 64px; }
+      .head img { height: 64px; width: auto; }
       .head .t { text-align: right; }
       h1 { font-size: 20px; margin: 0; } .sub { color: #64748b; font-size: 12px; margin-top: 2px; }
       h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #105aa9; margin: 16px 0 6px; }
@@ -104,7 +104,7 @@ function payslipHtml(payslip, orgName) {
       .foot { margin-top: 22px; color: #94a3b8; font-size: 11px; text-align: center; }
     </style></head><body>
     <div class="head">
-      <img src="${window.location.origin}/delphic-logo.png" alt="Delphic" />
+      <img src="${window.location.origin}/delphic-logo.svg" alt="Delphic" />
       <div class="t"><h1>Salary Slip</h1><div class="sub">${escapeHtml(orgName || 'Delphic')} · ${escapeHtml(period)}</div></div>
     </div>
     <h2>Employee &amp; bank details</h2>
@@ -189,7 +189,7 @@ function PayslipDrawer({ open, payslip, onClose }) {
       {payslip && (
         <div className="space-y-5">
           <div className="flex items-center justify-between border-b-2 border-primary-600 pb-3">
-            <img src="/delphic-logo.png" alt="Delphic" className="h-12" />
+            <img src="/delphic-logo.svg" alt="Delphic" className="h-12 w-auto" />
             <div className="text-right">
               <p className="font-heading text-lg font-semibold text-tertiary-900">Salary Slip</p>
               <p className="text-xs text-tertiary-500">{user?.active_org?.name || 'Delphic'} · {period}</p>

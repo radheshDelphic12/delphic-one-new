@@ -85,7 +85,7 @@ function AssetValueForm({ rows, onSaved }) {
       </label>
       <button type="submit" className="btn-primary" disabled={saving || value === ''}>{saving ? 'Saving…' : 'Save asset value'}</button>
       <p className="pb-1.5 text-xs text-tertiary-500">
-        Valuation = (Profit from sub-companies × 240) + (Asset value × 3). A month without a recorded asset value uses the latest earlier one{current ? ` — ${MONTHS[period.month - 1]} ${period.year} currently ${inr(current.asset_value)}${current.asset_value_carried ? ' (carried forward)' : ''}` : ''}.
+        Valuation = (Delphic profit × 240) + (Asset value × 3). A month without a recorded asset value uses the latest earlier one{current ? ` — ${MONTHS[period.month - 1]} ${period.year} currently ${inr(current.asset_value)}${current.asset_value_carried ? ' (carried forward)' : ''}` : ''}.
       </p>
     </form>
   );
@@ -94,7 +94,7 @@ function AssetValueForm({ rows, onSaved }) {
 /**
  * Financial Trends — Revenue, Profit and Valuation, month on month. Revenue and
  * profit are the Financials figures (locked records); valuation is
- * (profit from sub-companies × 240) + (asset value × 3). All values come from
+ * (Delphic profit × 240) + (asset value × 3). All values come from
  * GET /financials/trends - nothing is computed or hardcoded here.
  */
 const STATES = [
@@ -135,7 +135,7 @@ export default function FinancialTrendsTab() {
           </label>
         </div>
         <p className="w-full text-xs text-tertiary-500">
-          {state === 'locked' && "Revenue and profit count locked (finalized) records only. Valuation counts only what the sub-companies have locked too (their profit is 0 until they lock). Switch to Unlocked or All to include their live profit."}
+          {state === 'locked' && 'Revenue, profit and valuation count locked (finalized) records only. Switch to Unlocked or All to include live records that are not locked yet.'}
           {state === 'unlocked' && 'Live records that are not locked yet — projections, not final.'}
           {state === 'all' && 'Locked and unlocked records together.'}
         </p>
@@ -146,7 +146,7 @@ export default function FinancialTrendsTab() {
         <div className="grid gap-4 xl:grid-cols-2">
           <TrendChart title="Revenue — month on month" subtitle={`${VIEW_NAME[state]} revenue per month (Financials)`} data={rows} dataKey="revenue" name="Revenue" color={CHART_COLORS.success} />
           <TrendChart title="Profit — month on month" subtitle={`${VIEW_NAME[state]} revenue less salaries and expenses (Financials)`} data={rows} dataKey="profit" name="Profit" color={CHART_COLORS.primary} />
-          <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Profit from sub-companies × 240) + (Asset value × 3)" data={rows} dataKey="valuation" name="Valuation" color={CHART_COLORS.purple} />
+          <TrendChart className="xl:col-span-2" title="Valuation — month on month" subtitle="(Delphic profit × 240) + (Asset value × 3)" data={rows} dataKey="valuation" name="Valuation" color={CHART_COLORS.purple} />
         </div>
       )}
       {rows.length > 0 && (
@@ -155,7 +155,7 @@ export default function FinancialTrendsTab() {
           <table className="mt-2 w-full text-sm">
             <thead className="text-left text-xs text-tertiary-500"><tr>
               <th className="px-4 py-2 font-medium">Month</th>
-              <th className="px-3 py-2 text-right font-medium">Profit from sub-companies</th>
+              <th className="px-3 py-2 text-right font-medium">Delphic profit</th>
               <th className="px-3 py-2 text-right font-medium">× 240</th>
               <th className="px-3 py-2 text-right font-medium">Asset value</th>
               <th className="px-3 py-2 text-right font-medium">× 3</th>
@@ -165,8 +165,8 @@ export default function FinancialTrendsTab() {
               {rows.map((r) => (
                 <tr key={r.month} className="border-t border-tertiary-100">
                   <td className="px-4 py-2">{r.label}</td>
-                  <td className="px-3 py-2 text-right tabular-nums" title={(r.sub_company_breakdown || []).map((x) => `${x.name}: ${inr(x.profit)}`).join('\n')}>{inr(r.sub_company_profit)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{inr(r.sub_company_profit_x)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{inr(r.delphic_profit)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{inr(r.delphic_profit_x)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{inr(r.asset_value)}{r.asset_value_carried ? <span className="ml-1 text-[10px] text-tertiary-400">carried</span> : null}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{inr(r.asset_value_x)}</td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary-700">{inr(r.valuation)}</td>
@@ -174,11 +174,10 @@ export default function FinancialTrendsTab() {
               ))}
             </tbody>
           </table>
-          <p className="px-4 pb-3 pt-2 text-xs text-tertiary-500">Sub-companies{data?.sub_companies?.length ? ` (${data.sub_companies.join(', ')})` : ''} Profit from sub-companies is their locked profit in the Locked view and their live profit in Unlocked / All. Hover a figure for the per-company split.</p>
+          <p className="px-4 pb-3 pt-2 text-xs text-tertiary-500">Delphic profit is the same profit shown in the Profit chart: locked records in the Locked view, live records in Unlocked, both in All.</p>
         </section>
       )}
       {rows.length > 0 && <AssetValueForm rows={rows} onSaved={refresh} />}
-      {data?.sub_companies?.length === 0 && <p className="text-xs text-tertiary-500">No other active company in this group yet, so profit from sub-companies is 0.</p>}
     </div>
   );
 }

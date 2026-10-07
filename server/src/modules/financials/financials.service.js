@@ -289,15 +289,16 @@ async function orgProjection(orgId, opts = {}) {
 
 // --- Financial trends (Financials page charts) ---
 
-// Valuation = (Profit from Sub Company x 240) + (Asset Value x 3), exactly.
-const SUB_COMPANY_PROFIT_FACTOR = 240;
+// Valuation = (Delphic profit x 240) + (Asset Value x 3), exactly. Delphic profit is this workspace's own
+// profit for the month in the selected view (Locked / Unlocked / All), the same figure the Profit chart shows.
+const DELPHIC_PROFIT_FACTOR = 240;
 const ASSET_VALUE_FACTOR = 3;
-const valuationOf = (subCompanyProfit, assetValue) => round2(subCompanyProfit * SUB_COMPANY_PROFIT_FACTOR + assetValue * ASSET_VALUE_FACTOR);
+const valuationOf = (delphicProfit, assetValue) => round2(delphicProfit * DELPHIC_PROFIT_FACTOR + assetValue * ASSET_VALUE_FACTOR);
 
 
 // Month on month: Revenue and Profit are the Financials figures (the same
-// records the Financials tab shows: locked, unlocked or all); Profit from Sub Company is the
-// other active group companies' live profit for the month; Asset Value is the admin-recorded
+// records the Financials tab shows: locked, unlocked or all); valuation uses that same Delphic profit;
+// Asset Value is the admin-recorded
 // figure for the month, carried forward from the latest earlier one.
 // Every calendar month from (from_year, from_month) to (to_year, to_month), oldest first.
 function monthRange(from_year, from_month, to_year, to_month) {
@@ -313,11 +314,7 @@ function monthRange(from_year, from_month, to_year, to_month) {
 async function trends(orgId, { months = 12, from_year, from_month, to_year, to_month, state = 'locked' } = {}, now = new Date()) {
   const records = require('../calculations/records.service');
   const wins = from_year === undefined ? monthWindow(months, now) : monthRange(from_year, from_month, to_year, to_month);
-  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true } });
-  const [subs, assetRows] = await Promise.all([
-    org ? prisma.org.findMany({ where: { org_group_id: org.org_group_id, status: 'active', is_master_workspace: false, id: { not: orgId } }, select: { id: true, name: true } }) : [],
-    prisma.financialAssetValue.findMany({ where: { org_id: orgId }, orderBy: [{ period_year: 'asc' }, { period_month: 'asc' }] }),
-  ]);
+  const assetRows = await prisma.financialAssetValue.findMany({ where: { org_id: orgId }, orderBy: [{ period_year: 'asc' }, { period_month: 'asc' }] });
   const assetAt = (win) => {
     const exact = assetRows.find((r) => r.period_year === win.year && r.period_month === win.month);
     if (exact) return { value: Number(exact.asset_value), carried: false };
@@ -329,16 +326,7 @@ async function trends(orgId, { months = 12, from_year, from_month, to_year, to_m
   for (const win of wins) {
     const view = { period_year: win.year, from_month: win.month, to_month: win.month, state };
     const rec = await records.financialRecords(orgId, view, now);
-    // Profit from Sub Company follows the same view as revenue and profit:
-    //   Locked   -> only what each sub-company has finalized (its locked Financials records; 0 until it locks),
-    //   Unlocked / All -> its live profit (billing, trading, projects, contracts less costs and salary).
-    // The per-company figures travel with the row so every valuation can be checked.
-    const subBreakdown = [];
-    for (const sub of subs) {
-      const profit = state === 'locked' ? (await records.financialRecords(sub.id, view, now)).totals.profit : (await actualsForMonth(sub.id, win)).profit;
-      subBreakdown.push({ name: sub.name, profit });
-    }
-    const subProfit = round2(subBreakdown.reduce((s, x) => s + x.profit, 0));
+    const delphicProfit = rec.totals.profit;
     const asset = assetAt(win);
     rows.push({
       month: win.key,
@@ -346,20 +334,18 @@ async function trends(orgId, { months = 12, from_year, from_month, to_year, to_m
       period_year: win.year,
       revenue: rec.totals.revenue,
       profit: rec.totals.profit,
-      sub_company_profit: subProfit,
-      sub_company_breakdown: subBreakdown,
-      sub_company_profit_x: round2(subProfit * SUB_COMPANY_PROFIT_FACTOR),
+      delphic_profit: delphicProfit,
+      delphic_profit_x: round2(delphicProfit * DELPHIC_PROFIT_FACTOR),
       asset_value_x: round2(asset.value * ASSET_VALUE_FACTOR),
       asset_value: asset.value,
       asset_value_carried: asset.carried,
-      valuation: valuationOf(subProfit, asset.value),
+      valuation: valuationOf(delphicProfit, asset.value),
     });
   }
   return {
     currency: 'INR',
     state,
-    formula: { sub_company_profit: SUB_COMPANY_PROFIT_FACTOR, asset_value: ASSET_VALUE_FACTOR },
-    sub_companies: subs.map((x) => x.name),
+    formula: { delphic_profit: DELPHIC_PROFIT_FACTOR, asset_value: ASSET_VALUE_FACTOR },
     months: rows,
   };
 }

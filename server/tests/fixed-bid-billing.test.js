@@ -1,7 +1,7 @@
 // Fixed-bid projects: the rate is the one-time contract total, billed through several
 // invoices capped at that total; locking a month (the existing lock) makes its invoices
 // financially effective. Monthly projects are unaffected. Financial Trends: revenue,
-// profit and valuation = (sub-company profit x 240) + (asset value x 3).
+// profit and valuation = (Delphic profit x 240) + (asset value x 3).
 const { app, prisma, request, cleanDatabase, createUser, loginAs, createOrg, createOrgMembership, authed, unique } = require('./helpers');
 
 beforeEach(async () => {
@@ -123,13 +123,13 @@ describe('Fixed-bid billing', () => {
 });
 
 describe('Financial trends', () => {
-  test('revenue, profit and valuation = sub-company profit x 240 + asset value x 3, month on month', async () => {
+  test('revenue, profit and valuation = Delphic profit x 240 + asset value x 3, month on month', async () => {
     const ctx = await seed();
     const fixed = await addProject(ctx, 'Fixed Co', { category: 'project', rate_type: 'one_time', rate: 500000 });
     await invoice(ctx, fixed.id, SEP, 100000, { invoice_number: 'T-1' });
     await lock(ctx, fixed.id, SEP);
 
-    // A sub-company in the same group with a profit of 1,000 in September 2026.
+    // Another company in the group never feeds Delphic's valuation.
     const sub = await createOrg({ org_group_id: ctx.org.org_group_id, name: 'Sub Co', is_master_workspace: false });
     const subAdmin = await createUser({ role: 'admin' });
     const project = await prisma.selfProject.create({ data: { org_id: sub.id, name: 'Site', created_by: subAdmin.id } });
@@ -141,18 +141,18 @@ describe('Financial trends', () => {
     // Use "now" = Oct 2026 so the window ends in a known month.
     const financials = require('../src/modules/financials/financials.service');
     const result = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 8, to_year: 2026, to_month: 10, state: 'all' }, new Date('2026-10-20T00:00:00Z'));
-    // Locked view: sub-companies have locked nothing, so their profit (and its x240) is 0; asset value still counts.
+    // Locked view: Delphic's locked profit (100,000 in September) x 240 plus the carried asset value x 3.
     const lockedView = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 9, to_year: 2026, to_month: 9, state: 'locked' }, new Date('2026-10-20T00:00:00Z'));
-    expect(lockedView.months[0]).toMatchObject({ revenue: 100000, sub_company_profit: 0, valuation: 15000 });
+    expect(lockedView.months[0]).toMatchObject({ revenue: 100000, delphic_profit: 100000, valuation: 100000 * 240 + 15000 });
     // The unlocked view has no locked invoices; a single-month range works too.
     const unlocked = await financials.trends(ctx.org.id, { from_year: 2026, from_month: 9, to_year: 2026, to_month: 9, state: 'unlocked' }, new Date('2026-10-20T00:00:00Z'));
     expect(unlocked.months).toHaveLength(1);
     expect(unlocked.months[0].revenue).toBe(0);
     expect(result.months.map((m) => m.month)).toEqual(['2026-08', '2026-09', '2026-10']);
     const [aug, sep, oct] = result.months;
-    expect(aug).toMatchObject({ revenue: 0, sub_company_profit: 0, asset_value: 5000, asset_value_carried: false, valuation: 15000 });
-    expect(sep).toMatchObject({ revenue: 100000, profit: 100000, sub_company_profit: 1000, asset_value: 5000, asset_value_carried: true, valuation: 1000 * 240 + 5000 * 3 });
-    expect(oct).toMatchObject({ revenue: 0, sub_company_profit: 0, valuation: 15000 });
+    expect(aug).toMatchObject({ revenue: 0, delphic_profit: 0, asset_value: 5000, asset_value_carried: false, valuation: 15000 });
+    expect(sep).toMatchObject({ revenue: 100000, profit: 100000, delphic_profit: 100000, asset_value: 5000, asset_value_carried: true, valuation: 100000 * 240 + 5000 * 3 });
+    expect(oct).toMatchObject({ revenue: 0, delphic_profit: 0, valuation: 15000 });
     expect(financials.valuationOf(2, 3)).toBe(489);
 
     // And over HTTP.
