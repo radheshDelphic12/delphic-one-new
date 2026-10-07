@@ -443,6 +443,7 @@ model User {
   notification_preferences        NotificationPreference[]
   org_memberships                 OrgMembership[]                 @relation("OrgMembershipPerson")
   zx_people                       ZxPerson[]
+  gx_people                       GxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1876,6 +1877,23 @@ model Org {
   zx_categories ZxCategory[]
   zx_audit      ZxAudit[]
   zx_people     ZxPerson[]
+  gx_settings GxSetting[]
+  gx_categories GxCategory[]
+  gx_units GxUnit[]
+  gx_trading_types GxTradingType[]
+  gx_audit GxAudit[]
+  gx_people GxPerson[]
+  gx_parties GxParty[]
+  gx_documents GxDocument[]
+  gx_leads GxLead[]
+  gx_lead_activities GxLeadActivity[]
+  gx_deals GxDeal[]
+  gx_purchases GxPurchase[]
+  gx_sales GxSale[]
+  gx_payments GxPayment[]
+  gx_ledger_entries GxLedgerEntry[]
+  gx_tasks GxTask[]
+  gx_period_closes GxPeriodClose[]
   zx_parties    ZxParty[]
   zx_documents  ZxDocument[]
   zx_leads      ZxLead[]
@@ -4092,4 +4110,444 @@ model FinancialAssetValue {
 
   @@unique([org_id, period_year, period_month])
   @@map("financial_asset_values")
+}
+
+// ---------------------------------------------------------------------------
+// Gulati Industries workspace (standalone Gx* module, 2026-10): a trading company
+// (Copper Cathode and other deals). Mirrors the Zephyr Zx* pattern: every row is
+// org-scoped and services filter by org_id explicitly. See
+// docs/features/GULATI-INDUSTRIES.md.
+// ---------------------------------------------------------------------------
+
+model GxSetting {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @unique @db.Uuid
+  org                Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency           String   @default("INR")
+  valuation_method   String   @default("revenue_multiple") // manual | revenue_multiple | profit_multiple
+  valuation_multiple Decimal  @default(1) @db.Decimal(8, 2)
+  valuation_manual   Decimal? @db.Decimal(16, 2)
+  lead_prefix        String   @default("GL")
+  lead_seq           Int      @default(0)
+  deal_prefix        String   @default("GD")
+  deal_seq           Int      @default(0)
+  task_prefix        String   @default("GT")
+  task_seq           Int      @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@map("gx_settings")
+}
+
+// Admin-editable revenue / expense categories.
+model GxCategory {
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String          @db.Uuid
+  org        Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind       String // revenue | expense
+  name       String
+  active     Boolean         @default(true)
+  sort_order Int             @default(0)
+  created_at DateTime        @default(now())
+  updated_at DateTime        @default(now()) @updatedAt
+  deleted_at DateTime?
+  entries    GxLedgerEntry[]
+
+  @@unique([org_id, kind, name])
+  @@index([org_id, kind])
+  @@map("gx_categories")
+}
+
+// Admin-editable quantity units (Kg, MT, Ton, Piece ...).
+model GxUnit {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  org        Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name       String
+  active     Boolean   @default(true)
+  sort_order Int       @default(0)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
+
+  @@unique([org_id, name])
+  @@map("gx_units")
+}
+
+// Admin-editable trading types (Copper Cathode, Trading of Deals, plus any the admin adds).
+model GxTradingType {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  active     Boolean  @default(true)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, key])
+  @@map("gx_trading_types")
+}
+
+model GxAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("gx_audit")
+}
+
+// Roster of employees and contractors. access_role: manager | staff | finance | contractor | none.
+// Org-membership admins are Gulati admins regardless of this row.
+model GxPerson {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name         String
+  user_id      String?   @db.Uuid
+  user         User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role  String    @default("none")
+  active       Boolean   @default(true)
+  kind         String    @default("employee") // employee | contractor
+  designation  String?
+  phone        String?
+  email        String?
+  joining_date DateTime? @db.Date
+  leaving_date DateTime? @db.Date
+  notes        String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("gx_people")
+}
+
+// One directory of clients and vendors. kind: client | vendor | both. status: active | inactive | hold.
+model GxParty {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind               String    @default("client")
+  name               String
+  company_name       String?
+  contact_name       String?
+  phone              String?
+  email              String?
+  gstin              String?
+  pan                String?
+  address            String?
+  city               String?
+  state              String?
+  country            String?
+  vendor_category    String?
+  materials_services String?
+  payment_terms      String?
+  status             String    @default("active")
+  notes              String?
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  deleted_at         DateTime?
+
+  @@index([org_id, kind, status])
+  @@index([org_id, name])
+  @@map("gx_parties")
+}
+
+// Files owned by a Gulati record (owner_type party | lead | deal | purchase | sale). Polymorphic, validated in the service.
+model GxDocument {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  owner_type  String
+  owner_id    String    @db.Uuid
+  category    String    @default("other")
+  title       String
+  ref_no      String?
+  issue_date  DateTime? @db.Date
+  expiry_date DateTime? @db.Date
+  file_url    String
+  file_name   String?
+  size_bytes  Int?
+  uploaded_by String?   @db.Uuid
+  created_at  DateTime  @default(now())
+  deleted_at  DateTime?
+
+  @@index([org_id, owner_type, owner_id])
+  @@map("gx_documents")
+}
+
+// stage: new | in_discussion | negotiation | sourcing | proposal_order | won | dropped | on_hold | closed
+model GxLead {
+  id                       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                   String           @db.Uuid
+  org                      Org              @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                     String?
+  name                     String
+  trading_type             String
+  party_id                 String?          @db.Uuid
+  vendor_id                String?          @db.Uuid
+  contact_name             String?
+  phone                    String?
+  email                    String?
+  location                 String?
+  source                   String?
+  stage                    String           @default("new")
+  lost_reason              String?
+  owner_id                 String?          @db.Uuid
+  assignee_id              String?          @db.Uuid
+  contractor_id            String?          @db.Uuid
+  product                  String?
+  material_type            String?
+  quantity                 Decimal?         @db.Decimal(16, 3)
+  unit                     String?
+  expected_purchase_amount Decimal?         @db.Decimal(16, 2)
+  expected_sale_amount     Decimal?         @db.Decimal(16, 2)
+  expected_margin          Decimal?         @db.Decimal(16, 2)
+  expected_start           DateTime?        @db.Date
+  expected_end             DateTime?        @db.Date
+  description              String?
+  notes                    String?
+  details                  Json?
+  deal_id                  String?          @db.Uuid
+  closed_at                DateTime?
+  created_by               String?          @db.Uuid
+  created_at               DateTime         @default(now())
+  updated_at               DateTime         @default(now()) @updatedAt
+  deleted_at               DateTime?
+  activities               GxLeadActivity[]
+
+  @@index([org_id, stage])
+  @@index([org_id, trading_type])
+  @@map("gx_leads")
+}
+
+model GxLeadActivity {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  lead_id        String    @db.Uuid
+  lead           GxLead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  kind           String    @default("note")
+  summary        String
+  follow_up_date DateTime? @db.Date
+  follow_up_done Boolean   @default(false)
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+
+  @@index([lead_id, created_at])
+  @@index([org_id, follow_up_date])
+  @@map("gx_lead_activities")
+}
+
+// status: planned | sourcing | purchase_pending | material_sourced | ready_for_supply | supplied | completed | cancelled | on_hold
+model GxDeal {
+  id                       String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                   String          @db.Uuid
+  org                      Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                     String?
+  name                     String
+  lead_id                  String?         @db.Uuid
+  trading_type             String
+  party_id                 String?         @db.Uuid
+  vendor_id                String?         @db.Uuid
+  status                   String          @default("planned")
+  start_date               DateTime?       @db.Date
+  expected_end             DateTime?       @db.Date
+  actual_end               DateTime?       @db.Date
+  location                 String?
+  assignee_id              String?         @db.Uuid
+  contractor_id            String?         @db.Uuid
+  product                  String?
+  material_type            String?
+  ordered_quantity         Decimal?        @db.Decimal(16, 3)
+  unit                     String?
+  expected_purchase_amount Decimal?        @db.Decimal(16, 2)
+  expected_sale_amount     Decimal?        @db.Decimal(16, 2)
+  description              String?
+  notes                    String?
+  cancel_reason            String?
+  created_by               String?         @db.Uuid
+  created_at               DateTime        @default(now())
+  updated_at               DateTime        @default(now()) @updatedAt
+  deleted_at               DateTime?
+  purchases                GxPurchase[]
+  sales                    GxSale[]
+  payments                 GxPayment[]
+  ledger_entries           GxLedgerEntry[]
+  tasks                    GxTask[]
+
+  @@index([org_id, status])
+  @@index([org_id, trading_type])
+  @@map("gx_deals")
+}
+
+// Sourcing side: one row per vendor purchase / lot.
+model GxPurchase {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String      @db.Uuid
+  org           Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  deal_id       String      @db.Uuid
+  deal          GxDeal      @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  vendor_id     String?     @db.Uuid
+  purchase_date DateTime    @db.Date
+  quantity      Decimal?    @db.Decimal(16, 3)
+  rate          Decimal?    @db.Decimal(16, 2)
+  amount        Decimal     @db.Decimal(16, 2)
+  tax           Decimal     @default(0) @db.Decimal(16, 2)
+  reference     String?
+  notes         String?
+  created_by    String?     @db.Uuid
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @default(now()) @updatedAt
+  deleted_at    DateTime?
+  payments      GxPayment[]
+
+  @@index([org_id, purchase_date])
+  @@index([deal_id])
+  @@map("gx_purchases")
+}
+
+// Supply side: one row per client delivery / sale.
+model GxSale {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String      @db.Uuid
+  org        Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  deal_id    String      @db.Uuid
+  deal       GxDeal      @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  client_id  String?     @db.Uuid
+  sale_date  DateTime    @db.Date
+  quantity   Decimal?    @db.Decimal(16, 3)
+  rate       Decimal?    @db.Decimal(16, 2)
+  amount     Decimal     @db.Decimal(16, 2)
+  tax        Decimal     @default(0) @db.Decimal(16, 2)
+  reference  String?
+  notes      String?
+  created_by String?     @db.Uuid
+  created_at DateTime    @default(now())
+  updated_at DateTime    @default(now()) @updatedAt
+  deleted_at DateTime?
+  payments   GxPayment[]
+
+  @@index([org_id, sale_date])
+  @@index([deal_id])
+  @@map("gx_sales")
+}
+
+// Cash movement against a purchase (side vendor: paid out) or a sale (side client: received).
+model GxPayment {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String      @db.Uuid
+  org         Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  deal_id     String      @db.Uuid
+  deal        GxDeal      @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  side        String // vendor | client
+  purchase_id String?     @db.Uuid
+  purchase    GxPurchase? @relation(fields: [purchase_id], references: [id], onDelete: Cascade)
+  sale_id     String?     @db.Uuid
+  sale        GxSale?     @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  amount      Decimal     @db.Decimal(16, 2)
+  paid_date   DateTime    @db.Date
+  mode        String?
+  reference   String?
+  notes       String?
+  created_by  String?     @db.Uuid
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @default(now()) @updatedAt
+  deleted_at  DateTime?
+
+  @@index([org_id, paid_date])
+  @@index([deal_id])
+  @@map("gx_payments")
+}
+
+// Deal expenses (deal_id set) and company-level income / expense (deal_id null).
+model GxLedgerEntry {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String     @db.Uuid
+  org          Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entry_date   DateTime   @db.Date
+  type         String // revenue | expense
+  category_id  String     @db.Uuid
+  category     GxCategory @relation(fields: [category_id], references: [id])
+  deal_id      String?    @db.Uuid
+  deal         GxDeal?    @relation(fields: [deal_id], references: [id], onDelete: SetNull)
+  party_id     String?    @db.Uuid
+  amount       Decimal    @db.Decimal(16, 2)
+  tax          Decimal    @default(0) @db.Decimal(16, 2)
+  payment_mode String?
+  reference    String?
+  description  String?
+  created_by   String?    @db.Uuid
+  created_at   DateTime   @default(now())
+  updated_at   DateTime   @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  @@index([org_id, entry_date])
+  @@index([org_id, deal_id])
+  @@map("gx_ledger_entries")
+}
+
+// status: pending | in_progress | done | cancelled. priority: low | medium | high.
+model GxTask {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code          String?
+  title         String
+  task_type     String    @default("other")
+  deal_id       String?   @db.Uuid
+  deal          GxDeal?   @relation(fields: [deal_id], references: [id], onDelete: SetNull)
+  lead_id       String?   @db.Uuid
+  party_id      String?   @db.Uuid
+  assignee_id   String?   @db.Uuid
+  contractor_id String?   @db.Uuid
+  due_date      DateTime? @db.Date
+  priority      String    @default("medium")
+  status        String    @default("pending")
+  completed_on  DateTime? @db.Date
+  description   String?
+  notes         String?
+  created_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@index([org_id, status])
+  @@index([org_id, due_date])
+  @@map("gx_tasks")
+}
+
+// A month's lock. snapshot = totals at close time; stale is set when money dated in the closed month changes later.
+model GxPeriodClose {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month         String
+  status        String    @default("open")
+  snapshot      Json?
+  closed_by     String?   @db.Uuid
+  closed_at     DateTime?
+  reopen_reason String?
+  reopened_at   DateTime?
+  stale         Boolean   @default(false)
+  stale_at      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("gx_period_closes")
 }

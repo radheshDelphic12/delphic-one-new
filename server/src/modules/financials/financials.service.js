@@ -322,13 +322,12 @@ async function trends(orgId, { months = 12, from_year, from_month, to_year, to_m
     return earlier ? { value: Number(earlier.asset_value), carried: true } : { value: 0, carried: false };
   };
 
-  const rows = [];
-  for (const win of wins) {
+  const monthRow = async (win) => {
     const view = { period_year: win.year, from_month: win.month, to_month: win.month, state };
     const rec = await records.financialRecords(orgId, view, now);
     const delphicProfit = rec.totals.profit;
     const asset = assetAt(win);
-    rows.push({
+    return {
       month: win.key,
       period_month: win.month,
       period_year: win.year,
@@ -340,8 +339,10 @@ async function trends(orgId, { months = 12, from_year, from_month, to_year, to_m
       asset_value: asset.value,
       asset_value_carried: asset.carried,
       valuation: valuationOf(delphicProfit, asset.value),
-    });
-  }
+    };
+  };
+  const rows = [];
+  for (let i = 0; i < wins.length; i += 4) rows.push(...(await Promise.all(wins.slice(i, i + 4).map(monthRow))));
   return {
     currency: 'INR',
     state,
