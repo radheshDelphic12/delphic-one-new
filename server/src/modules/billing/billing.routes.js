@@ -70,7 +70,11 @@ const ERRORS = {
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
-  not_supported: [422, 'Invoicing is not enabled for this project type yet (fixed price / recruitment)'],
+  not_supported: [422, 'Invoicing is not enabled for this project type yet (recruitment)'],
+  billing_locked: [423, "This project's billing for that month is locked - reopen it (Live Analytics > Billing & Sales) before changing its invoices"],
+  fixed_bid_exceeds_balance: [422, 'That invoice is more than what is left of the fixed-bid contract value'],
+  fixed_bid_exhausted: [422, 'The fixed-bid contract value has already been fully invoiced'],
+  fixed_bid_currency: [422, "A fixed-bid invoice is always in the project's contract currency"],
   change_detected: [409, 'The locked month has a detected change — recalculate or dismiss it first'],
   invalid_transition: [409, 'Invalid status transition'],
   org_not_found: [404, 'Org not found'],
@@ -90,6 +94,9 @@ function failFor(res, error, result) {
   }
   if (error === 'after_agreement_end') {
     return fail(res, 422, `That period starts after the client agreement ended (${result?.agreement_end}) — nothing is billed after the Agreement End Date`);
+  }
+  if (error === 'fixed_bid_exceeds_balance') {
+    return fail(res, 422, `That invoice is more than what is left of the fixed-bid contract value - at most ${result?.currency || ''} ${result?.remaining} can still be invoiced (contract value ${result?.total})`.replace('  ', ' '));
   }
   const mapped = ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
@@ -463,8 +470,8 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const { account_id, currency, ...period } = previewInvoiceQuerySchema.parse(req.query);
-    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency);
+    const { account_id, currency, amount, ...period } = previewInvoiceQuerySchema.parse(req.query);
+    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.preview);
   })

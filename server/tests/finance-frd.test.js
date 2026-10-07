@@ -146,7 +146,7 @@ describe('Live Analytics invoice filters and the Finance month-wise project view
     await approved(ctx, dev.membership.id, a.id, days.slice(0, 3));
     await approved(ctx, dev.membership.id, b.id, days.slice(3, 6));
     const invoice = (status, extra = {}) => prisma.clientInvoice.upsert({
-      where: { client_account_id_period_month_period_year: { client_account_id: a.id, ...AUG.period_month ? { period_month: 8, period_year: 2026 } : {} } },
+      where: { org_id_invoice_number: { org_id: ctx.org.id, invoice_number: 'INV-2026-001' } },
       create: { org_id: ctx.org.id, client_account_id: a.id, period_month: 8, period_year: 2026, amount: 24000, currency: 'INR', status, line_items: {}, invoice_number: 'INV-2026-001', invoice_date: new Date('2026-09-01'), created_by: ctx.adminUser.id, ...extra },
       update: { status, ...extra },
     });

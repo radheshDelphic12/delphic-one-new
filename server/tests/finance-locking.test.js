@@ -325,13 +325,13 @@ describe('Billing & Sales — Managed Services on the project calendar', () => {
     expect(audit.map((a) => a.action)).toEqual(expect.arrayContaining(['calculation_lock', 'calculation_invoice', 'calculation_recalculate']));
   });
 
-  test('fixed-price projects are recognised but never run through hour/day billing', async () => {
+  test('fixed-price projects are billed through their invoices only, never by hour/day billing', async () => {
     const ctx = await seed();
     const p = await addProject(ctx, 'Fixed', { category: 'project' });
     const e = await employee(ctx);
     await approvedEntries(ctx, e.membership.id, p.id, ['2026-08-03']);
     const res = await authed(request(app).get('/api/v1/analytics/billing'), ctx.adminToken).query(AUG);
-    expect(res.body.data.projects.find((r) => r.project.id === p.id)).toMatchObject({ engine: 'fixed_price', supported: false, amount: 0 });
+    expect(res.body.data.projects.find((r) => r.project.id === p.id)).toMatchObject({ engine: 'fixed_price', supported: true, billing_type: 'one_time', amount: 0 });
   });
 });
 

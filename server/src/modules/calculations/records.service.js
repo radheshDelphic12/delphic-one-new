@@ -279,6 +279,7 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
   const nowIdx = monthIdx(today.getUTCFullYear(), today.getUTCMonth() + 1);
 
   const revenue = [];
+  const fixedRevenue = [];
   const salaries = { it: [], nonIt: [] };
   const claims = [];
   const charges = [];
@@ -310,7 +311,7 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
     if (wantLocked) {
       for (const [, rec] of billing) {
         const amountInr = rec.snapshot.amount_inr ?? toInr(rec.amount, rec.currency);
-        revenue.push(leaf(`project:${rec.calc.scope_key}`, rec.calc.scope_label || rec.snapshot.project?.name || 'Project', amountInr, true));
+        (rec.snapshot.fixed_bid ? fixedRevenue : revenue).push(leaf(`project:${rec.calc.scope_key}`, rec.calc.scope_label || rec.snapshot.project?.name || 'Project', amountInr, true));
         counts.locked.billing += 1;
         monthCounts.locked += 1;
       }
@@ -362,7 +363,7 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
         if (!raw?.supported) continue;
         const amount = billingEngine.lockedAmount(raw);
         if (!amount) continue;
-        revenue.push(leaf(`project:${account.id}`, `${raw.project.code ? `${raw.project.code} · ` : ''}${raw.project.name}`, toInr(amount, raw.currency), false));
+        (raw.fixed_bid ? fixedRevenue : revenue).push(leaf(`project:${account.id}`, `${raw.project.code ? `${raw.project.code} · ` : ''}${raw.project.name}`, toInr(amount, raw.currency), false));
         counts.unlocked.billing += 1;
         monthCounts.unlocked += 1;
       }
@@ -394,7 +395,7 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
     months.push({ ...period, locked_records: monthCounts.locked, unlocked_records: monthCounts.unlocked });
   }
 
-  const revenueNode = parent('revenue', 'Revenue / Sales', [group('managed_services', 'Managed Services Revenue', revenue)]);
+  const revenueNode = parent('revenue', 'Revenue / Sales', [group('managed_services', 'Managed Services Revenue', revenue), group('fixed_price', 'Project Revenue (fixed price)', fixedRevenue)]);
   const salariesNode = parent('salaries', 'Salaries', [group('it_salaries', 'IT Salaries', salaries.it), group('non_it_salaries', 'Non-IT Salaries', salaries.nonIt)]);
   const expensesNode = parent('expenses', 'Expenses', [
     group('group_charges', 'Group Charges', charges),

@@ -4,9 +4,10 @@
 //
 // The project's type picks the engine:
 //   managed_services (and legacy projects with no type) — active, below.
-//   project (fixed price) — recognised, but its calculation is not built yet:
-//     a fixed amount must never be run through hour/day billing, so it
-//     returns `supported: false` and bills nothing here.
+//   project (fixed bid / fixed price) — the rate is the TOTAL contract value;
+//     a fixed amount is never run through hour/day billing. A month's amount is
+//     the sum of the invoices raised for that month (computeFixedMonth), and
+//     locking the month (the existing lock) makes it financially effective.
 //
 // Managed services, per day, on the project's OWN calendar:
 //   monthly rate: every working day inside the agreement earns
@@ -59,7 +60,7 @@ const PROJECT_SELECT = {
 };
 
 function engineFor(serviceCategory) {
-  if (serviceCategory === 'project') return { engine: 'fixed_price', supported: false, note: 'Fixed-price calculation is not enabled yet — a fixed amount is never billed by hours or days.' };
+  if (serviceCategory === 'project') return { engine: 'fixed_price', supported: true, note: null };
   if (serviceCategory === 'recruitment') return { engine: 'recruitment', supported: false, note: 'Recruitment billing is not part of Billing & Sales yet.' };
   return { engine: 'managed_services', supported: true, note: null };
 }
@@ -158,6 +159,57 @@ function settleOwnMonthly(days) {
   }
 }
 
+// Fixed bid: no days, hours or working-day maths. The month is the invoices
+// raised for it against the project's one-time contract value; locking the
+// month snapshots exactly this (so Financials never re-reads invoices later).
+async function computeFixedMonth(orgId, account, { period_month, period_year }, { end }) {
+  const [rates, invoices] = await Promise.all([
+    prisma.billingRate.findMany({
+      where: { org_id: orgId, account_id: account.id, requirement_id: null },
+      select: { id: true, rate_type: true, rate: true, currency: true, effective_from: true, created_at: true },
+    }),
+    prisma.clientInvoice.findMany({
+      where: { org_id: orgId, client_account_id: account.id, period_month, period_year },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, invoice_number: true, invoice_date: true, amount: true, status: true },
+    }),
+  ]);
+  const rate = rateOn(rates, end) || [...rates].sort((a, b) => a.effective_from - b.effective_from)[0] || null;
+  const amount = round2(invoices.reduce((s, i) => s + Number(i.amount), 0));
+  const blockers = [];
+  if (!rate) blockers.push({ code: 'no_billing_rate', message: 'No contract value is set for this fixed-bid project.' });
+  if (!invoices.length) blockers.push({ code: 'no_invoices', message: 'No invoice has been raised for this month - a fixed-bid project bills only through its invoices.' });
+  // An invoice is a discrete, final act - no wait for the month to end before it can be locked.
+  return {
+    project: describeProject(account),
+    engine: 'fixed_price',
+    supported: true,
+    fixed_bid: true,
+    note: null,
+    period_month,
+    period_year,
+    billing_type: 'one_time',
+    rate: rate ? Number(rate.rate) : null,
+    currency: rate?.currency || account.client_billing_currency || 'INR',
+    billing_basis: 'fixed',
+    day_hours: null,
+    resource_rates: [],
+    status_rules: null,
+    adjustments: { items: [], total: 0 },
+    benchmark_hours: null,
+    working_days: 0,
+    calendar: null,
+    agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
+    agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
+    overtime: { enabled: false, multiplier: 1 },
+    days: [],
+    source_entry_ids: [],
+    invoices: invoices.map((i) => ({ id: i.id, invoice_number: i.invoice_number, invoice_date: i.invoice_date ? ymd(i.invoice_date) : null, amount: Number(i.amount), status: i.status })),
+    amount,
+    readiness: { can_lock: blockers.length === 0, blockers, warnings: [] },
+  };
+}
+
 // The full, unfiltered month for one project — exactly what a lock stores.
 async function computeProjectMonth(orgId, accountOrId, { period_month, period_year }, now = new Date()) {
   const account = typeof accountOrId === 'string'
@@ -167,6 +219,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const { start, end } = monthBounds(period_month, period_year);
   const { engine, supported, note } = engineFor(account.service_category);
   const project = describeProject(account);
+  if (engine === 'fixed_price') return computeFixedMonth(orgId, account, { period_month, period_year }, { end });
 
   const [rates, rawEntries, cal, adjustmentRows, otTicketRows, rbData] = await Promise.all([
     prisma.billingRate.findMany({
@@ -501,6 +554,10 @@ function viewOf(raw, { org_membership_id, include_overtime = true, status = 'all
   const total = (key) => round2(days.reduce((s, d) => s + d[key], 0));
   const statusCount = (s) => days.filter((d) => d.status === s).length;
   // Admin adjustments belong to the whole month: shown only when the view isn't narrowed to a person, dates or one approval state.
+  if (raw.fixed_bid) {
+    const zero = { base_amount: raw.amount, overtime_amount: 0, amount: raw.amount, adjustment_amount: 0, final_amount: raw.amount, approved_hours: 0, overtime_hours: 0, pending_hours: 0, rejected_hours: 0, approved_days: 0, pending_days: 0, rejected_days: 0, missing_days: 0 };
+    return { days: [], resources: [], adjustments: { items: [], total: 0 }, totals: zero };
+  }
   const wholeMonth = !org_membership_id && !from && !to && (status === 'all' || !status);
   const adjustments = wholeMonth ? raw.adjustments || { items: [], total: 0 } : { items: [], total: 0 };
   return {
@@ -548,6 +605,7 @@ function estimateFor(account, raw, totals) {
 // The amount a lock finalizes: approved base + (only if the project allows
 // it) approved overtime. Used for the lock's version amount and the invoice.
 function lockedAmount(raw) {
+  if (raw.fixed_bid) return raw.amount;
   return round2(raw.days.reduce((s, d) => s + d.base_amount + (raw.overtime.enabled ? d.overtime_amount : 0), 0) + (raw.adjustments?.total || 0));
 }
 

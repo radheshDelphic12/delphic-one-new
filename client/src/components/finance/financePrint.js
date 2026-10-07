@@ -47,7 +47,11 @@ export function billingCalculationLines(d) {
   if (!d) return [];
   const c = d.currency;
   const lines = [];
-  if (d.billing_type === 'monthly') {
+  if (d.billing_type === 'one_time') {
+    const f = d.fixed_bid;
+    lines.push(`Fixed-bid contract value: ${amountText(d.rate, c)} (one time)`);
+    if (f) lines.push(`Already invoiced before this: ${amountText(f.invoiced_before, c)} · left after this: ${amountText(f.remaining_after, c)}`);
+  } else if (d.billing_type === 'monthly') {
     lines.push(`Monthly rate: ${amountText(d.rate, c)}`);
     lines.push(`Working days in the month: ${d.working_days}${d.calendar ? ` (${d.calendar})` : ''}`);
     lines.push(`Billed working days: ${d.contract_working_days}${d.period_from ? ` (${dateText(d.period_from)} – ${dateText(d.period_to)})` : ''}`);
@@ -77,10 +81,10 @@ export function printClientInvoice(inv, orgName) {
       ['Billing period', escapeHtml(period)],
       ['Client', escapeHtml(p.client_name || '—')],
       ['Project', `${escapeHtml(p.name || '—')}${p.code ? ` (${escapeHtml(p.code)})` : ''}`],
-      ['Billing type', escapeHtml(d.billing_type ? (d.billing_type === 'monthly' ? 'Monthly' : 'Hourly') : '—')],
+      ['Billing type', escapeHtml(d.billing_type ? ({ monthly: 'Monthly', one_time: 'One time (fixed bid)' }[d.billing_type] || 'Hourly') : '—')],
       ['Currency', escapeHtml(inv.currency)],
       ['Converted from', d.conversion ? escapeHtml(`${amountText(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`) : null],
-      ['Rate', escapeHtml(d.rate !== undefined && d.rate !== null ? `${amountText(d.rate, inv.currency)}${d.billing_type === 'hourly' ? ' / hour' : ' / month'}` : '—')],
+      ['Rate', escapeHtml(d.rate !== undefined && d.rate !== null ? `${amountText(d.rate, inv.currency)}${d.billing_type === 'hourly' ? ' / hour' : d.billing_type === 'one_time' ? ' (contract value)' : ' / month'}` : '—')],
     ])}
     <h2>Calculation</h2>
     <div class="calc">${billingCalculationLines(d).map((l) => `<div>${escapeHtml(l)}</div>`).join('')}</div>
