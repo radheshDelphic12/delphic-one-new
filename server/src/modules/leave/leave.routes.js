@@ -5,7 +5,9 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./leave.service');
 const {
   createLeaveTypeSchema,
+  updateLeaveTypeSchema,
   createLeaveRequestSchema,
+  adminLeaveRequestSchema,
   decisionSchema,
   balanceQuerySchema,
   listRequestsQuerySchema,
@@ -14,6 +16,13 @@ const {
   setEntitlementSchema,
   revokeSchema,
 } = require('./leave.validation');
+
+// Admin or a Leave Manager (a member the admin has made responsible for processing leave requests).
+function authorizeLeaveManager(req, res, next) {
+  if (!req.user) return fail(res, 401, 'Not authenticated');
+  if (req.user.role === 'admin') return next();
+  return service.isLeaveManager(req.user.org_id, req.user.org_membership_id).then((yes) => (yes ? next() : fail(res, 403, 'Insufficient role')), next);
+}
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -25,7 +34,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const { date } = dayStatusQuerySchema.parse(req.query);
     const leave = await service.leaveDayFor(req.user.org_id, req.user.org_membership_id, date);
-    return ok(res, { date: date.toISOString().slice(0, 10), is_leave_day: Boolean(leave), leave_type: leave?.leave_type || null });
+    // A half-day leave leaves part of the day to work: `work_capacity` is that many hours.
+    const half = leave ? null : await service.workCapacityFor(req.user.org_id, req.user.org_membership_id, date);
+    return ok(res, {
+      date: date.toISOString().slice(0, 10),
+      is_leave_day: Boolean(leave),
+      leave_type: leave?.leave_type || half?.leave_type || null,
+      is_half_day_leave: Boolean(half),
+      work_capacity: half ? half.capacity : null,
+    });
   })
 );
 
@@ -81,17 +98,66 @@ router.post(
   })
 );
 
+router.patch(
+  '/types/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { reason, ...patch } = updateLeaveTypeSchema.parse(req.body);
+    const result = await service.updateType(req.user.org_id, req.user, req.params.id, { ...patch, reason });
+    if (result.error === 'not_found') return fail(res, 404, 'Leave type not found');
+    if (result.error === 'name_taken') return fail(res, 409, 'Leave type name already in use');
+    return ok(res, result.leaveType);
+  })
+);
+
+// Leave Managers (admin sets who).
+router.get('/managers', authorize('admin'), asyncHandler(async (req, res) => ok(res, await service.listLeaveManagers(req.user.org_id))));
+router.put(
+  '/managers/:membershipId',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const value = req.body && typeof req.body.is_leave_manager === 'boolean' ? req.body.is_leave_manager : null;
+    if (value === null) return fail(res, 422, 'is_leave_manager (true / false) is required');
+    const result = await service.setLeaveManager(req.user.org_id, req.user, req.params.membershipId, value);
+    if (result.error) return fail(res, 404, 'Employee not found in this company');
+    return ok(res, result);
+  })
+);
+
+// Why a request was refused - shared by self-apply, admin-apply and approval.
+function failRequest(res, result, who = 'You') {
+  if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
+  if (result.error === 'membership_not_found') return fail(res, 404, 'Employee not found in this organization');
+  if (result.error === 'membership_left') return fail(res, 422, 'That employee has left the organization');
+  if (result.error === 'timesheet_conflict' || result.error === 'half_day_hours_exceeded') return fail(res, 409, service.conflictMessage(result));
+  const self = who === 'You';
+  if (result.error === 'overlaps_existing') return fail(res, 409, self ? 'You already have a pending or approved leave request covering some of those dates' : 'The employee already has a pending or approved leave request covering some of those dates');
+  if (result.error === 'present_on_date') return fail(res, 409, self ? `You were marked present on ${result.date} — leave can't be applied for a day you attended` : `The employee was marked present on ${result.date} — leave can't be applied for a day attended`);
+  if (result.error === 'no_working_days') return fail(res, 422, self ? 'Those dates are all weekends or holidays on your calendar — there are no working days to take leave for' : 'Those dates are all weekends or holidays on the employee calendar — there are no working days to take leave for');
+  if (result.error === 'type_not_applicable') return fail(res, 422, 'That leave type is not applicable - pick another type');
+  if (result.error === 'insufficient_balance') return fail(res, 422, `Not enough leave balance — ${result.needed} day(s) requested, ${Math.max(result.remaining, 0)} remaining`);
+  return null;
+}
+
+// Admin: apply leave for an employee (or for themselves - omit org_membership_id).
+router.post(
+  '/requests/admin',
+  authorizeLeaveManager,
+  asyncHandler(async (req, res) => {
+    const body = adminLeaveRequestSchema.parse(req.body);
+    const result = await service.createRequestForEmployee(req.user.org_id, { org_membership_id: req.user.org_membership_id, user_id: req.user.id }, body);
+    if (result.error) return failRequest(res, result, 'The employee');
+    return created(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);
+  })
+);
+
 router.post(
   '/requests',
   asyncHandler(async (req, res) => {
     const body = createLeaveRequestSchema.parse(req.body);
     const result = await service.createRequest(req.user.org_id, req.user.org_membership_id, body);
-    if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
-    if (result.error === 'overlaps_existing') return fail(res, 409, 'You already have a pending or approved leave request covering some of those dates');
-    if (result.error === 'insufficient_balance') {
-      return fail(res, 422, `Not enough leave balance — ${result.needed} day(s) requested, ${Math.max(result.remaining, 0)} remaining`);
-    }
-    return created(res, result.request);
+    if (result.error) return failRequest(res, result);
+    return created(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);
   })
 );
 
@@ -106,7 +172,7 @@ router.get(
 
 router.get(
   '/requests',
-  authorize('admin'),
+  authorizeLeaveManager,
   asyncHandler(async (req, res) => {
     const query = listRequestsQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
@@ -116,22 +182,37 @@ router.get(
 
 router.post(
   '/requests/:id/decision',
-  authorize('admin'),
+  authorizeLeaveManager,
   asyncHandler(async (req, res) => {
     const body = decisionSchema.parse(req.body);
-    const result = await service.decide(req.user.org_id, req.params.id, req.user.org_membership_id, body);
+    const result = await service.decide(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
     if (result.error === 'not_pending') return fail(res, 409, 'Leave request is not pending');
+    if (result.error) return failRequest(res, result, 'The employee');
+    return ok(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);
+  })
+);
+
+router.post(
+  '/requests/:id/mark-unpaid',
+  authorizeLeaveManager,
+  asyncHandler(async (req, res) => {
+    const body = revokeSchema.parse(req.body || {});
+    const result = await service.markApprovedUnpaid(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
+    if (result.error === 'not_approved') return fail(res, 409, 'Only an approved leave can be marked unpaid');
+    if (result.error === 'already_unpaid') return fail(res, 409, 'That leave is already unpaid');
+    if (result.error === 'no_unpaid_type') return fail(res, 422, 'This company has no Unpaid Leave type');
     return ok(res, result.request);
   })
 );
 
 router.post(
   '/requests/:id/revoke',
-  authorize('admin'),
+  authorizeLeaveManager,
   asyncHandler(async (req, res) => {
     const body = revokeSchema.parse(req.body || {});
-    const result = await service.revoke(req.user.org_id, req.params.id, req.user.org_membership_id, body);
+    const result = await service.revoke(req.user.org_id, req.params.id, req.user.org_membership_id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Leave request not found');
     if (result.error === 'not_revocable') return fail(res, 409, 'Only pending or approved leave can be withdrawn');
     return ok(res, result.request);

@@ -1,8 +1,64 @@
 import { ROLE_COPY } from '../../pages/dashboard/dashboardWidgets.js';
 
+const ZEPHYR_TITLES = {
+  '/zephyr': ['Dashboard', 'Your business at a glance.'],
+  '/zephyr/leads': ['Leads', 'Opportunities from first contact to won or lost.'],
+  '/zephyr/parties': ['Client / Vendor', 'Clients, vendors and subcontractors in one directory.'],
+  '/zephyr/projects': ['Projects', 'Own and client projects, milestones and work orders.'],
+  '/zephyr/properties': ['Properties', 'Properties and units: investment, valuation, loans, tenants and sales.'],
+  '/zephyr/rent': ['Rent', 'Monthly rent due, collected, pending and overdue.'],
+  '/zephyr/tasks': ['Tasks', 'Operational tasks for employees and contractors.'],
+  '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
+  '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],
+  '/zephyr/financials': ['Financials', 'Revenue, profit and valuation, month on month.'],
+  '/zephyr/my-work': ['My work', 'Your assigned projects, profile and salary slips.'],
+  '/zephyr/settings': ['Zephyr setup', 'Services, valuation, categories and the audit log.'],
+};
+const zephyrEntry = (pathname) => {
+  if (/^\/zephyr\/projects\/[^/]+$/.test(pathname)) return ['Project', 'Milestones, vendor work orders and documents.'];
+  if (/^\/zephyr\/properties\/[^/]+$/.test(pathname)) return ['Property', 'Units, tenants, rent, finance and timeline.'];
+  return ZEPHYR_TITLES[pathname] || ZEPHYR_TITLES['/zephyr'];
+};
+const zephyrTitle = (pathname) => zephyrEntry(pathname)[0];
+const zephyrSubtitle = (pathname) => zephyrEntry(pathname)[1];
+
+const GULATI_TITLES = {
+  '/gulati': ['Dashboard', 'Lead pipeline, active trading and company performance.'],
+  '/gulati/leads': ['Leads', 'Client requirements from first contact to a won trading deal.'],
+  '/gulati/parties': ['Client / Vendor', 'Clients and the vendors you source from.'],
+  '/gulati/deals': ['Trading Deals', 'Purchases, sales, quantities, payments and profit.'],
+  '/gulati/finance': ['Finance', 'P&L, trading-type reports, expenses and month close.'],
+  '/gulati/financials': ['Financials', 'Revenue, profit and valuation, month on month.'],
+  '/gulati/tasks': ['Tasks', 'Follow-ups, sourcing and delivery work.'],
+  '/gulati/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/gulati/my-work': ['My work', 'Your assigned leads, deals and tasks.'],
+  '/gulati/settings': ['Gulati setup', 'Trading types, units, categories, valuation and audit log.'],
+};
+const gulatiEntry = (pathname) => (/^\/gulati\/deals\/[^/]+/.test(pathname) ? ['Trading Deal', 'Purchases, sales, expenses and profit for one deal.'] : GULATI_TITLES[pathname] || GULATI_TITLES['/gulati']);
+
+const ACCONCY_TITLES = {
+  '/acconcy': ['Dashboard', 'Lead pipeline, deals, finance, investments and company valuation.'],
+  '/acconcy/leads': ['Leads', 'Business opportunities across the six services, from first contact to won.'],
+  '/acconcy/parties': ['Client / Vendor', 'Clients and the vendors you work with.'],
+  '/acconcy/deals': ['Deals', 'Engagements after a lead is won: revenue, expenses and profit.'],
+  '/acconcy/finance': ['Revenue & Expenses', 'Profit and loss and every revenue and expense entry, with filters.'],
+  '/acconcy/financials': ['Financials & Valuation', 'Service-wise reports, company valuation and month close.'],
+  '/acconcy/investments': ['Investments', 'Gold, silver and venture holdings, assets and realised / unrealised gain.'],
+  '/acconcy/salaries': ['Salaries', 'Monthly salary sheet for employees and contractors.'],
+  '/acconcy/reports': ['Reports', 'Lead, deal and investment reports.'],
+  '/acconcy/tasks': ['Tasks', 'Meetings, analysis, due diligence and follow-ups.'],
+  '/acconcy/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/acconcy/my-work': ['My work', 'Your assigned leads, deals and tasks.'],
+  '/acconcy/settings': ['Acconcy setup', 'Valuation formula, categories, numbering and audit log.'],
+};
+const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
+
 /** Page title shown in the app header for the active route. */
 export function headerTitleForPath(pathname, user) {
   if (pathname === '/') return user?.name ? `${user.name}'s Dashboard` : 'Dashboard';
+  if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
+  if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[0];
+  if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
   if (pathname.startsWith('/requirements')) return 'Requirements';
@@ -12,7 +68,8 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/notifications')) return 'Notifications';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/reports')) return 'Reports';
-  if (pathname.startsWith('/group-overview')) return 'Group Overview';
+  if (pathname === '/group-overview/settings') return 'Group Settings';
+  if (pathname.startsWith('/group-overview')) return 'Group Dashboard';
   if (pathname.startsWith('/finance')) return 'Finance';
   if (pathname.startsWith('/payroll')) return 'Payroll';
   if (pathname.startsWith('/analytics')) return 'Live Analytics';
@@ -30,6 +87,9 @@ export function headerTitleForPath(pathname, user) {
 
 /** Subtitle shown directly under the header title on the same canvas background. */
 export function headerSubtitleForPath(pathname, user) {
+  if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
+  if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[1];
+  if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {
     return 'Requirements as rows, candidates by stage. Drag or use stage buttons.';
@@ -45,13 +105,14 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/notifications')) return 'Assignments, interviews, and stage changes across your work.';
   if (pathname.startsWith('/settings')) return 'Your profile, password, notifications, and account history.';
   if (pathname.startsWith('/reports')) return 'Pick filters and export Excel or PDF.';
+  if (pathname === '/group-overview/settings') return 'Your account, the companies in the group and the dashboard alert thresholds.';
   if (pathname.startsWith('/group-overview')) {
-    return 'Group-wide valuation, revenue vs. expense, and drill-down into any subsidiary.';
+    return 'All companies in one place: compare revenue, profit and valuation, then open any company.';
   }
   if (pathname.startsWith('/finance')) return 'Expenses, vendor payments, billing rates, accounting, group charges, and CA/audit access.';
   if (pathname.startsWith('/payroll')) return 'Salary structures, payroll runs, and payslips.';
   if (pathname.startsWith('/analytics')) return 'Real-time billing, resource revenue, salary, expenses, and vendor amounts. Click any row to open the record.';
-  if (pathname.startsWith('/financials')) return 'Monthly financials, plan vs actual, projections, and valuation.';
+  if (pathname.startsWith('/financials')) return 'Finalized financials by category, with revenue, profit and valuation trends month on month.';
   if (pathname.startsWith('/trading')) return 'Suppliers, consumers, goods, rate cards, and current transactions.';
   if (pathname.startsWith('/leads')) return 'Lead pipeline, categorised by self project, client project, or other.';
   if (pathname.startsWith('/contracts')) return 'Construction and recurring-revenue contracts, with monthly expected revenue.';

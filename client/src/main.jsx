@@ -2,9 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './app/App.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { AuthProvider } from './lib/authContext.jsx';
 import { AlertProvider } from './lib/alerts/alertContext.jsx';
 import { NotificationsProvider } from './lib/notifications/notificationsContext.jsx';
+import './styles/theme.css';
 import './styles/global.css';
 
 // AuthProvider → AlertProvider → NotificationsProvider: the notifications context
@@ -16,7 +18,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <AuthProvider>
         <AlertProvider>
           <NotificationsProvider>
-            <App />
+            {/* Last line of defence outside the app shell (sign-in, providers). */}
+            <ErrorBoundary fullPage>
+              <App />
+            </ErrorBoundary>
           </NotificationsProvider>
         </AlertProvider>
       </AuthProvider>

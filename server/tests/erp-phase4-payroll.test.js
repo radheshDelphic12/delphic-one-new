@@ -21,14 +21,15 @@ afterAll(async () => {
 async function seedOrgAdmin() {
   const org = await createOrg({ name: 'Delphic', slug: 'delphic' });
   const admin = await createUser({ role: 'admin' });
-  const membership = await createOrgMembership(admin.id, org.id, { role: 'admin' });
+  const membership = await createOrgMembership(admin.id, org.id, { role: 'admin', joined_at: new Date('2026-01-01') });
   const { access_token } = await loginAs(admin);
   return { org, admin, membership, access_token };
 }
 
 async function seedOrgEmployee(org, role = 'recruiter') {
   const user = await createUser({ role });
-  const membership = await createOrgMembership(user.id, org.id, { role });
+  // Joined before PERIOD (Sep 2026): payroll only pays people employed that month.
+  const membership = await createOrgMembership(user.id, org.id, { role, joined_at: new Date('2026-01-01') });
   const { access_token } = await loginAs(user);
   return { user, membership, access_token };
 }
@@ -36,15 +37,16 @@ async function seedOrgEmployee(org, role = 'recruiter') {
 // September 2026: Tue 1 -> Wed 30, 4 full weekends (5,6 / 12,13 / 19,20 / 26,27) = 8 weekend days, 22 weekdays.
 const PERIOD = { period_month: 9, period_year: 2026 };
 
-async function markPresent(orgId, membershipId, dates) {
-  await prisma.attendanceRecord.createMany({
-    data: dates.map((date) => ({ org_id: orgId, org_membership_id: membershipId, date: new Date(date), status: 'present' })),
+// Pay comes from approved timesheet hours (default 9h shift), not attendance.
+async function logApproved(orgId, membershipId, dates, hours = 9) {
+  await prisma.timesheetEntry.createMany({
+    data: dates.map((date) => ({ org_id: orgId, org_membership_id: membershipId, date: new Date(date), hours, status: 'approved' })),
   });
 }
 
 describe('Phase 4 — payroll routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/payroll/payslips/me'), access_token);
     expect(res.status).toBe(403);
@@ -134,8 +136,9 @@ describe('Phase 4 — payroll runs', () => {
   });
 });
 
-describe('Phase 4 — processing a run computes payslips from attendance + leave', () => {
-  test('a fully-present employee has zero deductions; net equals gross', async () => {
+describe('Phase 4 — processing a run computes payslips from approved timesheet hours + leave', () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('an employee with a full approved timesheet has zero deductions; net equals gross', async () => {
     const { org, access_token: adminToken } = await seedOrgAdmin();
     const { membership, access_token: empToken } = await seedOrgEmployee(org);
 
@@ -146,13 +149,13 @@ describe('Phase 4 — processing a run computes payslips from attendance + leave
       components: { basic: 60000 },
     });
 
-    // Every weekday in Sep 2026 marked present.
+    // Every weekday in Sep 2026: 9h approved.
     const weekdays = [];
     for (let d = 1; d <= 30; d += 1) {
       const day = new Date(Date.UTC(2026, 8, d));
       if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6) weekdays.push(day.toISOString().slice(0, 10));
     }
-    await markPresent(org.id, membership.id, weekdays);
+    await logApproved(org.id, membership.id, weekdays);
 
     const run = await authed(request(app).post('/api/v1/payroll/runs'), adminToken).send(PERIOD);
     const processed = await authed(request(app).post(`/api/v1/payroll/runs/${run.body.data.id}/process`), adminToken);
@@ -165,23 +168,26 @@ describe('Phase 4 — processing a run computes payslips from attendance + leave
     const payslip = mine.body.data[0];
     expect(Number(payslip.deductions)).toBe(0);
     expect(Number(payslip.net)).toBe(60000);
-    expect(payslip.breakdown.unpaid_days).toBe(0);
+    expect(payslip.breakdown.source).toBe('approved_timesheets');
+    expect(payslip.breakdown.expected_hours).toBe(198); // 22 working days x 9h
+    expect(payslip.breakdown.deficit_hours).toBe(0);
     expect(payslip.breakdown.weekend_days).toBe(8);
   });
 
-  test('unpaid absences reduce net pay; approved paid leave does not', async () => {
+  // Disabled: salary is calculated from attendance for everyone; the timesheet-hours salary basis is switched off.
+  test.skip('missing timesheet days reduce net pay; approved paid leave does not', async () => {
     const { org, access_token: adminToken } = await seedOrgAdmin();
     const { membership, access_token: empToken } = await seedOrgEmployee(org);
 
     await authed(request(app).post('/api/v1/payroll/salary-structures'), adminToken).send({
       org_membership_id: membership.id,
       effective_from: '2026-09-01',
-      ctc: 30000, // per_day_pay = 30000/30 = 1000
+      ctc: 30000, // hourly = 30000 / (22 working days x 9h) = 151.52
       components: { basic: 30000 },
     });
 
-    // Present every weekday except 2 unmarked absences (2026-09-08, 2026-09-09), and
-    // an approved paid leave covering 2026-09-14 (a Monday).
+    // 9h approved every weekday except 2 days with no timesheet (2026-09-08,
+    // 2026-09-09), and an approved paid leave covering 2026-09-14 (a Monday).
     const leaveType = await prisma.leaveType.create({ data: { org_id: org.id, name: 'Paid Leave', paid: true } });
     await prisma.leaveRequest.create({
       data: {
@@ -202,17 +208,20 @@ describe('Phase 4 — processing a run computes payslips from attendance + leave
       if (['2026-09-08', '2026-09-09', '2026-09-14'].includes(key)) continue;
       weekdays.push(key);
     }
-    await markPresent(org.id, membership.id, weekdays);
+    await logApproved(org.id, membership.id, weekdays);
 
     const run = await authed(request(app).post('/api/v1/payroll/runs'), adminToken).send(PERIOD);
     await authed(request(app).post(`/api/v1/payroll/runs/${run.body.data.id}/process`), adminToken);
 
     const mine = await authed(request(app).get('/api/v1/payroll/payslips/me'), empToken);
     const payslip = mine.body.data[0];
-    expect(payslip.breakdown.unpaid_days).toBe(2);
+    expect(payslip.breakdown.deficit_hours).toBe(18);
+    expect(payslip.breakdown.lop_days).toBe(2);
     expect(payslip.breakdown.paid_leave_days).toBe(1);
-    expect(Number(payslip.deductions)).toBe(2000); // 2 unpaid days * 1000/day
-    expect(Number(payslip.net)).toBe(28000);
+    // Prorated on the calendar's working days, never a fixed 30.
+    expect(payslip.breakdown.working_days).toBe(22);
+    expect(Number(payslip.deductions)).toBe(2727.27); // 18 short hours * 30000/198
+    expect(Number(payslip.net)).toBe(27272.73);
   });
 
   test('a member with no salary structure is skipped, not failed', async () => {

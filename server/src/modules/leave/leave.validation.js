@@ -5,17 +5,35 @@ const createLeaveTypeSchema = z.object({
   name: z.string().min(1).max(100),
   paid: z.boolean().default(true),
   annual_quota: z.coerce.number().int().min(0).optional(),
+  is_applicable: z.boolean().optional(),
+  counts_in_balance: z.boolean().optional(),
+  overflow_to_unpaid: z.boolean().optional(),
 });
 
-const createLeaveRequestSchema = z
+// Admin / HR: reconfigure a leave type (all optional, at least one).
+const updateLeaveTypeSchema = z
   .object({
-    leave_type_id: z.string().uuid(),
-    from_date: requiredDate,
-    to_date: requiredDate,
-    is_half_day: z.boolean().default(false),
-    half_day_session: z.enum(['FIRST_HALF', 'SECOND_HALF']).nullable().optional(),
-    reason: z.string().max(500).optional(),
+    name: z.string().min(1).max(100).optional(),
+    paid: z.boolean().optional(),
+    annual_quota: z.coerce.number().int().min(0).nullable().optional(),
+    is_applicable: z.boolean().optional(),
+    counts_in_balance: z.boolean().optional(),
+    overflow_to_unpaid: z.boolean().optional(),
+    reason: z.string().trim().max(500).optional(),
   })
+  .refine((v) => Object.keys(v).filter((k) => k !== 'reason').length > 0, { message: 'Nothing to change' });
+
+const leaveRequestShape = {
+  leave_type_id: z.string().uuid(),
+  from_date: requiredDate,
+  to_date: requiredDate,
+  is_half_day: z.boolean().default(false),
+  half_day_session: z.enum(['FIRST_HALF', 'SECOND_HALF']).nullable().optional(),
+  reason: z.string().max(500).optional(),
+};
+
+// Shared cross-field rules for self and admin requests.
+const withLeaveRules = (schema) => schema
   .refine((v) => v.from_date <= v.to_date, { message: 'from_date must be on or before to_date', path: ['to_date'] })
   .refine((v) => !v.is_half_day || Boolean(v.half_day_session), {
     message: 'half_day_session is required for a half-day leave request',
@@ -29,6 +47,16 @@ const createLeaveRequestSchema = z
     message: 'half_day_session is only valid for a half-day leave request',
     path: ['half_day_session'],
   });
+
+const createLeaveRequestSchema = withLeaveRules(z.object(leaveRequestShape));
+
+// Admin applying leave: same fields + the employee (omit = themselves) and an
+// optional auto-approve (admins are the approvers).
+const adminLeaveRequestSchema = withLeaveRules(z.object({
+  ...leaveRequestShape,
+  org_membership_id: z.string().uuid().optional(),
+  auto_approve: z.boolean().default(false),
+}));
 
 const decisionSchema = z.object({
   status: z.enum(['approved', 'rejected']),
@@ -67,7 +95,9 @@ const revokeSchema = z.object({ reason: z.string().max(500).optional() });
 
 module.exports = {
   createLeaveTypeSchema,
+  updateLeaveTypeSchema,
   createLeaveRequestSchema,
+  adminLeaveRequestSchema,
   decisionSchema,
   listRequestsQuerySchema,
   balanceQuerySchema,

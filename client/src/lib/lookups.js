@@ -96,11 +96,29 @@ export function useProjectOptions(enabled = true, refreshKey = 0) {
       .catch(() => { if (alive) setRows([]); });
     return () => { alive = false; };
   }, [enabled, refreshKey]);
-  return rows.map((row) => ({ value: row.id, label: row.name, hint: row.client_name || undefined }));
+  // Project names are not unique (a second contract can share a name), so the
+  // project code travels with the label.
+  return rows.map((row) => ({
+    value: row.id,
+    label: row.code ? `${row.name} · ${row.code}` : row.name,
+    hint: row.client_name || undefined,
+  }));
 }
 
-// Client-name picker for Add / Edit Project: this org's Lead accounts. Uncached
-// for the same reason as projects — leads are added while the app is open.
+// "meeting_scheduled" -> "Meeting scheduled"; lead is the default, so no hint.
+function clientHint(row) {
+  const parts = [];
+  if (row.stage && row.stage !== 'lead') {
+    const label = row.stage.replace(/_/g, ' ');
+    parts.push(label.charAt(0).toUpperCase() + label.slice(1));
+  }
+  if (!row.type) parts.push('Unclassified');
+  return parts.join(' · ') || undefined;
+}
+
+// Client-name picker for Add / Edit Project: this org's client accounts, any
+// stage. Uncached for the same reason as projects — accounts are added while
+// the app is open.
 export function useLeadClientOptions(enabled = true) {
   const [rows, setRows] = useState([]);
   useEffect(() => {
@@ -112,7 +130,7 @@ export function useLeadClientOptions(enabled = true) {
       .catch(() => { if (alive) setRows([]); });
     return () => { alive = false; };
   }, [enabled]);
-  return rows.map((row) => ({ value: row.id, label: row.name, hint: row.type ? undefined : 'Unclassified' }));
+  return rows.map((row) => ({ value: row.id, label: row.name, hint: clientHint(row) }));
 }
 
 export function useVendorAccountOptions(enabled = true) {
@@ -143,4 +161,34 @@ export function useRequirementOptions(enabled = true) {
 export function useOrgMembershipOptions(enabled = true) {
   const rows = useLookup('/orgs/memberships', {}, enabled);
   return rows.map((row) => ({ value: row.id, label: row.person?.name || 'Unknown', hint: row.employee_code || undefined }));
+}
+
+export function useDepartmentOptions(enabled = true) {
+  return toOptions(useLookup('/departments', {}, enabled));
+}
+
+export function useTeamOptions(enabled = true) {
+  return toOptions(useLookup('/teams', {}, enabled));
+}
+
+export function useLocationOptions(enabled = true) {
+  return toOptions(useLookup('/orgs/locations', {}, enabled));
+}
+
+/**
+ * Finance → Categories for a kind ('group_charge' | 'expense'). Uncached:
+ * admins add categories while the app is open. `refreshKey` forces a reload.
+ */
+export function useFinanceCategories(kind, { includeInactive = false, refreshKey = 0, enabled = true } = {}) {
+  const [rows, setRows] = useState([]);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    apiClient
+      .get('/finance-categories', { params: { kind, ...(includeInactive ? { include_inactive: true } : {}) } })
+      .then(({ data }) => { if (alive) setRows(data.data || []); })
+      .catch(() => { if (alive) setRows([]); });
+    return () => { alive = false; };
+  }, [kind, includeInactive, refreshKey, enabled]);
+  return rows;
 }

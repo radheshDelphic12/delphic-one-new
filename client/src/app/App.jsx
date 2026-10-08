@@ -5,6 +5,7 @@ import AppLayout from '../components/layout/AppLayout.jsx';
 import HomePreloaderGate from '../components/HomePreloaderGate.jsx';
 import LoginPage from '../pages/auth/LoginPage.jsx';
 import DashboardPage from '../pages/dashboard/DashboardPage.jsx';
+import ContractorPortalPage from '../pages/contractor/ContractorPortalPage.jsx';
 import AccountsListPage from '../pages/accounts/AccountsListPage.jsx';
 import AccountDetailPage from '../pages/accounts/AccountDetailPage.jsx';
 import PipelineShell from '../pages/pipeline/PipelineShell.jsx';
@@ -34,6 +35,50 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import ZephyrHomePage from '../pages/zephyr/ZephyrHomePage.jsx';
+import ZephyrSectionPage from '../pages/zephyr/ZephyrSectionPage.jsx';
+import ZephyrPartiesPage from '../pages/zephyr/ZephyrPartiesPage.jsx';
+import ZephyrLeadsPage from '../pages/zephyr/ZephyrLeadsPage.jsx';
+import ZephyrProjectsPage from '../pages/zephyr/ZephyrProjectsPage.jsx';
+import ZephyrPeoplePage from '../pages/zephyr/ZephyrPeoplePage.jsx';
+import ZephyrOverviewPage from '../pages/zephyr/ZephyrOverviewPage.jsx';
+import ZephyrFinancialsPage from '../pages/zephyr/ZephyrFinancialsPage.jsx';
+import ZephyrMyWorkPage from '../pages/zephyr/ZephyrMyWorkPage.jsx';
+import ZephyrProjectDetailPage from '../pages/zephyr/ZephyrProjectDetailPage.jsx';
+import ZephyrSettingsPage from '../pages/zephyr/ZephyrSettingsPage.jsx';
+import ZephyrPropertiesPage from '../pages/zephyr/ZephyrPropertiesPage.jsx';
+import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.jsx';
+import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
+import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
+import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
+import GulatiHomePage from '../pages/gulati/GulatiHomePage.jsx';
+import GulatiPartiesPage from '../pages/gulati/GulatiPartiesPage.jsx';
+import GulatiLeadsPage from '../pages/gulati/GulatiLeadsPage.jsx';
+import GulatiDealsPage from '../pages/gulati/GulatiDealsPage.jsx';
+import GulatiDealDetailPage from '../pages/gulati/GulatiDealDetailPage.jsx';
+import GulatiFinancePage from '../pages/gulati/GulatiFinancePage.jsx';
+import GulatiFinancialsPage from '../pages/gulati/GulatiFinancialsPage.jsx';
+import GulatiTasksPage from '../pages/gulati/GulatiTasksPage.jsx';
+import GulatiPeoplePage from '../pages/gulati/GulatiPeoplePage.jsx';
+import GulatiMyWorkPage from '../pages/gulati/GulatiMyWorkPage.jsx';
+import GulatiSettingsPage from '../pages/gulati/GulatiSettingsPage.jsx';
+import { isGulatiOrg } from '../lib/gulati/useGulati.js';
+import AcconcyHomePage from '../pages/acconcy/AcconcyHomePage.jsx';
+import AcconcyPartiesPage from '../pages/acconcy/AcconcyPartiesPage.jsx';
+import AcconcyLeadsPage from '../pages/acconcy/AcconcyLeadsPage.jsx';
+import AcconcyDealsPage from '../pages/acconcy/AcconcyDealsPage.jsx';
+import AcconcyDealDetailPage from '../pages/acconcy/AcconcyDealDetailPage.jsx';
+import AcconcyFinancePage from '../pages/acconcy/AcconcyFinancePage.jsx';
+import AcconcyFinancialsPage from '../pages/acconcy/AcconcyFinancialsPage.jsx';
+import AcconcyInvestmentsPage from '../pages/acconcy/AcconcyInvestmentsPage.jsx';
+import AcconcySalariesPage from '../pages/acconcy/AcconcySalariesPage.jsx';
+import AcconcyReportsPage from '../pages/acconcy/AcconcyReportsPage.jsx';
+import AcconcyTasksPage from '../pages/acconcy/AcconcyTasksPage.jsx';
+import AcconcyPeoplePage from '../pages/acconcy/AcconcyPeoplePage.jsx';
+import AcconcyMyWorkPage from '../pages/acconcy/AcconcyMyWorkPage.jsx';
+import AcconcySettingsPage from '../pages/acconcy/AcconcySettingsPage.jsx';
+import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
+import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
   return <div className="flex h-screen items-center justify-center text-tertiary-500">Loading…</div>;
@@ -64,11 +109,45 @@ function AccountBoardRedirect() {
 /**
  * Redirect when the current user lacks the required capability.
  */
+// Where an admin lands instead of the (temporarily hidden) dashboard.
+const ADMIN_HOME = '/finance';
+
+/**
+ * Home: contractors get their portal instead of the dashboard. Admins are sent
+ * to Finance while the admin dashboard is hidden (its numbers are not correct
+ * yet) — DashboardPage itself is untouched and still renders for other roles.
+ */
+function HomePage() {
+  const { user } = useAuth();
+  // Zephyr is a standalone workspace with its own home.
+  if (isZephyrOrg(user)) return <Navigate to="/zephyr" replace />;
+  // Gulati Industries is a standalone workspace with its own home.
+  if (isGulatiOrg(user)) return <Navigate to="/gulati" replace />;
+  // Acconcy Finance is a standalone workspace with its own home.
+  if (isAcconcyOrg(user)) return <Navigate to="/acconcy" replace />;
+  if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
+  if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
+  return (
+    <HomePreloaderGate>
+      <DashboardPage />
+    </HomePreloaderGate>
+  );
+}
+
 function RequirePermission({ capability, children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!can(user.role, capability)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The meetings / interviews calendar — Sales, HR and Management departments (and admins). */
+function RequireMeetingsCalendar({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!canSeeMeetingsCalendar(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -98,6 +177,33 @@ function RequireMasterWorkspace({ children }) {
   return children;
 }
 
+/** The Zephyr workspace needs the `zephyr` module on the ACTIVE company. */
+function RequireZephyr({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isZephyrOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Gulati workspace needs the `gulati` module on the ACTIVE company. */
+function RequireGulati({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isGulatiOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Acconcy workspace needs the `acconcy` module on the ACTIVE company. */
+function RequireAcconcy({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isAcconcyOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
 /** Group Overview is gated on the per-user is_group_superadmin flag, not a role capability. */
 function RequireGroupSuperadmin({ children }) {
   const { user, loading, isGroupSuperadmin } = useAuth();
@@ -122,11 +228,7 @@ export default function App() {
       >
         <Route
           index
-          element={
-            <HomePreloaderGate>
-              <DashboardPage />
-            </HomePreloaderGate>
-          }
+          element={<HomePage />}
         />
         {/* Recruitment pipeline — Delphic Global only (see RequireMasterWorkspace), and only
             for roles with pipeline access (RequirePermission) — keeps a self-service-only
@@ -186,7 +288,53 @@ export default function App() {
         <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="calendar" element={<CalendarPage />} />
+        {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced
+            by the server; AppLayout keeps Zephyr users off every Delphic page. */}
+        <Route path="zephyr" element={<RequireZephyr><ZephyrHomePage /></RequireZephyr>} />
+        <Route path="zephyr/settings" element={<RequireZephyr><ZephyrSettingsPage /></RequireZephyr>} />
+        <Route path="zephyr/overview" element={<RequireZephyr><ZephyrOverviewPage /></RequireZephyr>} />
+        <Route path="zephyr/financials" element={<RequireZephyr><ZephyrFinancialsPage /></RequireZephyr>} />
+        <Route path="zephyr/people" element={<RequireZephyr><ZephyrPeoplePage /></RequireZephyr>} />
+        <Route path="zephyr/my-work" element={<RequireZephyr><ZephyrMyWorkPage /></RequireZephyr>} />
+        <Route path="zephyr/projects" element={<RequireZephyr><ZephyrProjectsPage /></RequireZephyr>} />
+        <Route path="zephyr/projects/:id" element={<RequireZephyr><ZephyrProjectDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/properties" element={<RequireZephyr><ZephyrPropertiesPage /></RequireZephyr>} />
+        <Route path="zephyr/properties/:id" element={<RequireZephyr><ZephyrPropertyDetailPage /></RequireZephyr>} />
+        <Route path="zephyr/rent" element={<RequireZephyr><ZephyrRentPage /></RequireZephyr>} />
+        <Route path="zephyr/tasks" element={<RequireZephyr><ZephyrTasksPage /></RequireZephyr>} />
+        <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
+        <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />
+        <Route path="zephyr/:section" element={<RequireZephyr><ZephyrSectionPage /></RequireZephyr>} />
+
+        {/* Gulati Industries: standalone trading workspace. Module + role gating is enforced by the server. */}
+        <Route path="gulati" element={<RequireGulati><GulatiHomePage /></RequireGulati>} />
+        <Route path="gulati/parties" element={<RequireGulati><GulatiPartiesPage /></RequireGulati>} />
+        <Route path="gulati/leads" element={<RequireGulati><GulatiLeadsPage /></RequireGulati>} />
+        <Route path="gulati/deals" element={<RequireGulati><GulatiDealsPage /></RequireGulati>} />
+        <Route path="gulati/deals/:id" element={<RequireGulati><GulatiDealDetailPage /></RequireGulati>} />
+        <Route path="gulati/finance" element={<RequireGulati><GulatiFinancePage /></RequireGulati>} />
+        <Route path="gulati/financials" element={<RequireGulati><GulatiFinancialsPage /></RequireGulati>} />
+        <Route path="gulati/tasks" element={<RequireGulati><GulatiTasksPage /></RequireGulati>} />
+        <Route path="gulati/people" element={<RequireGulati><GulatiPeoplePage /></RequireGulati>} />
+        <Route path="gulati/my-work" element={<RequireGulati><GulatiMyWorkPage /></RequireGulati>} />
+        <Route path="gulati/settings" element={<RequireGulati><GulatiSettingsPage /></RequireGulati>} />
+        <Route path="gulati/*" element={<Navigate to="/gulati" replace />} />
+        <Route path="acconcy" element={<RequireAcconcy><AcconcyHomePage /></RequireAcconcy>} />
+        <Route path="acconcy/parties" element={<RequireAcconcy><AcconcyPartiesPage /></RequireAcconcy>} />
+        <Route path="acconcy/leads" element={<RequireAcconcy><AcconcyLeadsPage /></RequireAcconcy>} />
+        <Route path="acconcy/deals" element={<RequireAcconcy><AcconcyDealsPage /></RequireAcconcy>} />
+        <Route path="acconcy/deals/:id" element={<RequireAcconcy><AcconcyDealDetailPage /></RequireAcconcy>} />
+        <Route path="acconcy/finance" element={<RequireAcconcy><AcconcyFinancePage /></RequireAcconcy>} />
+        <Route path="acconcy/financials" element={<RequireAcconcy><AcconcyFinancialsPage /></RequireAcconcy>} />
+        <Route path="acconcy/investments" element={<RequireAcconcy><AcconcyInvestmentsPage /></RequireAcconcy>} />
+        <Route path="acconcy/salaries" element={<RequireAcconcy><AcconcySalariesPage /></RequireAcconcy>} />
+        <Route path="acconcy/reports" element={<RequireAcconcy><AcconcyReportsPage /></RequireAcconcy>} />
+        <Route path="acconcy/tasks" element={<RequireAcconcy><AcconcyTasksPage /></RequireAcconcy>} />
+        <Route path="acconcy/people" element={<RequireAcconcy><AcconcyPeoplePage /></RequireAcconcy>} />
+        <Route path="acconcy/my-work" element={<RequireAcconcy><AcconcyMyWorkPage /></RequireAcconcy>} />
+        <Route path="acconcy/settings" element={<RequireAcconcy><AcconcySettingsPage /></RequireAcconcy>} />
+        <Route path="acconcy/*" element={<Navigate to="/acconcy" replace />} />
+        <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
           path="notifications/preferences"
@@ -211,6 +359,14 @@ export default function App() {
         <Route path="projects/:id" element={<RequireModule module="projects" capability="viewProjects"><ProjectDetailPage /></RequireModule>} />
         <Route
           path="group-overview"
+          element={
+            <RequireGroupSuperadmin>
+              <GroupOverviewPage />
+            </RequireGroupSuperadmin>
+          }
+        />
+        <Route
+          path="group-overview/settings"
           element={
             <RequireGroupSuperadmin>
               <GroupOverviewPage />

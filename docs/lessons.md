@@ -1,5 +1,41 @@
 # Lessons
 
+## 2026-10-05: Auto attendance test skipped non-IT staff
+
+**Root cause:** The daily job marks every active full-time employee. The test still treated a non-IT full-time employee as out of scope, and it compared the clock in UTC, so the late-shift assertion depended on when CI ran.
+
+**Failure symptoms:** `auto-attendance.test.js` failed because the non-IT membership was in the marked list.
+
+**Fix details:** The test now expects a non-IT full-time employee to be marked, a contractor not to be marked, and runs the day at 10:00 IST so a 23:59 shift stays unmarked no matter when CI runs.
+
+**Consulted sources:** `autoAttendance.service.js` `applicableMembers`; CI shard 3/4.
+
+**Prevention guidance:** Attendance tests must follow worker type, not department. Pass a fixed instant into `runDaily` when the assertion depends on the shift start.
+
+## 2026-10-05: Salary lock counted days before joining as unmarked
+
+**Root cause:** Attendance pay walks every company working day of the month. A day with no attendance and no full-day leave incremented `unmarked_days`, and that count blocks the salary lock. `joined_at` and `left_at` were not part of the day loop, so a person who joined late in the month was blocked for every working day before they started.
+
+**Failure symptoms:** Locking that person's salary returned "Not ready to lock: 20 working days have no attendance marking" even though those days were before the joining date.
+
+**Fix details:** `computeBreakdown` takes `joinedAt` and `leftAt`. Days outside that employment stay in the month's expected hours (pay is still prorated) but are not unmarked, and attendance on them is ignored. `salaryLine` passes the membership dates. A day after joining that is still unmarked still blocks the lock.
+
+**Consulted sources:** `payroll.service.js` `computeBreakdown`; `salary.engine.js` `salaryLine`; `autoAttendance.service.js` `skipReason` (already skipped `before_joining`); `attendance-pay-basis.test.js`.
+
+**Prevention guidance:** Any new salary day-count (unmarked, deficit, leave) must skip days before `joined_at` and after `left_at`. Do not drop those days from expected hours, or a mid-month joiner is paid a full month.
+
+## 2026-10-03: Timesheet tests created days with no project
+
+**Root cause:** Employee timesheet creates now require `account_id`. `frd-hardening.test.js`, `timesheet-payroll-rules.test.js`, and `leave-timesheet-integration.test.js` still posted `{ date, hours }` only. The API returned 422, so `body.data` was missing and the month lock saw zero pending entries.
+
+**Failure symptoms:** CI failed on lock assertions (`locked` was 1, audit text was "Month timesheet locked" with no "admin override") and on `entry.id` / `pending.body.data.id` being undefined.
+
+**Fix details:** The test helpers create one client account in the employee's org and send `account_id` on employee `POST /timesheets/entries`. Admin creates and direct Prisma inserts were left as they were.
+
+**Consulted sources:** `timesheets.service.js` `createEntry` (`project_required`); `monthLocks.service.js` pending-entry audit text; the three Jest files above.
+
+**Prevention guidance:** Any new employee timesheet fixture must include a project. A 422 on create makes later lock and audit assertions look like product bugs.
+
 ## 2026-09-07: Calendar My interviews / All identical for recruiters
 
 **Root cause:** `listForCalendar` applied the same OR for recruiter `mine=1` and recruiter All (`submitted_by` OR interviewer). All never included `RequirementAssignment`, so the toolbar toggle did nothing for recruiters. BDA All was also narrowed to `account.owner_id` while the rest of the app treats BDA like admin for requirement visibility.

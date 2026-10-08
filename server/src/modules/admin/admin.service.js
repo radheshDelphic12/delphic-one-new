@@ -92,6 +92,10 @@ async function softDelete(entityType, entityId, password, reason, user) {
     return { error: gone ? 'already_deleted' : 'not_found' };
   }
 
+  // A project is an accounts row but not a catalogue account: deleting it
+  // here would silently remove the project (billing, allocations, timesheets).
+  if (entityType === 'account' && live.is_project) return { error: 'is_project' };
+
   const dependency = await dependencyCounts(entityType, entityId);
 
   await prisma.$transaction(async (tx) => {

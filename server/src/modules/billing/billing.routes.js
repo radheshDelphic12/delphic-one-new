@@ -1,24 +1,56 @@
 const express = require('express');
-const { authenticate, authorize, authorizeGroupSuperadmin, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
+const pnlService = require('./projectPnl.service');
+const invoices = require('./invoices.service');
+const adjustments = require('./adjustments.service');
+const resourceBilling = require('./resourceBilling.service');
+const vendorTracking = require('./vendorTracking.service');
+const charges = require('./charges.service');
+const exchangeRates = require('./exchangeRates.service');
+const allocationsService = require('../allocations/allocations.service');
+const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
+const { WORKER_ERRORS } = require('../../lib/workerType');
 const {
+  exchangeRatesSchema,
   createRateSchema,
   listRatesQuerySchema,
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
+  deleteInvoiceSchema,
+  contractChargeSchema,
+  updateContractChargeSchema,
+  billingAdjustmentSchema,
+  listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
+  updateInvoiceSchema,
+  previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
+  vendorInvoicePeriodSchema,
+  resourceRateSchema,
+  applyProjectRateSchema,
+  resourceRateQuerySchema,
+  reasonBodySchema,
+  billingRulesSchema,
+  vendorTrackingSchema,
+  generateVendorInvoiceSchema,
+  listVendorInvoicesQuerySchema,
   transitionInvoiceSchema,
   createGroupChargeSchema,
   createOwnGroupChargeSchema,
+  updateGroupChargeSchema,
   listMyGroupChargesQuerySchema,
   listAllGroupChargesQuerySchema,
   costAssignmentSchema,
   listCostAssignmentsQuerySchema,
   accountBudgetQuerySchema,
   updateProjectProfileSchema,
+  periodQuerySchema,
+  pnlListQuerySchema,
+  vendorInvoiceSchema,
+  updateVendorInvoiceSchema,
 } = require('./billing.validation');
 
 const router = express.Router();
@@ -30,20 +62,237 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
+  financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
+  invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
+  exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
+  percent_too_large: [422, 'A percentage cannot be above 100'],
+  reason_required: [422, 'Give a reason to change an invoice that has already been sent or paid'],
+  invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
+  nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
+  no_billing_rate: [422, 'This project has no billing rate for that month'],
+  not_supported: [422, 'Invoicing is not enabled for this project type yet (recruitment)'],
+  billing_locked: [423, "This project's billing for that month is locked - reopen it (Live Analytics > Billing & Sales) before changing its invoices"],
+  fixed_bid_exceeds_balance: [422, 'That invoice is more than what is left of the fixed-bid contract value'],
+  fixed_bid_exhausted: [422, 'The fixed-bid contract value has already been fully invoiced'],
+  fixed_bid_currency: [422, "A fixed-bid invoice is always in the project's contract currency"],
+  change_detected: [409, 'The locked month has a detected change — recalculate or dismiss it first'],
   invalid_transition: [409, 'Invalid status transition'],
   org_not_found: [404, 'Org not found'],
   membership_not_found: [404, 'Employee not found in this org'],
-  name_taken: [409, 'A project with that name already exists'],
-  client_not_lead: [422, 'Client must be one of this company\'s Lead accounts'],
+  category_not_found: [404, 'Group charge category not found (or deactivated)'],
+  location_not_found: [404, 'Office location not found'],
+  charge_raised_by_group: [403, 'This charge was raised by the group — only a group superadmin can edit it'],
+  client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
+  end_before_start: [422, 'The agreement end date cannot be before its start date'],
+  catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
+  vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };
 
 function failFor(res, error, result) {
   if (error === 'before_agreement_start') {
     return fail(res, 422, `That period ends before the client agreement starts (${result?.agreement_start}) — nothing is billed before the Agreement Start Date`);
   }
+  if (error === 'after_agreement_end') {
+    return fail(res, 422, `That period starts after the client agreement ended (${result?.agreement_end}) — nothing is billed after the Agreement End Date`);
+  }
+  if (error === 'fixed_bid_exceeds_balance') {
+    return fail(res, 422, `That invoice is more than what is left of the fixed-bid contract value - at most ${result?.currency || ''} ${result?.remaining} can still be invoiced (contract value ${result?.total})`.replace('  ', ' '));
+  }
   const mapped = ERRORS[error];
   return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
 }
+
+// Finance → Projects: monthly P&L (client billing - internal salary allocation
+// - vendor contractor cost) and per-project vendor invoices. See
+// projectPnl.service for the rules.
+const adminInOrg = [requireOrgMembership, authorize('admin')];
+
+router.get(
+  '/vendors',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await pnlService.listVendors(req.user.org_id)))
+);
+
+router.get(
+  '/projects-pnl',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await pnlService.listProjectsPnl(req.user.org_id, pnlListQuerySchema.parse(req.query))))
+);
+
+// INR value of each foreign currency, used to convert the P&L and project totals.
+router.get(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.listRates(req.user.org_id)))
+);
+
+router.put(
+  '/exchange-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await exchangeRates.setRates(req.user.org_id, exchangeRatesSchema.parse(req.body).rates)))
+);
+
+router.get(
+  '/projects/:id/pnl',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.computeProjectPnl(req.user.org_id, req.params.id, periodQuerySchema.parse(req.query));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.pnl);
+  })
+);
+
+router.get(
+  '/projects/:id/vendor-invoices',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const period = periodQuerySchema.partial().parse(req.query);
+    return ok(res, await pnlService.listVendorInvoices(req.user.org_id, req.params.id, period));
+  })
+);
+
+router.post(
+  '/projects/:id/vendor-invoices',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.createVendorInvoice(req.user.org_id, req.user.id, req.params.id, vendorInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.invoice);
+  })
+);
+
+// Live Analytics → Vendors: generated vendor invoices (one per vendor and
+// month, a row per project and currency).
+router.get(
+  '/vendor-invoices',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
+);
+
+router.get(
+  '/vendor-invoices/preview',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { vendor_account_id, ...period } = vendorInvoicePeriodSchema.parse(req.query);
+    const result = await invoices.previewVendorInvoice(req.user.org_id, vendor_account_id, period);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.preview);
+  })
+);
+
+router.post(
+  '/vendor-invoices/generate',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = generateVendorInvoiceSchema.parse(req.body);
+    const result = await invoices.generateVendorInvoice(req.user.org_id, req.user, body);
+    if (result.error) return failFor(res, result.error, result);
+    return created(res, result.invoices);
+  })
+);
+
+router.patch(
+  '/vendor-invoices/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.updateVendorInvoice(req.user.org_id, req.params.id, updateVendorInvoiceSchema.parse(req.body), req.user.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+
+// Vendor invoice tracking (sent / unsent, TDS, financial adjustment) and the full trace behind one invoice.
+router.patch(
+  '/vendor-invoices/:id/tracking',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorTracking.updateTracking(req.user.org_id, req.user, req.params.id, vendorTrackingSchema.parse(req.body));
+    if (result.error === 'not_found') return fail(res, 404, 'Vendor invoice not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+router.get(
+  '/vendor-invoices/:id/trace',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorTracking.trace(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Vendor invoice not found');
+    return ok(res, result);
+  })
+);
+
+// A resource's own billing rate on a project (monthly for one person, hourly for another in the same month).
+router.get(
+  '/resource-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await resourceBilling.list(req.user.org_id, resourceRateQuerySchema.parse(req.query))))
+);
+router.post(
+  '/resource-rates',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.create(req.user.org_id, req.user, resourceRateSchema.parse(req.body));
+    if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
+    if (result.error === 'membership_not_found') return fail(res, 404, 'Resource not found in this company');
+    return created(res, result.rate);
+  })
+);
+router.post(
+  '/projects/:id/resource-rates/apply-project-rate',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { effective_from } = applyProjectRateSchema.parse(req.body);
+    const result = await resourceBilling.applyProjectRate(req.user.org_id, req.user, req.params.id, { effective_from });
+    if (result.error === 'account_not_found') return fail(res, 404, 'Project not found');
+    if (result.error === 'no_project_rate') return fail(res, 422, 'The project has no billing rate in force on that date');
+    return ok(res, result);
+  })
+);
+router.delete(
+  '/resource-rates/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.remove(req.user.org_id, req.user, req.params.id, reasonBodySchema.parse(req.body || {}));
+    if (result.error === 'not_found') return fail(res, 404, 'Rate not found');
+    return ok(res, { deleted: true });
+  })
+);
+
+// Client billing status rules of a project (PL / NPL / comp off / FH / SH / half day ...): separate from salary leave rules.
+router.get(
+  '/projects/:id/billing-rules',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await resourceBilling.getRules(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Project not found');
+    return ok(res, result);
+  })
+);
+router.put(
+  '/projects/:id/billing-rules',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const body = billingRulesSchema.parse(req.body);
+    const current = await resourceBilling.getRules(req.user.org_id, req.params.id);
+    if (current.error === 'not_found') return fail(res, 404, 'Project not found');
+    const result = await resourceBilling.setRules(req.user.org_id, req.user, req.params.id, { ...(current.custom || {}), ...body.rules }, { reason: body.reason });
+    return ok(res, result);
+  })
+);
+
+router.delete(
+  '/vendor-invoices/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await pnlService.removeVendorInvoice(req.user.org_id, req.params.id, deleteInvoiceSchema.parse(req.body || {}).reason, req.user.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
 
 // Finance → Projects (project profile: name, client, blank requirement, billing
 // type, agreement start date). Registered first so '/projects' is not shadowed.
@@ -122,13 +371,84 @@ router.get(
   })
 );
 
+// Contract charges - GST, TDS or any other line a contract's client invoices carry (percent or fixed,
+// added or deducted, on the final approved amount). Added / edited / deleted one by one, audited.
+router.get(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await charges.listCharges(req.user.org_id, req.params.id)))
+);
+
+router.post(
+  '/projects/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.createCharge(req.user.org_id, req.user, req.params.id, contractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.charge);
+  })
+);
+
+router.patch(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.updateCharge(req.user.org_id, req.user, req.params.id, updateContractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+router.delete(
+  '/charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await charges.removeCharge(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// Billing adjustments — an admin's + / - tweak to a project's month (reason required, audited).
+router.get(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...period } = listBillingAdjustmentsQuerySchema.parse(req.query);
+    return ok(res, await adjustments.listAdjustments(req.user.org_id, account_id, period));
+  })
+);
+
+router.post(
+  '/adjustments',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const { account_id, ...rest } = billingAdjustmentSchema.parse(req.body);
+    const result = await adjustments.createAdjustment(req.user.org_id, req.user, account_id, rest);
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+
+router.delete(
+  '/adjustments/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await adjustments.removeAdjustment(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// Client invoices — one builder (invoices.service) for every path: the
+// project's contract month (its locked version when billing is locked).
 router.post(
   '/invoices',
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const body = createInvoiceSchema.parse(req.body);
-    const result = await service.createInvoice(req.user.org_id, req.user.id, body);
+    const { client_account_id, ...body } = createInvoiceSchema.parse(req.body);
+    const result = await invoices.generateClientInvoice(req.user.org_id, req.user, { account_id: client_account_id, ...body });
     if (result.error) return failFor(res, result.error, result);
     return created(res, result.invoice);
   })
@@ -140,8 +460,20 @@ router.get(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const query = listInvoicesQuerySchema.parse(req.query);
-    const rows = await service.listInvoices(req.user.org_id, query);
-    return ok(res, rows);
+    return ok(res, await invoices.listClientInvoices(req.user.org_id, query));
+  })
+);
+
+// What an invoice for that project and month would contain (form preview).
+router.get(
+  '/invoices/preview',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { account_id, currency, amount, ...period } = previewInvoiceQuerySchema.parse(req.query);
+    const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.preview);
   })
 );
 
@@ -150,9 +482,31 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.getInvoice(req.user.org_id, req.params.id);
+    const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
+  })
+);
+
+router.patch(
+  '/invoices/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, result.invoice);
+  })
+);
+
+router.delete(
+  '/invoices/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { deleted: true });
   })
 );
 
@@ -193,6 +547,31 @@ router.post(
   })
 );
 
+// Finance → Group Charges "Edit" — admin of the current company, on that company's charges.
+router.patch(
+  '/group-charges/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = updateGroupChargeSchema.parse(req.body);
+    const result = await service.updateGroupCharge(req.user.org_id, req.user.id, req.params.id, body);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+// Finance → Group Charges "Delete" — superadmin only, on the current company's charges.
+router.delete(
+  '/group-charges/:id',
+  requireOrgMembership,
+  authorizeSuperadmin,
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteGroupCharge(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
 router.get(
   '/group-charges',
   requireOrgMembership,
@@ -216,14 +595,18 @@ router.get(
 
 // --- Module C: project costing (developer cost rate + live budget summary). ---
 
+// Project team allocations — effective-dated spans (see allocations.service).
+// POST creates one, or changes the one in force (from `effective_date` when
+// given, else as a correction); DELETE removes one entered by mistake — to
+// take someone OFF a project, end it (POST /allocations/:id/end) so history stays.
 router.post(
   '/cost-assignments',
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = costAssignmentSchema.parse(req.body);
-    const result = await service.upsertCostAssignment(req.user.org_id, req.user.id, body);
-    if (result.error) return failFor(res, result.error);
+    const result = await allocationsService.assign(req.user.org_id, req.user.id, body);
+    if (result.error) return allocationsFailFor(res, result.error);
     return created(res, result.assignment);
   })
 );
@@ -233,8 +616,8 @@ router.delete(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.removeCostAssignment(req.user.org_id, req.params.id);
-    if (result.error) return failFor(res, result.error);
+    const result = await allocationsService.deleteAllocation(req.user.org_id, req.user.id, req.params.id);
+    if (result.error) return allocationsFailFor(res, result.error);
     return ok(res, { deleted: true });
   })
 );
@@ -244,9 +627,8 @@ router.get(
   requireOrgMembership,
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const { account_id } = listCostAssignmentsQuerySchema.parse(req.query);
-    const rows = await service.listCostAssignments(req.user.org_id, account_id);
-    return ok(res, rows);
+    const { account_id, include_ended } = listCostAssignmentsQuerySchema.parse(req.query);
+    return ok(res, await allocationsService.listForProject(req.user.org_id, account_id, { include_ended }));
   })
 );
 

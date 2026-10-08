@@ -6,6 +6,8 @@ const profitabilityService = require('../profitability/profitability.service');
 const superDashboardService = require('./superDashboard.service');
 const { computeSchema, rollupQuerySchema, financialsRollupQuerySchema } = require('./superDashboard.validation');
 const financialsService = require('../financials/financials.service');
+const groupFinance = require('./groupFinance.service');
+const { fail } = require('../../utils/response');
 
 // HLD §7: a single cross-org read API, org_id-agnostic by design, gated to
 // authorizeGroupSuperadmin only — deliberately never requireOrgMembership
@@ -70,6 +72,49 @@ router.get(
   asyncHandler(async (req, res) => {
     const opts = financialsService.projectionQuerySchema.parse(req.query);
     return ok(res, await financialsService.groupProjection(req.user.org_group_ids, opts));
+  })
+);
+
+// Group Dashboard: consolidated + per-company revenue, expenses, profit, assets and valuation, with trends,
+// contribution, rankings and alerts. Reads each company's own finance service (see groupFinance.service).
+router.get(
+  '/group/overview',
+  asyncHandler(async (req, res) => ok(res, await groupFinance.overview(req.user.org_group_ids, req.query)))
+);
+
+router.get(
+  '/group/activity',
+  asyncHandler(async (req, res) => ok(res, await groupFinance.activity(req.user.org_group_ids, Number(req.query.limit) || 30, Number(req.query.days) || 7)))
+);
+
+// Monthly asset value per company (history kept, a revised month is audited with the previous value).
+router.get(
+  '/companies/:orgId/asset-values',
+  asyncHandler(async (req, res) => {
+    const org = await groupFinance.companyInGroup(req.user.org_group_ids, req.params.orgId);
+    if (!org) return fail(res, 404, 'Company not found');
+    return ok(res, await groupFinance.listAssetValues(org));
+  })
+);
+
+router.get(
+  '/companies/:orgId/drilldown',
+  asyncHandler(async (req, res) => {
+    const org = await groupFinance.companyInGroup(req.user.org_group_ids, req.params.orgId);
+    if (!org) return fail(res, 404, 'Company not found');
+    return ok(res, await groupFinance.drilldown(org, req.query));
+  })
+);
+
+router.put(
+  '/companies/:orgId/asset-values',
+  asyncHandler(async (req, res) => {
+    const body = groupFinance.assetBodySchema.parse(req.body);
+    const result = await groupFinance.setAssetValue(req.user.org_group_ids, req.user.id, req.params.orgId, body);
+    if (result.error === 'not_found') return fail(res, 404, 'Company not found');
+    if (result.error === 'managed_in_company') return fail(res, 422, 'Acconcy asset value is calculated from its Assets and Investments; edit them in the Acconcy workspace');
+    if (result.error === 'future_month') return fail(res, 422, 'An asset value can only be recorded for the current or an earlier month');
+    return ok(res, result);
   })
 );
 

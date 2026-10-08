@@ -9,16 +9,16 @@ export default {
     extend: {
       colors: {
         primary: {
-          50: '#eef5fc',
-          100: '#d8e8f6',
-          200: '#b4d0ec',
-          300: '#82b0dd',
-          400: '#4a8bc9',
-          500: '#1f6cb5',
-          600: '#105aa9',
-          700: '#0e4a8b',
-          800: '#103f74',
-          900: '#123761',
+          50: 'rgb(var(--p-50) / <alpha-value>)',
+          100: 'rgb(var(--p-100) / <alpha-value>)',
+          200: 'rgb(var(--p-200) / <alpha-value>)',
+          300: 'rgb(var(--p-300) / <alpha-value>)',
+          400: 'rgb(var(--p-400) / <alpha-value>)',
+          500: 'rgb(var(--p-500) / <alpha-value>)',
+          600: 'rgb(var(--p-600) / <alpha-value>)',
+          700: 'rgb(var(--p-700) / <alpha-value>)',
+          800: 'rgb(var(--p-800) / <alpha-value>)',
+          900: 'rgb(var(--p-900) / <alpha-value>)',
         },
         tertiary: {
           50: '#f3f5fa',
@@ -33,8 +33,8 @@ export default {
           900: '#2d3541',
         },
         canvas: {
-          DEFAULT: '#F8F9FD',
-          sidebar: '#F3F5FA',
+          DEFAULT: 'rgb(var(--color-bg) / <alpha-value>)',
+          sidebar: 'rgb(var(--color-sidebar) / <alpha-value>)',
           muted: '#EEF1F8',
         },
         success: {

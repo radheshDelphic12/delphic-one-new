@@ -1,22 +1,26 @@
 import { useSearchParams } from 'react-router-dom';
-import { Network, Settings2, UserCog, UsersRound } from 'lucide-react';
+import { Gauge, Laptop, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import PeopleListPage from './PeopleListPage.jsx';
 import OrgChartPage from '../orgChart/OrgChartPage.jsx';
 import UsersPage from '../users/UsersPage.jsx';
 import HrSettingsPage from './HrSettingsPage.jsx';
+import AssetsPage from './AssetsPage.jsx';
+import CapacityPage from './CapacityPage.jsx';
 
 const BASE_TABS = [
   { key: 'directory', label: 'Directory', icon: UsersRound },
   { key: 'org-chart', label: 'Org Chart', icon: Network },
 ];
 const ADMIN_TABS = [
+  { key: 'capacity', label: 'Capacity & Allocation', icon: Gauge },
   { key: 'users', label: 'Users', icon: UserCog },
+  { key: 'assets', label: 'Assets', icon: Laptop },
   { key: 'hr-settings', label: 'HR Settings', icon: Settings2 },
 ];
 
 /**
- * People Hub: Directory + Org Chart + Users + HR Settings under one sidebar
+ * People Hub: Directory + Org Chart + Users + Assets + HR Settings under one sidebar
  * entry, so a new HR sub-module doesn't mean a new row in the sidebar.
  */
 export default function PeopleHubPage() {
@@ -48,7 +52,9 @@ export default function PeopleHubPage() {
       </div>
       {section === 'directory' && <PeopleListPage />}
       {section === 'org-chart' && <OrgChartPage />}
+      {section === 'capacity' && isAdmin && <CapacityPage />}
       {section === 'users' && isAdmin && <UsersPage />}
+      {section === 'assets' && isAdmin && <AssetsPage />}
       {section === 'hr-settings' && isAdmin && <HrSettingsPage />}
     </div>
   );

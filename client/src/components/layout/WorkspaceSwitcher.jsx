@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Check, ChevronsUpDown, Loader2, Network, Plus, Search } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
+import { orgLogo } from '../../lib/orgLogo.js';
 
 const SEARCH_THRESHOLD = 6;
 
@@ -21,8 +22,11 @@ const SEARCH_THRESHOLD = 6;
  */
 export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
   const { user, switchOrg, memberships, activeOrg, isGroupSuperadmin } = useAuth();
-  const { pushError } = useAlerts();
+  const { pushError, pushInfo } = useAlerts();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // On the Group Dashboard the switcher says so, instead of showing whichever company happens to be active underneath.
+  const groupMode = isGroupSuperadmin && pathname.startsWith('/group-overview');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [switchingId, setSwitchingId] = useState(null);
@@ -57,6 +61,7 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
   async function choose(orgId) {
     if (orgId === activeOrg.id) {
       setOpen(false);
+      if (groupMode) navigate('/');
       return;
     }
     setSwitchingId(orgId);
@@ -74,12 +79,12 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
 
   const brand = (
     <>
-      <WorkspaceLogo name={activeOrg.name} logoUrl={activeOrg.logo_url} size="md" />
+      <WorkspaceLogo name={groupMode ? 'All Companies' : activeOrg.name} logoUrl={groupMode ? '/group-logo.svg' : orgLogo(activeOrg)} size="md" />
       {!collapsed && (
         <span className="min-w-0 flex-1 text-left">
-          <span className="block truncate font-heading text-sm font-bold tracking-tight text-tertiary-900">{activeOrg.name}</span>
+          <span className="block truncate font-heading text-sm font-bold tracking-tight text-tertiary-900">{groupMode ? 'All Companies' : activeOrg.name}</span>
           <span className="block truncate text-[11px] text-tertiary-500">
-            {canSwitch ? `${memberships.length} workspaces` : 'Workspace'}
+            {groupMode ? `Group view - ${memberships.length} companies` : canSwitch ? `${memberships.length} workspaces` : 'Workspace'}
           </span>
         </span>
       )}
@@ -112,7 +117,24 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
           aria-label="Switch workspace"
           className="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-tertiary-200 bg-white shadow-drawer"
         >
-          <p className="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tertiary-400">Workspaces</p>
+          {isGroupSuperadmin && (
+            <div className="px-1.5 pt-1.5">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  navigate('/group-overview');
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left text-sm font-semibold text-tertiary-900 transition hover:bg-tertiary-50 ${groupMode ? 'bg-primary-50/60' : ''}`}
+              >
+                <Network className="h-4 w-4 text-primary-600" aria-hidden="true" />
+                <span className="flex-1">All Companies - Group dashboard</span>
+                {groupMode && <Check className="h-4 w-4 text-primary-600" aria-hidden="true" />}
+              </button>
+            </div>
+          )}
+          <p className="px-3.5 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-tertiary-400">Companies</p>
 
           {memberships.length > SEARCH_THRESHOLD && (
             <div className="relative px-2.5 pb-1.5">
@@ -132,7 +154,7 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
           <ul className="max-h-64 overflow-y-auto px-1.5 pb-1.5">
             {filtered.length === 0 && <li className="px-2 py-3 text-xs text-tertiary-400">No matching workspace</li>}
             {filtered.map((membership) => {
-              const active = membership.org.id === activeOrg.id;
+              const active = !groupMode && membership.org.id === activeOrg.id;
               return (
                 <li key={membership.org.id}>
                   <button
@@ -140,15 +162,22 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
                     role="menuitemradio"
                     aria-checked={active}
                     disabled={switchingId !== null}
-                    onClick={() => choose(membership.org.id)}
+                    onClick={() => {
+                      if (membership.org.enabled_modules?.includes('coming_soon')) {
+                        setOpen(false);
+                        pushInfo(`${membership.org.name} is coming soon. It will appear here once it is ready.`);
+                        return;
+                      }
+                      choose(membership.org.id);
+                    }}
                     className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-tertiary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-60 ${
                       active ? 'bg-primary-50/60' : ''
                     }`}
                   >
-                    <WorkspaceLogo name={membership.org.name} logoUrl={membership.org.logo_url} size="md" />
+                    <WorkspaceLogo name={membership.org.name} logoUrl={orgLogo(membership.org)} size="md" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-tertiary-900">{membership.org.name}</span>
-                      <span className="block truncate text-[11px] capitalize text-tertiary-500">{membership.role}</span>
+                      <span className="block truncate text-[11px] capitalize text-tertiary-500">{membership.org.enabled_modules?.includes('coming_soon') ? 'Coming soon' : membership.role}</span>
                     </span>
                     {switchingId === membership.org.id ? (
                       <Loader2 className="h-4 w-4 animate-spin text-primary-600" aria-hidden="true" />
@@ -163,20 +192,6 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
 
           {hasActions && (
             <div className="space-y-0.5 border-t border-tertiary-100 p-1.5">
-              {isGroupSuperadmin && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    navigate('/group-overview');
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-sm font-medium text-tertiary-700 transition hover:bg-tertiary-50"
-                >
-                  <Network className="h-4 w-4 text-tertiary-400" aria-hidden="true" />
-                  Group overview
-                </button>
-              )}
               {isAdmin && onCreate && (
                 <button
                   type="button"

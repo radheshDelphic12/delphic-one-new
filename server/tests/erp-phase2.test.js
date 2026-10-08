@@ -35,7 +35,7 @@ async function seedOrgEmployee(org, role = 'recruiter') {
 
 describe('Phase 2 — new ERP routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash, on every new module', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
 
     const endpoints = [
@@ -95,41 +95,17 @@ describe('Phase 2 — calendars', () => {
 });
 
 describe('Phase 2 — attendance', () => {
-  test('check-in then check-out records both timestamps for today', async () => {
+  test('check-in and check-out are removed - attendance is marked automatically', async () => {
     const { org } = await seedOrgAdmin();
     const { access_token } = await seedOrgEmployee(org);
-
-    const ci = await authed(request(app).post('/api/v1/attendance/check-in'), access_token);
-    expect(ci.status).toBe(201);
-    expect(ci.body.data.check_in_at).toBeTruthy();
-    expect(ci.body.data.check_out_at).toBeNull();
-
-    const dup = await authed(request(app).post('/api/v1/attendance/check-in'), access_token);
-    expect(dup.status).toBe(409);
-
-    const co = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(co.status).toBe(200);
-    expect(co.body.data.check_out_at).toBeTruthy();
-
-    const dupOut = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(dupOut.status).toBe(409);
-
-    const mine = await authed(request(app).get('/api/v1/attendance/me'), access_token);
-    expect(mine.status).toBe(200);
-    expect(mine.body.data).toHaveLength(1);
-  });
-
-  test('check-out without a check-in is rejected', async () => {
-    const { org } = await seedOrgAdmin();
-    const { access_token } = await seedOrgEmployee(org);
-    const res = await authed(request(app).post('/api/v1/attendance/check-out'), access_token);
-    expect(res.status).toBe(409);
+    expect((await authed(request(app).post('/api/v1/attendance/check-in'), access_token)).status).toBe(404);
+    expect((await authed(request(app).post('/api/v1/attendance/check-out'), access_token)).status).toBe(404);
   });
 
   test('admin can list the whole team and regularize a record', async () => {
     const { org, access_token: adminToken, admin } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
-    await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
+    const { membership: empMembership } = await seedOrgEmployee(org);
+    await prisma.attendanceRecord.create({ data: { org_id: org.id, org_membership_id: empMembership.id, date: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`), status: 'present', source: 'manual' } });
 
     const team = await authed(request(app).get('/api/v1/attendance'), adminToken);
     expect(team.status).toBe(200);
@@ -193,10 +169,10 @@ describe('Phase 2 — leave', () => {
     expect(decision.body.data.status).toBe('approved');
 
     // Balances are computed live from approved requests (Phase 3): Oct 10-12
-    // 2026 inclusive is 3 days, still ahead of today, so it shows as upcoming.
+    // 2026 is Sat-Mon, so it costs 1 working day, still ahead of today (upcoming).
     const balances = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), empToken);
     const balance = balances.body.data.find((item) => item.leave_type_id === leaveType.id);
-    expect(balance).toMatchObject({ allocated: 18, used: 0, upcoming: 3, pending: 0, remaining: 15 });
+    expect(balance).toMatchObject({ allocated: 18, used: 0, upcoming: 1, pending: 0, remaining: 17 });
     expect(membership.id).toBeTruthy();
 
     const reDecide = await authed(
@@ -285,8 +261,8 @@ describe('Phase 2 — leave', () => {
 
     const created = await authed(request(app).post('/api/v1/leave/requests'), empToken).send({
       leave_type_id: leaveType.id,
-      from_date: '2026-11-01',
-      to_date: '2026-11-01',
+      from_date: '2026-11-02',
+      to_date: '2026-11-02',
     });
 
     const cancelled = await authed(
