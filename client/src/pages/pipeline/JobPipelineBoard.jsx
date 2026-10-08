@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import RequirementScopeToggle from '../../components/ui/RequirementScopeToggle.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -200,6 +201,8 @@ export default function JobPipelineBoard() {
   const { pushError } = useAlerts();
   const sensors = usePipelineSensors();
   const [filterParams, setFilterParams] = useState({});
+  const isSales = user?.role === 'sales';
+  const [scope, setScope] = useState('mine');
   const boardParams = useMemo(() => {
     const params = { sort_by: 'created_at', sort_order: 'desc' };
     if (filterParams.search) params.search = filterParams.search;
@@ -214,8 +217,9 @@ export default function JobPipelineBoard() {
       const priorities = String(filterParams.priority).split(',').filter(Boolean);
       if (priorities.length === 1) params.priority = priorities[0];
     }
+    if (isSales && scope === 'all') params.scope = 'all';
     return params;
-  }, [filterParams]);
+  }, [filterParams, isSales, scope]);
   const handleFiltersChange = useCallback((params) => setFilterParams(params), []);
   const { cells, loading, reload } = usePipelineBoard({
     path: '/requirements',
@@ -344,6 +348,7 @@ export default function JobPipelineBoard() {
             Drag requirements between statuses, or use the ⋯ menu on a card.
           </p>
         </div>
+        {isSales && <RequirementScopeToggle value={scope} onChange={setScope} />}
         {canCreate && (
           <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> New requirement

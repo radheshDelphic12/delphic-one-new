@@ -37,16 +37,14 @@ function mapError(res, error) {
 const list = asyncHandler(async (req, res) => {
   const query = listQuerySchema.parse(req.query);
   if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
-  if (req.user.role === 'sales') query.sales_owner_id = req.user.id;
+  if (req.user.role === 'sales' && query.scope !== 'all') query.sales_owner_id = req.user.id;
+  delete query.scope;
   const { rows, pagination } = await service.list(query);
   return ok(res, rows, { pagination });
 });
 
 function assertCanViewRequirement(user, requirement) {
   if (user.role === 'admin') return null;
-  if (user.role === 'sales' && requirement.sales_owner?.id !== user.id) {
-    return 'You do not own this record';
-  }
   if (user.role === 'recruiter') {
     const assigned = (requirement.assigned_recruiters || []).some((row) => row.id === user.id);
     if (!assigned) return 'You do not own this record';

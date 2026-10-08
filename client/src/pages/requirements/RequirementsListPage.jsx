@@ -9,6 +9,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import RequirementScopeToggle from '../../components/ui/RequirementScopeToggle.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
 import { canAssignRecruiters } from '../profiles/profileUtils.js';
 import AssignRecruiterDrawer from './AssignRecruiterDrawer.jsx';
@@ -133,6 +134,8 @@ export default function RequirementsListPage() {
   const [reqType, setReqType] = useState(() => searchParams.get('req_type') || '');
   const [accountId, setAccountId] = useState(() => searchParams.get('account_id') || '');
   const [salesOwnerId, setSalesOwnerId] = useState(() => searchParams.get('sales_owner_id') || '');
+  const isSales = user?.role === 'sales';
+  const [scope, setScope] = useState(() => (searchParams.get('scope') === 'all' ? 'all' : 'mine'));
   const [recruiterId, setRecruiterId] = useState(() => searchParams.get('recruiter_id') || '');
   const [workMode, setWorkMode] = useState(() => searchParams.get('work_mode') || '');
   const [techStack, setTechStack] = useState(() => searchParams.get('tech_stack') || '');
@@ -169,6 +172,7 @@ export default function RequirementsListPage() {
     sync('req_type', reqType);
     sync('account_id', accountId);
     sync('sales_owner_id', salesOwnerId);
+    sync('scope', isSales ? scope : '', 'mine');
     sync('recruiter_id', recruiterId);
     sync('work_mode', workMode);
     sync('tech_stack', appliedTechStack);
@@ -176,7 +180,7 @@ export default function RequirementsListPage() {
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, recruiterId, workMode, appliedTechStack, sortBy, sortOrder]);
+  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, scope, recruiterId, workMode, appliedTechStack, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   // Guarded so it converges with the mirror effect above instead of looping.
@@ -191,6 +195,7 @@ export default function RequirementsListPage() {
     set(setReqType, g('req_type'));
     set(setAccountId, g('account_id'));
     set(setSalesOwnerId, g('sales_owner_id'));
+    set(setScope, g('scope') === 'all' ? 'all' : 'mine');
     set(setRecruiterId, g('recruiter_id'));
     set(setWorkMode, g('work_mode'));
     set(setAppliedTechStack, g('tech_stack'));
@@ -238,6 +243,7 @@ export default function RequirementsListPage() {
     if (reqType) params.req_type = reqType;
     if (accountId) params.account_id = accountId;
     if (salesOwnerId) params.sales_owner_id = salesOwnerId;
+    if (isSales && scope === 'all') params.scope = 'all';
     if (recruiterId) params.recruiter_id = recruiterId;
     if (workMode) params.work_mode = workMode;
     if (appliedTechStack) params.tech_stack = appliedTechStack;
@@ -256,7 +262,7 @@ export default function RequirementsListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, accountId,
-    salesOwnerId, recruiterId, workMode, appliedTechStack, sortBy, sortOrder,
+    salesOwnerId, scope, recruiterId, workMode, appliedTechStack, sortBy, sortOrder,
   ]);
 
   useEffect(() => {
@@ -337,11 +343,14 @@ export default function RequirementsListPage() {
 
   return (
     <div className="space-y-2">
-      {canCreateRequirement(user) && (
-        <div className="flex justify-end">
-          <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> New requirement
-          </button>
+      {(isSales || canCreateRequirement(user)) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {isSales ? <RequirementScopeToggle value={scope} onChange={(v) => { setScope(v); setPage(1); }} /> : <span />}
+          {canCreateRequirement(user) && (
+            <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" /> New requirement
+            </button>
+          )}
         </div>
       )}
 
