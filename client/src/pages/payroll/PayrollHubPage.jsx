@@ -4,6 +4,7 @@ import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, Sliders
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import SalaryAdjustmentsTab from './SalaryAdjustmentsTab.jsx';
 import SalaryPaymentsTab from './SalaryPaymentsTab.jsx';
+import RefreshRunModal from './RefreshRunModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -196,6 +197,14 @@ function PayslipDrawer({ open, payslip, onClose }) {
               <p className="text-xs text-tertiary-500">{user?.active_org?.name || 'Delphic'} · {period}</p>
             </div>
           </div>
+          {Array.isArray(payslip.breakdown?.revisions) && payslip.breakdown.revisions.length > 0 && (() => {
+            const last = payslip.breakdown.revisions[payslip.breakdown.revisions.length - 1];
+            return (
+              <p className="rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                Revised {payslip.breakdown.revisions.length} time(s). Last: {new Date(last.at).toLocaleDateString()} — {last.reason} (net was {money(last.previous?.net)}).
+              </p>
+            );
+          })()}
           <SlipSection title="Employee & bank details">
             <SlipRows rows={[['Employee Code', e.employee_code], ['Aadhar Number', e.aadhaar_number], ['Employee Name', e.name], ['PAN', e.pan_number], ['Department', e.department], ['Account Number', e.bank_account_number], ['Team', e.team], ['IFSC Code', e.bank_ifsc], ['Designation', e.designation]]} />
           </SlipSection>
@@ -567,6 +576,7 @@ function PayrollRunsTab({ filters }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const [viewingRun, setViewingRun] = useState(null);
+  const [refreshingRun, setRefreshingRun] = useState(null);
   const [selectedPayslip, setSelectedPayslip] = useState(null);
 
   function load() {
@@ -587,7 +597,7 @@ function PayrollRunsTab({ filters }) {
   }
 
   async function process(row) {
-    if (!window.confirm(`Process payroll for ${periodLabel(row.period_month, row.period_year)}? This generates payslips for every eligible employee and can't be re-run for this period.`)) return;
+    if (!window.confirm(`Process payroll for ${periodLabel(row.period_month, row.period_year)}? This generates payslips for every eligible employee. It can't be re-run, but later salary changes can be applied with "Update payroll".`)) return;
     setProcessingId(row.id);
     try {
       const { data } = await apiClient.post(`/payroll/runs/${row.id}/process`);
@@ -627,6 +637,9 @@ function PayrollRunsTab({ filters }) {
           {row.status === 'processed' && (
             <button type="button" className="btn-ghost text-xs" onClick={() => setViewingRun(row)}>View payslips</button>
           )}
+          {row.status === 'processed' && (
+            <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setRefreshingRun(row)}><Pencil className="h-3.5 w-3.5" /> Update payroll</button>
+          )}
         </div>
       ),
     },
@@ -645,6 +658,7 @@ function PayrollRunsTab({ filters }) {
       <NewRunDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onSubmit={create} />
       <RunPayslipsDrawer open={Boolean(viewingRun)} run={viewingRun} filters={filters} onClose={() => setViewingRun(null)} onOpenPayslip={openPayslip} />
       <PayslipDrawer open={Boolean(selectedPayslip)} payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} />
+      <RefreshRunModal open={Boolean(refreshingRun)} run={refreshingRun} periodText={refreshingRun ? periodLabel(refreshingRun.period_month, refreshingRun.period_year) : ''} onClose={() => setRefreshingRun(null)} onDone={load} />
     </div>
   );
 }
