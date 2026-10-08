@@ -55,6 +55,12 @@ const createRunSchema = z.object({
   period_year: z.coerce.number().int().min(2000).max(2100),
 });
 
+// Update a processed run from the current salary; a reason is kept on every revised payslip.
+const refreshRunSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  org_membership_ids: z.array(z.string().uuid()).max(500).optional(),
+});
+
 const listRunsQuerySchema = z.object({
   status: z.enum(['draft', 'processed']).optional(),
 });
@@ -117,6 +123,7 @@ module.exports = {
   attendanceSalaryQuerySchema,
   setPayBasisSchema,
   createRunSchema,
+  refreshRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
   salaryPaymentsQuerySchema,

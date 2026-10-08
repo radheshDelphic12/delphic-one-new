@@ -367,11 +367,9 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursB
 // if the month's salary calculation has been LOCKED (Live Analytics → Salary
 // → Lock), its locked version is used as-is, so the payslips match exactly
 // what was reviewed and finalized; otherwise the month is computed now.
-async function processRun(orgId, runId, adminUserId) {
-  const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
-  if (!run) return { error: 'not_found' };
-  if (run.status !== 'draft') return { error: 'already_processed' };
-
+// The month's salary lines as a run pays them: the locked version when the month's salary is locked
+// (an employee locked on their own keeps their locked figures), otherwise computed now.
+async function runLines(orgId, run) {
   // Lazy: salary.engine itself builds on computeBreakdown from this module.
   const salaryEngine = require('../calculations/engines/salary.engine');
   const calculations = require('../calculations/calculations.service');
@@ -391,15 +389,23 @@ async function processRun(orgId, runId, adminUserId) {
   // Contractors are paid through their vendor (Finance → vendor invoices),
   // never through payroll — the engine lists them as skipped.
   const skipped = (result.skipped || []).map(({ org_membership_id, reason }) => ({ org_membership_id, reason }));
-  const payslipRows = lines.map((line) => ({
-    org_id: orgId,
-    payroll_run_id: run.id,
+  const rows = lines.map((line) => ({
     org_membership_id: line.org_membership_id,
     gross: line.gross,
     deductions: line.deductions,
     net: line.net,
     breakdown: { ...line.breakdown, ...(locked ? { calculation_version: locked.version } : line.calculation_version ? { calculation_version: line.calculation_version } : {}) },
   }));
+  return { rows, skipped, locked };
+}
+
+async function processRun(orgId, runId, adminUserId) {
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
+  if (!run) return { error: 'not_found' };
+  if (run.status !== 'draft') return { error: 'already_processed' };
+
+  const { rows, skipped, locked } = await runLines(orgId, run);
+  const payslipRows = rows.map((row) => ({ org_id: orgId, payroll_run_id: run.id, ...row }));
 
   const updated = await prisma.$transaction(async (tx) => {
     if (payslipRows.length) await tx.payslip.createMany({ data: payslipRows });
@@ -410,6 +416,96 @@ async function processRun(orgId, runId, adminUserId) {
   });
 
   return { run: updated, payslips_generated: payslipRows.length, skipped, from_locked_version: locked ? locked.version : null };
+}
+
+// Order-independent text of a JSON value (Postgres jsonb does not keep key order).
+const canonical = (v) => {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v === undefined ? null : v);
+};
+const withoutRevisions = (breakdown) => {
+  const rest = { ...(breakdown || {}) };
+  delete rest.revisions;
+  return canonical(rest);
+};
+const sameMoney = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+
+// A processed run can be brought up to date after salary changed (structure, adjustments, attendance,
+// leave, a re-locked salary calculation). The payslips are recomputed exactly the way processing does and
+// the ones whose figures moved are updated IN PLACE (same payslip, same id), each change kept on the
+// payslip as a revision (when, who, why, the previous figures). Employees who became eligible get a
+// payslip. Payslips with no line any more are left untouched (never deleted). Optionally limited to
+// some employees. If the month's salary is locked, the locked version is what is paid: re-lock (or
+// recalculate) the salary first if the change should show up.
+async function refreshRun(orgId, runId, admin, { reason, org_membership_ids } = {}) {
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
+  if (!run) return { error: 'not_found' };
+  if (run.status !== 'processed') return { error: 'not_processed' };
+
+  const only = org_membership_ids?.length ? new Set(org_membership_ids) : null;
+  const { rows, skipped, locked } = await runLines(orgId, run);
+  const wanted = only ? rows.filter((r) => only.has(r.org_membership_id)) : rows;
+  const existing = await prisma.payslip.findMany({ where: { payroll_run_id: run.id, org_id: orgId } });
+  const byMember = new Map(existing.map((p) => [p.org_membership_id, p]));
+  const now = new Date().toISOString();
+
+  const updated = [];
+  const added = [];
+  const toUpdate = [];
+  const toCreate = [];
+  let unchanged = 0;
+  for (const row of wanted) {
+    const slip = byMember.get(row.org_membership_id);
+    if (!slip) {
+      toCreate.push({ org_id: orgId, payroll_run_id: run.id, ...row });
+      added.push({ org_membership_id: row.org_membership_id, net: Number(row.net) });
+      continue;
+    }
+    const amountsMoved = !sameMoney(slip.gross, row.gross) || !sameMoney(slip.deductions, row.deductions) || !sameMoney(slip.net, row.net);
+    const detailsMoved = withoutRevisions(slip.breakdown) !== withoutRevisions(row.breakdown);
+    if (!amountsMoved && !detailsMoved) {
+      unchanged += 1;
+      continue;
+    }
+    const previous = { gross: Number(slip.gross), deductions: Number(slip.deductions), net: Number(slip.net) };
+    const revisions = [...(Array.isArray(slip.breakdown?.revisions) ? slip.breakdown.revisions : [])];
+    if (amountsMoved) revisions.push({ at: now, by: admin.id, reason, previous });
+    toUpdate.push({ id: slip.id, data: { gross: row.gross, deductions: row.deductions, net: row.net, breakdown: { ...row.breakdown, ...(revisions.length ? { revisions } : {}) } } });
+    if (amountsMoved) updated.push({ org_membership_id: row.org_membership_id, previous_net: previous.net, net: Number(row.net) });
+  }
+  const calcIds = new Set(rows.map((r) => r.org_membership_id));
+  const not_recalculated = existing.filter((p) => (!only || only.has(p.org_membership_id)) && !calcIds.has(p.org_membership_id)).length;
+
+  await prisma.$transaction(async (tx) => {
+    for (const u of toUpdate) await tx.payslip.update({ where: { id: u.id }, data: u.data });
+    if (toCreate.length) await tx.payslip.createMany({ data: toCreate });
+    if (!only) await tx.payrollRun.update({ where: { id: run.id }, data: { skipped } });
+  });
+
+  // Salary already marked paid for an amount that no longer matches the payslip.
+  const movedIds = updated.map((u) => u.org_membership_id);
+  const payments = movedIds.length
+    ? await prisma.salaryPayment.findMany({ where: { org_id: orgId, period_month: run.period_month, period_year: run.period_year, org_membership_id: { in: movedIds } } })
+    : [];
+  const names = new Map((await prisma.orgMembership.findMany({ where: { id: { in: [...updated, ...added].map((x) => x.org_membership_id) } }, select: { id: true, person: { select: { name: true } } } })).map((m) => [m.id, m.person?.name || null]));
+  const named = (list) => list.map((x) => ({ ...x, employee: names.get(x.org_membership_id) || null }));
+  const paid_mismatch = payments
+    .map((p) => ({ org_membership_id: p.org_membership_id, amount_paid: Number(p.amount_paid), net: updated.find((u) => u.org_membership_id === p.org_membership_id)?.net }))
+    .filter((p) => !sameMoney(p.amount_paid, p.net));
+
+  const summary = {
+    period: `${run.period_year}-${String(run.period_month).padStart(2, '0')}`,
+    source: locked ? 'locked' : 'live',
+    locked_version: locked ? locked.version : null,
+    limited_to: only ? [...only] : null,
+    updated: named(updated),
+    added: named(added),
+    unchanged,
+    not_recalculated,
+  };
+  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: admin.id, action: 'payroll_run_refresh', entity_type: 'payroll_run', entity_id: run.id, reason, snapshot: summary } });
+  return { ...summary, run_id: run.id, details_refreshed: toUpdate.length - updated.length, paid_mismatch: named(paid_mismatch) };
 }
 
 async function listRunPayslips(orgId, runId, filters = {}) {
@@ -562,6 +658,7 @@ module.exports = {
   createRun,
   listRuns,
   processRun,
+  refreshRun,
   listRunPayslips,
   attendanceSalary,
   payBasisOf,

@@ -2,7 +2,20 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
-## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (local, uncommitted)
+## 2026-10-08 — Payroll: a processed run can be updated so salary changes reach the payslips (local, uncommitted)
+
+- Payroll > Payroll Runs: processed runs get an **Update payroll** action (reason required). It recalculates the run exactly like processing does (the locked salary version if the month is locked, otherwise live) and updates the payslips whose figures moved **in place** (same payslip id, so links and Salary Payments stay attached). Each amount change is kept on the payslip as a revision (`breakdown.revisions`: when, who, why, previous gross / deductions / net) and the salary slip shows "Revised N time(s)". Employees who became eligible after processing get a payslip; payslips with no line any more are left untouched (never deleted); optional `org_membership_ids` limits it to some employees. The result dialog lists before / after net per employee and warns when a salary was already marked paid for a different amount.
+- API `POST /payroll/runs/:id/refresh` `{ reason, org_membership_ids? }` (admin; 409 on a draft run, 422 without a reason), audited as `payroll_run_refresh`. `processRun` now shares `runLines()` with it. No schema change. Test `server/tests/payroll-run-refresh.test.js` (3/3); `erp-phase4-payroll` and `salary-payments` still pass. Verified in the browser on a throwaway Oct 2026 run (removed afterwards).
+- If the month's salary is locked, the locked figures are what is paid: re-lock / recalculate the salary first (Live Analytics > Salary) if a change should show up.
+
+## 2026-10-08 — Release state: all three branches in main, staging deployed, Gulati admin seeded on staging and production
+
+- `delphic-one-bugFix-and-newImplementation`, `zephyr-bug-fix-new-implementation` and `gulati_industry_bug_and_implementation` are all merged into `origin/main` (PR #33 Zephyr, PR #34 Gulati; Delphic was already in). Check: 0 commits of any branch are missing from main.
+- Staging (`https://delphic-one-new-staging.onrender.com`, Render service `srv-datoc5e0tbcc73elv730`) runs the three branches merged (`bdc14a5`), deployed with the Render CLI from a temp worktree (merge, `git push origin staging-merge:staging`, `render deploys create ... --commit <sha>`). Zephyr admin (`admin@zephyrinfra.in`) already existed on staging; the Gulati admin (`admin@gulatiindustries.in`) was created there with the non-destructive `server/prisma/gulati/seed-admin.js`.
+- Production is a Docker host (containers `delphic-server-1`, `delphic-client-1`, `delphic-db-1`; app at `/app/server` inside the container, nothing on the host). The Gulati admin login was created there with `docker cp` + `docker exec` of the same script. Runbook: [guides/GULATI-ADMIN-SEED.md](../guides/GULATI-ADMIN-SEED.md). Default password is the documented initial one; change it after first sign-in.
+- Shared Prisma client gotcha: `node_modules/.prisma` is one copy for every branch. After switching branches run `cd server && npx prisma generate` and restart the API (stop the running API first on Windows, it locks the engine DLL).
+
+## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (merged to main)
 
 - New sidebar entry **Financials** (`/gulati/financials`, just above "Gulati setup", admin capability `valuation`) with one section, **Financial trends**, laid out like Delphic Global and Zephyr: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table with a **Lock month / Reopen** button per month, and the asset value form (with remove). Page: `GulatiFinancialsPage.jsx`.
 - **Finance** (`/gulati/finance`) keeps its original tabs (Overview, P&L, By trading type, Expenses, Month close); only the Valuation tab I had added there was moved out into Financials. The home page Valuation KPI links to Financials.
