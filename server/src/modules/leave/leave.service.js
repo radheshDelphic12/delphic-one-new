@@ -469,7 +469,8 @@ async function workCapacityFor(orgId, orgMembershipId, date) {
 async function createRequest(
   orgId,
   orgMembershipId,
-  { leave_type_id, from_date, to_date, is_half_day, half_day_session, reason }
+  { leave_type_id, from_date, to_date, is_half_day, half_day_session, reason },
+  { allowPresent = false } = {}
 ) {
   const leaveType = await prisma.leaveType.findFirst({ where: { id: leave_type_id, org_id: orgId } });
   if (!leaveType) return { error: 'leave_type_not_found' };
@@ -482,8 +483,9 @@ async function createRequest(
   if (conflict) return conflict;
 
   // Someone who was present on a date can't take a full day's leave for it
-  // (a half day is still allowed — they worked the other half).
-  if (!is_half_day) {
+  // (a half day is still allowed — they worked the other half). An admin
+  // override (allowPresent) lets it through; see createRequestForEmployee.
+  if (!is_half_day && !allowPresent) {
     const present = await prisma.attendanceRecord.findFirst({
       where: {
         org_id: orgId,
@@ -609,13 +611,14 @@ async function setLeaveManager(orgId, adminUser, orgMembershipId, value) {
 // omitted). Same rules and the same Pending -> approver flow as a self request;
 // an admin IS the approver in this system, so `auto_approve` may approve it in
 // the same step - through decide(), so the approval-time checks still run.
-async function createRequestForEmployee(orgId, actor, { org_membership_id, auto_approve = false, ...body }) {
+async function createRequestForEmployee(orgId, actor, { org_membership_id, auto_approve = false, override_attendance = false, ...body }) {
   const targetId = org_membership_id || actor.org_membership_id;
   const target = await prisma.orgMembership.findFirst({ where: { id: targetId, org_id: orgId }, select: { id: true, left_at: true } });
   if (!target) return { error: 'membership_not_found' };
   if (target.left_at) return { error: 'membership_left' };
 
-  const result = await createRequest(orgId, targetId, body);
+  const allowPresent = override_attendance && !body.is_half_day;
+  const result = await createRequest(orgId, targetId, body, { allowPresent });
   if (result.error || !auto_approve) return result;
 
   const decided = await decide(orgId, result.request.id, actor.org_membership_id, { status: 'approved', reason: 'Applied and approved by admin' }, actor.user_id);
@@ -631,7 +634,48 @@ async function createRequestForEmployee(orgId, actor, { org_membership_id, auto_
     if (overflowDecided.error) await prisma.leaveRequest.update({ where: { id: overflow.request.id }, data: { status: 'cancelled', decision_reason: 'Auto-approval failed' } });
     else overflow = { ...overflow, request: { ...overflow.request, ...overflowDecided.request } };
   }
-  return { request: { ...result.request, ...decided.request }, overflow };
+  const attendance_overridden = allowPresent ? await convertPresentDaysToLeave(orgId, targetId, body, actor.user_id) : 0;
+  return { request: { ...result.request, ...decided.request, ...(allowPresent ? { attendance_overridden } : {}) }, overflow };
+}
+
+// Admin override: the employee was marked present on days now covered by an
+// approved full-day leave. Those records become 'leave' (Leave Day rule: no
+// attendance on a leave day), each one audited and finance-change checked so
+// an already-finalized month is flagged rather than silently rewritten.
+async function convertPresentDaysToLeave(orgId, orgMembershipId, { from_date, to_date, reason }, adminUserId) {
+  const records = await prisma.attendanceRecord.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from_date, lte: to_date }, status: { in: ['present', 'wfh', 'half_day'] } },
+  });
+  for (const existing of records) {
+    const record = await prisma.attendanceRecord.update({
+      where: { id: existing.id },
+      data: { status: 'leave', regularized_by: adminUserId, regularized_reason: `[leave override] ${reason}`.slice(0, 500) },
+    });
+    await detectFinanceChange(orgId, {
+      source_type: 'attendance',
+      source_id: existing.id,
+      date: existing.date,
+      org_membership_id: orgMembershipId,
+      changed_by: adminUserId,
+      description: `Attendance overridden by admin leave: ${existing.status} → leave (${reason})`.slice(0, 500),
+      old_value: { status: existing.status, check_in_at: existing.check_in_at, check_out_at: existing.check_out_at },
+      new_value: { status: record.status, check_in_at: record.check_in_at, check_out_at: record.check_out_at },
+    });
+  }
+  if (records.length) {
+    await prisma.auditLog.create({
+      data: {
+        org_id: orgId,
+        actor_id: adminUserId,
+        action: 'attendance_leave_override',
+        entity_type: 'attendance',
+        entity_id: orgId,
+        reason,
+        snapshot: { employees: [orgMembershipId], records: records.length, days: records.map((r) => ({ date: ymd(r.date), from: r.status })) },
+      },
+    });
+  }
+  return records.length;
 }
 
 async function listMine(orgId, orgMembershipId, { status, page, limit }) {

@@ -296,6 +296,37 @@ describe('admin applies leave (rule 7)', () => {
     expect(unknown.status).toBe(404);
   });
 
+  test('admin override: full-day leave over days marked present is applied + approved, the days become leave, audited; admin only, reason required', async () => {
+    const s = await seed();
+    const present = (date) => prisma.attendanceRecord.create({ data: { org_id: s.org.id, org_membership_id: s.emp.membership.id, date: d(date), status: 'present' } });
+    await present('2026-09-08');
+    await present('2026-09-09');
+    const body = { org_membership_id: s.emp.membership.id, leave_type_id: s.CL.id, from_date: '2026-09-08', to_date: '2026-09-09' };
+
+    // Without the override the present days still block it.
+    expect((await adminApply(s.admin.token, { ...body, auto_approve: true })).status).toBe(409);
+    // Override needs a reason and immediate approval (Zod validation -> 422 via errorHandler).
+    expect((await adminApply(s.admin.token, { ...body, auto_approve: true, override_attendance: true })).status).toBe(422);
+    expect((await adminApply(s.admin.token, { ...body, override_attendance: true, reason: 'Family emergency' })).status).toBe(422);
+    // A Leave Manager who is not an admin cannot override.
+    const manager = await person(s.org);
+    await prisma.orgMembership.update({ where: { id: manager.membership.id }, data: { is_leave_manager: true } });
+    expect((await adminApply(manager.token, { ...body, auto_approve: true, override_attendance: true, reason: 'Family emergency' })).status).toBe(403);
+    expect(await prisma.leaveRequest.count()).toBe(0);
+
+    const res = await adminApply(s.admin.token, { ...body, auto_approve: true, override_attendance: true, reason: 'Family emergency' });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ status: 'approved', attendance_overridden: 2 });
+
+    const records = await prisma.attendanceRecord.findMany({ where: { org_membership_id: s.emp.membership.id }, orderBy: { date: 'asc' } });
+    expect(records.map((r) => r.status)).toEqual(['leave', 'leave']);
+    expect(records[0]).toMatchObject({ regularized_by: s.admin.user.id, regularized_reason: '[leave override] Family emergency' });
+    const audit = await prisma.auditLog.findFirst({ where: { action: 'attendance_leave_override' } });
+    expect(audit).toMatchObject({ actor_id: s.admin.user.id, reason: 'Family emergency' });
+    expect(audit.snapshot).toMatchObject({ records: 2, days: [{ date: '2026-09-08', from: 'present' }, { date: '2026-09-09', from: 'present' }] });
+    expect((await dayOf(s.emp.token, '2026-09-08')).leave_hours).toBe(9);
+  });
+
   test('admin applies for themselves (org_membership_id omitted) and it follows the same rules', async () => {
     const s = await seed();
     const res = await adminApply(s.admin.token, { leave_type_id: s.CL.id, from_date: '2026-09-08', to_date: '2026-09-08' });

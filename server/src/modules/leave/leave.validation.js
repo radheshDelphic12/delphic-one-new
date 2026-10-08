@@ -56,7 +56,18 @@ const adminLeaveRequestSchema = withLeaveRules(z.object({
   ...leaveRequestShape,
   org_membership_id: z.string().uuid().optional(),
   auto_approve: z.boolean().default(false),
-}));
+  // Admin-only special case: a full day's leave on a date the employee was marked
+  // present. Approved in the same step; the present days become leave, audited.
+  override_attendance: z.boolean().default(false),
+}))
+  .refine((v) => !v.override_attendance || v.auto_approve, {
+    message: 'An attendance override is approved immediately - set auto_approve',
+    path: ['auto_approve'],
+  })
+  .refine((v) => !v.override_attendance || (v.reason || '').trim().length >= 3, {
+    message: 'Give a reason (at least 3 characters) for overriding attendance',
+    path: ['reason'],
+  });
 
 const decisionSchema = z.object({
   status: z.enum(['approved', 'rejected']),

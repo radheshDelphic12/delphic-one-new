@@ -2,6 +2,13 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, pushed to `staging` and `main` as 5101ada, test fix 4e74524 on `staging`)
+
+- Special case: an admin can apply a **full-day** leave for an employee on dates they were already marked present (previously refused with `present_on_date`). `POST /leave/requests/admin` takes `override_attendance: true`, which requires `auto_approve: true` and a reason (min 3 chars). Leave Managers who are not admins get 403. Half-day leave never needed it.
+- The leave is approved right away; the employee's present / wfh / half_day attendance rows in the range become `leave` (`regularized_by` = admin, `regularized_reason` = `[leave override] <reason>`), each runs `detectFinanceChange` (a locked month is flagged, not rewritten), and one `audit_logs` row `attendance_leave_override` lists the days and their previous status. Timesheet conflicts are still enforced.
+- UI: "Apply for employee" drawer (Leave page) gets an admin-only "Override attendance (special case)" checkbox; it forces "Approve immediately" and makes the reason required. No migration.
+- Test added in `server/tests/leave-timesheet-integration.test.js` ("admin override ..."); not run locally (no test DB on this machine). First CI run failed only because the test expected 400 for a validation error - this app returns 422 (`errorHandler.js`); fixed in 4e74524.
+
 ## 2026-10-08 - Super Admin: Group Dashboard + full company control (branch `super_admin_branch`, committed locally as d4d86ee, not pushed)
 
 - **Group Finance** tab (default of Group Overview): consolidated + per-company revenue, expenses, profit, assets and valuation (profit x 240 + asset x 3), filters (period, FY quarter/year, Locked/Unlocked/All, company chips), sortable/searchable company table, one-legend-per-company graphs, contribution, rankings, alerts (configurable thresholds), activity feed, company panel with valuation breakdown, drill-down (`GET /super-dashboard/companies/:orgId/drilldown`) and monthly asset values (history kept, revisions audited), CSV and PDF (print view) export. Logo `client/public/group-logo.svg` (a redrawn Gulati Foundation logo; replace with the original file).
@@ -55,6 +62,26 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
 - Gulati Industries trading workspace (copper cathode + trading of deals) built Zephyr-style; plan, decisions and admin-editability matrix in [features/GULATI-INDUSTRIES.md](../features/GULATI-INDUSTRIES.md), test guide [testing/TESTING-GULATI.md](../testing/TESTING-GULATI.md); demo seed `npm run gulati:seed` (server).
 - Financials: valuation = (Delphic profit x 240) + (asset value x 3); month filters made fast (4-way month concurrency in records.service) with an "Updating..." state; salary slip uses the sharp `/delphic-logo.svg`. Zeros on staging/prod mean missing locked records / asset values, not a code fault.
 - Time & Attendance > OT Tickets: admin can apply and edit OT for any employee (`POST /timesheets/overtime-tickets/admin`, admin edit with reason, lock audit + finance-change detection). The Project dropdown lists only projects assigned to the chosen employee on that date (`GET /timesheets/overtime-tickets/employee-projects`); the server rejects unassigned projects with 422 `project_not_assigned`. Tests in server/tests/overtime-tickets.test.js pass.
+
+## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (local, uncommitted)
+
+- New sidebar entry **Financials** (`/gulati/financials`, just above "Gulati setup", admin capability `valuation`) with one section, **Financial trends**, laid out like Delphic Global and Zephyr: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table with a **Lock month / Reopen** button per month, and the asset value form (with remove). Page: `GulatiFinancialsPage.jsx`.
+- **Finance** (`/gulati/finance`) keeps its original tabs (Overview, P&L, By trading type, Expenses, Month close); only the Valuation tab I had added there was moved out into Financials. The home page Valuation KPI links to Financials.
+- `GET /gulati/finance/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months, Unlocked = live figures of months not closed, All = live. Test gulati-trading (13/13).
+
+## 2026-10-07 — Gulati valuation section (local, uncommitted)
+
+- Gulati Finance > Valuation tab: (net profit x 240) + (asset value x 3) per month, admin-entered asset values (`gx_asset_values`, carry-forward), live or closed-months-only profit. Tests in server/tests/gulati-trading.test.js pass (13/13) and gulati-admin-edits (8/8).
+
+## 2026-10-08 — Zephyr Financials reduced to one section: Financial trends (local, uncommitted)
+
+- Zephyr > Financials now has a single section, **Financial trends**, laid out like Delphic Global: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table and the asset value form (with remove). Plan vs actual, Projection, Month close and Statements are no longer on the page (their APIs are untouched). Page and nav need the admin capability `overviewValuation`.
+- API `GET /zephyr/financials/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months (`snapshot.summary`), Unlocked = live figures of months not closed, All = live. Test zephyr-financials (10/10).
+
+## 2026-10-07 — Zephyr valuation section (local, uncommitted)
+
+- Zephyr Financials > Valuation tab: (Zephyr profit x 240) + (asset value x 3) per month, same as Delphic Global, with Revenue / Profit / Valuation month-on-month graphs. Profit = revenue - expense - approved salaries. Admin-entered asset values (`zx_asset_values`, migration `20261007160000`, carry-forward); live or closed-months-only profit. The Overview valuation tile uses the same figure; the old method / multiple / manual setting is retired from the UI. Test in server/tests/zephyr-financials.test.js (10/10).
+
 
 ## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
 
