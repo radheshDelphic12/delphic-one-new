@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, Building2, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, X } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
+import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
+import { orgLogo } from '../../lib/orgLogo.js';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
 import { usePermissions } from '../../lib/permissions.js';
 import Avatar from '../ui/Avatar.jsx';
@@ -19,6 +21,8 @@ import { isZephyrOrg, useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
 import { zephyrNavFor } from '../../lib/zephyr/sections.js';
 import { gulatiNavFor } from '../../lib/gulati/sections.js';
 import { isGulatiOrg, useGulati, gxCan } from '../../lib/gulati/useGulati.js';
+import { acconcyNavFor } from '../../lib/acconcy/sections.js';
+import { isAcconcyOrg, useAcconcy, axCan } from '../../lib/acconcy/useAcconcy.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -83,6 +87,8 @@ const ZEPHYR_EXTRA_NAV = [{ to: '/settings', label: 'Settings', icon: Settings }
 const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings', '/notifications'].includes(pathname);
 // Gulati Industries is standalone in the same way.
 const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
+// Acconcy Finance as well.
+const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settings', '/notifications'].includes(pathname);
 
 const GROUP_NAV_ITEM = { to: '/group-overview', label: 'Group Dashboard', icon: Network, end: true };
 
@@ -100,8 +106,14 @@ export default function AppLayout() {
   // The group superadmin's Group Dashboard is reachable from inside any company workspace.
   const isGroupPath = isGroupSuperadmin && pathname.startsWith('/group-overview');
   const { me: gxMe } = useGulati();
+  const isAcconcy = isAcconcyOrg(user);
+  const { me: axMe } = useAcconcy();
   const navBase = useMemo(
     () => {
+      if (isAcconcy) {
+        const setup = axCan(axMe, 'settings') ? [{ to: '/acconcy/settings', label: 'Acconcy setup', icon: Settings }] : [];
+        return [...acconcyNavFor(axMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
       if (isGulati) {
         const setup = gxCan(gxMe, 'settings') ? [{ to: '/gulati/settings', label: 'Gulati setup', icon: Settings }] : [];
         return [...gulatiNavFor(gxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
@@ -120,7 +132,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
@@ -140,6 +152,20 @@ export default function AppLayout() {
     document.documentElement.classList.add('theme-zephyr');
     return () => document.documentElement.classList.remove('theme-zephyr');
   }, [isZephyr, isGroupPath]);
+
+  // Group view gets the light green of the Gulati Foundation logo, not the company's palette underneath.
+  useEffect(() => {
+    if (!isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-group');
+    return () => document.documentElement.classList.remove('theme-group');
+  }, [isGroupPath]);
+
+  // Acconcy gets the plum palette of its logo.
+  useEffect(() => {
+    if (!isAcconcy || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-acconcy');
+    return () => document.documentElement.classList.remove('theme-acconcy');
+  }, [isAcconcy, isGroupPath]);
 
   // Gulati gets its own calm green palette from the logo.
   useEffect(() => {
@@ -205,6 +231,24 @@ export default function AppLayout() {
             <span className="h-px flex-1 bg-primary-200" />
           </div>
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
+        </Link>
+      )}
+      {isAcconcy && !isGroupPath && !collapsed && (
+        <Link
+          to="/acconcy"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Acconcy Finance home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-3 py-3">
+            <img src={user?.active_org?.logo_url || '/acconcy-logo.png'} alt={user?.active_org?.name || 'Acconcy Finance'} className="h-9 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="flex items-center gap-2 px-4 pb-2">
+            <span className="h-px flex-1 bg-primary-200" />
+            <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-primary-600">Finance</span>
+            <span className="h-px flex-1 bg-primary-200" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--ax-gold))]" />
         </Link>
       )}
       {isGulati && !isGroupPath && !collapsed && (
@@ -282,7 +326,7 @@ export default function AppLayout() {
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-tertiary-700 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900"
                 >
-                  <Building2 className="h-4 w-4 shrink-0 text-tertiary-400" aria-hidden="true" />
+                  <WorkspaceLogo name={m.org.name} logoUrl={orgLogo(m.org)} size="sm" />
                   <span className="min-w-0 flex-1 truncate">{m.org.name}</span>
                   {m.org.enabled_modules?.includes('coming_soon') && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Soon</span>}
                 </button>
@@ -448,7 +492,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

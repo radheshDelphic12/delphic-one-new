@@ -63,6 +63,21 @@ import GulatiPeoplePage from '../pages/gulati/GulatiPeoplePage.jsx';
 import GulatiMyWorkPage from '../pages/gulati/GulatiMyWorkPage.jsx';
 import GulatiSettingsPage from '../pages/gulati/GulatiSettingsPage.jsx';
 import { isGulatiOrg } from '../lib/gulati/useGulati.js';
+import AcconcyHomePage from '../pages/acconcy/AcconcyHomePage.jsx';
+import AcconcyPartiesPage from '../pages/acconcy/AcconcyPartiesPage.jsx';
+import AcconcyLeadsPage from '../pages/acconcy/AcconcyLeadsPage.jsx';
+import AcconcyDealsPage from '../pages/acconcy/AcconcyDealsPage.jsx';
+import AcconcyDealDetailPage from '../pages/acconcy/AcconcyDealDetailPage.jsx';
+import AcconcyFinancePage from '../pages/acconcy/AcconcyFinancePage.jsx';
+import AcconcyFinancialsPage from '../pages/acconcy/AcconcyFinancialsPage.jsx';
+import AcconcyInvestmentsPage from '../pages/acconcy/AcconcyInvestmentsPage.jsx';
+import AcconcySalariesPage from '../pages/acconcy/AcconcySalariesPage.jsx';
+import AcconcyReportsPage from '../pages/acconcy/AcconcyReportsPage.jsx';
+import AcconcyTasksPage from '../pages/acconcy/AcconcyTasksPage.jsx';
+import AcconcyPeoplePage from '../pages/acconcy/AcconcyPeoplePage.jsx';
+import AcconcyMyWorkPage from '../pages/acconcy/AcconcyMyWorkPage.jsx';
+import AcconcySettingsPage from '../pages/acconcy/AcconcySettingsPage.jsx';
+import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
@@ -108,6 +123,8 @@ function HomePage() {
   if (isZephyrOrg(user)) return <Navigate to="/zephyr" replace />;
   // Gulati Industries is a standalone workspace with its own home.
   if (isGulatiOrg(user)) return <Navigate to="/gulati" replace />;
+  // Acconcy Finance is a standalone workspace with its own home.
+  if (isAcconcyOrg(user)) return <Navigate to="/acconcy" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -175,6 +192,15 @@ function RequireGulati({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isGulatiOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Acconcy workspace needs the `acconcy` module on the ACTIVE company. */
+function RequireAcconcy({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isAcconcyOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -293,6 +319,21 @@ export default function App() {
         <Route path="gulati/my-work" element={<RequireGulati><GulatiMyWorkPage /></RequireGulati>} />
         <Route path="gulati/settings" element={<RequireGulati><GulatiSettingsPage /></RequireGulati>} />
         <Route path="gulati/*" element={<Navigate to="/gulati" replace />} />
+        <Route path="acconcy" element={<RequireAcconcy><AcconcyHomePage /></RequireAcconcy>} />
+        <Route path="acconcy/parties" element={<RequireAcconcy><AcconcyPartiesPage /></RequireAcconcy>} />
+        <Route path="acconcy/leads" element={<RequireAcconcy><AcconcyLeadsPage /></RequireAcconcy>} />
+        <Route path="acconcy/deals" element={<RequireAcconcy><AcconcyDealsPage /></RequireAcconcy>} />
+        <Route path="acconcy/deals/:id" element={<RequireAcconcy><AcconcyDealDetailPage /></RequireAcconcy>} />
+        <Route path="acconcy/finance" element={<RequireAcconcy><AcconcyFinancePage /></RequireAcconcy>} />
+        <Route path="acconcy/financials" element={<RequireAcconcy><AcconcyFinancialsPage /></RequireAcconcy>} />
+        <Route path="acconcy/investments" element={<RequireAcconcy><AcconcyInvestmentsPage /></RequireAcconcy>} />
+        <Route path="acconcy/salaries" element={<RequireAcconcy><AcconcySalariesPage /></RequireAcconcy>} />
+        <Route path="acconcy/reports" element={<RequireAcconcy><AcconcyReportsPage /></RequireAcconcy>} />
+        <Route path="acconcy/tasks" element={<RequireAcconcy><AcconcyTasksPage /></RequireAcconcy>} />
+        <Route path="acconcy/people" element={<RequireAcconcy><AcconcyPeoplePage /></RequireAcconcy>} />
+        <Route path="acconcy/my-work" element={<RequireAcconcy><AcconcyMyWorkPage /></RequireAcconcy>} />
+        <Route path="acconcy/settings" element={<RequireAcconcy><AcconcySettingsPage /></RequireAcconcy>} />
+        <Route path="acconcy/*" element={<Navigate to="/acconcy" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route

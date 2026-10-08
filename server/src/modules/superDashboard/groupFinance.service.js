@@ -3,6 +3,7 @@ const prisma = require('../../config/db');
 const { num, round2 } = require('../../lib/vertical');
 const financialsService = require('../financials/financials.service');
 const gulatiFinance = require('../gulati/finance.service');
+const acconcyFinance = require('../acconcy/finance.service');
 const zephyrMoney = require('../zephyr/money.service');
 const records = require('../calculations/records.service');
 
@@ -38,7 +39,7 @@ const overviewQuerySchema = z
 const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
 
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
-const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : 'delphic');
+const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : 'delphic');
 
 // Indian financial year (April - March), the convention the Zephyr presets already use.
 function bucketOf(month, granularity) {
@@ -72,6 +73,16 @@ async function companyMonths(org, from, to, state) {
       month: m.month, revenue: m.revenue, profit: m.profit, expenses: round2(m.revenue - m.profit),
       asset_value: m.asset_value, asset_value_carried: m.asset_value_carried, profit_x: m.profit_x, asset_value_x: m.asset_value_x,
       valuation: m.valuation, closed: Boolean(m.closed),
+    }));
+  }
+  if (kind === 'acconcy') {
+    // Acconcy computes every month live from its own ledger, salaries, assets and investments (no per-month lock view).
+    const at = await acconcyFinance.valuationTrend(org.id, { from, to });
+    if (at.error) return [];
+    return at.months.map((m) => ({
+      month: m.month, revenue: m.revenue, profit: m.profit, expenses: round2(m.revenue - m.profit),
+      asset_value: m.asset_value, asset_value_carried: false, profit_x: m.profit_component, asset_value_x: m.asset_component,
+      valuation: m.total, closed: Boolean(m.closed),
     }));
   }
   const t = await financialsService.trends(org.id, { months: 12, state, from_year: Number(from.slice(0, 4)), from_month: Number(from.slice(5)), to_year: Number(to.slice(0, 4)), to_month: Number(to.slice(5)) });
@@ -285,6 +296,10 @@ async function drilldown(org, query) {
     const p = await gulatiFinance.pnl(org.id, { from: `${q.from}-01`, to: monthEndDay(q.to) });
     sec('deals', 'Deals', ['Deal', 'Type', 'Sales', 'Net profit'], p.by_deal.map((d) => [d.code ? `${d.code} ${d.name || ''}`.trim() : 'Company-level', d.trading_type || '', d.sales_revenue, d.net_profit]));
     sec('types', 'Trading types', ['Type', 'Sales', 'Net profit'], p.by_trading_type.map((t) => [t.label, t.sales_revenue, t.net_profit]));
+  } else if (kind === 'acconcy') {
+    const p = await acconcyFinance.pnl(org.id, { from: `${q.from}-01`, to: monthEndDay(q.to) });
+    sec('deals', 'Deals', ['Deal', 'Service', 'Revenue', 'Net profit'], p.by_deal.map((d) => [d.code ? `${d.code} ${d.name || ''}`.trim() : 'Company-level', d.service_type || '', d.revenue, d.net_profit]));
+    sec('services', 'Services', ['Service', 'Revenue', 'Net profit'], p.by_service.map((t) => [t.label, t.revenue, t.net_profit]));
   } else {
     const merged = new Map();
     for (let y = Number(q.from.slice(0, 4)); y <= Number(q.to.slice(0, 4)); y += 1) {
@@ -308,6 +323,7 @@ async function drilldown(org, query) {
 async function listAssetValues(org) {
   const kind = kindOf(org);
   if (kind === 'gulati') return (await prisma.gxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
+  if (kind === 'acconcy') return [];
   if (kind === 'zephyr') return (await prisma.zxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
   const rows = await prisma.financialAssetValue.findMany({ where: { org_id: org.id }, orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }] });
   return rows.map((r) => ({ id: r.id, month: `${r.period_year}-${String(r.period_month).padStart(2, '0')}`, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
@@ -325,6 +341,7 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
   if (!org) return { error: 'not_found' };
   if (input.month > currentMonth()) return { error: 'future_month' };
   const kind = kindOf(org);
+  if (kind === 'acconcy') return { error: 'managed_in_company' };
   const before = (await listAssetValues(org)).find((r) => r.month === input.month) || null;
   let result;
   if (kind === 'gulati') result = await gulatiFinance.setAssetValue(org.id, actorId, input);
