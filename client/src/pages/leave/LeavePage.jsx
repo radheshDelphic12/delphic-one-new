@@ -52,6 +52,7 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
   const [fields, setFields] = useState({
     org_membership_id: '',
     auto_approve: false,
+    override_attendance: false,
     leave_type_id: '',
     from_date: '',
     to_date: '',
@@ -66,6 +67,7 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
       setFields({
         org_membership_id: '',
         auto_approve: false,
+        override_attendance: false,
         leave_type_id: types[0]?.id || '',
         from_date: '',
         to_date: '',
@@ -80,14 +82,17 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
     setFields((current) => ({ ...current, [key]: value }));
   }
 
+  // Admin special case: full-day leave over days marked present (approved at once, reason required).
+  const overrideOn = admin && fields.override_attendance && !fields.is_half_day;
+
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      const { org_membership_id: employeeId, auto_approve: autoApprove, ...rest } = fields;
+      const { org_membership_id: employeeId, auto_approve: autoApprove, override_attendance: _override, ...rest } = fields;
       const body = { ...rest, half_day_session: fields.is_half_day ? fields.half_day_session : null };
       const { data } = admin
-        ? await apiClient.post('/leave/requests/admin', { ...body, ...(employeeId ? { org_membership_id: employeeId } : {}), auto_approve: autoApprove })
+        ? await apiClient.post('/leave/requests/admin', { ...body, ...(employeeId ? { org_membership_id: employeeId } : {}), auto_approve: overrideOn || autoApprove, ...(overrideOn ? { override_attendance: true } : {}) })
         : await apiClient.post('/leave/requests', body);
       onSaved(data.data);
     } catch (err) {
@@ -101,7 +106,7 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
     <Drawer open={open} title={admin ? 'Apply leave for an employee' : 'Request leave'} onClose={onClose} size="md" tone="create" footer={(
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="leave-request-form" className="btn-primary" disabled={saving || !fields.leave_type_id || !fields.from_date || !fields.to_date}>{saving ? 'Submitting...' : admin && fields.auto_approve ? 'Apply and approve' : 'Submit request'}</button>
+        <button type="submit" form="leave-request-form" className="btn-primary" disabled={saving || !fields.leave_type_id || !fields.from_date || !fields.to_date || (overrideOn && fields.reason.trim().length < 3)}>{saving ? 'Submitting...' : admin && (fields.auto_approve || overrideOn) ? 'Apply and approve' : 'Submit request'}</button>
       </>
     )}>
       <form id="leave-request-form" onSubmit={submit} className="space-y-4">
@@ -139,8 +144,9 @@ function LeaveRequestDrawer({ types, open, onClose, onSaved, admin = false }) {
             </div>
           </fieldset>
         )}
-        {admin && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={fields.auto_approve} onChange={(event) => set('auto_approve', event.target.checked)} /><span>Approve immediately<span className="block text-xs text-tertiary-500">Otherwise it goes to the approval queue as Pending. Either way it is refused if the employee already has a conflicting timesheet.</span></span></label>}
-        <label className="block text-xs font-medium text-tertiary-600">Reason<textarea value={fields.reason} onChange={(event) => set('reason', event.target.value)} rows={4} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
+        {admin && !fields.is_half_day && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={fields.override_attendance} onChange={(event) => set('override_attendance', event.target.checked)} /><span>Override attendance (special case)<span className="block text-xs text-tertiary-500">Applies the leave even on days the employee was marked present. Those days change to leave and are audited, and the leave is approved immediately. A reason is required.</span></span></label>}
+        {admin && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={fields.auto_approve || overrideOn} disabled={overrideOn} onChange={(event) => set('auto_approve', event.target.checked)} /><span>Approve immediately<span className="block text-xs text-tertiary-500">Otherwise it goes to the approval queue as Pending. Either way it is refused if the employee already has a conflicting timesheet.</span></span></label>}
+        <label className="block text-xs font-medium text-tertiary-600">Reason{overrideOn && <span className="font-normal text-tertiary-500"> (required - why the attendance is changed, e.g. emergency)</span>}<textarea required={overrideOn} minLength={overrideOn ? 3 : undefined} value={fields.reason} onChange={(event) => set('reason', event.target.value)} rows={4} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
       </form>
     </Drawer>
   );

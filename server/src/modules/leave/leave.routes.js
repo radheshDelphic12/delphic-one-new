@@ -145,6 +145,7 @@ router.post(
   authorizeLeaveManager,
   asyncHandler(async (req, res) => {
     const body = adminLeaveRequestSchema.parse(req.body);
+    if (body.override_attendance && req.user.role !== 'admin') return fail(res, 403, 'Only an admin can apply leave over a day the employee was marked present');
     const result = await service.createRequestForEmployee(req.user.org_id, { org_membership_id: req.user.org_membership_id, user_id: req.user.id }, body);
     if (result.error) return failRequest(res, result, 'The employee');
     return created(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);

@@ -2,6 +2,13 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, local, uncommitted)
+
+- Special case: an admin can apply a **full-day** leave for an employee on dates they were already marked present (previously refused with `present_on_date`). `POST /leave/requests/admin` takes `override_attendance: true`, which requires `auto_approve: true` and a reason (min 3 chars). Leave Managers who are not admins get 403. Half-day leave never needed it.
+- The leave is approved right away; the employee's present / wfh / half_day attendance rows in the range become `leave` (`regularized_by` = admin, `regularized_reason` = `[leave override] <reason>`), each runs `detectFinanceChange` (a locked month is flagged, not rewritten), and one `audit_logs` row `attendance_leave_override` lists the days and their previous status. Timesheet conflicts are still enforced.
+- UI: "Apply for employee" drawer (Leave page) gets an admin-only "Override attendance (special case)" checkbox; it forces "Approve immediately" and makes the reason required. No migration.
+- Test added in `server/tests/leave-timesheet-integration.test.js` ("admin override ..."); not run locally (no test DB on this machine) - CI runs it.
+
 ## 2026-10-08 - Super Admin: Group Dashboard + full company control (branch `super_admin_branch`, committed locally as d4d86ee, not pushed)
 
 - **Group Finance** tab (default of Group Overview): consolidated + per-company revenue, expenses, profit, assets and valuation (profit x 240 + asset x 3), filters (period, FY quarter/year, Locked/Unlocked/All, company chips), sortable/searchable company table, one-legend-per-company graphs, contribution, rankings, alerts (configurable thresholds), activity feed, company panel with valuation breakdown, drill-down (`GET /super-dashboard/companies/:orgId/drilldown`) and monthly asset values (history kept, revisions audited), CSV and PDF (print view) export. Logo `client/public/group-logo.svg` (a redrawn Gulati Foundation logo; replace with the original file).
