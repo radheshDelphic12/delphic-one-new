@@ -1,4 +1,6 @@
 const prisma = require('../../config/db');
+const { ensureGroupAdminMemberships } = require('../../lib/groupAccess');
+const { MODULES } = require('./orgs.validation');
 const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { resolveWorkerFields, WORKER_FIELDS } = require('../../lib/workerType');
 const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
@@ -17,6 +19,8 @@ const MEMBERSHIP_SELECT = {
 
 // Powers the org switcher UI: every org the caller currently belongs to.
 async function listMyMemberships(userId) {
+  // Group superadmins see (and can switch to) every company of their group.
+  await ensureGroupAdminMemberships(userId);
   return prisma.orgMembership.findMany({
     where: { person_id: userId, employment_status: { in: WORKING_STATUSES } },
     orderBy: { joined_at: 'asc' },
@@ -63,9 +67,18 @@ async function updateValuation(orgGroupIds, orgId, valuation) {
 async function updateSettings(orgGroupIds, orgId, patch) {
   const org = await prisma.org.findFirst({ where: { id: orgId, org_group_id: { in: orgGroupIds } } });
   if (!org) return { error: 'not_found' };
+  const { coming_soon: comingSoon, ...rest } = patch;
+  const data = { ...rest };
+  if (rest.enabled_modules !== undefined || comingSoon !== undefined) {
+    // Only the optional verticals are edited here; markers such as 'gulati' / 'zephyr' / 'coming_soon' are kept.
+    const verticals = rest.enabled_modules !== undefined ? rest.enabled_modules : org.enabled_modules.filter((m) => MODULES.includes(m));
+    const markers = org.enabled_modules.filter((m) => !MODULES.includes(m) && m !== 'coming_soon');
+    const soon = comingSoon !== undefined ? comingSoon : org.enabled_modules.includes('coming_soon');
+    data.enabled_modules = [...verticals, ...markers, ...(soon ? ['coming_soon'] : [])];
+  }
   const updated = await prisma.org.update({
     where: { id: orgId },
-    data: patch,
+    data,
     select: { id: true, name: true, enabled_modules: true, valuation_method: true, valuation_multiple: true, valuation: true },
   });
   return { org: updated };

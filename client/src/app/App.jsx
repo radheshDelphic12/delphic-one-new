@@ -325,6 +325,14 @@ export default function App() {
           }
         />
         <Route
+          path="group-overview/settings"
+          element={
+            <RequireGroupSuperadmin>
+              <GroupOverviewPage />
+            </RequireGroupSuperadmin>
+          }
+        />
+        <Route
           path="reports"
           element={
             <RequireMasterWorkspace>
