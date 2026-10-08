@@ -23,6 +23,7 @@ const ERROR_STATUS = {
   forbidden_type_change: [403, 'Only an admin can change the account type'],
   forbidden_brought_by: [403, 'Only an admin can change "Brought by"'],
   user_not_found: [400, 'Selected owner was not found or is inactive'],
+  is_project: [409, 'This is a project, not a client account — manage it under Finance → Projects'],
 };
 
 const list = asyncHandler(async (req, res) => {

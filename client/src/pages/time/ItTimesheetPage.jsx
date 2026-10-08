@@ -7,8 +7,12 @@ import { useLeaveDay } from '../../lib/useLeaveDay.js';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Badge from '../../components/ui/Badge.jsx';
+import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
+import ProjectDayHint from '../../components/finance/ProjectDayHint.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
+import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -17,8 +21,17 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Last month stays open through the 5th. After that, only the current month.
+function earliestLogIso() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (now.getDate() <= 5 ? 1 : 0), 1);
+  const month = String(start.getMonth() + 1).padStart(2, '0');
+  const day = String(start.getDate()).padStart(2, '0');
+  return `${start.getFullYear()}-${month}-${day}`;
+}
+
 function blankRow() {
-  return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', notes: '' };
+  return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
 
 function dateLabel(iso) {
@@ -42,12 +55,15 @@ export default function ItTimesheetPage() {
   const [saving, setSaving] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState(null);
+  // Attendance-paid people raise overtime as a ticket (OT Tickets tab) instead of logging OT hours here.
+  const [usesTickets, setUsesTickets] = useState(false);
   const leave = useLeaveDay(date);
 
   const projectOptions = useMemo(() => (projects || []).map((p) => ({ value: p.id, label: p.name })), [projects]);
 
   useEffect(() => {
     apiClient.get('/timesheets/my-projects').then(({ data }) => setProjects(data.data || [])).catch(() => setProjects([]));
+    apiClient.get('/timesheets/overtime-tickets', { params: { scope: 'mine' } }).then(({ data }) => setUsesTickets(Boolean(data.data?.uses_tickets))).catch(() => setUsesTickets(false));
   }, []);
 
   function loadTasks() {
@@ -79,8 +95,11 @@ export default function ItTimesheetPage() {
     }
   }
 
+  const [weekKey, setWeekKey] = useState(0);
+
   async function load() {
     setLoading(true);
+    setWeekKey((k) => k + 1);
     try {
       const { data } = await apiClient.get('/timesheets/my-log', { params: period });
       setDays(data.data || []);
@@ -93,8 +112,34 @@ export default function ItTimesheetPage() {
 
   useEffect(() => { load(); }, [period.month, period.year]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const monthTotal = useMemo(() => days.reduce((sum, d) => sum + d.total_hours, 0), [days]);
-  const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0), 0), [rows]);
+  // Filters on the month's log: a Sunday–Saturday week and/or one project.
+  const [weekFilter, setWeekFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  useEffect(() => { setWeekFilter(''); }, [period.month, period.year]);
+  const weeks = useMemo(() => monthWeeks(period), [period]);
+  const logProjects = useMemo(() => {
+    const byId = new Map();
+    for (const d of days) for (const e of d.entries) if (e.account?.id) byId.set(e.account.id, e.account.name);
+    return [...byId].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [days]);
+  const shownDays = useMemo(() => {
+    const week = weeks.find((w) => w.key === weekFilter);
+    return days
+      .filter((d) => !week || (d.date >= week.from && d.date <= week.to))
+      .map((d) => {
+        if (!projectFilter) return d;
+        const entries = d.entries.filter((e) => e.account?.id === projectFilter);
+        return { ...d, entries, total_hours: Math.round(entries.reduce((s, e) => s + e.hours + (e.overtime_hours || 0), 0) * 100) / 100 };
+      })
+      .filter((d) => d.entries.length > 0);
+  }, [days, weeks, weekFilter, projectFilter]);
+  const filtered = Boolean(weekFilter || projectFilter);
+
+  const monthTotal = useMemo(() => shownDays.reduce((sum, d) => sum + d.total_hours, 0), [shownDays]);
+
+  // Overtime is per day (beyond the shift), so it follows the week filter, not a project.
+  const monthOt = useMemo(() => (projectFilter ? 0 : shownDays.reduce((sum, d) => sum + (d.ot_hours || 0), 0)), [shownDays, projectFilter]);
+  const draftTotal = useMemo(() => rows.reduce((sum, r) => sum + (Number(r.hours) || 0) + (Number(r.overtime_hours) || 0), 0), [rows]);
   const openTasks = tasks.filter((t) => t.status !== 'completed');
 
   function setRow(key, field, value) {
@@ -120,6 +165,7 @@ export default function ItTimesheetPage() {
           date,
           account_id: row.account_id,
           hours: Number(row.hours),
+          overtime_hours: Number(row.overtime_hours) || 0,
           notes: row.notes.trim() || undefined,
         });
       }
@@ -192,7 +238,8 @@ export default function ItTimesheetPage() {
         <form onSubmit={saveDay} className="mt-3 space-y-3">
           <label className="block text-xs font-medium text-tertiary-600">
             Date
-            <input required type="date" max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <input required type="date" min={earliestLogIso()} max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-1 block font-normal text-tertiary-500">Last month can be filled until the 5th of this month.</span>
           </label>
           <LeaveDayNotice leave={leave} />
           {noProjects && (
@@ -202,13 +249,21 @@ export default function ItTimesheetPage() {
           )}
           <div className="space-y-2">
             {rows.map((row) => (
-              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_2.4fr_auto]">
+              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_0.6fr_2.2fr_auto]">
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
-                <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
-                <input placeholder="Description" value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                {usesTickets ? (
+                  <span className="self-center text-xs text-tertiary-500" title="Overtime is raised as a ticket and approved by your manager">OT: use OT Tickets</span>
+                ) : (
+                  <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
+                )}
+                <textarea placeholder="Description" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] resize-y rounded-xl border px-3 py-2 text-sm" />
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
                 </button>
+                {row.account_id && (
+                  <div className="sm:col-span-5"><ProjectDayHint accountId={row.account_id} date={date} reloadKey={weekKey} /></div>
+                )}
               </div>
             ))}
           </div>
@@ -230,24 +285,37 @@ export default function ItTimesheetPage() {
             <select value={period.year} onChange={(e) => setPeriod((p) => ({ ...p, year: Number(e.target.value) }))} className="rounded-xl border px-3 py-1.5 text-sm">
               {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
+            <select value={weekFilter} onChange={(e) => setWeekFilter(e.target.value)} aria-label="Week" className="rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">Whole month</option>
+              {weeks.map((w) => <option key={w.key} value={w.key}>Week {w.label}</option>)}
+            </select>
+            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} aria-label="Project" className="max-w-[14rem] rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">All projects</option>
+              {logProjects.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">Month total: {monthTotal.toFixed(1)} hrs</span>
+            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
           </div>
         </div>
 
-        {!loading && days.length === 0 ? (
-          <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
+        {!loading && shownDays.length === 0 ? (
+          filtered
+            ? <EmptyState icon={Timer} title="Nothing matches these filters" description="Try another week or project." />
+            : <EmptyState icon={Timer} title="Nothing logged this month yet" description="Log a day above to see it here." />
         ) : (
           <div className="space-y-3">
-            {days.map((day) => (
+            {shownDays.map((day) => (
               <div key={day.date} className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
                 <div className="flex items-center justify-between bg-tertiary-50 px-4 py-2">
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>
-                  <span className="text-xs font-medium text-tertiary-600">{day.total_hours} hrs</span>
+                  <span className="text-xs font-medium text-tertiary-600">
+                    {day.total_hours} hrs
+                    {day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
+                  </span>
                 </div>
                 <table className="w-full text-sm">
                   <thead>
@@ -269,10 +337,13 @@ export default function ItTimesheetPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}</td>
-                        <td className="px-4 py-1.5 text-tertiary-500">{entry.notes || '—'}</td>
+                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
+                        <td className="px-4 py-1.5 text-tertiary-500"><NoteText text={entry.notes} /></td>
                         <td className="px-4 py-1.5">
-                          <Badge value={entry.status} label={STATUS_LABEL[entry.status] || entry.status} />
+                          <StatusBadge status={entry.status} label={STATUS_LABEL[entry.status]} size="xs" />
+                          {entry.status === 'approved' && entry.approved_by && (
+                            <p className="mt-0.5 text-[11px] text-tertiary-500">by {entry.approved_by.name}{entry.approved_at ? ` · ${new Date(entry.approved_at).toLocaleString()}` : ''}</p>
+                          )}
                           {entry.status === 'rejected' && entry.decision_reason && (
                             <p className="mt-0.5 text-xs text-danger-600">Manager: {entry.decision_reason}</p>
                           )}

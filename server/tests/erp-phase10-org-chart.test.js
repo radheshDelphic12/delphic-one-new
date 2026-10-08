@@ -29,7 +29,7 @@ async function seedEmployeeUnder(org, managerMembershipId, role = 'recruiter') {
 
 describe('Phase 10 — org chart requires an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/org-chart'), access_token);
     expect(res.status).toBe(403);
@@ -112,7 +112,10 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     const adminBMembership = await createOrgMembership(adminB.id, orgB.id, { role: 'admin' });
     await seedEmployeeUnder(orgB, adminBMembership.id);
 
-    const groupSuper = await createUser({ role: 'admin' });
+    // withOrg: false — no membership anywhere, so login doesn't enroll them
+    // in the helper's test org (a second holding group would break the
+    // single-group fallback this test relies on).
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
     await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
     const { access_token: groupSuperToken } = await loginAs(groupSuper);
 
@@ -123,5 +126,23 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     const chartB = res.body.data.find((c) => c.org.id === orgB.id);
     expect(chartA.headcount).toBe(2);
     expect(chartB.headcount).toBe(2);
+  });
+});
+
+describe('Team view data', () => {
+  test('the chart carries this org\'s teams (with lead) and each member\'s team and worker type', async () => {
+    const { org, access_token, membership: adminMembership } = await seedOrgAdmin();
+    const { membership: lead } = await seedEmployeeUnder(org, adminMembership.id);
+    const { membership: member } = await seedEmployeeUnder(org, lead.id);
+    const team = await prisma.team.create({ data: { org_id: org.id, name: 'Nexosoft', lead_membership_id: lead.id } });
+    await prisma.orgMembership.updateMany({ where: { id: { in: [lead.id, member.id] } }, data: { team_id: team.id } });
+    const other = await createOrg({ name: 'Other', slug: 'other' });
+    await prisma.team.create({ data: { org_id: other.id, name: 'Elsewhere' } });
+
+    const res = await authed(request(app).get('/api/v1/org-chart'), access_token);
+    expect(res.body.data.teams).toEqual([expect.objectContaining({ id: team.id, name: 'Nexosoft', lead_membership_id: lead.id, manager_membership_id: null, open_positions: 0, sort_order: 0 })]);
+    const leadNode = res.body.data.roots[0].direct_reports[0];
+    expect(leadNode).toMatchObject({ team_id: team.id, worker_type: 'full_time_employee' });
+    expect(leadNode.direct_reports[0]).toMatchObject({ id: member.id, team_id: team.id });
   });
 });

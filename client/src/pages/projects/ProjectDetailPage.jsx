@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Paperclip, Plus, Trash2 } from 'lucide-react';
-import apiClient from '../../lib/apiClient.js';
+import apiClient, { openAuthenticatedFile } from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -96,7 +96,7 @@ export default function ProjectDetailPage() {
     { key: 'reference_no', header: 'Reference', render: (r) => r.reference_no || '-' },
     { key: 'expires_on', header: 'Expires', render: (r) => (r.expires_on ? dateLabel(r.expires_on) : '-') },
     { key: 'status', header: 'Status', render: (r) => <Pill value={r.status} /> },
-    { key: 'file', header: 'File', render: (r) => (r.file_url ? <a className="inline-flex items-center gap-1 text-primary-700 hover:underline" href={r.file_url} target="_blank" rel="noreferrer"><Paperclip className="h-3.5 w-3.5" />Open</a> : '-') },
+    { key: 'file', header: 'File', render: (r) => (r.file_url ? <button type="button" className="inline-flex items-center gap-1 text-primary-700 hover:underline" onClick={() => openAuthenticatedFile(r.file_url).catch((err) => pushError(err.message, 'Could not open file'))}><Paperclip className="h-3.5 w-3.5" />Open</button> : '-') },
     { key: 'x', header: '', render: (r) => <button type="button" aria-label="Delete document" className="text-tertiary-400 hover:text-red-600" onClick={() => act(() => apiClient.delete(`/projects/${id}/documents/${r.id}`), 'Document removed')}><Trash2 className="h-4 w-4" /></button> },
   ];
   const contractCols = [

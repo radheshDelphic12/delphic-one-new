@@ -4,6 +4,38 @@ Working task list. Check off / move to [PROGRESS.md](PROGRESS.md) as items land.
 
 **Sprint tickets live in [SPRINT-PLAN.md](SPRINT-PLAN.md)** (Aug 21 → Aug 28 deploy).
 
+## Zephyr Infrastructure workspace (2026-10-01, branch `zephyr-bug-fix-new-implementation`)
+
+Standalone `Zx` module, nothing reused from Delphic Global. Spec + phases: [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md).
+
+- [x] Decisions made (spec section 11): logins admin+manager+staff, fixed-rate salaries, dependency order
+- [ ] Z0 foundation + isolation (PAUSED): [x] schema + migration + db.js org-stamp; [ ] modules/zephyr (access, audit, /me, settings, categories, people) + app.js mount; [ ] client shell (ZEPHYR_NAV, /zephyr home, guard, settings); [ ] seed Zephyr org to ['zephyr']; [ ] zephyr-foundation tests + wider erp-verticals/workspace-isolation/auth run
+- [ ] Z1 Client/Vendor
+- [ ] Z2 Leads
+- [ ] Z3 Projects
+- [ ] Z4 Employee/Contractor + salary records
+- [ ] Z5 Money ledger (revenue / expense)
+- [ ] Z6 Company overview (revenue, expense, salaries, profit, valuation)
+- [ ] Z7 Financials (plan vs actual, month close, projections, statements)
+- [ ] Z8 Hardening: seed, testing guide, QA
+
+## Timesheet-based pay + overtime approval (2026-09-30, branch `delphic-one-bugFix-and-newImplementation`, uncommitted)
+
+See PROGRESS.md 2026-09-30 entry.
+
+- [x] `workHours.service`, `TimesheetDayOvertime`, `is_working_day`, Sun→Sat
+      weekly lock, week/hours/admin-entry/OT-decision endpoints, Approvals OT
+      section + `WeekHoursView`, salary/payroll on approved hours, Projects
+      hourly billing total.
+- [ ] Fix local test DB credentials, then run `timesheet-payroll-rules`,
+      `timesheet-workflow`, `project-pnl-fx` and the full server suite.
+- [ ] Apply migration `20261001090000_timesheet_overtime_workday` locally
+      (`prisma migrate deploy`) and smoke-test Approvals → OT + payroll run.
+- [ ] Normalise line endings before committing (most of the diff is CRLF
+      churn); commit when ready.
+- [ ] Decide how `comp_off` OT turns into leave balance (currently only
+      recorded, not credited).
+
 ## Multi-company ERP platform (2026-09-15, branch `feature/multi-company-erp`)
 
 Plan: [MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md](../architecture/MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md) · Design: [MULTI-COMPANY-ERP-PLATFORM-HLD.md](../architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md).
@@ -732,4 +764,5 @@ Full design + as-built: [features/RD-NOTIFICATIONS-AND-CALENDAR.md](../features/
 - [x] 2026-08-29 — PROGRESS/TODO + API-Spec pipeline board / `progress` field + AGENTS/ARCHITECTURE notes for matrix + closure rings.
 - [x] 2026-09-01 — PROGRESS/TODO updated for admin-editable account type, dashboard KPI fixes + client/vendor + stuck split (4-col grid), and the `SearchableSelect` dropdown migration.
 - [x] 2026-09-01 — PROGRESS/TODO updated for vendor-name-on-cards, the candidate-stage filter fix + pipeline filter cleanup, and the two coverage-gap report tabs.
+- [x] **2026-10-08 Acconcy Finance workspace** (A0-A9, local branch `acconcy-finance-workspace`, uncommitted): own `Ax*` module under `/api/v1/acconcy` mirroring Gulati / Zephyr - six-service leads and deals, ledger-computed profit, investments (realised vs unrealised), assets, salaries, P&L with every filter, valuation = profit x 240 + assets x 3 (configurable, with history), month locking, dashboard, reports, Group Dashboard feed. Plan / work log: [../features/ACCONCY-FINANCE.md](../features/ACCONCY-FINANCE.md); test guide: [../testing/TESTING-ACCONCY.md](../testing/TESTING-ACCONCY.md); go-live runbook: [../guides/ACCONCY-ADMIN-SEED.md](../guides/ACCONCY-ADMIN-SEED.md). Open: browser click-through, answers to Q1-Q3 (defaults applied).
 - [ ] Keep this file and PROGRESS.md current each session.

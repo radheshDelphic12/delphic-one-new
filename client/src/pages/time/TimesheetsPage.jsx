@@ -10,6 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import NoteText from '../../components/NoteText.jsx';
 
 const STATUS_LABEL = { submitted: 'Pending', approved: 'Approved', rejected: 'Rejected' };
 
@@ -66,7 +67,7 @@ function EntryDrawer({ open, onClose, onSubmit }) {
         <LeaveDayNotice leave={leave} />
         <label className="block text-xs font-medium text-tertiary-600">
           Hours
-          <input required type="number" min="0.5" max="24" step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          <input required type="number" min="0.5" max={leave.work_capacity ?? 24} step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <label className="block text-xs font-medium text-tertiary-600">
           Notes
@@ -117,7 +118,7 @@ export default function TimesheetsPage() {
   const columns = [
     { key: 'date', header: 'Date', render: (row) => new Date(`${row.date}`.slice(0, 10)).toLocaleDateString() },
     { key: 'hours', header: 'Hours', render: (row) => row.hours },
-    { key: 'notes', header: 'Notes', render: (row) => row.notes || <span className="text-tertiary-400">—</span> },
+    { key: 'notes', header: 'Notes', render: (row) => <NoteText text={row.notes} /> },
     {
       key: 'status',
       header: 'Status',

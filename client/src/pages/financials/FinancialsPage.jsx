@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { CalendarRange, ClipboardList, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
+import { CalendarRange, ClipboardList, LineChart, Lock, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -14,15 +14,24 @@ import KpiCard from '../../components/ui/KpiCard.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
+import FinalizedFinancialsTab from './FinalizedFinancialsTab.jsx';
+import FinancialTrendsTab from './FinancialTrendsTab.jsx';
 
 const POLL_MS = 60000;
 const TABS = [
-  { key: 'overview', label: 'Overview', icon: Wallet },
-  { key: 'plan', label: 'Plan vs actual', icon: ClipboardList },
-  { key: 'projection', label: 'Projection & valuation', icon: TrendingUp },
+  // The final, locked state by business category (see FinalizedFinancialsTab).
+  { key: 'finalized', label: 'Financials', icon: Lock },
+  // Revenue, Profit and Valuation month on month (line charts).
+  { key: 'trends', label: 'Financial trends', icon: LineChart },
+  // Switched off for now (hidden from the dashboard) — the tabs and their code below are kept for future use.
+  // { key: 'overview', label: 'Live trend', icon: Wallet },
+  // { key: 'plan', label: 'Plan vs actual', icon: ClipboardList },
+  // { key: 'projection', label: 'Projection & valuation', icon: TrendingUp },
 ];
 const LINE_LABEL = { revenue: 'Revenue', expense: 'Operating expenses', salary: 'Salary', other: 'Other costs' };
 
+// Kept for future use; not rendered while the dashboard sections are switched off.
+// eslint-disable-next-line no-unused-vars
 function OverviewTab() {
   const [months, setMonths] = useState(12);
   const { data, loading, updatedAt } = useLiveData(() => apiClient.get('/financials/monthly', { params: { months } }).then((r) => r.data.data), { intervalMs: POLL_MS, deps: [months] });
@@ -74,6 +83,8 @@ function OverviewTab() {
   );
 }
 
+// Kept for future use; not rendered while the dashboard sections are switched off.
+// eslint-disable-next-line no-unused-vars
 function PlanTab() {
   const { pushError, pushSuccess } = useAlerts();
   const now = new Date();
@@ -148,6 +159,8 @@ function PlanTab() {
   );
 }
 
+// Kept for future use; not rendered while the dashboard sections are switched off.
+// eslint-disable-next-line no-unused-vars
 function ProjectionTab() {
   const { data, loading, updatedAt } = useLiveData(() => apiClient.get('/financials/projection', { params: { months: 12, horizon: 6 } }).then((r) => r.data.data), { intervalMs: POLL_MS });
   const chart = useMemo(() => {
@@ -193,14 +206,14 @@ function ProjectionTab() {
 
 export default function FinancialsPage() {
   const [params, setParams] = useSearchParams();
-  const requested = params.get('section') || 'overview';
-  const section = TABS.some((t) => t.key === requested) ? requested : 'overview';
+  const requested = params.get('section') || 'finalized';
+  const section = TABS.some((t) => t.key === requested) ? requested : 'finalized';
   return (
     <div className="space-y-4">
       <SectionTabs tabs={TABS} value={section} onChange={(key) => setParams({ section: key })} />
-      {section === 'overview' && <OverviewTab />}
-      {section === 'plan' && <PlanTab />}
-      {section === 'projection' && <ProjectionTab />}
+      {section === 'finalized' && <FinalizedFinancialsTab />}
+      {section === 'trends' && <FinancialTrendsTab />}
+      {/* Disabled with their tabs above: {section === 'overview' && <OverviewTab />}  {section === 'plan' && <PlanTab />}  {section === 'projection' && <ProjectionTab />} */}
     </div>
   );
 }

@@ -6,7 +6,8 @@ const { fail } = require('../utils/response');
 // posture as requireModule()/requireMasterWorkspace/authorizeSuperadmin so a
 // department change takes effect on the very next request, not next login.
 // Admins bypass: the spec's "Admin/Lead" summary/export needs to see every
-// IT member's log, not just their own.
+// IT member's log, not just their own. Contractors (vendor resources) are let
+// through too — they log per-project time exactly like IT staff.
 //
 // Uses the legacy User.department_id (already returned by GET /users/me and
 // already relied on client-side) rather than the newer per-org
@@ -16,6 +17,9 @@ const { fail } = require('../utils/response');
 async function requireItDepartment(req, res, next) {
   if (!req.user?.id) return fail(res, 401, 'Not authenticated');
   if (req.user.role === 'admin') return next();
+  // Vendor resources (contractors) log the same project timesheet as IT staff
+  // from their portal — same grid, same approval flow.
+  if (req.user.worker_type === 'contractor') return next();
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },

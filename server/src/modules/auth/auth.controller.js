@@ -37,6 +37,7 @@ const switchOrg = asyncHandler(async (req, res) => {
   const { org_id } = switchOrgSchema.parse(req.body);
   const result = await authService.switchOrg(req.user.id, org_id);
   if (result.error === 'not_a_member') return fail(res, 403, 'Not a member of that org');
+  if (result.error === 'coming_soon') return fail(res, 409, `${result.org.name} is coming soon`);
   if (result.error === 'not_found') return fail(res, 401, 'Invalid session');
   return ok(res, result);
 });

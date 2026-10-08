@@ -81,7 +81,8 @@ async function getPreferences(user) {
       label,
       description,
       in_app: stored ? stored.in_app : ROLE_EVENT_MATRIX[type].defaultInApp !== false,
-      email: stored ? stored.email : false,
+      // Same default notify() uses, so the toggle shows what is actually sent.
+      email: stored ? stored.email : ROLE_EVENT_MATRIX[type].defaultEmail === true,
       is_overridden: Boolean(stored),
     };
   });

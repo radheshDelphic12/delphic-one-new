@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PiggyBank, Settings2, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
@@ -56,12 +56,16 @@ export default function ProjectionsTab() {
         put(p.month, { projected: (cur.projected || 0) + p.revenue, projectedProfit: (cur.projectedProfit || 0) + p.profit });
       }
     }
-    return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ ...r, label: shortMonth(r.month) }));
+    const rows = Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ ...r, label: shortMonth(r.month) }));
+    // Start the projected line on the last actual month so the two lines read as one continuous trend.
+    const lastActual = [...rows].reverse().find((r) => r.actual !== undefined);
+    if (lastActual && lastActual.projected === undefined) lastActual.projected = lastActual.actual;
+    return rows;
   }, [data]);
 
   async function saveSettings(values) {
     const enabled_modules = MODULES.map(([key]) => key).filter((key) => values[`mod_${key}`]);
-    const body = { enabled_modules, valuation_method: values.valuation_method, valuation_multiple: values.valuation_multiple ?? null };
+    const body = { enabled_modules, coming_soon: Boolean(values.coming_soon), valuation_method: values.valuation_method, valuation_multiple: values.valuation_multiple ?? null };
     try {
       await apiClient.patch(`/orgs/${editing.org.id}/settings`, body);
       pushSuccess(`${editing.org.name} settings saved. Users see module changes after they switch workspace or sign in again.`);
@@ -88,6 +92,7 @@ export default function ProjectionsTab() {
     valuation_method: editing.valuation.method,
     valuation_multiple: editing.valuation.multiple ?? '',
     ...Object.fromEntries(MODULES.map(([key]) => [`mod_${key}`, (editing.org.enabled_modules || []).includes(key)])),
+    coming_soon: (editing.org.enabled_modules || []).includes('coming_soon'),
   } : undefined;
 
   return (
@@ -111,9 +116,9 @@ export default function ProjectionsTab() {
                 <YAxis tickFormatter={compact} tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => money(v)} />
                 <Legend />
-                <Bar dataKey="actual" name="Actual revenue" fill={CHART_COLORS.success} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="projected" name="Projected revenue" fill={CHART_COLORS.primarySoft} radius={[4, 4, 0, 0]} />
-                <Line type="monotone" dataKey="projectedProfit" name="Projected profit" stroke={CHART_COLORS.purple} strokeDasharray="5 4" dot={false} />
+                <Line type="monotone" dataKey="actual" name="Actual revenue" stroke={CHART_COLORS.success} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="projected" name="Projected revenue" stroke={CHART_COLORS.primary} strokeWidth={2.5} strokeDasharray="6 4" dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="projectedProfit" name="Projected profit" stroke={CHART_COLORS.purple} strokeWidth={1.5} strokeDasharray="2 4" dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -128,6 +133,7 @@ export default function ProjectionsTab() {
           { name: 'valuation_method', label: 'Valuation method', type: 'select', required: true, options: METHODS },
           { name: 'valuation_multiple', label: 'Multiple', type: 'number', min: 0, hint: 'blank = default (3x revenue, 8x EBITDA)', show: (v) => v.valuation_method !== 'manual' },
           ...MODULES.map(([key, label]) => ({ name: `mod_${key}`, label, type: 'checkbox' })),
+          { name: 'coming_soon', label: 'Coming soon (company not built yet: shown as Coming soon, cannot be opened, left out of group totals)', type: 'checkbox' },
         ]}
         intro="Choose how this company is valued and which optional modules appear in its sidebar."
       />

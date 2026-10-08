@@ -324,8 +324,7 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
               >
                 <option value="managed_services">Manage Services</option>
                 <option value="project">Projects</option>
-                {/* Recruitment is switched off for new requirements for now; an existing recruitment one keeps its value. */}
-                <option value="recruitment" disabled={form.req_type !== 'recruitment'}>Recruitment (coming soon)</option>
+                <option value="recruitment">Recruitment</option>
               </select>
             </div>
 

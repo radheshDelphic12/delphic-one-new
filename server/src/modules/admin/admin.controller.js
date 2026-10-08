@@ -17,6 +17,7 @@ const ERROR_STATUS = {
   forbidden: [403, 'Not permitted'],
   bad_password: [401, 'Password incorrect'],
   already_deleted: [409, 'Record is already deleted'],
+  is_project: [409, 'This is a project, not a client account — it can’t be deleted from Accounts'],
   not_deleted: [409, 'Record is not deleted'],
 };
 

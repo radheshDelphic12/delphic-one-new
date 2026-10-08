@@ -63,7 +63,7 @@ async function approvedEntry(orgId, membershipId, accountId, requirementId, date
 
 describe('Phase 5 — billing routes require an active org membership', () => {
   test('a user with no OrgMembership gets 403, not a crash', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/billing/rates'), access_token);
     expect(res.status).toBe(403);
@@ -256,7 +256,7 @@ describe('Phase 5 — client invoices', () => {
     });
   }
 
-  test('generates a draft invoice from computed revenue; a duplicate period is rejected', async () => {
+  test('generates a draft invoice for the project month; generating it again refreshes the same draft', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
     const { membership } = await seedOrgEmployee(org);
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
@@ -270,14 +270,16 @@ describe('Phase 5 — client invoices', () => {
     expect(invoice.status).toBe(201);
     expect(invoice.body.data.status).toBe('draft');
     expect(Number(invoice.body.data.amount)).toBe(6000);
-    expect(invoice.body.data.line_items).toHaveLength(1);
+    expect(invoice.body.data.line_items.lines).toHaveLength(1);
+    expect(invoice.body.data.invoice_number).toBe('INV-2026-001');
 
-    const dup = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({
+    const again = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({
       client_account_id: account.id,
       period_month: 9,
       period_year: 2026,
     });
-    expect(dup.status).toBe(409);
+    expect(again.status).toBe(201);
+    expect(again.body.data).toMatchObject({ id: invoice.body.data.id, invoice_number: 'INV-2026-001', status: 'draft' });
   });
 
   test('generating an invoice with no computed revenue is rejected', async () => {

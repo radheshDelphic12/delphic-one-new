@@ -18,13 +18,18 @@ export default function CalendarMappingSection({ membershipId, locationName, can
   const [calendars, setCalendars] = useState([]);
   const [calendarId, setCalendarId] = useState('');
   const [saving, setSaving] = useState(false);
+  // Effective calendars (admin view): standard + per-project for IT / contractors.
+  const [overview, setOverview] = useState(null);
 
   const load = useCallback(() => {
     apiClient
       .get(`/calendars/assignments/${membershipId}`)
       .then(({ data }) => setAssignments(data.data || []))
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load calendar mappings'), 'Something went wrong'));
-  }, [membershipId, pushError]);
+    if (canEdit) {
+      apiClient.get(`/calendars/members/${membershipId}`).then(({ data }) => setOverview(data.data || null)).catch(() => setOverview(null));
+    }
+  }, [membershipId, canEdit, pushError]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -70,6 +75,33 @@ export default function CalendarMappingSection({ membershipId, locationName, can
           <span className="text-tertiary-500">not set — using the office or organization calendar</span>
         )}
       </p>
+
+      {overview && (
+        <div className="mt-3 rounded-xl bg-tertiary-50 px-3 py-2 text-sm">
+          <p className="text-tertiary-700">
+            <span className="text-tertiary-500">Calendar in effect: </span>
+            <span className="font-medium text-tertiary-900">{overview.standard_calendar?.name || 'none'}</span>
+            {!overview.per_project && <span className="ml-1 text-xs text-tertiary-500">(non-IT — this one calendar applies to all working days)</span>}
+          </p>
+          {overview.per_project && (
+            overview.projects.length === 0 ? (
+              <p className="mt-1 text-xs text-tertiary-500">IT employee with no assigned projects yet — once assigned, each project&apos;s calendar applies for that project.</p>
+            ) : (
+              <>
+                <p className="mt-2 text-xs font-medium text-tertiary-500">Project-wise calendars (IT — each project follows its own calendar)</p>
+                <ul className="mt-1 divide-y divide-tertiary-100">
+                  {overview.projects.map((p) => (
+                    <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                      <span className="text-tertiary-800">{p.name}{p.client_name ? <span className="text-xs text-tertiary-500"> · {p.client_name}</span> : null}</span>
+                      <span className="inline-flex items-center gap-2 text-tertiary-700">{p.calendar?.name || 'Standard'} {p.calendar && <Badge value={p.calendar.kind} />}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )
+          )}
+        </div>
+      )}
 
       {legacyOverrides.length > 0 && (
         <div className="mt-3">

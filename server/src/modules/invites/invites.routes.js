@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { z } = require('zod');
 const prisma = require('../../config/db');
+const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -43,7 +44,7 @@ router.post(
     const body = sendSchema.parse(req.body);
     const members = body.attendee_user_ids.length
       ? await prisma.orgMembership.findMany({
-          where: { org_id: req.user.org_id, person_id: { in: body.attendee_user_ids }, employment_status: 'active' },
+          where: { org_id: req.user.org_id, person_id: { in: body.attendee_user_ids }, employment_status: { in: WORKING_STATUSES } },
           select: { person: { select: { id: true, name: true, email: true } } },
         })
       : [];

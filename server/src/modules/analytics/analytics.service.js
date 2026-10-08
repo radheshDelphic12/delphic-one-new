@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const { num, round2, monthKey } = require('../../lib/vertical');
+const exchangeRates = require('../billing/exchangeRates.service');
 
 const rangeSchema = z
   .object({ from: z.coerce.date().optional(), to: z.coerce.date().optional() })
@@ -270,7 +271,7 @@ async function salaryTrend(orgId, { months }, now = new Date()) {
 
 async function expenseAnalysis(orgId, { months }, now = new Date()) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
-  const [claims, vendors, locations] = await Promise.all([
+  const [claims, vendors, locations, groupCharges, fx] = await Promise.all([
     prisma.expenseClaim.findMany({
       where: { org_id: orgId, status: { in: ['approved', 'reimbursed'] }, created_at: { gte: start } },
       select: { amount: true, category: true, location_id: true, created_at: true },
@@ -280,12 +281,18 @@ async function expenseAnalysis(orgId, { months }, now = new Date()) {
       select: { amount: true, vendor_type: true, period_month: true, period_year: true },
     }),
     prisma.location.findMany({ where: { org_id: orgId }, select: { id: true, name: true } }),
+    // Group expenses (Finance → Group Charges) charged to this company.
+    prisma.groupBillingCharge.findMany({
+      where: { org_id: orgId },
+      select: { amount: true, currency: true, kind: true, category: { select: { name: true } }, location_id: true, payment_date: true, period_month: true, period_year: true },
+    }),
+    exchangeRates.inrRates(orgId),
   ]);
   const locName = new Map(locations.map((l) => [l.id, l.name]));
 
   const months_ = new Map();
   const bucket = (key) => {
-    if (!months_.has(key)) months_.set(key, { month: key, office_expenses: 0, vendor_payments: 0, total: 0 });
+    if (!months_.has(key)) months_.set(key, { month: key, office_expenses: 0, group_expenses: 0, vendor_payments: 0, total: 0 });
     return months_.get(key);
   };
   const byCategory = new Map();
@@ -299,6 +306,25 @@ async function expenseAnalysis(orgId, { months }, now = new Date()) {
     const loc = locName.get(c.location_id) || 'Unknown';
     byLocation.set(loc, (byLocation.get(loc) || 0) + amount);
   }
+  // Group expenses: in the month they were paid (else their period month),
+  // converted to INR; a currency with no exchange rate is reported, not summed.
+  const byGroupCategory = new Map();
+  const missingRates = new Set();
+  for (const g of groupCharges) {
+    const date = g.payment_date || new Date(Date.UTC(g.period_year, g.period_month - 1, 1));
+    if (date < start) continue;
+    const rate = fx.get(g.currency || 'INR');
+    if (rate === undefined) { missingRates.add(g.currency); continue; }
+    const amount = Number(g.amount) * rate;
+    const b = bucket(monthKey(date));
+    b.group_expenses += amount;
+    b.total += amount;
+    const category = g.category?.name || g.kind || 'Other';
+    byGroupCategory.set(category, (byGroupCategory.get(category) || 0) + amount);
+    const loc = locName.get(g.location_id) || 'Unknown';
+    byLocation.set(loc, (byLocation.get(loc) || 0) + amount);
+  }
+
   const byVendorType = new Map();
   for (const v of vendors) {
     const date = new Date(Date.UTC(v.period_year, v.period_month - 1, 1));
@@ -313,11 +339,14 @@ async function expenseAnalysis(orgId, { months }, now = new Date()) {
   const toList = (map, label) => Array.from(map, ([k, v]) => ({ [label]: k, amount: round2(v) })).sort((a, b) => b.amount - a.amount);
   return {
     series: Array.from(months_.values())
-      .map((m) => ({ ...m, office_expenses: round2(m.office_expenses), vendor_payments: round2(m.vendor_payments), total: round2(m.total) }))
+      .map((m) => ({ ...m, office_expenses: round2(m.office_expenses), group_expenses: round2(m.group_expenses), vendor_payments: round2(m.vendor_payments), total: round2(m.total) }))
       .sort((a, b) => a.month.localeCompare(b.month)),
     by_category: toList(byCategory, 'category'),
     by_location: toList(byLocation, 'location'),
     by_vendor_type: toList(byVendorType, 'vendor_type'),
+    by_group_category: toList(byGroupCategory, 'category'),
+    group_total: round2([...byGroupCategory.values()].reduce((s, v) => s + v, 0)),
+    missing_rates: [...missingRates],
     total: round2(Array.from(months_.values()).reduce((s, m) => s + m.total, 0)),
   };
 }

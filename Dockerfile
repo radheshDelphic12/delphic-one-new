@@ -74,4 +74,7 @@ EXPOSE 4000
 
 # API side: scripts/staging-bootstrap.js migrates (and seeds when SEED_STAGING=true), then the API starts on 4000.
 # nginx side: serves the SPA and proxies /api and /uploads on Render's $PORT.
-CMD sh -c "cd /app/server && (node scripts/staging-bootstrap.js && PORT=4000 node src/index.js) & envsubst '\$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/http.d/default.conf && nginx -g 'daemon off;'"
+# The API runs in a restart loop: nginx keeps the container alive, so if node exits
+# (e.g. a crash after Neon drops connections) nothing else would bring it back and
+# every /api call would 502 until Render's health check recycled the container.
+CMD sh -c "cd /app/server && (node scripts/staging-bootstrap.js && while true; do PORT=4000 node src/index.js; echo \"[api] exited with code \$?, restarting in 2s\"; sleep 2; done) & envsubst '\$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/http.d/default.conf && nginx -g 'daemon off;'"

@@ -1,6 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
 const usersService = require('./users.service');
+const { WORKER_ERRORS } = require('../../lib/workerType');
 const { listQuerySchema, directoryQuerySchema, createSchema, updateSchema } = require('./users.validation');
 
 const ERROR_STATUS = {
@@ -11,6 +12,7 @@ const ERROR_STATUS = {
   forbidden_password: [403, "Only a superadmin can set another user's password"],
   forbidden_edit_superadmin: [403, 'Only a superadmin can edit a superadmin'],
   last_superadmin: [409, 'Cannot remove the last superadmin'],
+  ...WORKER_ERRORS,
 };
 
 const me = asyncHandler(async (req, res) => {

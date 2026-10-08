@@ -1,11 +1,14 @@
 const express = require('express');
 const { authenticate } = require('../../middleware/auth');
+const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./dashboard.service');
 
 const router = express.Router();
-router.use(authenticate);
+// Every figure here is recruitment data (accounts, requirements, submissions,
+// recent activity) — same master-workspace gate as those routers.
+router.use(authenticate, requireMasterWorkspace);
 
 router.get(
   '/summary',

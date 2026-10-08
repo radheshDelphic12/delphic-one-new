@@ -24,7 +24,17 @@ const emptyForm = {
   role: 'bda',
   phone: '',
   department_id: '',
+  worker_type: 'full_time_employee',
+  vendor_account_id: '',
+  vendor_rate: '',
+  vendor_rate_currency: 'INR',
 };
+
+const WORKER_TYPES = [
+  { value: 'full_time_employee', label: 'Full-Time Employee' },
+  { value: 'contractor', label: 'Contractor' },
+];
+const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 function EditUserDrawer({ open, row, departments, isSuperadmin, onClose, onSaved }) {
   const { pushError } = useAlerts();
@@ -239,6 +249,8 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deptDrawer, setDeptDrawer] = useState(null);
   const [editRow, setEditRow] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const isContractor = form.worker_type === 'contractor';
 
   async function loadUsers() {
     setLoading(true);
@@ -263,6 +275,8 @@ export default function UsersPage() {
     if (user?.role === 'admin') {
       loadUsers();
       loadDepartments();
+      // Vendor companies (Accounts → vendor) a contractor can be supplied by.
+      apiClient.get('/billing/vendors').then(({ data }) => setVendors(data.data || [])).catch(() => setVendors([]));
     }
   }, [user?.role]);
 
@@ -282,6 +296,10 @@ export default function UsersPage() {
         role: form.role,
         phone: form.phone.trim() || null,
         department_id: form.department_id || null,
+        worker_type: form.worker_type,
+        ...(isContractor
+          ? { role: 'employee', vendor_account_id: form.vendor_account_id || null, vendor_rate: form.vendor_rate === '' ? null : Number(form.vendor_rate), vendor_rate_currency: form.vendor_rate_currency }
+          : {}),
       };
       const { data } = await apiClient.post('/users', payload);
       setCreatedCreds({
@@ -449,6 +467,28 @@ export default function UsersPage() {
 
       <Drawer open={createOpen} title="Create user" onClose={() => setCreateOpen(false)} size="md" tone="create">
         <form onSubmit={handleCreate} className="space-y-3">
+          <div>
+            <span className="mb-1 block text-xs font-medium text-tertiary-500">User type</span>
+            <div role="radiogroup" className="inline-flex rounded-xl border border-tertiary-200 p-0.5">
+              {WORKER_TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.worker_type === t.value}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${form.worker_type === t.value ? 'bg-primary-600 text-white' : 'text-tertiary-600'}`}
+                  onClick={() => updateField('worker_type', t.value)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {isContractor && (
+              <p className="mt-1 text-xs text-tertiary-500">
+                Contractors sign in with their own email, are paid through their vendor (not payroll) and only see their projects, holiday calendar and timesheet.
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-tertiary-500">Name</label>
@@ -462,9 +502,10 @@ export default function UsersPage() {
             <div>
               <label className="mb-1 block text-xs font-medium text-tertiary-500">Role</label>
               <select
-                value={form.role}
+                value={isContractor ? 'employee' : form.role}
+                disabled={isContractor}
                 onChange={(e) => updateField('role', e.target.value)}
-                className="w-full rounded-xl border px-3 py-2 text-sm"
+                className="w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50"
               >
                 {CREATABLE_ROLES.map((r) => (
                   <option key={r.value} value={r.value}>
@@ -474,7 +515,7 @@ export default function UsersPage() {
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-tertiary-500">Email</label>
+              <label className="mb-1 block text-xs font-medium text-tertiary-500">{isContractor ? 'Email (personal email is fine)' : 'Email'}</label>
               <input
                 type="email"
                 required
@@ -514,12 +555,44 @@ export default function UsersPage() {
                 className="w-full rounded-xl border px-3 py-2 text-sm"
               />
             </div>
+            {isContractor && (
+              <>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-tertiary-500">Vendor</label>
+                  <SearchableSelect
+                    value={form.vendor_account_id}
+                    onChange={(v) => updateField('vendor_account_id', v)}
+                    placeholder={vendors.length ? 'Select the vendor company' : 'No vendor accounts yet — add one under Accounts'}
+                    searchPlaceholder="Search vendors…"
+                    options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-tertiary-500">Vendor rate (per month)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    value={form.vendor_rate}
+                    onChange={(e) => updateField('vendor_rate', e.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-tertiary-500">Currency</label>
+                  <select value={form.vendor_rate_currency} onChange={(e) => updateField('vendor_rate_currency', e.target.value)} className="w-full rounded-xl border px-3 py-2 text-sm">
+                    {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" className="btn-secondary" onClick={() => setCreateOpen(false)}>
               Cancel
             </button>
-            <button type="submit" disabled={creating} className="btn-primary">
+            <button type="submit" disabled={creating || (isContractor && !form.vendor_account_id)} className="btn-primary">
               {creating ? 'Creating…' : 'Create user'}
             </button>
           </div>

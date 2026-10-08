@@ -45,6 +45,14 @@ async function main() {
     process.exit(1);
   }
 
+  // Opt-in finance demo data (idempotent, non-destructive): set SEED_FINANCE_DEMO=true,
+  // deploy once, then unset it. Independent of SEED_STAGING; never fails the boot.
+  if (process.env.SEED_FINANCE_DEMO === 'true') {
+    if (!run('finance demo data (billing basis, vendor payout, leave, adjustment)', 'node', ['prisma/erp/seed-finance-demo.js'])) {
+      console.error('[bootstrap] finance demo seed failed - the API will still start');
+    }
+  }
+
   if (process.env.SEED_STAGING !== 'true') {
     console.log('[bootstrap] SEED_STAGING is not "true" - skipping seed');
     return;

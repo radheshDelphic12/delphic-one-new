@@ -49,13 +49,15 @@ async function computeDayForOrg(orgId, date) {
     select: { org_membership_id: true, account_id: true, requirement_id: true, hours: true },
   });
 
-  // Module C: an ADDITIONAL cost layer on top of salary — a project-specific
-  // hourly pay rate for the hours a member logged on that project, only
-  // where an admin has explicitly set one (ProjectMemberAssignment). No
-  // assignment for a given (account, member) means no project cost added,
-  // same as before this feature existed.
+  // ProjectMemberAssignment.cost_rate_per_hr is the resource's INTERNAL cost
+  // per hour on a contract — what Project P&L charges the project for that
+  // person instead of a salary allocation. The salary below already IS the
+  // company's cost of this person, so the cost-rate figure is recorded in the
+  // breakdown for reference only and is NOT added on top (adding it would
+  // count the same person's cost twice).
+  // Only the allocation in force on this day (allocations are effective-dated).
   const costAssignments = await prisma.projectMemberAssignment.findMany({
-    where: { org_id: orgId },
+    where: { org_id: orgId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: date } }] }, { OR: [{ end_date: null }, { end_date: { gte: date } }] }] },
     select: { account_id: true, org_membership_id: true, cost_rate_per_hr: true },
   });
   const costRateByKey = new Map(costAssignments.map((a) => [`${a.account_id}|${a.org_membership_id}`, Number(a.cost_rate_per_hr)]));
@@ -127,7 +129,7 @@ async function computeDayForOrg(orgId, date) {
 
     const salaryCost = round2(Number(structure.ctc) / daysInMonth(date));
     const projectCostEntry = projectCostByMembership.get(membership.id) || { cost: 0, allocations: [] };
-    const cost = round2(salaryCost + projectCostEntry.cost);
+    const cost = salaryCost;
     const revenueEntry = revenueByMembership.get(membership.id) || { revenue: 0, allocations: [] };
     const margin = round2(revenueEntry.revenue - cost);
 
@@ -135,7 +137,9 @@ async function computeDayForOrg(orgId, date) {
       ctc: Number(structure.ctc),
       days_in_month: daysInMonth(date),
       per_day_salary_cost: salaryCost,
+      // Reference only — not part of `cost` (see the note above).
       project_cost: projectCostEntry.cost,
+      project_cost_counted: false,
       project_cost_allocations: projectCostEntry.allocations,
       revenue_allocations: revenueEntry.allocations,
     };

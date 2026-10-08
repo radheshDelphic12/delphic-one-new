@@ -35,7 +35,9 @@ const ACCOUNT_INCLUDE = {
 async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
   // Accumulate into an AND array so multiple OR-bearing clauses (type scope +
   // search) can coexist without one clobbering the other in the object literal.
-  const and = [];
+  // Projects share this table (type 'client', is_project) but are managed in
+  // Finance → Projects / People → Calendars, never in the Accounts catalogue.
+  const and = [{ is_project: false }];
   if (type === 'client' && include_unclassified) and.push({ OR: [{ type: 'client' }, { type: null }] });
   else if (type === 'unclassified') and.push({ type: null });
   else if (type) and.push({ type });
@@ -105,7 +107,7 @@ async function getById(id) {
 }
 
 function canMutateAccount(account, user) {
-  if (!account) return false;
+  if (!account || account.is_project) return false;
   // Admin and BDA may edit any account (clients, vendors, unclassified) and move stages / schedule meetings.
   return user.role === 'admin' || user.role === 'bda';
 }
@@ -122,6 +124,7 @@ async function create(data, ownerId) {
 async function update(id, patch, user) {
   const existing = await prisma.account.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
+  if (existing.is_project) return { error: 'is_project' };
   if (!canMutateAccount(existing, user)) return { error: 'forbidden' };
 
   if (patch.owner_id && patch.owner_id !== existing.owner_id) {
@@ -167,6 +170,7 @@ function canClassifyAccount(account, user) {
 async function classifyLead(id, { type }, user) {
   const account = await prisma.account.findUnique({ where: { id } });
   if (!account) return { error: 'not_found' };
+  if (account.is_project) return { error: 'is_project' };
   if (!canMutateAccount(account, user)) return { error: 'forbidden' };
   if (account.type != null) return { error: 'already_classified' };
 
@@ -199,6 +203,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
+    if (account.is_project) return { error: 'is_project' };
     if (!canMutateAccount(account, user)) return { error: 'forbidden' };
     if (account.is_locked) return { error: 'locked' };
     if (!canTransition(account.stage, to_stage)) return { error: 'invalid_transition' };
@@ -274,6 +279,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
+    if (account.is_project) return { error: 'is_project' };
     if (!canMutateAccount(account, user)) return { error: 'forbidden' };
     if (account.is_locked) return { error: 'locked' };
     if (meeting_mode === 'offline' && !meeting_location) return { error: 'meeting_location_required' };
