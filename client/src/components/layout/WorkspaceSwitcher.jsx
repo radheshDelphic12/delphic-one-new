@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
+import { orgLogo } from '../../lib/orgLogo.js';
 
 const SEARCH_THRESHOLD = 6;
 
@@ -78,7 +79,7 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
 
   const brand = (
     <>
-      <WorkspaceLogo name={groupMode ? 'All Companies' : activeOrg.name} logoUrl={groupMode ? '/group-logo.svg' : activeOrg.logo_url} size="md" />
+      <WorkspaceLogo name={groupMode ? 'All Companies' : activeOrg.name} logoUrl={groupMode ? '/group-logo.svg' : orgLogo(activeOrg)} size="md" />
       {!collapsed && (
         <span className="min-w-0 flex-1 text-left">
           <span className="block truncate font-heading text-sm font-bold tracking-tight text-tertiary-900">{groupMode ? 'All Companies' : activeOrg.name}</span>
@@ -173,7 +174,7 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
                       active ? 'bg-primary-50/60' : ''
                     }`}
                   >
-                    <WorkspaceLogo name={membership.org.name} logoUrl={membership.org.logo_url} size="md" />
+                    <WorkspaceLogo name={membership.org.name} logoUrl={orgLogo(membership.org)} size="md" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-tertiary-900">{membership.org.name}</span>
                       <span className="block truncate text-[11px] capitalize text-tertiary-500">{membership.org.enabled_modules?.includes('coming_soon') ? 'Coming soon' : membership.role}</span>

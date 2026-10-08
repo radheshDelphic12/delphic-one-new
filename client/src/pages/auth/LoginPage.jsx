@@ -6,6 +6,7 @@ import { DEFAULT_DEV_PASSWORD, isQuickLoginEnabled } from '../../lib/testAccount
 import { detectWorkspaceSlug, getRecentWorkspaces, rememberWorkspace } from '../../lib/workspace.js';
 import PasswordInput from '../../components/ui/PasswordInput.jsx';
 import WorkspaceLogo from '../../components/ui/WorkspaceLogo.jsx';
+import { orgLogo } from '../../lib/orgLogo.js';
 import DevQuickLogin from './DevQuickLogin.jsx';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -229,7 +230,7 @@ export default function LoginPage() {
                     {pendingOrg === membership.org_id ? (
                       <Loader2 className="m-1.5 h-4 w-4 animate-spin text-primary-600" aria-hidden="true" />
                     ) : (
-                      <WorkspaceLogo name={membership.org.name} logoUrl={membership.org.logo_url} size="sm" className="rounded-full" />
+                      <WorkspaceLogo name={membership.org.name} logoUrl={orgLogo(membership.org)} size="sm" className="rounded-full" />
                     )}
                     {membership.org.name}
                   </button>

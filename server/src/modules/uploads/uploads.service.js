@@ -76,6 +76,21 @@ async function resolveFile(filename, user) {
     return finish(filename, gxDoc.file_name || gxDoc.title);
   }
 
+  // Acconcy documents: same rule against the Acconcy role model.
+  const axDoc = await prisma.axDocument.findFirst({
+    where: { file_url: fileUrl, deleted_at: null },
+    select: { org_id: true, owner_type: true, title: true, file_name: true },
+  });
+  if (axDoc) {
+    if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
+    if (axDoc.org_id !== user.org_id) return { error: 'forbidden' };
+    const { resolveAxRole, capsFor } = require('../acconcy/access');
+    const ax = await resolveAxRole(user);
+    const cap = require('../acconcy/documents.service').capFor(axDoc.owner_type);
+    if (!ax.role || !capsFor(ax.role).includes(cap)) return { error: 'forbidden' };
+    return finish(filename, axDoc.file_name || axDoc.title);
+  }
+
   return { error: 'not_found' };
 }
 

@@ -49,6 +49,7 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 - Tabs: Group Finance, Dashboard, Projections & Valuation (group revenue actual vs projected is a **line** chart), Org Chart, Billing Charges, Settings (`/group-overview/settings`: account, change password, companies, alert thresholds saved in the browser).
 - **Org Chart** (group): one chart, Group Super Admin at the bottom, every company above, each company's teams and people above it (`layoutGroupChart` in `TeamChart.jsx`). For one company, Team, Designation/Role and Department views all use the same team-chart design (`regroupForTeamChart`).
 - Navigation: **Group Dashboard** pinned at the top of every sidebar; in group view the sidebar shows only group items plus an "Open a company" list; the switcher reads "All Companies"; inside a company a banner offers "Back to Group Dashboard".
+- Look: group view uses a light sage-green theme (`.theme-group` in `client/src/styles/theme.css`, switched on by `AppLayout` while the path is under `/group-overview`). Company logos in the switcher, sidebar list and login picker come from `lib/orgLogo.js` (the company's own `logo_url`, else the brand logo for known slugs delphic/gulati/zephyr/acconcy, else an initial tile).
 - Logo: `client/public/group-logo.svg` is a redrawn Gulati Foundation logo; replace it with the original file.
 
 ## Tests

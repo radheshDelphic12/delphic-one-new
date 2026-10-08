@@ -36,11 +36,29 @@ const GULATI_TITLES = {
 };
 const gulatiEntry = (pathname) => (/^\/gulati\/deals\/[^/]+/.test(pathname) ? ['Trading Deal', 'Purchases, sales, expenses and profit for one deal.'] : GULATI_TITLES[pathname] || GULATI_TITLES['/gulati']);
 
+const ACCONCY_TITLES = {
+  '/acconcy': ['Dashboard', 'Lead pipeline, deals, finance, investments and company valuation.'],
+  '/acconcy/leads': ['Leads', 'Business opportunities across the six services, from first contact to won.'],
+  '/acconcy/parties': ['Client / Vendor', 'Clients and the vendors you work with.'],
+  '/acconcy/deals': ['Deals', 'Engagements after a lead is won: revenue, expenses and profit.'],
+  '/acconcy/finance': ['Revenue & Expenses', 'Profit and loss and every revenue and expense entry, with filters.'],
+  '/acconcy/financials': ['Financials & Valuation', 'Service-wise reports, company valuation and month close.'],
+  '/acconcy/investments': ['Investments', 'Gold, silver and venture holdings, assets and realised / unrealised gain.'],
+  '/acconcy/salaries': ['Salaries', 'Monthly salary sheet for employees and contractors.'],
+  '/acconcy/reports': ['Reports', 'Lead, deal and investment reports.'],
+  '/acconcy/tasks': ['Tasks', 'Meetings, analysis, due diligence and follow-ups.'],
+  '/acconcy/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/acconcy/my-work': ['My work', 'Your assigned leads, deals and tasks.'],
+  '/acconcy/settings': ['Acconcy setup', 'Valuation formula, categories, numbering and audit log.'],
+};
+const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
+
 /** Page title shown in the app header for the active route. */
 export function headerTitleForPath(pathname, user) {
   if (pathname === '/') return user?.name ? `${user.name}'s Dashboard` : 'Dashboard';
   if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[0];
+  if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
   if (pathname.startsWith('/requirements')) return 'Requirements';
@@ -71,6 +89,7 @@ export function headerTitleForPath(pathname, user) {
 export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[1];
+  if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {
     return 'Requirements as rows, candidates by stage. Drag or use stage buttons.';

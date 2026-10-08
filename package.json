@@ -22,6 +22,7 @@
     "seed:admin": "npm run seed:admin --workspace server",
     "zephyr:seed": "npm run zephyr:seed --workspace server",
     "gulati:seed": "npm run gulati:seed --workspace server",
+    "acconcy:seed": "npm run acconcy:seed --workspace server",
     "zephyr:seed-admin": "npm run zephyr:seed-admin --workspace server",
     "build:client": "npm run build --workspace client",
     "test:changed": "npm run test:changed --workspace server",
