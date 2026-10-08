@@ -84,8 +84,11 @@ export function Kpi({ label, value, hint, tone, onClick }) {
   return <button type="button" onClick={onClick} className={`${base} transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-card`}>{body}</button>;
 }
 
+// Dates arrive from the API as full timestamps (2026-09-01T00:00:00.000Z) but the server only accepts YYYY-MM-DD, so an
+// edited record would be refused unless every date is cut back to its day.
+const ISO_DAY = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 export function toBody(values, { numbers = [] } = {}) {
-  const body = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, typeof v === 'string' ? (v.trim() === '' ? null : v.trim()) : v]));
+  const body = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, typeof v === 'string' ? (v.trim() === '' ? null : v.trim().replace(ISO_DAY, '$1')) : v]));
   for (const k of numbers) if (body[k] !== null && body[k] !== undefined) body[k] = Number(body[k]);
   return body;
 }
