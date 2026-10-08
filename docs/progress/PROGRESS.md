@@ -2794,3 +2794,9 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 - Routes-only (no controller/service split yet) for: **admin, comments, dashboard, documents**; requirements/seats and submissions/interviewRounds routes exist as extra route files within those modules.
 - CI workflow and deploy workflow (`deploy.yml`, currently a no-op pending `DEPLOY_ENABLED` + VPS secrets) added under `.github/workflows/`.
 - `docs/AGENTS.md`, `docs/progress/PROGRESS.md`, `docs/progress/TODO.md` created to track context going forward.
+
+## 2026-10-08 - Acconcy Financials = Gulati layout; group light-green theme + company logos
+
+- Acconcy > Financials opens on "Financial trends" (same as Gulati): Locked/Unlocked/All, month range, Revenue/Profit/Valuation charts, valuation breakdown table with Lock month/Reopen. `GET /acconcy/finance/valuation` gained `?state=` and per-month `revenue`. Extra tabs (Service-wise, Valuation, Month close) kept. Component `client/src/components/acconcy/AcconcyFinancialTrends.jsx`; test `acconcy financial trends` in `tests/acconcy-workspace.test.js` (30/30 on `acconcy_test`). Details: docs/features/ACCONCY-FINANCE.md.
+- Group view uses the light-green `.theme-group`; company logos via `client/src/lib/orgLogo.js` in switcher, sidebar list and login picker (docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md).
+- All uncommitted on branch `acconcy-finance-workspace`; nothing pushed. Temp e2e files (`client/vite.pw.config.js`, `api4100.log`, `vite5190.log`) must not be committed.
