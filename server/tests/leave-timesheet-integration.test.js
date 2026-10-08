@@ -306,8 +306,8 @@ describe('admin applies leave (rule 7)', () => {
     // Without the override the present days still block it.
     expect((await adminApply(s.admin.token, { ...body, auto_approve: true })).status).toBe(409);
     // Override needs a reason and immediate approval.
-    expect((await adminApply(s.admin.token, { ...body, auto_approve: true, override_attendance: true })).status).toBe(400);
-    expect((await adminApply(s.admin.token, { ...body, override_attendance: true, reason: 'Family emergency' })).status).toBe(400);
+    expect((await adminApply(s.admin.token, { ...body, auto_approve: true, override_attendance: true })).status).toBe(422);
+    expect((await adminApply(s.admin.token, { ...body, override_attendance: true, reason: 'Family emergency' })).status).toBe(422);
     // A Leave Manager who is not an admin cannot override.
     const manager = await person(s.org);
     await prisma.orgMembership.update({ where: { id: manager.membership.id }, data: { is_leave_manager: true } });
