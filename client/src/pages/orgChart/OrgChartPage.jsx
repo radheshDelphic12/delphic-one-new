@@ -1,43 +1,12 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Building2, ChevronDown, ChevronRight, Layers, Network, Sparkles, UserRound } from 'lucide-react';
+import { UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import Avatar from '../../components/ui/Avatar.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
-import TeamChart from './TeamChart.jsx';
-
-function formatDate(value) {
-  return value ? new Date(`${value}`.slice(0, 10)).toLocaleDateString() : null;
-}
-
-/** New-hire / notice-period indicators live directly on employment_status + notice_end_date. */
-function LifecycleBadge({ node }) {
-  if (node.employment_status === 'pending_onboarding') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-blue-700">
-        <Sparkles className="h-3 w-3" /> New hire
-      </span>
-    );
-  }
-  if (node.employment_status === 'notice_period') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
-        <AlertTriangle className="h-3 w-3" />
-        Notice{node.notice_end_date ? ` · ends ${formatDate(node.notice_end_date)}` : ''}
-      </span>
-    );
-  }
-  if (node.employment_status === 'on_leave') {
-    return <span className="inline-flex items-center rounded-full bg-tertiary-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-tertiary-600">On leave</span>;
-  }
-  if (node.employment_status === 'terminated') {
-    return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700">Terminated</span>;
-  }
-  return null;
-}
+import TeamChart, { regroupForTeamChart } from './TeamChart.jsx';
 
 /**
  * Seniority tiers for visual grouping. There is no rank/level field on
@@ -68,14 +37,6 @@ function tierIndexFor(node) {
   return ROLE_FALLBACK_TIER_INDEX[node.role] ?? DEFAULT_TIER_INDEX;
 }
 
-/** Highest-ranking first, then alphabetical by name — applied to every sibling group in both view modes. */
-function sortByTier(nodes) {
-  return [...nodes].sort((a, b) => {
-    const diff = tierIndexFor(a) - tierIndexFor(b);
-    return diff !== 0 ? diff : (a.person?.name || '').localeCompare(b.person?.name || '');
-  });
-}
-
 function flattenTree(roots) {
   const flat = [];
   const walk = (node) => {
@@ -90,134 +51,28 @@ function getRoleTitle(node) {
   return node.designation?.name || ROLE_LABEL[node.role] || 'Team member';
 }
 
-function countDescendants(node, getChildren) {
-  const children = getChildren(node) || [];
-  return children.reduce((sum, child) => sum + 1 + countDescendants(child, getChildren), 0);
-}
-
-/**
- * Department-wise view: the same people, regrouped under a branch per
- * department instead of the org-wide reporting line. A department's own
- * manager_id relationships are preserved *within* that department — anyone
- * whose real manager sits in a different department (or has none) becomes a
- * root inside their department's branch, which is the correct behavior, not
- * a data gap.
- */
-function buildDepartmentBranches(roots) {
-  const groups = new Map();
-  for (const node of flattenTree(roots)) {
-    const key = node.department?.id || '__unassigned__';
-    const label = node.department?.name || 'Unassigned';
-    if (!groups.has(key)) groups.set(key, { key, label, members: [] });
-    groups.get(key).members.push(node);
+/** Role / Department views draw the same team chart; only the grouping changes. */
+function chartDataFor(data, viewMode) {
+  if (viewMode === 'role') {
+    return regroupForTeamChart(data, {
+      keyOf: (n) => n.designation?.id || `role:${getRoleTitle(n)}`,
+      labelOf: (n) => getRoleTitle(n),
+      orderOf: (n) => tierIndexFor(n),
+    });
   }
-  const branches = [...groups.values()].map(({ key, label, members }) => {
-    const memberIds = new Set(members.map((m) => m.id));
-    const childrenMap = new Map(members.map((m) => [m.id, []]));
-    const deptRoots = [];
-    for (const m of members) {
-      if (m.manager_id && memberIds.has(m.manager_id)) childrenMap.get(m.manager_id).push(m);
-      else deptRoots.push(m);
-    }
-    return { key, label, count: members.length, roots: deptRoots, getChildren: (n) => childrenMap.get(n.id) || [] };
-  });
-  branches.sort((a, b) => (a.key === '__unassigned__' ? 1 : b.key === '__unassigned__' ? -1 : a.label.localeCompare(b.label)));
-  return branches;
+  if (viewMode === 'department') {
+    return regroupForTeamChart(data, {
+      keyOf: (n) => n.department?.id || '__unassigned__',
+      labelOf: (n) => n.department?.name || 'Unassigned',
+      orderOf: (n) => (n.department?.id ? 0 : 1),
+    });
+  }
+  return data;
 }
-
-/** A single employee card — role/designation is the primary heading; name, department, and avatar sit underneath. */
-function PersonCard({ node, hasChildren, collapsed, onToggle, hiddenCount }) {
-  const tier = ROLE_TIERS[tierIndexFor(node)];
-  const title = getRoleTitle(node);
-
-  return (
-    <div className={`org-node-card inline-flex w-64 items-start gap-2 rounded-xl border border-tertiary-100 border-l-4 bg-white p-3 text-left shadow-card ${tier.border}`}>
-      {hasChildren ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="mt-0.5 shrink-0 rounded-md p-0.5 text-tertiary-400 transition-colors hover:bg-tertiary-100 hover:text-tertiary-700"
-          aria-label={collapsed ? 'Expand direct reports' : 'Collapse direct reports'}
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </button>
-      ) : (
-        <span className="mt-0.5 h-4 w-4 shrink-0" />
-      )}
-      <div className="min-w-0 flex-1">
-        <p className={`truncate text-sm font-bold ${tier.text}`} title={title}>{title}</p>
-        <div className="org-node-card__meta mt-2 flex items-center gap-2">
-          <Avatar name={node.person.name} size="sm" />
-          <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-tertiary-800" title={node.person.name}>{node.person.name}</p>
-            <p className="truncate text-[11px] text-tertiary-500">{node.department?.name || 'No department'}</p>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1">
-          <LifecycleBadge node={node} />
-          {hasChildren && !collapsed && hiddenCount > 0 && (
-            <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-medium text-primary-700" title="Everyone reporting up to this person">{hiddenCount} {hiddenCount === 1 ? 'person' : 'people'} under</span>
-          )}
-          {collapsed && hiddenCount > 0 && (
-            <span className="inline-flex items-center rounded-full bg-tertiary-100 px-2 py-0.5 text-[10px] font-medium text-tertiary-600">+{hiddenCount} hidden</span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** The top node of a tree, or a department-group header — styled distinctly from employee cards. */
-function EntityCard({ label, sublabel, icon: Icon = Building2, hasChildren, collapsed, onToggle }) {
-  return (
-    <div className="org-entity-card inline-flex min-w-[13rem] max-w-[16rem] items-center gap-2 rounded-xl border-2 border-primary-600 bg-primary-50 p-3 text-left shadow-card">
-      {hasChildren ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="shrink-0 rounded-md p-0.5 text-primary-700 transition-colors hover:bg-primary-100"
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </button>
-      ) : (
-        <span className="h-4 w-4 shrink-0" />
-      )}
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white">
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="min-w-0">
-        <span className="block truncate text-sm font-bold text-primary-900">{label}</span>
-        {sublabel && <p className="truncate text-xs text-primary-700">{sublabel}</p>}
-      </div>
-    </div>
-  );
-}
-
-/** Recursive branch: a person node plus its (tier-sorted) reports as a nested tree level. `getChildren` lets the department view swap in a department-local report list without mutating the source tree. */
-function PersonBranch({ node, getChildren, collapsedIds, onToggle }) {
-  const children = getChildren(node) || [];
-  const hasChildren = children.length > 0;
-  const collapsed = collapsedIds.has(node.id);
-  return (
-    <li>
-      <PersonCard
-        node={node}
-        hasChildren={hasChildren}
-        collapsed={collapsed}
-        onToggle={() => onToggle(node.id)}
-        hiddenCount={hasChildren ? countDescendants(node, getChildren) : 0}
-      />
-      {hasChildren && !collapsed && (
-        <ul>
-          {sortByTier(children).map((child) => (
-            <PersonBranch key={child.id} node={child} getChildren={getChildren} collapsedIds={collapsedIds} onToggle={onToggle} />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
+const HINTS = {
+  role: 'Grouped by designation. Reporting lines are unchanged: each group hangs off the manager of its most senior member.',
+  department: 'Grouped by department. Reporting lines are unchanged: each department hangs off the manager of its most senior member.',
+};
 
 /**
  * How many people sit in each category of the current view: per department,
@@ -342,44 +197,6 @@ function CategoryCounts({ roots, viewMode, teams }) {
   );
 }
 
-/** One org's tree, in either view mode — used for both the single-org chart and each subsidiary in group mode. */
-function OrgBranches({ roots, viewMode, branchNamespace, collapsedIds, onToggle }) {
-  const defaultGetChildren = (node) => node.direct_reports;
-
-  if (viewMode === 'department') {
-    const branches = buildDepartmentBranches(roots);
-    if (branches.length === 0) return null;
-    return (
-      <ul>
-        {branches.map((branch) => {
-          const branchId = `${branchNamespace}:dept:${branch.key}`;
-          const collapsed = collapsedIds.has(branchId);
-          return (
-            <li key={branchId}>
-              <EntityCard label={branch.label} sublabel={`${branch.count} people`} icon={Layers} hasChildren collapsed={collapsed} onToggle={() => onToggle(branchId)} />
-              {!collapsed && branch.roots.length > 0 && (
-                <ul>
-                  {sortByTier(branch.roots).map((root) => (
-                    <PersonBranch key={root.id} node={root} getChildren={branch.getChildren} collapsedIds={collapsedIds} onToggle={onToggle} />
-                  ))}
-                </ul>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  }
-
-  return (
-    <ul>
-      {sortByTier(roots).map((root) => (
-        <PersonBranch key={root.id} node={root} getChildren={defaultGetChildren} collapsedIds={collapsedIds} onToggle={onToggle} />
-      ))}
-    </ul>
-  );
-}
-
 const VIEW_MODES = [
   { key: 'team', label: 'Team View' },
   { key: 'role', label: 'Designation / Role View' },
@@ -402,10 +219,9 @@ export default function OrgChartPage({ groupOrgs }) {
   const { user } = useAuth();
   const { pushError } = useAlerts();
   const [includeTerminated, setIncludeTerminated] = useState(false);
-  // Team view draws one org's HR teams; the group chart spans companies, so it keeps the tree views.
-  const viewModes = groupOrgs ? VIEW_MODES.filter((m) => m.key !== 'team') : VIEW_MODES;
-  const [viewMode, setViewMode] = useState(groupOrgs ? 'role' : 'team');
-  const [collapsedIds, setCollapsedIds] = useState(() => new Set());
+  // Team view (teams, leads, direct-reports boxes) is the default everywhere; at group level it draws one company at a time.
+  const viewModes = VIEW_MODES;
+  const [viewMode, setViewMode] = useState('team');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(!groupOrgs);
 
@@ -427,15 +243,6 @@ export default function OrgChartPage({ groupOrgs }) {
     return () => { cancelled = true; };
   }, [includeTerminated, groupOrgs, pushError]);
 
-  function toggle(id) {
-    setCollapsedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   const viewToggle = (
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-tertiary-200 bg-white p-0.5 shadow-sm">
@@ -452,9 +259,6 @@ export default function OrgChartPage({ groupOrgs }) {
           </button>
         ))}
       </div>
-      {viewMode !== 'team' && (
-        <p className="text-xs text-tertiary-400">Strictly role-based reporting order remains intact; department view simply re-groups the same employees without changing reporting lines.</p>
-      )}
     </div>
   );
 
@@ -464,30 +268,10 @@ export default function OrgChartPage({ groupOrgs }) {
     }
     return (
       <div className="space-y-3">
-        {viewToggle}
-        <div className="overflow-x-auto pb-4">
-          <ul className="org-tree w-max min-w-full">
-            <li>
-              <EntityCard label="Group" sublabel={`${groupOrgs.length} companies`} icon={Network} hasChildren collapsed={collapsedIds.has('root')} onToggle={() => toggle('root')} />
-              {!collapsedIds.has('root') && (
-                <ul>
-                  {groupOrgs.map((company) => {
-                    const companyId = `company:${company.org.id}`;
-                    const collapsed = collapsedIds.has(companyId);
-                    return (
-                      <li key={company.org.id}>
-                        <EntityCard label={company.org.name} sublabel={`${company.headcount} people`} icon={Building2} hasChildren={company.roots.length > 0} collapsed={collapsed} onToggle={() => toggle(companyId)} />
-                        {!collapsed && company.roots.length > 0 && (
-                          <OrgBranches roots={company.roots} viewMode={viewMode} branchNamespace={companyId} collapsedIds={collapsedIds} onToggle={toggle} />
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </li>
-          </ul>
-        </div>
+        <p className="text-sm text-tertiary-500">
+          {user?.name} manages every company of the group. Each company shows its teams and people above its name.
+        </p>
+        <TeamChart group={{ companies: groupOrgs, adminName: user?.name || 'Group Super Admin' }} hint="Group Super Admin at the bottom, then each company, then its teams and people." />
       </div>
     );
   }
@@ -509,20 +293,8 @@ export default function OrgChartPage({ groupOrgs }) {
       {!loading && data?.roots.length === 0 && (
         <EmptyState icon={UserRound} title="No org chart yet" description="Set a manager on employee records (People → Directory) to build the reporting tree." />
       )}
-      {!loading && data?.roots.length > 0 && viewMode === 'team' && (
-        <TeamChart data={data} companyName={user?.active_org?.name || 'Company'} />
-      )}
-      {!loading && data?.roots.length > 0 && viewMode !== 'team' && (
-        <div className="overflow-x-auto pb-4">
-          <ul className="org-tree w-max min-w-full">
-            <li>
-              <EntityCard label={user?.active_org?.name || 'Company'} sublabel={`${data.headcount} people`} hasChildren collapsed={collapsedIds.has('root')} onToggle={() => toggle('root')} />
-              {!collapsedIds.has('root') && (
-                <OrgBranches roots={data.roots} viewMode={viewMode} branchNamespace="root" collapsedIds={collapsedIds} onToggle={toggle} />
-              )}
-            </li>
-          </ul>
-        </div>
+      {!loading && data?.roots.length > 0 && (
+        <TeamChart data={chartDataFor(data, viewMode)} companyName={user?.active_org?.name || 'Company'} hint={HINTS[viewMode]} />
       )}
     </div>
   );

@@ -26,6 +26,34 @@ function flatten(roots) {
   return flat;
 }
 
+/**
+ * Role / Department views reuse the team chart: every person is placed in a "team" named after their
+ * designation (or department), so the same boxes, circles and arrows are drawn. A group hangs off the
+ * manager of its most senior member (the one closest to the top of the reporting line); reporting
+ * lines themselves are never changed. `keyOf` / `labelOf` / `orderOf` decide the grouping.
+ */
+export function regroupForTeamChart({ roots }, { keyOf, labelOf, orderOf }) {
+  const depth = new Map();
+  const walk = (node, d) => {
+    depth.set(node.id, d);
+    node.direct_reports?.forEach((c) => walk(c, d + 1));
+  };
+  roots.forEach((r) => walk(r, 0));
+  const groups = new Map();
+  const clone = (node) => {
+    const key = keyOf(node);
+    if (!groups.has(key)) groups.set(key, { id: key, name: labelOf(node), members: [], sort_order: orderOf(node) });
+    groups.get(key).members.push(node);
+    return { ...node, team_id: key, direct_reports: (node.direct_reports || []).map(clone) };
+  };
+  const newRoots = roots.map(clone);
+  const teams = [...groups.values()].map((g) => {
+    const top = [...g.members].sort((a, b) => depth.get(a.id) - depth.get(b.id) || (a.person?.name || '').localeCompare(b.person?.name || ''))[0];
+    return { id: g.id, name: g.name, lead_membership_id: null, manager_membership_id: top?.manager_id || null, open_positions: 0, sort_order: g.sort_order };
+  });
+  return { roots: newRoots, teams };
+}
+
 const nameOf = (node) => node?.person?.name || '';
 const byName = (a, b) => nameOf(a).localeCompare(nameOf(b));
 
@@ -244,8 +272,67 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
   lines.push(arrow('root:stub', { x: root.x + ROOT_W / 2, y: height, r: 0 }, { x: root.x + ROOT_W / 2, y: root.y + ROOT_H, r: 0 }));
 
   const width = Math.max(root.span, fx - H_GAP, 0);
-  return { root, units, floatBoxes, lines, width, height };
+  return { root, roots: [root], units, floatBoxes, lines, width, height, extraSeats: [] };
 }
+
+// ---- Group chart: one group superadmin at the bottom, every company above, each company's people above that.
+const COMPANY_GAP = 110;
+const GROUP_ROOT_W = 176;
+const ADMIN_CAPTION = 34;
+
+function arrowLine(id, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  return { id, x1: from.x + ux * from.r, y1: from.y + uy * from.r, x2: to.x - ux * to.r, y2: to.y - uy * to.r };
+}
+
+/**
+ * Every company is laid out exactly like the single-company team chart, side by side with their company
+ * nodes on one line; the group superadmin (the same person is the admin of each company) sits below
+ * them all with an arrow up to every company. A company that is not live yet shows as a dashed
+ * "Coming soon" node with nobody under it.
+ */
+export function layoutGroupChart(companies, adminName) {
+  const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon'));
+  const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name) }));
+  const top = Math.max(...parts.map((p) => p.chart.height), ROOT_H + ROOT_STUB);
+  const units = [];
+  const floatBoxes = [];
+  const lines = [];
+  const roots = [];
+  let x = 0;
+  for (const { c, chart } of parts) {
+    const soon = soonOf(c);
+    const dx = x + (soon ? 0 : 0);
+    const dy = top - chart.height;
+    const shiftBox = (b) => {
+      b.x += dx;
+      b.y += dy;
+      if (b.labelY !== undefined) b.labelY += dy;
+      b.circles?.forEach((k) => { k.cx += dx; k.cy += dy; });
+      if (b.leadCircle) { b.leadCircle.cx += dx; b.leadCircle.cy += dy; }
+    };
+    chart.units.forEach(shiftBox);
+    chart.floatBoxes.forEach(shiftBox);
+    units.push(...chart.units);
+    floatBoxes.push(...chart.floatBoxes);
+    chart.lines.filter((l) => l.id !== 'root:stub').forEach((l) => lines.push({ ...l, id: `${c.org.id}:${l.id}`, x1: l.x1 + dx, x2: l.x2 + dx, y1: l.y1 + dy, y2: l.y2 + dy }));
+    const root = chart.root;
+    const widen = (GROUP_ROOT_W - ROOT_W) / 2;
+    roots.push({ id: `root:${c.org.id}`, x: root.x + dx - widen, y: root.y + dy, width: GROUP_ROOT_W, soon, label: soon ? `${c.org.name} - Coming soon` : `${c.org.name} (${c.headcount})` });
+    x += Math.max(chart.width, GROUP_ROOT_W) + COMPANY_GAP;
+  }
+  const width = Math.max(x - COMPANY_GAP, C);
+  const adminCx = width / 2;
+  const adminCy = top + V_GAP + R;
+  const admin = { seat: { person: { name: adminName }, name: adminName, vacant: false }, cx: adminCx, cy: adminCy, caption: 'Group Super Admin - admin of every company' };
+  for (const r of roots) lines.push(arrowLine(`admin:${r.id}`, { x: adminCx, y: adminCy, r: R }, { x: r.x + r.width / 2, y: r.y + ROOT_H, r: 0 }));
+  return { root: null, roots, units, floatBoxes, lines, width, height: adminCy + R + ADMIN_CAPTION, extraSeats: [admin] };
+}
+
 
 function circleClass(seat) {
   if (seat.vacant) return 'border-slate-700 bg-[#c9a7e0]';
@@ -301,9 +388,9 @@ const ZOOMS = [0.5, 0.65, 0.8, 1, 1.2];
  * Reporting lines are still manager_id; teams, leads, reports-to, open
  * positions and order come from People → HR Settings → Teams.
  */
-export default function TeamChart({ data, companyName }) {
-  const [zoom, setZoom] = useState(3);
-  const chart = useMemo(() => layoutTeamChart(data, companyName), [data, companyName]);
+export default function TeamChart({ data, companyName, group, hint = 'Teams, leads, reports-to, open positions and order: People → HR Settings → Teams.' }) {
+  const [zoom, setZoom] = useState(group ? 2 : 3);
+  const chart = useMemo(() => (group ? layoutGroupChart(group.companies, group.adminName) : layoutTeamChart(data, companyName)), [data, companyName, group]);
   const scale = ZOOMS[zoom];
   const boxes = [...chart.units.filter((u) => u.kind !== 'manager'), ...chart.floatBoxes];
 
@@ -315,7 +402,7 @@ export default function TeamChart({ data, companyName }) {
           <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border border-slate-700 bg-[#c9a7e0]" /> Open position</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border border-dashed border-slate-700 bg-[#9fc9f0]" /> New hire</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border border-amber-600 bg-amber-200" /> Notice period</span>
-          <span>Teams, leads, reports-to, open positions and order: People → HR Settings → Teams.</span>
+          <span>{hint}</span>
         </div>
         <div className="inline-flex items-center rounded-lg border border-tertiary-200 bg-white shadow-sm">
           <button type="button" className="p-1.5 text-tertiary-600 hover:bg-tertiary-50 disabled:opacity-40" onClick={() => setZoom((z) => z - 1)} disabled={zoom === 0} aria-label="Zoom out"><Minus className="h-3.5 w-3.5" /></button>
@@ -342,13 +429,22 @@ export default function TeamChart({ data, companyName }) {
               ...(b.leadCircle ? [<Seat key={`${b.id}:lead`} seat={b.leadCircle.seat} cx={b.leadCircle.cx} cy={b.leadCircle.cy} />] : []),
             ])}
             {chart.units.filter((u) => u.kind === 'manager').map((u) => <Seat key={u.id} seat={u.person} cx={u.x + R} cy={u.y + R} />)}
-            <div
-              className="absolute flex items-center justify-center rounded-lg border border-slate-700 bg-[#9ee0b8] px-2 text-center text-[11px] font-bold text-slate-900"
-              style={{ left: chart.root.x, top: chart.root.y, width: ROOT_W, height: ROOT_H }}
-              title={companyName}
-            >
-              <span className="truncate">{companyName}</span>
-            </div>
+            {chart.roots.map((r) => (
+              <div
+                key={r.id || 'root'}
+                className={`absolute flex items-center justify-center rounded-lg border px-2 text-center text-[11px] font-bold text-slate-900 ${r.soon ? 'border-dashed border-slate-400 bg-slate-100 text-slate-500' : 'border-slate-700 bg-[#9ee0b8]'}`}
+                style={{ left: r.x, top: r.y, width: r.width || ROOT_W, height: ROOT_H }}
+                title={r.label || companyName}
+              >
+                <span className="truncate">{r.label || companyName}</span>
+              </div>
+            ))}
+            {chart.extraSeats.map((e) => (
+              <div key="group-admin">
+                <Seat seat={e.seat} cx={e.cx} cy={e.cy} />
+                <p className="absolute text-center text-[11px] font-bold text-slate-800" style={{ left: e.cx - 130, top: e.cy + R + 6, width: 260 }}>{e.caption}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>

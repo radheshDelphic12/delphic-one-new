@@ -50,7 +50,8 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/notifications')) return 'Notifications';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/reports')) return 'Reports';
-  if (pathname.startsWith('/group-overview')) return 'Group Overview';
+  if (pathname === '/group-overview/settings') return 'Group Settings';
+  if (pathname.startsWith('/group-overview')) return 'Group Dashboard';
   if (pathname.startsWith('/finance')) return 'Finance';
   if (pathname.startsWith('/payroll')) return 'Payroll';
   if (pathname.startsWith('/analytics')) return 'Live Analytics';
@@ -85,8 +86,9 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/notifications')) return 'Assignments, interviews, and stage changes across your work.';
   if (pathname.startsWith('/settings')) return 'Your profile, password, notifications, and account history.';
   if (pathname.startsWith('/reports')) return 'Pick filters and export Excel or PDF.';
+  if (pathname === '/group-overview/settings') return 'Your account, the companies in the group and the dashboard alert thresholds.';
   if (pathname.startsWith('/group-overview')) {
-    return 'Group-wide valuation, revenue vs. expense, and drill-down into any subsidiary.';
+    return 'All companies in one place: compare revenue, profit and valuation, then open any company.';
   }
   if (pathname.startsWith('/finance')) return 'Expenses, vendor payments, billing rates, accounting, group charges, and CA/audit access.';
   if (pathname.startsWith('/payroll')) return 'Salary structures, payroll runs, and payslips.';

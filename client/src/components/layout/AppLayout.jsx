@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Settings, X } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, X } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
@@ -84,17 +84,23 @@ const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings
 // Gulati Industries is standalone in the same way.
 const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
 
+const GROUP_NAV_ITEM = { to: '/group-overview', label: 'Group Dashboard', icon: Network, end: true };
+
 export default function AppLayout() {
-  const { user, logout, isGroupSuperadmin } = useAuth();
+  const { user, logout, isGroupSuperadmin, memberships, switchOrg } = useAuth();
+  const { pushInfo } = useAlerts();
   const { pathname, search } = useLocation();
+  const navigate = useNavigate();
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
   const isContractor = user?.worker_type === 'contractor';
   const isZephyr = isZephyrOrg(user);
   const { me: zxMe } = useZephyr();
   const isGulati = isGulatiOrg(user);
+  // The group superadmin's Group Dashboard is reachable from inside any company workspace.
+  const isGroupPath = isGroupSuperadmin && pathname.startsWith('/group-overview');
   const { me: gxMe } = useGulati();
-  const navItems = useMemo(
+  const navBase = useMemo(
     () => {
       if (isGulati) {
         const setup = gxCan(gxMe, 'settings') ? [{ to: '/gulati/settings', label: 'Gulati setup', icon: Settings }] : [];
@@ -117,19 +123,30 @@ export default function AppLayout() {
     [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe]
   );
 
+  // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
+  const navItems = useMemo(
+    () => {
+      if (!isGroupSuperadmin || isContractor) return navBase;
+      // In group view the sidebar is the group's, not whichever company happens to be active underneath.
+      if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }];
+      return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview')];
+    },
+    [navBase, isGroupSuperadmin, isContractor, isGroupPath]
+  );
+
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
   useEffect(() => {
-    if (!isZephyr) return undefined;
+    if (!isZephyr || isGroupPath) return undefined;
     document.documentElement.classList.add('theme-zephyr');
     return () => document.documentElement.classList.remove('theme-zephyr');
-  }, [isZephyr]);
+  }, [isZephyr, isGroupPath]);
 
   // Gulati gets its own calm green palette from the logo.
   useEffect(() => {
-    if (!isGulati) return undefined;
+    if (!isGulati || isGroupPath) return undefined;
     document.documentElement.classList.add('theme-gulati');
     return () => document.documentElement.classList.remove('theme-gulati');
-  }, [isGulati]);
+  }, [isGulati, isGroupPath]);
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -172,7 +189,7 @@ export default function AppLayout() {
       <div className="px-2 py-3">
         <WorkspaceSwitcher collapsed={collapsed} onCreate={() => setOrgCreateOpen(true)} />
       </div>
-      {isZephyr && !collapsed && (
+      {isZephyr && !isGroupPath && !collapsed && (
         <Link
           to="/zephyr"
           onClick={() => setMobileOpen(false)}
@@ -190,7 +207,7 @@ export default function AppLayout() {
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
         </Link>
       )}
-      {isGulati && !collapsed && (
+      {isGulati && !isGroupPath && !collapsed && (
         <Link
           to="/gulati"
           onClick={() => setMobileOpen(false)}
@@ -246,6 +263,34 @@ export default function AppLayout() {
           );
         })}
       </nav>
+      {isGroupSuperadmin && isGroupPath && !collapsed && memberships?.length > 0 && (
+        <div className="border-t border-tertiary-100 px-2 pb-1 pt-3">
+          <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary-400">Open a company</p>
+          <ul className="space-y-0.5">
+            {memberships.map((m) => (
+              <li key={m.org.id}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (m.org.enabled_modules?.includes('coming_soon')) {
+                      pushInfo(`${m.org.name} is coming soon. It will appear here once it is ready.`);
+                      return;
+                    }
+                    setMobileOpen(false);
+                    await switchOrg(m.org.id);
+                    navigate('/');
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-tertiary-700 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900"
+                >
+                  <Building2 className="h-4 w-4 shrink-0 text-tertiary-400" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{m.org.name}</span>
+                  {m.org.enabled_modules?.includes('coming_soon') && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Soon</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="mt-auto space-y-2 border-t border-tertiary-100 p-2">
         <button
           type="button"
@@ -390,9 +435,20 @@ export default function AppLayout() {
           </header>
 
           <div className="px-4 pb-6 pt-0 md:px-6">
+            {isGroupSuperadmin && !isGroupPath && user?.active_org && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary-200 bg-primary-50 px-4 py-2 text-sm text-primary-900">
+                <span>
+                  Group admin view - you are working in <b>{user.active_org.name}</b>. Changes here affect only this company.
+                </span>
+                <Link to="/group-overview" className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-soft hover:bg-primary-100">
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  Back to Group Dashboard
+                </Link>
+              </div>
+            )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) ? <Navigate to="/gulati" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

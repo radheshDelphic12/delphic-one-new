@@ -8,6 +8,8 @@ const MODULES = ['trading', 'leads', 'contracts', 'projects'];
 const updateOrgSettingsSchema = z
   .object({
     enabled_modules: z.array(z.enum(MODULES)).max(MODULES.length),
+    // Company not built yet: shown on the group dashboard as "Coming soon" and cannot be opened.
+    coming_soon: z.boolean(),
     valuation_method: z.enum(['manual', 'revenue_multiple', 'ebitda_multiple']),
     valuation_multiple: z.coerce.number().positive().max(1000).nullable(),
   })

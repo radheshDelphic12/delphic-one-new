@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { ensureGroupAdminMemberships } = require('../../lib/groupAccess');
 const prisma = require('../../config/db');
 const { WORKING_STATUSES, isWorking } = require('../../lib/employmentStatus');
 const env = require('../../config/env');
@@ -22,7 +23,7 @@ const MEMBERSHIP_SELECT = {
 async function defaultMembershipFor(userId) {
   return prisma.orgMembership.findFirst({
     where: { person_id: userId, employment_status: { in: WORKING_STATUSES } },
-    orderBy: { joined_at: 'asc' },
+    orderBy: [{ joined_at: 'asc' }, { org: { is_master_workspace: 'desc' } }, { org: { name: 'asc' } }],
     select: MEMBERSHIP_SELECT,
   });
 }
@@ -63,7 +64,7 @@ async function login(email, password, orgSlug) {
   const [memberships, defaultMembership] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { person_id: user.id, employment_status: { in: WORKING_STATUSES } },
-      orderBy: { joined_at: 'asc' },
+      orderBy: [{ joined_at: 'asc' }, { org: { is_master_workspace: 'desc' } }, { org: { name: 'asc' } }],
       select: MEMBERSHIP_SELECT,
     }),
     defaultMembershipFor(user.id),
@@ -142,11 +143,14 @@ async function switchOrg(userId, orgId) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || !user.active) return { error: 'not_found' };
 
+  // A group superadmin may open any company of their own holding group (admin membership created on demand).
+  if (user.is_group_superadmin) await ensureGroupAdminMemberships(userId, orgId);
   const membership = await prisma.orgMembership.findUnique({
     where: { person_id_org_id: { person_id: userId, org_id: orgId } },
     select: MEMBERSHIP_SELECT,
   });
   if (!membership || membership.employment_status !== 'active') return { error: 'not_a_member' };
+  if (membership.org.enabled_modules?.includes('coming_soon')) return { error: 'coming_soon', org: membership.org };
 
   return {
     access_token: signAccessToken(user, membership.org_id, membership.role),
