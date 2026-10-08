@@ -13,6 +13,7 @@ const {
   attendanceSalaryQuerySchema,
   setPayBasisSchema,
   createRunSchema,
+  refreshRunSchema,
   listRunsQuerySchema,
   listPayslipsQuerySchema,
   salaryAdjustmentSchema,
@@ -30,6 +31,7 @@ const ERRORS = {
   membership_not_found: [404, 'Org membership not found'],
   not_found: [404, 'Not found'],
   already_processed: [409, 'That payroll run has already been processed'],
+  not_processed: [409, 'Process the payroll run first - only a processed run can be updated'],
   bad_range: [422, 'Choose a valid month range (at most 24 months)'],
   future_paid_on: [422, 'The payment date cannot be in the future'],
   paid_on_required: [422, 'Enter the date the salary was paid'],
@@ -148,6 +150,18 @@ router.post(
     const result = await service.processRun(req.user.org_id, req.params.id, req.user.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, { run: result.run, payslips_generated: result.payslips_generated, skipped: result.skipped });
+  })
+);
+
+// Bring a processed run up to date after salary changed: payslips whose figures moved are updated in place
+// (each change kept as a revision with the reason), new eligible employees get a payslip.
+router.post(
+  '/runs/:id/refresh',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.refreshRun(req.user.org_id, req.params.id, req.user, refreshRunSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
   })
 );
 
