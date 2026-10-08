@@ -2,12 +2,12 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
-## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, local, uncommitted)
+## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, pushed to `staging` and `main` as 5101ada, test fix 4e74524 on `staging`)
 
 - Special case: an admin can apply a **full-day** leave for an employee on dates they were already marked present (previously refused with `present_on_date`). `POST /leave/requests/admin` takes `override_attendance: true`, which requires `auto_approve: true` and a reason (min 3 chars). Leave Managers who are not admins get 403. Half-day leave never needed it.
 - The leave is approved right away; the employee's present / wfh / half_day attendance rows in the range become `leave` (`regularized_by` = admin, `regularized_reason` = `[leave override] <reason>`), each runs `detectFinanceChange` (a locked month is flagged, not rewritten), and one `audit_logs` row `attendance_leave_override` lists the days and their previous status. Timesheet conflicts are still enforced.
 - UI: "Apply for employee" drawer (Leave page) gets an admin-only "Override attendance (special case)" checkbox; it forces "Approve immediately" and makes the reason required. No migration.
-- Test added in `server/tests/leave-timesheet-integration.test.js` ("admin override ..."); not run locally (no test DB on this machine) - CI runs it.
+- Test added in `server/tests/leave-timesheet-integration.test.js` ("admin override ..."); not run locally (no test DB on this machine). First CI run failed only because the test expected 400 for a validation error - this app returns 422 (`errorHandler.js`); fixed in 4e74524.
 
 ## 2026-10-08 - Super Admin: Group Dashboard + full company control (branch `super_admin_branch`, committed locally as d4d86ee, not pushed)
 
