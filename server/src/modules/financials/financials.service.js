@@ -246,7 +246,7 @@ async function projectionForOrg(org, { months = 12, horizon = 6 } = {}, now = ne
   const keys = nextMonths(months, horizon, now);
   const projected = keys.map((month, i) => ({ month, revenue: revenue[i], cost: cost[i], profit: round2(revenue[i] - cost[i]) }));
   return {
-    org: { id: org.id, name: org.name, slug: org.slug, currency: org.default_currency },
+    org: { id: org.id, name: org.name, slug: org.slug, currency: org.default_currency, enabled_modules: org.enabled_modules },
     actuals,
     projected,
     projected_revenue_total: round2(projected.reduce((s, p) => s + p.revenue, 0)),
@@ -256,7 +256,7 @@ async function projectionForOrg(org, { months = 12, horizon = 6 } = {}, now = ne
   };
 }
 
-const ORG_SELECT = { id: true, name: true, slug: true, default_currency: true, valuation: true, valuation_method: true, valuation_multiple: true };
+const ORG_SELECT = { id: true, name: true, slug: true, enabled_modules: true, default_currency: true, valuation: true, valuation_method: true, valuation_multiple: true };
 
 async function groupProjection(orgGroupIds, opts = {}) {
   const orgs = await prisma.org.findMany({ where: { org_group_id: { in: orgGroupIds }, status: 'active' }, select: ORG_SELECT, orderBy: { name: 'asc' } });

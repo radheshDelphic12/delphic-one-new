@@ -37,10 +37,14 @@ function buildTree(memberships) {
   return roots;
 }
 
-async function getOrgChart(orgId, { include_terminated }) {
+async function getOrgChart(orgId, { include_terminated, exclude_group_admins = false }) {
   const [memberships, teams] = await Promise.all([
     prisma.orgMembership.findMany({
-      where: { org_id: orgId, ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }) },
+      where: {
+        org_id: orgId,
+        ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }),
+        ...(exclude_group_admins ? { person: { is_group_superadmin: false } } : {}),
+      },
       select: MEMBER_SELECT,
       orderBy: { joined_at: 'asc' },
     }),
@@ -66,10 +70,11 @@ async function getGroupOrgChart({ org_group_id, include_terminated }, allowedGro
         ? org_group_id
         : { in: allowedGroupIds },
     },
-    select: { id: true, name: true, slug: true },
+    select: { id: true, name: true, slug: true, enabled_modules: true },
     orderBy: { name: 'asc' },
   });
-  const charts = await Promise.all(orgs.map(async (org) => ({ org, ...(await getOrgChart(org.id, { include_terminated })) })));
+  // The group superadmin sits above every company in the group chart, not inside each one.
+  const charts = await Promise.all(orgs.map(async (org) => ({ org, ...(await getOrgChart(org.id, { include_terminated, exclude_group_admins: true })) })));
   return charts;
 }
 
