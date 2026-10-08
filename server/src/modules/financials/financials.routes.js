@@ -19,6 +19,18 @@ router.get(
   })
 );
 
+// Financials page: Revenue, Profit and Valuation month on month.
+router.get(
+  '/trends',
+  asyncHandler(async (req, res) => ok(res, await service.trends(req.user.org_id, service.trendsQuerySchema.parse(req.query))))
+);
+
+// The asset value recorded for a month (feeds Valuation).
+router.put(
+  '/asset-values',
+  asyncHandler(async (req, res) => ok(res, await service.upsertAssetValue(req.user.org_id, req.user.id, service.assetValueSchema.parse(req.body))))
+);
+
 router.get(
   '/projection',
   asyncHandler(async (req, res) => {

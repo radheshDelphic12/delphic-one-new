@@ -4,10 +4,11 @@ const logger = require('../config/logger');
 const timesheetsService = require('../modules/timesheets/timesheets.service');
 
 /**
- * Weekly timesheet auto-lock: the company works Monday-Friday, and at
- * Saturday 00:00 (IST) the week that just ended (Mon-Fri) locks for every
- * active org — no more entries or edits from employees OR admins through the
- * normal timesheet screen; corrections go through Timesheet Regularisation.
+ * Weekly timesheet auto-lock: weeks run Sunday -> Saturday (clients may work
+ * weekends), and at Sunday 00:00 (IST) the week that just ended locks for
+ * every active org — no more entries or edits from employees; managers can
+ * still decide it, admins can correct it, and employees raise a Timesheet
+ * Regularisation.
  *
  * Idempotent (already-locked days are left alone), so it is also run once on
  * startup: if the server was down over a Saturday midnight, the missed lock is
@@ -30,8 +31,8 @@ async function run(now = new Date()) {
 
 function schedule() {
   run().catch((err) => logger.error('timesheet_weekly_lock_startup_failed', { err }));
-  // Saturday 00:00 IST.
-  return cron.schedule('0 0 * * 6', () => {
+  // Sunday 00:00 IST.
+  return cron.schedule('0 0 * * 0', () => {
     run().catch((err) => logger.error('timesheet_weekly_lock_tick_failed', { err }));
   }, { timezone: 'Asia/Kolkata' });
 }

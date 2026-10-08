@@ -159,4 +159,15 @@ describe('GET /reports/hr', () => {
     expect(narrowed).toHaveLength(1);
     expect(narrowed[0].interviewer).toBe('Omar');
   });
+
+  test('each table carries its real total, not its number of per-person/day rows', async () => {
+    const body = (await getHr(adminToken)).body;
+    expect(table(body, 'sourcing')).toMatchObject({ total: 3 }); // 1 row, 3 profiles
+    expect(table(body, 'submissions')).toMatchObject({ total: 2 });
+    expect(table(body, 'round1_by_sourcer')).toMatchObject({ total: 4 });
+    // Ivy 4 + Omar 1 rows, but the round both sat on is one round: 4 in all.
+    expect(table(body, 'round1_by_interviewer')).toMatchObject({ total: 4 });
+    const narrowed = (await getHr(adminToken, { interviewer_id: interviewerB.id })).body;
+    expect(table(narrowed, 'round1_by_interviewer')).toMatchObject({ total: 1 });
+  });
 });

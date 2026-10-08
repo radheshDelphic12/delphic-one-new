@@ -109,11 +109,9 @@ describe('Client-brief amendment — HR POC, sourcing POC, manager mapping', () 
   });
 });
 
-describe('Client-brief amendment — shift + automatic overtime', () => {
-  test('admin creates a shift; overtime is null with no shift assigned', async () => {
-    const { org, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken } = await seedOrgEmployee(org);
-
+describe('Client-brief amendment — shifts', () => {
+  test('admin creates a shift (check-in / overtime-from-check-out no longer exist)', async () => {
+    const { access_token: adminToken } = await seedOrgAdmin();
     const shift = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken).send({
       name: 'General',
       start_minutes: 9 * 60,
@@ -121,62 +119,13 @@ describe('Client-brief amendment — shift + automatic overtime', () => {
       grace_minutes: 15,
     });
     expect(shift.status).toBe(201);
-
-    await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
-    const checkOut = await authed(request(app).post('/api/v1/attendance/check-out'), empToken);
-    expect(checkOut.status).toBe(200);
-    expect(checkOut.body.data.overtime_minutes).toBeNull();
-  });
-
-  test('overtime is computed against the assigned shift + grace period', async () => {
-    const { org, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken, membership } = await seedOrgEmployee(org);
-
-    const shift = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken).send({
-      name: 'General',
-      start_minutes: 9 * 60,
-      end_minutes: 18 * 60, // 9h shift
-      grace_minutes: 15,
-    });
-    await authed(request(app).patch(`/api/v1/orgs/memberships/${membership.id}`), adminToken).send({
-      shift_id: shift.body.data.id,
-    });
-
-    await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
-    // Backdate check_in_at to 10 hours ago so check-out sees a 10h work span
-    // (9h shift + 15m grace = 555m allowed; 600m worked -> 45m overtime).
-    await prisma.attendanceRecord.updateMany({
-      where: { org_membership_id: membership.id },
-      data: { check_in_at: new Date(Date.now() - 10 * 60 * 60 * 1000) },
-    });
-
-    const checkOut = await authed(request(app).post('/api/v1/attendance/check-out'), empToken);
-    expect(checkOut.status).toBe(200);
-    expect(checkOut.body.data.overtime_minutes).toBe(45);
-  });
-
-  test('no overtime when worked time is within the shift + grace window', async () => {
-    const { org, access_token: adminToken } = await seedOrgAdmin();
-    const { access_token: empToken, membership } = await seedOrgEmployee(org);
-
-    const shift = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken).send({
+    const dup = await authed(request(app).post('/api/v1/attendance/shifts'), adminToken).send({
       name: 'General',
       start_minutes: 9 * 60,
       end_minutes: 18 * 60,
-      grace_minutes: 30,
+      grace_minutes: 15,
     });
-    await authed(request(app).patch(`/api/v1/orgs/memberships/${membership.id}`), adminToken).send({
-      shift_id: shift.body.data.id,
-    });
-
-    await authed(request(app).post('/api/v1/attendance/check-in'), empToken);
-    await prisma.attendanceRecord.updateMany({
-      where: { org_membership_id: membership.id },
-      data: { check_in_at: new Date(Date.now() - 9 * 60 * 60 * 1000) }, // exactly 9h worked
-    });
-
-    const checkOut = await authed(request(app).post('/api/v1/attendance/check-out'), empToken);
-    expect(checkOut.body.data.overtime_minutes).toBe(0);
+    expect(dup.status).toBe(409);
   });
 });
 
@@ -228,5 +177,30 @@ describe('Client-brief amendment — multi-project calendar mapping', () => {
     const list = await authed(request(app).get(`/api/v1/calendars/assignments/${membership.id}`), adminToken);
     expect(list.body.data).toHaveLength(1);
     expect(list.body.data[0].calendar.name).toBe('Calendar B');
+  });
+});
+
+describe('Locations: one default, edit, delete', () => {
+  test('marking a location default moves the flag; edit and delete work; a location in use cannot be deleted', async () => {
+    const { org, access_token: token } = await seedOrgAdmin();
+    const add = (body) => authed(request(app).post('/api/v1/orgs/locations'), token).send(body);
+    const list = async () => (await authed(request(app).get('/api/v1/orgs/locations'), token)).body.data;
+    const ahm = (await add({ name: 'Ahmedabad Office', is_default: true })).body.data;
+    const ind = (await add({ name: 'Indore Office', is_default: true })).body.data;
+    expect((await list()).filter((l) => l.is_default).map((l) => l.name)).toEqual(['Indore Office']);
+
+    const patched = await authed(request(app).patch(`/api/v1/orgs/locations/${ahm.id}`), token).send({ is_default: true, city: 'Ahmedabad' });
+    expect(patched.body.data).toMatchObject({ is_default: true, city: 'Ahmedabad' });
+    expect((await list()).filter((l) => l.is_default).map((l) => l.name)).toEqual(['Ahmedabad Office']);
+    expect((await authed(request(app).patch(`/api/v1/orgs/locations/${ind.id}`), token).send({ name: 'Ahmedabad Office' })).status).toBe(409);
+
+    const emp = await seedOrgEmployee(org);
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { location_id: ind.id } });
+    const blocked = await authed(request(app).delete(`/api/v1/orgs/locations/${ind.id}`), token);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.message).toContain('1 employee');
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { location_id: null } });
+    expect((await authed(request(app).delete(`/api/v1/orgs/locations/${ind.id}`), token)).status).toBe(200);
+    expect((await authed(request(app).delete(`/api/v1/orgs/locations/${ahm.id}`), emp.access_token)).status).toBe(403);
   });
 });

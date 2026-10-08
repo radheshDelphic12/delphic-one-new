@@ -2,6 +2,338 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-08 - Super Admin: Group Dashboard + full company control (branch `super_admin_branch`, committed locally as d4d86ee, not pushed)
+
+- **Group Finance** tab (default of Group Overview): consolidated + per-company revenue, expenses, profit, assets and valuation (profit x 240 + asset x 3), filters (period, FY quarter/year, Locked/Unlocked/All, company chips), sortable/searchable company table, one-legend-per-company graphs, contribution, rankings, alerts (configurable thresholds), activity feed, company panel with valuation breakdown, drill-down (`GET /super-dashboard/companies/:orgId/drilldown`) and monthly asset values (history kept, revisions audited), CSV and PDF (print view) export. Logo `client/public/group-logo.svg` (a redrawn Gulati Foundation logo; replace with the original file).
+- APIs: `GET /super-dashboard/group/overview`, `/group/activity`, `GET|PUT /super-dashboard/companies/:orgId/asset-values`. No migration; each company keeps its own asset-value table, `groupFinance.service.js` only normalises them. Companies are read dynamically from the group (no hardcoded names).
+- Company switching: a group superadmin gets an admin `OrgMembership` on demand in every active company of their own holding group (`server/src/lib/groupAccess.js`, audited as `group_admin_access`), so all existing role/module checks apply unchanged. Another group's company is refused (403). The superadmin is excluded from group headcount.
+- Group Dashboard stays reachable from inside the Gulati/Zephyr workspaces (AppLayout redirect exception) and from the switcher ("All Companies - Group dashboard").
+- Navigation: a group superadmin lands on the Group Dashboard right after login (no company picker); **Group Dashboard** is pinned at the top of the sidebar inside every company; in group view the switcher reads "All Companies"; inside a company a banner offers "Back to Group Dashboard". The page is laid out as numbered sections (at a glance, companies, trends with one metric toggle, contribution/rankings, activity). Login/default-company tie-break prefers the master workspace.
+- Later the same day: Zephyr-style pill filters with live refresh (a stale response can no longer overwrite a newer one), previous-period change on the KPI cards, group Org Chart as one chart (Group Super Admin > companies > people), Role/Department views in the team-chart design, Group Settings page, line chart for group revenue actual vs projected, "Coming soon" companies (marker in `Org.enabled_modules`, `PATCH /orgs/:id/settings { coming_soon }`, switch refused with 409), activity timeline limited to the last 7 days. Full write-up: [SUPER-ADMIN-GROUP-DASHBOARD.md](../features/SUPER-ADMIN-GROUP-DASHBOARD.md). Tests now 16 server + 60 UI + 40 API checks.
+- Limits: month is the finest period (no daily/weekly); group valuation = plain sum, no inter-company elimination; projects/leads/receivables/payables stay inside each company.
+- Tests: `server/tests/super-admin-group-dashboard.test.js` (13). Browser/API e2e on a throwaway DB: 40/40 UI (filters, asset value add/revise, drill-down, CSV/PDF, switch into Gulati/Zephyr/Delphic, add + edit client from the UI, company admins see only their company) and 40/40 API (isolation + 172 read endpoints identical to the company admin's, add/edit inside each company).
+
+## 2026-10-08 — Payroll: a processed run can be updated so salary changes reach the payslips (local, uncommitted)
+
+- Payroll > Payroll Runs: processed runs get an **Update payroll** action (reason required). It recalculates the run exactly like processing does (the locked salary version if the month is locked, otherwise live) and updates the payslips whose figures moved **in place** (same payslip id, so links and Salary Payments stay attached). Each amount change is kept on the payslip as a revision (`breakdown.revisions`: when, who, why, previous gross / deductions / net) and the salary slip shows "Revised N time(s)". Employees who became eligible after processing get a payslip; payslips with no line any more are left untouched (never deleted); optional `org_membership_ids` limits it to some employees. The result dialog lists before / after net per employee and warns when a salary was already marked paid for a different amount.
+- API `POST /payroll/runs/:id/refresh` `{ reason, org_membership_ids? }` (admin; 409 on a draft run, 422 without a reason), audited as `payroll_run_refresh`. `processRun` now shares `runLines()` with it. No schema change. Test `server/tests/payroll-run-refresh.test.js` (3/3); `erp-phase4-payroll` and `salary-payments` still pass. Verified in the browser on a throwaway Oct 2026 run (removed afterwards).
+- If the month's salary is locked, the locked figures are what is paid: re-lock / recalculate the salary first (Live Analytics > Salary) if a change should show up.
+
+## 2026-10-08 — Release state: all three branches in main, staging deployed, Gulati admin seeded on staging and production
+
+- `delphic-one-bugFix-and-newImplementation`, `zephyr-bug-fix-new-implementation` and `gulati_industry_bug_and_implementation` are all merged into `origin/main` (PR #33 Zephyr, PR #34 Gulati; Delphic was already in). Check: 0 commits of any branch are missing from main.
+- Staging (`https://delphic-one-new-staging.onrender.com`, Render service `srv-datoc5e0tbcc73elv730`) runs the three branches merged (`bdc14a5`), deployed with the Render CLI from a temp worktree (merge, `git push origin staging-merge:staging`, `render deploys create ... --commit <sha>`). Zephyr admin (`admin@zephyrinfra.in`) already existed on staging; the Gulati admin (`admin@gulatiindustries.in`) was created there with the non-destructive `server/prisma/gulati/seed-admin.js`.
+- Production is a Docker host (containers `delphic-server-1`, `delphic-client-1`, `delphic-db-1`; app at `/app/server` inside the container, nothing on the host). The Gulati admin login was created there with `docker cp` + `docker exec` of the same script. Runbook: [guides/GULATI-ADMIN-SEED.md](../guides/GULATI-ADMIN-SEED.md). Default password is the documented initial one; change it after first sign-in.
+- Shared Prisma client gotcha: `node_modules/.prisma` is one copy for every branch. After switching branches run `cd server && npx prisma generate` and restart the API (stop the running API first on Windows, it locks the engine DLL).
+
+## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (merged to main)
+
+- New sidebar entry **Financials** (`/gulati/financials`, just above "Gulati setup", admin capability `valuation`) with one section, **Financial trends**, laid out like Delphic Global and Zephyr: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table with a **Lock month / Reopen** button per month, and the asset value form (with remove). Page: `GulatiFinancialsPage.jsx`.
+- **Finance** (`/gulati/finance`) keeps its original tabs (Overview, P&L, By trading type, Expenses, Month close); only the Valuation tab I had added there was moved out into Financials. The home page Valuation KPI links to Financials.
+- `GET /gulati/finance/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months, Unlocked = live figures of months not closed, All = live. Test gulati-trading (13/13).
+
+## 2026-10-07 — Gulati valuation section (local, uncommitted)
+
+- Gulati Finance > Valuation tab: (net profit x 240) + (asset value x 3) per month, admin-entered asset values (`gx_asset_values`, carry-forward), live or closed-months-only profit. Tests in server/tests/gulati-trading.test.js pass (13/13) and gulati-admin-edits (8/8).
+
+## 2026-10-08 — Zephyr Financials reduced to one section: Financial trends (local, uncommitted)
+
+- Zephyr > Financials now has a single section, **Financial trends**, laid out like Delphic Global: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table and the asset value form (with remove). Plan vs actual, Projection, Month close and Statements are no longer on the page (their APIs are untouched). Page and nav need the admin capability `overviewValuation`.
+- API `GET /zephyr/financials/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months (`snapshot.summary`), Unlocked = live figures of months not closed, All = live. Test zephyr-financials (10/10).
+
+## 2026-10-07 — Zephyr valuation section (local, uncommitted)
+
+- Zephyr Financials > Valuation tab: (Zephyr profit x 240) + (asset value x 3) per month, same as Delphic Global, with Revenue / Profit / Valuation month-on-month graphs. Profit = revenue - expense - approved salaries. Admin-entered asset values (`zx_asset_values`, migration `20261007160000`, carry-forward); live or closed-months-only profit. The Overview valuation tile uses the same figure; the old method / multiple / manual setting is retired from the UI. Test in server/tests/zephyr-financials.test.js (10/10).
+
+## 2026-10-08 — Salary payment status + Salary Payments dashboard (local, uncommitted)
+
+- Payroll > **Salary Payments** tab (admin): every employee's salary for every month in a From/To range (default last 6 months, max 24), filter by status (All / Paid / Not paid), employee, department and team. KPI cards (payable, paid, not paid), a month-wise summary and a detail table. Each row can be marked Paid with transaction details (paid on, amount, mode, transaction ID / UTR, bank, notes), edited, or set back to Not paid (details cleared). All changes audited (`salary_payment_create/update/clear`).
+- New table `salary_payments` (migration `20261008090000_salary_payments`, additive; no row = not paid). API `GET /payroll/salary-payments`, `PUT /payroll/salary-payments`, admin only. Test: server/tests/salary-payments.test.js (2/2). The older salary views (Attendance Salary, Adjustments, Live Analytics > Salary) are unchanged.
+
+## 2026-10-07 — Gulati Industries (G0-G9), Financials valuation, admin OT apply (committed locally, not pushed)
+
+- Gulati Industries trading workspace (copper cathode + trading of deals) built Zephyr-style; plan, decisions and admin-editability matrix in [features/GULATI-INDUSTRIES.md](../features/GULATI-INDUSTRIES.md), test guide [testing/TESTING-GULATI.md](../testing/TESTING-GULATI.md); demo seed `npm run gulati:seed` (server).
+- Financials: valuation = (Delphic profit x 240) + (asset value x 3); month filters made fast (4-way month concurrency in records.service) with an "Updating..." state; salary slip uses the sharp `/delphic-logo.svg`. Zeros on staging/prod mean missing locked records / asset values, not a code fault.
+- Time & Attendance > OT Tickets: admin can apply and edit OT for any employee (`POST /timesheets/overtime-tickets/admin`, admin edit with reason, lock audit + finance-change detection). The Project dropdown lists only projects assigned to the chosen employee on that date (`GET /timesheets/overtime-tickets/employee-projects`); the server rejects unassigned projects with 422 `project_not_assigned`. Tests in server/tests/overtime-tickets.test.js pass.
+
+## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
+
+- Built to the owner's 44-section brief on top of the Z0-Z8 base (plan, decisions and log: [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md)). Two migrations: `zephyr_services_leads_projects` and `zephyr_real_estate`.
+- Services master (five fixed keys, renameable); leads and projects per service with new stage / status sets; client / vendor fields; properties, units, tenants, leases, monthly rent dues with computed overdue, rent payments posting to the ledger, loans, manual valuation (unrealized, never in the P&L), whole-property and unit sales (realized profit in the P&L), consulting commission, shared (group) expenses, tasks, a `finance` role, P&L by service / property / client-vendor, service-wise reports, a new Home dashboard, and Properties / Rent / Tasks screens. A closed month is now a hard lock.
+- Tests: Zephyr suites 122/122 (run two files at a time); lint 0 errors; client build OK; API smoke 128/128 across admin / manager / staff / finance on the rebuilt demo (`ZEPHYR_RESET=1 npm run zephyr:seed`, new login `finance@zephyrinfra.in`). Not done: expense-claim approval flow, browser click-through by a person, staging deploy and re-seed.
+
+## 2026-10-06 — Zephyr R0-R9 + UI polish pushed to staging and deployed
+
+- `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`646ef0d..fd121d1`) and deployed on Render (`render deploys create srv-datoc5e0tbcc73elv730 --commit fd121d1 --wait --confirm`, deploy `dep-db2cvgahabec73cve19g`). Health 200 after a short 502 while the service booted; admin login and the Zephyr `me`, `dashboard`, `service-types`, `properties`, `leads`, `projects`, `overview` endpoints return 200 (the new migrations ran on boot).
+- Staging still holds the OLD demo (7 leads, 4 projects, 0 properties, no `finance@` login). To show the new demo, run the Zephyr seed against the Neon direct host with `ZEPHYR_RESET=1` (see TESTING-ZEPHYR.md section 5). Not done yet.
+- Final theme: the original Zephyr green restored (screenshot reviewed by the owner), very slightly dimmed surfaces, light-green selected side-menu item with a green edge, new logo card (new `zephyr-logo.png`, also set as the org logo in the seed). `D:\Zephyr-Feature-Guide.docx` rebuilt with document control and a what-is-new table.
+
+## 2026-10-06 — Zephyr: admin can edit everything (local, not pushed)
+
+- Browser pass with Playwright (Edge, `vite preview` of the built client; the dev server overloads a headless browser) found records admin could add but not edit. Closed: valuation, manual timeline entry, rent payment, sale, shared expense, lead activity, lease, rent due amount, milestone fields and the lead / property / task code prefixes (details in the plan work log). New `server/tests/zephyr-admin-edits.test.js`; the rent, property, trading, finance-links, foundation, ledger and leads suites still pass.
+- Tasks page bug fixed (empty `status` query gave a 422 so the rent picker never filled).
+
+## 2026-10-06 — Zephyr UI polish (local, not pushed)
+
+- Shared `FilterBar` for Client / Vendor, Leads, Projects and Properties (search + one Filters menu + chips); Leads service / stage strips replaced by dropdowns with counts; Client / Vendor drawers close after save; softer Zephyr theme; simpler Home (greeting card with quick tiles, plain-language money cards, By service table); `StatCard` `tone` for amber / red warning cards. Client lint clean, build OK; not yet clicked through by a person. Rent, Tasks, People and Revenue & Profit still have the old filter rows.
+- `D:\Zephyr-Feature-Guide.docx` was rebuilt again for this UI; if Word has the file open it is saved as `Zephyr-Feature-Guide-updated.docx` instead.
+
+## 2026-10-06 — Zephyr real-estate / construction plan written (no code yet)
+
+- Product owner supplied a 44-section brief (five services: civil construction, interior design, property management, property trading, real-estate consulting; properties, units, tenants, rent, loans, valuation, trading, consulting, tasks, service P&L). Gap analysis against the built Zx module and a phased plan R0-R9 are in [features/ZEPHYR-REAL-ESTATE-PLAN.md](../features/ZEPHYR-REAL-ESTATE-PLAN.md).
+- Owner confirmed (2026-10-06): Zephyr leads stay `ZxLead`; Delphic finance/expense concepts (approval flow, group expenses, snapshot locking) are re-built inside Zx tables, Delphic modules untouched; the Z0-Z8 UI was a sample and is reshaped; phase order R0-R9 and the new sidebar approved.
+- **R0-R2 started, uncommitted:** `schema.prisma` adds `ZxServiceType`, lead/project service fields (`service_type`, `details` JSON, expected dates/profit, assignee/contractor), lead code prefix/seq and party fields (company, state, country, hold, interested services, vendor category); migration `20261006090000_zephyr_services_leads_projects` drafted, not yet applied or tested. Lead stage and project status sets renamed; data migration, fixtures and seed still to update. No tests run for this slice yet.
+
+## 2026-10-05 — Zephyr committed, pushed to staging, deployed and seeded on Neon
+
+- Branch `zephyr-bug-fix-new-implementation` pushed to `origin/staging` (`git push origin <branch>:staging`, fast-forward, up to `3467895`) and deployed on Render with `render deploys create srv-datoc5e0tbcc73elv730 --commit <sha> --wait --confirm`. Boot runs `prisma migrate deploy`: 73 migrations, none pending, so the Zephyr tables are on Neon.
+- Fix after the first browser check: closing the Revenue & Profit drill-down drawer (X) crashed with "Cannot read properties of null (reading 'metric')" because the list still read `drill` while the drawer closed; the list now renders only when `drill` is set (`ZephyrOverviewPage.jsx`).
+- Staging Zephyr data seeded by hand on the Neon DB: `node prisma/zephyr/seed.js` with `ALLOW_DESTRUCTIVE_SEED=1` and the Neon DIRECT host (no `-pooler`, no `channel_binding`, `connect_timeout=120&pool_timeout=120&connection_limit=3`). The pooler URL timed out in Prisma both here and on the user's PC. Admin login verified through the staging API (health 200). Logins: see [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md).
+- Not automated: `server/scripts/staging-bootstrap.js` does not run the Zephyr seed (a step with the guard bypass was refused). Re-seed by hand if the Neon DB is reset. Not done: browser click-through of the staging site, manager and staff logins on staging.
+
+## 2026-10-05 — Zephyr Z5-Z8 built: money ledger, overview, financials, hardening (uncommitted)
+
+- All nine Zephyr phases (Z0-Z8) are now built on branch `zephyr-bug-fix-new-implementation`. Z5 ledger (revenue / expense, actual or planned, work order and milestone links, CSV import, project Money tab, party statement), Z6 Overview (presets, tiles, 12-month chart, profit by project, valuation, drill-down), Z7 Financials (plans, plan vs actual, projection, month close with stale flag, P&L by month / project / party with Excel + PDF). Migration `zephyr_money`.
+- Z8: idempotent demo seed (`npm run zephyr:seed`), test guide [testing/TESTING-ZEPHYR.md](../testing/TESTING-ZEPHYR.md), admin-editability pass (paid slips reopenable by admin with a reason; document details editable).
+- Tests: Zephyr suites 71/71 (foundation 10, parties 9, leads 11, projects 12, people 9, ledger 10, financials 10), run a few files at a time. Shared-infra suites re-run: erp-verticals, workspace-isolation, auth, auth-workspace, uploads-auth, recruitment-access-uploads (14/14 alone; two timeouts under load in a combined run) all pass. Lint 0 errors, client build OK, API smoke 59/59 as admin / manager / staff on the seeded database. Not done: browser click-through, commit / push.
+
+## 2026-10-05 — Zephyr Z4 Employee/Contractor built (uncommitted)
+
+- Roster, project assignments (100% cap), monthly salary slips (fixed monthly / daily x days, approve -> pay, project split) and staff 'My work'. Admin-only pay and login access. Migration `zephyr_people_salaries`. Home page company card removed.
+- Tests: Zephyr suites 51/51 on the private DB (people 9 new). Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z3 Projects built (uncommitted)
+
+- `/api/v1/zephyr/projects` (projects, milestones with weighted progress, vendor work orders, won lead -> project) and pages `/zephyr/projects` and `/zephyr/projects/:id` (Overview / Milestones / Work orders / Documents / Money placeholder). Migration `zephyr_projects`.
+- Tests: `zephyr-projects` 12/12 on the private DB. Lint and client build pass. Still to do: browser QA; staff assigned-project access with Z4.
+
+## 2026-10-05 — Zephyr Z2 Leads built (uncommitted)
+
+- `/api/v1/zephyr/leads` (stages, activities, follow-ups, summary, admin reopen) and page `/zephyr/leads` (board + list, follow-ups panel). Migration `zephyr_leads`. Won -> project conversion comes with Z3.
+- Tests: `zephyr-leads` 11/11 on the private DB. Lint and client build pass. Still to do: browser QA.
+
+## 2026-10-05 — Zephyr Z1 Client/Vendor built (uncommitted)
+
+- Client/Vendor directory: `/api/v1/zephyr/parties` (CRUD, search, tabs, CSV import, admin-only soft delete) and `/zephyr/documents` (category, ref no, expiry; downloads via `/uploads`). Page `/zephyr/parties` with add/edit drawer, documents panel and expiry badges. Migration `zephyr_parties_documents`.
+- Tests: `zephyr-parties` + `zephyr-foundation` 19/19 on the private DB. Lint and client build pass. Still to do: browser QA, run upload-related Delphic suites.
+
+## 2026-10-05 — Zephyr Z0 foundation built: standalone API, Zephyr-branded shell (uncommitted)
+
+- Server `modules/zephyr` at `/api/v1/zephyr`: role resolution (org admin / `ZxPerson` manager / staff), `GET /me`, audited valuation settings, editable categories, people + login link, audit log. Test `zephyr-foundation.test.js` 10/10 (private DB).
+- Client: Zephyr logo (`public/zephyr-logo.png`) and green theme from it (`styles/theme.css`; Tailwind `primary` and `canvas` now CSS-variable driven, Delphic defaults unchanged), role-based Zephyr sidebar, `/zephyr` home, coming-soon section pages, `/zephyr/settings`. Zephyr users are kept off Delphic pages. Seed: Zephyr org modules `['zephyr']`.
+- Details and next steps (Z1 Client/Vendor): [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Still to do: wider run of shared-infra suites, browser QA.
+
+## 2026-10-05 — Salary is attendance-only for everyone; timesheet tabs removed; CI test fixes; main merged into Zephyr branch
+
+- Salary: `payroll.service.payBasisOf` always returns `attendance` (timesheets no longer feed pay). Logged hours never create overtime (`workHours.syncDayOvertime` is a no-op; OT is ticket based for every non-contractor); auto attendance covers all active full-time employees; the Payroll "Pay basis" tab is removed. `OrgMembership.pay_basis` column kept (no DROP).
+- Client: removed the Timesheets, IT Timesheet and Team Monitoring tabs from Time & Attendance, and the "Calendar: ... change under People -> Calendars" line from the project drawer. Timesheet pages/endpoints still exist, only hidden. Open question: whether to remove the "Project team (Employee <-> Project), cost rates & budget" section (or just Billable hrs/day).
+- Tests: salary-lock tests now mark the month's weekdays present (unmarked days block a lock); overtime-ticket and auto-attendance tests updated; 6 tests that cover timesheet-based pay / pay-basis switching are `test.skip` with a note (attendance-pay-basis, timesheet-payroll-rules, erp-phase4-payroll).
+- Deploy: pushed to `origin/staging` (via local `staging-deploy`, which tracks it) and deployed `delphic-one-new-staging` on Render with the CLI. Not on `main`.
+- Branches: `origin/main` merged into `zephyr-bug-fix-new-implementation` (conflict was only PROGRESS.md line endings); line endings normalized to main's LF. The Zephyr branch is main plus 323 added lines (docs, `zephyr_foundation` migration, schema, 4 lines in `db.js`).
+
+## 2026-10-05 — Salary lock ignores days outside employment
+
+- A working day before `joined_at` or after `left_at` is unpaid, and it is no longer an unmarked attendance day. The salary lock only asks for attendance on days the person was employed. Pay stays prorated against the full month.
+
+## 2026-10-05 — Finance Month View: contract type filter
+
+- `GET /calculations/finance/month-projects` now includes `service_category` on each project. Finance → Month View has a Contract type dropdown (All, Manage Services, Projects, No category) and a Contract type column. The table filters in the browser; invoice and billing type filters are unchanged.
+- The month-view assertion in `finance-frd.test.js` expects `service_category: 'managed_services'`. That test did not run: Postgres on port 5434 was not reachable.
+
+## 2026-10-02 — FRD slices 2-4: approval chain, 3-stage lock audit, leave types, per-resource billing, finance views, salary adjustments (uncommitted)
+
+- Migration `20261002100000_approval_locks_leave_billing` (additive). Backend + client UI built; everything is documented in [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md) ("slices 2-4").
+- Approval chain Employee -> Manager (optional) -> Admin (mandatory) for timesheets and OT tickets, OT audit history, per-employee month timesheet lock (bulk) and a lock audit across timesheet / calculation / financial stages with bulk -> one row per record.
+- Leave: applicable / counts-in-balance / overflow flags, Comp Off in the balance, unpaid overflow. Billing: per-resource rates (monthly + hourly in one month) with client billing statuses; invoice-status filters; Finance Month View; Sales / Salary Excel exports; salary adjustments (TDS, OT adjustment, variable pay, reimbursement); vendor invoice tracking + trace.
+- UI: Time & Attendance > Timesheet Locks, OT history; Payroll > Adjustments; Finance > Month View; Leave type settings; Live Analytics invoice filters. API only for now: resource rates, billing status rules, vendor tracking.
+- Hardening round: admin approval before a month lock (force with reason), day OT + regularisation on the same chain, approval steps and attendance corrections on the audit trail, lock order timesheets -> calculations -> financials (`orgs.enforce_lock_order`), financial freeze of invoices / vendor payments (423 until reopened), Leave Manager role, unpaid overflow split at approval, half-day-leave days in the daily attendance run, vendor Excel export, "apply project rate to every resource", UI for Billing Setup / Vendor Invoices / Leave Managers. Test: `frd-hardening.test.js`.
+- Full server suite on a private DB (2026-10-02): 89 suites, 798 tests, all passing. Client build and lint pass. Not done: browser click-through, applying the migration to dev / staging.
+- Tests: `approval-locks-leave.test.js`, `finance-frd.test.js`; `phase3-leave-salary-expense.test.js` updated (Comp Off type, overflow off for the hard-cap case). Test helper `createOrg` defaults `timesheet_admin_approval` off.
+
+## 2026-10-02 — FRD slice 1: timesheet + attendance core (no hour cap, Timesheet Dashboard, project team view, auto attendance) — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- Removed the project hour cap, the Project Calendar from Time & Attendance, and check-in / check-out (endpoints, header button, Today card, columns, prompt). Salary never read check-in/out; legacy columns kept (no DROP).
+- Added: Timesheet Dashboard (`/timesheets/dashboard`, `/timesheets/dashboard/calendar`), Project Team timesheet (`/timesheets/project-team`, assigned users + admin only), daily auto attendance job (today only, after the start time, never future), admin previous-month backfill with preview + audit, audit rows for manual marking / import.
+- Tests: new `auto-attendance.test.js`, `project-timesheet.test.js` (replaces `project-timesheet-cap.test.js`); check-in tests removed from `erp-phase2*`, `erp-multiproject-calendars`, `timesheet-workflow`. Detail + the list of FRD sections still open: [features/CLIENT-PROJECT-TIMESHEET.md](../features/CLIENT-PROJECT-TIMESHEET.md).
+
+## 2026-10-01 — Zephyr Infrastructure workspace: plan + docs — branch `zephyr-bug-fix-new-implementation`
+
+New work stream for the Zephyr group with only six sections (Leads, Client/Vendor, Projects, Revenue/Expense/Salaries/Profit/Valuation, Employee/Contractor management, Financials). Audited what exists (leads/contracts/projects/people are in place; Client/Vendor directory, company money overview and Zephyr-reachable Financials are the gaps) and wrote a phased plan. Revised later the same day to a standalone `Zx` module (no Delphic Global reuse), 9 phases Z0-Z8. Plan and live work log: [features/ZEPHYR-INFRASTRUCTURE.md](../features/ZEPHYR-INFRASTRUCTURE.md). Plan v4 (reviewed against platform code, admin/manager/staff access model, fixed-rate salaries) approved. Z0 started and **paused**: schema + migration `zephyr_foundation` + org-stamp registration done (uncommitted); server module, client shell and tests not started. See the work log in the spec for resume notes.
+
+## 2026-10-01 — Finance: contract-based billing, invoices in Live Analytics, per-record locks, Financials = locked only — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+Spec, decisions and file map: [features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md](../features/FINANCE-LIVE-ANALYTICS-INVOICES-LOCKING.md).
+
+- **Billing follows the contract.** A monthly project bills rate ÷ working days for every working day inside its agreement (partial months by working days), no longer scaled by approved hours; hourly = approved hours × rate; vendor (contractor) cost follows the same rule. Applies to Billing & Sales, its lock, invoices and Financials.
+- **Invoices fixed and moved.** One builder (`billing/invoices.service.js`) for every path: project's own name + linked client and the billing rate's currency (was: account `name` — often another client — and always INR), calculation details on the invoice, editable invoice number (unique per org, `INV-2026-001` suggested), invoice date, notes. Generate from Live Analytics → Billing & sales (top form + per project row); vendor invoices from Live Analytics → Vendors. Project P&L tab hidden; Finance → Projects' old Invoicing section removed.
+- **Per-record locks** (`salary_employee`, `vendor_bill`, `expense` kinds on the existing lock system): lock billing per project, salary per employee (payroll pays the locked line), each expense record, billing per vendor. New Live Analytics → Locked tab with View / Download.
+- **Financials = locked records only** by default, with a Locked / Unlocked / All filter (`GET /calculations/financials/records`).
+- Migrations: `invoice_numbers_details`, `record_lock_kinds` (additive). Tests: new `finance-invoices-records.test.js`; updated `finance-locking`, `erp-phase5-billing`, `erp-projects-phase2` for the contract rule / single invoice builder.
+
+## 2026-09-30 — Hourly billing = billing engine, working-day leave, claim approval chain, admin timesheet backfill — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- **Hourly billing fixed (Finance → Projects total, Project P&L).** `projectPnl.projectRevenue` now takes hourly revenue from the billing engine (`billing.engine.computeProjectMonth` / `lockedAmount`, or the locked snapshot) so it matches Billing & Sales, locks and invoices: hours after `agreement_end_date` no longer bill, approved overtime bills (× multiplier) where `overtime_billable`, fixed-price projects are not billed by hours. Monthly fees are also prorated in the month the agreement ends. `excluded` reasons: `outside_agreement`, `not_supported` added.
+- **Leave counts working days only** on the employee's company calendar (weekends + holidays free; Fri→Mon = 2; 1–5 Oct with 2 Oct holiday = 2). All-non-working ranges refused (`no_working_days`); full-day leave refused on a date the employee was present (`present_on_date`). Requests carry `days`.
+- **Attendance sheet shows calendar holidays and approved leave** (`calendar_days` on `GET /attendance/me`); the bulk template prefills `holiday`. `calendars.companyHolidaysByMember` batches the lookup.
+- **One Standard holiday calendar**: `is_default` is exclusive per org (setting it moves it); UI labels it "Standard" with a "Make standard" action.
+- **IT timesheet OT** = logged hours beyond the day's shift (`workHours.loggedOvertime`), shown per day / month and in the admin overview (was only the typed OT field).
+- **Admin timesheet backfill**: "Add entry" (any employee, past date) and CSV bulk upload `POST /timesheets/entries/admin/import` (validated, all-or-nothing, approved).
+- **Approve all**: `POST /timesheets/approvals/bulk`; leave queue and claim approvals get Approve-all too.
+- **Salary structures**: `DELETE /payroll/salary-structures/:id` (admin; flags locked months).
+- **Expense claims**: migration `20261001100000_expense_claim_approval_chain` (additive: `description`, `submitted_by`, `approval_stage`, `approvals`). Chain Manager → HR → Finance (`lib/claimApprovers.js`, departments matched by name; admin decision is final); `GET /expenses/claims/approvals`; admin can file for any employee; "Other" category requires a description; owner/admin delete a pending claim; receipts picked before submitting.
+- **Timesheet descriptions** keep their formatting (`NoteText` pre-wrap, CRLF normalised; was pre-line, collapsing indentation/bullets); the weekly hours view shows each entry's description; the Excel export's Hours include the line's OT.
+- **Timesheet filters**: admin view weeks are Sunday–Saturday (the lock week) with a filtered hours total (`GET /timesheets/entries` → `totals`); employees' IT timesheet gets week + project filters (`lib/timesheetWeeks.js`).
+- **Corrections at any stage**: admin view can Unlock / Lock a whole week; `AffectedCalculationsBanner` (IT admin view, attendance admin tab) lists locked calculations flagged by corrections with a link to recalculate / re-finalize and regenerate the invoice.
+- **Multi approve / reject**: claims (Approvals + Reimbursements) tick-select with Approve / Reject selected; timesheet Approvals tick-select across sections, `POST /timesheets/approvals/bulk` takes `status` + one `reason` for rejects.
+- **Org chart**: per-category counts (department / tier / team), team box headcounts, people-under count on managers.
+
+## 2026-09-30 — Pay from approved timesheet hours + overtime approval, Sun→Sat weeks, client working days, hourly billing in Projects — branch `delphic-one-bugFix-and-newImplementation` (uncommitted)
+
+- **Salary now comes from approved timesheet hours, not check-in/out.** New
+  `modules/timesheets/workHours.service.js` is the single place that turns
+  entries into payroll hours. Expected hours = the employee's ONE company
+  calendar (`resolveCalendar` with no project) working days × shift hours
+  (`shiftHours`, default 9). Per day: normal = min(logged, expected), the
+  rest is overtime. `salary.engine` / `payroll.service.computeBreakdown`:
+  hourly rate = CTC ÷ expected hours; net = CTC − rate × short hours +
+  approved OT. Paid leave counts as a full shift. Actual uses approved rows
+  only; pending hours / OT appear only in `projected_net` / `pending_amount`.
+  Payslip breakdown carries `source: 'approved_timesheets'`, expected / paid /
+  deficit / OT hours, OT amount, hourly rate.
+- **Overtime approval.** Migration `20261001090000_timesheet_overtime_workday`
+  (additive): `timesheet_day_overtime` (one row per employee-day,
+  `TimesheetOvertimeStatus` pending | approved | rejected | comp_off) and
+  `calendar_holidays.is_working_day`. `syncDayOvertime` re-syncs the row
+  whenever that day's entries change (create / edit / delete / decide /
+  regularise). `POST /timesheets/overtime/:id/decision` — reporting manager or
+  admin. Approvals tab lists pending OT (Approve / Comp off / Reject).
+- **Weeks are Sunday → Saturday.** `timesheetWeeklyLock` cron moved to
+  Sunday 00:00 IST. A locked week is read-only for the employee; the manager
+  can still decide and the admin can correct. Pending entries still undecided
+  `TIMESHEET_ADMIN_REVIEW_GRACE_DAYS` (default 3) after the lock get an
+  `admin_review` flag (red pill in Approvals).
+- **New timesheet endpoints:** `GET /timesheets/week?date=&org_membership_id=`
+  (per-day expected / logged / approved / pending / OT), `GET /timesheets/hours`
+  (range summaries), `POST /timesheets/entries/admin` (admin creates an entry
+  for anyone). Own / direct reports / admin-any scoping via `hoursTarget`.
+  `DELETE /entries/:id` now lets an employee remove their own entry while
+  pending and unlocked (`deleteOwnEntry`); admin PATCH can also approve /
+  reject / reopen. Client: new `pages/time/WeekHoursView.jsx`, opened from
+  "View week" in Approvals.
+- **Client working-day exceptions.** A calendar row with `is_working_day`
+  (HR Settings → holiday drawer checkbox) marks a normally-off date as
+  working on a client/project calendar. Billing and payroll working-day counts
+  honour it; the employee's company calendar never changes — their hours that
+  day become OT / comp off. My Holidays tab now shows the one company calendar
+  plus a collapsed "Client / project exceptions" section.
+- **Finance → Projects shows the contract; Project P&L shows actuals.** Each
+  Projects row gets `this_month` from `projectPnl.monthContractByProject`:
+  the fixed monthly fee, or contract hours × hourly rate — contract hours are
+  `minimum_monthly_hours`, else `benchmark_hours` (`contractHours`) —
+  prorated in the agreement's first/last month (same FX converter as P&L).
+  A "This month (INR)" column shows each row's figure and why it is lower
+  (prorated / not started / ended / no FX rate); the total above the table
+  is exactly its sum. `monthly_amount_inr` uses the same contract hours.
+  Project P&L is unchanged: approved timesheet hours × rate (e.g. 60h
+  contract, 55h worked → Projects 60h, P&L 55h).
+- **UI copy:** Attendance page states attendance ≠ salary and renames
+  "Overtime" to "Time past shift"; Attendance → Salary tab shows expected /
+  approved / pending / short / OT columns and Actual vs Projected KPIs.
+- **Tests:** new `timesheet-payroll-rules.test.js` (scenarios 1-16);
+  `timesheet-workflow.test.js` and `project-pnl-fx.test.js` updated. **Not run
+  green this session** — the local test DB rejected the `postgres`
+  credentials. Most of the large `git diff` line counts are CRLF churn; the
+  real change is ~700 lines (`git diff -w --ignore-cr-at-eol --stat`).
+
+## 2026-09-30 — Older projects editable in Finance → Projects — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Legacy projects were locked as "Client account · read-only".** Rows used
+  as projects before `is_project` existed (e.g. Circle · P0004, client
+  Girnarsoft, monthly billing) weren't flagged by the migration, so Finance
+  refused to edit them. `billing.service` now treats any row matching
+  `lib/projectScope.projectListWhere` as editable (list, single profile and
+  PATCH guard). Edits still write only project fields — the account's own
+  name is never changed. A plain catalogue client with no project data stays
+  unlisted and read-only. Test added in `projects-vs-accounts.test.js`.
+
+## 2026-09-29 — Recruitment requirements re-enabled — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Create requirement → Type: Recruitment is selectable again.** The option
+  was hard-disabled as "Recruitment (coming soon)" in `RequirementFormPage`
+  for every role, so no one could raise a recruitment requirement. The API
+  (`requirements.validation.js`) already accepted `recruitment`; only the form
+  blocked it. The finance **project** category picker
+  (`lib/projectCategories.js`) is unchanged — Recruitment stays "coming soon"
+  there because the API still refuses it for new projects.
+- **Creating a client no longer makes it a project.** Finance → Projects,
+  People → Calendars projects, Project P&L and the billing engine listed
+  every active client account as a project. They now share
+  `lib/projectScope.projectListWhere`: a row counts as a project only if it
+  was made by Add Project (`is_project`) or already has project data
+  (account-level billing rate, cost rates, timesheets, calendar mapping or
+  daily revenue), so older projects stay listed.
+
+## 2026-09-28 — Recruitment access + per-file uploads (security), HR Teams + Work Mode — branch `delphic-one-bugFix-and-newImplementation`
+
+- **Ex-members / other workspaces locked out of recruitment data.**
+  `requireMasterWorkspace` now 403s a caller with no active membership
+  (previously passed through — an offboarded employee with an active `User`
+  row kept reading candidates and CVs). The same check is repeated in
+  `lib/entityAccess` for account/requirement/profile/submission, so the
+  `documents` and `comments` routers (bare `authenticate`) are covered too.
+  `/dashboard/summary` is now master-workspace only; the client skips the
+  call elsewhere.
+- **`/uploads` is no longer a static mount.** New `modules/uploads` serves a
+  file only through its owning `Document` / `ProjectDocument` row and only to
+  someone allowed to read that record; orphans and traversal attempts 404.
+  Downloads are `attachment` + `no-store`. Project pages open files via
+  `openAuthenticatedFile`.
+- **HR Settings → Teams.** Migration `20260928100000_hr_teams_work_mode`
+  (additive): `teams` table (org-scoped, unique name, optional department +
+  lead) and nullable `team_id` / `work_mode` on `org_memberships`. New
+  `/api/v1/teams` (list for members, CRUD for admins; delete refused while the
+  team has members). `PATCH /orgs/memberships/:id` accepts `team_id` (same-org
+  check) and `work_mode`. UI: Teams tab in HR Settings; Team + Work mode on
+  the employee profile.
+- **Tests:** `recruitment-access-uploads.test.js`, `teams.test.js`. Test
+  helper `createUser` now lazily enrolls users in the test (master) org at
+  login; `withOrg: false` keeps a user membership-less.
+- **Holiday calendars per employee (Time & Attendance).** Migration
+  `20260928130000_calendar_department`: a calendar can be the standard one for
+  a Department. Resolution order is now project calendar → employee's own
+  mapping → department → office location → org default (`pickCalendarId`,
+  shared by timesheets and payroll). New `GET /calendars/me?year=` returns the
+  caller's standard calendar and each assigned project's calendar with that
+  year's holidays; shown in a new **Holiday Calendar** tab for everyone. HR
+  Settings → Calendars gets a department picker.
+- **Contractors (People).** Migration `20260928120000_contractors_vendor_invoices`:
+  `WorkerType` (full_time_employee | contractor) plus `vendor_account_id`
+  (an Account of type vendor in the same org), `vendor_rate` (monthly) and
+  currency on `OrgMembership`. Create user / employee profile get a
+  Full-Time vs Contractor toggle with vendor dropdown and vendor rate
+  (`lib/workerType.js` validates; a contractor's role is always `employee`).
+  Contractors log in with any (personal) email. `middleware/contractorScope.js`,
+  checked inside `authenticate`, limits them to their profile, notifications,
+  `/calendars/me`, timesheets, their tasks and leave day-status — every other
+  API is 403. The client shows them only **My Portal** (projects, holiday
+  calendar, timesheet). Payroll skips contractors (`contractor_paid_by_vendor`).
+- **Project P&L + vendor invoices (Finance).** `ProjectVendorInvoice` (project,
+  vendor, month, amount, optional file via Documents entity
+  `project_vendor_invoice`). `ProjectMemberAssignment.allocation_percent`
+  (null = even split across the person's projects); resource type now follows
+  the person's worker type. `billing/projectPnl.service.js`:
+  profit = client billing (fixed monthly rate, prorated in the start month; or
+  hourly revenue) − salary × allocation − contractor vendor rate × allocation,
+  where a vendor's actual invoice for the month replaces its rate estimate.
+  Routes: `GET /billing/vendors`, `/billing/projects-pnl`,
+  `/billing/projects/:id/pnl`, CRUD on `/billing/projects/:id/vendor-invoices`
+  and `/billing/vendor-invoices/:id`. UI: Finance → **Project P&L** tab with a
+  per-project drawer (breakdown + vendor invoices). Currencies are not
+  converted — `mixed_currency` flags it.
+- **Tests:** `contractors-project-pnl.test.js` (9). Updated `uploads-auth`
+  (orphan files are no longer served) and the org-chart group test (group
+  superadmin created without an org).
+
 ## 2026-09-16 — Multi-company ERP Phases 8-10 (accounting ledger/tax, external CA/Legal access, org chart — all backend) — branch `feature/multi-company-erp`
 
 Plan log: [MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md](../architecture/MULTI-COMPANY-ERP-IMPLEMENTATION-PLAN.md).

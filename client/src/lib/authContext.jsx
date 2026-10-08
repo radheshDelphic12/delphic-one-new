@@ -18,6 +18,8 @@ function withOrgContext(user, memberships, activeOrg) {
     memberships,
     active_org: activeOrg,
     role: membership?.role || user.role,
+    // 'contractor' → the simplified contractor portal (see ContractorPortalPage).
+    worker_type: membership?.worker_type || 'full_time_employee',
   };
 }
 
@@ -93,6 +95,19 @@ export function AuthProvider({ children }) {
     return nextUser;
   }
 
+  // Merge changes into the signed-in user and/or the active org (after editing the logo or own profile).
+  function patchSession({ user: userPatch, org: orgPatch } = {}) {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...(userPatch || {}) };
+      if (orgPatch) {
+        next.active_org = { ...prev.active_org, ...orgPatch };
+        next.memberships = (prev.memberships || []).map((m) => (m.org_id === prev.active_org?.id ? { ...m, org: { ...m.org, ...orgPatch } } : m));
+      }
+      return next;
+    });
+  }
+
   function logout() {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
@@ -107,6 +122,7 @@ export function AuthProvider({ children }) {
         loading,
         login,
         logout,
+        patchSession,
         switchOrg,
         createOrganization,
         memberships: user?.memberships || [],

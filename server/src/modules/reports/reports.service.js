@@ -423,7 +423,7 @@ async function bdaPerformance({ date_from, date_to, bda_id, department_id }) {
       // fields above, since "currently active clients" is a present-state fact, not a period
       // event. Named *_current so the report doesn't imply they're period-scoped.
       const clients_active_current = await prisma.account.count({
-        where: { owner_id: b.id, type: 'client', stage: 'active' },
+        where: { owner_id: b.id, type: 'client', stage: 'active', is_project: false },
       });
       const vendors_active_current = await prisma.account.count({
         where: { owner_id: b.id, type: 'vendor', stage: 'active' },
@@ -432,6 +432,7 @@ async function bdaPerformance({ date_from, date_to, bda_id, department_id }) {
         where: {
           owner_id: b.id,
           type: 'client',
+          is_project: false,
           stage: { in: ['lead', 'meeting_scheduled', 'rescheduled'] },
           updated_at: { lte: stuckCutoff },
         },
@@ -499,7 +500,7 @@ async function vendorPerformance({ date_from, date_to, vendor_id }) {
 }
 
 async function clientPerformance({ date_from, date_to, client_id }) {
-  const clients = await prisma.account.findMany({ where: { type: 'client', ...(client_id ? { id: client_id } : {}) } });
+  const clients = await prisma.account.findMany({ where: { type: 'client', is_project: false, ...(client_id ? { id: client_id } : {}) } });
   const from = reportFrom(date_from);
   const to = reportTo(date_to);
   const stuckCutoff = new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
@@ -804,6 +805,7 @@ async function clientsWithoutRequirements({ bda_id, origin_owner_id, stage, buck
     // legacy no-bucket path keeps unclassified accounts so `stage = 'lead'`
     // still returns not-yet-classified leads.
     ...(bucket ? { type: 'client' } : { OR: [{ type: 'client' }, { type: null }] }),
+    is_project: false,
     ...(bda_id ? { owner_id: bda_id } : {}),
     ...(origin_owner_id ? { origin_owner_id } : {}),
     ...(effectiveStage ? { stage: effectiveStage } : {}),
@@ -967,7 +969,8 @@ async function recruiterVendorGaps({
 
 // --- HR report -------------------------------------------------------------
 // Recruiter-ops throughput grouped per day. Four tables; on-bench profiles are
-// excluded everywhere. Date anchors: sourcing = Profile.created_at, submission =
+// excluded everywhere. Each table carries `total` — profiles / submissions /
+// rounds in the range — since its rows are per person per day. Date anchors: sourcing = Profile.created_at, submission =
 // Submission.created_at, round = InterviewRound.scheduled_at.
 
 // Display labels for the candidate-source enum; stored values stay direct/linkedin.
@@ -1062,11 +1065,16 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
 
   const bySourcer = new Map();
   const byInterviewer = new Map();
+  // Distinct rounds counted in each table — a round with two interviewers is
+  // one row per interviewer but still one round in the total.
+  let sourcerRounds = 0;
+  let interviewerRounds = 0;
   for (const r of rounds) {
     const p = r.submission?.profile;
     const day = dayKey(r.scheduled_at);
 
     if (p && (!sourcer_id || p.added_by === sourcer_id)) {
+      sourcerRounds += 1;
       const key = `${p.added_by}|${day}`;
       bump(
         bySourcer,
@@ -1079,6 +1087,7 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     const people = r.interviewers.length
       ? r.interviewers.map((i) => i.user)
       : [{ id: null, name: r.interviewer_name || 'Unassigned' }];
+    if (people.some((person) => !interviewer_id || person.id === interviewer_id)) interviewerRounds += 1;
     for (const person of people) {
       if (interviewer_id && person.id !== interviewer_id) continue;
       const key = `${person.id || `name:${person.name}`}|${day}`;
@@ -1098,21 +1107,25 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     tables: [
       {
         key: 'sourcing',
+        total: sourcedProfiles.length,
         title: 'Sourcing',
         rows: [...sourcingMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'submissions',
+        total: submissions.length,
         title: 'Submissions',
         rows: [...submissionMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_sourcer',
+        total: sourcerRounds,
         title: 'Internal round 1 - by sourcer',
         rows: [...bySourcer.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_interviewer',
+        total: interviewerRounds,
         title: 'Internal round 1 - by interviewer',
         rows: [...byInterviewer.values()].sort(byDateThenName('interviewer')),
       },

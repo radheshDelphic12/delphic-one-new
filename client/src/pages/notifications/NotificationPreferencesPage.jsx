@@ -4,13 +4,12 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Toggle from '../../components/ui/Toggle.jsx';
-import Badge from '../../components/ui/Badge.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 
 export default function NotificationPreferencesPage() {
   const { pushSuccess, pushError } = useAlerts();
   const [rows, setRows] = useState([]);
-  const [draft, setDraft] = useState({}); // type -> { in_app }
+  const [draft, setDraft] = useState({}); // type -> { in_app, email }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -21,7 +20,7 @@ export default function NotificationPreferencesPage() {
       .then(({ data }) => {
         if (!alive) return;
         setRows(data.data || []);
-        setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app }])));
+        setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app, email: r.email }])));
       })
       .catch((err) => alive && pushError(apiErrorMessage(err, 'Failed to load preferences')))
       .finally(() => alive && setLoading(false));
@@ -31,21 +30,21 @@ export default function NotificationPreferencesPage() {
   }, [pushError]);
 
   const dirty = useMemo(
-    () => rows.some((r) => draft[r.type]?.in_app !== r.in_app),
+    () => rows.some((r) => draft[r.type]?.in_app !== r.in_app || draft[r.type]?.email !== r.email),
     [rows, draft]
   );
 
-  function toggle(type, next) {
-    setDraft((d) => ({ ...d, [type]: { in_app: next } }));
+  function toggle(type, channel, next) {
+    setDraft((d) => ({ ...d, [type]: { ...d[type], [channel]: next } }));
   }
 
   async function save() {
     setSaving(true);
     try {
-      const items = rows.map((r) => ({ type: r.type, in_app: draft[r.type]?.in_app ?? r.in_app, email: false }));
+      const items = rows.map((r) => ({ type: r.type, in_app: draft[r.type]?.in_app ?? r.in_app, email: draft[r.type]?.email ?? r.email }));
       const { data } = await apiClient.put('/notifications/preferences', { items });
       setRows(data.data || []);
-      setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app }])));
+      setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app, email: r.email }])));
       pushSuccess('Notification preferences saved');
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to save preferences'));
@@ -59,7 +58,7 @@ export default function NotificationPreferencesPage() {
     try {
       const { data } = await apiClient.delete('/notifications/preferences');
       setRows(data.data || []);
-      setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app }])));
+      setDraft(Object.fromEntries((data.data || []).map((r) => [r.type, { in_app: r.in_app, email: r.email }])));
       pushSuccess('Reset to role defaults');
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to reset preferences'));
@@ -72,7 +71,7 @@ export default function NotificationPreferencesPage() {
     <div className="mx-auto max-w-3xl space-y-4 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-tertiary-500">
-          Choose which lifecycle events reach your <Link to="/notifications" className="text-primary-700 hover:underline">in-app inbox</Link>.
+          Choose which lifecycle events reach your <Link to="/notifications" className="text-primary-700 hover:underline">in-app inbox</Link> and your email.
         </p>
         <button type="button" className="btn-ghost text-xs" disabled={saving} onClick={resetDefaults}>
           Reset to defaults
@@ -84,9 +83,7 @@ export default function NotificationPreferencesPage() {
           <span className="font-heading text-sm font-semibold text-tertiary-900">Event types</span>
           <div className="flex items-center gap-6 text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">
             <span>In-app</span>
-            <span className="flex items-center gap-1">
-              Email <Badge value="soon" />
-            </span>
+            <span>Email</span>
           </div>
         </div>
 
@@ -107,10 +104,14 @@ export default function NotificationPreferencesPage() {
                 <div className="flex items-center gap-6">
                   <Toggle
                     checked={draft[r.type]?.in_app ?? r.in_app}
-                    onChange={(next) => toggle(r.type, next)}
+                    onChange={(next) => toggle(r.type, 'in_app', next)}
                     label={`${r.label} in-app`}
                   />
-                  <Toggle checked={false} disabled label={`${r.label} email (coming soon)`} />
+                  <Toggle
+                    checked={draft[r.type]?.email ?? r.email}
+                    onChange={(next) => toggle(r.type, 'email', next)}
+                    label={`${r.label} email`}
+                  />
                 </div>
               </li>
             ))}

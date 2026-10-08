@@ -21,7 +21,7 @@ afterAll(async () => {
 
 describe('multi-company ERP Phase 1 — backward compatibility', () => {
   test('a user with no OrgMembership can log in, but membership-gated routes 403', async () => {
-    const user = await createUser({ role: 'recruiter' });
+    const user = await createUser({ role: 'recruiter', withOrg: false });
     const { access_token, memberships, active_org } = await loginAs(user);
 
     expect(memberships).toEqual([]);
@@ -39,7 +39,7 @@ describe('multi-company ERP Phase 1 — backward compatibility', () => {
   });
 
   test('refresh for a membership-less user keeps working', async () => {
-    const user = await createUser({ role: 'bda' });
+    const user = await createUser({ role: 'bda', withOrg: false });
     const { refresh_token } = await loginAs(user);
     const res = await request(app).post('/api/v1/auth/refresh').send({ refresh_token });
     expect(res.status).toBe(200);
@@ -52,8 +52,9 @@ describe('multi-company ERP Phase 1 — org context', () => {
     const user = await createUser({ role: 'sales' });
     const orgA = await createOrg({ name: 'Delphic', slug: 'delphic' });
     const orgB = await createOrg({ name: 'Acconcy', slug: 'acconcy' });
-    await createOrgMembership(user.id, orgA.id, { role: 'sales' });
-    await createOrgMembership(user.id, orgB.id, { role: 'admin' });
+    // Explicit dates: two inserts in the same millisecond would tie on joined_at.
+    await createOrgMembership(user.id, orgA.id, { role: 'sales', joined_at: new Date('2026-01-01') });
+    await createOrgMembership(user.id, orgB.id, { role: 'admin', joined_at: new Date('2026-06-01') });
     return { user, orgA, orgB };
   }
 

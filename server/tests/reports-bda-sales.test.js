@@ -48,7 +48,10 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-const RANGE = { date_from: '2026-09-01', date_to: '2026-09-30' };
+// Records made through the API (meeting stage events, requirements) are stamped "now", so the
+// range must reach the current date or these tests break once the calendar passes September.
+const RANGE_END = new Date(Math.max(Date.now(), Date.parse('2026-09-30T00:00:00Z')) + 2 * 86400000);
+const RANGE = { date_from: '2026-09-01', date_to: iso(RANGE_END) };
 
 async function scheduleMeeting(accountId, token, attendeeIds = []) {
   const res = await authed(request(app).post(`/api/v1/accounts/${accountId}/stage`), token).send({

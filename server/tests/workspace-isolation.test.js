@@ -54,11 +54,11 @@ describe('workspace isolation — recruitment/strategic layer is Delphic-Global-
     }
   });
 
-  test('a user with no org context (no membership) is passed through, not blocked — matches the existing global-role fallback', async () => {
-    const user = await createUser({ role: 'admin' });
+  test('a user with no org context (no active membership) is blocked with 403, not passed through', async () => {
+    const user = await createUser({ role: 'admin', withOrg: false });
     const { access_token } = await loginAs(user);
     const res = await authed(request(app).get('/api/v1/accounts'), access_token);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   test('is_master_workspace is surfaced on the org object from login and from /orgs/me/memberships', async () => {
@@ -82,9 +82,15 @@ describe('workspace isolation — recruitment/strategic layer is Delphic-Global-
   });
 });
 
-describe('dashboard stays available to every workspace', () => {
-  test('a non-master workspace can still load /dashboard/summary (branches client-side, not blocked)', async () => {
+describe('dashboard summary is recruitment data — master workspace only', () => {
+  test('a non-master workspace gets 403 on /dashboard/summary (the client shows its lightweight page instead)', async () => {
     const { token } = await adminIn({ is_master_workspace: false });
+    const res = await authed(request(app).get('/api/v1/dashboard/summary'), token);
+    expect(res.status).toBe(403);
+  });
+
+  test('the master workspace still loads /dashboard/summary', async () => {
+    const { token } = await adminIn();
     const res = await authed(request(app).get('/api/v1/dashboard/summary'), token);
     expect(res.status).toBe(200);
   });

@@ -43,6 +43,17 @@ function EmployeePeek({ row, onClose }) {
   );
 }
 
+// Department A→Z, then name A→Z within it; people with no department last.
+function sortByDepartment(rows) {
+  return [...rows].sort((a, b) => {
+    const da = a.department?.name;
+    const db = b.department?.name;
+    if (da && !db) return -1;
+    if (!da && db) return 1;
+    return (da || '').localeCompare(db || '') || (a.person?.name || '').localeCompare(b.person?.name || '');
+  });
+}
+
 export default function PeopleListPage() {
   const { pushError } = useAlerts();
   const [rows, setRows] = useState([]);
@@ -59,7 +70,7 @@ export default function PeopleListPage() {
         params: { search: search.trim() || undefined, include_terminated: includeTerminated },
       })
       .then(({ data }) => {
-        if (!cancelled) setRows(data.data || []);
+        if (!cancelled) setRows(sortByDepartment(data.data || []));
       })
       .catch((err) => {
         if (!cancelled) pushError(apiErrorMessage(err, 'Failed to load employee directory'), 'Something went wrong');
@@ -81,10 +92,22 @@ export default function PeopleListPage() {
         </div>
       ),
     },
+    { key: 'code', header: 'Employee code', render: (row) => row.employee_code || <span className="text-tertiary-400">—</span> },
     { key: 'role', header: 'Role', render: (row) => <span className="capitalize">{row.role}</span> },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not assigned' },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.employment_status} /> },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => (
+        <span>
+          <Badge value={row.employment_status} />
+          {row.employment_status === 'notice_period' && row.notice_end_date && (
+            <span className="mt-0.5 block text-xs text-warning-700">LWD {formatDate(row.notice_end_date)}</span>
+          )}
+        </span>
+      ),
+    },
     { key: 'joined', header: 'Joined', render: (row) => formatDate(row.joined_at) },
   ];
 

@@ -33,7 +33,10 @@ describe('authenticated uploads', () => {
     expect(res.status).toBe(404);
   });
 
-  test('GET /uploads with a valid token serves an existing file', async () => {
+  // /uploads is no longer a static mount: a file is served only through the
+  // Document / ProjectDocument row that owns it (see
+  // recruitment-access-uploads.test.js for the served cases).
+  test('GET /uploads with a valid token does not serve a file no record owns', async () => {
     const user = await createUser({ role: 'admin' });
     const { access_token } = await loginAs(user);
     fs.mkdirSync(env.uploadDir, { recursive: true });
@@ -41,10 +44,11 @@ describe('authenticated uploads', () => {
     const filePath = path.join(env.uploadDir, filename);
     fs.writeFileSync(filePath, 'hello');
 
-    const res = await authed(request(app).get(`/uploads/${filename}`), access_token);
-    expect(res.status).toBe(200);
-    expect(res.text).toBe('hello');
-
-    fs.unlinkSync(filePath);
+    try {
+      const res = await authed(request(app).get(`/uploads/${filename}`), access_token);
+      expect(res.status).toBe(404);
+    } finally {
+      fs.unlinkSync(filePath);
+    }
   });
 });

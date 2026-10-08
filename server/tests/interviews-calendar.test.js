@@ -8,6 +8,7 @@
 const {
   app,
   prisma,
+  createOrg,
   request,
   cleanDatabase,
   createUser,
@@ -41,6 +42,12 @@ beforeEach(async () => {
   recruiterA = await createUser({ role: 'recruiter' });
   recruiterB = await createUser({ role: 'recruiter' });
   interviewer = await createUser({ role: 'recruiter' });
+  // The calendar is for the Sales, HR and Management departments.
+  const org = await prisma.org.findUnique({ where: { slug: 'test-org' } }) || await createOrg({ name: 'Test Org', slug: 'test-org' });
+  const salesDept = await prisma.department.create({ data: { name: 'Sales', org_id: org.id } });
+  const hrDept = await prisma.department.create({ data: { name: 'HR', org_id: org.id } });
+  await prisma.user.updateMany({ where: { id: { in: [bda.id, sales.id] } }, data: { department_id: salesDept.id } });
+  await prisma.user.updateMany({ where: { id: { in: [recruiterA.id, recruiterB.id, interviewer.id] } }, data: { department_id: hrDept.id } });
   ({ access_token: salesToken } = await loginAs(sales));
   ({ access_token: recruiterAToken } = await loginAs(recruiterA));
   ({ access_token: recruiterBToken } = await loginAs(recruiterB));

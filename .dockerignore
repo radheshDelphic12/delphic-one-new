@@ -5,6 +5,7 @@
 **/.env.*
 !**/.env.example
 **/uploads
+!server/src/modules/uploads
 .git
 .github
 docs

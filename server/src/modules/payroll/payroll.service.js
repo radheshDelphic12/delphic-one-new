@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
-const { pickCalendarId } = require('../calendars/calendars.service');
+const { detectFinanceChange } = require('../../lib/financeChanges');
+const { leaveHoursForDay } = require('../leave/leaveHours');
 
 function ymd(date) {
   return date.toISOString().slice(0, 10);
@@ -17,6 +18,17 @@ async function createSalaryStructure(orgId, createdByUserId, { org_membership_id
 
   const structure = await prisma.salaryStructure.create({
     data: { org_id: orgId, org_membership_id, effective_from, ctc, components, created_by: createdByUserId },
+  });
+  // A new structure never rewrites a finalized month — it flags any locked
+  // month from its effective date on for review.
+  await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structure.id,
+    from_date: effective_from,
+    org_membership_id,
+    changed_by: createdByUserId,
+    description: `New salary structure from ${effective_from.toISOString().slice(0, 10)} (CTC ${Number(ctc)})`,
+    new_value: { ctc: Number(ctc), effective_from },
   });
   return { structure };
 }
@@ -47,14 +59,56 @@ async function updateSalaryStructure(orgId, actorUserId, structureId, patch) {
     },
     include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
   });
+  const from = existing.effective_from < structure.effective_from ? existing.effective_from : structure.effective_from;
+  await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structureId,
+    from_date: from,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Salary structure edited (CTC ${Number(existing.ctc)} → ${Number(structure.ctc)})`,
+    old_value: { ctc: Number(existing.ctc), effective_from: existing.effective_from },
+    new_value: { ctc: Number(structure.ctc), effective_from: structure.effective_from },
+  });
   return { structure };
 }
 
-async function listSalaryStructures(orgId, { org_membership_id }) {
+// Admin deletes a structure (e.g. created by mistake). Payroll reads
+// structures at processing time, so draft runs simply fall back to the
+// previous structure; processed payslips keep their frozen figures, and any
+// locked month from its effective date on is flagged for review.
+async function deleteSalaryStructure(orgId, actorUserId, structureId) {
+  const existing = await prisma.salaryStructure.findFirst({ where: { id: structureId, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  await prisma.salaryStructure.delete({ where: { id: structureId } });
+  const change = await detectFinanceChange(orgId, {
+    source_type: 'salary_structure',
+    source_id: structureId,
+    from_date: existing.effective_from,
+    org_membership_id: existing.org_membership_id,
+    changed_by: actorUserId,
+    description: `Salary structure from ${ymd(existing.effective_from)} deleted (CTC ${Number(existing.ctc)})`,
+    old_value: { ctc: Number(existing.ctc), effective_from: existing.effective_from },
+    new_value: null,
+  });
+  return { deleted: true, flagged: change?.flagged || 0 };
+}
+
+// Payroll filters — Employee, Department, Team — combinable. Department
+// matches the membership's department or (legacy) the person's own.
+function payrollMemberWhere({ org_membership_id, department_id, team_id } = {}) {
+  const { membershipFilterWhere } = require('../calculations/engines/salary.engine');
+  const where = membershipFilterWhere({ org_membership_id, department_id, team_id });
+  return Object.keys(where).length ? { org_membership: where } : {};
+}
+
+const PAYROLL_MEMBER_INCLUDE = { org_membership: { select: { id: true, employee_code: true, employment_status: true, department: { select: { id: true, name: true } }, team: { select: { id: true, name: true } }, person: { select: { id: true, name: true, department: { select: { id: true, name: true } } } } } } };
+
+async function listSalaryStructures(orgId, filters = {}) {
   return prisma.salaryStructure.findMany({
-    where: { org_id: orgId, ...(org_membership_id ? { org_membership_id } : {}) },
+    where: { org_id: orgId, ...payrollMemberWhere(filters) },
     orderBy: [{ org_membership_id: 'asc' }, { effective_from: 'desc' }],
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    include: PAYROLL_MEMBER_INCLUDE,
   });
 }
 
@@ -82,91 +136,225 @@ async function listRuns(orgId, { status }) {
   });
 }
 
-// One employee's paid/unpaid day breakdown for the period. Documented
-// assumptions (see schema.prisma's Payslip comment):
-// - 5-day work week — Sat/Sun always paid, non-working. No weekly-off
-//   calendar exists yet to configure this per org.
-// - A day counts as paid when: it's a weekend, it's a holiday on the org's
-//   default Calendar, attendance is present/wfh (full) or half_day (half),
-//   or an approved LeaveRequest with a paid LeaveType covers it.
-// - Everything else on a working day (absent, unpaid leave, or simply no
-//   attendance record and no leave) is an unpaid day — loss of pay.
-// - Overtime is tracked (`overtime_minutes`) but not paid — no overtime pay
-//   policy exists yet (Phase 3's own deferred item).
-function computeBreakdown({ period_start, period_end, days_in_month, ctc, attendanceByDate, leaveRanges, holidaySet }) {
+// One employee's salary for the period. The SOURCE depends on the person's pay basis
+// (OrgMembership.pay_basis, set by an admin):
+//   timesheet (default) - APPROVED TIMESHEET HOURS, never attendance (rules below);
+//   attendance          - the attendance MARKING: every company working day counts the
+//                         shift when marked present / wfh, half the shift when half_day,
+//                         nothing when absent. Approved leave pays / doesn't pay per its type
+//                         (leave and attendance never double count), and a past working day
+//                         with no marking and no leave is "unmarked" - unpaid, listed in
+//                         `unmarked_days` and blocking the salary lock until an admin marks it.
+//                         Days before joined_at and after left_at are outside employment:
+//                         unpaid (the month's rate still covers them), but not unmarked.
+//                         Project timesheets only feed client billing; overtime is
+//                         ticket based (phase 3), so the timesheet never creates OT here.
+// The rules below are described for the timesheet basis; both share the deficit logic.
+//
+// - Expected hours: each company working day (the employee's company calendar:
+//   Mon–Fri less its holidays, plus any weekend it marks as a working day) ×
+//   the daily shift hours. Weekends / company holidays are paid non-working
+//   days — already inside the monthly ctc.
+// - hourly_rate = ctc / expected hours of the month.
+// - A working day is paid for its approved hours up to the shift (a paid
+//   leave day counts as the full shift). Anything short is a deficit, deducted
+//   at the hourly rate. Pending and rejected hours are never paid.
+// - Hours beyond the day's expected hours (incl. any hours on a weekend /
+//   company holiday) are overtime, paid ONLY when the day's overtime is
+//   approved (TimesheetDayOvertime), at the hourly rate × OT_MULTIPLIER.
+//   comp_off overtime earns time off, not pay.
+// - Projection: the same with pending hours / pending OT counted as if
+//   approved — `projected_net`; `pending_amount` = projected_net − net.
+// - `asOf` (optional) = the live "salary incurred so far" mode used by Live
+//   Analytics: working days after it are `upcoming_days`, never a deficit, and
+//   `earned_to_date` is what the days up to it have earned.
+const OT_MULTIPLIER = 1;
+
+// A day's share of the shift for an attendance marking (anything else pays nothing).
+const ATTENDANCE_DAY_SHARE = { present: 1, wfh: 1, half_day: 0.5 };
+
+// The calendar day of a timestamp, at UTC midnight, so a join time later that
+// day still counts as employed on the joining date.
+function calendarDay(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function isEmployedOn(day, joinedAt, leftAt) {
+  const joined = calendarDay(joinedAt);
+  const left = calendarDay(leftAt);
+  if (joined && day < joined) return false;
+  if (left && day > left) return false;
+  return true;
+}
+
+// 'attendance' only when an admin chose it; everyone else keeps the timesheet basis.
+// Salary is paid from attendance for everyone (timesheets no longer feed pay).
+function payBasisOf() {
+  return 'attendance';
+}
+
+function computeBreakdown({ period_start, period_end, days_in_month, ctc, hoursByDate = new Map(), overtimeByDate = new Map(), leaveRanges = [], holidaySet = new Set(), workingSet = new Set(), shiftHours = 9, attendanceByDate = new Map(), asOf = null, payBasis = 'timesheet', ticketsByDate = new Map(), joinedAt = null, leftAt = null }) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const attendanceMode = payBasis === 'attendance';
+  let half_days = 0;
+  let absent_days = 0;
+  let unmarked_days = 0;
   let weekend_days = 0;
   let holiday_days = 0;
-  let present_days = 0;
-  let half_days = 0;
+  let working_days = 0;
+  let upcoming_days = 0;
   let paid_leave_days = 0;
   let unpaid_leave_days = 0;
-  let unpaid_days = 0;
-  let overtime_minutes = 0;
+  let paid_leave_hours = 0;
+  let unpaid_leave_hours = 0;
+  let present_days = 0;
+  let expected_hours = 0;
+  let paid_hours = 0; // approved normal hours + paid leave, on past working days
+  let paid_hours_to_date = 0;
+  let deficit_hours = 0;
+  let projected_deficit_hours = 0;
+  let approved_hours = 0;
+  let pending_hours = 0;
+  let ot_approved_hours = 0;
+  let ot_pending_hours = 0;
+  let ot_rejected_hours = 0;
+  let comp_off_days = 0;
 
   for (let d = 1; d <= days_in_month; d += 1) {
     const day = new Date(Date.UTC(period_start.getUTCFullYear(), period_start.getUTCMonth(), d));
-    const dow = day.getUTCDay();
     const key = ymd(day);
+    const dow = day.getUTCDay();
+    const isWorking = workingSet.has(key) || (dow !== 0 && dow !== 6 && !holidaySet.has(key));
+    if (!isWorking) {
+      if (dow === 0 || dow === 6) weekend_days += 1;
+      else holiday_days += 1;
+    } else working_days += 1;
+    const expected = isWorking ? shiftHours : 0;
+    expected_hours += expected;
 
-    if (dow === 0 || dow === 6) {
-      weekend_days += 1;
-      continue;
-    }
-    if (holidaySet.has(key)) {
-      holiday_days += 1;
-      continue;
-    }
-
-    const attendance = attendanceByDate.get(key);
-    if (attendance) {
-      overtime_minutes += attendance.overtime_minutes || 0;
-      if (attendance.status === 'present' || attendance.status === 'wfh') {
-        present_days += 1;
-        continue;
+    // Before joining and after leaving the person was not employed. Those days
+    // stay in the month's expected hours, so pay is prorated, but attendance
+    // is not required and the salary lock does not call them unmarked.
+    if (isWorking && !isEmployedOn(day, joinedAt, leftAt)) {
+      if (asOf && day > asOf) upcoming_days += 1;
+      else {
+        deficit_hours += expected;
+        projected_deficit_hours += expected;
       }
-      if (attendance.status === 'half_day') {
-        half_days += 1;
-        continue;
-      }
-    }
-
-    const leaveHit = leaveRanges.find((r) => day >= r.from_date && day <= r.to_date);
-    if (leaveHit) {
-      if (leaveHit.paid) paid_leave_days += 1;
-      else unpaid_leave_days += 1;
       continue;
     }
 
-    unpaid_days += 1;
+    const att = attendanceByDate.get(key);
+    if (att && (att.status === 'present' || att.status === 'wfh' || att.status === 'half_day')) present_days += 1;
+
+    let logged = hoursByDate.get(key) || { approved: 0, pending: 0 };
+    // Attendance basis: the day's hours are what the marking says, not what was logged on projects.
+    if (attendanceMode) logged = { approved: isWorking ? expected * (att ? ATTENDANCE_DAY_SHARE[att.status] || 0 : 0) : 0, pending: 0 };
+    approved_hours += logged.approved;
+    pending_hours += logged.pending;
+    const ot = overtimeByDate.get(key) || null;
+    const otApprovedExcess = Math.max(0, logged.approved - expected);
+    const otProjectedExcess = Math.max(0, logged.approved + logged.pending - expected);
+    const otStatus = ot?.status || (otProjectedExcess > 0 ? 'pending' : null);
+    if (otStatus === 'approved') ot_approved_hours += Math.min(Number(ot.hours), otApprovedExcess);
+    if (otStatus === 'approved' || otStatus === 'pending') ot_pending_hours += Math.max(0, otProjectedExcess - (otStatus === 'approved' ? Math.min(Number(ot.hours), otApprovedExcess) : 0));
+    if (otStatus === 'rejected') ot_rejected_hours += otProjectedExcess;
+    if (otStatus === 'comp_off') comp_off_days += 1;
+    // Attendance basis: overtime is what the manager approved on tickets (never timesheet hours).
+    if (attendanceMode) {
+      const t = ticketsByDate.get(key);
+      if (t) {
+        ot_approved_hours += t.approved;
+        ot_pending_hours += t.pending;
+        ot_rejected_hours += t.rejected;
+      }
+    }
+
+    if (!isWorking) continue;
+    if (asOf && day > asOf) {
+      upcoming_days += 1;
+      continue;
+    }
+    // Approved leave only (callers pass nothing else). A full day = the shift, a
+    // half day = half of it; paid leave hours are paid, unpaid never are, and
+    // worked hours fill only what the leave leaves free (working + leave <=
+    // the day), so leave and timesheet hours are never counted twice.
+    const dayLeave = leaveHoursForDay(leaveRanges.filter((r) => day >= r.from_date && day <= r.to_date), expected);
+    const workCap = expected - dayLeave.total;
+    if (attendanceMode) {
+      if (!att && dayLeave.total < expected - 1e-9) unmarked_days += 1;
+      else if (att && att.status === 'absent') absent_days += 1;
+      else if (att && att.status === 'half_day') half_days += 1;
+    }
+    const paid = dayLeave.paid + Math.min(logged.approved, workCap);
+    const projected = dayLeave.paid + Math.min(logged.approved + logged.pending, workCap);
+    if (expected > 0) {
+      paid_leave_days += dayLeave.paid / expected;
+      unpaid_leave_days += dayLeave.unpaid / expected;
+    }
+    paid_leave_hours += dayLeave.paid;
+    unpaid_leave_hours += dayLeave.unpaid;
+    paid_hours += paid;
+    paid_hours_to_date += paid;
+    deficit_hours += expected - paid;
+    projected_deficit_hours += expected - projected;
   }
 
-  const working_days = days_in_month - weekend_days - holiday_days;
-  // half_day counts as a working day but only half-paid, so it's half a
-  // day's deduction — not a full loss like unpaid_days/unpaid_leave_days.
-  const lop_days = unpaid_leave_days + unpaid_days + half_days * 0.5;
-  const paid_days = working_days - lop_days;
-  const per_day_pay = ctc / days_in_month;
-  const deductions = Math.round(per_day_pay * lop_days * 100) / 100;
-  const gross = Number(ctc);
-  const net = Math.round((gross - deductions) * 100) / 100;
+  const hourly_rate = expected_hours > 0 ? Number(ctc) / expected_hours : 0;
+  const per_day_pay = working_days > 0 ? Number(ctc) / working_days : 0;
+  const ot_amount = r2(ot_approved_hours * hourly_rate * OT_MULTIPLIER);
+  const projected_ot_amount = r2((ot_approved_hours + ot_pending_hours) * hourly_rate * OT_MULTIPLIER);
+  const deductions = r2(hourly_rate * deficit_hours);
+  const gross = r2(Number(ctc) + ot_amount);
+  const net = r2(gross - deductions);
+  const projected_net = r2(Number(ctc) + projected_ot_amount - hourly_rate * projected_deficit_hours);
+  const earned_to_date = r2(hourly_rate * paid_hours_to_date + ot_amount);
+  // Day-based view of the same deficit, for the existing screens.
+  const lop_days = shiftHours > 0 ? r2(deficit_hours / shiftHours) : 0;
 
   return {
     breakdown: {
+      source: attendanceMode ? 'attendance' : 'approved_timesheets',
+      pay_basis: attendanceMode ? 'attendance' : 'timesheet',
+      half_days,
+      absent_days,
+      unmarked_days,
       period_start: ymd(period_start),
       period_end: ymd(period_end),
       days_in_month,
       working_days,
       weekend_days,
       holiday_days,
+      upcoming_days,
+      shift_hours: shiftHours,
+      expected_hours: r2(expected_hours),
+      approved_hours: r2(approved_hours),
+      pending_hours: r2(pending_hours),
+      paid_hours: r2(paid_hours),
+      deficit_hours: r2(deficit_hours),
+      paid_leave_days: r2(paid_leave_days),
+      unpaid_leave_days: r2(unpaid_leave_days),
+      paid_leave_hours: r2(paid_leave_hours),
+      unpaid_leave_hours: r2(unpaid_leave_hours),
+      // Presence only (check-in / check-out) — shown, never paid from.
       present_days,
-      half_days,
-      paid_leave_days,
-      unpaid_leave_days,
-      unpaid_days,
       lop_days,
-      paid_days,
-      overtime_minutes,
-      per_day_pay: Math.round(per_day_pay * 100) / 100,
+      paid_days: r2(working_days - upcoming_days - lop_days),
+      hourly_rate: r2(hourly_rate),
+      per_day_pay: r2(per_day_pay),
+      ot_approved_hours: r2(ot_approved_hours),
+      ot_pending_hours: r2(ot_pending_hours),
+      ot_rejected_hours: r2(ot_rejected_hours),
+      ot_multiplier: OT_MULTIPLIER,
+      ot_amount,
+      comp_off_days,
+      earned_to_date,
+      projected_net,
+      pending_amount: r2(projected_net - net),
+      as_of: asOf ? ymd(asOf) : null,
     },
     gross,
     deductions,
@@ -174,105 +362,50 @@ function computeBreakdown({ period_start, period_end, days_in_month, ctc, attend
   };
 }
 
+// Processing freezes the run into payslips. The figures come from the ONE
+// timesheet-based salary calculation (calculations/engines/salary.engine):
+// if the month's salary calculation has been LOCKED (Live Analytics → Salary
+// → Lock), its locked version is used as-is, so the payslips match exactly
+// what was reviewed and finalized; otherwise the month is computed now.
+// The month's salary lines as a run pays them: the locked version when the month's salary is locked
+// (an employee locked on their own keeps their locked figures), otherwise computed now.
+async function runLines(orgId, run) {
+  // Lazy: salary.engine itself builds on computeBreakdown from this module.
+  const salaryEngine = require('../calculations/engines/salary.engine');
+  const calculations = require('../calculations/calculations.service');
+  const period = { period_month: run.period_month, period_year: run.period_year };
+
+  const locked = await calculations.lockedVersion(orgId, 'salary', 'org', period);
+  const result = locked ? locked.snapshot : await salaryEngine.computeSalary(orgId, period);
+  // Employees locked one by one (Live Analytics → Salary → Lock) are paid
+  // exactly their locked figures; the rest of the month is computed now.
+  const individual = locked ? new Map() : await calculations.lockedRecords(orgId, 'salary_employee', period);
+  const lines = result.lines.map((line) => {
+    const own = individual.get(line.org_membership_id);
+    const lockedLine = own?.snapshot?.lines?.find((l) => l.org_membership_id === line.org_membership_id);
+    return lockedLine ? { ...lockedLine, calculation_version: own.version } : line;
+  });
+
+  // Contractors are paid through their vendor (Finance → vendor invoices),
+  // never through payroll — the engine lists them as skipped.
+  const skipped = (result.skipped || []).map(({ org_membership_id, reason }) => ({ org_membership_id, reason }));
+  const rows = lines.map((line) => ({
+    org_membership_id: line.org_membership_id,
+    gross: line.gross,
+    deductions: line.deductions,
+    net: line.net,
+    breakdown: { ...line.breakdown, ...(locked ? { calculation_version: locked.version } : line.calculation_version ? { calculation_version: line.calculation_version } : {}) },
+  }));
+  return { rows, skipped, locked };
+}
+
 async function processRun(orgId, runId, adminUserId) {
   const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
   if (!run) return { error: 'not_found' };
   if (run.status !== 'draft') return { error: 'already_processed' };
 
-  const { period_start, period_end, days_in_month } = periodBounds(run.period_month, run.period_year);
-
-  const memberships = await prisma.orgMembership.findMany({
-    where: {
-      org_id: orgId,
-      joined_at: { lte: period_end },
-      OR: [{ left_at: null }, { left_at: { gte: period_start } }],
-    },
-  });
-
-  const [attendanceRows, leaveRows, holidayRows, calendars, employeeCalendars] = await Promise.all([
-    prisma.attendanceRecord.findMany({ where: { org_id: orgId, date: { gte: period_start, lte: period_end } } }),
-    prisma.leaveRequest.findMany({
-      where: { org_id: orgId, status: 'approved', from_date: { lte: period_end }, to_date: { gte: period_start } },
-      include: { leave_type: { select: { paid: true } } },
-    }),
-    prisma.calendarHoliday.findMany({
-      where: { calendar: { org_id: orgId }, date: { gte: period_start, lte: period_end } },
-      select: { calendar_id: true, date: true },
-    }),
-    prisma.calendar.findMany({ where: { org_id: orgId }, select: { id: true, location_id: true, is_default: true } }),
-    prisma.employeeCalendar.findMany({
-      where: { org_membership: { org_id: orgId } },
-      select: { org_membership_id: true, account_id: true, calendar_id: true },
-    }),
-  ]);
-
-  // Holidays are per-employee, not org-wide: each person's paid-holiday days
-  // come from the calendar that governs them (their own mapping, else their
-  // office location's calendar, else the org default) — an Ahmedabad and a
-  // Gurgaon employee no longer share one holiday list. Project-specific
-  // calendars only constrain timesheets; payroll follows the primary one.
-  const holidaysByCalendar = new Map();
-  for (const h of holidayRows) {
-    if (!holidaysByCalendar.has(h.calendar_id)) holidaysByCalendar.set(h.calendar_id, new Set());
-    holidaysByCalendar.get(h.calendar_id).add(ymd(h.date));
-  }
-  const assignmentsByMembership = new Map();
-  for (const row of employeeCalendars) {
-    if (!assignmentsByMembership.has(row.org_membership_id)) assignmentsByMembership.set(row.org_membership_id, []);
-    assignmentsByMembership.get(row.org_membership_id).push(row);
-  }
-  const noHolidays = new Set();
-
-  const attendanceByMembership = new Map();
-  for (const row of attendanceRows) {
-    if (!attendanceByMembership.has(row.org_membership_id)) attendanceByMembership.set(row.org_membership_id, new Map());
-    attendanceByMembership.get(row.org_membership_id).set(ymd(row.date), row);
-  }
-
-  const leaveByMembership = new Map();
-  for (const row of leaveRows) {
-    if (!leaveByMembership.has(row.org_membership_id)) leaveByMembership.set(row.org_membership_id, []);
-    leaveByMembership.get(row.org_membership_id).push({ from_date: row.from_date, to_date: row.to_date, paid: row.leave_type.paid });
-  }
-
-  const skipped = [];
-  const payslipRows = [];
-
-  for (const membership of memberships) {
-    const structure = await prisma.salaryStructure.findFirst({
-      where: { org_membership_id: membership.id, effective_from: { lte: period_end } },
-      orderBy: { effective_from: 'desc' },
-    });
-    if (!structure) {
-      skipped.push({ org_membership_id: membership.id, reason: 'no_salary_structure' });
-      continue;
-    }
-
-    const { breakdown, gross, deductions, net } = computeBreakdown({
-      period_start,
-      period_end,
-      days_in_month,
-      ctc: structure.ctc,
-      attendanceByDate: attendanceByMembership.get(membership.id) || new Map(),
-      leaveRanges: leaveByMembership.get(membership.id) || [],
-      holidaySet: holidaysByCalendar.get(
-        pickCalendarId(
-          { assignments: assignmentsByMembership.get(membership.id) || [], membershipLocationId: membership.location_id, calendars },
-          null
-        )
-      ) || noHolidays,
-    });
-
-    payslipRows.push({
-      org_id: orgId,
-      payroll_run_id: run.id,
-      org_membership_id: membership.id,
-      gross,
-      deductions,
-      net,
-      breakdown,
-    });
-  }
+  const { rows, skipped, locked } = await runLines(orgId, run);
+  const payslipRows = rows.map((row) => ({ org_id: orgId, payroll_run_id: run.id, ...row }));
 
   const updated = await prisma.$transaction(async (tx) => {
     if (payslipRows.length) await tx.payslip.createMany({ data: payslipRows });
@@ -282,19 +415,149 @@ async function processRun(orgId, runId, adminUserId) {
     });
   });
 
-  return { run: updated, payslips_generated: payslipRows.length, skipped };
+  return { run: updated, payslips_generated: payslipRows.length, skipped, from_locked_version: locked ? locked.version : null };
 }
 
-async function listRunPayslips(orgId, runId) {
+// Order-independent text of a JSON value (Postgres jsonb does not keep key order).
+const canonical = (v) => {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v === undefined ? null : v);
+};
+const withoutRevisions = (breakdown) => {
+  const rest = { ...(breakdown || {}) };
+  delete rest.revisions;
+  return canonical(rest);
+};
+const sameMoney = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+
+// A processed run can be brought up to date after salary changed (structure, adjustments, attendance,
+// leave, a re-locked salary calculation). The payslips are recomputed exactly the way processing does and
+// the ones whose figures moved are updated IN PLACE (same payslip, same id), each change kept on the
+// payslip as a revision (when, who, why, the previous figures). Employees who became eligible get a
+// payslip. Payslips with no line any more are left untouched (never deleted). Optionally limited to
+// some employees. If the month's salary is locked, the locked version is what is paid: re-lock (or
+// recalculate) the salary first if the change should show up.
+async function refreshRun(orgId, runId, admin, { reason, org_membership_ids } = {}) {
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
+  if (!run) return { error: 'not_found' };
+  if (run.status !== 'processed') return { error: 'not_processed' };
+
+  const only = org_membership_ids?.length ? new Set(org_membership_ids) : null;
+  const { rows, skipped, locked } = await runLines(orgId, run);
+  const wanted = only ? rows.filter((r) => only.has(r.org_membership_id)) : rows;
+  const existing = await prisma.payslip.findMany({ where: { payroll_run_id: run.id, org_id: orgId } });
+  const byMember = new Map(existing.map((p) => [p.org_membership_id, p]));
+  const now = new Date().toISOString();
+
+  const updated = [];
+  const added = [];
+  const toUpdate = [];
+  const toCreate = [];
+  let unchanged = 0;
+  for (const row of wanted) {
+    const slip = byMember.get(row.org_membership_id);
+    if (!slip) {
+      toCreate.push({ org_id: orgId, payroll_run_id: run.id, ...row });
+      added.push({ org_membership_id: row.org_membership_id, net: Number(row.net) });
+      continue;
+    }
+    const amountsMoved = !sameMoney(slip.gross, row.gross) || !sameMoney(slip.deductions, row.deductions) || !sameMoney(slip.net, row.net);
+    const detailsMoved = withoutRevisions(slip.breakdown) !== withoutRevisions(row.breakdown);
+    if (!amountsMoved && !detailsMoved) {
+      unchanged += 1;
+      continue;
+    }
+    const previous = { gross: Number(slip.gross), deductions: Number(slip.deductions), net: Number(slip.net) };
+    const revisions = [...(Array.isArray(slip.breakdown?.revisions) ? slip.breakdown.revisions : [])];
+    if (amountsMoved) revisions.push({ at: now, by: admin.id, reason, previous });
+    toUpdate.push({ id: slip.id, data: { gross: row.gross, deductions: row.deductions, net: row.net, breakdown: { ...row.breakdown, ...(revisions.length ? { revisions } : {}) } } });
+    if (amountsMoved) updated.push({ org_membership_id: row.org_membership_id, previous_net: previous.net, net: Number(row.net) });
+  }
+  const calcIds = new Set(rows.map((r) => r.org_membership_id));
+  const not_recalculated = existing.filter((p) => (!only || only.has(p.org_membership_id)) && !calcIds.has(p.org_membership_id)).length;
+
+  await prisma.$transaction(async (tx) => {
+    for (const u of toUpdate) await tx.payslip.update({ where: { id: u.id }, data: u.data });
+    if (toCreate.length) await tx.payslip.createMany({ data: toCreate });
+    if (!only) await tx.payrollRun.update({ where: { id: run.id }, data: { skipped } });
+  });
+
+  // Salary already marked paid for an amount that no longer matches the payslip.
+  const movedIds = updated.map((u) => u.org_membership_id);
+  const payments = movedIds.length
+    ? await prisma.salaryPayment.findMany({ where: { org_id: orgId, period_month: run.period_month, period_year: run.period_year, org_membership_id: { in: movedIds } } })
+    : [];
+  const names = new Map((await prisma.orgMembership.findMany({ where: { id: { in: [...updated, ...added].map((x) => x.org_membership_id) } }, select: { id: true, person: { select: { name: true } } } })).map((m) => [m.id, m.person?.name || null]));
+  const named = (list) => list.map((x) => ({ ...x, employee: names.get(x.org_membership_id) || null }));
+  const paid_mismatch = payments
+    .map((p) => ({ org_membership_id: p.org_membership_id, amount_paid: Number(p.amount_paid), net: updated.find((u) => u.org_membership_id === p.org_membership_id)?.net }))
+    .filter((p) => !sameMoney(p.amount_paid, p.net));
+
+  const summary = {
+    period: `${run.period_year}-${String(run.period_month).padStart(2, '0')}`,
+    source: locked ? 'locked' : 'live',
+    locked_version: locked ? locked.version : null,
+    limited_to: only ? [...only] : null,
+    updated: named(updated),
+    added: named(added),
+    unchanged,
+    not_recalculated,
+  };
+  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: admin.id, action: 'payroll_run_refresh', entity_type: 'payroll_run', entity_id: run.id, reason, snapshot: summary } });
+  return { ...summary, run_id: run.id, details_refreshed: toUpdate.length - updated.length, paid_mismatch: named(paid_mismatch) };
+}
+
+async function listRunPayslips(orgId, runId, filters = {}) {
   const run = await prisma.payrollRun.findFirst({ where: { id: runId, org_id: orgId } });
   if (!run) return { error: 'not_found' };
 
   const data = await prisma.payslip.findMany({
-    where: { payroll_run_id: runId, org_id: orgId },
+    where: { payroll_run_id: runId, org_id: orgId, ...payrollMemberWhere(filters) },
     orderBy: { generated_at: 'asc' },
-    include: { org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
+    include: PAYROLL_MEMBER_INCLUDE,
   });
   return { data };
+}
+
+// Payroll → Attendance salary: the month's attendance-based salary per
+// employee (the same calculation a run processes), honouring the filters.
+// A locked month shows its locked figures.
+async function attendanceSalary(orgId, query) {
+  const live = require('../calculations/live.service');
+  return live.salaryLive(orgId, query);
+}
+
+// What each employee would be paid under each basis for a month, side by side, so an admin
+// can check the attendance basis (unmarked days, absences) BEFORE switching anyone.
+async function payBasisComparison(orgId, query) {
+  const salaryEngine = require('../calculations/engines/salary.engine');
+  return salaryEngine.comparePayBases(orgId, query);
+}
+
+// Admin: set the pay basis of some people (ids) and / or everyone in the IT department.
+// Audited with the reason; locked months keep their locked figures, only live / future
+// calculations follow the new basis.
+async function setPayBasis(orgId, adminUserId, { pay_basis, org_membership_ids = [], it_department = false, reason }) {
+  const where = { org_id: orgId, worker_type: { not: 'contractor' }, OR: [] };
+  if (org_membership_ids.length) where.OR.push({ id: { in: org_membership_ids } });
+  if (it_department) where.OR.push({ person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } }, { department: { name: { equals: 'IT', mode: 'insensitive' } } });
+  if (!where.OR.length) return { error: 'nobody_selected' };
+  const people = await prisma.orgMembership.findMany({ where, select: { id: true, pay_basis: true, person: { select: { name: true } } } });
+  const changing = people.filter((p) => (p.pay_basis === 'attendance' ? 'attendance' : 'timesheet') !== pay_basis);
+  if (changing.length) await prisma.orgMembership.updateMany({ where: { id: { in: changing.map((p) => p.id) } }, data: { pay_basis } });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId,
+      actor_id: adminUserId,
+      action: 'pay_basis_set',
+      entity_type: 'org_membership',
+      entity_id: changing[0]?.id || people[0]?.id || orgId,
+      reason,
+      snapshot: { pay_basis, changed: changing.map((p) => ({ id: p.id, name: p.person?.name, from: p.pay_basis || 'timesheet' })), considered: people.length },
+    },
+  });
+  return { pay_basis, changed: changing.length, considered: people.length };
 }
 
 async function listMyPayslips(orgId, orgMembershipId, { page, limit }) {
@@ -312,6 +575,70 @@ async function listMyPayslips(orgId, orgMembershipId, { page, limit }) {
   return { data, pagination: { page, limit, total } };
 }
 
+// The payslip's printable detail: who the employee is and where the money goes, the month's
+// leaves taken and balances as of now, the salary structure breakup, and the adjustments itemized.
+// Built on read from the employee's own records, so a payslip never needs re-processing for it.
+// Basic first, then HRA, then everything else in the order stored.
+const componentRank = (name) => { const i = ['basic', 'hra'].indexOf(String(name).toLowerCase()); return i === -1 ? 9 : i; };
+const SLIP_LEAVES = [['CL', 'Casual'], ['SL', 'Sick'], ['EL', 'Earned'], ['CO', 'Compensatory Off']];
+
+async function payslipDetail(orgId, payslip) {
+  const leaveService = require('../leave/leave.service');
+  const salaryAdjustments = require('./salaryAdjustments.service');
+  const { period_start, period_end } = periodBounds(payslip.payroll_run.period_month, payslip.payroll_run.period_year);
+  const member = await prisma.orgMembership.findFirst({
+    where: { id: payslip.org_membership_id, org_id: orgId },
+    select: {
+      employee_code: true,
+      aadhaar_number: true,
+      pan_number: true,
+      bank_account_number: true,
+      bank_ifsc: true,
+      person: { select: { name: true } },
+      department: { select: { name: true } },
+      team: { select: { name: true } },
+      designation: { select: { name: true } },
+    },
+  });
+  const [structure, adjustments, balances, taken] = await Promise.all([
+    prisma.salaryStructure.findFirst({ where: { org_id: orgId, org_membership_id: payslip.org_membership_id, effective_from: { lte: period_end } }, orderBy: { effective_from: 'desc' } }),
+    salaryAdjustments.list(orgId, { period_month: payslip.payroll_run.period_month, period_year: payslip.payroll_run.period_year, org_membership_id: payslip.org_membership_id }),
+    leaveService.listMyBalances(orgId, payslip.org_membership_id, new Date().getUTCFullYear()),
+    leaveService.leaveTakenInRange(orgId, payslip.org_membership_id, period_start, period_end),
+  ]);
+  const leaves = SLIP_LEAVES.map(([code, label]) => {
+    const row = balances.find((b) => b.code === code);
+    return { code, label, taken: row ? taken.get(row.leave_type_id) || 0 : 0, balance: row ? (row.remaining === null ? null : row.remaining) : null };
+  });
+  const items = adjustments.map((a) => ({ id: a.id, label: a.label, note: a.note, amount: a.amount, sign: a.sign }));
+  const round = (n) => Math.round(n * 100) / 100;
+  return {
+    employee: member && {
+      employee_code: member.employee_code || null,
+      name: member.person?.name || null,
+      department: member.department?.name || null,
+      team: member.team?.name || null,
+      designation: member.designation?.name || null,
+      aadhaar_number: member.aadhaar_number || null,
+      pan_number: member.pan_number || null,
+      bank_account_number: member.bank_account_number || null,
+      bank_ifsc: member.bank_ifsc || null,
+    },
+    leaves,
+    salary: structure && { monthly_ctc: Number(structure.ctc), components: Object.entries(structure.components || {}).map(([name, amount]) => ({ name, amount: Number(amount) })).sort((x, y) => componentRank(x.name) - componentRank(y.name)) },
+    additions: items.filter((i) => i.sign > 0),
+    other_deductions: items.filter((i) => i.sign < 0),
+    totals: {
+      gross: Number(payslip.gross),
+      loss_of_pay: Number(payslip.deductions),
+      additions: round(items.filter((i) => i.sign > 0).reduce((s, i) => s + i.amount, 0)),
+      adjustment_deductions: round(items.filter((i) => i.sign < 0).reduce((s, i) => s + i.amount, 0)),
+      net_paid: Number(payslip.net),
+    },
+  };
+}
+
+// An employee reads only their own payslip (another's reads as not found); an admin reads any in the org.
 async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
   const payslip = await prisma.payslip.findFirst({
     where: { id: payslipId, org_id: orgId },
@@ -319,10 +646,11 @@ async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
   });
   if (!payslip) return { error: 'not_found' };
   if (!isAdmin && payslip.org_membership_id !== orgMembershipId) return { error: 'not_found' };
-  return { payslip };
+  return { payslip: { ...payslip, detail: await payslipDetail(orgId, payslip) } };
 }
 
 module.exports = {
+  deleteSalaryStructure,
   createSalaryStructure,
   updateSalaryStructure,
   listSalaryStructures,
@@ -330,7 +658,12 @@ module.exports = {
   createRun,
   listRuns,
   processRun,
+  refreshRun,
   listRunPayslips,
+  attendanceSalary,
+  payBasisOf,
+  setPayBasis,
+  payBasisComparison,
   listMyPayslips,
   getPayslip,
   // exported for tests only

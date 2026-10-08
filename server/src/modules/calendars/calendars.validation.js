@@ -8,6 +8,8 @@ const createCalendarSchema = z.object({
   // Ties the calendar's holidays to an office (Ahmedabad, Indore, Gurgaon…);
   // omit for a client calendar that isn't tied to a physical location.
   location_id: z.string().uuid().nullable().optional(),
+  // Makes this the standard calendar for a department (non-IT staff).
+  department_id: z.string().uuid().nullable().optional(),
 });
 
 const updateCalendarSchema = z.object({
@@ -15,19 +17,23 @@ const updateCalendarSchema = z.object({
   kind: z.enum(['internal', 'client', 'custom']).optional(),
   is_default: z.boolean().optional(),
   location_id: z.string().uuid().nullable().optional(),
+  department_id: z.string().uuid().nullable().optional(),
 });
 
 const addHolidaySchema = z.object({
   date: requiredDate,
   label: z.string().min(1).max(200),
+  // A working-day exception instead of a holiday (e.g. a client working Sunday).
+  is_working_day: z.boolean().optional(),
 });
 
 const updateHolidaySchema = z
   .object({
     date: optionalDate,
     label: z.string().min(1).max(200).optional(),
+    is_working_day: z.boolean().optional(),
   })
-  .refine((v) => v.date !== undefined || v.label !== undefined, { message: 'Provide at least one field to update' });
+  .refine((v) => v.date !== undefined || v.label !== undefined || v.is_working_day !== undefined, { message: 'Provide at least one field to update' });
 
 const assignCalendarSchema = z.object({
   org_membership_id: z.string().uuid(),

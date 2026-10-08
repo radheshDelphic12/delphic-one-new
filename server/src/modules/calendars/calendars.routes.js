@@ -24,6 +24,32 @@ router.get(
   })
 );
 
+// The caller's own holiday calendars for a year: their standard calendar
+// plus the calendar each assigned project follows (a client calendar where
+// the project has one). Any member — including contractors.
+router.get(
+  '/me',
+  asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getUTCFullYear();
+    if (year < 2000 || year > 2100) return fail(res, 400, 'Invalid year');
+    return ok(res, await service.myCalendars(req.user.org_id, req.user.org_membership_id, year));
+  })
+);
+
+// The same view for any employee (admin): their standard calendar and, for IT
+// staff / contractors, the calendar each assigned project follows.
+router.get(
+  '/members/:orgMembershipId',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getUTCFullYear();
+    if (year < 2000 || year > 2100) return fail(res, 400, 'Invalid year');
+    const member = await service.memberExists(req.user.org_id, req.params.orgMembershipId);
+    if (!member) return fail(res, 404, 'Org membership not found');
+    return ok(res, await service.myCalendars(req.user.org_id, req.params.orgMembershipId, year));
+  })
+);
+
 // Project <-> Calendar mapping (People → Calendar section). Declared before
 // the '/:id' routes so 'projects' is never read as a calendar id.
 router.get(
@@ -34,7 +60,7 @@ router.get(
   })
 );
 
-// Client-name picker for Add / Edit Project: this org's Lead accounts.
+// Client-name picker for Add / Edit Project: this org's client accounts.
 router.get(
   '/projects/client-options',
   authorize('admin'),
@@ -47,9 +73,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = createProjectSchema.parse(req.body);
     const result = await service.createProject(req.user.org_id, req.user.id, body);
-    if (result.error === 'client_not_lead') return fail(res, 422, 'Client must be one of this company\'s Lead accounts');
+    if (result.error === 'client_not_lead') return fail(res, 422, 'Client must be one of this company\'s client accounts');
     if (result.error === 'category_not_available') return fail(res, 422, 'Recruitment projects are not available yet — choose Manage Services or Projects');
-    if (result.error === 'name_taken') return fail(res, 409, 'A project with that name already exists');
     if (result.error === 'calendar_not_found') return fail(res, 404, 'Calendar not found');
     if (result.error === 'no_calendar_available') return fail(res, 422, 'Create a calendar first — every project must be mapped to one');
     return created(res, result.project);
@@ -75,6 +100,7 @@ router.post(
     const body = createCalendarSchema.parse(req.body);
     const result = await service.create(req.user.org_id, body);
     if (result.error === 'location_not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'department_not_found') return fail(res, 404, 'Department not found');
     return created(res, result.calendar);
   })
 );
@@ -87,6 +113,7 @@ router.patch(
     const result = await service.update(req.user.org_id, req.params.id, body);
     if (result.error === 'not_found') return fail(res, 404, 'Calendar not found');
     if (result.error === 'location_not_found') return fail(res, 404, 'Location not found');
+    if (result.error === 'department_not_found') return fail(res, 404, 'Department not found');
     return ok(res, result.calendar);
   })
 );
@@ -172,6 +199,28 @@ router.post(
     if (result.error === 'membership_not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'account_not_found') return fail(res, 404, 'Account not found');
     return ok(res, result.assignment);
+  })
+);
+
+router.delete(
+  '/:id/assign/:orgMembershipId',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.unassign(req.user.org_id, req.params.id, req.params.orgMembershipId);
+    if (result.error === 'not_found') return fail(res, 404, 'This employee is not directly assigned to that calendar');
+    return ok(res, { deleted: true });
+  })
+);
+
+// Who follows this calendar as their standard calendar — explicitly assigned
+// or inherited through department / office location / org default.
+router.get(
+  '/:id/employees',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.listCalendarEmployees(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Calendar not found');
+    return ok(res, result.employees);
   })
 );
 

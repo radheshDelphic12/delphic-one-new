@@ -6,6 +6,7 @@ import { DEFAULT_DEV_PASSWORD, isQuickLoginEnabled } from '../../lib/testAccount
 import { detectWorkspaceSlug, getRecentWorkspaces, rememberWorkspace } from '../../lib/workspace.js';
 import PasswordInput from '../../components/ui/PasswordInput.jsx';
 import WorkspaceLogo from '../../components/ui/WorkspaceLogo.jsx';
+import { orgLogo } from '../../lib/orgLogo.js';
 import DevQuickLogin from './DevQuickLogin.jsx';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -40,8 +41,10 @@ export default function LoginPage() {
 
   // Just signed in with 2+ orgs: pick one here. Anyone else already signed in
   // (including a returning session) goes straight to the app.
-  const choosingOrg = Boolean(user) && signedInHere && !linkedSlug && (user.memberships?.length || 0) > 1;
-  if (user && !choosingOrg) return <Navigate to="/" replace />;
+  // A group superadmin never picks a company here: they land on the Group Dashboard and switch from the sidebar.
+  const toGroupDashboard = Boolean(user?.is_group_superadmin) && signedInHere && !linkedSlug;
+  const choosingOrg = Boolean(user) && signedInHere && !linkedSlug && !user.is_group_superadmin && (user.memberships?.length || 0) > 1;
+  if (user && !choosingOrg) return <Navigate to={toGroupDashboard ? '/group-overview' : '/'} replace />;
 
   // Restart the CSS shake without remounting the form (which would steal focus).
   function shake() {
@@ -62,6 +65,7 @@ export default function LoginPage() {
     setSignedInHere(true);
     try {
       const nextUser = await login(nextEmail, nextPassword, slug);
+      if (nextUser?.is_group_superadmin && !slug) return; // redirected to the Group Dashboard above
       if ((nextUser?.memberships?.length || 0) > 1 && !slug) return; // org pills render next
       if (nextUser?.active_org) rememberWorkspace(nextUser.active_org);
       navigate('/');
@@ -226,7 +230,7 @@ export default function LoginPage() {
                     {pendingOrg === membership.org_id ? (
                       <Loader2 className="m-1.5 h-4 w-4 animate-spin text-primary-600" aria-hidden="true" />
                     ) : (
-                      <WorkspaceLogo name={membership.org.name} logoUrl={membership.org.logo_url} size="sm" className="rounded-full" />
+                      <WorkspaceLogo name={membership.org.name} logoUrl={orgLogo(membership.org)} size="sm" className="rounded-full" />
                     )}
                     {membership.org.name}
                   </button>

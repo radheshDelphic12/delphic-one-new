@@ -1,0 +1,36 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "delphic-one-bugFix-and-newImplementation",
+    "dev",
+    "dev-deep",
+    "feature/header-attendance",
+    "feature/simple-login",
+    "fix/ci-green",
+    "main",
+    "origin",
+    "staging"
+  ],
+  "parent": {
+    "delphic-one-bugFix-and-newImplementation": "main",
+    "dev": "main",
+    "dev-deep": "dev",
+    "feature/header-attendance": "main",
+    "feature/simple-login": "main",
+    "fix/ci-green": "main",
+    "main": null,
+    "origin": "main",
+    "staging": "main"
+  },
+  "order": [
+    "main",
+    "delphic-one-bugFix-and-newImplementation",
+    "dev",
+    "feature/header-attendance",
+    "feature/simple-login",
+    "fix/ci-green",
+    "origin",
+    "staging",
+    "dev-deep"
+  ]
+}

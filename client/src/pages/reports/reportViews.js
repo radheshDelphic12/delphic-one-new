@@ -365,6 +365,8 @@ export function hrSections(data) {
   return data.tables.map((t) => ({
     key: t.key,
     title: t.title,
+    // Profiles / submissions / rounds in the range (rows are per person per day).
+    total: t.total,
     columns: HR_COLUMNS[t.key] || fallbackColumns(t.rows?.[0]),
     rows: (t.rows || []).map((r, i) => ({ id: `${t.key}-${i}`, ...r })),
   }));
@@ -494,9 +496,15 @@ const TAB_BADGE_SUM_FIELD = {
   profiles_submitted_to_client: 'count',
   meetings_scheduled: 'meetings_scheduled',
   meetings_conversion: 'meetings_scheduled',
+  // HR report (the server's `total` wins when present — see below).
+  sourcing: 'count',
+  submissions: 'count',
+  round1_by_sourcer: 'scheduled',
+  round1_by_interviewer: 'scheduled',
 };
 
 export function sectionTabBadge(section) {
+  if (typeof section?.total === 'number') return section.total;
   const field = TAB_BADGE_SUM_FIELD[section?.key];
   if (!field) return section?.rows?.length ?? 0;
   return (section.rows || []).reduce((sum, r) => sum + (Number(r[field]) || 0), 0);

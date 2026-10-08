@@ -36,7 +36,7 @@ describe('workspace-scoped sign in', () => {
   async function twoOrgUser() {
     const first = await createOrg({ name: 'Delphic', slug: 'delphic' });
     const second = await createOrg({ name: 'Acconcy', slug: 'acconcy' });
-    const user = await createUser({ role: 'admin' });
+    const user = await createUser({ role: 'admin', withOrg: false });
     await prisma.orgMembership.create({ data: { person_id: user.id, org_id: first.id, role: 'admin', joined_at: new Date('2026-01-01') } });
     await prisma.orgMembership.create({ data: { person_id: user.id, org_id: second.id, role: 'admin', joined_at: new Date('2026-06-01') } });
     return { user, first, second };

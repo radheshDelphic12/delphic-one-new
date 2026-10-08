@@ -192,11 +192,11 @@ async function main() {
   const group = delphic.org_group_id;
   const acconcy = await ensureOrg(group, { name: 'Acconcy Finance', slug: 'acconcy', modules: ['leads', 'contracts'], multiple: 4 });
   const gulati = await ensureOrg(group, { name: 'Gulati Industries', slug: 'gulati', modules: ['trading'], multiple: 0.5 });
-  const zephyr = await ensureOrg(group, { name: 'Zephyr Infrastructure', slug: 'zephyr', modules: ['leads', 'contracts', 'projects'], multiple: 3 });
+  const zephyr = await ensureOrg(group, { name: 'Zephyr Infrastructure', slug: 'zephyr', modules: ['zephyr'], multiple: 3 });
   for (const org of [acconcy, gulati, zephyr]) await ensureMembership(admin.id, org);
 
   await seedGulati(gulati, admin.id);
-  await seedZephyr(zephyr, admin.id);
+  // Zephyr runs its own Zx workspace (modules/zephyr); the generic seedZephyr demo no longer applies.
   await seedAcconcy(acconcy, admin.id);
   console.log('Done.');
 }

@@ -103,7 +103,7 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     expect(res.body.data.calendar.id).toBe(office.id);
   });
 
-  test('an explicit calendar wins; Recruitment is refused; a duplicate name is refused; a non-admin cannot add', async () => {
+  test('an explicit calendar wins; Recruitment is refused; a same-named project is a separate project; a non-admin cannot add', async () => {
     const { org, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const us = await calendar(org, 'US Client Calendar');
@@ -115,8 +115,12 @@ describe('Add Project (Calendar section) — Project <-> Calendar mapping is man
     const recruitment = await addProject(token, { name: 'Hiring', service_category: 'recruitment' });
     expect(recruitment.status).toBe(422);
 
+    // The name is only a label — a second contract with the same name is a
+    // separate project with its own id and project code.
     const dup = await addProject(token, { name: 'tankpros', service_category: 'project' });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+    expect(dup.body.data.id).not.toBe(explicit.body.data.id);
+    expect(dup.body.data.code).not.toBe(explicit.body.data.code);
 
     const emp = await seedEmployee(org);
     expect((await addProject(emp.token, { name: 'Sneaky', service_category: 'project' })).status).toBe(403);
@@ -225,51 +229,126 @@ describe('Finance → Projects profile', () => {
 
     const bad = await authed(request(app).patch(url), token).send({ service_category: 'recruitment' });
     expect(bad.status).toBe(422);
+
+    // Switching Monthly → Hourly from the same agreement start date: the newer
+    // rate wins even though both share an effective_from.
+    const switched = await authed(request(app).patch(url), token).send({ agreement_start_date: '2026-09-01', billing: { rate_type: 'monthly', rate: 80000 } });
+    expect(switched.body.data).toMatchObject({ billing_type: 'monthly', rate: 80000 });
+    const hourly = await authed(request(app).patch(url), token).send({ agreement_start_date: '2026-09-01', billing: { rate_type: 'hourly', rate: 500 } });
+    expect(hourly.status).toBe(200);
+    expect(hourly.body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
+    expect((await authed(request(app).get(url), token)).body.data).toMatchObject({ billing_type: 'hourly', rate: 500 });
+
     const rename = await authed(request(app).patch(url), token).send({ project_name: 'Tax Portal 2', client_account_id: newClient.id });
     expect(rename.body.data).toMatchObject({ project_name: 'Tax Portal 2', client_name: 'New Client', client_account_id: newClient.id });
   });
+
+  test('a saved monthly rate can be edited again, whether the agreement starts in the past or the future', async () => {
+    const { org, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const past = (await addProject(token, { name: 'Past Start', service_category: 'project' })).body.data;
+    const future = (await addProject(token, { name: 'Future Start', service_category: 'project' })).body.data;
+
+    for (const [project, start] of [[past, '2026-01-01'], [future, '2099-01-01']]) {
+      const url = `/api/v1/billing/projects/${project.id}`;
+      await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 80000 } });
+      const edited = await authed(request(app).patch(url), token).send({ agreement_start_date: start, billing: { rate_type: 'monthly', rate: 95000 } });
+      expect(edited.status).toBe(200);
+      expect(edited.body.data).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+      const row = (await authed(request(app).get('/api/v1/billing/projects'), token)).body.data.find((p) => p.id === project.id);
+      expect(row).toMatchObject({ billing_type: 'monthly', rate: 95000 });
+    }
+  });
 });
 
-describe('Project Client Name — a Lead account, never free text', () => {
-  test('client-options lists only this org\'s Lead accounts (client or unclassified); admin only', async () => {
+describe('Project Client Name — a client account, never free text', () => {
+  test('client-options lists all of this org\'s client accounts (client or unclassified, any stage) but no vendors or projects; admin only', async () => {
     const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
     await lead(org, admin, 'Lead Co');
     await lead(org, admin, 'Unclassified Lead', { type: null });
     await lead(org, admin, 'Vendor Lead', { type: 'vendor' });
     await lead(org, admin, 'Active Client', { stage: 'active' });
+    await lead(org, admin, 'Dropped Client', { stage: 'dropped' });
+    await lead(org, admin, 'Meeting Client', { stage: 'meeting_scheduled', type: null });
+    await addProject(token, { name: 'Some Project', service_category: 'project' });
     const other = await seedOrgAdmin({ name: 'Other', slug: 'other' });
     await lead(other.org, other.admin, 'Other Org Lead');
 
     const res = await authed(request(app).get('/api/v1/calendars/projects/client-options'), token);
     expect(res.status).toBe(200);
-    expect(res.body.data.map((a) => a.name)).toEqual(['Lead Co', 'Unclassified Lead']);
+    expect(res.body.data.map((a) => a.name)).toEqual(['Active Client', 'Dropped Client', 'Lead Co', 'Meeting Client', 'Unclassified Lead']);
 
     const emp = await seedEmployee(org);
     expect((await authed(request(app).get('/api/v1/calendars/projects/client-options'), emp.token)).status).toBe(403);
   });
 
-  test('create and edit refuse any account that is not a Lead of this org', async () => {
+  test('a client account whose billing was set up in Finance (so it has a service_category) is still offered and linkable', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const apaar = await lead(org, admin, 'Apaar', { stage: 'active', industry: 'Technology', poc_name: 'Nidhi' });
+    await addProject(token, { name: 'Some Project', service_category: 'project' });
+    // Production data from before projects were separate rows: the client's own
+    // row carries a service_category. It is still a client, not a project.
+    await prisma.account.update({ where: { id: apaar.id }, data: { service_category: 'managed_services' } });
+
+    const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
+    expect(options.map((a) => a.name)).toEqual(['Apaar']);
+
+    const created = await addProject(token, { name: 'E branch Pro', client_account_id: apaar.id, service_category: 'project' });
+    expect(created.status).toBe(201);
+    expect(created.body.data.client_name).toBe('Apaar');
+  });
+
+  test('a catalogue client is not turned into a project in Finance; its projects are added with it as the client', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const miicare = await lead(org, admin, 'MiiCare', { stage: 'active', industry: 'Technology', poc_name: 'Asha' });
+    const res = await authed(request(app).patch(`/api/v1/billing/projects/${miicare.id}`), token).send({
+      project_name: 'Mii Health 2',
+      client_account_id: miicare.id,
+    });
+    expect(res.status).toBe(409);
+
+    for (const name of ['Mii Health 2', 'Mii Health 3']) {
+      const created = await addProject(token, { name, client_account_id: miicare.id, service_category: 'project' });
+      expect(created.status).toBe(201);
+      expect(created.body.data.client_name).toBe('MiiCare');
+    }
+    expect((await prisma.account.findUnique({ where: { id: miicare.id } })).name).toBe('MiiCare');
+  });
+
+  test('create and edit refuse vendors, projects, other orgs\' accounts and the project itself; accept a client in any stage', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const active = await lead(org, admin, 'Active Client', { stage: 'active' });
     const vendor = await lead(org, admin, 'Vendor Lead', { type: 'vendor' });
+    const otherProject = (await addProject(token, { name: 'Other Project', service_category: 'project' })).body.data;
     const other = await seedOrgAdmin({ name: 'Other', slug: 'other' });
     const foreign = await lead(other.org, other.admin, 'Other Org Lead');
 
-    for (const bad of [active, vendor, foreign]) {
+    for (const bad of [vendor, otherProject, foreign]) {
       const res = await addProject(token, { name: `P ${bad.name}`, client_account_id: bad.id, service_category: 'project' });
       expect(res.status).toBe(422);
-      expect(res.body.message).toContain('Lead');
+      expect(res.body.message).toContain('client accounts');
     }
     expect(await prisma.account.count({ where: { name: { startsWith: 'P ' } } })).toBe(0);
 
     const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
-    const patch = await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), token).send({ client_account_id: active.id });
-    expect(patch.status).toBe(422);
+    const url = `/api/v1/billing/projects/${project.id}`;
+    expect((await authed(request(app).patch(url), token).send({ client_account_id: vendor.id })).status).toBe(422);
+    expect((await authed(request(app).patch(url), token).send({ client_account_id: project.id })).status).toBe(422);
+    const patch = await authed(request(app).patch(url), token).send({ client_account_id: active.id });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.client_name).toBe('Active Client');
+
+    const created = await addProject(token, { name: 'Gaming', client_account_id: active.id, service_category: 'project' });
+    expect(created.status).toBe(201);
 
     // Free text is no longer stored.
-    await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), token).send({ project_name: 'Tax Portal', client_name: 'Typed Name' });
-    expect((await prisma.account.findUnique({ where: { id: project.id } })).client_name).toBeNull();
+    const unlinked = (await addProject(token, { name: 'No Client', service_category: 'project' })).body.data;
+    await authed(request(app).patch(`/api/v1/billing/projects/${unlinked.id}`), token).send({ project_name: 'No Client', client_name: 'Typed Name' });
+    expect((await prisma.account.findUnique({ where: { id: unlinked.id } })).client_name).toBeNull();
   });
 
   test('edit pre-loads the linked lead, keeps it once it leaves the Lead stage, and can clear it', async () => {
@@ -290,6 +369,38 @@ describe('Project Client Name — a Lead account, never free text', () => {
 
     const cleared = await authed(request(app).patch(url), token).send({ client_account_id: null });
     expect(cleared.body.data).toMatchObject({ client_account_id: null, client_name: null });
+  });
+
+  test('a Finance edit never renames the account: project name and client name stay separate', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    // A client account and a project delivered for it.
+    const acme = await lead(org, admin, 'Acme Corp', { stage: 'active' });
+    const portal = (await addProject(token, { name: 'Tax Portal', client_account_id: acme.id, service_category: 'project' })).body.data;
+
+    // The client account itself can't be edited from Finance, so its name is safe…
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${acme.id}`), token).send({ project_name: 'Acme Website' })).status).toBe(409);
+    expect((await prisma.account.findUnique({ where: { id: acme.id } })).name).toBe('Acme Corp');
+    // …and renaming the project writes project_name, never the account's own name.
+    const rename = await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 150 });
+    expect(rename.status).toBe(200);
+    expect(rename.body.data.project_name).toBe('Acme Website');
+    expect((await prisma.account.findUnique({ where: { id: portal.id } })).name).toBe('Tax Portal');
+
+    // The project's client name is untouched, as is the client picker.
+    const linked = (await authed(request(app).get(`/api/v1/billing/projects/${portal.id}`), token)).body.data;
+    expect(linked).toMatchObject({ project_name: 'Acme Website', client_name: 'Acme Corp' });
+    const options = (await authed(request(app).get('/api/v1/calendars/projects/client-options'), token)).body.data;
+    expect(options.map((o) => o.name)).toContain('Acme Corp');
+
+    // Re-saving an unchanged name writes nothing; an edit elsewhere keeps the client link.
+    await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'Acme Website', benchmark_hours: 140 });
+    const after = await prisma.account.findUnique({ where: { id: portal.id } });
+    expect(after).toMatchObject({ name: 'Tax Portal', project_name: 'Acme Website', client_account_id: acme.id, client_name: 'Acme Corp' });
+
+    // Project names are not unique: another project may take the same name.
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${portal.id}`), token).send({ project_name: 'acme website' })).status).toBe(200);
+    expect((await addProject(token, { name: 'Acme Website', service_category: 'project' })).status).toBe(201);
   });
 
   test('legacy projects keep their free-text client name until a lead is linked', async () => {
@@ -368,7 +479,9 @@ describe('Agreement Start Date — billing applies only from that date', () => {
     const { org, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const emp = await seedEmployee(org);
-    const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
+    // Managed services: invoices are built from the Billing & Sales month
+    // (fixed-price invoicing isn't enabled yet).
+    const project = (await addProject(token, { name: 'Tax Portal', service_category: 'managed_services' })).body.data;
     const url = `/api/v1/billing/projects/${project.id}`;
     await authed(request(app).patch(url), token).send({ billing: { rate_type: 'hourly', rate: 1000, effective_from: '2026-08-01' } });
 
@@ -461,17 +574,19 @@ describe('Finance scope reduction', () => {
   });
 });
 
-describe('Project resources — company employees only for now, schema ready for the rest', () => {
-  test('the API only accepts company_employee; the column already holds contractor / vendor_resource', async () => {
+describe('Project resources — resource type follows the person user type', () => {
+  test('a client-sent resource_type is ignored; a full-time employee is always company_employee', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');
     const emp = await seedEmployee(org);
     const project = (await addProject(token, { name: 'Tax Portal', service_category: 'project' })).body.data;
 
-    const contractor = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({
+    // Contractors are marked on the person (People → user type), not per assignment.
+    const spoofed = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({
       account_id: project.id, org_membership_id: emp.membership.id, resource_type: 'contractor',
     });
-    expect(contractor.status).toBe(422);
+    expect(spoofed.status).toBe(201);
+    expect(spoofed.body.data.resource_type).toBe('company_employee');
 
     const ok = await authed(request(app).post('/api/v1/billing/cost-assignments'), token).send({ account_id: project.id, org_membership_id: emp.membership.id });
     expect(ok.status).toBe(201);

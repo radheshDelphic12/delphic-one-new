@@ -6,6 +6,7 @@ const { createSchema, listQuerySchema } = require('./comments.validation');
 const ERROR_STATUS = {
   not_found: [404, 'Not found'],
   forbidden: [403, 'Not permitted'],
+  membership_required: [403, 'Active organization membership required'],
   bad_entity: [400, 'Invalid entity type'],
 };
 
