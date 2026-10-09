@@ -62,3 +62,7 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 
 - Gulati and Zephyr must share the Delphic org group on staging/production for the superadmin to see them (they were seeded in separate groups; join them first).
 - Local dev: `group.admin@delphic.in` was removed from the local dev DB and `super@delphic.in` (`Password123!`) created; Acconcy is marked coming soon locally.
+
+## Performance on a remote database (2026-10-09)
+
+The Delphic finance engine runs ~3500 queries per 12-month window, so over Neon (~100 ms/query) the overview took ~270 s and timed out (504) on Render staging; production (local DB) was never slow. `groupFinance.service.js` now computes companies in parallel and caches each company/window/state stale-while-revalidate (120 s fresh, shared in-flight, cleared on asset-value edits, off when NODE_ENV=test) and `index.js` warms the default window 15 s after start. The first call after a deploy can still 504 until the warm-up finishes; the next is ~0.5 s.
