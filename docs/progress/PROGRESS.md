@@ -2800,3 +2800,10 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 - Acconcy > Financials opens on "Financial trends" (same as Gulati): Locked/Unlocked/All, month range, Revenue/Profit/Valuation charts, valuation breakdown table with Lock month/Reopen. `GET /acconcy/finance/valuation` gained `?state=` and per-month `revenue`. Extra tabs (Service-wise, Valuation, Month close) kept. Component `client/src/components/acconcy/AcconcyFinancialTrends.jsx`; test `acconcy financial trends` in `tests/acconcy-workspace.test.js` (30/30 on `acconcy_test`). Details: docs/features/ACCONCY-FINANCE.md.
 - Group view uses the light-green `.theme-group`; company logos via `client/src/lib/orgLogo.js` in switcher, sidebar list and login picker (docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md).
 - All uncommitted on branch `acconcy-finance-workspace`; nothing pushed. Temp e2e files (`client/vite.pw.config.js`, `api4100.log`, `vite5190.log`) must not be committed.
+
+## 2026-10-09 - Meetings with active clients / vendors
+
+- Accounts that are **active** (client or vendor) can now have any number of extra tracked meetings: Account detail > **Meetings** > Schedule meeting (title, online/in person, date and time, duration, location or link, notes, attendees). Edit, Done, Cancel, Reopen, Delete. The account stage is never changed (no stage_history row); the onboarding meeting on the account is untouched.
+- They appear on the Calendar feed (kind client_meeting, id cm-<id>, status scheduled/completed/cancelled, honours the status / mine / audience filters).
+- API: GET|POST /accounts/:id/meetings, PATCH|DELETE /accounts/:id/meetings/:meetingId (write = admin + BDA, same as other account edits; 409 when the account is not active, 400 offline without a location).
+- Schema: additive migration 20261009090000_client_meetings (tables client_meetings, client_meeting_attendees, enum ClientMeetingStatus). Test: tests/accounts-client-meetings.test.js (4) + accounts-meeting + interviews-calendar green on acconcy_test. Not committed/pushed.

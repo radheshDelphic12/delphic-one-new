@@ -16,6 +16,7 @@ import AccountFormPage from './AccountFormPage.jsx';
 import AccountStageMoveDrawer from './AccountStageMoveDrawer.jsx';
 import AccountStageOverrideDrawer from './AccountStageOverrideDrawer.jsx';
 import AccountMeetingEditDrawer from './AccountMeetingEditDrawer.jsx';
+import AccountClientMeetings from './AccountClientMeetings.jsx';
 import { accountAccent } from '../../lib/accountAccent.js';
 import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canMutateAccount, formatAccountValue } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
@@ -292,6 +293,8 @@ export default function AccountDetailPage() {
                 : '—'}
             </DetailField>
           </DetailSection>
+
+          {account.stage === 'active' && !account.is_project && <AccountClientMeetings account={account} canMutate={canMutate} />}
 
           {account.type && (
           <DetailSection title={account.type === 'vendor' ? 'Vendor details' : 'Client details'}>

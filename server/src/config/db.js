@@ -69,6 +69,7 @@ prisma.$use(async (params, next) => {
 // common case — see resolveOrgContext in middleware/auth.js) is unaffected.
 const ORG_SCOPED_ON_CREATE = new Set([
   'Account',
+  'ClientMeeting',
   'Requirement',
   'Profile',
   'Submission',

@@ -127,6 +127,7 @@ export function eventPrimaryLabel(event, fallback = 'Interview') {
 /** Type line: the round label for interviews, the meeting mode for meetings. */
 export function eventTypeLabel(event) {
   if (isClientMeeting(event)) {
+    if (event?.round_name) return event.round_type_label;
     return event?.meeting_mode === 'offline' ? 'Client meeting · In person' : 'Client meeting · Online';
   }
   return roundTypeMeta(event?.round_type).label;

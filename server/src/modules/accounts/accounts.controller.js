@@ -1,12 +1,15 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
 const accountsService = require('./accounts.service');
+const clientMeetings = require('./clientMeetings.service');
 const {
   createSchema,
   updateSchema,
   stageSchema,
   stageOverrideSchema,
   meetingSchema,
+  clientMeetingCreateSchema,
+  clientMeetingUpdateSchema,
   classifySchema,
   listQuerySchema,
 } = require('./accounts.validation');
@@ -23,6 +26,8 @@ const ERROR_STATUS = {
   forbidden_type_change: [403, 'Only an admin can change the account type'],
   forbidden_brought_by: [403, 'Only an admin can change "Brought by"'],
   user_not_found: [400, 'Selected owner was not found or is inactive'],
+  not_active: [409, 'Meetings can only be tracked for active clients and vendors'],
+  location_required: [400, 'location is required for offline meetings'],
   is_project: [409, 'This is a project, not a client account — manage it under Finance → Projects'],
 };
 
@@ -89,6 +94,34 @@ const updateMeeting = asyncHandler(async (req, res) => {
   return ok(res, result.account, { stage_history: result.history });
 });
 
+function meetingResult(res, result, key = 'meeting', status = 200) {
+  if (result.error) {
+    const [code, message] = ERROR_STATUS[result.error];
+    return fail(res, code, message);
+  }
+  return status === 201 ? created(res, result[key]) : ok(res, result[key]);
+}
+
+const listClientMeetings = asyncHandler(async (req, res) => {
+  const result = await clientMeetings.list(req.params.id);
+  return meetingResult(res, result, 'meetings');
+});
+
+const createClientMeeting = asyncHandler(async (req, res) => {
+  const body = clientMeetingCreateSchema.parse(req.body);
+  return meetingResult(res, await clientMeetings.create(req.params.id, body, req.user), 'meeting', 201);
+});
+
+const updateClientMeeting = asyncHandler(async (req, res) => {
+  const body = clientMeetingUpdateSchema.parse(req.body);
+  return meetingResult(res, await clientMeetings.update(req.params.id, req.params.meetingId, body, req.user));
+});
+
+const deleteClientMeeting = asyncHandler(async (req, res) => {
+  const result = await clientMeetings.remove(req.params.id, req.params.meetingId, req.user);
+  return meetingResult(res, result, 'id');
+});
+
 const classify = asyncHandler(async (req, res) => {
   const body = classifySchema.parse(req.body);
   const result = await accountsService.classifyLead(req.params.id, body, req.user);
@@ -115,6 +148,10 @@ module.exports = {
   changeStage,
   changeStageOverride,
   updateMeeting,
+  listClientMeetings,
+  createClientMeeting,
+  updateClientMeeting,
+  deleteClientMeeting,
   classify,
   history,
 };

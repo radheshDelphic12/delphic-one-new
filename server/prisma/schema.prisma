@@ -428,6 +428,8 @@ model User {
   origin_accounts                 Account[]                       @relation("AccountOriginOwner")
   classified_accounts             Account[]                       @relation("AccountClassifiedBy")
   meeting_attendances             AccountMeetingAttendee[]
+  client_meeting_attendances      ClientMeetingAttendee[]
+  created_client_meetings         ClientMeeting[]                 @relation("ClientMeetingCreator")
   sales_requirements              Requirement[]                   @relation("RequirementSalesOwner")
   assignments                     RequirementAssignment[]         @relation("AssignmentUser")
   assignments_made                RequirementAssignment[]         @relation("AssignmentAssignedBy")
@@ -2285,6 +2287,7 @@ model Account {
   requirements               Requirement[]
   vendor_profiles            Profile[]                       @relation("ProfileVendorAccount")
   meeting_attendees          AccountMeetingAttendee[]
+  client_meetings            ClientMeeting[]
   employee_calendar_mappings EmployeeCalendar[]              @relation("EmployeeCalendarAccount")
   timesheet_entries          TimesheetEntry[]                @relation("TimesheetAccount")
   billing_rates              BillingRate[]                   @relation("BillingRateAccount")
@@ -2322,6 +2325,51 @@ model AccountMeetingAttendee {
   @@unique([account_id, user_id])
   @@index([account_id])
   @@map("account_meeting_attendees")
+}
+
+enum ClientMeetingStatus {
+  scheduled
+  completed
+  cancelled
+}
+
+// Extra meetings with an ACTIVE client / vendor, tracked after onboarding. Independent of the
+// account stage (the onboarding meeting stays on accounts.meeting_*); shown on the calendar.
+model ClientMeeting {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String?             @db.Uuid
+  account_id       String              @db.Uuid
+  account          Account             @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  title            String
+  mode             MeetingMode         @default(online)
+  scheduled_at     DateTime
+  duration_minutes Int                 @default(60)
+  location         String?
+  link             String?
+  notes            String?
+  status           ClientMeetingStatus @default(scheduled)
+  created_by       String              @db.Uuid
+  creator          User                @relation("ClientMeetingCreator", fields: [created_by], references: [id])
+  created_at       DateTime            @default(now())
+  updated_at       DateTime            @default(now()) @updatedAt
+
+  attendees ClientMeetingAttendee[]
+
+  @@index([account_id, scheduled_at])
+  @@index([scheduled_at])
+  @@map("client_meetings")
+}
+
+model ClientMeetingAttendee {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  meeting_id String        @db.Uuid
+  meeting    ClientMeeting @relation(fields: [meeting_id], references: [id], onDelete: Cascade)
+  user_id    String        @db.Uuid
+  user       User          @relation(fields: [user_id], references: [id])
+
+  @@unique([meeting_id, user_id])
+  @@index([user_id])
+  @@map("client_meeting_attendees")
 }
 
 model Requirement {

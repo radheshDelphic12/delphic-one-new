@@ -82,8 +82,68 @@ function serializeClientMeeting(account) {
   };
 }
 
+/** A tracked follow-up meeting with an active client / vendor, shaped like a calendar event. */
+function serializeFollowUpMeeting(m) {
+  const startsAt = m.scheduled_at;
+  const endsAt = new Date(new Date(startsAt).getTime() + (m.duration_minutes || 60) * 60000);
+  const mode = m.mode === 'offline' ? 'offline' : 'online';
+  return {
+    id: `cm-${m.id}`,
+    kind: 'client_meeting',
+    submission_id: null,
+    account_id: m.account_id,
+    account_name: m.account?.name || null,
+    scheduled_at: startsAt,
+    duration_minutes: m.duration_minutes || 60,
+    ends_at: endsAt,
+    status: m.status,
+    round_type: null,
+    round_type_label: `${m.title} · ${mode === 'offline' ? 'In person' : 'Online'}`,
+    round_name: m.title,
+    audience: 'external',
+    result: null,
+    meeting_mode: mode,
+    meeting_location: m.location || null,
+    meeting_notes: m.notes || null,
+    meeting_link: m.link || null,
+    candidate_name: null,
+    requirement_id: null,
+    requirement_title: null,
+    interviewers: (m.attendees || []).map((a) => ({ id: a.user.id, name: a.user.name, email: a.user.email })),
+    interviewer_name: null,
+    interviewer_email: null,
+    scheduled_by: m.creator ? { id: m.creator.id, name: m.creator.name, email: m.creator.email } : null,
+    cancellation_reason: null,
+    cancelled_at: null,
+    can_submit_feedback: false,
+    can_reschedule: false,
+  };
+}
+
+async function listFollowUpMeetings({ from, to, mine, user, status }) {
+  const where = { scheduled_at: { gte: from, lte: to }, account: { deleted_at: null } };
+  if (status) where.status = status;
+  if (mine) {
+    where.OR = [
+      { created_by: user.id },
+      { attendees: { some: { user_id: user.id } } },
+      { account: { owner_id: user.id } },
+    ];
+  }
+  const rows = await prisma.clientMeeting.findMany({
+    where,
+    include: {
+      account: { select: { name: true } },
+      attendees: { include: { user: { select: { id: true, name: true, email: true } } } },
+      creator: { select: { id: true, name: true, email: true } },
+    },
+  });
+  return rows.map(serializeFollowUpMeeting);
+}
+
 async function listClientMeetings({ from, to, mine, user, status }) {
-  if (status === 'completed') return [];
+  const followUps = await listFollowUpMeetings({ from, to, mine, user, status });
+  if (status === 'completed') return followUps;
   const where = { meeting_date: { gte: from, lte: to }, deleted_at: null };
   if (status === 'scheduled') where.stage = { in: ['meeting_scheduled', 'rescheduled'] };
   if (status === 'cancelled') where.stage = 'dropped';
@@ -95,7 +155,7 @@ async function listClientMeetings({ from, to, mine, user, status }) {
     ];
   }
   const accounts = await prisma.account.findMany({ where, include: CLIENT_MEETING_INCLUDE });
-  return accounts.map(serializeClientMeeting);
+  return accounts.map(serializeClientMeeting).concat(followUps);
 }
 
 function monthRange() {
