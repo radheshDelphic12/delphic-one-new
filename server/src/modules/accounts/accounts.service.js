@@ -116,7 +116,11 @@ function canMutateAccount(account, user) {
 // Every edit of a lead / client / vendor by a person writes one audit_logs row (entity_type 'account'), so the detail page can
 // say "edited by Chahak". Stage moves and meeting edits are already in stage_history; getActivity() merges both.
 const IGNORED_FIELDS = new Set(['updated_at', 'created_at']);
-const plainValue = (v) => (v instanceof Date ? v.toISOString() : v);
+// empty text, empty list and null all mean "not set", so saving a form without touching a field is not a change
+const plainValue = (v) => {
+  const x = v instanceof Date ? v.toISOString() : Array.isArray(v) ? (v.length ? v.join(', ') : null) : v;
+  return x === '' || x === undefined ? null : x;
+};
 function changedFields(before, after, patch) {
   const out = {};
   for (const key of Object.keys(patch)) {

@@ -203,7 +203,11 @@ const FIELD_LABEL = { title: 'title', description: 'description', req_type: 'typ
 async function logActivity(user, requirementId, action, reason, snapshot = {}) {
   await prisma.auditLog.create({ data: { actor_id: user.id, action, entity_type: 'requirement', entity_id: requirementId, reason, snapshot } });
 }
-const plain = (v) => (v instanceof Date ? v.toISOString() : Array.isArray(v) ? v.join(', ') : v);
+// empty text, empty list and null all mean "not set", so saving a form without touching a field is not a change
+const plain = (v) => {
+  const x = v instanceof Date ? v.toISOString() : Array.isArray(v) ? (v.length ? v.join(', ') : null) : v;
+  return x === '' || x === undefined ? null : x;
+};
 function changedFields(before, after, patch) {
   const out = {};
   for (const key of Object.keys(patch)) {
