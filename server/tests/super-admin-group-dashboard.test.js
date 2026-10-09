@@ -37,6 +37,7 @@ afterAll(async () => {
 });
 
 const put = (orgId, body) => authed(request(app).put(`${base}/companies/${orgId}/asset-values`), superToken).send(body);
+const projection = (qs = '') => authed(request(app).get(`${base}/group/projection${qs}`), superToken);
 const overview = async (qs = '') => { const r = await authed(request(app).get(`${base}/group/overview${qs}`), superToken); if (r.status >= 500) console.log(r.status, JSON.stringify(r.body)); return r; };
 
 describe('super admin group dashboard', () => {
@@ -235,5 +236,55 @@ describe('super admin group dashboard', () => {
     const rows = (await authed(request(app).get(`${base}/group/activity`), superToken)).body.data;
     expect(rows.some((r) => r.detail === 'today')).toBe(true);
     expect(rows.some((r) => r.detail === 'ten days ago')).toBe(false);
+  });
+
+  test('projection continues from the chosen end month, month by month, with the same valuation formula', async () => {
+    // four closed Gulati months with a steady rise: revenue 1000, 2000, 3000, 4000 (costs 500 each month)
+    for (const [i, m] of ['2026-05', '2026-06', '2026-07', '2026-08'].entries()) {
+      await prisma.gxPeriodClose.create({ data: { org_id: gulati.id, month: m, status: 'closed', snapshot: { sales_revenue: 1000 * (i + 1), net_profit: 1000 * (i + 1) - 500 }, closed_at: new Date() } });
+    }
+    await put(gulati.id, { month: '2026-08', asset_value: 10000 });
+    const res = await projection('?from=2026-05&to=2026-08&horizon=3&state=locked');
+    expect(res.status).toBe(200);
+    const d = res.body.data;
+    expect(d.projected_months).toEqual(['2026-09', '2026-10', '2026-11']);
+    const g = d.companies.find((c) => c.org.id === gulati.id);
+    expect(g.history.map((m) => m.month)).toEqual(['2026-05', '2026-06', '2026-07', '2026-08']);
+    expect(g.history.map((m) => m.revenue)).toEqual([1000, 2000, 3000, 4000]);
+    expect(g.projected.map((m) => m.revenue)).toEqual([5000, 6000, 7000]);
+    expect(g.projected.map((m) => m.expenses)).toEqual([500, 500, 500]);
+    for (const m of g.projected) expect(m.valuation).toBe(m.profit * 240 + 10000 * 3);
+    expect(g.totals.projected_revenue).toBe(18000);
+    expect(g.confidence).toBe('medium');
+    // group totals add the live companies together, per month
+    expect(d.group.projected.map((m) => m.month)).toEqual(d.projected_months);
+    expect(d.group.totals.projected_revenue).toBe(d.companies.reduce((a2, c) => a2 + (c.totals?.projected_revenue || 0), 0));
+    // a different end month moves the whole projection
+    const earlier = (await projection('?from=2026-05&to=2026-07&horizon=2&state=locked')).body.data;
+    expect(earlier.projected_months).toEqual(['2026-08', '2026-09']);
+    expect(earlier.companies.find((c) => c.org.id === gulati.id).projected.map((m) => m.revenue)).toEqual([4000, 5000]);
+  });
+
+  test('projection filters: company subset, coming soon left out, bad ranges refused, company admin refused', async () => {
+    const only = (await projection(`?org_ids=${gulati.id}&horizon=1`)).body.data;
+    expect(only.companies.map((c) => c.org.id)).toEqual([gulati.id]);
+    await prisma.org.update({ where: { id: zephyr.id }, data: { enabled_modules: ['zephyr', 'coming_soon'] } });
+    const all = (await projection('')).body.data;
+    expect(all.companies.find((c) => c.org.id === zephyr.id)).toMatchObject({ coming_soon: true, history: [], projected: [] });
+    expect((await projection('?from=2026-08&to=2026-05')).status).toBeGreaterThanOrEqual(400);
+    expect((await projection('?horizon=99')).status).toBeGreaterThanOrEqual(400);
+    expect((await authed(request(app).get(`${base}/group/projection`), adminToken)).status).toBe(403);
+  });
+
+  test('every period filter of the group overview returns exactly its own months', async () => {
+    const months = async (qs) => (await overview(qs)).body.data.companies[0].months.map((m) => m.month);
+    expect(await months('?from=2026-04&to=2026-06')).toEqual(['2026-04', '2026-05', '2026-06']);
+    expect(await months('?from=2026-06&to=2026-06')).toEqual(['2026-06']);
+    expect(await months('?from=2025-04&to=2026-03&granularity=quarter')).toHaveLength(12);
+    const q = (await overview('?from=2025-04&to=2026-03&granularity=quarter')).body.data.companies[0].series;
+    expect(q.map((r) => r.label)).toEqual(['FY2025-26 Q1', 'FY2025-26 Q2', 'FY2025-26 Q3', 'FY2025-26 Q4']);
+    const y = (await overview('?from=2024-04&to=2026-03&granularity=year')).body.data.companies[0].series;
+    expect(y.map((r) => r.label)).toEqual(['FY2024-25', 'FY2025-26']);
+    expect((await overview('?from=2026-06&to=2026-04')).status).toBeGreaterThanOrEqual(400);
   });
 });

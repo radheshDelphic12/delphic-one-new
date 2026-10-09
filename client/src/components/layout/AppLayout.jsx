@@ -153,7 +153,7 @@ export default function AppLayout() {
     return () => document.documentElement.classList.remove('theme-zephyr');
   }, [isZephyr, isGroupPath]);
 
-  // Group view gets the light green of the Gulati Foundation logo, not the company's palette underneath.
+  // Group view gets the light green of the Gulati Industries logo, not the company's palette underneath.
   useEffect(() => {
     if (!isGroupPath) return undefined;
     document.documentElement.classList.add('theme-group');

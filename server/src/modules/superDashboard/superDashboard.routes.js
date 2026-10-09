@@ -83,6 +83,11 @@ router.get(
 );
 
 router.get(
+  '/group/projection',
+  asyncHandler(async (req, res) => ok(res, await groupFinance.projection(req.user.org_group_ids, req.query)))
+);
+
+router.get(
   '/group/activity',
   asyncHandler(async (req, res) => ok(res, await groupFinance.activity(req.user.org_group_ids, Number(req.query.limit) || 30, Number(req.query.days) || 7)))
 );

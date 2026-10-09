@@ -16,6 +16,7 @@ import { downloadCsv, printReport } from '../../lib/groupExport.js';
 import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
+import { FIGURES, GROUPINGS, PeriodFilters, Segmented, monthStr, usePeriod } from './groupFilters.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
 const PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#be185d', '#65a30d', '#475569', '#ea580c'];
@@ -30,54 +31,8 @@ const compact = (n) => {
 };
 const pctText = (p) => (p === null || p === undefined ? 'N/A' : `${p > 0 ? '+' : ''}${p}%`);
 
-const monthStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
-
-// Indian financial year (April - March), the convention the rest of the app uses.
-function presetRange(key) {
-  const now = new Date();
-  const cur = new Date(now.getFullYear(), now.getMonth(), 1);
-  const fyStart = new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
-  switch (key) {
-    case 'this_month': return { from: monthStr(cur), to: monthStr(cur) };
-    case 'prev_month': return { from: monthStr(addMonths(cur, -1)), to: monthStr(addMonths(cur, -1)) };
-    case 'quarter': { const q = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1); return { from: monthStr(q), to: monthStr(cur) }; }
-    case 'prev_quarter': { const q = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 - 3, 1); return { from: monthStr(q), to: monthStr(addMonths(q, 2)) }; }
-    case 'fy': return { from: monthStr(fyStart), to: monthStr(cur) };
-    case 'last_12': return { from: monthStr(addMonths(cur, -11)), to: monthStr(cur) };
-    default: return null;
-  }
-}
-const PRESETS = [
-  ['this_month', 'This month'], ['prev_month', 'Last month'], ['quarter', 'This quarter'], ['prev_quarter', 'Last quarter'],
-  ['fy', 'Financial year'], ['last_12', 'Last 12 months'], ['custom', 'Custom'],
-];
-const GROUPINGS = [['month', 'Monthly'], ['quarter', 'Quarterly'], ['year', 'Yearly']];
-const FIGURES = [['all', 'All (live)'], ['locked', 'Locked'], ['unlocked', 'Unlocked']];
 const LIVE_EVERY_MS = 30000;
-const DEFAULTS = { preset: 'last_12', granularity: 'month', state: 'all' };
-
-// A row of pills: one choice at a time, the chosen one filled.
-function Segmented({ label, value, options, onChange }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">{label}</div>
-      <div className="inline-flex flex-wrap gap-1 rounded-xl bg-tertiary-50 p-1" role="group" aria-label={label}>
-        {options.map(([k, text]) => (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={value === k}
-            onClick={() => onChange(k)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${value === k ? 'bg-white text-primary-700 shadow-soft ring-1 ring-primary-200' : 'text-tertiary-600 hover:bg-white/70'}`}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+const DEFAULTS = { granularity: 'month', state: 'all' };
 
 function SectionTitle({ title, hint }) {
   return (
@@ -350,8 +305,7 @@ export default function GroupFinanceTab() {
   const { pushError } = useAlerts();
   const navigate = useNavigate();
   const { pushInfo } = useAlerts();
-  const [preset, setPreset] = useState(DEFAULTS.preset);
-  const [custom, setCustom] = useState(presetRange('last_12'));
+  const period = usePeriod('last_12');
   const [granularity, setGranularity] = useState(DEFAULTS.granularity);
   const [state, setState] = useState(DEFAULTS.state);
   const [selected, setSelected] = useState(null); // null = all companies
@@ -361,8 +315,7 @@ export default function GroupFinanceTab() {
   const [sort, setSort] = useState({ key: 'valuation', dir: 'desc' });
   const [openOrgId, setOpenOrgId] = useState(null);
 
-  const range = preset === 'custom' ? custom : presetRange(preset);
-  const validRange = Boolean(range?.from && range?.to && range.to >= range.from);
+  const { range, valid: validRange } = period;
   const selectedKey = selected ? selected.join(',') : '';
 
   // Every filter change reloads at once (a slower, older answer can never overwrite a newer one), and the page
@@ -390,13 +343,13 @@ export default function GroupFinanceTab() {
   }, [updatedAt]);
 
   function resetFilters() {
-    setPreset(DEFAULTS.preset);
+    period.reset();
     setGranularity(DEFAULTS.granularity);
     setState(DEFAULTS.state);
     setSelected(null);
     setSearch('');
   }
-  const filtersChanged = preset !== DEFAULTS.preset || granularity !== DEFAULTS.granularity || state !== DEFAULTS.state || Boolean(selected);
+  const filtersChanged = !period.isDefault || granularity !== DEFAULTS.granularity || state !== DEFAULTS.state || Boolean(selected);
 
   async function openCompany(org) {
     try {
@@ -478,13 +431,7 @@ export default function GroupFinanceTab() {
           </div>
 
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <Segmented label="Period" value={preset} options={PRESETS} onChange={setPreset} />
-            {preset === 'custom' && (
-              <div className="flex items-end gap-2">
-                <label className="text-xs font-medium text-tertiary-600">From<input type="month" value={custom.from} max={custom.to || undefined} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="mt-1 block rounded-lg border px-2 py-1.5 text-sm" /></label>
-                <label className="text-xs font-medium text-tertiary-600">To<input type="month" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="mt-1 block rounded-lg border px-2 py-1.5 text-sm" /></label>
-              </div>
-            )}
+            <PeriodFilters period={period} />
             <Segmented label="Group by" value={granularity} options={GROUPINGS} onChange={setGranularity} />
             <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
           </div>

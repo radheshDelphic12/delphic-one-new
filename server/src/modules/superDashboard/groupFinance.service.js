@@ -36,6 +36,9 @@ const overviewQuerySchema = z
   .refine((q) => !q.from || !q.to || idx(q.to) >= idx(q.from), { message: 'The end month cannot be before the start month' })
   .refine((q) => !q.from || !q.to || idx(q.to) - idx(q.from) < 60, { message: 'Pick at most 60 months' });
 
+// The one place the group valuation factors live: valuation = profit x 240 + asset value x 3.
+const FORMULA = { profit: 240, asset_value: 3 };
+
 const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
 
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
@@ -93,44 +96,54 @@ async function computeCompanyMonths(org, from, to, state) {
   }));
 }
 
-// The Delphic engine prices every project for every month, which is thousands of queries for a 12-month window.
-// Cheap on a local database, far too slow over a remote one - so the result is cached per company/window/state
-// and served stale-while-revalidate: always an instant answer once warm, refreshed in the background after
-// FRESH_MS. Concurrent callers share one computation. Off in tests so assertions always see fresh data.
+// The Delphic engine prices every project for every month, which is ~300 queries a month: cheap on a local database,
+// far too slow over a remote one. So each company-month is cached on its own (key: company, month, figures view) and
+// served stale-while-revalidate - always instant once warm, refreshed in the background after FRESH_MS. Any window
+// (this quarter, a custom range, the previous period) is assembled from cached months, so changing a filter only
+// computes months that have never been seen. Concurrent callers share one computation. Off in tests so assertions
+// always see fresh data.
 const FRESH_MS = 120_000;
-const MAX_ENTRIES = 300;
+const MAX_ENTRIES = 2000;
 const monthsCache = new Map(); // key -> { value, at, promise }
 
-function companyMonths(org, from, to, state) {
-  if (process.env.NODE_ENV === 'test') return computeCompanyMonths(org, from, to, state);
-  const key = `${org.id}|${from}|${to}|${state || ''}`;
+function cachedMonth(org, month, state) {
+  const key = `${org.id}|${month}|${state || ''}`;
   const entry = monthsCache.get(key);
   const refresh = () => {
-    const promise = computeCompanyMonths(org, from, to, state).then(
-      (value) => {
+    const promise = computeCompanyMonths(org, month, month, state).then(
+      (rows) => {
+        const value = rows[0] || null;
         monthsCache.set(key, { value, at: Date.now(), promise: null });
         if (monthsCache.size > MAX_ENTRIES) monthsCache.delete(monthsCache.keys().next().value);
         return value;
       },
       (err) => {
         const cur = monthsCache.get(key);
-        if (cur?.value) cur.promise = null;
+        if (cur && cur.value !== undefined && cur.at) cur.promise = null;
         else monthsCache.delete(key);
         throw err;
       },
     );
     const cur = monthsCache.get(key);
     if (cur) cur.promise = promise;
-    else monthsCache.set(key, { value: null, at: 0, promise });
+    else monthsCache.set(key, { value: undefined, at: 0, promise });
     return promise;
   };
-  if (entry?.value && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.value);
-  if (entry?.promise) return entry.value ? Promise.resolve(entry.value) : entry.promise;
-  if (entry?.value) {
+  if (entry && entry.at && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.value);
+  if (entry?.promise) return entry.at ? Promise.resolve(entry.value) : entry.promise;
+  if (entry?.at) {
     refresh().catch(() => {});
     return Promise.resolve(entry.value);
   }
   return refresh();
+}
+
+async function companyMonths(org, from, to, state) {
+  if (process.env.NODE_ENV === 'test') return computeCompanyMonths(org, from, to, state);
+  const keys = [];
+  for (let i = idx(from); i <= idx(to); i += 1) keys.push(at(i));
+  const rows = await Promise.all(keys.map((m) => cachedMonth(org, m, state)));
+  return rows.filter(Boolean);
 }
 
 function invalidateCompany(orgId) {
@@ -140,7 +153,91 @@ function invalidateCompany(orgId) {
 /** Computes the default Group Dashboard window once in the background (called after the server starts). */
 async function warmUp() {
   const groups = await prisma.orgGroupMembership.findMany({ distinct: ['org_group_id'], select: { org_group_id: true } });
-  if (groups.length) await overview(groups.map((g) => g.org_group_id), {});
+  if (!groups.length) return;
+  const ids = groups.map((g) => g.org_group_id);
+  await overview(ids, {}); // last 12 months + the 12 before (previous-period change)
+  const now = currentMonth();
+  const fyStart = Number(now.slice(5)) >= 4 ? `${now.slice(0, 4)}-04` : `${Number(now.slice(0, 4)) - 1}-04`;
+  await overview(ids, { from: fyStart, to: now }); // financial year to date
+}
+
+const projectionQuerySchema = z
+  .object({
+    from: monthSchema.optional(),
+    to: monthSchema.optional(),
+    horizon: z.coerce.number().int().min(1).max(12).default(6),
+    state: z.enum(['locked', 'unlocked', 'all']).default('all'),
+    org_ids: z.string().optional(),
+  })
+  .refine((q) => !q.from || !q.to || idx(q.to) >= idx(q.from), { message: 'The end month cannot be before the start month' })
+  .refine((q) => !q.from || !q.to || idx(q.to) - idx(q.from) < 36, { message: 'Pick at most 36 months' });
+
+/**
+ * Projection + valuation for every company, from the SAME monthly books the Group Finance tab uses (companyMonths).
+ * History = start..end month. The projection continues from the month after the end month for `horizon` months:
+ * a straight-line (least squares) fit of the last six months that have figures, separately for revenue and costs, so
+ * profit = revenue - costs. Projected valuation = projected profit x 240 + the latest asset value x 3.
+ */
+async function projection(orgGroupIds, query = {}) {
+  const q = projectionQuerySchema.parse(query);
+  const now = currentMonth();
+  const to = q.to || now;
+  const from = q.from || at(idx(to) - 11);
+  const orgs = await groupOrgs(orgGroupIds, q.org_ids);
+  const futureKeys = Array.from({ length: q.horizon }, (_, k) => at(idx(to) + 1 + k));
+
+  const companies = await Promise.all(orgs.map(async (org) => {
+    const orgOut = { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org), enabled_modules: org.enabled_modules, coming_soon: isSoon(org) };
+    if (isSoon(org)) return { org: orgOut, coming_soon: true, history: [], projected: [], totals: null, confidence: 'low' };
+    const months = await companyMonths(org, from, to, q.state);
+    const history = months.map((m) => ({ month: m.month, revenue: m.revenue, expenses: m.expenses, profit: m.profit, asset_value: m.asset_value, valuation: m.valuation, closed: m.closed }));
+    // Basis: the last six COMPLETE months that carry figures (the month in progress is not a full month).
+    const basis = history.filter((m) => m.month < now && (m.revenue || m.expenses || m.profit)).slice(-6);
+    const revenue = financialsService.linearForecast(basis.map((m) => m.revenue), q.horizon);
+    const cost = financialsService.linearForecast(basis.map((m) => m.expenses), q.horizon);
+    const asset = history.length ? history[history.length - 1].asset_value : 0;
+    const projected = futureKeys.map((month, i) => {
+      const profit = round2(revenue[i] - cost[i]);
+      return { month, revenue: revenue[i], expenses: cost[i], profit, asset_value: asset, valuation: round2(profit * FORMULA.profit + asset * FORMULA.asset_value) };
+    });
+    const sum = (rows, k) => round2(rows.reduce((a, r) => a + r[k], 0));
+    const last = history[history.length - 1] || null;
+    return {
+      org: orgOut,
+      coming_soon: false,
+      history,
+      projected,
+      confidence: basis.length >= 6 ? 'high' : basis.length >= 3 ? 'medium' : 'low',
+      totals: {
+        history_revenue: sum(history, 'revenue'), history_profit: sum(history, 'profit'),
+        projected_revenue: sum(projected, 'revenue'), projected_profit: sum(projected, 'profit'),
+        current_valuation: last ? last.valuation : null,
+        projected_valuation: projected.length ? projected[projected.length - 1].valuation : null,
+      },
+    };
+  }));
+
+  const live = companies.filter((c) => !c.coming_soon);
+  const currencies = [...new Set(live.map((c) => c.org.currency))];
+  const byMonth = (pick) => {
+    const keys = [...new Set(live.flatMap((c) => pick(c).map((r) => r.month)))].sort();
+    return keys.map((month) => {
+      const rows = live.flatMap((c) => pick(c).filter((r) => r.month === month));
+      return { month, revenue: round2(rows.reduce((a, r) => a + r.revenue, 0)), profit: round2(rows.reduce((a, r) => a + r.profit, 0)), valuation: round2(rows.reduce((a, r) => a + r.valuation, 0)) };
+    });
+  };
+  const gh = byMonth((c) => c.history);
+  const gp = byMonth((c) => c.projected);
+  const tot = (k) => round2(live.reduce((a, c) => a + (c.totals[k] || 0), 0));
+  return {
+    from, to, horizon: q.horizon, state: q.state, formula: FORMULA, projected_months: futureKeys,
+    currency: currencies.length === 1 ? currencies[0] : null, mixed_currency: currencies.length > 1,
+    companies,
+    group: {
+      history: gh, projected: gp,
+      totals: { history_revenue: tot('history_revenue'), history_profit: tot('history_profit'), projected_revenue: tot('projected_revenue'), projected_profit: tot('projected_profit'), current_valuation: tot('current_valuation'), projected_valuation: tot('projected_valuation') },
+    },
+  };
 }
 
 function bucketSeries(months, granularity) {
@@ -310,7 +407,7 @@ async function overview(orgGroupIds, query = {}) {
   return {
     filters: { from, to, state: q.state, granularity: q.granularity, org_ids: q.org_ids ? q.org_ids.split(',') : null },
     thresholds,
-    formula: { profit: 240, asset_value: 3 },
+    formula: FORMULA,
     notes: {
       inter_company: 'Group figures add the companies together. Intra-group charges are not eliminated.',
       valuation: 'Group valuation is the plain sum of each company valuation; each company is also shown on its own.',
@@ -430,4 +527,4 @@ async function activity(orgGroupIds, limit = 30, days = 7) {
   return rows.map((r) => ({ id: r.id, at: r.created_at, actor: name.get(r.actor_id) || null, company: r.org, action: r.action, entity: r.entity_type, detail: r.reason, snapshot: r.snapshot }));
 }
 
-module.exports = { warmUp, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };
+module.exports = { warmUp, projection, projectionQuerySchema, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };
