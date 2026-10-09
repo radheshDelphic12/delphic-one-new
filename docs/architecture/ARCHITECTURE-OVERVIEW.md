@@ -50,11 +50,9 @@ flowchart LR
     BDA[BDA — account flow]
     Sales[Sales — requirements]
     Rec[Recruiter — submissions]
-    Admin[Admin]
-    Super[Superadmin]
-    GSA[Group superadmin]
   end
 
+  Admin[Admin / Group superadmin]
   Ext[External CA / Legal]
   RMD[Delphic One platform]
 
@@ -62,8 +60,6 @@ flowchart LR
   Sales --> RMD
   Rec --> RMD
   Admin --> RMD
-  Super --> RMD
-  GSA --> RMD
   Ext -->|read-only| RMD
 
   RMD --> PG[(PostgreSQL)]

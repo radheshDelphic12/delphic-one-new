@@ -47,9 +47,7 @@ Multi-company group platform for the Delphic holding group. It started as the in
 | **BDA** | Own the full account (lead) flow: capture, classify, schedule meetings, convert clients / vendors |
 | **Sales** | Open job requirements and seats; assign recruiters |
 | **Recruiter** | Source candidates, submit to seats, run interviews through join, track margin |
-| **Admin** | Manage users, unlock any locked entity, read org-wide reports |
-| **Superadmin** | Admin plus free-form stage overrides, locked-row edits and soft-delete / restore |
-| **Group superadmin** | Admin of every company in the holding group, via on-demand membership; owns the Group Dashboard |
+| **Admin / Group superadmin** | One role: manage users, unlock any locked entity, read org-wide reports, free-form stage overrides, locked-row edits, soft-delete / restore. As group admin: admin of every company in the holding group (on-demand membership) and owner of the Group Dashboard |
 
 ### In scope
 
@@ -100,10 +98,9 @@ flowchart LR
     BDA[BDA]
     Sales[Sales]
     Rec[Recruiter]
-    Admin[Admin]
   end
 
-  GSA[Group superadmin]
+  Admin[Admin / Group superadmin]
   Ext[External CA / Legal]
 
   RMD[Delphic One platform]
@@ -112,7 +109,6 @@ flowchart LR
   Sales --> RMD
   Rec --> RMD
   Admin --> RMD
-  GSA --> RMD
   Ext -->|read-only access| RMD
 
   RMD --> PG[(PostgreSQL)]
