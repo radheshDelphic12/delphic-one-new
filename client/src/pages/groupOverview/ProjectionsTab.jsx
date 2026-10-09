@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { PiggyBank, RefreshCw, RotateCcw, Settings2, TrendingUp, Wallet } from 'lucide-react';
+import { PiggyBank, RefreshCw, Settings2, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -15,10 +15,10 @@ import KpiCard from '../../components/ui/KpiCard.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
-import { FIGURES, PeriodFilters, Segmented, usePeriod } from './groupFilters.jsx';
+import { GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
 
 const POLL_MS = 60000;
-const HORIZONS = [['3', 'Next 3 months'], ['6', 'Next 6 months'], ['9', 'Next 9 months'], ['12', 'Next 12 months']];
+const HORIZONS = [['1', 'Next month'], ['2', 'Next 2 months'], ['3', 'Next 3 months'], ['6', 'Next 6 months'], ['9', 'Next 9 months'], ['12', 'Next 12 months']];
 const MODULES = [
   ['trading', 'Trading (suppliers, consumers, rate cards)'],
   ['leads', 'Leads'],
@@ -122,37 +122,27 @@ export default function ProjectionsTab() {
     ...Object.fromEntries(MODULES.map(([key]) => [`mod_${key}`, (editing.org.enabled_modules || []).includes(key)])),
     coming_soon: Boolean(editing.org.coming_soon),
   } : undefined;
-  const changed = !period.isDefault || horizon !== '6' || state !== 'all';
+  const pb = periodBinding(period, 'History (actuals)');
+  const filterFields = [...pb.fields, { key: 'horizon', label: 'Project', type: 'select', options: HORIZONS }];
+  const filterValues = { ...pb.values, horizon };
+  const filterDefaults = { ...pb.defaults, horizon: '6' };
+  const changeFilter = (key, value) => (key === 'horizon' ? setHorizon(value) : pb.change(key, value));
+  const resetFilters = () => { period.reset(); setHorizon('6'); setState('all'); };
   const projectedSpan = data && data.projected_months.length ? `${shortMonth(data.projected_months[0])} to ${shortMonth(data.projected_months[data.projected_months.length - 1])}` : '';
 
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
-        <div className={`h-1 bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
-        <div className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-tertiary-700">Filters</h2>
-              {valid && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">History {range.from} to {range.to}</span>}
-              {projectedSpan && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Projecting {projectedSpan}</span>}
-              <LiveIndicator updatedAt={updatedAt} everyMs={POLL_MS} />
-            </div>
-            <div className="flex items-center gap-2">
-              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
-              </button>
-              {changed && (
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={() => { period.reset(); setHorizon('6'); setState('all'); }}>
-                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Reset
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <PeriodFilters period={period} label="History (actuals)" />
-            <Segmented label="Project" value={horizon} options={HORIZONS} onChange={setHorizon} />
-            <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
-          </div>
+      <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <div className={`h-1 overflow-hidden rounded-t-2xl bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
+        <div className="space-y-2 p-4">
+          <GroupFilterBar fields={filterFields} values={filterValues} defaults={filterDefaults} onChange={changeFilter} onReset={resetFilters} below={<FigureSwitch value={state} onChange={setState} />}>
+            {valid && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">History {range.from} to {range.to}</span>}
+            {projectedSpan && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Projecting {projectedSpan}</span>}
+            <LiveIndicator updatedAt={updatedAt} everyMs={POLL_MS} />
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
+            </button>
+          </GroupFilterBar>
           <p className="text-[11px] text-tertiary-500">History is what you see as actuals. The projection covers the current month and the months after it (or starts after an earlier history end), and is a straight-line fit of the last six complete months that have figures - whatever history you pick - so it is indicative, not a forecast. The current month&apos;s actuals are only to date.</p>
         </div>
       </div>

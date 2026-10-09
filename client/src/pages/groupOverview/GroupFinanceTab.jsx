@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart } from 'recharts';
-import { AlertTriangle, Building2, PiggyBank, Plus, RefreshCw, RotateCcw, Scale, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Building2, PiggyBank, Plus, RefreshCw, Scale, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -16,7 +16,7 @@ import { downloadCsv, printReport } from '../../lib/groupExport.js';
 import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
-import { FIGURES, GROUPINGS, PeriodFilters, Segmented, monthStr, usePeriod } from './groupFilters.jsx';
+import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
 const PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#be185d', '#65a30d', '#475569', '#ea580c'];
@@ -349,7 +349,6 @@ export default function GroupFinanceTab() {
     setSelected(null);
     setSearch('');
   }
-  const filtersChanged = !period.isDefault || granularity !== DEFAULTS.granularity || state !== DEFAULTS.state || Boolean(selected);
 
   async function openCompany(org) {
     try {
@@ -407,45 +406,32 @@ export default function GroupFinanceTab() {
     setSelected(next.length === 0 || next.length === live.length ? null : next);
   }
 
+  const pb = periodBinding(period);
+  const filterFields = [
+    ...pb.fields,
+    { key: 'group', label: 'Group by', type: 'select', options: GROUPINGS },
+    { key: 'companies', label: 'Companies', type: 'checks', options: allCompanies.filter((o) => !o.coming_soon).map((o) => [o.id, o.name]) },
+  ];
+  const filterValues = { ...pb.values, group: granularity, companies: selected || [] };
+  const filterDefaults = { ...pb.defaults, group: DEFAULTS.granularity, companies: [] };
+  function changeFilter(key, value) {
+    if (key === 'group') setGranularity(value);
+    else if (key === 'companies') setSelected(value.length ? value : null);
+    else pb.change(key, value);
+  }
+
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
-        <div className={`h-1 bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
-        <div className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-tertiary-700">Filters</h2>
-              {validRange && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
-              <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
-            </div>
-            <div className="flex items-center gap-2">
-              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
-              </button>
-              {filtersChanged && (
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={resetFilters}>
-                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Reset
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <PeriodFilters period={period} />
-            <Segmented label="Group by" value={granularity} options={GROUPINGS} onChange={setGranularity} />
-            <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">Companies</span>
-            {allCompanies.map((o) => {
-              const on = !selected || selected.includes(o.id);
-              if (o.coming_soon) {
-                return <span key={o.id} className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-tertiary-300 px-3 py-1 text-xs text-tertiary-400">{o.name}<span className="rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold uppercase text-amber-700">Coming soon</span></span>;
-              }
-              return <button key={o.id} type="button" aria-pressed={on} onClick={() => toggleCompany(o.id)} className={`rounded-full border px-3 py-1 text-xs font-medium transition ${on ? 'border-primary-600 bg-primary-50 text-primary-700' : 'border-tertiary-200 text-tertiary-400 hover:bg-tertiary-50'}`}>{o.name}</button>;
-            })}
-          </div>
+      <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <div className={`h-1 overflow-hidden rounded-t-2xl bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
+        <div className="space-y-3 p-4">
+          <GroupFilterBar fields={filterFields} values={filterValues} defaults={filterDefaults} onChange={changeFilter} onToggle={(key, id) => toggleCompany(id)} onReset={resetFilters} below={<FigureSwitch value={state} onChange={setState} />}>
+            {validRange && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
+            <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
+            </button>
+          </GroupFilterBar>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-tertiary-100 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">Export</span>
@@ -455,7 +441,7 @@ export default function GroupFinanceTab() {
             </select>
             <button type="button" className="btn-secondary text-sm" disabled={!data} onClick={() => doExport('csv')}>CSV</button>
             <button type="button" className="btn-secondary text-sm" disabled={!data} onClick={() => doExport('pdf')}>PDF</button>
-            <span className="ml-auto text-[11px] text-tertiary-500">Month is the finest period; quarter and year follow the April-March financial year. Group totals add live companies together.</span>
+            <span className="ml-auto text-[11px] text-tertiary-500">Month is the finest period; quarter and year follow the April-March financial year. Group totals add live companies together.{allCompanies.some((o) => o.coming_soon) ? ` Coming soon: ${allCompanies.filter((o) => o.coming_soon).map((o) => o.name).join(', ')}.` : ''}</span>
           </div>
         </div>
       </div>

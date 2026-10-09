@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Building2, PiggyBank, RefreshCw, RotateCcw, TrendingUp, Users2, Wallet } from 'lucide-react';
+import { Building2, PiggyBank, RefreshCw, TrendingUp, Users2, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -14,7 +14,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
-import { FIGURES, GROUPINGS, PeriodFilters, Segmented, usePeriod } from './groupFilters.jsx';
+import { GROUPINGS, GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
 
 const LIVE_EVERY_MS = 30000;
 const money = (n) => (n === null || n === undefined ? 'N/A' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
@@ -101,34 +101,24 @@ export default function GroupDashboardTab() {
     }
   }
 
-  const changed = !period.isDefault || granularity !== 'month' || state !== 'all';
+  const pb = periodBinding(period);
+  const filterFields = [...pb.fields, { key: 'group', label: 'Group by', type: 'select', options: GROUPINGS }];
+  const filterValues = { ...pb.values, group: granularity };
+  const filterDefaults = { ...pb.defaults, group: 'month' };
+  const changeFilter = (key, value) => (key === 'group' ? setGranularity(value) : pb.change(key, value));
+  const resetFilters = () => { period.reset(); setGranularity('month'); setState('all'); };
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
-        <div className={`h-1 bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
-        <div className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-tertiary-700">Filters</h2>
-              {valid && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
-              <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
-            </div>
-            <div className="flex items-center gap-2">
-              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
-              </button>
-              {changed && (
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={() => { period.reset(); setGranularity('month'); setState('all'); }}>
-                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Reset
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <PeriodFilters period={period} />
-            <Segmented label="Group by" value={granularity} options={GROUPINGS} onChange={setGranularity} />
-            <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
-          </div>
+      <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <div className={`h-1 overflow-hidden rounded-t-2xl bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
+        <div className="space-y-2 p-4">
+          <GroupFilterBar fields={filterFields} values={filterValues} defaults={filterDefaults} onChange={changeFilter} onReset={resetFilters} below={<FigureSwitch value={state} onChange={setState} />}>
+            {valid && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
+            <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
+            </button>
+          </GroupFilterBar>
           <p className="text-[11px] text-tertiary-500">Month is the finest period; quarter and year follow the April-March financial year. Pick a month, a quarter, a financial year or any start and end month.</p>
         </div>
       </div>

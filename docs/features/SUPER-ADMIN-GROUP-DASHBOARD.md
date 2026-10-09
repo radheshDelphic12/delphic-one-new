@@ -75,3 +75,5 @@ The Delphic finance engine runs ~3500 queries per 12-month window, so over Neon 
 - Speed on a remote DB: the cache is now per company-month, so any window is assembled from cached months and a filter change only computes months not seen before; warm-up covers the last 24 months and the financial year to date.
 
 Projection basis (2026-10-09): the projection starts the month after the history end but never later than the current month (a history ending this month still projects this month), and its basis is the last six complete months before the start, independent of the history window - so This month / Last month / Pick a month all project properly.
+
+Filter UI (2026-10-09, Zephyr pattern): one Filters button opens a panel with custom dropdowns (Period grouped into Months / Quarters / Years / Custom with a date hint, Group by, Project, Companies as toggles, month inputs when needed), active filters show as removable chips with Clear all, and **Figures** (All live / Locked / Unlocked) are pills under the filters, outside the panel. Shared in groupOverview/groupFilters.jsx (GroupFilterBar, ChoiceMenu, FigureSwitch, periodBinding).
