@@ -11,11 +11,13 @@ router.use(authenticate, requireMasterWorkspace);
 router.get('/', controller.list);
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
+router.get('/:id/activity', controller.activity);
 router.get('/:id/assignments', controller.assignments);
 router.get('/:id/seats', controller.getSeats);
 
 router.post('/', authorize('sales', 'admin'), controller.create);
 router.patch('/:id', authorize('sales', 'admin'), lockCheck('requirements'), controller.update);
+router.delete('/:id', authorize('sales', 'admin'), controller.remove);
 router.post('/:id/status', authorize('sales', 'admin'), controller.changeStatus);
 router.post('/:id/status/override', authorizeSuperadmin, controller.changeStatusOverride);
 router.post('/:id/assign', authorize('sales', 'admin'), controller.assign);

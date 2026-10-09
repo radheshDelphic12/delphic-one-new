@@ -29,9 +29,7 @@ export function canAssignRecruiters(user, requirement) {
   if (!user) return false;
   if (user.role === 'admin') return true;
   if (user.role !== 'sales') return false;
-  if (!requirement) return true;
-  const ownerId = requirement.sales_owner?.id || requirement.sales_owner_id;
-  return Boolean(ownerId && ownerId === user.id);
+  return true; // any sales person manages assignments on any requirement (tagged with who did it)
 }
 
 export { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';

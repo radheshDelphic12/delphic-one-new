@@ -151,7 +151,8 @@ async function getById(id) {
 function canMutateRequirement(requirement, user) {
   if (!requirement) return false;
   if (user.role === 'admin') return true;
-  return user.role === 'sales' && requirement.sales_owner_id === user.id;
+  // The whole Sales team manages every requirement (edit, status, assign, seats, delete); each action is tagged with who did it.
+  return user.role === 'sales';
 }
 
 async function create(data, salesOwnerId, actor = null) {
@@ -195,6 +196,24 @@ async function create(data, salesOwnerId, actor = null) {
 
 const OWNER_ROLES = ['sales', 'bda', 'admin'];
 
+// ---- who did what ----
+// Every change to a requirement by a person writes one audit_logs row (entity_type 'requirement'), so the detail page can
+// say "edited by Tanvi, 3 Oct". Status moves are already in stage_history; both are merged by getActivity().
+const FIELD_LABEL = { title: 'title', description: 'description', req_type: 'type', priority: 'priority', work_mode: 'work mode', location: 'location', tech_stack: 'tech stack', sales_owner_id: 'sales owner' };
+async function logActivity(user, requirementId, action, reason, snapshot = {}) {
+  await prisma.auditLog.create({ data: { actor_id: user.id, action, entity_type: 'requirement', entity_id: requirementId, reason, snapshot } });
+}
+const plain = (v) => (v instanceof Date ? v.toISOString() : Array.isArray(v) ? v.join(', ') : v);
+function changedFields(before, after, patch) {
+  const out = {};
+  for (const key of Object.keys(patch)) {
+    const a = JSON.stringify(plain(before[key]) ?? null);
+    const b = JSON.stringify(plain(after[key]) ?? null);
+    if (a !== b) out[FIELD_LABEL[key] || key] = { from: plain(before[key]) ?? null, to: plain(after[key]) ?? null };
+  }
+  return out;
+}
+
 async function update(id, patch, user) {
   const existing = await prisma.requirement.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
@@ -208,6 +227,8 @@ async function update(id, patch, user) {
   }
 
   const row = await prisma.requirement.update({ where: { id }, data: patch, include: DECORATE_INCLUDE });
+  const changes = changedFields(existing, row, patch);
+  if (Object.keys(changes).length) await logActivity(user, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
   return { requirement: serialize(row) };
 }
 
@@ -492,19 +513,63 @@ async function changeSeatStatus(seatId, { to_status, reason, joined_at }, userId
   });
 }
 
+/** Soft delete by the Sales team / admin: hidden from every list, kept in the database with who deleted it and why. */
+async function remove(id, reason, user) {
+  const existing = await prisma.requirement.findUnique({ where: { id } });
+  if (!existing) return { error: 'not_found' };
+  if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  await prisma.$transaction(async (tx) => {
+    await tx.requirement.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason } });
+    await tx.auditLog.create({ data: { actor_id: user.id, action: 'soft_delete', entity_type: 'requirement', entity_id: id, reason, snapshot: JSON.parse(JSON.stringify(existing)) } });
+  });
+  return { ok: true };
+}
+
+/** Everything that happened to a requirement, newest first, each tagged with the person who did it. */
+async function getActivity(id) {
+  const [logs, stages] = await Promise.all([
+    prisma.auditLog.findMany({ where: { entity_type: 'requirement', entity_id: id, action: { not: 'soft_delete' } }, orderBy: { created_at: 'desc' }, take: 200 }),
+    prisma.stageHistory.findMany({ where: { entity_type: 'requirement', entity_id: id }, orderBy: { changed_at: 'desc' }, take: 200 }),
+  ]);
+  const ids = [...new Set([...logs.map((l) => l.actor_id), ...stages.map((s) => s.changed_by)].filter(Boolean))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, role: true } }) : [];
+  const by = new Map(users.map((u) => [u.id, u]));
+  const who = (uid) => (by.get(uid) ? { id: uid, name: by.get(uid).name, role: by.get(uid).role } : null);
+  const rows = [
+    ...logs.map((l) => ({ id: l.id, kind: l.action, summary: l.reason, details: l.snapshot, by: who(l.actor_id), at: l.created_at })),
+    ...stages.map((s) => ({ id: s.id, kind: 'status', summary: `Status ${s.from_stage || '-'} → ${s.to_stage}`, details: { reason: s.reason }, by: who(s.changed_by), at: s.changed_at })),
+  ];
+  return rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
+// Assign / unassign / add seat: same behaviour as before, plus the activity tag.
+const wrap = (fn, describe) => async (...args) => {
+  const result = await fn(...args);
+  if (!result.error) {
+    const [requirementId, , user] = describe.pick(args);
+    await logActivity(user, requirementId, describe.action, describe.text(args, result), describe.snapshot ? describe.snapshot(args, result) : {});
+  }
+  return result;
+};
+const assignLogged = wrap(assign, { action: 'assign', pick: (a) => [a[0], null, a[2]], text: (a) => `Assigned a ${a[1].role_on_req.replace('_', ' ')}`, snapshot: (a) => ({ user_id: a[1].user_id, role_on_req: a[1].role_on_req }) });
+const unassignLogged = wrap(unassign, { action: 'unassign', pick: (a) => [a[0], null, a[2]], text: () => 'Removed an assignment', snapshot: (a) => ({ assignment_id: a[1] }) });
+const addSeatLogged = wrap(addSeat, { action: 'add_seat', pick: (a) => [a[0], null, a[2]], text: (a) => `Added a seat${a[1].seat_label ? ` (${a[1].seat_label})` : ''}`, snapshot: (a) => ({ seat_label: a[1].seat_label || null }) });
+
 module.exports = {
+  remove,
+  getActivity,
   list,
   getById,
   create,
   update,
   changeStatus,
   changeStatusOverride,
-  assign,
-  unassign,
+  assign: assignLogged,
+  unassign: unassignLogged,
   getAssignments,
   getHistory,
   getSeats,
-  addSeat,
+  addSeat: addSeatLogged,
   changeSeatStatus,
   canMutateRequirement,
 };

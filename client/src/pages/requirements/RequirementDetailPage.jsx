@@ -58,6 +58,7 @@ export default function RequirementDetailPage() {
   const [addSeatOpen, setAddSeatOpen] = useState(false);
   const [seatLabel, setSeatLabel] = useState('');
   const [assignRole, setAssignRole] = useState(null);
+  const [activity, setActivity] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,7 @@ export default function RequirementDetailPage() {
       setSeats(seatsRes.data.data || []);
       setAssignments(assignRes.data.data || []);
       setHistory(histRes.data.data || []);
+      apiClient.get(`/requirements/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
       setTaggedProfiles(subsRes.data.data || []);
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to load requirement'), 'Something went wrong');
@@ -334,6 +336,24 @@ export default function RequirementDetailPage() {
           {user?.role === 'admin' && locked && (
             <UnlockButton entityType="requirement" entityId={requirement.id} onUnlocked={load} />
           )}
+          {!userCan(user, 'deleteRecords') && canEdit && (
+            <button
+              type="button"
+              className="btn-secondary text-danger-600"
+              onClick={async () => {
+                const reason = window.prompt('Why is this requirement being deleted? (kept in the activity log)');
+                if (!reason || reason.trim().length < 3) return;
+                try {
+                  await apiClient.delete(`/requirements/${requirement.id}`, { data: { reason: reason.trim() } });
+                  navigate('/requirements');
+                } catch (err) {
+                  pushError(apiErrorMessage(err, 'Failed to delete the requirement'), 'Something went wrong');
+                }
+              }}
+            >
+              Delete
+            </button>
+          )}
           {userCan(user, 'deleteRecords') && (
             <DeleteRecordButton
               entityType="requirement"
@@ -591,6 +611,26 @@ export default function RequirementDetailPage() {
               <span className="text-tertiary-400"> · {formatDate(h.changed_at)}</span>
               <span className="text-tertiary-500"> · {h.changed_by?.name || 'Unknown'}</span>
               {h.reason && <span className="text-tertiary-500"> - {h.reason}</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Who did what */}
+      <section className="rounded-lg border bg-white p-4" aria-label="Activity">
+        <h2 className="text-sm font-semibold text-tertiary-800">Activity - who did what</h2>
+        <ul className="mt-2 space-y-2 text-sm text-tertiary-700">
+          {activity.length === 0 && <li className="text-tertiary-400">No changes recorded yet</li>}
+          {activity.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-x-2">
+              <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800" title={a.by?.role}>{a.by?.name || 'Unknown'}</span>
+              <span>{a.summary}</span>
+              <span className="text-tertiary-400">· {formatDate(a.at)}</span>
+              {a.kind === 'update' && a.details?.changes && (
+                <span className="w-full pl-1 text-xs text-tertiary-500">
+                  {Object.entries(a.details.changes).map(([field, c]) => `${field}: ${c.from ?? '-'} → ${c.to ?? '-'}`).join(' · ')}
+                </span>
+              )}
             </li>
           ))}
         </ul>

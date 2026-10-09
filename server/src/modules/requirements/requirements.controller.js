@@ -112,6 +112,22 @@ const assignments = asyncHandler(async (req, res) => {
   return ok(res, rows);
 });
 
+const activity = asyncHandler(async (req, res) => {
+  const requirement = await service.getById(req.params.id);
+  if (!requirement) return fail(res, 404, 'Not found');
+  const denied = assertCanViewRequirement(req.user, requirement);
+  if (denied) return fail(res, 403, denied);
+  return ok(res, await service.getActivity(req.params.id));
+});
+
+const remove = asyncHandler(async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) return fail(res, 400, 'Give the reason for deleting this requirement');
+  const result = await service.remove(req.params.id, reason, req.user);
+  if (result.error) return mapError(res, result.error);
+  return ok(res, { id: req.params.id });
+});
+
 const history = asyncHandler(async (req, res) => {
   const requirement = await service.getById(req.params.id);
   if (!requirement) return fail(res, 404, 'Not found');
@@ -145,6 +161,8 @@ const changeSeatStatus = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  activity,
+  remove,
   list,
   getOne,
   create,
