@@ -63,7 +63,7 @@ async function groupOrgs(orgGroupIds, orgIds) {
 }
 
 // One company's months in a common shape, whichever finance service owns its books.
-async function companyMonths(org, from, to, state) {
+async function computeCompanyMonths(org, from, to, state) {
   const kind = kindOf(org);
   if (kind === 'gulati' || kind === 'zephyr') {
     const svc = kind === 'gulati' ? gulatiFinance : zephyrMoney;
@@ -91,6 +91,56 @@ async function companyMonths(org, from, to, state) {
     asset_value: m.asset_value, asset_value_carried: m.asset_value_carried, profit_x: m.delphic_profit_x, asset_value_x: m.asset_value_x,
     valuation: m.valuation, closed: null,
   }));
+}
+
+// The Delphic engine prices every project for every month, which is thousands of queries for a 12-month window.
+// Cheap on a local database, far too slow over a remote one - so the result is cached per company/window/state
+// and served stale-while-revalidate: always an instant answer once warm, refreshed in the background after
+// FRESH_MS. Concurrent callers share one computation. Off in tests so assertions always see fresh data.
+const FRESH_MS = 120_000;
+const MAX_ENTRIES = 300;
+const monthsCache = new Map(); // key -> { value, at, promise }
+
+function companyMonths(org, from, to, state) {
+  if (process.env.NODE_ENV === 'test') return computeCompanyMonths(org, from, to, state);
+  const key = `${org.id}|${from}|${to}|${state || ''}`;
+  const entry = monthsCache.get(key);
+  const refresh = () => {
+    const promise = computeCompanyMonths(org, from, to, state).then(
+      (value) => {
+        monthsCache.set(key, { value, at: Date.now(), promise: null });
+        if (monthsCache.size > MAX_ENTRIES) monthsCache.delete(monthsCache.keys().next().value);
+        return value;
+      },
+      (err) => {
+        const cur = monthsCache.get(key);
+        if (cur?.value) cur.promise = null;
+        else monthsCache.delete(key);
+        throw err;
+      },
+    );
+    const cur = monthsCache.get(key);
+    if (cur) cur.promise = promise;
+    else monthsCache.set(key, { value: null, at: 0, promise });
+    return promise;
+  };
+  if (entry?.value && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.value);
+  if (entry?.promise) return entry.value ? Promise.resolve(entry.value) : entry.promise;
+  if (entry?.value) {
+    refresh().catch(() => {});
+    return Promise.resolve(entry.value);
+  }
+  return refresh();
+}
+
+function invalidateCompany(orgId) {
+  for (const key of [...monthsCache.keys()]) if (key.startsWith(`${orgId}|`)) monthsCache.delete(key);
+}
+
+/** Computes the default Group Dashboard window once in the background (called after the server starts). */
+async function warmUp() {
+  const groups = await prisma.orgGroupMembership.findMany({ distinct: ['org_group_id'], select: { org_group_id: true } });
+  if (groups.length) await overview(groups.map((g) => g.org_group_id), {});
 }
 
 function bucketSeries(months, granularity) {
@@ -158,8 +208,15 @@ async function overview(orgGroupIds, query = {}) {
     headBy.set(h.org_id, e);
   }
 
+  // Every live company's two windows are fetched at the same time (each is cached, see companyMonths).
+  const span = idx(to) - idx(from) + 1;
+  const monthData = await Promise.all(orgs.map((org) => (isSoon(org) ? null : Promise.all([
+    companyMonths(org, from, to, q.state),
+    companyMonths(org, at(idx(from) - span), at(idx(from) - 1), q.state),
+  ]))));
+
   const companies = [];
-  for (const org of orgs) {
+  for (const [i, org] of orgs.entries()) {
     if (isSoon(org)) {
       // Not built yet: listed so it is visible, but it has no figures and is left out of every total.
       companies.push({
@@ -169,12 +226,8 @@ async function overview(orgGroupIds, query = {}) {
       });
       continue;
     }
-    // The period just before the selected one (same length), for the change shown on the group cards.
-    const span = idx(to) - idx(from) + 1;
-    const [months, prevMonths] = await Promise.all([
-      companyMonths(org, from, to, q.state),
-      companyMonths(org, at(idx(from) - span), at(idx(from) - 1), q.state),
-    ]);
+    // monthData holds the selected period and the one just before it (same length), for the change on the group cards.
+    const [months, prevMonths] = monthData[i];
     const series = bucketSeries(months, q.granularity);
     const last = series[series.length - 1] || null;
     const prior = series.length > 1 ? series[series.length - 2] : null;
@@ -341,6 +394,7 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
   if (!org) return { error: 'not_found' };
   if (input.month > currentMonth()) return { error: 'future_month' };
   const kind = kindOf(org);
+  invalidateCompany(org.id);
   if (kind === 'acconcy') return { error: 'managed_in_company' };
   const before = (await listAssetValues(org)).find((r) => r.month === input.month) || null;
   let result;
@@ -358,6 +412,7 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
       reason: `Asset value ${input.month}`, snapshot: { company: org.name, month: input.month, previous: before ? before.asset_value : null, new: input.asset_value },
     },
   });
+  invalidateCompany(org.id);
   return { asset: result.asset, previous: before ? before.asset_value : null };
 }
 
@@ -375,4 +430,4 @@ async function activity(orgGroupIds, limit = 30, days = 7) {
   return rows.map((r) => ({ id: r.id, at: r.created_at, actor: name.get(r.actor_id) || null, company: r.org, action: r.action, entity: r.entity_type, detail: r.reason, snapshot: r.snapshot }));
 }
 
-module.exports = { drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };
+module.exports = { warmUp, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };

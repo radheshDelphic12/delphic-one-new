@@ -2807,3 +2807,8 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 - They appear on the Calendar feed (kind client_meeting, id cm-<id>, status scheduled/completed/cancelled, honours the status / mine / audience filters).
 - API: GET|POST /accounts/:id/meetings, PATCH|DELETE /accounts/:id/meetings/:meetingId (write = admin + BDA, same as other account edits; 409 when the account is not active, 400 offline without a location).
 - Schema: additive migration 20261009090000_client_meetings (tables client_meetings, client_meeting_attendees, enum ClientMeetingStatus). Test: tests/accounts-client-meetings.test.js (4) + accounts-meeting + interviews-calendar green on acconcy_test. Not committed/pushed.
+
+## 2026-10-09 - Group Dashboard speed on a remote DB; Acconcy on staging
+
+- Group Dashboard (/super-dashboard/group/overview) timed out (504) on Render: the Delphic engine runs ~3500 queries per 12-month window (x2 windows) = ~270 s at ~100 ms/query to Neon. Now: companies computed in parallel (126 s cold with a pool of 9), per company/window cache served stale-while-revalidate (FRESH_MS 120 s, shared in-flight, 0.5 s warm), invalidated on asset-value edits, off in tests, and warmed 15 s after server start (index.js). Production (local DB) was never slow.
+- Staging Neon: Acconcy org created with seed-admin.js (admin = paras.gulati@delphic.in) and moved into the Delphic group, so the Group Dashboard lists 4 companies. Staging super admin: paras.gulati@delphic.in.
