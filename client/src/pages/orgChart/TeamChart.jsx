@@ -140,9 +140,11 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
 
   const root = { id: 'root', kind: 'root', label: companyName, width: ROOT_W, height: ROOT_H, children: [] };
   const parent = new Map();
+  // A person's home can be a floating box (drawn unconnected, never given children): hang off the company instead.
+  const placed = new Set(units);
   for (const u of units) {
     const target = home.get(u.managerId);
-    parent.set(u.id, target && target !== u ? target : root);
+    parent.set(u.id, target && target !== u && placed.has(target) ? target : root);
   }
   // Break reporting cycles (A → B → A): the first unit that revisits hangs off the company.
   for (const u of units) {
