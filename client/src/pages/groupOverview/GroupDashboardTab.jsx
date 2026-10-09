@@ -73,7 +73,7 @@ export default function GroupDashboardTab() {
   const { switchOrg } = useAuth();
   const { pushError } = useAlerts();
   const navigate = useNavigate();
-  const period = usePeriod('last_12');
+  const period = usePeriod('this_month');
   const [granularity, setGranularity] = useState('month');
   const [state, setState] = useState('all');
   const { range, valid } = period;

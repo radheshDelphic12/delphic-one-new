@@ -305,7 +305,7 @@ export default function GroupFinanceTab() {
   const { pushError } = useAlerts();
   const navigate = useNavigate();
   const { pushInfo } = useAlerts();
-  const period = usePeriod('last_12');
+  const period = usePeriod('this_month');
   const [granularity, setGranularity] = useState(DEFAULTS.granularity);
   const [state, setState] = useState(DEFAULTS.state);
   const [selected, setSelected] = useState(null); // null = all companies

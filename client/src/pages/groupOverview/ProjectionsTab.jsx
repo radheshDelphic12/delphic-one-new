@@ -64,7 +64,7 @@ export default function ProjectionsTab() {
   const { pushError, pushSuccess } = useAlerts();
   const [editing, setEditing] = useState(null);
   const [openOrgId, setOpenOrgId] = useState(null);
-  const period = usePeriod('last_12');
+  const period = usePeriod('this_month');
   const [horizon, setHorizon] = useState('6');
   const [state, setState] = useState('all');
   const { range, valid } = period;
