@@ -1,6 +1,6 @@
 const OPTIONS = [
-  { key: 'mine', label: 'My requirements' },
   { key: 'all', label: 'All requirements' },
+  { key: 'mine', label: 'My requirements' },
 ];
 
 /** Pill toggle for sales users: their own requirements, or everyone's (others' stay read-only). */

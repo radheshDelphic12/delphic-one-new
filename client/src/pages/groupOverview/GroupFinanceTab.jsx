@@ -197,6 +197,8 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
   if (!company) return <Drawer open={false} onClose={onClose} title="" />;
   const v = company.valuation;
   const isFx = company.org.kind === 'foundation';
+  const isZx = company.org.kind === 'zephyr';
+  const lastM = [...(company.months || [])].reverse().find((m) => m.property_count !== undefined);
   return (
     <Drawer open title={company.org.name} onClose={onClose} size="lg" footer={<button type="button" className="btn-primary" onClick={() => onOpen(company.org)}>Open {company.org.name} (admin view)</button>}>
       <div className="space-y-5">
@@ -223,8 +225,11 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
           <h4 className="mb-2 font-heading text-sm font-semibold">Where the numbers come from</h4>
           <DrillDown orgId={company.org.id} range={range} state={state} />
         </section>
+        {isZx && lastM && (
+          <p className="rounded-xl bg-primary-50 px-3 py-2 text-sm text-primary-900">Asset value includes the company&apos;s <b>active properties</b>, added automatically: <b>{money(lastM.property_value)}</b> for {lastM.property_count} propert{lastM.property_count === 1 ? 'y' : 'ies'} (as at {lastM.month}), plus other assets recorded below: <b>{money(lastM.recorded_asset_value)}</b>. The property list is under &quot;Where the numbers come from&quot;.</p>
+        )}
         <section>
-          <h4 className="mb-2 font-heading text-sm font-semibold">{isFx ? 'Fund balance' : 'Monthly asset values'}</h4>
+          <h4 className="mb-2 font-heading text-sm font-semibold">{isFx ? 'Fund balance' : isZx ? 'Other assets (monthly)' : 'Monthly asset values'}</h4>
           {isFx ? <p className="text-sm text-tertiary-600">The fund balance is funds received minus paid spending, so it is not typed in. Record funding and spending in the foundation (open it with the button below); campaigns, budgets and their projections are managed there too.</p> : <AssetValueForm company={company} onSaved={onChanged} />}
         </section>
       </div>

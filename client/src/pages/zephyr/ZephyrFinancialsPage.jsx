@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Lock, LockOpen, TrendingUp } from 'lucide-react';
 import useLiveData from '../../lib/useLiveData.js';
@@ -90,13 +90,13 @@ function AssetValueForm({ rows, onSaved }) {
       <label className="text-xs font-medium text-tertiary-600">Month
         <input type="month" required max={monthValue(new Date())} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="mt-1 block rounded-xl border px-3 py-1.5 text-sm" />
       </label>
-      <label className="text-xs font-medium text-tertiary-600">Asset value (₹)
-        <input required type="number" min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} placeholder={current ? String(current.asset_value) : '0'} className="mt-1 block w-44 rounded-xl border px-3 py-1.5 text-sm" />
+      <label className="text-xs font-medium text-tertiary-600">Other assets (₹)
+        <input required type="number" min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} placeholder={current ? String(current.recorded_asset_value ?? 0) : '0'} className="mt-1 block w-44 rounded-xl border px-3 py-1.5 text-sm" />
       </label>
       <button type="submit" className="btn-primary" disabled={saving || value === ''}>{saving ? 'Saving…' : 'Save asset value'}</button>
       {current?.asset_value_id && <button type="button" className="btn-secondary" onClick={remove}>Remove this month&apos;s value</button>}
       <p className="pb-1.5 text-xs text-tertiary-500">
-        Valuation = (Zephyr profit × 240) + (Asset value × 3). A month without a recorded asset value uses the latest earlier one{current ? ` — ${shortMonth(month)} currently ${rupees(current.asset_value)}${current.asset_value_carried ? ' (carried forward)' : ''}` : ''}.
+        Valuation = (Zephyr profit × 240) + (Asset value × 3). Asset value = your <b>active properties</b>, added automatically{current ? ` (${shortMonth(month)}: ${rupees(current.property_value)} for ${current.property_count} propert${current.property_count === 1 ? 'y' : 'ies'})` : ''}, <b>plus the other assets recorded here</b> (a month without one uses the latest earlier figure){current ? ` - ${rupees(current.recorded_asset_value)}${current.asset_value_carried ? ' carried forward' : ''}` : ''}. A property counts at its latest valuation, or at cost until one is recorded, from its purchase date until it is sold.
       </p>
     </form>
   );
@@ -192,7 +192,7 @@ function FinancialTrends() {
                   <td className="px-4 py-2">{r.label}{r.closed && <span className="ml-1.5 text-[10px] text-tertiary-400">closed</span>}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{rupees(r.profit)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{rupees(r.profit_x)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{rupees(r.asset_value)}{r.asset_value_carried ? <span className="ml-1 text-[10px] text-tertiary-400">carried</span> : null}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{rupees(r.asset_value)}<span className="block text-[10px] text-tertiary-400">properties {rupees(r.property_value)} ({r.property_count}) + other {rupees(r.recorded_asset_value)}{r.asset_value_carried ? ' (carried)' : ''}</span></td>
                   <td className="px-3 py-2 text-right tabular-nums text-tertiary-600">{rupees(r.asset_value_x)}</td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary-700">{rupees(r.valuation)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -210,6 +210,21 @@ function FinancialTrends() {
         </section>
       )}
       {rows.length > 0 && <AssetValueForm rows={rows} onSaved={refresh} />}
+      {data?.properties?.length > 0 && (
+        <section className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white" aria-label="Properties counted in the asset value">
+          <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">Properties counted in the asset value (as at {shortMonth(data.to)})</h3>
+          <table className="mt-2 w-full text-sm">
+            <thead className="text-left text-xs text-tertiary-500"><tr><th className="px-4 py-2 font-medium">Property</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 text-right font-medium">Value</th><th className="px-3 py-2 font-medium">Basis</th></tr></thead>
+            <tbody>
+              {data.properties.map((r) => (
+                <tr key={r.id} className="border-t border-tertiary-100"><td className="px-4 py-2"><Link to={`/zephyr/properties/${r.id}`} className="font-medium text-primary-700 hover:underline">{r.code} {r.name}</Link></td><td className="px-3 py-2 capitalize">{r.status.replace(/_/g, ' ')}</td><td className="px-3 py-2 text-right tabular-nums">{rupees(r.value)}</td><td className="px-3 py-2 text-xs text-tertiary-500">{r.basis === 'valuation' ? `Valuation${r.as_of ? ` (${r.as_of})` : ''}` : 'Cost (no valuation recorded yet)'}</td></tr>
+              ))}
+              <tr className="border-t-2 font-semibold"><td className="px-4 py-2">Total properties</td><td /><td className="px-3 py-2 text-right tabular-nums">{rupees(data.properties.reduce((a2, r) => a2 + r.value, 0))}</td><td /></tr>
+            </tbody>
+          </table>
+          <p className="px-4 pb-3 pt-2 text-xs text-tertiary-500">Active, under-construction, under-renovation and held properties count automatically, from their purchase date until they are sold; sold and inactive ones do not. Record a valuation on the property to move it from cost to market value.</p>
+        </section>
+      )}
     </div>
   );
 }

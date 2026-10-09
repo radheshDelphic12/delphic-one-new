@@ -23,13 +23,13 @@ afterAll(async () => {
 const ids = (res) => res.body.data.map((r) => r.id).sort();
 
 describe('sales requirement scope', () => {
-  test('default and scope=mine list only the sales person own requirements', async () => {
-    expect(ids(await authed(request(app).get('/api/v1/requirements'), aToken))).toEqual([reqA.id]);
+  test('scope=mine lists only the sales person own requirements', async () => {
     expect(ids(await authed(request(app).get('/api/v1/requirements?scope=mine'), aToken))).toEqual([reqA.id]);
   });
 
-  test('scope=all lists everyone, and the other sales person requirement can be opened but not edited', async () => {
-    expect(ids(await authed(request(app).get('/api/v1/requirements?scope=all'), aToken))).toEqual([reqA.id, reqB.id].sort());
+  test('by default every sales person sees all requirements; another one can be opened but not edited', async () => {
+    expect(ids(await authed(request(app).get('/api/v1/requirements'), aToken))).toEqual([reqA.id, reqB.id].sort());
+    expect(ids(await authed(request(app).get('/api/v1/requirements?scope=all'), bToken))).toEqual([reqA.id, reqB.id].sort());
     expect((await authed(request(app).get(`/api/v1/requirements/${reqB.id}`), aToken)).status).toBe(200);
     const edit = await authed(request(app).patch(`/api/v1/requirements/${reqB.id}`), aToken).send({ title: 'Hijacked' });
     expect(edit.status).toBe(403);

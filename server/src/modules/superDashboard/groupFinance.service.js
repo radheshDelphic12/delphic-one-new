@@ -78,6 +78,7 @@ async function computeCompanyMonths(org, from, to, state) {
       month: m.month, revenue: m.revenue, profit: m.profit, expenses: round2(m.revenue - m.profit),
       asset_value: m.asset_value, asset_value_carried: m.asset_value_carried, profit_x: m.profit_x, asset_value_x: m.asset_value_x,
       valuation: m.valuation, closed: Boolean(m.closed),
+      ...(kind === 'zephyr' ? { property_value: m.property_value, property_count: m.property_count, recorded_asset_value: m.recorded_asset_value } : {}),
     }));
   }
   if (kind === 'foundation') {
@@ -494,6 +495,8 @@ async function drilldown(org, query) {
   if (kind === 'zephyr') {
     const rows = await zephyrMoney.byProject(org.id, `${q.from}-01`, monthEndDay(q.to));
     sec('projects', 'Projects', ['Project', 'Revenue', 'Expense', 'Salaries', 'Profit'], rows.map((r) => [r.code ? `${r.code} ${r.name}` : r.name, r.revenue, r.expense, r.salaries, r.profit]));
+    const props = await zephyrMoney.propertyBreakdown(org.id, q.to);
+    sec('properties', `Properties counted in the asset value (as at ${q.to})`, ['Property', 'Status', 'Value', 'Basis'], props.map((r) => [`${r.code} ${r.name}`, r.status.replace(/_/g, ' '), r.value, r.basis === 'valuation' ? `Valuation${r.as_of ? ` (${r.as_of})` : ''}` : 'Cost (no valuation yet)']));
   } else if (kind === 'gulati') {
     const p = await gulatiFinance.pnl(org.id, { from: `${q.from}-01`, to: monthEndDay(q.to) });
     sec('deals', 'Deals', ['Deal', 'Type', 'Sales', 'Net profit'], p.by_deal.map((d) => [d.code ? `${d.code} ${d.name || ''}`.trim() : 'Company-level', d.trading_type || '', d.sales_revenue, d.net_profit]));

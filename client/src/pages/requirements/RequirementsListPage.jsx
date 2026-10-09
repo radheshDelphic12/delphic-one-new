@@ -135,7 +135,7 @@ export default function RequirementsListPage() {
   const [accountId, setAccountId] = useState(() => searchParams.get('account_id') || '');
   const [salesOwnerId, setSalesOwnerId] = useState(() => searchParams.get('sales_owner_id') || '');
   const isSales = user?.role === 'sales';
-  const [scope, setScope] = useState(() => (searchParams.get('scope') === 'all' ? 'all' : 'mine'));
+  const [scope, setScope] = useState(() => (searchParams.get('scope') === 'mine' ? 'mine' : 'all'));
   const [recruiterId, setRecruiterId] = useState(() => searchParams.get('recruiter_id') || '');
   const [workMode, setWorkMode] = useState(() => searchParams.get('work_mode') || '');
   const [techStack, setTechStack] = useState(() => searchParams.get('tech_stack') || '');
@@ -172,7 +172,7 @@ export default function RequirementsListPage() {
     sync('req_type', reqType);
     sync('account_id', accountId);
     sync('sales_owner_id', salesOwnerId);
-    sync('scope', isSales ? scope : '', 'mine');
+    sync('scope', isSales ? scope : '', 'all');
     sync('recruiter_id', recruiterId);
     sync('work_mode', workMode);
     sync('tech_stack', appliedTechStack);
@@ -195,7 +195,7 @@ export default function RequirementsListPage() {
     set(setReqType, g('req_type'));
     set(setAccountId, g('account_id'));
     set(setSalesOwnerId, g('sales_owner_id'));
-    set(setScope, g('scope') === 'all' ? 'all' : 'mine');
+    set(setScope, g('scope') === 'mine' ? 'mine' : 'all');
     set(setRecruiterId, g('recruiter_id'));
     set(setWorkMode, g('work_mode'));
     set(setAppliedTechStack, g('tech_stack'));
@@ -243,7 +243,7 @@ export default function RequirementsListPage() {
     if (reqType) params.req_type = reqType;
     if (accountId) params.account_id = accountId;
     if (salesOwnerId) params.sales_owner_id = salesOwnerId;
-    if (isSales && scope === 'all') params.scope = 'all';
+    if (isSales && scope === 'mine') params.scope = 'mine';
     if (recruiterId) params.recruiter_id = recruiterId;
     if (workMode) params.work_mode = workMode;
     if (appliedTechStack) params.tech_stack = appliedTechStack;

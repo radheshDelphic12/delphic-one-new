@@ -359,4 +359,40 @@ describe('super admin group dashboard', () => {
     // the previous period of a foundation compares income / expenses like any company
     expect(res.body.data.totals.change_pct).toHaveProperty('revenue');
   });
+
+  test('Zephyr valuation includes its owned properties automatically (valuation if recorded, else cost), plus recorded other assets', async () => {
+    const orgId = zephyr.id;
+    const ymd = (monthsBack, day = 5) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - monthsBack); d.setUTCDate(day); return d.toISOString().slice(0, 10); };
+    const day = (v) => new Date(`${v}T00:00:00.000Z`);
+    const prop = (code, extra) => prisma.zxProperty.create({ data: { org_id: orgId, code, name: `Property ${code}`, purchase_date: day(ymd(8)), ...extra } });
+    const cost = await prop('P-COST', { status: 'active', purchase_cost: 5000000, brokerage: 100000 }); // counts at cost 51 lakh
+    const valued = await prop('P-VAL', { status: 'held', purchase_cost: 5000000 });
+    await prisma.zxPropertyValuation.create({ data: { org_id: orgId, property_id: valued.id, value: 8000000, as_of: day(ymd(2)) } });
+    await prisma.zxProperty.update({ where: { id: valued.id }, data: { valuation: 8000000, valuation_date: day(ymd(2)) } });
+    await prop('P-BUILD', { status: 'under_construction', purchase_cost: 2000000, construction_cost: 500000 }); // 25 lakh
+    await prop('P-INACTIVE', { status: 'inactive', purchase_cost: 9000000 }); // never counts
+    await prop('P-FUTURE', { status: 'active', purchase_cost: 7000000, purchase_date: day(ymd(-2)) }); // not bought yet
+    const sold = await prop('P-SOLD', { status: 'sold', purchase_cost: 3000000 });
+    await prisma.zxPropertySale.create({ data: { org_id: orgId, property_id: sold.id, sale_value: 4000000, sale_date: day(ymd(1)), cost_basis: 3000000, realized_profit: 1000000 } });
+    await prisma.zxProperty.create({ data: { org_id: orgId, code: 'P-DELETED', name: 'Deleted', status: 'active', purchase_cost: 6000000, deleted_at: new Date() } });
+    await put(zephyr.id, { month: thisMonth, asset_value: 1000000 }); // other assets recorded by the admin
+
+    const res = await overview(`?from=${thisMonth}&to=${thisMonth}&state=all`);
+    const z = res.body.data.companies.find((c) => c.org.id === zephyr.id);
+    const owned = 5100000 + 8000000 + 2500000; // cost + valuation + under construction (sold, inactive, future, deleted excluded)
+    expect(z.assets).toBe(owned + 1000000);
+    expect(z.valuation.current).toBe(z.totals.profit * 240 + (owned + 1000000) * 3);
+    expect(z.months[0]).toMatchObject({ property_value: owned, property_count: 3, recorded_asset_value: 1000000 });
+    // a month before the sale still counts the sold property; before the valuation, the property counts at cost
+    const early = (await overview(`?from=${ymd(3).slice(0, 7)}&to=${ymd(3).slice(0, 7)}&state=all`)).body.data.companies.find((c) => c.org.id === zephyr.id);
+    expect(early.months[0].property_value).toBe(5100000 + 5000000 + 2500000 + 3000000);
+    // the drill-down lists the properties behind the figure
+    const dd = await authed(request(app).get(`${base}/companies/${zephyr.id}/drilldown?from=${thisMonth}&to=${thisMonth}`), superToken);
+    const sec = dd.body.data.sections.find((x) => x.key === 'properties');
+    expect(sec.rows.map((r) => r[0]).sort()).toEqual(['P-BUILD Property P-BUILD', 'P-COST Property P-COST', 'P-VAL Property P-VAL']);
+    expect(sec.rows.find((r) => r[0].startsWith('P-VAL'))[3]).toMatch(/Valuation/);
+    expect(sec.rows.find((r) => r[0].startsWith('P-COST'))[3]).toMatch(/Cost/);
+    // another company's properties are not mixed in
+    expect(res.body.data.companies.find((c) => c.org.id === gulati.id).months[0].property_value).toBeUndefined();
+  });
 });

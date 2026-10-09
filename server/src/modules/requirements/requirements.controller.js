@@ -37,7 +37,8 @@ function mapError(res, error) {
 const list = asyncHandler(async (req, res) => {
   const query = listQuerySchema.parse(req.query);
   if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
-  if (req.user.role === 'sales' && query.scope !== 'all') query.sales_owner_id = req.user.id;
+  // Every requirement is visible to the whole Sales team; ?scope=mine narrows to the user's own.
+  if (req.user.role === 'sales' && query.scope === 'mine') query.sales_owner_id = req.user.id;
   delete query.scope;
   const { rows, pagination } = await service.list(query);
   return ok(res, rows, { pagination });

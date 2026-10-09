@@ -202,7 +202,7 @@ export default function JobPipelineBoard() {
   const sensors = usePipelineSensors();
   const [filterParams, setFilterParams] = useState({});
   const isSales = user?.role === 'sales';
-  const [scope, setScope] = useState('mine');
+  const [scope, setScope] = useState('all');
   const boardParams = useMemo(() => {
     const params = { sort_by: 'created_at', sort_order: 'desc' };
     if (filterParams.search) params.search = filterParams.search;
@@ -217,7 +217,7 @@ export default function JobPipelineBoard() {
       const priorities = String(filterParams.priority).split(',').filter(Boolean);
       if (priorities.length === 1) params.priority = priorities[0];
     }
-    if (isSales && scope === 'all') params.scope = 'all';
+    if (isSales && scope === 'mine') params.scope = 'mine';
     return params;
   }, [filterParams, isSales, scope]);
   const handleFiltersChange = useCallback((params) => setFilterParams(params), []);

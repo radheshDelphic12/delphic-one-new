@@ -85,7 +85,7 @@ const listQuerySchema = z.object({
   req_type: z.enum(['managed_services', 'recruitment', 'project']).optional(),
   account_id: z.string().uuid().optional(),
   sales_owner_id: z.string().uuid().optional(),
-  // Sales only: 'all' lists every sales person's requirements (read-only for the others); default 'mine'.
+  // Sales only: default lists every sales person's requirements (read-only for the others); 'mine' narrows to their own.
   scope: z.enum(['mine', 'all']).optional(),
   recruiter_id: z.string().uuid().optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
