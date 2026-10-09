@@ -91,6 +91,22 @@ const meetingSchema = z.object({
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 
+// Extra meetings with an active client / vendor (does not change the account stage).
+const clientMeetingBase = {
+  title: z.string().trim().min(1).max(200),
+  mode: z.enum(['online', 'offline']).optional(),
+  scheduled_at: z.string().datetime(),
+  duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
+  location: z.string().trim().max(300).optional(),
+  link: z.string().trim().max(500).optional(),
+  notes: z.string().max(5000).optional(),
+  attendee_ids: z.array(z.string().uuid()).optional(),
+};
+const clientMeetingCreateSchema = z.object(clientMeetingBase);
+const clientMeetingUpdateSchema = z
+  .object({ ...clientMeetingBase, status: z.enum(['scheduled', 'completed', 'cancelled']).optional() })
+  .partial();
+
 const classifySchema = z.object({
   type: z.enum(['client', 'vendor']),
 });
@@ -135,6 +151,8 @@ module.exports = {
   stageSchema,
   stageOverrideSchema,
   meetingSchema,
+  clientMeetingCreateSchema,
+  clientMeetingUpdateSchema,
   classifySchema,
   listQuerySchema,
 };
