@@ -2812,3 +2812,7 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 
 - Group Dashboard (/super-dashboard/group/overview) timed out (504) on Render: the Delphic engine runs ~3500 queries per 12-month window (x2 windows) = ~270 s at ~100 ms/query to Neon. Now: companies computed in parallel (126 s cold with a pool of 9), per company/window cache served stale-while-revalidate (FRESH_MS 120 s, shared in-flight, 0.5 s warm), invalidated on asset-value edits, off in tests, and warmed 15 s after server start (index.js). Production (local DB) was never slow.
 - Staging Neon: Acconcy org created with seed-admin.js (admin = paras.gulati@delphic.in) and moved into the Delphic group, so the Group Dashboard lists 4 companies. Staging super admin: paras.gulati@delphic.in.
+
+## 2026-10-09 - Group Dashboard filters, projections, Gulati Industries logo
+
+- Group view logo/name = Gulati Industries icon. Period / group-by / figures filters (incl. pick a month, custom start-end) on Group Finance, Dashboard (rebuilt on /group/overview) and Projections & Valuation (new /group/projection, month-by-month history + projection, horizon 3-12 months). Per-month cache for the remote-DB slowness. Tests: 3 new in tests/super-admin-group-dashboard.test.js (19 green); Playwright e2e of the filters passed locally. Removed the accidentally committed client/vite.pw.config.js. Local commit only.

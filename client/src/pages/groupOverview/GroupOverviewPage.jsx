@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Building2, Network, PiggyBank, Plus, Receipt, Settings, TrendingUp, Users2, Wallet } from 'lucide-react';
+import { Building2, Network, PiggyBank, Plus, Receipt, Settings, TrendingUp } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
-import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { CHART_COLORS, chartTooltipStyle } from '../../lib/chartTheme.js';
-import ChartCard from '../../components/ui/ChartCard.jsx';
-import KpiCard from '../../components/ui/KpiCard.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
@@ -18,195 +13,14 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import OrgChartPage from '../orgChart/OrgChartPage.jsx';
 import ProjectionsTab from './ProjectionsTab.jsx';
 import GroupFinanceTab from './GroupFinanceTab.jsx';
+import GroupDashboardTab from './GroupDashboardTab.jsx';
 import GroupSettingsTab from './GroupSettingsTab.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
-const GROUP_BY_OPTIONS = [
-  { value: 'day', label: 'Daily' },
-  { value: 'month', label: 'Monthly' },
-  { value: 'quarter', label: 'Quarterly' },
-  { value: 'year', label: 'Yearly' },
-];
-
 function money(n) {
   return Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
-}
-
-function defaultRangeFor(groupBy) {
-  const to = new Date();
-  const from = new Date(to);
-  if (groupBy === 'day') from.setDate(from.getDate() - 30);
-  else if (groupBy === 'month') from.setMonth(from.getMonth() - 6);
-  else if (groupBy === 'quarter') from.setMonth(from.getMonth() - 12);
-  else from.setFullYear(from.getFullYear() - 3);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
-}
-
-function SubsidiaryTile({ tile, editable, onOpen, onSaveValuation }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(tile.valuation ?? '');
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    setSaving(true);
-    try {
-      await onSaveValuation(tile.org.id, value === '' ? null : Number(value));
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card transition-shadow hover:shadow-cardHover">
-      <button type="button" className="flex w-full items-center gap-3 text-left" onClick={() => onOpen(tile.org)}>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-50 text-primary-700">
-          {tile.org.logo_url ? <img src={tile.org.logo_url} alt="" className="h-full w-full object-contain" /> : <Building2 className="h-5 w-5" />}
-        </div>
-        <div className="min-w-0">
-          <p className="truncate font-heading text-sm font-semibold text-tertiary-900">{tile.org.name}</p>
-          <p className="text-xs text-tertiary-500">{tile.headcount} people · open ERP →</p>
-        </div>
-      </button>
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div><dt className="text-tertiary-400">Revenue (30d)</dt><dd className="font-medium text-tertiary-800">{tile.org.default_currency} {money(tile.trailing_30d.revenue)}</dd></div>
-        <div><dt className="text-tertiary-400">Margin (30d)</dt><dd className={`font-medium ${tile.trailing_30d.margin < 0 ? 'text-danger-600' : 'text-success-700'}`}>{tile.org.default_currency} {money(tile.trailing_30d.margin)}</dd></div>
-        <div><dt className="text-tertiary-400">Expenses (30d)</dt><dd className="font-medium text-tertiary-800">{tile.org.default_currency} {money(tile.trailing_30d.expenses)}</dd></div>
-        <div><dt className="text-tertiary-400">Vendor pay (30d)</dt><dd className="font-medium text-tertiary-800">{tile.org.default_currency} {money(tile.trailing_30d.vendor_payments)}</dd></div>
-      </dl>
-      <div className="mt-3 flex items-center justify-between border-t border-tertiary-100 pt-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-tertiary-400">Valuation</span>
-        {editing ? (
-          <div className="flex items-center gap-1">
-            <input autoFocus type="number" min="0" value={value} onChange={(e) => setValue(e.target.value)} className="w-28 rounded-lg border px-2 py-1 text-xs" />
-            <button type="button" className="btn-ghost text-xs" disabled={saving} onClick={save}>{saving ? '…' : 'Save'}</button>
-          </div>
-        ) : (
-          <button type="button" className={`text-sm font-semibold ${editable ? 'text-primary-700 hover:underline' : 'text-tertiary-700'}`} onClick={() => editable && setEditing(true)}>
-            {tile.valuation ? `${tile.org.default_currency} ${money(tile.valuation)}` : editable ? 'Set valuation' : 'Not set'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GroupDashboardTab() {
-  const { switchOrg } = useAuth();
-  const { pushError, pushInfo } = useAlerts();
-  const navigate = useNavigate();
-  const [subsidiaries, setSubsidiaries] = useState(null);
-  const [groupBy, setGroupBy] = useState('month');
-  const [rollup, setRollup] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  function loadSubsidiaries() {
-    apiClient.get('/super-dashboard/subsidiaries').then(({ data }) => setSubsidiaries(data.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load subsidiaries'), 'Something went wrong'));
-  }
-
-  useEffect(() => { loadSubsidiaries(); }, []);
-
-  useEffect(() => {
-    setLoading(true);
-    const { from, to } = defaultRangeFor(groupBy);
-    apiClient
-      .get('/super-dashboard/financials-rollup', { params: { from, to, group_by: groupBy } })
-      .then(({ data }) => setRollup(data.data))
-      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the group rollup'), 'Something went wrong'))
-      .finally(() => setLoading(false));
-  }, [groupBy]);
-
-  const totals = useMemo(() => {
-    if (!subsidiaries) return null;
-    return subsidiaries.reduce(
-      (acc, tile) => ({
-        headcount: acc.headcount + tile.headcount,
-        revenue: acc.revenue + tile.trailing_30d.revenue,
-        margin: acc.margin + tile.trailing_30d.margin,
-        valuation: acc.valuation + (Number(tile.valuation) || 0),
-        anyValuation: acc.anyValuation || tile.valuation !== null,
-      }),
-      { headcount: 0, revenue: 0, margin: 0, valuation: 0, anyValuation: false }
-    );
-  }, [subsidiaries]);
-
-  async function openCompany(org) {
-    try {
-      await switchOrg(org.id);
-      navigate('/');
-    } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to open that company'), 'Something went wrong');
-    }
-  }
-
-  async function saveValuation(orgId, value) {
-    try {
-      await apiClient.patch(`/orgs/${orgId}/valuation`, { valuation: value });
-      pushInfo('Valuation updated');
-      loadSubsidiaries();
-    } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to update valuation'), 'Something went wrong');
-      throw err;
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard label="Companies" value={subsidiaries?.length ?? '—'} icon={Building2} theme="blue" />
-        <KpiCard label="Group headcount" value={totals ? totals.headcount : '—'} icon={Users2} theme="purple" />
-        <KpiCard label="Revenue (30d, all cos.)" value={totals ? money(totals.revenue) : '—'} icon={Wallet} theme="green" />
-        <KpiCard label="Group valuation" value={totals?.anyValuation ? money(totals.valuation) : 'Not set'} icon={PiggyBank} theme="orange" />
-      </div>
-
-      <ChartCard
-        title="Revenue vs. expense"
-        subtitle="Group-wide — margin nets revenue against employee cost; net also deducts approved expenses and vendor payments"
-        action={
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="rounded-lg border px-2 py-1 text-xs">
-            {GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        }
-      >
-        {loading && <Skeleton className="h-64 w-full" />}
-        {!loading && (!rollup || rollup.length === 0) && (
-          <EmptyState title="No financial data yet" description="Run profitability compute and approve some expenses to see this chart." />
-        )}
-        {!loading && rollup?.length > 0 && (
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={rollup} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
-                <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={chartTooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="revenue" name="Revenue" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expenses" name="Expenses" fill={CHART_COLORS.warning} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="vendor_payments" name="Vendor payments" fill={CHART_COLORS.muted} radius={[4, 4, 0, 0]} />
-                <Line type="monotone" dataKey="net" name="Net" stroke={CHART_COLORS.success} strokeWidth={2} dot={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </ChartCard>
-
-      <div>
-        <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Subsidiaries</h3>
-        {!subsidiaries && <Skeleton className="h-32 w-full" />}
-        {subsidiaries?.length === 0 && <EmptyState icon={Building2} title="No subsidiaries yet" description="Create a second organization from the header's + button to see it here." />}
-        {subsidiaries?.length > 0 && (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {subsidiaries.map((tile) => (
-              <SubsidiaryTile key={tile.org.id} tile={tile} editable onOpen={openCompany} onSaveValuation={saveValuation} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function GroupOrgChartTab() {
@@ -348,11 +162,11 @@ export default function GroupOverviewPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-5 overflow-hidden rounded-2xl bg-gradient-to-r from-[#1f3a2c] via-[#2f5d43] to-[#4f8f60] p-4 text-white shadow-card sm:p-5">
         <div className="flex h-24 w-32 shrink-0 items-center justify-center rounded-xl bg-white p-2 shadow-soft sm:h-28 sm:w-40">
-          <img src="/group-logo.svg" alt="Gulati Foundation" className="h-full w-full object-contain" />
+          <img src="/group-logo.svg" alt="Gulati Industries" className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Multi-organization group</p>
-          <h2 className="font-heading text-xl font-bold tracking-tight sm:text-2xl">Gulati Foundation</h2>
+          <h2 className="font-heading text-xl font-bold tracking-tight sm:text-2xl">Gulati Industries</h2>
           <p className="mt-1 max-w-2xl text-sm text-white/80">One view of every company in the group: revenue, profit, assets and valuation side by side. Open any company from the sidebar to work inside it; the Group Dashboard link brings you back.</p>
         </div>
       </div>

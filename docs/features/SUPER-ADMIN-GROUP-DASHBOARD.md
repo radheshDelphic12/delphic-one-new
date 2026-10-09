@@ -50,7 +50,7 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 - **Org Chart** (group): one chart, Group Super Admin at the bottom, every company above, each company's teams and people above it (`layoutGroupChart` in `TeamChart.jsx`). For one company, Team, Designation/Role and Department views all use the same team-chart design (`regroupForTeamChart`).
 - Navigation: **Group Dashboard** pinned at the top of every sidebar; in group view the sidebar shows only group items plus an "Open a company" list; the switcher reads "All Companies"; inside a company a banner offers "Back to Group Dashboard".
 - Look: group view uses a light sage-green theme (`.theme-group` in `client/src/styles/theme.css`, switched on by `AppLayout` while the path is under `/group-overview`). Company logos in the switcher, sidebar list and login picker come from `lib/orgLogo.js` (the company's own `logo_url`, else the brand logo for known slugs delphic/gulati/zephyr/acconcy, else an initial tile).
-- Logo: `client/public/group-logo.svg` is a redrawn Gulati Foundation logo; replace it with the original file.
+- Logo: `client/public/group-logo.svg` is the uploaded Gulati Industries icon (same file as gulati-logo.svg); the banner and switcher are named Gulati Industries.
 
 ## Tests
 
@@ -66,3 +66,14 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 ## Performance on a remote database (2026-10-09)
 
 The Delphic finance engine runs ~3500 queries per 12-month window, so over Neon (~100 ms/query) the overview took ~270 s and timed out (504) on Render staging; production (local DB) was never slow. `groupFinance.service.js` now computes companies in parallel and caches each company/window/state stale-while-revalidate (120 s fresh, shared in-flight, cleared on asset-value edits, off when NODE_ENV=test) and `index.js` warms the default window 15 s after start. The first call after a deploy can still 504 until the warm-up finishes; the next is ~0.5 s.
+
+## Filters on every tab (2026-10-09)
+
+- Shared `groupOverview/groupFilters.jsx`: Period (This / Last month, Pick a month, This / Last quarter, Financial year, Last financial year, Last 12 months, Custom start and end month), Group by (Monthly / Quarterly / Yearly, April-March FY), Figures (All / Locked / Unlocked).
+- **Group Finance**, **Dashboard** and **Projections & Valuation** all use them and read the same books. The Dashboard tab was rebuilt on `/group/overview` (it used the legacy profitability tables, fixed 30-day tiles and a hard-coded range).
+- `GET /super-dashboard/group/projection?from&to&horizon&state&org_ids`: history = start..end month; the projection starts the month after the end month for 1-12 months (straight-line fit of the last six months with figures, revenue and costs separately); projected valuation = projected profit x 240 + latest asset value x 3. The old valuation methods (manual / revenue multiple / EBITDA multiple) no longer drive this tab; its Settings drawer keeps modules and Coming soon.
+- Speed on a remote DB: the cache is now per company-month, so any window is assembled from cached months and a filter change only computes months not seen before; warm-up covers the last 24 months and the financial year to date.
+
+Projection basis (2026-10-09): the projection starts the month after the history end but never later than the current month (a history ending this month still projects this month), and its basis is the last six complete months before the start, independent of the history window - so This month / Last month / Pick a month all project properly.
+
+Filter UI (2026-10-09, Zephyr pattern): one Filters button opens a panel with custom dropdowns (Period grouped into Months / Quarters / Years / Custom with a date hint, Group by, Project, Companies as toggles, month inputs when needed), active filters show as removable chips with Clear all, and **Figures** (All live / Locked / Unlocked) are pills under the filters, outside the panel. Shared in groupOverview/groupFilters.jsx (GroupFilterBar, ChoiceMenu, FigureSwitch, periodBinding).
