@@ -2,12 +2,13 @@
 
 | Field | Value |
 |---|---|
-| **Product** | Delphic One — Requirement Management Dashboard |
-| **As of** | 2026-09-07 |
+| **Product** | Delphic One — multi-company group platform (recruitment core + company workspaces) |
+| **As of** | 2026-10-09 |
 | **Audience** | Stakeholders, new developers, reviewers |
 | **Full HLD** | [HLD.md](HLD.md) |
 | **Field specs** | [Requirement-Dashboard-System-Design-v2.md](Requirement-Dashboard-System-Design-v2.md) |
 | **API contract** | [API-Spec-and-Build-Plan.md](API-Spec-and-Build-Plan.md) |
+| **Multi-company design** | [MULTI-COMPANY-ERP-PLATFORM-HLD.md](MULTI-COMPANY-ERP-PLATFORM-HLD.md) |
 
 ## Table of Contents
 
@@ -17,7 +18,8 @@
 4. [User journeys](#4-user-journeys)
 5. [Stage pipelines](#5-stage-pipelines)
 6. [Role capability matrix](#6-role-capability-matrix)
-7. [Related docs](#7-related-docs)
+7. [Multi-company platform](#7-multi-company-platform)
+8. [Related docs](#8-related-docs)
 
 ---
 
@@ -50,15 +52,19 @@ flowchart LR
     Rec[Recruiter — submissions]
     Admin[Admin]
     Super[Superadmin]
+    GSA[Group superadmin]
   end
 
-  RMD[Requirement Management Dashboard]
+  Ext[External CA / Legal]
+  RMD[Delphic One platform]
 
   BDA --> RMD
   Sales --> RMD
   Rec --> RMD
   Admin --> RMD
   Super --> RMD
+  GSA --> RMD
+  Ext -->|read-only| RMD
 
   RMD --> PG[(PostgreSQL)]
   RMD --> Files[Document store]
@@ -68,6 +74,11 @@ flowchart LR
 
 ```mermaid
 flowchart TB
+  BDA[BDA]
+  Sales[Sales]
+  Rec[Recruiter]
+  Admin[Admin]
+  Super[Superadmin]
   AccAll[View all accounts]
   AccMutate[Mutate all accounts · stages · meetings · unlock accounts]
   ReqView[View requirements]
@@ -111,6 +122,7 @@ flowchart TB
   Nginx -->|/| Client
   Nginx -->|/api| API
   Client -->|REST + JWT| API
+  Jobs[Background jobs — reminders] --> API
   API --> DB
   API --> Store
 ```
@@ -134,8 +146,10 @@ flowchart TB
 | Client | React + Vite + Tailwind (`client/`) |
 | API | Node.js + Express (`server/`) |
 | ORM / DB | Prisma → PostgreSQL |
-| Edge | Nginx (TLS; SPA + API proxy) |
-| Local runtime | Docker Compose (`db`, `server`, `client`) |
+| Tenancy | `Org` / `OrgGroup` / `OrgMembership`, shared DB, row-level `org_id` |
+| Edge | Host Nginx (TLS; SPA + API proxy) |
+| Local runtime | `start-platform.sh` (Postgres in Docker, API + client hot reload) or Docker Compose (`db`, `server`, `client`) |
+| Production | Docker Compose (`docker-compose.prod.yml`) via `start-delphic.sh --prod`, backup-first deploy |
 
 ---
 
@@ -153,6 +167,12 @@ flowchart TB
 | **Interviews** | Internal + client rounds, feedback, rating |
 | **Collaboration** | Comments, documents, stage history |
 | **Ops & insights** | Role dashboard, stuck lists, reports, Excel/PDF export, **requirement × stage matrix board** |
+| **Org & HR** | Orgs, departments, designations, teams, assets, org chart, invites, external CA / Legal access |
+| **Time & leave** | Company and project calendars, attendance, leave balances, project-centric timesheets, overtime approval |
+| **Money** | Payroll and payslips, billing / invoices, expenses and vendor payments, accounting, profitability |
+| **Live Analytics** | Financials, per-record locks, valuation trends |
+| **Group** | Group Dashboard, company switching, coming-soon companies |
+| **Company workspaces** | Zephyr, Gulati, Acconcy, trading |
 
 ### 3.2 Entity happy path
 
@@ -261,8 +281,8 @@ stateDiagram-v2
   internal_screening --> submitted_to_client
   submitted_to_client --> interview_scheduled
   interview_scheduled --> interview_result
-  interview_result --> offer
-  offer --> bgv
+  interview_result --> offer_sent
+  offer_sent --> bgv
   bgv --> closed
   sourced --> backout: reason required
   sourced --> rejected: reason required
@@ -310,10 +330,82 @@ Usually derived from the furthest-advanced active submission; can be overridden.
 
 ---
 
-## 7. Related docs
+## 7. Multi-company platform
+
+### 7.1 Tenancy
+
+```mermaid
+flowchart TB
+  Group[OrgGroup — Delphic holding group]
+  Group --> O1[Org — Delphic Global]
+  Group --> O2[Org — Zephyr Infrastructure]
+  Group --> O3[Org — Gulati Industries]
+  Group --> O4[Org — Acconcy Finance]
+  Group --> O5[Org — Coming soon]
+
+  User[User] --> M[OrgMembership — role per company]
+  M --> O1
+  M --> O2
+  User --> GM[OrgGroupMembership]
+  GM --> Group
+```
+
+Every tenant-owned row carries `org_id`. The active company is set at login or with `POST /auth/switch-org`.
+
+### 7.2 Company workspaces
+
+| Workspace | API prefix | Scope |
+|---|---|---|
+| Delphic Global | recruitment + platform modules | Recruitment, HR, timesheets, payroll, billing, Live Analytics |
+| Zephyr Infrastructure | `/zephyr` | Real estate and construction |
+| Gulati Industries | `/gulati` | Trading (Copper Cathode and other deals) |
+| Acconcy Finance | `/acconcy` | Finance services |
+| Coming soon | marker in `enabled_modules` | Listed, not openable, excluded from totals |
+
+### 7.3 Group Dashboard access
+
+```mermaid
+sequenceDiagram
+  participant GSA as Group superadmin
+  participant API as API
+  participant Fin as groupFinance.service
+  participant Co as Per-company finance services
+
+  GSA->>API: GET /super-dashboard/group/overview
+  API->>Fin: Build consolidated view
+  Fin->>Co: Request each live company's numbers
+  Co-->>Fin: Revenue, profit, assets, valuation
+  Fin-->>GSA: Totals, per-company rows, trends, alerts
+  GSA->>API: POST /auth/switch-org
+  API-->>GSA: Admin membership created on demand and audited
+```
+
+### 7.4 Time to money
+
+```mermaid
+flowchart LR
+  Cal[Company calendar] --> TS[Timesheets]
+  TS --> OT[Overtime approval]
+  TS --> WH[Approved hours]
+  OT --> WH
+  Leave[Leave balance] --> WH
+  WH --> Pay[Payroll + payslips]
+  TS --> Bill[Billing + invoices]
+  Pay --> Fin[Financials / Live Analytics]
+  Bill --> Fin
+  Exp[Expenses + vendor payments] --> Fin
+  Fin --> Grp[Group Dashboard]
+```
+
+Pay comes from approved timesheet hours, never raw attendance. See [FINANCE-CALCULATIONS-AND-LOCKING](../features/FINANCE-CALCULATIONS-AND-LOCKING.md) and [SUPER-ADMIN-GROUP-DASHBOARD](../features/SUPER-ADMIN-GROUP-DASHBOARD.md).
+
+---
+
+## 8. Related docs
 
 | Doc | Use when |
 |---|---|
+| [MULTI-COMPANY-ERP-PLATFORM-HLD.md](MULTI-COMPANY-ERP-PLATFORM-HLD.md) | Multi-company design and phase status |
 | [HLD.md](HLD.md) | Detailed high-level design (principles, security, ops, abstraction budget) |
 | [Requirement-Dashboard-System-Design-v2.md](Requirement-Dashboard-System-Design-v2.md) | Field-level data model |
 | [API-Spec-and-Build-Plan.md](API-Spec-and-Build-Plan.md) | Exact HTTP contracts |
