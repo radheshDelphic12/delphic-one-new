@@ -132,6 +132,12 @@ const classify = asyncHandler(async (req, res) => {
   return ok(res, result.account);
 });
 
+const activity = asyncHandler(async (req, res) => {
+  const account = await accountsService.getById(req.params.id);
+  if (!account) return fail(res, 404, 'Not found');
+  return ok(res, await accountsService.getActivity(req.params.id));
+});
+
 const history = asyncHandler(async (req, res) => {
   const account = await accountsService.getById(req.params.id);
   if (!account) return fail(res, 404, 'Not found');
@@ -140,6 +146,7 @@ const history = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  activity,
   list,
   listSpecializations,
   getOne,

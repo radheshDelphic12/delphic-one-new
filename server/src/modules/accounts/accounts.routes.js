@@ -12,6 +12,7 @@ router.get('/', controller.list);
 router.get('/specializations', controller.listSpecializations);
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
+router.get('/:id/activity', controller.activity);
 router.post('/', authorize('bda', 'admin'), controller.create);
 router.patch('/:id', authorize('bda', 'admin'), loadSuperadminFlag, lockCheck('accounts'), controller.update);
 router.post('/:id/stage', authorize('bda', 'admin'), controller.changeStage);

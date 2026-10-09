@@ -58,6 +58,7 @@ export default function AccountDetailPage() {
   const [classifying, setClassifying] = useState(false);
   const [meetingEditOpen, setMeetingEditOpen] = useState(false);
   const [savingMeeting, setSavingMeeting] = useState(false);
+  const [activity, setActivity] = useState([]);
 
   async function loadAccount() {
     setLoading(true);
@@ -68,6 +69,7 @@ export default function AccountDetailPage() {
       ]);
       setAccount(accountResponse.data.data);
       setHistory(historyResponse.data.data || []);
+      apiClient.get(`/accounts/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
     } catch (requestError) {
       pushError(apiErrorMessage(requestError, 'Failed to load account'), 'Something went wrong');
     } finally {
@@ -365,6 +367,33 @@ export default function AccountDetailPage() {
         </div>
 
         <aside className="space-y-3.5 self-start xl:sticky xl:top-0">
+          <section className="overflow-hidden rounded-xl border border-tertiary-200 bg-white" aria-label="Activity">
+            <h2 className="border-b border-tertiary-100 bg-tertiary-50/60 px-3.5 py-2.5 font-heading text-sm font-semibold tracking-tight text-tertiary-900">
+              Activity - who did what
+            </h2>
+            {activity[0]?.by && (
+              <p className="border-b border-tertiary-100 bg-primary-50/50 px-3.5 py-2 text-xs text-primary-900">
+                Last worked on by <b>{activity[0].by.name}</b> · {new Date(activity[0].at).toLocaleString()}
+              </p>
+            )}
+            <ol className="max-h-96 divide-y divide-tertiary-100 overflow-y-auto">
+              {activity.map((a) => (
+                <li key={a.id} className="px-3.5 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800" title={a.by?.role}>{a.by?.name || 'Unknown'}</span>
+                    <span className="text-tertiary-800">{a.summary}</span>
+                  </div>
+                  {a.kind === 'update' && a.details?.changes && (
+                    <p className="mt-1 text-xs text-tertiary-500">
+                      {Object.entries(a.details.changes).map(([field, c]) => (c.changed ? field : `${field}: ${c.from ?? '-'} → ${c.to ?? '-'}`)).join(' · ')}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-tertiary-400">{new Date(a.at).toLocaleString()}</p>
+                </li>
+              ))}
+              {activity.length === 0 && <li className="px-3.5 py-4 text-sm text-tertiary-400">No activity recorded yet.</li>}
+            </ol>
+          </section>
           <section className="overflow-hidden rounded-xl border border-tertiary-200 bg-white">
             <h2 className="border-b border-tertiary-100 bg-tertiary-50/60 px-3.5 py-2.5 font-heading text-sm font-semibold tracking-tight text-tertiary-900">
               Stage history

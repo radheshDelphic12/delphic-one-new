@@ -112,12 +112,34 @@ function canMutateAccount(account, user) {
   return user.role === 'admin' || user.role === 'bda';
 }
 
+// ---- who did what ----
+// Every edit of a lead / client / vendor by a person writes one audit_logs row (entity_type 'account'), so the detail page can
+// say "edited by Chahak". Stage moves and meeting edits are already in stage_history; getActivity() merges both.
+const IGNORED_FIELDS = new Set(['updated_at', 'created_at']);
+const plainValue = (v) => (v instanceof Date ? v.toISOString() : v);
+function changedFields(before, after, patch) {
+  const out = {};
+  for (const key of Object.keys(patch)) {
+    if (IGNORED_FIELDS.has(key)) continue;
+    const a = plainValue(before[key]) ?? null;
+    const b = plainValue(after[key]) ?? null;
+    if (JSON.stringify(a) === JSON.stringify(b)) continue;
+    const simple = (x) => x === null || ['string', 'number', 'boolean'].includes(typeof x);
+    out[key.replace(/_/g, ' ')] = simple(a) && simple(b) ? { from: a, to: b } : { changed: true };
+  }
+  return out;
+}
+async function logActivity(userId, accountId, action, reason, snapshot = {}) {
+  await prisma.auditLog.create({ data: { actor_id: userId, action, entity_type: 'account', entity_id: accountId, reason, snapshot } });
+}
+
 async function create(data, ownerId) {
   const row = await prisma.account.create({
     // origin_owner_id is the immutable "brought by" — same as the first owner, never updated after.
     data: { ...data, owner_id: ownerId, origin_owner_id: ownerId },
     include: ACCOUNT_INCLUDE,
   });
+  await logActivity(ownerId, row.id, 'create', 'Added this account', { name: row.name, stage: row.stage });
   return serialize(row);
 }
 
@@ -160,6 +182,8 @@ async function update(id, patch, user) {
     data,
     include: ACCOUNT_INCLUDE,
   });
+  const changes = changedFields(existing, row, data);
+  if (Object.keys(changes).length) await logActivity(user.id, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
   return { account: serialize(row) };
 }
 
@@ -192,6 +216,7 @@ async function classifyLead(id, { type }, user) {
     }),
   ]);
 
+  await logActivity(user.id, id, 'classify', `Classified as ${type}`, { type });
   return { account: serialize(row) };
 }
 
@@ -369,6 +394,23 @@ async function changeStageOverride(id, body, user) {
   });
 }
 
+/** Everything that happened to an account, newest first, each tagged with the person who did it. */
+async function getActivity(id) {
+  const [logs, stages] = await Promise.all([
+    prisma.auditLog.findMany({ where: { entity_type: 'account', entity_id: id, action: { not: 'soft_delete' } }, orderBy: { created_at: 'desc' }, take: 200 }),
+    prisma.stageHistory.findMany({ where: { entity_type: 'account', entity_id: id }, orderBy: { changed_at: 'desc' }, take: 200 }),
+  ]);
+  const ids = [...new Set([...logs.map((l) => l.actor_id), ...stages.map((s) => s.changed_by)].filter(Boolean))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, role: true } }) : [];
+  const by = new Map(users.map((u) => [u.id, u]));
+  const who = (uid) => (by.get(uid) ? { id: uid, name: by.get(uid).name, role: by.get(uid).role } : null);
+  const rows = [
+    ...logs.map((l) => ({ id: l.id, kind: l.action, summary: l.reason, details: l.snapshot, by: who(l.actor_id), at: l.created_at })),
+    ...stages.map((s) => ({ id: s.id, kind: 'stage', summary: s.reason === 'Meeting details updated' ? 'Meeting details updated' : `Stage ${(s.from_stage || '-').replace(/_/g, ' ')} → ${s.to_stage.replace(/_/g, ' ')}${s.reason && s.reason !== 'Lead classified' ? ` (${s.reason})` : ''}`, details: { reason: s.reason }, by: who(s.changed_by), at: s.changed_at })),
+  ];
+  return rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
 async function getHistory(id) {
   const rows = await prisma.stageHistory.findMany({
     where: { entity_type: 'account', entity_id: id },
@@ -396,6 +438,7 @@ module.exports = {
   updateMeeting,
   classifyLead,
   getHistory,
+  getActivity,
   canTransition,
   canMutateAccount,
   canClassifyAccount,
