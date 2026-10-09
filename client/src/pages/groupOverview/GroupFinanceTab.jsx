@@ -16,6 +16,7 @@ import { downloadCsv, printReport } from '../../lib/groupExport.js';
 import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
+import FoundationGroupSection from './FoundationGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
@@ -195,12 +196,13 @@ function DrillDown({ orgId, range, state }) {
 function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChanged }) {
   if (!company) return <Drawer open={false} onClose={onClose} title="" />;
   const v = company.valuation;
+  const isFx = company.org.kind === 'foundation';
   return (
     <Drawer open title={company.org.name} onClose={onClose} size="lg" footer={<button type="button" className="btn-primary" onClick={() => onOpen(company.org)}>Open {company.org.name} (admin view)</button>}>
       <div className="space-y-5">
         <section>
           <h4 className="mb-2 font-heading text-sm font-semibold">Valuation</h4>
-          {!v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
+          {isFx ? <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">Not applicable: valuation (profit × {formula.profit} + asset value × {formula.asset_value}) is a business measure. A foundation is followed through its income, expenses, fund balance and campaign budgets instead. Its assets here are the fund balance: {money(company.assets)}.</p> : !v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
             <div className="space-y-1 rounded-xl border border-tertiary-100 p-3 text-sm">
               <div className="flex justify-between"><span>Profit component ({money(v.profit_component / formula.profit)} × {formula.profit})</span><b>{money(v.profit_component)}</b></div>
               <div className="flex justify-between"><span>Asset component ({money(company.assets)} × {formula.asset_value})</span><b>{money(v.asset_component)}</b></div>
@@ -222,8 +224,8 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
           <DrillDown orgId={company.org.id} range={range} state={state} />
         </section>
         <section>
-          <h4 className="mb-2 font-heading text-sm font-semibold">Monthly asset values</h4>
-          <AssetValueForm company={company} onSaved={onChanged} />
+          <h4 className="mb-2 font-heading text-sm font-semibold">{isFx ? 'Fund balance' : 'Monthly asset values'}</h4>
+          {isFx ? <p className="text-sm text-tertiary-600">The fund balance is funds received minus paid spending, so it is not typed in. Record funding and spending in the foundation (open it with the button below); campaigns, budgets and their projections are managed there too.</p> : <AssetValueForm company={company} onSaved={onChanged} />}
         </section>
       </div>
     </Drawer>
@@ -467,6 +469,8 @@ export default function GroupFinanceTab() {
               <ul className="space-y-1 text-sm">{data.alerts.map((a, i) => <li key={`${a.org_id}-${a.type}-${i}`}><b>{a.org_name}:</b> {a.message}</li>)}</ul>
             </div>
           )}
+
+          <FoundationGroupSection foundation={data.foundation} />
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">

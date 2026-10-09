@@ -447,6 +447,7 @@ model User {
   zx_people                       ZxPerson[]
   gx_people                       GxPerson[]
   ax_people                       AxPerson[]
+  fx_people                       FxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1942,6 +1943,15 @@ model Org {
   ax_salaries AxSalary[]
   ax_period_closes AxPeriodClose[]
   ax_valuation_history AxValuationHistory[]
+  fx_settings FxSetting[]
+  fx_categories FxCategory[]
+  fx_audit FxAudit[]
+  fx_people FxPerson[]
+  fx_campaigns FxCampaign[]
+  fx_campaign_plans FxCampaignPlan[]
+  fx_budget_history FxBudgetHistory[]
+  fx_entries FxEntry[]
+  fx_period_closes FxPeriodClose[]
   zx_parties    ZxParty[]
   zx_documents  ZxDocument[]
   zx_leads      ZxLead[]
@@ -5132,4 +5142,223 @@ model AxValuationHistory {
 
   @@index([org_id, valuation_date])
   @@map("ax_valuation_history")
+}
+
+// ===================== Gulati Foundation (Fx) =====================
+// Campaigns, budgets and the money moving through them for the foundation. Money is never kept on the campaign:
+// every actual figure is derived from fx_entries (see modules/foundation/campaign.calc.js).
+
+model FxSetting {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String   @unique @db.Uuid
+  org              Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency         String   @default("INR")
+  campaign_prefix  String   @default("GF")
+  campaign_seq     Int      @default(0)
+  // Spending that would push a campaign past its allocated budget is refused unless an admin gives a reason.
+  block_overspend  Boolean  @default(true)
+  // 'plan' = spread the remaining planned investment over the remaining months; 'run_rate' = recent monthly average.
+  forecast_method  String   @default("plan")
+  run_rate_months  Int      @default(3)
+  ending_soon_days Int      @default(30)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  @@map("fx_settings")
+}
+
+model FxCategory {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String     @db.Uuid
+  org         Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  scope       String // initiative | expense | funding
+  name        String
+  description String?
+  active      Boolean    @default(true)
+  sort_order  Int        @default(0)
+  created_by  String?    @db.Uuid
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @default(now()) @updatedAt
+  deleted_at  DateTime?
+  campaigns   FxCampaign[]
+  entries     FxEntry[]
+
+  @@unique([org_id, scope, name])
+  @@index([org_id, scope])
+  @@map("fx_categories")
+}
+
+model FxAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("fx_audit")
+}
+
+// Employees and contractors of the foundation, with their access role inside the Foundation workspace.
+model FxPerson {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String       @db.Uuid
+  org          Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name         String
+  user_id      String?      @db.Uuid
+  user         User?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role  String       @default("none") // none | manager | finance | staff
+  active       Boolean      @default(true)
+  kind         String       @default("employee") // employee | contractor
+  designation  String?
+  phone        String?
+  email        String?
+  joining_date DateTime?    @db.Date
+  leaving_date DateTime?    @db.Date
+  notes        String?
+  created_at   DateTime     @default(now())
+  updated_at   DateTime     @default(now()) @updatedAt
+  deleted_at   DateTime?
+  campaigns    FxCampaign[]
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("fx_people")
+}
+
+model FxCampaign {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String            @db.Uuid
+  org               Org               @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code              String
+  name              String
+  description       String?
+  objective         String?
+  category_id       String?           @db.Uuid
+  category          FxCategory?       @relation(fields: [category_id], references: [id])
+  status            String            @default("draft") // draft | planned | active | on_hold | completed | cancelled
+  country           String?
+  state             String?
+  city              String?
+  area              String?
+  address           String?
+  planned_start     DateTime?         @db.Date
+  planned_end       DateTime?         @db.Date
+  actual_start      DateTime?         @db.Date
+  actual_end        DateTime?         @db.Date
+  allocated_budget  Decimal           @default(0) @db.Decimal(16, 2)
+  planned_investment Decimal          @default(0) @db.Decimal(16, 2)
+  financial_notes   String?
+  manager_id        String?           @db.Uuid
+  manager           FxPerson?         @relation(fields: [manager_id], references: [id], onDelete: SetNull)
+  created_by        String?           @db.Uuid
+  updated_by        String?           @db.Uuid
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @default(now()) @updatedAt
+  deleted_at        DateTime?
+  plan              FxCampaignPlan[]
+  budget_history    FxBudgetHistory[]
+  entries           FxEntry[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@index([org_id, category_id])
+  @@map("fx_campaigns")
+}
+
+// Planned investment per month. When a campaign has no rows the plan is spread evenly over its duration.
+model FxCampaignPlan {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String     @db.Uuid
+  org            Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  campaign_id    String     @db.Uuid
+  campaign       FxCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  month          String
+  planned_amount Decimal    @db.Decimal(16, 2)
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @default(now()) @updatedAt
+
+  @@unique([campaign_id, month])
+  @@index([org_id])
+  @@map("fx_campaign_plans")
+}
+
+model FxBudgetHistory {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String     @db.Uuid
+  org                Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  campaign_id        String     @db.Uuid
+  campaign           FxCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  previous_allocated Decimal    @db.Decimal(16, 2)
+  new_allocated      Decimal    @db.Decimal(16, 2)
+  previous_planned   Decimal    @db.Decimal(16, 2)
+  new_planned        Decimal    @db.Decimal(16, 2)
+  reason             String?
+  effective_date     DateTime   @db.Date
+  changed_by         String?    @db.Uuid
+  created_at         DateTime   @default(now())
+
+  @@index([campaign_id])
+  @@index([org_id])
+  @@map("fx_budget_history")
+}
+
+// Every actual movement of money. kind: expense (money out) | funding (money in) | transfer (internal, never income or expense).
+// Only expense rows with status 'paid' are actual spending; 'approved' is an outstanding commitment; funding counts once 'received'.
+model FxEntry {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String      @db.Uuid
+  org            Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  campaign_id    String?     @db.Uuid
+  campaign       FxCampaign? @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
+  kind           String // expense | funding | transfer
+  status         String      @default("pending") // expense: pending|approved|paid|rejected|cancelled|reversed; funding: pledged|received|cancelled; transfer: recorded
+  expense_class  String? // programme | operational (expense only)
+  category_id    String?     @db.Uuid
+  category       FxCategory? @relation(fields: [category_id], references: [id])
+  entry_date     DateTime    @db.Date
+  amount         Decimal     @db.Decimal(16, 2)
+  payment_method String?
+  party_name     String? // payee, donor or counterparty
+  reference      String?
+  description    String?
+  override_reason String?
+  approved_by    String?     @db.Uuid
+  approved_at    DateTime?
+  created_by     String?     @db.Uuid
+  created_at     DateTime    @default(now())
+  updated_at     DateTime    @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, entry_date])
+  @@index([org_id, campaign_id])
+  @@index([org_id, kind, status])
+  @@map("fx_entries")
+}
+
+model FxPeriodClose {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month         String
+  status        String    @default("open")
+  snapshot      Json?
+  closed_by     String?   @db.Uuid
+  closed_at     DateTime?
+  reopen_reason String?
+  reopened_at   DateTime?
+  stale         Boolean   @default(false)
+  stale_at      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("fx_period_closes")
 }

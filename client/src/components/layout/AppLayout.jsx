@@ -23,6 +23,8 @@ import { gulatiNavFor } from '../../lib/gulati/sections.js';
 import { isGulatiOrg, useGulati, gxCan } from '../../lib/gulati/useGulati.js';
 import { acconcyNavFor } from '../../lib/acconcy/sections.js';
 import { isAcconcyOrg, useAcconcy, axCan } from '../../lib/acconcy/useAcconcy.js';
+import { foundationNavFor } from '../../lib/foundation/sections.js';
+import { isFoundationOrg, useFoundation, fxCan } from '../../lib/foundation/useFoundation.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -89,6 +91,8 @@ const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings
 const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
 // Acconcy Finance as well.
 const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settings', '/notifications'].includes(pathname);
+// Gulati Foundation as well.
+const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || ['/settings', '/notifications'].includes(pathname);
 
 const GROUP_NAV_ITEM = { to: '/group-overview', label: 'Group Dashboard', icon: Network, end: true };
 
@@ -108,8 +112,14 @@ export default function AppLayout() {
   const { me: gxMe } = useGulati();
   const isAcconcy = isAcconcyOrg(user);
   const { me: axMe } = useAcconcy();
+  const isFoundation = isFoundationOrg(user);
+  const { me: fxMe } = useFoundation();
   const navBase = useMemo(
     () => {
+      if (isFoundation) {
+        const setup = fxCan(fxMe, 'settings') ? [{ to: '/foundation/settings', label: 'Foundation setup', icon: Settings }] : [];
+        return [...foundationNavFor(fxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
       if (isAcconcy) {
         const setup = axCan(axMe, 'settings') ? [{ to: '/acconcy/settings', label: 'Acconcy setup', icon: Settings }] : [];
         return [...acconcyNavFor(axMe), ...setup, ...ZEPHYR_EXTRA_NAV];
@@ -132,7 +142,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
@@ -159,6 +169,13 @@ export default function AppLayout() {
     document.documentElement.classList.add('theme-group');
     return () => document.documentElement.classList.remove('theme-group');
   }, [isGroupPath]);
+
+  // Gulati Foundation gets the calm green of its logo.
+  useEffect(() => {
+    if (!isFoundation || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-foundation');
+    return () => document.documentElement.classList.remove('theme-foundation');
+  }, [isFoundation, isGroupPath]);
 
   // Acconcy gets the plum palette of its logo.
   useEffect(() => {
@@ -231,6 +248,19 @@ export default function AppLayout() {
             <span className="h-px flex-1 bg-primary-200" />
           </div>
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
+        </Link>
+      )}
+      {isFoundation && !isGroupPath && !collapsed && (
+        <Link
+          to="/foundation"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Gulati Foundation home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/foundation-logo.svg'} alt={user?.active_org?.name || 'Gulati Foundation'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-primary-400" />
         </Link>
       )}
       {isAcconcy && !isGroupPath && !collapsed && (
@@ -492,7 +522,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

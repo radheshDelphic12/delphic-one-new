@@ -269,3 +269,99 @@
   border-color: rgb(var(--ax-gold));
   color: rgb(var(--p-800));
 }
+
+/* Gulati Foundation workspace: the same sage green as the Group Dashboard (and the foundation logo), kept
+   restrained and neutral so the numbers stay the focus: soft green selection, deep green text. */
+.theme-foundation {
+  --p-50: 243 249 245;
+  --p-100: 226 241 232;
+  --p-200: 198 226 208;
+  --p-300: 160 204 175;
+  --p-400: 128 182 148;
+  --p-500: 99 160 118;
+  --p-600: 74 130 93;
+  --p-700: 56 104 72;
+  --p-800: 45 82 58;
+  --p-900: 36 66 47;
+
+  --color-bg: 244 248 246;
+  --color-sidebar: 234 242 238;
+  --color-border: 214 227 221;
+  --color-border-subtle: 225 235 230;
+  --color-primary: 74 130 93;
+  --color-primary-soft: 243 249 245;
+}
+
+.theme-foundation .dashboard-canvas-glow {
+  background-image: radial-gradient(ellipse 70% 55% at 12% -5%, rgb(99 160 118 / 0.1), transparent 58%);
+}
+
+.theme-foundation .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(56 104 72 / 0.12);
+}
+
+.theme-foundation nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.65);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--p-600));
+}
+
+.theme-foundation [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--p-600));
+  color: rgb(var(--p-800));
+}
+
+/* Acconcy Finance: plum taken from the logo's chevrons (#722F50 at 700) on warm off-white surfaces, so it reads
+   as a different company from the green Zephyr / Gulati workspaces, with a muted gold accent (finance, gold
+   investments) used sparingly for key figures and the selected tab. */
+.theme-acconcy {
+  --p-50: 251 243 247;
+  --p-100: 245 227 236;
+  --p-200: 234 199 216;
+  --p-300: 217 160 186;
+  --p-400: 192 112 154;
+  --p-500: 158 74 120;
+  --p-600: 132 58 99;
+  --p-700: 114 47 80;
+  --p-800: 92 38 65;
+  --p-900: 72 30 52;
+
+  --color-bg: 250 247 248;
+  --color-sidebar: 244 236 240;
+  --color-border: 230 216 223;
+  --color-border-subtle: 238 228 233;
+  --zx-surface: 253 252 252;
+  --color-primary: 114 47 80;
+  --color-primary-soft: 251 243 247;
+
+  --ax-gold: 176 141 60;
+}
+
+.theme-acconcy .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(114 47 80 / 0.07), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 0%, rgb(176 141 60 / 0.05), transparent 52%);
+}
+
+.theme-acconcy .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(114 47 80 / 0.14);
+}
+
+.theme-acconcy nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.7);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--ax-gold));
+}
+
+.theme-acconcy .bg-white {
+  background-color: rgb(var(--zx-surface));
+}
+
+/* Gold accent: key money figures and the selected tab underline. */
+.theme-acconcy .ax-gold {
+  color: rgb(var(--ax-gold));
+}
+.theme-acconcy [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--ax-gold));
+  color: rgb(var(--p-800));
+}

@@ -61,6 +61,10 @@ async function login(email, password, orgSlug) {
   const matches = await bcrypt.compare(password, user.password_hash);
   if (!matches) return null;
 
+  // A group superadmin gets an admin membership in every company of the group on sign-in, so a company added since the
+  // last visit (such as Gulati Foundation) is in the company list straight away.
+  if (user.is_group_superadmin) await ensureGroupAdminMemberships(user.id);
+
   const [memberships, defaultMembership] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { person_id: user.id, employment_status: { in: WORKING_STATUSES } },

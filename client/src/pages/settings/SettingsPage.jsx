@@ -240,7 +240,7 @@ export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab');
   // Zephyr is standalone: the Deleted-records panel lists Delphic records, so it stays off there.
-  const canSeeDeleted = userCan(user, 'deleteRecords') && !user?.active_org?.enabled_modules?.includes('zephyr') && !user?.active_org?.enabled_modules?.includes('gulati') && !user?.active_org?.enabled_modules?.includes('acconcy');
+  const canSeeDeleted = userCan(user, 'deleteRecords') && !user?.active_org?.enabled_modules?.includes('zephyr') && !user?.active_org?.enabled_modules?.includes('gulati') && !user?.active_org?.enabled_modules?.includes('foundation') && !user?.active_org?.enabled_modules?.includes('acconcy');
   // Zephyr has no HR profile (reporting line, bank, emergency contact, documents), so "My details" is hidden there.
   const hideDetails = isZephyrOrg(user);
   const TABS = useMemo(() => {

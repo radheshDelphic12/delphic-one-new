@@ -2816,3 +2816,7 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 ## 2026-10-09 - Group Dashboard filters, projections, Gulati Industries logo
 
 - Group view logo/name = Gulati Industries icon. Period / group-by / figures filters (incl. pick a month, custom start-end) on Group Finance, Dashboard (rebuilt on /group/overview) and Projections & Valuation (new /group/projection, month-by-month history + projection, horizon 3-12 months). Per-month cache for the remote-DB slowness. Tests: 3 new in tests/super-admin-group-dashboard.test.js (19 green); Playwright e2e of the filters passed locally. Removed the accidentally committed client/vite.pw.config.js. Local commit only.
+
+## 2026-10-09 - Gulati Foundation (5th company)
+
+- New foundation / NGO workspace and Group Dashboard integration: campaigns, initiatives (data-driven), budgets with revision history, planned vs actual investment, funding vs spending, approvals, overspend guard with admin override, projections (plan / run-rate), 13 reports, financials with month close. Migration 20261010090000_gulati_foundation (9 fx_ tables). Group login now creates admin memberships so a newly added company shows up straight away. Full write-up: docs/features/GULATI-FOUNDATION.md. Tests: foundation-workspace (12), super-admin-group-dashboard (21), auth / orgs / workspace-isolation / acconcy regression green. Local seed applied to the dev DB (demo foundation visible at localhost:5173). Not pushed.

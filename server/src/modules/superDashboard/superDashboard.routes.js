@@ -117,7 +117,7 @@ router.put(
     const body = groupFinance.assetBodySchema.parse(req.body);
     const result = await groupFinance.setAssetValue(req.user.org_group_ids, req.user.id, req.params.orgId, body);
     if (result.error === 'not_found') return fail(res, 404, 'Company not found');
-    if (result.error === 'managed_in_company') return fail(res, 422, 'Acconcy asset value is calculated from its Assets and Investments; edit them in the Acconcy workspace');
+    if (result.error === 'managed_in_company') return fail(res, 422, "This company's asset value is calculated inside its own workspace (Acconcy: assets and investments; Gulati Foundation: the fund balance); change it there");
     if (result.error === 'future_month') return fail(res, 422, 'An asset value can only be recorded for the current or an earlier month');
     return ok(res, result);
   })

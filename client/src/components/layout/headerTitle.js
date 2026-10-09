@@ -51,6 +51,17 @@ const ACCONCY_TITLES = {
   '/acconcy/my-work': ['My work', 'Your assigned leads, deals and tasks.'],
   '/acconcy/settings': ['Acconcy setup', 'Valuation formula, categories, numbering and audit log.'],
 };
+const FOUNDATION_TITLES = {
+  '/foundation': ['Dashboard', 'Campaigns, budgets, spending and projections for the foundation.'],
+  '/foundation/campaigns': ['Campaigns', 'Every campaign with its location, dates, budget, spending and projection.'],
+  '/foundation/funds': ['Funds & Expenses', 'Investments, expenses, donations and transfers, with approvals.'],
+  '/foundation/initiatives': ['Initiatives & Categories', 'Child care, education, healthcare ... and the categories of spending and funding.'],
+  '/foundation/reports': ['Reports', 'Budget, spending, funding and projection reports.'],
+  '/foundation/financials': ['Financials', 'Income, expenses and fund balance by month, with month close.'],
+  '/foundation/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/foundation/settings': ['Foundation setup', 'Budget rules, projection method and the audit log.'],
+};
+const foundationEntry = (pathname) => (/^\/foundation\/campaigns\/[^/]+/.test(pathname) ? ['Campaign', 'Budget, spending, timeline and projection for one campaign.'] : FOUNDATION_TITLES[pathname] || FOUNDATION_TITLES['/foundation']);
 const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
 
 /** Page title shown in the app header for the active route. */
@@ -58,6 +69,7 @@ export function headerTitleForPath(pathname, user) {
   if (pathname === '/') return user?.name ? `${user.name}'s Dashboard` : 'Dashboard';
   if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[0];
+  if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[0];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
@@ -89,6 +101,7 @@ export function headerTitleForPath(pathname, user) {
 export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[1];
+  if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[1];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {

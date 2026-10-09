@@ -6,6 +6,7 @@ const BRAND_LOGOS = {
   gulati: '/gulati-logo.svg',
   zephyr: '/zephyr-logo.png',
   acconcy: '/acconcy-logo.png',
+  foundation: '/foundation-mark.svg',
 };
 
 export function orgLogo(org) {

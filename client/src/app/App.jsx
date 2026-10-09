@@ -77,7 +77,17 @@ import AcconcyTasksPage from '../pages/acconcy/AcconcyTasksPage.jsx';
 import AcconcyPeoplePage from '../pages/acconcy/AcconcyPeoplePage.jsx';
 import AcconcyMyWorkPage from '../pages/acconcy/AcconcyMyWorkPage.jsx';
 import AcconcySettingsPage from '../pages/acconcy/AcconcySettingsPage.jsx';
+import FoundationHomePage from '../pages/foundation/FoundationHomePage.jsx';
+import FoundationCampaignsPage from '../pages/foundation/FoundationCampaignsPage.jsx';
+import FoundationCampaignDetailPage from '../pages/foundation/FoundationCampaignDetailPage.jsx';
+import FoundationFundsPage from '../pages/foundation/FoundationFundsPage.jsx';
+import FoundationInitiativesPage from '../pages/foundation/FoundationInitiativesPage.jsx';
+import FoundationFinancialsPage from '../pages/foundation/FoundationFinancialsPage.jsx';
+import FoundationReportsPage from '../pages/foundation/FoundationReportsPage.jsx';
+import FoundationPeoplePage from '../pages/foundation/FoundationPeoplePage.jsx';
+import FoundationSettingsPage from '../pages/foundation/FoundationSettingsPage.jsx';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
+import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
@@ -125,6 +135,8 @@ function HomePage() {
   if (isGulatiOrg(user)) return <Navigate to="/gulati" replace />;
   // Acconcy Finance is a standalone workspace with its own home.
   if (isAcconcyOrg(user)) return <Navigate to="/acconcy" replace />;
+  // Gulati Foundation is a standalone workspace with its own home.
+  if (isFoundationOrg(user)) return <Navigate to="/foundation" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -201,6 +213,15 @@ function RequireAcconcy({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isAcconcyOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Gulati Foundation workspace needs the `foundation` module on the ACTIVE company. */
+function RequireFoundation({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isFoundationOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -334,6 +355,16 @@ export default function App() {
         <Route path="acconcy/my-work" element={<RequireAcconcy><AcconcyMyWorkPage /></RequireAcconcy>} />
         <Route path="acconcy/settings" element={<RequireAcconcy><AcconcySettingsPage /></RequireAcconcy>} />
         <Route path="acconcy/*" element={<Navigate to="/acconcy" replace />} />
+        <Route path="foundation" element={<RequireFoundation><FoundationHomePage /></RequireFoundation>} />
+        <Route path="foundation/campaigns" element={<RequireFoundation><FoundationCampaignsPage /></RequireFoundation>} />
+        <Route path="foundation/campaigns/:id" element={<RequireFoundation><FoundationCampaignDetailPage /></RequireFoundation>} />
+        <Route path="foundation/funds" element={<RequireFoundation><FoundationFundsPage /></RequireFoundation>} />
+        <Route path="foundation/initiatives" element={<RequireFoundation><FoundationInitiativesPage /></RequireFoundation>} />
+        <Route path="foundation/financials" element={<RequireFoundation><FoundationFinancialsPage /></RequireFoundation>} />
+        <Route path="foundation/reports" element={<RequireFoundation><FoundationReportsPage /></RequireFoundation>} />
+        <Route path="foundation/people" element={<RequireFoundation><FoundationPeoplePage /></RequireFoundation>} />
+        <Route path="foundation/settings" element={<RequireFoundation><FoundationSettingsPage /></RequireFoundation>} />
+        <Route path="foundation/*" element={<Navigate to="/foundation" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route

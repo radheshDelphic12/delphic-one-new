@@ -305,4 +305,58 @@ describe('super admin group dashboard', () => {
     expect(y.map((r) => r.label)).toEqual(['FY2024-25', 'FY2025-26']);
     expect((await overview('?from=2026-06&to=2026-04')).status).toBeGreaterThanOrEqual(400);
   });
+
+  test('Gulati Foundation joins the group on its own: income = funds received, expenses = paid spending, no valuation, campaign block beside the books', async () => {
+    const foundation = await createOrg({ name: 'Zeta Foundation', org_group_id: group.id });
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation'] } });
+    const actor = await prisma.user.findFirst();
+    const d = (days) => new Date(Date.now() - days * 86400000);
+    const camp = await prisma.fxCampaign.create({ data: { org_id: foundation.id, code: 'GF-0001', name: 'Child Care Ahmedabad', status: 'active', city: 'Ahmedabad', state: 'Gujarat', planned_start: d(60), planned_end: new Date(Date.now() + 120 * 86400000), actual_start: d(60), allocated_budget: 1000000, planned_investment: 800000 } });
+    const mk = (kind, status, amount, extra = {}) => prisma.fxEntry.create({ data: { org_id: foundation.id, campaign_id: camp.id, kind, status, amount, entry_date: d(3), created_by: actor.id, expense_class: kind === 'expense' ? 'programme' : null, ...extra } });
+    await mk('funding', 'received', 600000);
+    await mk('funding', 'pledged', 250000); // not income yet
+    await mk('expense', 'paid', 300000);
+    await mk('expense', 'approved', 100000); // a commitment, not spending
+    await mk('expense', 'pending', 50000);
+    await prisma.fxEntry.create({ data: { org_id: foundation.id, kind: 'transfer', status: 'recorded', amount: 999999, entry_date: d(3), created_by: actor.id } }); // internal: nothing
+
+    const res = await overview(`?from=${thisMonth}&to=${thisMonth}&state=all`);
+    expect(res.status).toBe(200);
+    const f = res.body.data.companies.find((c) => c.org.id === foundation.id);
+    expect(f.org.kind).toBe('foundation');
+    // the three months around "d(3)" may straddle a month edge, so read the whole window
+    const wide = (await overview(`?from=${new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 7)}&to=${thisMonth}&state=all`)).body.data.companies.find((c) => c.org.id === foundation.id);
+    expect(wide.totals).toMatchObject({ revenue: 600000, expenses: 300000, profit: 300000 });
+    expect(wide.valuation).toBeNull();
+    expect(wide.assets).toBe(300000); // the fund balance
+    // the group valuation is the sum of the companies that have one; the foundation adds nothing to it
+    const valuations = res.body.data.companies.filter((c) => c.valuation).reduce((a, c) => a + c.valuation.current, 0);
+    expect(res.body.data.totals.valuation).toBe(valuations);
+    // campaign planning numbers are kept apart from the books
+    const fb = res.body.data.foundation;
+    expect(fb.companies.map((c) => c.org_id)).toEqual([foundation.id]);
+    expect(fb.campaigns).toMatchObject({ total: 1, active: 1 });
+    expect(fb.money).toMatchObject({ allocated_budget: 1000000, planned_investment: 800000, actual_expenditure: 300000, commitments: 100000, funds_received: 600000, remaining_allocated: 700000, uncommitted: 600000 });
+    expect(fb.projected.monthly.length).toBeGreaterThan(0);
+    expect(f.foundation.campaigns.total).toBe(1);
+    // other companies carry no foundation block
+    expect(res.body.data.companies.find((c) => c.org.id === gulati.id).foundation).toBeUndefined();
+    // a group without a foundation has none
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation', 'coming_soon'] } });
+    expect((await overview()).body.data.foundation).toBeNull();
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation'] } });
+
+    // asset value is not set from the group (it is the fund balance); drill-down and projection both answer
+    expect((await put(foundation.id, { month: thisMonth, asset_value: 1 })).status).toBe(422);
+    const dd = await authed(request(app).get(`${base}/companies/${foundation.id}/drilldown?from=${thisMonth}&to=${thisMonth}`), superToken);
+    expect(dd.status).toBe(200);
+    expect(dd.body.data.sections.map((x) => x.key)).toEqual(['campaigns', 'months']);
+    expect(dd.body.data.sections[0].rows[0][0]).toContain('GF-0001');
+    const pr = (await projection(`?org_ids=${foundation.id}&horizon=2`)).body.data;
+    const pf = pr.companies[0];
+    expect(pf.org.kind).toBe('foundation');
+    expect(pf.projected.every((m) => m.valuation === null)).toBe(true);
+    // the previous period of a foundation compares income / expenses like any company
+    expect(res.body.data.totals.change_pct).toHaveProperty('revenue');
+  });
 });
