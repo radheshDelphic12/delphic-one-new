@@ -174,9 +174,12 @@ const projectionQuerySchema = z
 
 /**
  * Projection + valuation for every company, from the SAME monthly books the Group Finance tab uses (companyMonths).
- * History = start..end month. The projection continues from the month after the end month for `horizon` months:
- * a straight-line (least squares) fit of the last six months that have figures, separately for revenue and costs, so
- * profit = revenue - costs. Projected valuation = projected profit x 240 + the latest asset value x 3.
+ * History = start..end month (what is shown as actuals). The projection runs for `horizon` months from the month after
+ * the end month - but never later than the CURRENT month, so a history that ends this month still projects this month
+ * (its actuals are only to date) and the months after it. Its basis is a straight-line (least squares) fit of the last
+ * six COMPLETE months before the projection starts that have figures, separately for revenue and costs, whatever the
+ * history window is (a one-month window projects as well as a year). Projected valuation = projected profit x 240 +
+ * the latest asset value x 3.
  */
 async function projection(orgGroupIds, query = {}) {
   const q = projectionQuerySchema.parse(query);
@@ -184,15 +187,18 @@ async function projection(orgGroupIds, query = {}) {
   const to = q.to || now;
   const from = q.from || at(idx(to) - 11);
   const orgs = await groupOrgs(orgGroupIds, q.org_ids);
-  const futureKeys = Array.from({ length: q.horizon }, (_, k) => at(idx(to) + 1 + k));
+  const startIdx = Math.min(idx(to) + 1, idx(now));
+  const futureKeys = Array.from({ length: q.horizon }, (_, k) => at(startIdx + k));
+  const basisFrom = at(startIdx - 6);
+  const basisTo = at(startIdx - 1);
 
   const companies = await Promise.all(orgs.map(async (org) => {
     const orgOut = { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org), enabled_modules: org.enabled_modules, coming_soon: isSoon(org) };
     if (isSoon(org)) return { org: orgOut, coming_soon: true, history: [], projected: [], totals: null, confidence: 'low' };
-    const months = await companyMonths(org, from, to, q.state);
+    const [months, basisMonths] = await Promise.all([companyMonths(org, from, to, q.state), companyMonths(org, basisFrom, basisTo, q.state)]);
     const history = months.map((m) => ({ month: m.month, revenue: m.revenue, expenses: m.expenses, profit: m.profit, asset_value: m.asset_value, valuation: m.valuation, closed: m.closed }));
-    // Basis: the last six COMPLETE months that carry figures (the month in progress is not a full month).
-    const basis = history.filter((m) => m.month < now && (m.revenue || m.expenses || m.profit)).slice(-6);
+    // Basis: the last six COMPLETE months before the projection starts that carry figures (the month in progress is not a full month).
+    const basis = basisMonths.filter((m) => m.month < now && (m.revenue || m.expenses || m.profit));
     const revenue = financialsService.linearForecast(basis.map((m) => m.revenue), q.horizon);
     const cost = financialsService.linearForecast(basis.map((m) => m.expenses), q.horizon);
     const asset = history.length ? history[history.length - 1].asset_value : 0;
@@ -230,7 +236,7 @@ async function projection(orgGroupIds, query = {}) {
   const gp = byMonth((c) => c.projected);
   const tot = (k) => round2(live.reduce((a, c) => a + (c.totals[k] || 0), 0));
   return {
-    from, to, horizon: q.horizon, state: q.state, formula: FORMULA, projected_months: futureKeys,
+    from, to, horizon: q.horizon, state: q.state, formula: FORMULA, projected_months: futureKeys, basis_from: basisFrom, basis_to: basisTo,
     currency: currencies.length === 1 ? currencies[0] : null, mixed_currency: currencies.length > 1,
     companies,
     group: {

@@ -265,6 +265,24 @@ describe('super admin group dashboard', () => {
     expect(earlier.companies.find((c) => c.org.id === gulati.id).projected.map((m) => m.revenue)).toEqual([4000, 5000]);
   });
 
+  test('a history that ends this month still projects: it starts with the current month and uses the last complete months', async () => {
+    const now = new Date();
+    const key = (back) => { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1)); return d.toISOString().slice(0, 7); };
+    for (const [i, back] of [4, 3, 2, 1].entries()) {
+      await prisma.gxPeriodClose.create({ data: { org_id: gulati.id, month: key(back), status: 'closed', snapshot: { sales_revenue: 1000 * (i + 1), net_profit: 1000 * (i + 1) - 500 }, closed_at: new Date() } });
+    }
+    const cur = key(0);
+    const r = (await projection(`?from=${cur}&to=${cur}&horizon=3&state=locked`)).body.data;
+    expect(r.projected_months).toEqual([cur, key(-1), key(-2)]);
+    const g = r.companies.find((c) => c.org.id === gulati.id);
+    expect(g.history.map((m) => m.month)).toEqual([cur]);
+    expect(g.projected.map((m) => m.revenue)).toEqual([5000, 6000, 7000]);
+    expect(g.confidence).toBe('medium');
+    // last month as the history: the projection still begins with the current month
+    const last = (await projection(`?from=${key(1)}&to=${key(1)}&horizon=2&state=locked`)).body.data;
+    expect(last.projected_months).toEqual([cur, key(-1)]);
+  });
+
   test('projection filters: company subset, coming soon left out, bad ranges refused, company admin refused', async () => {
     const only = (await projection(`?org_ids=${gulati.id}&horizon=1`)).body.data;
     expect(only.companies.map((c) => c.org.id)).toEqual([gulati.id]);

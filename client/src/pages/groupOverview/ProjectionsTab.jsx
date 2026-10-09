@@ -81,12 +81,18 @@ export default function ProjectionsTab() {
   const live = useMemo(() => (data?.companies || []).filter((c) => !c.coming_soon), [data]);
   const chart = useMemo(() => {
     if (!data || data.mixed_currency) return [];
-    const rows = data.group.history.map((r) => ({ month: r.month, label: shortMonth(r.month), actual: r.revenue, actualValuation: r.valuation, actualProfit: r.profit }));
-    // The projected lines start on the last actual month so each pair reads as one continuous trend.
-    const last = rows[rows.length - 1];
-    if (last) { last.projected = last.actual; last.projectedValuation = last.actualValuation; last.projectedProfit = last.actualProfit; }
-    for (const r of data.group.projected) rows.push({ month: r.month, label: shortMonth(r.month), projected: r.revenue, projectedValuation: r.valuation, projectedProfit: r.profit });
-    return rows;
+    const byMonth = new Map();
+    for (const r of data.group.history) byMonth.set(r.month, { month: r.month, label: shortMonth(r.month), actual: r.revenue, actualValuation: r.valuation, actualProfit: r.profit });
+    // The projected lines start on the last actual month (unless the projection itself covers it, e.g. the current month)
+    // so each pair reads as one continuous trend.
+    const lastActual = data.group.history[data.group.history.length - 1];
+    const first = data.group.projected[0];
+    if (lastActual && first && first.month > lastActual.month) {
+      const row = byMonth.get(lastActual.month);
+      row.projected = row.actual; row.projectedValuation = row.actualValuation; row.projectedProfit = row.actualProfit;
+    }
+    for (const r of data.group.projected) byMonth.set(r.month, { ...(byMonth.get(r.month) || { month: r.month, label: shortMonth(r.month) }), projected: r.revenue, projectedValuation: r.valuation, projectedProfit: r.profit });
+    return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
   }, [data]);
 
   async function saveSettings(values) {
@@ -147,7 +153,7 @@ export default function ProjectionsTab() {
             <Segmented label="Project" value={horizon} options={HORIZONS} onChange={setHorizon} />
             <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
           </div>
-          <p className="text-[11px] text-tertiary-500">The projection starts the month after the history&apos;s end month, so choosing an earlier history window shows what the trend would have predicted from there. It is a straight-line fit of the last six months that have figures, so it is indicative, not a forecast.</p>
+          <p className="text-[11px] text-tertiary-500">History is what you see as actuals. The projection covers the current month and the months after it (or starts after an earlier history end), and is a straight-line fit of the last six complete months that have figures - whatever history you pick - so it is indicative, not a forecast. The current month&apos;s actuals are only to date.</p>
         </div>
       </div>
 
