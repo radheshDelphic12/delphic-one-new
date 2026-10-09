@@ -15,7 +15,8 @@ const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const monthSchema = z.string().regex(MONTH);
 const idx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
 const at = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+// The current month in the app's own timezone (not UTC), so it turns over at local midnight like the client's does.
+const currentMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata', year: 'numeric', month: '2-digit' }).format(new Date());
 
 // Alert thresholds are configurable per request; these are only the defaults.
 const DEFAULT_THRESHOLDS = { revenue_drop_pct: 20, profit_drop_pct: 20, expense_rise_pct: 30, valuation_drop_pct: 0 };
