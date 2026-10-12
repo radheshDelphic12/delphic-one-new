@@ -56,8 +56,15 @@ describe('pipeline board role scoping', () => {
     expect(ids).toEqual(expect.arrayContaining([ownRequirement.id, otherSalesRequirement.id]));
   });
 
-  test('sales sees only their own requirements', async () => {
+  test('sales sees every sales requirement by default (shared Sales team)', async () => {
     const res = await authed(request(app).get('/api/v1/pipeline/board'), salesToken);
+    expect(res.status).toBe(200);
+    const ids = res.body.data.requirements.map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining([ownRequirement.id, otherSalesRequirement.id]));
+  });
+
+  test('sales can narrow the board to their own with scope=mine', async () => {
+    const res = await authed(request(app).get('/api/v1/pipeline/board'), salesToken).query({ scope: 'mine' });
     expect(res.status).toBe(200);
     const ids = res.body.data.requirements.map((r) => r.id);
     expect(ids).toContain(ownRequirement.id);

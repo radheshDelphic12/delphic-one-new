@@ -87,7 +87,7 @@ async function getBoard(user, filters = {}) {
   } = filters;
 
   const cutoff = new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
-  const scopeWhere = await requirementScopeWhere(user);
+  const scopeWhere = await requirementScopeWhere(user, { sharedSales: true, mine: filters.scope === 'mine' });
   const statuses = parseCsvList(status);
   const priorities = parseCsvList(priority);
   const stages = parseCsvList(submission_stage);
