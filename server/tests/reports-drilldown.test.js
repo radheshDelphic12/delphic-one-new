@@ -195,6 +195,40 @@ describe('drilldown: coverage reports + access', () => {
     expect(res.body.data.total).toBe(2);
   });
 
+  test('recruiter reports: profiles submitted to the client per recruiter and day, self-scoped for a recruiter', async () => {
+    const client = await mkAccount({ stage: 'active', owner_id: bda.id });
+    const req = await createRequirement(salesToken, client.id);
+    const seats = (await authed(request(app).get(`/api/v1/requirements/${req.id}/seats`), salesToken)).body.data;
+    const other = await createUser({ role: 'recruiter', name: 'Other Recruiter' });
+    const mk = async (name, by) => {
+      const p = await prisma.profile.create({ data: { name, added_by: by.id, source: 'direct', total_experience_years: 3, primary_skills: ['x'] } });
+      const sub = await prisma.submission.create({ data: { requirement_seat_id: seats[0].id, profile_id: p.id, submitted_by: by.id, stage: 'submitted_to_client' } });
+      await prisma.stageHistory.create({ data: { entity_type: 'submission', entity_id: sub.id, from_stage: 'internal_screening', to_stage: 'submitted_to_client', changed_by: by.id, changed_at: SEP } });
+    };
+    await mk('Mine one', recruiter);
+    await mk('Mine two', recruiter);
+    await mk('Theirs', other);
+
+    const asAdmin = await authed(request(app).get('/api/v1/reports/recruiter-reports').query(RANGE), adminToken);
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.data.tables[0].total).toBe(3);
+
+    const asRecruiter = await authed(request(app).get('/api/v1/reports/recruiter-reports').query(RANGE), recruiterToken);
+    const table = asRecruiter.body.data.tables[0];
+    expect(table.total).toBe(2);
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0].count).toBe(2);
+    expect(table.rows[0].date).toBe(iso(SEP));
+
+    const base = { report: 'recruiter-reports', table: 'profiles_submitted_to_client', metric: 'count', date: table.rows[0].date };
+    const mine = await drill(recruiterToken, { ...base, person_id: other.id }); // a recruiter cannot widen to someone else
+    expect(mine.status).toBe(200);
+    expect(mine.body.data.total).toBe(2);
+    const theirs = await drill(adminToken, { ...base, person_id: other.id });
+    expect(theirs.body.data.total).toBe(1);
+    expect((await drill(salesToken, base)).status).toBe(403);
+  });
+
   test('roles that cannot open a report cannot drill into it, and unknown tables are rejected', async () => {
     expect((await drill(recruiterToken, { report: 'hr', table: 'sourcing' })).status).toBe(403);
     expect((await drill(salesToken, { report: 'hr', table: 'sourcing' })).status).toBe(403);

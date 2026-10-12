@@ -376,6 +376,27 @@ const RESOLVERS = {
     );
   },
 
+  // ---- Recruiter reports ----
+  'recruiter-reports:profiles_submitted_to_client': async (q) => {
+    const range = rangeOf(q);
+    const history = await prisma.stageHistory.findMany({
+      where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+      orderBy: { changed_at: 'asc' },
+      select: { entity_id: true, changed_at: true },
+    });
+    const at = new Map();
+    for (const h of history) if (!at.has(h.entity_id)) at.set(h.entity_id, h.changed_at);
+    return submissions(
+      'Profiles submitted to client',
+      {
+        id: { in: [...at.keys()] },
+        ...(q.person_id ? { submitted_by: q.person_id } : {}),
+        ...(q.client_id ? { seat: { requirement: { account_id: q.client_id } } } : {}),
+      },
+      { dateLabel: 'Submitted to client on', dateOf: (s) => at.get(s.id) }
+    );
+  },
+
   // ---- Coverage reports ----
   'clients-without-requirements:main': (q) =>
     requirements('Active requirements', { account_id: q.account_id, status: { in: ACTIVE_REQUIREMENT_STATUSES } }),
@@ -429,6 +450,7 @@ const REPORT_ROLES = {
   joinings: ['admin', 'sales'],
   'bda-reports': ['admin', 'bda'],
   'sales-reports': ['admin', 'sales'],
+  'recruiter-reports': ['admin', 'recruiter'],
   'clients-without-requirements': ['admin', 'sales', 'bda'],
   'recruiter-vendor-gaps': ['admin', 'recruiter'],
 };
@@ -445,6 +467,7 @@ async function drilldown(user, query) {
   if (query.report === 'bda-reports' && user.role === 'bda') q.person_id = user.id;
   if (query.report === 'sales-reports' && user.role === 'sales') q.person_id = user.id;
   if (query.report === 'recruiter-vendor-gaps' && user.role === 'recruiter') q.recruiter_id = user.id;
+  if (query.report === 'recruiter-reports' && user.role === 'recruiter') q.person_id = user.id;
   if (query.report === 'clients-without-requirements' && user.role === 'bda') {
     const owned = await prisma.account.count({ where: { id: q.account_id, owner_id: user.id } });
     if (!owned) return { error: 'forbidden' };

@@ -1700,6 +1700,75 @@ async function salesReports({ date_from, date_to, sales_id, client_id }) {
   };
 }
 
+/**
+ * Recruiter reports — one table today: profiles submitted to the client, per recruiter (the submission's
+ * `submitted_by`) per day. A submission counts on the day it FIRST moved to "submitted to client" (stage history),
+ * the same anchor the HR and Sales reports use. `recruiter_id` narrows to one recruiter (forced for a recruiter caller).
+ */
+async function recruiterReports({ date_from, date_to, recruiter_id, client_id }) {
+  const range = optionalDateRange(date_from, date_to);
+  const history = await prisma.stageHistory.findMany({
+    where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+    orderBy: { changed_at: 'asc' },
+    select: { entity_id: true, changed_at: true },
+  });
+  const at = new Map();
+  for (const h of history) if (!at.has(h.entity_id)) at.set(h.entity_id, h.changed_at);
+
+  const subs = at.size
+    ? await prisma.submission.findMany({
+        where: {
+          id: { in: [...at.keys()] },
+          ...(recruiter_id ? { submitted_by: recruiter_id } : {}),
+          ...(client_id ? { seat: { requirement: { account_id: client_id } } } : {}),
+        },
+        select: {
+          id: true,
+          submitted_by: true,
+          submitted_by_user: { select: { id: true, name: true } },
+          profile: { select: { name: true } },
+          seat: { select: { requirement: { select: { title: true, account: { select: { id: true, name: true } } } } } },
+        },
+      })
+    : [];
+
+  const rows = new Map();
+  for (const s of subs) {
+    const day = dayKey(at.get(s.id));
+    const key = `${s.submitted_by}|${day}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        recruiter: s.submitted_by_user?.name || 'Unknown',
+        recruiter_id: s.submitted_by,
+        date: day,
+        count: 0,
+        profiles: {},
+        details: [],
+      });
+    }
+    const row = rows.get(key);
+    row.count += 1;
+    const profileName = s.profile?.name || '—';
+    row.profiles[profileName] = (row.profiles[profileName] || 0) + 1;
+    row.details.push({
+      profile: { name: profileName },
+      requirement: { title: s.seat?.requirement?.title || '—' },
+      client: { name: s.seat?.requirement?.account?.name || '—', id: s.seat?.requirement?.account?.id || null },
+    });
+  }
+
+  return {
+    tables: [
+      {
+        key: 'profiles_submitted_to_client',
+        title: 'Profiles submitted to client',
+        total: subs.length,
+        rows: [...rows.values()].sort(byDateThenNameDesc('recruiter')),
+      },
+    ],
+  };
+}
+
 // One row per submission. All three duration columns are measured from the
 // requirement's creation time: requirement created -> submission created,
 // -> first internal round 1 scheduled, -> submitted to client.
@@ -1807,6 +1876,7 @@ module.exports = {
   timeToSubmit,
   bdaReports,
   salesReports,
+  recruiterReports,
   // shared with drilldown.service so a drill-down uses the exact same IST day/range rules
   dayKey,
   reportFrom,

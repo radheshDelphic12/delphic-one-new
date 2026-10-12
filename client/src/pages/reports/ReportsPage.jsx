@@ -58,6 +58,7 @@ import {
   joiningsSections,
   bdaReportsSections,
   salesReportsSections,
+  recruiterReportsSections,
   sectionTabBadge,
   reportsForRole,
   tableRowsForReport,
@@ -353,6 +354,7 @@ export default function ReportsPage() {
   const [joiningsTab, setJoiningsTab] = useState('by_sourcer');
   const [bdaReportsTab, setBdaReportsTab] = useState('accounts_created');
   const [salesReportsTab, setSalesReportsTab] = useState('requirements_created');
+  const [recruiterReportsTab, setRecruiterReportsTab] = useState('profiles_submitted_to_client');
   const [ttsClientId, setTtsClientId] = useState('');
   const [ttsRequirementId, setTtsRequirementId] = useState('');
   const [ttsSourcerId, setTtsSourcerId] = useState('');
@@ -384,7 +386,9 @@ export default function ReportsPage() {
   const isTimeToSubmit = active === 'time-to-submit';
   const isBdaReports = active === 'bda-reports';
   const isSalesReports = active === 'sales-reports';
-  const isDateOnly = isHr || isJoinings || isTimeToSubmit || isBdaReports || isSalesReports; // reports that take only a date range
+  const isRecruiterReports = active === 'recruiter-reports';
+  const isDateOnly =
+    isHr || isJoinings || isTimeToSubmit || isBdaReports || isSalesReports || isRecruiterReports; // reports that take only a date range
   const isCoverage = active === 'clients-without-requirements' || active === 'recruiter-vendor-gaps';
   const isClientsWithoutReqs = active === 'clients-without-requirements';
   const isRvg = active === 'recruiter-vendor-gaps';
@@ -396,13 +400,15 @@ export default function ReportsPage() {
     'recruiter-vendor-gaps': 'recruiter',
     'bda-reports': 'bda',
     'sales-reports': 'sales',
+    'recruiter-reports': 'recruiter',
   };
   // bda-reports / sales-reports self-scope a bda/sales caller server-side regardless
   // of this filter, so hide it for them — only useful to an admin looking across people.
   const showIndividual =
     can('filterByIndividual') &&
     Boolean(INDIVIDUAL_ROLE_BY_REPORT[active]) &&
-    !((active === 'bda-reports' && user?.role === 'bda') || (active === 'sales-reports' && user?.role === 'sales'));
+    !((active === 'bda-reports' && user?.role === 'bda') || (active === 'sales-reports' && user?.role === 'sales') ||
+      (active === 'recruiter-reports' && user?.role === 'recruiter'));
   const showCoveragePeople = can('filterByIndividual') && isClientsWithoutReqs;
   const canEditCoverage = (isClientsWithoutReqs || isRvg) && userCan(user, 'editBroughtBy');
 
@@ -629,6 +635,7 @@ export default function ReportsPage() {
     if (individualId && active === 'recruiter-vendor-gaps') params.recruiter_id = individualId;
     if (individualId && active === 'bda-reports') params.bda_id = individualId;
     if (individualId && active === 'sales-reports') params.sales_id = individualId;
+    if (individualId && active === 'recruiter-reports') params.recruiter_id = individualId;
     if (isBdaReports && bdaReportsAccountId) params.client_id = bdaReportsAccountId;
     if (isBdaReports && bdaReportsAccountType) params.account_type = bdaReportsAccountType;
     if (isSalesReports && salesReportsAccountId) params.client_id = salesReportsAccountId;
@@ -742,7 +749,7 @@ export default function ReportsPage() {
     // Rows name their subject as plain text (HR / BDA / Sales / Joinings) or as { id, name } (coverage reports).
     const nameOf = (value) => (value && typeof value === 'object' ? value.name : value);
     const who =
-      [row.vendor, row.client, row.sourcer, row.interviewer, row.bda, row.sales_poc].map(nameOf).find(Boolean) || '';
+      [row.vendor, row.client, row.sourcer, row.interviewer, row.bda, row.sales_poc, row.recruiter].map(nameOf).find(Boolean) || '';
     const when = row.date ? formatReportDate(row.date) : row.month || '';
     return [col.header, who, when].filter(Boolean).join(' · ');
   }
@@ -870,13 +877,23 @@ export default function ReportsPage() {
             ? bdaReportsSections(payload)
             : active === 'sales-reports'
               ? salesReportsSections(payload)
-              : [];
+              : active === 'recruiter-reports'
+                ? recruiterReportsSections(payload)
+                : [];
   const hrSection = isHr ? sections.find((s) => s.key === hrTab) || sections[0] : null;
   const joiningsSection = isJoinings ? sections.find((s) => s.key === joiningsTab) || sections[0] : null;
   const bdaReportsSection = isBdaReports ? sections.find((s) => s.key === bdaReportsTab) || sections[0] : null;
   const salesReportsSection = isSalesReports
     ? sections.find((s) => s.key === salesReportsTab) || sections[0]
     : null;
+  const recruiterReportsSection = isRecruiterReports
+    ? sections.find((s) => s.key === recruiterReportsTab) || sections[0]
+    : null;
+  const tablesSection = isBdaReports
+    ? bdaReportsSection
+    : isRecruiterReports
+      ? recruiterReportsSection
+      : salesReportsSection;
   // Count cell reveals the per-source split (Bench 3 · Vendor 2 · Market 1) on hover.
   const hrColumns = (hrSection?.columns || []).map((col) =>
     col.key === 'count'
@@ -1521,17 +1538,23 @@ export default function ReportsPage() {
             onRowClick={(row) => openRow(row, joiningsSection?.key, joiningsSection?.columns || [])}
           />
         </div>
-      ) : isBdaReports || isSalesReports ? (
+      ) : isBdaReports || isSalesReports || isRecruiterReports ? (
         <div className="space-y-4">
           <div
             className="grid gap-2 grid-cols-1 sm:grid-cols-3 lg:grid-cols-5"
             role="tablist"
-            aria-label={isBdaReports ? 'BDA report tables' : 'Sales report tables'}
+            aria-label={
+              isBdaReports ? 'BDA report tables' : isRecruiterReports ? 'Recruiter report tables' : 'Sales report tables'
+            }
           >
             {sections.map((section) => {
-              const activeSection = isBdaReports ? bdaReportsSection : salesReportsSection;
+              const activeSection = tablesSection;
               const selected = activeSection?.key === section.key;
-              const setTab = isBdaReports ? setBdaReportsTab : setSalesReportsTab;
+              const setTab = isBdaReports
+                ? setBdaReportsTab
+                : isRecruiterReports
+                  ? setRecruiterReportsTab
+                  : setSalesReportsTab;
               return (
                 <button
                   key={section.key}
@@ -1559,17 +1582,17 @@ export default function ReportsPage() {
           </div>
           <DataTable
             columns={withDrill(
-              (isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || [],
-              (isBdaReports ? bdaReportsSection : salesReportsSection)?.key
+              tablesSection?.columns || [],
+              tablesSection?.key
             )}
-            rows={(isBdaReports ? bdaReportsSection : salesReportsSection)?.rows || []}
+            rows={tablesSection?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
             onRowClick={(row) =>
               openRow(
                 row,
-                (isBdaReports ? bdaReportsSection : salesReportsSection)?.key,
-                (isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || []
+                tablesSection?.key,
+                tablesSection?.columns || []
               )
             }
           />

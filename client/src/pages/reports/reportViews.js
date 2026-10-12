@@ -25,6 +25,7 @@ export const ALL_REPORTS = [
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },
   { key: 'bda-reports', label: 'BDA reports', roles: ['admin', 'bda'] },
   { key: 'sales-reports', label: 'Sales reports', roles: ['admin', 'sales'] },
+  { key: 'recruiter-reports', label: 'Recruiter reports', roles: ['admin', 'recruiter'] },
 ];
 
 export function reportsForRole(role) {
@@ -490,6 +491,14 @@ const SALES_REPORTS_COLUMNS = {
   ],
 };
 
+const RECRUITER_REPORTS_COLUMNS = {
+  profiles_submitted_to_client: [
+    { key: 'recruiter', header: 'Recruiter' },
+    { key: 'count', header: 'Count', render: hoverCount('profiles') },
+    reportDate('Date'),
+  ],
+};
+
 // Per-table tab badge: for the daily aggregate tables the useful headline number
 // is the SUM of the count column (e.g. total meetings this month), not the number
 // of grouped rows. Detail tables (one row = one record) fall back to row count.
@@ -538,6 +547,10 @@ function tablesToSections(columnsByKey, data) {
 
 export function bdaReportsSections(data) {
   return tablesToSections(BDA_REPORTS_COLUMNS, data);
+}
+
+export function recruiterReportsSections(data) {
+  return tablesToSections(RECRUITER_REPORTS_COLUMNS, data);
 }
 
 export function salesReportsSections(data) {
@@ -790,6 +803,7 @@ const DRILL_RULES = {
   'sales-reports:requirements_created': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
   'sales-reports:meetings_attended': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
   'sales-reports:profiles_submitted_to_client': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'recruiter-reports:profiles_submitted_to_client': { metrics: ['count'], ids: dayAndPerson('recruiter_id') },
   'clients-without-requirements:main': {
     metrics: ['active_requirements_count'],
     ids: (row) => ({ account_id: row.client?.id }),

@@ -39,6 +39,7 @@ const REPORTS = {
   'time-to-submit': (q) => service.timeToSubmit(q),
   'bda-reports': (q) => service.bdaReports(q),
   'sales-reports': (q) => service.salesReports(q),
+  'recruiter-reports': (q) => service.recruiterReports(q),
 };
 
 router.get(
@@ -161,6 +162,16 @@ router.get(
 );
 
 router.get(
+  '/recruiter-reports',
+  authorize('admin', 'recruiter'),
+  asyncHandler(async (req, res) => {
+    const query = dateRangeSchema.parse(req.query);
+    if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
+    return ok(res, await service.recruiterReports(query));
+  })
+);
+
+router.get(
   '/pipeline-explorer',
   authorize('admin', 'sales', 'recruiter', 'bda'),
   asyncHandler(async (req, res) => {
@@ -229,6 +240,7 @@ router.get(
 
     if (report === 'bda-reports' && req.user.role === 'bda') query.bda_id = req.user.id;
     if (report === 'sales-reports' && req.user.role === 'sales') query.sales_id = req.user.id;
+    if (report === 'recruiter-reports' && req.user.role === 'recruiter') query.recruiter_id = req.user.id;
 
     const data = await fn(query, req.user);
     const sheets = buildExportSheets(report, data);
@@ -297,7 +309,7 @@ function buildExportSheets(report, data) {
   }
 
   if (
-    ['hr', 'joinings', 'bda-reports', 'sales-reports'].includes(report) &&
+    ['hr', 'joinings', 'bda-reports', 'sales-reports', 'recruiter-reports'].includes(report) &&
     data &&
     typeof data === 'object' &&
     Array.isArray(data.tables)
