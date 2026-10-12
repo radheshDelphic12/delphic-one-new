@@ -169,7 +169,7 @@ function Avatar({ org, color }) {
  * Every company, one card shape: logo, name, people and a status chip; revenue / profit / margin; a revenue + profit
  * line when the period has more than one point; and the company's share of group revenue with its valuation.
  */
-export function CompanyCard({ company, color, groupRevenue, onOpen }) {
+export function CompanyCard({ company, color, groupRevenue, onOpen, series: seriesOverride }) {
   const { org } = company;
   if (company.coming_soon) {
     return (
@@ -186,7 +186,7 @@ export function CompanyCard({ company, color, groupRevenue, onOpen }) {
   const loss = t.profit < 0;
   const share = groupRevenue > 0 && t.revenue > 0 ? Math.min(100, (t.revenue / groupRevenue) * 100) : 0;
   const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profit', 'bg-emerald-100 text-emerald-700'];
-  const series = (company.series || []).map((r) => ({ label: r.label, revenue: Number(r.revenue) || 0, profit: Number(r.profit) || 0 }));
+  const series = (seriesOverride || company.series || []).map((r) => ({ label: r.label, revenue: Number(r.revenue) || 0, profit: Number(r.profit) || 0 }));
   const showLine = series.length > 1 && series.some((p) => p.revenue || p.profit);
   return (
     <button
@@ -353,14 +353,14 @@ export const AXIS_TICK = { fontSize: 11, fill: '#6b7c72' };
 
 /** Props for a <Line>: smooth, thick, softly glowing, with white-ringed dots while the series is short. */
 export function lineProps(color, count = 0, { dashed = false, width = 3, labels = false, format = compact } = {}) {
-  const few = count > 0 && count <= 18;
+  const few = count > 0 && count <= 6;
   return {
     type: 'monotone',
     stroke: color,
     strokeWidth: width,
     strokeLinecap: 'round',
     strokeDasharray: dashed ? '7 5' : undefined,
-    dot: few ? { r: 4, fill: '#fff', stroke: color, strokeWidth: 2.5 } : false,
+    dot: few ? { r: 3.5, fill: '#fff', stroke: color, strokeWidth: 2.25 } : false,
     activeDot: { r: 6.5, fill: color, stroke: '#fff', strokeWidth: 3 },
     style: { filter: `drop-shadow(0 4px 6px ${color}45)` },
     animationDuration: 700,

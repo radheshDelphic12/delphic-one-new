@@ -8,6 +8,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import useLiveData from '../../lib/useLiveData.js';
+import useTrendWindow from './trendWindow.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
@@ -48,10 +49,13 @@ export default function GroupDashboardTab() {
   }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const t = data?.totals;
+  // The chart reads a 12-month window when the chosen period is too short to draw a line.
+  const trend = useTrendWindow({ data, range, valid, state, orgIds: '' });
   const chart = useMemo(() => {
-    if (!data) return [];
-    return data.trends.revenue.map((r, i) => ({ label: r.label, revenue: r.total, expenses: data.trends.expenses[i]?.total ?? 0, profit: data.trends.profit[i]?.total ?? 0 }));
-  }, [data]);
+    const tr = trend.trends || data?.trends;
+    if (!tr) return [];
+    return tr.revenue.map((r, i) => ({ label: r.label, revenue: r.total, expenses: tr.expenses[i]?.total ?? 0, profit: tr.profit[i]?.total ?? 0 }));
+  }, [data, trend.trends]);
 
   async function openCompany(org) {
     try {
@@ -90,12 +94,12 @@ export default function GroupDashboardTab() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <StatTile label="Companies" value={t.active_companies} icon={Building2} tone="blue" note={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : `${t.active_companies} live`} />
             <StatTile label="Group headcount" value={t.employees + t.contractors} icon={Users2} tone="violet" note={`${t.employees} employees · ${t.contractors} contractors`} />
-            <StatTile label="Revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={data.trends.revenue.map((r) => r.total)} />
-            <StatTile label="Profit" value={compact(t.profit)} icon={TrendingUp} tone="teal" pct={t.change_pct?.profit} series={data.trends.profit.map((r) => r.total)} />
-            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="amber" pct={t.change_pct?.valuation} series={data.trends.valuation.map((r) => r.total)} />
+            <StatTile label="Revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={(trend.trends || data.trends).revenue.map((r) => r.total)} />
+            <StatTile label="Profit" value={compact(t.profit)} icon={TrendingUp} tone="teal" pct={t.change_pct?.profit} series={(trend.trends || data.trends).profit.map((r) => r.total)} />
+            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="amber" pct={t.change_pct?.valuation} series={(trend.trends || data.trends).valuation.map((r) => r.total)} />
           </div>
 
-          <ChartCard title="Revenue, expenses and profit" subtitle={`All companies together, ${GROUPINGS.find(([k]) => k === granularity)[1].toLowerCase()}, ${range.from} to ${range.to}`}>
+          <ChartCard title="Revenue, expenses and profit" subtitle={trend.widened ? `All companies together, monthly. ${trend.note}` : `All companies together, ${GROUPINGS.find(([k]) => k === granularity)[1].toLowerCase()}, ${range.from} to ${range.to}`}>
             {chart.length === 0 || chart.every((r) => !r.revenue && !r.expenses && !r.profit) ? (
               <EmptyState title="No financial data in this period" description="Nothing has been recorded for these months. Try another period." />
             ) : (
@@ -122,7 +126,7 @@ export default function GroupDashboardTab() {
           <div>
             <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Companies</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {data.companies.map((c, i) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} onOpen={openCompany} />)}
+              {data.companies.map((c, i) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} series={trend.companies?.find((x) => x.org.id === c.org.id)?.series} onOpen={openCompany} />)}
             </div>
           </div>
         </div>

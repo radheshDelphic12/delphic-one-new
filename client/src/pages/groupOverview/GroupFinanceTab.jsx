@@ -12,6 +12,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import { downloadCsv, printReport } from '../../lib/groupExport.js';
 import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
+import useTrendWindow from './trendWindow.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
@@ -297,6 +298,9 @@ export default function GroupFinanceTab() {
     { intervalMs: LIVE_EVERY_MS, enabled: validRange, deps: [range?.from, range?.to, granularity, state, selectedKey] }
   );
 
+  // Charts read a 12-month window when the chosen period is too short to draw a line.
+  const trend = useTrendWindow({ data, range, valid: validRange, state, orgIds: selectedKey });
+
   useEffect(() => {
     if (error) pushError(apiErrorMessage(error, 'Failed to load the group dashboard'), 'Something went wrong');
   }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -429,11 +433,11 @@ export default function GroupFinanceTab() {
           {t.mixed_currency && <div className="rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-sm">Companies report in different currencies, so group totals are shown as plain sums.</div>}
           <SectionTitle title="1. Group at a glance" hint={`${range.from} to ${range.to} - ${t.active_companies} companies`} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <StatTile label="Group revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={data.trends.revenue.map((r) => r.total)} />
-            <StatTile label="Group profit" value={compact(t.profit)} icon={TrendingUp} tone="blue" pct={t.change_pct?.profit} series={data.trends.profit.map((r) => r.total)} />
-            <StatTile label="Group expenses" value={compact(t.expenses)} icon={Scale} tone="amber" pct={t.change_pct?.expenses} invert series={data.trends.expenses.map((r) => r.total)} />
-            <StatTile label="Group assets" value={compact(t.assets)} icon={PiggyBank} tone="violet" pct={t.change_pct?.assets} series={data.trends.assets.map((r) => r.total)} />
-            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="teal" pct={t.change_pct?.valuation} series={data.trends.valuation.map((r) => r.total)} />
+            <StatTile label="Group revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={(trend.trends || data.trends).revenue.map((r) => r.total)} />
+            <StatTile label="Group profit" value={compact(t.profit)} icon={TrendingUp} tone="blue" pct={t.change_pct?.profit} series={(trend.trends || data.trends).profit.map((r) => r.total)} />
+            <StatTile label="Group expenses" value={compact(t.expenses)} icon={Scale} tone="amber" pct={t.change_pct?.expenses} invert series={(trend.trends || data.trends).expenses.map((r) => r.total)} />
+            <StatTile label="Group assets" value={compact(t.assets)} icon={PiggyBank} tone="violet" pct={t.change_pct?.assets} series={(trend.trends || data.trends).assets.map((r) => r.total)} />
+            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="teal" pct={t.change_pct?.valuation} series={(trend.trends || data.trends).valuation.map((r) => r.total)} />
             <StatTile label="Active companies" value={t.active_companies} icon={Building2} tone="rose" note={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : `${t.employees} employees · ${t.contractors} contractors`} />
           </div>
           <p className="text-xs text-tertiary-500">Profit margin {t.margin_pct === null ? 'N/A' : `${t.margin_pct}%`} · {t.employees} employees · {t.contractors} contractors. Group valuation = sum of each company&apos;s valuation (profit × {data.formula.profit} + asset value × {data.formula.asset_value}).</p>
@@ -446,7 +450,7 @@ export default function GroupFinanceTab() {
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
+            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} series={trend.companies?.find((x) => x.org.id === c.org.id)?.series} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
           </div>
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -490,12 +494,12 @@ export default function GroupFinanceTab() {
               <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-600 bg-gradient-to-b from-[#3a8a5f] to-[#2b6b48] text-white shadow-[0_6px_14px_-6px_rgba(43,107,72,0.7)]' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-primary-50 hover:text-primary-800'}`}>{label}</button>
             ))}
           </div>
-          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
+          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={[TREND_METRICS.find(([k]) => k === trendMetric)[2], trend.note].filter(Boolean).join(' - ')} rows={(trend.trends || data.trends)[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
 
           <SectionTitle title="4. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
-            <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
-            <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
+            <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={(trend.trends || data.trends).revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
+            <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={(trend.trends || data.trends).profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
