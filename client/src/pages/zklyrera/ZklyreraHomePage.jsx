@@ -103,7 +103,7 @@ export default function ZklyreraHomePage() {
               <ul className="mt-2 space-y-1 text-xs text-tertiary-600">{data.expenses_by_category.slice(0, 6).map((c, i) => <li key={c.name} className="flex justify-between"><span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: ZK_PIE[i % ZK_PIE.length] }} />{c.name}</span><span className="tabular-nums">{inr(c.amount)}</span></li>)}</ul>
             </ChartCard>
             <ChartCard title="Expenses and salaries" subtitle="By month"><ExpenseTrendChart rows={data.trend} showSalary={canSalary} /></ChartCard>
-            <ChartCard title="Projected vs actual income" subtitle="Dashed line = the plan (an estimate); bars = what happened"><ProjectedActualChart rows={data.projected_by_month} side="income" /></ChartCard>
+            <ChartCard title="Projected vs actual income" subtitle="Solid line = what happened; dashed line = the plan (an estimate)"><ProjectedActualChart rows={data.projected_by_month} side="income" /></ChartCard>
             <ChartCard title="Projected vs actual expenses" subtitle="Spending above the plan is unfavourable"><ProjectedActualChart rows={data.projected_by_month} side="expenses" /></ChartCard>
             <ChartCard title="Net result" subtitle="Income less expenses by month"><NetTrendChart rows={data.trend} /></ChartCard>
             <ChartCard title="Investment-wise returns" subtitle="Expected return vs received, per investment"><InvestmentReturnsChart rows={data.investments} /></ChartCard>

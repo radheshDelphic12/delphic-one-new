@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowUpRight, Landmark } from 'lucide-react';
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -64,16 +64,16 @@ export default function ZklyreraGroupSection({ zklyrera }) {
           {monthly.every((r) => !r.projected_income && !r.projected_expenses) ? <p className="py-8 text-center text-sm text-tertiary-500">No projections entered yet.</p> : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={monthly} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+                <LineChart data={monthly} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={short} width={64} />
                   <Tooltip contentStyle={chartTooltipStyle} formatter={(v, n) => [inr(v), n]} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="projected_income" name="Projected income" fill="#7B9A82" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="projected_expenses" name="Projected expenses" fill="#7A2E3B" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="projected_net" name="Projected net" stroke="#B08D57" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
-                </ComposedChart>
+                  <Line type="monotone" dataKey="projected_income" name="Projected income" stroke="#7B9A82" strokeWidth={2.25} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="projected_expenses" name="Projected expenses" stroke="#7A2E3B" strokeWidth={2.25} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="projected_net" name="Projected net" stroke="#B08D57" strokeWidth={2.25} strokeDasharray="6 4" dot={{ r: 3 }} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           )}

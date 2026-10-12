@@ -41,6 +41,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import FilterBar from '../../components/ui/FilterBar.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
+import DrilldownDrawer from './DrilldownDrawer.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -48,6 +49,8 @@ import {
   chartTypeForReport,
   columnsForReport,
   defaultDateRange,
+  drillMetrics,
+  drillParams,
   formatReportDate,
   formatReportDateShort,
   hrSections,
@@ -230,6 +233,23 @@ function ReportChart({ reportKey, chartRows, chartBars }) {
   );
 }
 
+/** A report count that opens the records behind it. Plain text when there is nothing to open. */
+function DrillCount({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      title="Show the records behind this count"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="font-semibold text-primary-600 underline decoration-dotted underline-offset-2 hover:text-primary-800"
+    >
+      {children}
+    </button>
+  );
+}
+
 function DetailField({ label, value }) {
   return (
     <div className="rounded-xl bg-tertiary-50 px-3 py-2">
@@ -354,6 +374,8 @@ export default function ReportsPage() {
   const reportRequestId = useRef(0);
   const [exporting, setExporting] = useState(false);
   const [drawerRow, setDrawerRow] = useState(null);
+  // The count the user clicked: { params, label } for GET /reports/drilldown.
+  const [drill, setDrill] = useState(null);
 
   const isExplorer = active === 'pipeline-explorer';
   const isHr = active === 'hr';
@@ -705,6 +727,41 @@ export default function ReportsPage() {
     }
   }
 
+  // Current report filters the drill-down must repeat so its list matches the clicked count.
+  function drillFilters() {
+    const filters = isCoverage ? {} : { date_from: dateFrom, date_to: dateTo };
+    if (isHr && hrSource) filters.source = hrSource;
+    if (isBdaReports && bdaReportsAccountId) filters.client_id = bdaReportsAccountId;
+    if (isBdaReports && bdaReportsAccountType) filters.account_type = bdaReportsAccountType;
+    if (isSalesReports && salesReportsAccountId) filters.client_id = salesReportsAccountId;
+    return filters;
+  }
+
+  function drillLabel(row, col) {
+    const who =
+      row.sourcer || row.interviewer || row.bda || row.sales_poc || row.vendor?.name || row.vendor || row.client?.name || '';
+    const when = row.date ? formatReportDate(row.date) : row.month || '';
+    return [col.header, who, when].filter(Boolean).join(' · ');
+  }
+
+  /** Turn the count columns of a report table into links that open the records behind each count. */
+  function withDrill(columns, tableKey = 'main') {
+    const metrics = drillMetrics(active, tableKey);
+    if (!metrics.length) return columns;
+    return columns.map((col) => {
+      if (!metrics.includes(col.key)) return col;
+      return {
+        ...col,
+        render: (row) => {
+          const inner = col.render ? col.render(row) : (row[col.key] ?? 0);
+          const params = drillParams(active, tableKey, col.key, row, drillFilters());
+          if (!params || !Number(row[col.key])) return inner;
+          return <DrillCount onClick={() => setDrill({ params, label: drillLabel(row, col) })}>{inner}</DrillCount>;
+        },
+      };
+    });
+  }
+
   const tableRows = tableRowsForReport(active, payload);
   const baseColumns = columnsForReport(active);
   const columns = canEditCoverage
@@ -741,7 +798,23 @@ export default function ReportsPage() {
       })
     : baseColumns;
   const chartRows = chartDataForReport(active, payload);
-  const chartBars = chartBarsForReport(active);
+  // The coverage charts count every row of the selected view, so name the bars after that
+  // view instead of a fixed "…w/o reqs / submissions" label that is wrong for the other views.
+  const COVERAGE_BAR_NAME = {
+    all: 'Active clients',
+    with_requirements: 'Clients with requirements',
+    no_active: 'Clients without requirements',
+    active: 'Active vendors',
+    inactive: 'Inactive vendors',
+    has_live: 'Vendors with live submissions',
+  };
+  const chartBars = chartBarsForReport(active).map((bar) =>
+    isClientsWithoutReqs
+      ? { ...bar, name: COVERAGE_BAR_NAME[coverageBucket] || bar.name }
+      : isRvg
+        ? { ...bar, name: COVERAGE_BAR_NAME[rvgActivity] || bar.name }
+        : bar
+  );
   const sections =
     active === 'aging'
       ? agingSections(payload)
@@ -825,6 +898,7 @@ export default function ReportsPage() {
               setBdaReportsAccountType('');
               setSalesReportsAccountId('');
               setDrawerRow(null);
+              setDrill(null);
             }}
             searchPlaceholder="Search reports…"
             options={available.map((r) => ({ value: r.key, label: r.label }))}
@@ -1358,7 +1432,7 @@ export default function ReportsPage() {
           {!loading && <HrChart section={hrSection} />}
 
           <DataTable
-            columns={hrColumns}
+            columns={withDrill(hrColumns, hrSection?.key)}
             rows={hrSection?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
@@ -1395,7 +1469,7 @@ export default function ReportsPage() {
             })}
           </div>
           <DataTable
-            columns={joiningsSection?.columns || []}
+            columns={withDrill(joiningsSection?.columns || [], joiningsSection?.key)}
             rows={joiningsSection?.rows || []}
             loading={loading}
             emptyLabel="No joinings in this range"
@@ -1438,7 +1512,10 @@ export default function ReportsPage() {
             })}
           </div>
           <DataTable
-            columns={(isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || []}
+            columns={withDrill(
+              (isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || [],
+              (isBdaReports ? bdaReportsSection : salesReportsSection)?.key
+            )}
             rows={(isBdaReports ? bdaReportsSection : salesReportsSection)?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
@@ -1472,13 +1549,15 @@ export default function ReportsPage() {
         </div>
       ) : (
         <DataTable
-          columns={columns}
+          columns={withDrill(columns)}
           rows={tableRows}
           loading={loading}
           emptyLabel="No rows for this range"
           onRowClick={setDrawerRow}
         />
       )}
+
+      <DrilldownDrawer request={drill} onClose={() => setDrill(null)} />
 
       <Drawer open={Boolean(drawerRow)} title={drawerTitle} onClose={() => setDrawerRow(null)} size="md" tone="info">
         {drawerRow && (

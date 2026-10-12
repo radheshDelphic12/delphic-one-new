@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Area, AreaChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Lock, LockOpen } from 'lucide-react';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -29,16 +29,15 @@ function Trend({ title, subtitle, data, dataKey, color, name, className = '' }) 
     <ChartCard title={title} subtitle={subtitle} className={className}>
       <div className="h-72" data-testid={id}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 22, right: 16, left: 4, bottom: 0 }}>
-            <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.22} /><stop offset="100%" stopColor={color} stopOpacity={0.02} /></linearGradient></defs>
+          <LineChart data={data} margin={{ top: 22, right: 16, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={ZK_COLORS.grid} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
             <YAxis tickFormatter={rupee} tick={{ fontSize: 11 }} width={64} />
             <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => [rupees(v), name]} />
-            <Area type="monotone" dataKey={dataKey} name={name} stroke={color} strokeWidth={2} fill={`url(#${id})`} dot={{ r: 2.5, fill: color, strokeWidth: 0 }} activeDot={{ r: 4 }} isAnimationActive={false}>
+            <Line type="monotone" dataKey={dataKey} name={name} stroke={color} strokeWidth={2.25} dot={{ r: 3, fill: color, strokeWidth: 0 }} activeDot={{ r: 5 }} isAnimationActive={false}>
               <LabelList dataKey={dataKey} position="top" formatter={(v) => (v ? rupee(v) : '')} style={{ fontSize: 10, fill: '#6B7280' }} />
-            </Area>
-          </AreaChart>
+            </Line>
+          </LineChart>
         </ResponsiveContainer>
       </div>
     </ChartCard>

@@ -751,3 +751,64 @@ export function chartBarsForReport(reportKey) {
   }
   return [];
 }
+
+// --- Drill-down: click a count -> the records behind it ----------------------------
+// `report:table` -> the count columns that open a side panel, and how a clicked row maps
+// to the server's `/reports/drilldown` identifiers (person / account / day / month).
+// Section-less reports use table `main`. Only counts that map to a list of records are
+// listed — averages, rates and money columns are not.
+const dayAndPerson = (personKey) => (row) => ({ person_id: row[personKey], date: row.date });
+const DRILL_RULES = {
+  'hr:sourcing': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:submissions': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:round1_by_sourcer': { metrics: ['scheduled', 'completed', 'shortlisted'], ids: dayAndPerson('sourcer_id') },
+  'hr:round1_by_interviewer': {
+    metrics: ['scheduled', 'completed', 'shortlisted'],
+    ids: (row) => ({ person_id: row.interviewer_id, person_name: row.interviewer, date: row.date }),
+  },
+  'joinings:by_sourcer': { metrics: ['joinings'], ids: (row) => ({ person_id: row.sourcer_id, month: row.sort }) },
+  'joinings:by_vendor': { metrics: ['joinings'], ids: (row) => ({ person_id: row.vendor_id, month: row.sort }) },
+  'joinings:by_sales_poc': { metrics: ['joinings'], ids: (row) => ({ person_id: row.sales_poc_id, month: row.sort }) },
+  'joinings:by_interviewer': {
+    metrics: ['l1', 'l2', 'total'],
+    ids: (row) => ({ person_id: row.interviewer_id, person_name: row.interviewer, month: row.sort }),
+  },
+  'bda-reports:accounts_created': { metrics: ['count'], ids: dayAndPerson('bda_id') },
+  'bda-reports:meetings_scheduled': { metrics: ['meetings_scheduled', 'converted_to_active'], ids: dayAndPerson('bda_id') },
+  'bda-reports:meetings_conversion': {
+    metrics: ['meetings_scheduled', 'converted_to_active'],
+    ids: (row) => ({ person_id: row.bda_id }),
+  },
+  'bda-reports:requirements_brought_counts': { metrics: ['count'], ids: dayAndPerson('bda_id') },
+  'sales-reports:requirements_created': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'sales-reports:meetings_attended': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'sales-reports:profiles_submitted_to_client': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'clients-without-requirements:main': {
+    metrics: ['active_requirements_count'],
+    ids: (row) => ({ account_id: row.client?.id }),
+  },
+  'recruiter-vendor-gaps:main': {
+    metrics: ['profiles_sourced', 'profiles_submitted'],
+    ids: (row) => ({ account_id: row.vendor?.id }),
+  },
+};
+
+/** Count columns of a report table that open a drill-down panel. */
+export function drillMetrics(reportKey, tableKey = 'main') {
+  return DRILL_RULES[`${reportKey}:${tableKey}`]?.metrics || [];
+}
+
+/**
+ * Query params for `/reports/drilldown` for one clicked count, or null when the row has
+ * no identifier to drill into. `filters` are the report's current filters (date range, type…).
+ */
+export function drillParams(reportKey, tableKey, metric, row, filters = {}) {
+  const rule = DRILL_RULES[`${reportKey}:${tableKey}`];
+  if (!rule || !rule.metrics.includes(metric)) return null;
+  const ids = rule.ids(row);
+  const params = { report: reportKey, table: tableKey, metric, ...filters };
+  for (const [key, value] of Object.entries(ids)) if (value) params[key] = value;
+  // Without an identifier the server would not narrow to anyone; only the unassigned sales row (null owner) may go without one.
+  if (!params.person_id && !params.person_name && !params.account_id && tableKey !== 'by_sales_poc') return null;
+  return params;
+}

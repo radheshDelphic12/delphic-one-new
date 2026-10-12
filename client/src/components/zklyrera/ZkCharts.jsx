@@ -1,8 +1,10 @@
-import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { ZK_COLORS, inr } from '../../lib/zklyrera/meta.js';
 
+// Every Zklyrera chart is a line chart. Recharts only recognises its own elements as direct children of a chart,
+// so the shared pieces are plain elements / element factories, not components.
 const axis = (v) => `₹${compact(v)}`;
 const PIE = [ZK_COLORS.ink, ZK_COLORS.brass, ZK_COLORS.slate, ZK_COLORS.wine, ZK_COLORS.sage, ZK_COLORS.projected, '#4B5563', '#C9B28A'];
 
@@ -10,11 +12,13 @@ function Frame({ height, label, empty, children }) {
   if (empty) return <div className="flex items-center justify-center text-sm text-tertiary-400" style={{ height: Math.min(height, 160) }}>Nothing to show for these filters.</div>;
   return <div style={{ height }} role="img" aria-label={label}><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div>;
 }
-// Recharts only recognises its own elements as direct children of a chart, so these are plain elements / element factories, not components.
 const grid = <CartesianGrid stroke={ZK_COLORS.grid} vertical={false} />;
 const xAxis = (dataKey = 'label') => <XAxis dataKey={dataKey} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />;
 const yAxis = <YAxis tickFormatter={axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={62} />;
 const tip = <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [inr(v), name]} />;
+const legend = <Legend wrapperStyle={{ fontSize: 12 }} />;
+const margin = { top: 8, right: 14, left: 4, bottom: 0 };
+const line = (key, name, color, extra = {}) => <Line key={key} isAnimationActive={false} type="monotone" dataKey={key} name={name} stroke={color} strokeWidth={2.25} dot={{ r: 3, fill: color, strokeWidth: 0 }} activeDot={{ r: 5 }} {...extra} />;
 const withLabel = (rows) => (rows || []).map((r) => ({ ...r, label: shortMonth(r.month) }));
 const hasAny = (rows, keys) => (rows || []).some((r) => keys.some((k) => Number(r[k]) !== 0));
 
@@ -23,11 +27,10 @@ export function InvestmentFlowChart({ rows, height = 270 }) {
   const data = withLabel(rows);
   return (
     <Frame height={height} label="Monthly investment additions versus principal recovered" empty={!hasAny(data, ['investment_added', 'principal_returned'])}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis()}{yAxis}{tip}<Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="investment_added" name="Investment added" fill={ZK_COLORS.ink} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="principal_returned" name="Principal recovered" fill={ZK_COLORS.brass} radius={[4, 4, 0, 0]} />
-      </BarChart>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}{tip}{legend}
+        {line('investment_added', 'Investment added', ZK_COLORS.ink)}
+        {line('principal_returned', 'Principal recovered', ZK_COLORS.brass)}
+      </LineChart>
     </Frame>
   );
 }
@@ -37,88 +40,77 @@ export function IncomeChart({ rows, height = 270 }) {
   const data = withLabel(rows);
   return (
     <Frame height={height} label="Monthly investment earnings and other income" empty={!hasAny(data, ['investment_earnings', 'other_income'])}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis()}{yAxis}{tip}<Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} stackId="inc" dataKey="investment_earnings" name="Investment earnings" fill={ZK_COLORS.sage} />
-        <Bar isAnimationActive={false} stackId="inc" dataKey="other_income" name="Other income" fill={ZK_COLORS.slate} radius={[4, 4, 0, 0]} />
-      </BarChart>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}{tip}{legend}
+        {line('investment_earnings', 'Investment earnings', ZK_COLORS.sage)}
+        {line('other_income', 'Other income', ZK_COLORS.slate)}
+      </LineChart>
     </Frame>
   );
 }
 
-/** 3. Expenses by category for the selected period (donut + the legend as a list is added by the page). */
+/** 3. Expenses by category for the selected period: one point per category, largest first. */
 export function CategoryChart({ rows, height = 250 }) {
-  const data = (rows || []).filter((r) => r.amount > 0);
+  const data = (rows || []).filter((r) => r.amount > 0).map((r) => ({ ...r, label: r.name.length > 14 ? `${r.name.slice(0, 13)}…` : r.name }));
   return (
     <Frame height={height} label="Expenses by category" empty={!data.length}>
-      <PieChart>
-        <Pie isAnimationActive={false} data={data} dataKey="amount" nameKey="name" innerRadius="52%" outerRadius="82%" paddingAngle={2}>
-          {data.map((c, i) => <Cell key={c.name} fill={PIE[i % PIE.length]} />)}
-        </Pie>
-        <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [inr(v), name]} />
-      </PieChart>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}
+        <Tooltip contentStyle={chartTooltipStyle} formatter={(v) => [inr(v), 'Amount']} labelFormatter={(l, p) => p?.[0]?.payload?.name || l} />
+        {line('amount', 'Amount', ZK_COLORS.brass)}
+      </LineChart>
     </Frame>
   );
 }
 
-/** 4. Salary (and total expense) trend by month. */
+/** 4. Business expenses and salaries, by month. */
 export function ExpenseTrendChart({ rows, height = 270, showSalary = true }) {
   const data = withLabel(rows);
   return (
     <Frame height={height} label="Monthly expenses and salaries" empty={!hasAny(data, ['expenses_ex_salary', 'salaries'])}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis()}{yAxis}{tip}<Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} stackId="exp" dataKey="expenses_ex_salary" name="Business expenses" fill={ZK_COLORS.wine} />
-        {showSalary && <Bar isAnimationActive={false} stackId="exp" dataKey="salaries" name="Salaries" fill={ZK_COLORS.brass} radius={[4, 4, 0, 0]} />}
-      </BarChart>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}{tip}{legend}
+        {line('expenses_ex_salary', 'Business expenses', ZK_COLORS.wine)}
+        {showSalary && line('salaries', 'Salaries', ZK_COLORS.brass)}
+      </LineChart>
     </Frame>
   );
 }
 
-/** 5 / 6. Projected versus actual, one side (income or expenses). rows: projected_income / actual_income ... from the dashboard. */
+/** 5 / 6. Projected versus actual, one side (income or expenses): solid = actual, dashed = the plan. */
 export function ProjectedActualChart({ rows, side = 'income', height = 260 }) {
   const data = withLabel(rows);
-  const p = `projected_${side}`;
-  const a = `actual_${side}`;
   return (
-    <Frame height={height} label={`Projected versus actual ${side}`} empty={!hasAny(data, [p, a])}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis()}{yAxis}{tip}<Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey={a} name="Actual" fill={side === 'income' ? ZK_COLORS.sage : ZK_COLORS.wine} radius={[4, 4, 0, 0]} />
-        <Line isAnimationActive={false} type="monotone" dataKey={p} name="Projected" stroke={ZK_COLORS.projected} strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
-      </ComposedChart>
+    <Frame height={height} label={`Projected versus actual ${side}`} empty={!hasAny(data, [`projected_${side}`, `actual_${side}`])}>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}{tip}{legend}
+        {line(`actual_${side}`, 'Actual', side === 'income' ? ZK_COLORS.sage : ZK_COLORS.wine)}
+        {line(`projected_${side}`, 'Projected', ZK_COLORS.projected, { strokeDasharray: '6 4' })}
+      </LineChart>
     </Frame>
   );
 }
 
-/** 7. Net result by month (ink = profit, wine = loss). */
+/** 7. Net result by month. */
 export function NetTrendChart({ rows, height = 260 }) {
-  const data = withLabel(rows).map((r) => ({ ...r, profit: r.net_result >= 0 ? r.net_result : 0, loss: r.net_result < 0 ? r.net_result : 0 }));
+  const data = withLabel(rows);
   return (
     <Frame height={height} label="Monthly net result" empty={!hasAny(data, ['net_result'])}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis()}{yAxis}{tip}<Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="profit" name="Net surplus" fill={ZK_COLORS.ink} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="loss" name="Net deficit" fill={ZK_COLORS.wine} radius={[0, 0, 4, 4]} />
-        <Line isAnimationActive={false} type="monotone" dataKey="net_result" name="Net result" stroke={ZK_COLORS.brass} strokeWidth={2} dot={false} />
-      </ComposedChart>
+      <LineChart data={data} margin={margin}>{grid}{xAxis()}{yAxis}{tip}{legend}
+        {line('net_result', 'Net result', ZK_COLORS.ink)}
+      </LineChart>
     </Frame>
   );
 }
 
-/** 8. Investment by investment: expected return versus received (principal + earnings). */
+/** 8. Investment by investment: expected return versus received (principal + earnings) and the earnings part. */
 export function InvestmentReturnsChart({ rows, height = 270 }) {
   const data = (rows || []).filter((r) => r.expected_return_amount !== null || r.received > 0).map((r) => ({ name: r.code, full: r.name, expected: r.expected_return_amount || 0, received: r.received || 0, earnings: r.earnings || 0 }));
   return (
     <Frame height={height} label="Investment-wise expected versus actual returns" empty={!data.length}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-        {grid}{xAxis('name')}{yAxis}
+      <LineChart data={data} margin={margin}>{grid}{xAxis('name')}{yAxis}
         <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [inr(v), name]} labelFormatter={(l, p) => p?.[0]?.payload?.full || l} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="expected" name="Expected return" fill={ZK_COLORS.projected} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="received" name="Received (principal + earnings)" fill={ZK_COLORS.ink} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="earnings" name="Of which earnings" fill={ZK_COLORS.brass} radius={[4, 4, 0, 0]} />
-      </BarChart>
+        {legend}
+        {line('expected', 'Expected return', ZK_COLORS.projected, { strokeDasharray: '6 4' })}
+        {line('received', 'Received (principal + earnings)', ZK_COLORS.ink)}
+        {line('earnings', 'Of which earnings', ZK_COLORS.brass)}
+      </LineChart>
     </Frame>
   );
 }
