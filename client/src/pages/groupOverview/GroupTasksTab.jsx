@@ -308,6 +308,26 @@ export default function GroupTasksTab() {
                 ))}
               </tbody>
             </table>
+            <div className="border-t border-tertiary-100 px-4 py-3" aria-label="All companies by day">
+              <p className="mb-2 text-xs font-semibold text-tertiary-600">All companies at a glance</p>
+              <table className="w-full min-w-[34rem] text-sm">
+                <thead className="text-xs text-tertiary-500">
+                  <tr><th className="py-1 text-left font-medium">Company</th>{w.days.map((d) => <th key={d.date} className={`px-2 py-1 text-center font-medium ${d.is_today ? 'rounded-t bg-primary-100 text-primary-800' : ''}`}>{SHORT[d.weekday - 1]}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {w.assignments.filter((a) => !a.org.coming_soon && (!company || a.org.id === company)).map((a) => (
+                    <tr key={a.org.id} className="border-t border-tertiary-100">
+                      <td className="py-1.5 pr-2"><CompanyChip c={a.org} small /></td>
+                      {w.days.map((d) => (
+                        <td key={d.date} className={`px-2 py-1.5 text-center ${d.is_today ? 'bg-primary-50' : ''}`}>
+                          {a.weekdays.includes(d.weekday) ? <span className="inline-block h-3 w-3 rounded-full bg-primary-600" title={`${a.org.name} on ${d.name}`} /> : <span className="text-tertiary-300">·</span>}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {w.unassigned.length > 0 && <p className="border-t border-tertiary-100 px-4 py-2 text-xs text-amber-800">Not linked to a day yet: {w.unassigned.map((o) => o.name).join(', ')}. Use &quot;Set company days&quot;.</p>}
           </div>
         )}
