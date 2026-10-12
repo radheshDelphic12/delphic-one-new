@@ -13,7 +13,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
-import { CompanyCard, StatTile, colorAt } from './groupUi.jsx';
+import { CompanyCard, MAIN_COMPANY_SLUGS, MainCompanies, StatTile, colorAt } from './groupUi.jsx';
 
 const LIVE_EVERY_MS = 30000;
 const money = (n) => (n === null || n === undefined ? 'N/A' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
@@ -95,6 +95,8 @@ export default function GroupDashboardTab() {
             <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="amber" pct={t.change_pct?.valuation} series={data.trends.valuation.map((r) => r.total)} />
           </div>
 
+          <MainCompanies companies={data.companies} colorOfOrg={(id) => colorAt(Math.max(0, data.companies.findIndex((c) => c.org.id === id)))} onOpen={openCompany} />
+
           <ChartCard title="Revenue, expenses and profit" subtitle={`All companies together, ${GROUPINGS.find(([k]) => k === granularity)[1].toLowerCase()}, ${range.from} to ${range.to}`}>
             {chart.length === 0 || chart.every((r) => !r.revenue && !r.expenses && !r.profit) ? (
               <EmptyState title="No financial data in this period" description="Nothing has been recorded for these months. Try another period." />
@@ -117,9 +119,9 @@ export default function GroupDashboardTab() {
           </ChartCard>
 
           <div>
-            <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Companies</h3>
+            <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Other companies</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {data.companies.map((c, i) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} onOpen={openCompany} />)}
+              {data.companies.map((c, i) => [c, i]).filter(([c]) => !MAIN_COMPANY_SLUGS.includes(c.org.slug)).map(([c, i]) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} onOpen={openCompany} />)}
             </div>
           </div>
         </div>

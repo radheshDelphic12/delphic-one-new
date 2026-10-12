@@ -355,6 +355,103 @@ export function TrendLines({ rows, companies, colorOfOrg, metric }) {
   );
 }
 
+/** The group's three operating companies, in the order the group thinks of them. Matched by slug. */
+export const MAIN_COMPANY_SLUGS = ['delphic', 'zephyr', 'gulati'];
+
+function MiniFigure({ label, value, tone }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">{label}</div>
+      <div className={`truncate text-[15px] font-bold tabular-nums ${tone || 'text-tertiary-900'}`}>{value}</div>
+    </div>
+  );
+}
+
+function MainCompanyCard({ company, color, onOpen }) {
+  const { org } = company;
+  const t = company.totals;
+  const loss = t.profit < 0;
+  const logo = orgLogo(org);
+  const series = (company.series || []).map((r) => ({ label: r.label, revenue: Number(r.revenue) || 0, profit: Number(r.profit) || 0 }));
+  const hasLine = series.length > 0 && series.some((p) => p.revenue || p.profit);
+  const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profit', 'bg-emerald-100 text-emerald-700'];
+  return (
+    <div className="relative flex flex-col overflow-hidden rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-cardHover">
+      <span className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${color}, ${color}44)` }} aria-hidden="true" />
+      <div className="flex items-center gap-3">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-tertiary-100 bg-white shadow-sm">
+          {logo ? <img src={logo} alt="" className="h-full w-full object-contain p-1.5" /> : <Building2 className="h-5 w-5" style={{ color }} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-heading text-base font-bold text-tertiary-900">{org.name}</p>
+          <p className="text-xs text-tertiary-500">{company.people.employees + company.people.contractors} people</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${status[1]}`}>{status[0]}</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
+        <MiniFigure label="Revenue" value={company.has_data ? compact(t.revenue) : '—'} />
+        <MiniFigure label="Profit" value={company.has_data ? compact(t.profit) : '—'} tone={loss ? 'text-rose-600' : 'text-emerald-700'} />
+        <MiniFigure label="Expenses" value={company.has_data ? compact(t.expenses) : '—'} />
+        <MiniFigure label="Margin" value={t.margin_pct === null || t.margin_pct === undefined ? 'N/A' : `${t.margin_pct}%`} />
+      </div>
+
+      <div className="mt-3 h-20">
+        {hasLine ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
+              <XAxis dataKey="label" hide />
+              <YAxis hide domain={['auto', 'auto']} />
+              <RTooltip
+                content={({ active, payload, label }) =>
+                  active && payload?.length ? (
+                    <div className="rounded-lg border border-tertiary-100 bg-white px-2.5 py-1.5 text-xs shadow-card">
+                      <div className="font-semibold text-tertiary-900">{label}</div>
+                      {payload.map((p) => (
+                        <div key={p.dataKey} className="flex items-center gap-1.5 text-tertiary-600">
+                          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
+                          {p.name}: <b className="text-tertiary-900">{compact(p.value)}</b>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null
+                }
+              />
+              <Line type="monotone" dataKey="revenue" name="Revenue" stroke={color} strokeWidth={2.25} dot={series.length < 4 ? { r: 3, strokeWidth: 0, fill: color } : false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="profit" name="Profit" stroke="#1d4ed8" strokeWidth={2} dot={series.length < 4 ? { r: 3, strokeWidth: 0, fill: '#1d4ed8' } : false} activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-full items-center justify-center rounded-lg bg-tertiary-50 text-[11px] text-tertiary-400">No figures recorded in this period</div>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-tertiary-100 pt-3 text-xs">
+        <div>
+          <span className="text-tertiary-400">Valuation </span>
+          <span className="font-semibold text-tertiary-900">{company.valuation ? compact(company.valuation.current) : 'N/A'}</span>
+          <span className="ml-2 text-tertiary-400">Assets </span>
+          <span className="font-semibold text-tertiary-900">{company.assets ? compact(company.assets) : 'Not set'}</span>
+        </div>
+        <button type="button" onClick={() => onOpen(org)} className="rounded-lg px-2 py-1 font-semibold text-primary-700 transition-colors hover:bg-primary-50">
+          Details →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Spotlight for Delphic Global, Zephyr Infrastructure and Gulati Industries: key figures, a revenue / profit line, valuation. */
+export function MainCompanies({ companies, colorOfOrg, onOpen }) {
+  const main = MAIN_COMPANY_SLUGS.map((slug) => companies.find((c) => c.org.slug === slug)).filter((c) => c && !c.coming_soon);
+  if (main.length === 0) return null;
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      {main.map((c) => <MainCompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} onOpen={onOpen} />)}
+    </div>
+  );
+}
+
 const MEDAL = ['from-amber-300 to-amber-500 text-amber-950', 'from-slate-200 to-slate-400 text-slate-900', 'from-orange-300 to-orange-500 text-orange-950'];
 
 /** Top-N list with medal-style ranks and a relative bar. */

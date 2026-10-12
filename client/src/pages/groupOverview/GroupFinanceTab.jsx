@@ -16,7 +16,7 @@ import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
-import { COMPANY_COLORS, CompanyCard, ContributionLines, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
+import { COMPANY_COLORS, CompanyCard, ContributionLines, MAIN_COMPANY_SLUGS, MainCompanies, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
 const PALETTE = COMPANY_COLORS;
@@ -366,8 +366,8 @@ export default function GroupFinanceTab() {
     const i = allCompanies.findIndex((o) => o.id === id);
     return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
   }, [allCompanies]);
-  // Cards follow the table order that matters most: live companies by valuation, coming-soon ones last.
-  const cardOrder = useMemo(() => [...everyCompany].sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
+  // The three main companies have their own section above; these cards are the rest, live ones by valuation and coming-soon last.
+  const cardOrder = useMemo(() => everyCompany.filter((c) => !MAIN_COMPANY_SLUGS.includes(c.org.slug)).sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
   const t = data?.totals;
   const openCompanyData = companies.find((c) => c.org.id === openOrgId) || null;
 
@@ -440,10 +440,10 @@ export default function GroupFinanceTab() {
             </div>
           )}
 
-          <FoundationGroupSection foundation={data.foundation} />
-          <ZklyreraGroupSection zklyrera={data.zklyrera} />
+          <SectionTitle title="2. Main companies" hint="Delphic Global, Zephyr Infrastructure and Gulati Industries - key figures and trend at a glance" />
+          <MainCompanies companies={everyCompany} colorOfOrg={colorOfOrg} onOpen={(org) => setOpenOrgId(org.id)} />
 
-          <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
+          <SectionTitle title="3. Other companies and comparison" hint="Click a company for its valuation, history, drill-down and asset values" />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
           </div>
@@ -483,7 +483,7 @@ export default function GroupFinanceTab() {
             <p className="mt-2 text-[11px] text-tertiary-500">Click a company for the valuation breakdown, history and monthly asset values. Projects, leads, receivables and payables are company-specific and are shown inside each company.</p>
           </div>
 
-          <SectionTitle title="3. Trends" hint="Every company has its own line and legend" />
+          <SectionTitle title="4. Trends" hint="Every company has its own line and legend" />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Trend metric">
             {TREND_METRICS.map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-600 bg-gradient-to-b from-[#3a8a5f] to-[#2b6b48] text-white shadow-[0_6px_14px_-6px_rgba(43,107,72,0.7)]' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-primary-50 hover:text-primary-800'}`}>{label}</button>
@@ -491,7 +491,7 @@ export default function GroupFinanceTab() {
           </div>
           <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
 
-          <SectionTitle title="4. Who contributes and who leads" />
+          <SectionTitle title="5. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
             <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
             <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
@@ -503,10 +503,14 @@ export default function GroupFinanceTab() {
             ))}
           </div>
 
-          <SectionTitle title="5. Recent activity" hint="Last 7 days - changes made in any company of the group" />
+          <SectionTitle title="6. Recent activity" hint="Last 7 days - changes made in any company of the group" />
           <div className="rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
             <ActivityFeed items={activity} colorOf={colorOfOrg} />
           </div>
+
+          <SectionTitle title="7. Company workspaces" hint="Specialised views for the Foundation and Zklyrera Spirits" />
+          <FoundationGroupSection foundation={data.foundation} />
+          <ZklyreraGroupSection zklyrera={data.zklyrera} />
         </div>
       )}
 
