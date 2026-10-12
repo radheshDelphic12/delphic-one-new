@@ -17,7 +17,6 @@ import GroupDashboardTab from './GroupDashboardTab.jsx';
 import GroupSettingsTab from './GroupSettingsTab.jsx';
 import GroupTasksTab from './GroupTasksTab.jsx';
 import { GroupHero, GroupTabs } from './groupUi.jsx';
-import { useAuth } from '../../lib/authContext.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -159,13 +158,12 @@ export default function GroupOverviewPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { user } = useAuth();
   const requested = pathname === '/group-overview/settings' ? 'settings' : params.get('section') || 'finance';
   const section = TABS.some((t) => t.key === requested) ? requested : 'finance';
 
   return (
     <div className="space-y-4">
-      <GroupHero userName={user?.name} />
+      <GroupHero />
       <GroupTabs tabs={TABS} value={section} onChange={(key) => navigate(key === 'settings' ? '/group-overview/settings' : `/group-overview?section=${key}`)} />
       {section === 'finance' && <GroupFinanceTab />}
       {section === 'dashboard' && <GroupDashboardTab />}

@@ -89,3 +89,12 @@ Charts on the group pages are line graphs only (no bars, areas or pies): Dashboa
 Section order on Group Finance (most-used first): 1 Group at a glance, with a one-line "Needs attention" disclosure (closed until clicked); 2 Companies - one grid where every company has the same card (logo, status, revenue / profit / margin, share-of-group bar, valuation, a revenue / profit line when the period has several points) followed by the sortable comparison table; 3 Trends; 4 Contribution and rankings; 5 Company insights - Gulati Foundation and Zklyrera Spirits views that open only on click, with their own attention lists also closed by default. Recent activity is no longer a page section: it opens in a right-hand drawer from the Activity button (with a count) next to Refresh. The Dashboard tab uses the same company cards. Reusable pieces: CompanyCard and Disclosure in groupUi.jsx.
 Line charts share one style (groupUi.jsx: lineProps, GRID_PROPS, ChartFrame, ShortPeriodHint): smooth rounded lines with a soft glow, white-ringed dots and value labels while a series is short, a dotted grid on a tinted panel, legend pills with the latest values; a short-period hint appears when the range has fewer than three points.
 Charts always draw a wave: when the chosen period has fewer than six months, the trend charts, KPI sparklines and company-card lines read the last 12 months ending at the period's end (`trendWindow.js`, same `/group/overview` endpoint, finished months are cached server-side). Tiles, cards and tables still follow the selected period; the chart subtitle says when the window was widened.
+
+### Design rules (professional pass, 2026-10-12)
+The look is deliberately restrained; keep new group-dashboard UI to these rules:
+- One neutral surface: white cards, 1px `tertiary-200` border, `shadow-sm`, 12px radius, no gradients, glows or hover lifts. The only filled colour block is the flat dark-green header band (`.group-hero`).
+- Colour carries meaning, not decoration: green / red text only for good / bad change, a small dot + word for status (Profit, Loss, No data); KPI tiles are all neutral with a grey icon.
+- Each company has one muted key colour (`COMPANY_COLORS`) used as a small square, its card line and its chart line.
+- Navigation is an underline tab bar; section headings are plain text with a hairline, no numbers or badges.
+- Charts: thin (2px) smooth lines, hairline solid grid, no markers or labels until hover, plain legend with the latest values, no tinted panels.
+- Numbers use tabular figures and Indian compact units (L, Cr).

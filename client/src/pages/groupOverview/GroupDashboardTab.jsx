@@ -108,13 +108,13 @@ export default function GroupDashboardTab() {
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chart} margin={{ top: 22, right: 22, left: 0, bottom: 0 }}>
                       <CartesianGrid {...GRID_PROPS} />
-                      <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="label" tick={AXIS_TICK} axisLine={{ stroke: '#d5ddd8' }} tickLine={false} />
                       <YAxis tick={AXIS_TICK} tickFormatter={compact} width={70} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} cursor={{ stroke: '#9fb3a7', strokeDasharray: '3 4' }} />
-                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} iconType="circle" />
-                      <Line dataKey="revenue" name="Revenue" {...lineProps('#2f7d57', chart.length, { labels: true })} />
-                      <Line dataKey="expenses" name="Expenses" {...lineProps('#f59e0b', chart.length, { labels: true })} />
-                      <Line dataKey="profit" name="Profit" {...lineProps('#2563eb', chart.length, { labels: true })} />
+                      <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} cursor={{ stroke: '#b9c6be' }} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} iconType="plainline" />
+                      <Line dataKey="revenue" name="Revenue" {...lineProps('#1f6f50', chart.length)} />
+                      <Line dataKey="expenses" name="Expenses" {...lineProps('#b9822a', chart.length)} />
+                      <Line dataKey="profit" name="Profit" {...lineProps('#2b5d9e', chart.length)} />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartFrame>

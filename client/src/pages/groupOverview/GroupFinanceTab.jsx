@@ -36,8 +36,8 @@ const LIVE_EVERY_MS = 30000;
 const DEFAULTS = { granularity: 'month', state: 'all' };
 
 function SectionTitle({ title, hint }) {
-  const m = /^(d+).s*(.*)$/.exec(title);
-  return <SectionHeading n={m ? Number(m[1]) : null} title={m ? m[2] : title} hint={hint} />;
+  // Titles carry a leading "1. " for the order in the source; the page shows the plain title.
+  return <SectionHeading title={title.replace(/^\d+\.\s*/, '')} hint={hint} />;
 }
 
 const TREND_METRICS = [
@@ -491,7 +491,7 @@ export default function GroupFinanceTab() {
           <SectionTitle title="3. Trends" hint="Every company has its own line and legend" />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Trend metric">
             {TREND_METRICS.map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-600 bg-gradient-to-b from-[#3a8a5f] to-[#2b6b48] text-white shadow-[0_6px_14px_-6px_rgba(43,107,72,0.7)]' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-primary-50 hover:text-primary-800'}`}>{label}</button>
+              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-700 bg-primary-700 text-white' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900'}`}>{label}</button>
             ))}
           </div>
           <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={[TREND_METRICS.find(([k]) => k === trendMetric)[2], trend.note].filter(Boolean).join(' - ')} rows={(trend.trends || data.trends)[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
