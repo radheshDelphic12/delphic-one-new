@@ -8,5 +8,5 @@ Group Dashboard > **Tasks & Weekly plan** tab (group super admin only).
 - Migration `20261012090000_group_tasks` (additive: group_tasks, group_task_done, group_company_days).
 - Tests: `server/tests/group-tasks.test.js`.
 
-## OT hidden (Delphic Global)
+## OT hidden (Delphic Global): only the automatic OT
 Log time (`ItTimesheetPage.jsx`, flag `OT_HIDDEN`) no longer shows OT; Timesheet Dashboard shows OT chips/section only to admins (`canSeeOt`). OT Tickets tab untouched.

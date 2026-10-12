@@ -37,7 +37,7 @@ const attendanceText = (day) => {
   return day.attendance_label || ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status;
 };
 
-// Overtime hours are not shown on the employee side (IT people included); only an admin sees them on this dashboard.
+// Hours worked beyond the expected day (derived OT) are shown to admins only; OT tickets the employee raised stay visible.
 const canSeeOt = (user) => user?.role === 'admin';
 
 function DayCell({ day, selected, onSelect }) {
@@ -61,7 +61,7 @@ function DayCell({ day, selected, onSelect }) {
       {(day.pending_leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700" title="Pending leave">{leaveCaption(leave)} (pending)</span>)}
       {day.attendance_conflict && <span className="text-[11px] text-amber-700">Present + approved leave - review</span>}
       {off && day.day_label && <span className="text-tertiary-400">{day.day_label}</span>}
-      {canSeeOt(user) && (day.ot_hours > 0 || day.ot_tickets.length > 0) && (
+      {(day.ot_tickets.length > 0 || (canSeeOt(user) && day.ot_hours > 0)) && (
         <span className="text-purple-700">OT {day.ot_tickets.length ? day.ot_tickets.map((t) => `${t.hours}h ${t.status}`).join(', ') : `${day.ot_hours}h ${day.ot_status || ''}`}</span>
       )}
     </button>
@@ -117,11 +117,11 @@ function DayDetail({ day }) {
           </ul>
         </div>
       )}
-      {canSeeOt(user) && (day.ot_hours > 0 || day.ot_tickets.length > 0) && (
+      {(day.ot_tickets.length > 0 || (canSeeOt(user) && day.ot_hours > 0)) && (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Overtime</h4>
           <ul className="mt-1 space-y-0.5 text-xs">
-            {day.ot_hours > 0 && <li>Timesheet OT: {hoursLabel(day.ot_hours)} · {day.ot_status || 'pending'}</li>}
+            {canSeeOt(user) && day.ot_hours > 0 && <li>Timesheet OT: {hoursLabel(day.ot_hours)} · {day.ot_status || 'pending'}</li>}
             {day.ot_tickets.map((t) => <li key={t.id}>Ticket: {hoursLabel(t.hours)} · {t.status}{t.project ? ` · ${t.project}` : ''} - {t.reason}</li>)}
           </ul>
         </div>
@@ -224,7 +224,7 @@ function MonthCalendar({ year, month, member, onBack }) {
                     <td className="py-1"><input type="checkbox" aria-label={`Select log of ${l.date}`} checked={picked.has(l.id)} onChange={() => toggle(l.id)} /></td>
                     <td className="pr-3 tabular-nums">{l.date}</td>
                     <td className="pr-3">{l.project || 'No project'}</td>
-                    <td className="pr-3 tabular-nums">{l.hours}{canSeeOt(user) && l.overtime_hours ? ` +${l.overtime_hours} OT` : ''}</td>
+                    <td className="pr-3 tabular-nums">{l.hours}{l.overtime_hours ? ` +${l.overtime_hours} OT` : ''}</td>
                     <td className="pr-3"><Badge value={l.status} /></td>
                     <td className="pr-3 text-tertiary-500">{l.notes || ''}</td>
                     <td className="py-1 text-right"><button type="button" className="text-danger-600 hover:underline" title="Delete this log" disabled={deleting} onClick={() => deleteLogs([l.id])}><Trash2 className="inline h-3.5 w-3.5" /></button></td>
