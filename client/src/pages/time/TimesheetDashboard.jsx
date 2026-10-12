@@ -37,7 +37,11 @@ const attendanceText = (day) => {
   return day.attendance_label || ATTENDANCE_LABEL[day.attendance_status] || day.attendance_status;
 };
 
+// Hours worked beyond the expected day (derived OT) are shown to admins only; OT tickets the employee raised stay visible.
+const canSeeOt = (user) => user?.role === 'admin';
+
 function DayCell({ day, selected, onSelect }) {
+  const { user } = useAuth();
   const off = day.day_type !== 'working';
   return (
     <button
@@ -57,7 +61,7 @@ function DayCell({ day, selected, onSelect }) {
       {(day.pending_leaves || []).map((leave) => <span key={leave.request_id} className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700" title="Pending leave">{leaveCaption(leave)} (pending)</span>)}
       {day.attendance_conflict && <span className="text-[11px] text-amber-700">Present + approved leave - review</span>}
       {off && day.day_label && <span className="text-tertiary-400">{day.day_label}</span>}
-      {(day.ot_hours > 0 || day.ot_tickets.length > 0) && (
+      {(day.ot_tickets.length > 0 || (canSeeOt(user) && day.ot_hours > 0)) && (
         <span className="text-purple-700">OT {day.ot_tickets.length ? day.ot_tickets.map((t) => `${t.hours}h ${t.status}`).join(', ') : `${day.ot_hours}h ${day.ot_status || ''}`}</span>
       )}
     </button>
@@ -65,6 +69,7 @@ function DayCell({ day, selected, onSelect }) {
 }
 
 function DayDetail({ day }) {
+  const { user } = useAuth();
   if (!day) return <p className="rounded-2xl border border-dashed border-tertiary-200 p-4 text-sm text-tertiary-500">Hover or select a day to see its details.</p>;
   return (
     <aside className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 text-sm shadow-card">
@@ -112,11 +117,11 @@ function DayDetail({ day }) {
           </ul>
         </div>
       )}
-      {(day.ot_hours > 0 || day.ot_tickets.length > 0) && (
+      {(day.ot_tickets.length > 0 || (canSeeOt(user) && day.ot_hours > 0)) && (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Overtime</h4>
           <ul className="mt-1 space-y-0.5 text-xs">
-            {day.ot_hours > 0 && <li>Timesheet OT: {hoursLabel(day.ot_hours)} · {day.ot_status || 'pending'}</li>}
+            {canSeeOt(user) && day.ot_hours > 0 && <li>Timesheet OT: {hoursLabel(day.ot_hours)} · {day.ot_status || 'pending'}</li>}
             {day.ot_tickets.map((t) => <li key={t.id}>Ticket: {hoursLabel(t.hours)} · {t.status}{t.project ? ` · ${t.project}` : ''} - {t.reason}</li>)}
           </ul>
         </div>

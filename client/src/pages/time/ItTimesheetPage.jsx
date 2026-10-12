@@ -30,6 +30,10 @@ function earliestLogIso() {
   return `${start.getFullYear()}-${month}-${day}`;
 }
 
+// OT that is merely worked beyond the expected hours (derived per day / month) is not shown to the employee.
+// OT the employee raised on purpose (OT ticket, the OT hrs box, holiday OT) stays visible.
+const OT_HIDDEN = true; // derived OT only
+
 function blankRow() {
   return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
@@ -295,7 +299,7 @@ export default function ItTimesheetPage() {
             </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
+            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{!OT_HIDDEN && monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
@@ -314,7 +318,7 @@ export default function ItTimesheetPage() {
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>
                   <span className="text-xs font-medium text-tertiary-600">
                     {day.total_hours} hrs
-                    {day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
+                    {!OT_HIDDEN && day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
                   </span>
                 </div>
                 <table className="w-full text-sm">
