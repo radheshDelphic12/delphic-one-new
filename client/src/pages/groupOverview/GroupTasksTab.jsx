@@ -135,6 +135,7 @@ function PlanEditor({ assignments, onSubmit, onCancel, saving }) {
   const toggle = (id, n) => setGrid((g) => ({ ...g, [id]: g[id]?.includes(n) ? g[id].filter((x) => x !== n) : [...(g[id] || []), n].sort() }));
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(assignments.map((a) => ({ org_id: a.org.id, weekdays: grid[a.org.id] || [] }))); }} className="space-y-4">
+      <button type="button" className="btn-secondary text-sm" onClick={() => setGrid(Object.fromEntries(assignments.map((a, i) => [a.org.id, [(i % 5) + 1]])))}>Spread evenly Mon-Fri</button>
       <p className="text-sm text-tertiary-600">Choose the day(s) of the week each company is reviewed on. A company can have more than one day; clear all of them to leave it unassigned.</p>
       <div className="overflow-x-auto rounded-xl border border-tertiary-100">
         <table className="w-full min-w-[34rem] text-sm">
@@ -328,7 +329,12 @@ export default function GroupTasksTab() {
                 </tbody>
               </table>
             </div>
-            {w.unassigned.length > 0 && <p className="border-t border-tertiary-100 px-4 py-2 text-xs text-amber-800">Not linked to a day yet: {w.unassigned.map((o) => o.name).join(', ')}. Use &quot;Set company days&quot;.</p>}
+            {w.unassigned.filter((o) => !o.coming_soon).length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-tertiary-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                <span>{w.unassigned.filter((o) => !o.coming_soon).length} compan{w.unassigned.filter((o) => !o.coming_soon).length === 1 ? 'y is' : 'ies are'} not linked to a day yet: {w.unassigned.filter((o) => !o.coming_soon).map((o) => o.name).join(', ')}.</span>
+                <button type="button" className="btn-primary text-xs" disabled={saving} onClick={() => savePlan(w.assignments.filter((a) => !a.org.coming_soon).map((a, i) => ({ org_id: a.org.id, weekdays: a.weekdays.length ? a.weekdays : [(i % 5) + 1] })))}>Link them now (spread Mon-Fri)</button>
+              </div>
+            )}
           </div>
         )}
       </section>

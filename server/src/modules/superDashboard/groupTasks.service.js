@@ -209,7 +209,7 @@ async function weeklyPlan(groupIds, rawQuery = {}) {
   const days = DAY_NAMES.map((name, i) => {
     const weekday = i + 1;
     const date = calc.addDays(weekStart, i);
-    const linked = links.filter((l) => l.weekday === weekday && byOrg.has(l.org_id) && (!q.org_id || l.org_id === q.org_id)).map((l) => ({ ...byOrg.get(l.org_id), note: notes.get(`${l.org_id}|${weekday}`) || null })).sort((a, b) => a.name.localeCompare(b.name));
+    const linked = links.filter((l) => l.weekday === weekday && byOrg.has(l.org_id)).map((l) => ({ ...byOrg.get(l.org_id), note: notes.get(`${l.org_id}|${weekday}`) || null })).sort((a, b) => a.name.localeCompare(b.name));
     const tasks = occ.items.filter((t) => t.date === date);
     return { weekday, name, date, is_today: date === today, is_past: date < today, companies: linked, tasks, task_count: tasks.length, open_tasks: tasks.filter((t) => !t.done).length };
   });
