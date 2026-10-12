@@ -8,7 +8,7 @@ import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { FLAG_META, STATUS_META } from '../../lib/foundation/meta.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import { KpiTile as KpiCard } from './groupUi.jsx';
+import { Disclosure, KpiTile as KpiCard } from './groupUi.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -97,8 +97,7 @@ export default function FoundationGroupSection({ foundation }) {
       </div>
 
       {attention.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
-          <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><AlertTriangle className="h-4 w-4 text-amber-600" />Campaigns that need attention</h3>
+        <Disclosure title="Campaigns that need attention" count={foundation.attention_count} icon={AlertTriangle}>
           <div className="grid gap-4 md:grid-cols-2">
             {attention.map(([key, label, rows]) => (
               <div key={key}>
@@ -116,7 +115,7 @@ export default function FoundationGroupSection({ foundation }) {
               </div>
             ))}
           </div>
-        </div>
+        </Disclosure>
       )}
 
       {foundation.top.length > 0 && (

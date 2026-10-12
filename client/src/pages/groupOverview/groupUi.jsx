@@ -1,5 +1,6 @@
 import { ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis, CartesianGrid, Line, LineChart } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, Minus } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowDownRight, ArrowUpRight, Building2, ChevronDown, Minus } from 'lucide-react';
 import { orgLogo } from '../../lib/orgLogo.js';
 
 /**
@@ -162,12 +163,15 @@ function Avatar({ org, color }) {
   );
 }
 
-/** One company as a compact card: logo + status, revenue / profit / margin, share-of-group bar and valuation. */
+/**
+ * Every company, one card shape: logo, name, people and a status chip; revenue / profit / margin; a revenue + profit
+ * line when the period has more than one point; and the company's share of group revenue with its valuation.
+ */
 export function CompanyCard({ company, color, groupRevenue, onOpen }) {
   const { org } = company;
   if (company.coming_soon) {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-dashed border-tertiary-200 bg-white/60 p-3 text-tertiary-400">
+      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-tertiary-200 bg-white/60 p-4 text-tertiary-400">
         <Avatar org={org} color="#94a3b8" />
         <div className="min-w-0">
           <p className="truncate font-heading text-sm font-semibold text-tertiary-500">{org.name}</p>
@@ -176,54 +180,94 @@ export function CompanyCard({ company, color, groupRevenue, onOpen }) {
       </div>
     );
   }
-  const loss = company.totals.profit < 0;
-  const share = groupRevenue > 0 && company.totals.revenue > 0 ? Math.min(100, (company.totals.revenue / groupRevenue) * 100) : 0;
+  const t = company.totals;
+  const loss = t.profit < 0;
+  const share = groupRevenue > 0 && t.revenue > 0 ? Math.min(100, (t.revenue / groupRevenue) * 100) : 0;
   const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profit', 'bg-emerald-100 text-emerald-700'];
-  const margin = company.totals.margin_pct;
+  const series = (company.series || []).map((r) => ({ label: r.label, revenue: Number(r.revenue) || 0, profit: Number(r.profit) || 0 }));
+  const showLine = series.length > 1 && series.some((p) => p.revenue || p.profit);
   return (
     <button
       type="button"
       onClick={() => onOpen(org)}
-      className="group relative overflow-hidden rounded-xl border border-tertiary-100 bg-white py-2.5 pl-4 pr-3 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-cardHover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+      className="group relative flex flex-col overflow-hidden rounded-2xl border border-tertiary-100 bg-white p-4 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-tertiary-200 hover:shadow-cardHover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
     >
-      <span className="absolute inset-y-0 left-0 w-1" style={{ background: `linear-gradient(180deg, ${color}, ${color}66)` }} aria-hidden="true" />
-      <div className="flex items-center gap-2.5">
+      <span className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${color}, ${color}44)` }} aria-hidden="true" />
+      <div className="flex items-center gap-3">
         <Avatar org={org} color={color} />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-[13px] font-semibold leading-tight text-tertiary-900">{org.name}</p>
-          <p className="truncate text-[11px] text-tertiary-500">
-            {company.people.employees + company.people.contractors} people · Valuation {company.valuation ? compact(company.valuation.current) : 'N/A'}
-          </p>
+          <p className="truncate font-heading text-sm font-bold leading-tight text-tertiary-900">{org.name}</p>
+          <p className="text-[11px] text-tertiary-500">{company.people.employees + company.people.contractors} people</p>
         </div>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${status[1]}`}>{status[0]}</span>
       </div>
 
       {company.has_data ? (
-        <div className="mt-2.5 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <div>
             <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Revenue</div>
-            <div className="text-sm font-bold tabular-nums text-tertiary-900">{compact(company.totals.revenue)}</div>
+            <div className="text-[15px] font-bold tabular-nums text-tertiary-900">{compact(t.revenue)}</div>
           </div>
           <div>
             <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Profit</div>
-            <div className={`text-sm font-bold tabular-nums ${loss ? 'text-rose-600' : 'text-emerald-700'}`}>{compact(company.totals.profit)}</div>
+            <div className={`text-[15px] font-bold tabular-nums ${loss ? 'text-rose-600' : 'text-emerald-700'}`}>{compact(t.profit)}</div>
           </div>
           <div className="text-right">
             <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Margin</div>
-            <div className="text-sm font-bold tabular-nums text-tertiary-900">{margin === null || margin === undefined ? 'N/A' : `${margin}%`}</div>
+            <div className="text-[15px] font-bold tabular-nums text-tertiary-900">{t.margin_pct === null || t.margin_pct === undefined ? 'N/A' : `${t.margin_pct}%`}</div>
           </div>
         </div>
       ) : (
-        <p className="mt-2.5 text-[11px] text-tertiary-400">Nothing recorded in this period.</p>
+        <p className="mt-3 rounded-lg bg-tertiary-50 px-2 py-1.5 text-[11px] text-tertiary-400">Nothing recorded in this period.</p>
       )}
 
-      <div className="mt-2 flex items-center gap-2" title="Share of group revenue">
+      {showLine && (
+        <div className="mt-2 h-12" aria-hidden="true">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+              <XAxis dataKey="label" hide />
+              <YAxis hide domain={['auto', 'auto']} />
+              <Line type="monotone" dataKey="revenue" stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="profit" stroke="#1d4ed8" strokeWidth={1.75} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div className="mt-3 flex items-center gap-2" title="Share of group revenue">
         <div className="h-1 flex-1 overflow-hidden rounded-full bg-tertiary-100">
           <div className="h-full rounded-full transition-all duration-700" style={{ width: `${share}%`, background: `linear-gradient(90deg, ${color}, ${color}aa)` }} />
         </div>
         <span className="w-9 text-right text-[10px] font-medium tabular-nums text-tertiary-500">{share ? `${share.toFixed(share < 10 ? 1 : 0)}%` : '—'}</span>
       </div>
+      <div className="mt-2 flex items-center justify-between border-t border-tertiary-100 pt-2 text-[11px] text-tertiary-500">
+        <span>Valuation <b className="font-semibold text-tertiary-800">{company.valuation ? compact(company.valuation.current) : 'N/A'}</b></span>
+        <span className="font-medium text-primary-700 opacity-0 transition-opacity group-hover:opacity-100">Details →</span>
+      </div>
     </button>
+  );
+}
+
+/**
+ * A closed-by-default panel: a header button with an icon, a count badge and a chevron; its content shows only when
+ * the user asks for it. Used for alerts and "needs attention" lists so they do not crowd the page.
+ */
+export function Disclosure({ title, count, icon: Icon, tone = 'amber', defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const tones = {
+    amber: 'border-amber-200 bg-amber-50/60 text-amber-900',
+    slate: 'border-tertiary-100 bg-white text-tertiary-800',
+  };
+  return (
+    <div className={`overflow-hidden rounded-xl border ${tones[tone] || tones.amber}`}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm font-semibold">
+        {Icon && <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {count != null && <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold tabular-nums shadow-sm">{count}</span>}
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      {open && <div className="border-t border-black/5 bg-white/70 p-3.5 text-sm">{children}</div>}
+    </div>
   );
 }
 
@@ -351,103 +395,6 @@ export function TrendLines({ rows, companies, colorOfOrg, metric }) {
           </span>
         ))}
       </div>
-    </div>
-  );
-}
-
-/** The group's three operating companies, in the order the group thinks of them. Matched by slug. */
-export const MAIN_COMPANY_SLUGS = ['delphic', 'zephyr', 'gulati'];
-
-function MiniFigure({ label, value, tone }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">{label}</div>
-      <div className={`truncate text-[15px] font-bold tabular-nums ${tone || 'text-tertiary-900'}`}>{value}</div>
-    </div>
-  );
-}
-
-function MainCompanyCard({ company, color, onOpen }) {
-  const { org } = company;
-  const t = company.totals;
-  const loss = t.profit < 0;
-  const logo = orgLogo(org);
-  const series = (company.series || []).map((r) => ({ label: r.label, revenue: Number(r.revenue) || 0, profit: Number(r.profit) || 0 }));
-  const hasLine = series.length > 0 && series.some((p) => p.revenue || p.profit);
-  const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profit', 'bg-emerald-100 text-emerald-700'];
-  return (
-    <div className="relative flex flex-col overflow-hidden rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-cardHover">
-      <span className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${color}, ${color}44)` }} aria-hidden="true" />
-      <div className="flex items-center gap-3">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-tertiary-100 bg-white shadow-sm">
-          {logo ? <img src={logo} alt="" className="h-full w-full object-contain p-1.5" /> : <Building2 className="h-5 w-5" style={{ color }} />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-base font-bold text-tertiary-900">{org.name}</p>
-          <p className="text-xs text-tertiary-500">{company.people.employees + company.people.contractors} people</p>
-        </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${status[1]}`}>{status[0]}</span>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
-        <MiniFigure label="Revenue" value={company.has_data ? compact(t.revenue) : '—'} />
-        <MiniFigure label="Profit" value={company.has_data ? compact(t.profit) : '—'} tone={loss ? 'text-rose-600' : 'text-emerald-700'} />
-        <MiniFigure label="Expenses" value={company.has_data ? compact(t.expenses) : '—'} />
-        <MiniFigure label="Margin" value={t.margin_pct === null || t.margin_pct === undefined ? 'N/A' : `${t.margin_pct}%`} />
-      </div>
-
-      <div className="mt-3 h-20">
-        {hasLine ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>
-              <XAxis dataKey="label" hide />
-              <YAxis hide domain={['auto', 'auto']} />
-              <RTooltip
-                content={({ active, payload, label }) =>
-                  active && payload?.length ? (
-                    <div className="rounded-lg border border-tertiary-100 bg-white px-2.5 py-1.5 text-xs shadow-card">
-                      <div className="font-semibold text-tertiary-900">{label}</div>
-                      {payload.map((p) => (
-                        <div key={p.dataKey} className="flex items-center gap-1.5 text-tertiary-600">
-                          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
-                          {p.name}: <b className="text-tertiary-900">{compact(p.value)}</b>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null
-                }
-              />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke={color} strokeWidth={2.25} dot={series.length < 4 ? { r: 3, strokeWidth: 0, fill: color } : false} activeDot={{ r: 4 }} />
-              <Line type="monotone" dataKey="profit" name="Profit" stroke="#1d4ed8" strokeWidth={2} dot={series.length < 4 ? { r: 3, strokeWidth: 0, fill: '#1d4ed8' } : false} activeDot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-full items-center justify-center rounded-lg bg-tertiary-50 text-[11px] text-tertiary-400">No figures recorded in this period</div>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-tertiary-100 pt-3 text-xs">
-        <div>
-          <span className="text-tertiary-400">Valuation </span>
-          <span className="font-semibold text-tertiary-900">{company.valuation ? compact(company.valuation.current) : 'N/A'}</span>
-          <span className="ml-2 text-tertiary-400">Assets </span>
-          <span className="font-semibold text-tertiary-900">{company.assets ? compact(company.assets) : 'Not set'}</span>
-        </div>
-        <button type="button" onClick={() => onOpen(org)} className="rounded-lg px-2 py-1 font-semibold text-primary-700 transition-colors hover:bg-primary-50">
-          Details →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Spotlight for Delphic Global, Zephyr Infrastructure and Gulati Industries: key figures, a revenue / profit line, valuation. */
-export function MainCompanies({ companies, colorOfOrg, onOpen }) {
-  const main = MAIN_COMPANY_SLUGS.map((slug) => companies.find((c) => c.org.slug === slug)).filter((c) => c && !c.coming_soon);
-  if (main.length === 0) return null;
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      {main.map((c) => <MainCompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} onOpen={onOpen} />)}
     </div>
   );
 }

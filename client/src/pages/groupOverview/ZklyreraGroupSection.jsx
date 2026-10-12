@@ -8,7 +8,7 @@ import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { INVESTMENT_STATUS_META } from '../../lib/zklyrera/meta.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import { KpiTile as KpiCard } from './groupUi.jsx';
+import { Disclosure, KpiTile as KpiCard } from './groupUi.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -90,8 +90,7 @@ export default function ZklyreraGroupSection({ zklyrera }) {
       </div>
 
       {overdue.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
-          <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><AlertTriangle className="h-4 w-4 text-amber-600" />Investments past their expected return date ({overdue.length})</h3>
+        <Disclosure title="Investments past their expected return date" count={overdue.length} icon={AlertTriangle}>
           <ul className="space-y-1">
             {overdue.slice(0, 6).map((r) => (
               <li key={r.id}>
@@ -102,7 +101,7 @@ export default function ZklyreraGroupSection({ zklyrera }) {
               </li>
             ))}
           </ul>
-        </div>
+        </Disclosure>
       )}
 
       {zklyrera.top.length > 0 && (

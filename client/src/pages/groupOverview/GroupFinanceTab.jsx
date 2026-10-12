@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Building2, PiggyBank, Plus, RefreshCw, Scale, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Building2, History, PiggyBank, Plus, RefreshCw, Scale, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -16,7 +16,7 @@ import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
-import { COMPANY_COLORS, CompanyCard, ContributionLines, MAIN_COMPANY_SLUGS, MainCompanies, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
+import { COMPANY_COLORS, CompanyCard, ContributionLines, Disclosure, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
 const PALETTE = COMPANY_COLORS;
@@ -280,6 +280,8 @@ export default function GroupFinanceTab() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState({ key: 'valuation', dir: 'desc' });
   const [openOrgId, setOpenOrgId] = useState(null);
+  const [insight, setInsight] = useState('');
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const { range, valid: validRange } = period;
   const selectedKey = selected ? selected.join(',') : '';
@@ -366,8 +368,8 @@ export default function GroupFinanceTab() {
     const i = allCompanies.findIndex((o) => o.id === id);
     return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
   }, [allCompanies]);
-  // The three main companies have their own section above; these cards are the rest, live ones by valuation and coming-soon last.
-  const cardOrder = useMemo(() => everyCompany.filter((c) => !MAIN_COMPANY_SLUGS.includes(c.org.slug)).sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
+  // Every company gets the same card: live ones by valuation, coming-soon ones last.
+  const cardOrder = useMemo(() => [...everyCompany].sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
   const t = data?.totals;
   const openCompanyData = companies.find((c) => c.org.id === openOrgId) || null;
 
@@ -400,6 +402,9 @@ export default function GroupFinanceTab() {
           <GroupFilterBar fields={filterFields} values={filterValues} defaults={filterDefaults} onChange={changeFilter} onToggle={(key, id) => toggleCompany(id)} onReset={resetFilters} below={<FigureSwitch value={state} onChange={setState} />}>
             {validRange && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
             <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={() => setActivityOpen(true)}>
+              <History className="h-3.5 w-3.5" aria-hidden="true" />Activity{activity.length > 0 && <span className="rounded-full bg-primary-100 px-1.5 text-[10px] font-bold text-primary-800">{activity.length}</span>}
+            </button>
             <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
             </button>
@@ -434,16 +439,12 @@ export default function GroupFinanceTab() {
           <p className="text-xs text-tertiary-500">Profit margin {t.margin_pct === null ? 'N/A' : `${t.margin_pct}%`} · {t.employees} employees · {t.contractors} contractors. Group valuation = sum of each company&apos;s valuation (profit × {data.formula.profit} + asset value × {data.formula.asset_value}).</p>
 
           {data.alerts.length > 0 && (
-            <div className="rounded-2xl border border-warning-200 bg-warning-50 p-4">
-              <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-semibold"><AlertTriangle className="h-4 w-4" />Attention required</h3>
-              <ul className="space-y-1 text-sm">{data.alerts.map((a, i) => <li key={`${a.org_id}-${a.type}-${i}`}><b>{a.org_name}:</b> {a.message}</li>)}</ul>
-            </div>
+            <Disclosure title="Needs attention" count={data.alerts.length} icon={AlertTriangle}>
+              <ul className="space-y-1">{data.alerts.map((a, i) => <li key={`${a.org_id}-${a.type}-${i}`}><b>{a.org_name}:</b> {a.message}</li>)}</ul>
+            </Disclosure>
           )}
 
-          <SectionTitle title="2. Main companies" hint="Delphic Global, Zephyr Infrastructure and Gulati Industries - key figures and trend at a glance" />
-          <MainCompanies companies={everyCompany} colorOfOrg={colorOfOrg} onOpen={(org) => setOpenOrgId(org.id)} />
-
-          <SectionTitle title="3. Other companies and comparison" hint="Click a company for its valuation, history, drill-down and asset values" />
+          <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
           </div>
@@ -483,7 +484,7 @@ export default function GroupFinanceTab() {
             <p className="mt-2 text-[11px] text-tertiary-500">Click a company for the valuation breakdown, history and monthly asset values. Projects, leads, receivables and payables are company-specific and are shown inside each company.</p>
           </div>
 
-          <SectionTitle title="4. Trends" hint="Every company has its own line and legend" />
+          <SectionTitle title="3. Trends" hint="Every company has its own line and legend" />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Trend metric">
             {TREND_METRICS.map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-600 bg-gradient-to-b from-[#3a8a5f] to-[#2b6b48] text-white shadow-[0_6px_14px_-6px_rgba(43,107,72,0.7)]' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-primary-50 hover:text-primary-800'}`}>{label}</button>
@@ -491,7 +492,7 @@ export default function GroupFinanceTab() {
           </div>
           <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
 
-          <SectionTitle title="5. Who contributes and who leads" />
+          <SectionTitle title="4. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
             <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
             <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
@@ -503,16 +504,28 @@ export default function GroupFinanceTab() {
             ))}
           </div>
 
-          <SectionTitle title="6. Recent activity" hint="Last 7 days - changes made in any company of the group" />
-          <div className="rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
-            <ActivityFeed items={activity} colorOf={colorOfOrg} />
-          </div>
-
-          <SectionTitle title="7. Company workspaces" hint="Specialised views for the Foundation and Zklyrera Spirits" />
-          <FoundationGroupSection foundation={data.foundation} />
-          <ZklyreraGroupSection zklyrera={data.zklyrera} />
+          {(data.foundation || data.zklyrera) && (
+            <>
+              <SectionTitle title="5. Company insights" hint="Open a company-specific view only when you need it" />
+              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Company insights">
+                {[data.foundation && ['foundation', 'Gulati Foundation', 'Campaigns, budgets and fund projections'], data.zklyrera && ['zklyrera', 'Zklyrera Spirits', 'Investments, returns and projections']].filter(Boolean).map(([key, label, hint]) => (
+                  <button key={key} type="button" role="tab" aria-selected={insight === key} onClick={() => setInsight((cur) => (cur === key ? '' : key))} className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition-all ${insight === key ? 'border-primary-300 bg-primary-50 shadow-card ring-1 ring-primary-200' : 'border-tertiary-100 bg-white hover:border-tertiary-200 hover:shadow-card'}`}>
+                    <span className="min-w-0"><span className="block text-sm font-semibold text-tertiary-900">{label}</span><span className="block text-xs text-tertiary-500">{hint}</span></span>
+                    <span className="text-xs font-semibold text-primary-700">{insight === key ? 'Hide' : 'View'}</span>
+                  </button>
+                ))}
+              </div>
+              {insight === 'foundation' && <FoundationGroupSection foundation={data.foundation} />}
+              {insight === 'zklyrera' && <ZklyreraGroupSection zklyrera={data.zklyrera} />}
+            </>
+          )}
         </div>
       )}
+
+      <Drawer open={activityOpen} title="Recent activity" onClose={() => setActivityOpen(false)} size="lg" tone="info">
+        <p className="mb-3 text-xs text-tertiary-500">Last 7 days: changes made in any company of the group.</p>
+        <ActivityFeed items={activity} colorOf={colorOfOrg} />
+      </Drawer>
 
       <CompanyDrawer company={openCompanyData} range={range} state={state} formula={data?.formula || { profit: 240, asset_value: 3 }} onClose={() => setOpenOrgId(null)} onOpen={openCompany} onChanged={refresh} />
     </div>
