@@ -344,6 +344,11 @@ const HR_COLUMNS = {
     hrCount,
     hrDate('Submission date'),
   ],
+  submitted_to_client: [
+    { key: 'sourcer', header: 'Sourcer' },
+    hrCount,
+    hrDate('Submitted to client on'),
+  ],
   round1_by_sourcer: [
     { key: 'sourcer', header: 'Sourcer' },
     { key: 'scheduled', header: 'Scheduled' },
@@ -499,6 +504,7 @@ const TAB_BADGE_SUM_FIELD = {
   // HR report (the server's `total` wins when present — see below).
   sourcing: 'count',
   submissions: 'count',
+  submitted_to_client: 'count',
   round1_by_sourcer: 'scheduled',
   round1_by_interviewer: 'scheduled',
 };
@@ -761,6 +767,7 @@ const dayAndPerson = (personKey) => (row) => ({ person_id: row[personKey], date:
 const DRILL_RULES = {
   'hr:sourcing': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
   'hr:submissions': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:submitted_to_client': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
   'hr:round1_by_sourcer': { metrics: ['scheduled', 'completed', 'shortlisted'], ids: dayAndPerson('sourcer_id') },
   'hr:round1_by_interviewer': {
     metrics: ['scheduled', 'completed', 'shortlisted'],

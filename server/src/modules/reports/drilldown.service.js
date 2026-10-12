@@ -275,6 +275,21 @@ const RESOLVERS = {
       profile: { ...profileScope(q), ...(q.person_id ? { added_by: q.person_id } : {}) },
     });
   },
+  'hr:submitted_to_client': async (q) => {
+    const range = rangeOf(q);
+    const history = await prisma.stageHistory.findMany({
+      where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+      orderBy: { changed_at: 'asc' },
+      select: { entity_id: true, changed_at: true },
+    });
+    const at = new Map();
+    for (const h of history) if (!at.has(h.entity_id)) at.set(h.entity_id, h.changed_at);
+    return submissions(
+      'Profiles submitted to client',
+      { id: { in: [...at.keys()] }, profile: { ...profileScope(q), ...(q.person_id ? { added_by: q.person_id } : {}) } },
+      { dateLabel: 'Submitted to client on', dateOf: (s) => at.get(s.id) }
+    );
+  },
   'hr:round1_by_sourcer': (q) => hrRounds(q, { by: 'sourcer' }),
   'hr:round1_by_interviewer': (q) => hrRounds(q, { by: 'interviewer' }),
 

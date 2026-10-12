@@ -45,3 +45,7 @@ Code: `server/src/modules/reports/drilldown.service.js`, route in `reports.route
 
 ## Tests
 `cd server && npx jest --runInBand tests/reports-drilldown.test.js tests/reports-bda-sales.test.js` (8 + 15). Each drill-down test checks that the list size equals the count it was opened from, plus the role pinning and 403 / 422 cases.
+
+## HR reports: Submitted to client (recruiter side)
+
+HR reports has a fifth table, **Submitted to client**: profiles that reached the client, per sourcer per day (excludes on-bench; honours the Type and Sourcer filters). A profile counts on the day its submission FIRST moved to `submitted_to_client` (stage history), the same anchor the Sales "Profiles submitted to client" report uses, so both sides agree. The tab badge is the total, the count opens the profiles behind it (`hr:submitted_to_client` in `drilldown.service.js`), and Excel/PDF export include it.

@@ -81,6 +81,7 @@ async function fetchAllAccountOptions(extraParams = {}) {
 const HR_TAB_META = {
   sourcing: { hint: 'Profiles sourced per day (excludes on-bench)', Icon: UserPlus },
   submissions: { hint: 'Submissions created per day (excludes on-bench)', Icon: Send },
+  submitted_to_client: { hint: 'Profiles submitted to the client per day, by sourcer (excludes on-bench)', Icon: Send },
   round1_by_sourcer: { hint: 'Internal round 1 per day, grouped by the sourcer', Icon: ClipboardCheck },
   round1_by_interviewer: { hint: 'Internal round 1 per day, grouped by the interviewer', Icon: UserCheck },
 };

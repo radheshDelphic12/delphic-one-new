@@ -166,6 +166,35 @@ describe('drilldown: coverage reports + access', () => {
     expect(res.body.data.total).toBe(2);
   });
 
+  test('hr: profiles submitted to the client, per sourcer and day, match the records behind them', async () => {
+    const client = await mkAccount({ stage: 'active', owner_id: bda.id });
+    const req = await createRequirement(salesToken, client.id);
+    const seats = (await authed(request(app).get(`/api/v1/requirements/${req.id}/seats`), salesToken)).body.data;
+    const otherRecruiter = await createUser({ role: 'recruiter', name: 'Other Recruiter' });
+    const mk = async (name, addedBy, seat, toClientAt) => {
+      const p = await prisma.profile.create({ data: { name, added_by: addedBy.id, source: 'direct', total_experience_years: 3, primary_skills: ['x'] } });
+      const sub = await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: p.id, submitted_by: addedBy.id, stage: toClientAt ? 'submitted_to_client' : 'internal_screening' } });
+      if (toClientAt) await prisma.stageHistory.create({ data: { entity_type: 'submission', entity_id: sub.id, from_stage: 'internal_screening', to_stage: 'submitted_to_client', changed_by: addedBy.id, changed_at: toClientAt } });
+      return sub;
+    };
+    await mk('Went one', recruiter, seats[0], SEP);
+    await mk('Went two', recruiter, seats[0], SEP);
+    await mk('Went by other', otherRecruiter, seats[0], SEP);
+    await mk('Not sent yet', recruiter, seats[0], null);
+
+    const report = await authed(request(app).get('/api/v1/reports/hr').query(RANGE), adminToken);
+    expect(report.status).toBe(200);
+    const table = report.body.data.tables.find((t) => t.key === 'submitted_to_client');
+    expect(table.total).toBe(3);
+    const row = table.rows.find((r) => r.sourcer_id === recruiter.id);
+    expect(row.count).toBe(2);
+    expect(row.date).toBe(iso(SEP));
+
+    const res = await drill(adminToken, { report: 'hr', table: 'submitted_to_client', metric: 'count', person_id: recruiter.id, date: row.date });
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(2);
+  });
+
   test('roles that cannot open a report cannot drill into it, and unknown tables are rejected', async () => {
     expect((await drill(recruiterToken, { report: 'hr', table: 'sourcing' })).status).toBe(403);
     expect((await drill(salesToken, { report: 'hr', table: 'sourcing' })).status).toBe(403);

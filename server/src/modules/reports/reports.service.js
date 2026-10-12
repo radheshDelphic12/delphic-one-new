@@ -1100,6 +1100,26 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     }
   }
 
+  // Table 5 - profiles submitted to the client, per sourcer per day. A submission counts on the day it FIRST moved to
+  // "submitted to client" (the stage history), the same anchor the Sales report uses.
+  const toClientHistory = await prisma.stageHistory.findMany({
+    where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+    orderBy: { changed_at: 'asc' },
+    select: { entity_id: true, changed_at: true },
+  });
+  const toClientAt = new Map();
+  for (const h of toClientHistory) if (!toClientAt.has(h.entity_id)) toClientAt.set(h.entity_id, h.changed_at);
+  const toClientSubs = toClientAt.size
+    ? await prisma.submission.findMany({
+        where: { id: { in: [...toClientAt.keys()] }, profile: { ...profileWhere, ...(sourcer_id ? { added_by: sourcer_id } : {}) } },
+        select: { id: true, profile: { select: { added_by: true, source: true, added_by_user: { select: { id: true, name: true } } } } },
+      })
+    : [];
+  const toClientMap = new Map();
+  for (const s of toClientSubs) {
+    addTyped(toClientMap, s.profile.added_by, s.profile.added_by_user?.name, dayKey(toClientAt.get(s.id)), s.profile.source);
+  }
+
   const byDateThenName = (nameKey) => (a, b) =>
     (b.date || '').localeCompare(a.date || '') || (a[nameKey] || '').localeCompare(b[nameKey] || '');
 
@@ -1116,6 +1136,12 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
         total: submissions.length,
         title: 'Submissions',
         rows: [...submissionMap.values()].sort(byDateThenName('sourcer')),
+      },
+      {
+        key: 'submitted_to_client',
+        total: toClientSubs.length,
+        title: 'Submitted to client',
+        rows: [...toClientMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_sourcer',
