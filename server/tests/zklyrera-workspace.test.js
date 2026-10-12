@@ -330,7 +330,7 @@ describe('month close and audit', () => {
 });
 
 describe('group dashboard', () => {
-  test('Zklyrera Spirits is a company of the group: P&L without capital, its own block, no valuation', async () => {
+  test('Zklyrera Spirits is a company of the group: P&L without capital, its own block, valued by the group formula', async () => {
     const delphic = await createOrg({ name: 'Group Alpha', slug: `ga-${Date.now()}` });
     const zk = await createOrg({ name: 'Zklyrera Spirits', slug: `zks-${Date.now()}`, org_group_id: delphic.org_group_id });
     await prisma.org.update({ where: { id: zk.id }, data: { enabled_modules: ['zklyrera'] } });
@@ -356,7 +356,10 @@ describe('group dashboard', () => {
     expect(c.org.kind).toBe('zklyrera');
     expect(c.has_data).toBe(true);
     expect(c.totals).toMatchObject({ revenue: 6000, expenses: 2000, profit: 4000 }); // earnings only: capital, principal and the transfer are not
-    expect(c.valuation).toBeNull();
+    // profit x 240 + principal still invested x 3, on the last month in view
+    expect(c.valuation.asset_component).toBe(900000);
+    expect(c.valuation.current).toBe(c.valuation.profit_component + c.valuation.asset_component);
+    expect(c.valuation.profit_component).toBe(c.series[c.series.length - 1].profit * 240);
     expect(c.zklyrera.money).toMatchObject({ capital_invested_total: 400000, principal_returned_total: 100000, outstanding_principal: 300000 });
     expect(res.body.data.zklyrera.money.outstanding_principal).toBe(300000);
     expect(res.body.data.zklyrera.projected.total_income).toBe(7000);
@@ -365,7 +368,7 @@ describe('group dashboard', () => {
     const proj = await authed(request(app).get(`/api/v1/super-dashboard/group/projection`), superToken);
     expect(proj.status).toBe(200);
     expect(proj.body.data.zklyrera).toBeTruthy();
-    expect(proj.body.data.companies.find((x) => x.org.id === zk.id).projected.every((p) => p.valuation === null)).toBe(true);
+    expect(proj.body.data.companies.find((x) => x.org.id === zk.id).projected.every((p) => typeof p.valuation === 'number')).toBe(true);
 
     const dd = await authed(request(app).get(`/api/v1/super-dashboard/companies/${zk.id}/drilldown?from=${month}&to=${month}&state=all`), superToken);
     expect(dd.status).toBe(200);

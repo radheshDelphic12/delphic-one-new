@@ -334,6 +334,9 @@ async function liveMonths(orgId, from, to, ctx = {}) {
   });
 }
 
+// The group valuation factors (kept equal to FORMULA in superDashboard/groupFinance.service.js).
+const VALUATION_FACTORS = { profit: 240, asset_value: 3 };
+
 async function valuationTrend(orgId, q = {}) {
   const to = q.to || currentMonth();
   const from = q.from || at(idx(to) - 11);
@@ -348,12 +351,14 @@ async function valuationTrend(orgId, q = {}) {
     let income = m.income; let expenses = m.expenses; let assets = m.outstanding_principal;
     if (state === 'locked') { income = isClosed ? Number(snap.income || 0) : 0; expenses = isClosed ? Number(snap.expenses || 0) : 0; assets = isClosed ? Number(snap.outstanding_principal || 0) : 0; }
     if (state === 'unlocked' && isClosed) { income = 0; expenses = 0; }
+    const profit = round2(income - expenses);
     return {
-      month: m.month, revenue: income, income, expenses, profit: round2(income - expenses), net_result: round2(income - expenses),
+      month: m.month, revenue: income, income, expenses, profit, net_result: round2(income - expenses),
       asset_value: assets, outstanding_principal: assets, investment_added: m.investment_added, principal_returned: m.principal_returned, investment_earnings: m.investment_earnings,
       closed: isClosed,
-      // The Delphic valuation formula (profit x 240 + assets x 3) is not applied to this capital company.
-      valuation: null,
+      // Same group formula as the other companies: profit x 240 + assets x 3 (assets = principal still invested).
+      profit_x: round2(profit * VALUATION_FACTORS.profit), asset_value_x: round2(assets * VALUATION_FACTORS.asset_value),
+      valuation: round2(profit * VALUATION_FACTORS.profit + assets * VALUATION_FACTORS.asset_value),
     };
   });
   return { currency: 'INR', state, from, to, months };

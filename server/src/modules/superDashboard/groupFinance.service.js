@@ -47,7 +47,7 @@ const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.num
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
 const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : org.enabled_modules?.includes('foundation') ? 'foundation' : org.enabled_modules?.includes('zklyrera') ? 'zklyrera' : 'delphic');
 // Companies the Delphic valuation formula (profit x 240 + assets x 3) does not apply to.
-const noValuation = (org) => ['foundation', 'zklyrera'].includes(kindOf(org));
+const noValuation = (org) => kindOf(org) === 'foundation';
 
 // Indian financial year (April - March), the convention the Zephyr presets already use.
 function bucketOf(month, granularity) {
@@ -86,12 +86,12 @@ async function computeCompanyMonths(org, from, to, state) {
   }
   if (kind === 'zklyrera') {
     // Income = investment earnings + other income, expenses = expenses + salaries, profit = net result; assets = principal still
-    // invested. Capital placed and principal recovered are NOT revenue or profit. Valuation does not apply.
+    // invested. Capital placed and principal recovered are NOT revenue or profit. Valuation = profit x 240 + principal still invested x 3.
     const t = await zklyreraFinance.valuationTrend(org.id, { from, to, state });
     if (t.error) return [];
     return t.months.map((m) => ({
       month: m.month, revenue: m.income, profit: m.profit, expenses: m.expenses,
-      asset_value: m.asset_value, asset_value_carried: false, profit_x: null, asset_value_x: null, valuation: null, closed: Boolean(m.closed),
+      asset_value: m.asset_value, asset_value_carried: false, profit_x: m.profit_x, asset_value_x: m.asset_value_x, valuation: m.valuation, closed: Boolean(m.closed),
     }));
   }
   if (kind === 'foundation') {
