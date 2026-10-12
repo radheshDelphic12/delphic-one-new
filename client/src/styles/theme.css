@@ -267,6 +267,12 @@
   background-color: rgb(var(--p-800));
 }
 
+/* The selected sidebar item keeps its soft fill on hover (the button rules above must not turn it dark). */
+.theme-zklyrera nav a.bg-primary-600:hover {
+  background-color: rgb(var(--p-200) / 0.85);
+  color: rgb(var(--p-900));
+}
+
 /* Acconcy Finance: plum taken from the logo's chevrons (#722F50 at 700) on warm off-white surfaces, so it reads
    as a different company from the green Zephyr / Gulati workspaces, with a muted gold accent (finance, gold
    investments) used sparingly for key figures and the selected tab. */
