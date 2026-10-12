@@ -401,7 +401,7 @@ export function TrendLines({ rows, companies, colorOfOrg, metric }) {
 
 /** Top-N list: plain rank numbers and a thin relative bar. */
 export function RankCard({ title, rows, format }) {
-  const max = Math.max(...rows.map((r) => Math.abs(Number(r.value) || 0)), 1);
+  const max = Math.max(...rows.map((r) => Math.max(0, Number(r.value) || 0)), 1);
   return (
     <div className="rounded-xl border border-tertiary-200 bg-white p-4 shadow-sm">
       <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-tertiary-500">{title}</h4>
@@ -414,7 +414,7 @@ export function RankCard({ title, rows, format }) {
               <span className="font-semibold tabular-nums text-tertiary-900">{format(r.value)}</span>
             </div>
             <div className="ml-6 mt-1 h-1 overflow-hidden rounded-full bg-tertiary-100">
-              <div className="h-full rounded-full bg-primary-600/80" style={{ width: `${Math.max(3, Math.min(100, (Math.abs(Number(r.value) || 0) / max) * 100))}%` }} />
+              <div className="h-full rounded-full bg-primary-600/80" style={{ width: `${Math.max(3, Math.min(100, (Math.max(0, Number(r.value) || 0) / max) * 100))}%` }} />
             </div>
           </li>
         ))}

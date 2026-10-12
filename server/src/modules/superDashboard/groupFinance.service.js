@@ -373,6 +373,8 @@ async function overview(orgGroupIds, query = {}) {
     const series = bucketSeries(months, q.granularity);
     const last = series[series.length - 1] || null;
     const prior = series.length > 1 ? series[series.length - 2] : null;
+    // With one bucket in view, compare with the last month of the period just before it.
+    const priorValuation = prior ? prior.valuation : (prevMonths.length ? prevMonths[prevMonths.length - 1].valuation : null);
     const totals = series.reduce((a, r) => ({ revenue: a.revenue + r.revenue, expenses: a.expenses + r.expenses, profit: a.profit + r.profit }), { revenue: 0, expenses: 0, profit: 0 });
     const hasBooks = months.some((m) => m.revenue || m.profit || m.asset_value);
     companies.push({
@@ -390,9 +392,9 @@ async function overview(orgGroupIds, query = {}) {
       valuation: noValuation(org) ? null : last
         ? {
             current: last.valuation,
-            previous: prior ? prior.valuation : null,
-            change: prior ? round2(last.valuation - prior.valuation) : null,
-            growth_pct: prior ? pct(last.valuation, prior.valuation) : null,
+            previous: priorValuation,
+            change: priorValuation != null ? round2(last.valuation - priorValuation) : null,
+            growth_pct: pct(last.valuation, priorValuation),
             as_of: last.label,
             profit_component: last.profit_x,
             asset_component: last.asset_value_x,
