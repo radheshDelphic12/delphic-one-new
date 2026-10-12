@@ -13,7 +13,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
-import { CompanyCard, StatTile, colorAt } from './groupUi.jsx';
+import { AXIS_TICK, ChartFrame, CompanyCard, GRID_PROPS, ShortPeriodHint, StatTile, colorAt, lineProps } from './groupUi.jsx';
 
 const LIVE_EVERY_MS = 30000;
 const money = (n) => (n === null || n === undefined ? 'N/A' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
@@ -99,20 +99,23 @@ export default function GroupDashboardTab() {
             {chart.length === 0 || chart.every((r) => !r.revenue && !r.expenses && !r.profit) ? (
               <EmptyState title="No financial data in this period" description="Nothing has been recorded for these months. Try another period." />
             ) : (
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="2 4" stroke="#e2e8f0" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={compact} width={70} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#2f7d57" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
-                    <Line type="monotone" dataKey="expenses" name="Expenses" stroke="#f59e0b" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
-                    <Line type="monotone" dataKey="profit" name="Profit" stroke="#1d4ed8" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <ChartFrame className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chart} margin={{ top: 22, right: 22, left: 0, bottom: 0 }}>
+                      <CartesianGrid {...GRID_PROPS} />
+                      <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                      <YAxis tick={AXIS_TICK} tickFormatter={compact} width={70} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} cursor={{ stroke: '#9fb3a7', strokeDasharray: '3 4' }} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} iconType="circle" />
+                      <Line dataKey="revenue" name="Revenue" {...lineProps('#2f7d57', chart.length, { labels: true })} />
+                      <Line dataKey="expenses" name="Expenses" {...lineProps('#f59e0b', chart.length, { labels: true })} />
+                      <Line dataKey="profit" name="Profit" {...lineProps('#2563eb', chart.length, { labels: true })} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </ChartFrame>
+                <ShortPeriodHint count={chart.length} />
+              </>
             )}
           </ChartCard>
 

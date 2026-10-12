@@ -5,8 +5,9 @@ import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { CHART_COLORS, chartTooltipStyle } from '../../lib/chartTheme.js';
+import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, money, shortMonth, titleCase } from '../../lib/format.js';
+import { GRID_PROPS, lineProps } from './groupUi.jsx';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
@@ -165,14 +166,14 @@ export default function ProjectionsTab() {
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} />
+                      <CartesianGrid {...GRID_PROPS} />
                       <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                       <YAxis tickFormatter={compact} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [rupees(v), name]} />
                       <Legend />
-                      <Line type="monotone" dataKey="actual" name="Actual revenue" stroke={CHART_COLORS.success} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-                      <Line type="monotone" dataKey="projected" name="Projected revenue" stroke={CHART_COLORS.primary} strokeWidth={2.5} strokeDasharray="6 4" dot={{ r: 3 }} connectNulls />
-                      <Line type="monotone" dataKey="projectedProfit" name="Projected profit" stroke={CHART_COLORS.purple} strokeWidth={1.5} strokeDasharray="2 4" dot={false} />
+                      <Line dataKey="actual" name="Actual revenue" connectNulls {...lineProps('#2f7d57', chart.length)} />
+                      <Line dataKey="projected" name="Projected revenue" connectNulls {...lineProps('#2563eb', chart.length, { dashed: true })} />
+                      <Line dataKey="projectedProfit" name="Projected profit" {...lineProps('#7c3aed', 0, { dashed: true, width: 2 })} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -181,13 +182,13 @@ export default function ProjectionsTab() {
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} />
+                      <CartesianGrid {...GRID_PROPS} />
                       <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                       <YAxis tickFormatter={compact} tick={{ fontSize: 11 }} />
                       <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [rupees(v), name]} />
                       <Legend />
-                      <Line type="monotone" dataKey="actualValuation" name="Actual valuation" stroke={CHART_COLORS.success} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-                      <Line type="monotone" dataKey="projectedValuation" name="Projected valuation" stroke={CHART_COLORS.primary} strokeWidth={2.5} strokeDasharray="6 4" dot={{ r: 3 }} connectNulls />
+                      <Line dataKey="actualValuation" name="Actual valuation" connectNulls {...lineProps('#2f7d57', chart.length)} />
+                      <Line dataKey="projectedValuation" name="Projected valuation" connectNulls {...lineProps('#2563eb', chart.length, { dashed: true })} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>

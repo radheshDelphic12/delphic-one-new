@@ -103,7 +103,7 @@ const TONES = {
 
 /** Up / down / flat pill. `invert` flips the colour meaning (rising expenses are bad news). */
 export function DeltaPill({ pct, invert = false, suffix = 'vs previous period' }) {
-  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return <span className="text-xs text-tertiary-400">{suffix ? `No previous period` : ''}</span>;
+  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return <span className="whitespace-nowrap text-xs text-tertiary-400">No prior period</span>;
   const n = Number(pct);
   const flat = n === 0;
   const good = invert ? n < 0 : n > 0;
@@ -139,7 +139,9 @@ export function StatTile({ label, value, icon: Icon, tone = 'green', pct, invert
         )}
       </div>
       <div className="mt-3 flex items-end justify-between gap-2">
-        <div className="min-w-0">{note ? <span className="text-xs text-tertiary-500">{note}</span> : <DeltaPill pct={pct} invert={invert} />}</div>
+        <div className="min-w-0 flex-1">
+          {note ? <span className="text-xs text-tertiary-500">{note}</span> : <DeltaPill pct={pct} invert={invert} suffix={showSpark ? '' : undefined} />}
+        </div>
         {showSpark && (
           <div className="h-10 w-24 shrink-0 opacity-90" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
@@ -315,29 +317,20 @@ export function ContributionLines({ title, subtitle, trendRows, rows, companies,
         <p className="py-10 text-center text-sm text-tertiary-500">Nothing to compare in this period.</p>
       ) : (
         <>
-          <div className="mt-2 h-52">
+          <ChartFrame className="mt-2 h-56">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `${v}%`} width={44} axisLine={false} tickLine={false} />
-                <RTooltip content={<ShareTooltip companies={companies} />} cursor={{ stroke: '#cbd5e1', strokeDasharray: '3 3' }} />
+              <LineChart data={series} margin={{ top: 18, right: 18, left: 0, bottom: 0 }}>
+                <CartesianGrid {...GRID_PROPS} />
+                <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} width={44} axisLine={false} tickLine={false} />
+                <RTooltip content={<ShareTooltip companies={companies} />} cursor={{ stroke: '#9fb3a7', strokeDasharray: '3 4' }} />
                 {companies.map((c) => (
-                  <Line
-                    key={c.org.id}
-                    type="monotone"
-                    dataKey={c.org.id}
-                    name={c.org.name}
-                    stroke={colorOfOrg(c.org.id)}
-                    strokeWidth={2.25}
-                    dot={series.length < 25 ? { r: 3, strokeWidth: 0, fill: colorOfOrg(c.org.id) } : false}
-                    activeDot={{ r: 5 }}
-                    connectNulls
-                  />
+                  <Line key={c.org.id} dataKey={c.org.id} name={c.org.name} connectNulls {...lineProps(colorOfOrg(c.org.id), series.length, { width: 2.75, labels: true, format: (v) => `${v}%` })} />
                 ))}
               </LineChart>
             </ResponsiveContainer>
-          </div>
+          </ChartFrame>
+          <ShortPeriodHint count={series.length} />
           <ul className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
             {legend.map((d) => (
               <li key={d.id} className="flex items-center gap-2">
@@ -352,6 +345,38 @@ export function ContributionLines({ title, subtitle, trendRows, rows, companies,
       )}
     </div>
   );
+}
+
+// ---- shared line-chart styling: soft dotted grid, rounded glowing lines, white-ringed dots --------------------------
+export const GRID_PROPS = { strokeDasharray: '1 7', vertical: false, stroke: '#c5d1ca' };
+export const AXIS_TICK = { fontSize: 11, fill: '#6b7c72' };
+
+/** Props for a <Line>: smooth, thick, softly glowing, with white-ringed dots while the series is short. */
+export function lineProps(color, count = 0, { dashed = false, width = 3, labels = false, format = compact } = {}) {
+  const few = count > 0 && count <= 18;
+  return {
+    type: 'monotone',
+    stroke: color,
+    strokeWidth: width,
+    strokeLinecap: 'round',
+    strokeDasharray: dashed ? '7 5' : undefined,
+    dot: few ? { r: 4, fill: '#fff', stroke: color, strokeWidth: 2.5 } : false,
+    activeDot: { r: 6.5, fill: color, stroke: '#fff', strokeWidth: 3 },
+    style: { filter: `drop-shadow(0 4px 6px ${color}45)` },
+    animationDuration: 700,
+    label: labels && count > 0 && count <= 3 ? { position: 'top', fontSize: 11, fontWeight: 600, fill: color, formatter: format } : false,
+  };
+}
+
+/** Soft tinted panel behind a chart so the lines sit on something instead of bare white. */
+export function ChartFrame({ children, className = 'h-72' }) {
+  return <div className={`${className} rounded-xl bg-gradient-to-b from-primary-50/60 via-white to-white p-2 ring-1 ring-primary-100/70`}>{children}</div>;
+}
+
+/** A one-line nudge when the period is too short to draw a trend. */
+export function ShortPeriodHint({ count }) {
+  if (count >= 3) return null;
+  return <p className="mt-2 text-[11px] text-tertiary-500">Only {count === 1 ? 'one period' : 'two periods'} in this range. Pick a quarter or a financial year above to see the line.</p>;
 }
 
 function TrendTooltip({ active, payload, label, companies }) {
@@ -370,28 +395,34 @@ function TrendTooltip({ active, payload, label, companies }) {
   );
 }
 
-/** Multi-company trend: smooth lines, soft grid, a ranked tooltip and a pill legend. */
+/** Multi-company trend: glowing smooth lines, dotted grid, ranked tooltip and legend pills that show each latest value. */
 export function TrendLines({ rows, companies, colorOfOrg, metric }) {
+  const latest = (id) => {
+    for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i][id] != null && rows[i][id] !== '') return Number(rows[i][id]);
+    return null;
+  };
   return (
     <div>
-      <div className="h-72">
+      <ChartFrame>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ top: 10, right: 14, left: 4, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#e2e8f0" />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={compact} width={72} axisLine={false} tickLine={false} />
-            <RTooltip content={<TrendTooltip companies={companies} />} cursor={{ stroke: '#cbd5e1', strokeDasharray: '3 3' }} />
+          <LineChart data={rows} margin={{ top: 22, right: 22, left: 4, bottom: 0 }}>
+            <CartesianGrid {...GRID_PROPS} />
+            <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+            <YAxis tick={AXIS_TICK} tickFormatter={compact} width={72} axisLine={false} tickLine={false} />
+            <RTooltip content={<TrendTooltip companies={companies} />} cursor={{ stroke: '#9fb3a7', strokeDasharray: '3 4' }} />
             {companies.map((c) => (
-              <Line key={`${metric}-${c.org.id}`} type="monotone" dataKey={c.org.id} name={c.org.name} stroke={colorOfOrg(c.org.id)} strokeWidth={2.5} dot={rows.length < 25 ? { r: 3, strokeWidth: 0, fill: colorOfOrg(c.org.id) } : false} activeDot={{ r: 5 }} connectNulls />
+              <Line key={`${metric}-${c.org.id}`} dataKey={c.org.id} name={c.org.name} connectNulls {...lineProps(colorOfOrg(c.org.id), rows.length, { labels: true })} />
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2">
+      </ChartFrame>
+      <ShortPeriodHint count={rows.length} />
+      <div className="mt-3 flex flex-wrap gap-2">
         {companies.map((c) => (
-          <span key={c.org.id} className="inline-flex items-center gap-1.5 rounded-full border border-tertiary-100 bg-white px-2.5 py-1 text-xs text-tertiary-700">
-            <span className="h-2 w-2 rounded-full" style={{ background: colorOfOrg(c.org.id) }} />
+          <span key={c.org.id} className="inline-flex items-center gap-2 rounded-full border border-tertiary-100 bg-white py-1 pl-2 pr-3 text-xs text-tertiary-700 shadow-sm">
+            <span className="h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ background: colorOfOrg(c.org.id), boxShadow: `0 0 0 1px ${colorOfOrg(c.org.id)}66` }} />
             {c.org.name}
+            {latest(c.org.id) != null && <b className="tabular-nums text-tertiary-900">{compact(latest(c.org.id))}</b>}
           </span>
         ))}
       </div>

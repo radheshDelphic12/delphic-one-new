@@ -8,7 +8,7 @@ import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { FLAG_META, STATUS_META } from '../../lib/foundation/meta.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import { Disclosure, KpiTile as KpiCard } from './groupUi.jsx';
+import { Disclosure, GRID_PROPS, KpiTile as KpiCard, lineProps } from './groupUi.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -74,13 +74,13 @@ export default function FoundationGroupSection({ foundation }) {
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={monthly} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <CartesianGrid {...GRID_PROPS} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={short} width={64} />
                   <Tooltip contentStyle={chartTooltipStyle} formatter={(v, n) => [inr(v), n]} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="planned_investment" name="Planned investment" stroke="#4f8f60" strokeWidth={2.5} dot={{ r: 2.5 }} />
-                  <Line type="monotone" dataKey="projected" name="Projected spending" stroke="#7A6BB5" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
+                  <Line dataKey="planned_investment" name="Planned investment" {...lineProps('#4f8f60', monthly.length)} />
+                  <Line dataKey="projected" name="Projected spending" {...lineProps('#7A6BB5', monthly.length, { dashed: true, width: 2.5 })} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
