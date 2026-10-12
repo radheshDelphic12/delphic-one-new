@@ -92,7 +92,7 @@ Charts always draw a wave: when the chosen period has fewer than six months, the
 
 ### Design rules (professional pass, 2026-10-12)
 The look is deliberately restrained; keep new group-dashboard UI to these rules:
-- One neutral surface: white cards, 1px `tertiary-200` border, `shadow-sm`, 12px radius, no gradients, glows or hover lifts. The only filled colour block is the flat dark-green header band (`.group-hero`).
+- One neutral surface: white cards, 1px `tertiary-200` border, `shadow-sm`, 12px radius, no gradients, glows or hover lifts. The page banner and the underline tab bar are kept exactly as originally designed (green gradient banner with the large logo).
 - Colour carries meaning, not decoration: green / red text only for good / bad change, a small dot + word for status (Profit, Loss, No data); KPI tiles are all neutral with a grey icon.
 - Each company has one muted key colour (`COMPANY_COLORS`) used as a small square, its card line and its chart line.
 - Navigation is an underline tab bar; section headings are plain text with a hairline, no numbers or badges.

@@ -21,53 +21,39 @@ export const compact = (n) => {
   return `${sign}₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 };
 
-/** Page header: a flat dark-green band with the group logo, name and today's date. No decoration. */
-export function GroupHero({ title = 'Gulati Industries', logo = '/group-logo.svg', subtitle }) {
-  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+/** Page banner: kept exactly as the original design (green gradient, large logo, short description). */
+export function GroupHero({ title = 'Gulati Industries', logo = '/group-logo.svg' }) {
   return (
-    <div className="group-hero flex flex-wrap items-center gap-4 rounded-xl px-5 py-4 text-white">
-      <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg bg-white p-1.5">
+    <div className="flex flex-wrap items-center gap-5 overflow-hidden rounded-2xl bg-gradient-to-r from-[#1f3a2c] via-[#2f5d43] to-[#4f8f60] p-4 text-white shadow-card sm:p-5">
+      <div className="flex h-24 w-32 shrink-0 items-center justify-center rounded-xl bg-white p-2 shadow-soft sm:h-28 sm:w-40">
         <img src={logo} alt={title} className="h-full w-full object-contain" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-emerald-100/70">Multi-organization group</p>
-        <h2 className="font-heading text-xl font-semibold tracking-tight">{title}</h2>
-        <p className="mt-0.5 max-w-3xl text-[13px] text-emerald-50/80">
-          {subtitle || 'Revenue, profit, assets and valuation of every company in the group, side by side. Open a company from the sidebar to work inside it.'}
-        </p>
-      </div>
-      <div className="text-right text-xs text-emerald-100/75">
-        <div className="font-medium text-white/90">{today}</div>
-        <div>Figures in INR</div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Multi-organization group</p>
+        <h2 className="font-heading text-xl font-bold tracking-tight sm:text-2xl">{title}</h2>
+        <p className="mt-1 max-w-2xl text-sm text-white/80">One view of every company in the group: revenue, profit, assets and valuation side by side. Open any company from the sidebar to work inside it; the Group Dashboard link brings you back.</p>
       </div>
     </div>
   );
 }
 
-/** Section switcher: a plain underline tab bar (same `role=tab` contract as before). */
+/** Section tabs: kept exactly as the original underline bar. */
 export function GroupTabs({ tabs, value, onChange }) {
   return (
-    <div className="overflow-x-auto border-b border-tertiary-200" role="tablist" aria-label="Group sections">
-      <div className="flex min-w-max gap-1">
-        {tabs.map(({ key, label, icon: Icon }) => {
-          const active = value === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => onChange(key)}
-              className={`-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm transition-colors ${
-                active ? 'border-primary-700 font-semibold text-primary-800' : 'border-transparent font-medium text-tertiary-500 hover:text-tertiary-800'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
+      {tabs.map(({ key, label, icon: Icon }) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={value === key}
+          className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${value === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`}
+          onClick={() => onChange(key)}
+        >
+          <Icon className="h-4 w-4" />
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

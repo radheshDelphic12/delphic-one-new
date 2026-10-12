@@ -424,12 +424,6 @@
   color: rgb(var(--p-800));
 }
 
-/* Group Dashboard header band: a flat, dark green with a hairline edge. No gradients or patterns. */
-.group-hero {
-  background: #17382b;
-  border: 1px solid #0f2a1f;
-}
-
 /* The selected pill of the group tab bar keeps white text (the generic selected-tab rule above would darken it). */
 .theme-group [role='tablist'] button.group-tab-active {
   color: #fff;
