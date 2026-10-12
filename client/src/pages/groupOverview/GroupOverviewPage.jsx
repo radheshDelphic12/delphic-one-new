@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Network, PiggyBank, Plus, Receipt, Settings, TrendingUp } from 'lucide-react';
+import { Building2, ListChecks, Network, PiggyBank, Plus, Receipt, Settings, TrendingUp } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -15,6 +15,7 @@ import ProjectionsTab from './ProjectionsTab.jsx';
 import GroupFinanceTab from './GroupFinanceTab.jsx';
 import GroupDashboardTab from './GroupDashboardTab.jsx';
 import GroupSettingsTab from './GroupSettingsTab.jsx';
+import GroupTasksTab from './GroupTasksTab.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -145,6 +146,7 @@ const TABS = [
   { key: 'finance', label: 'Group Finance', icon: PiggyBank },
   { key: 'dashboard', label: 'Dashboard', icon: Building2 },
   { key: 'projections', label: 'Projections & Valuation', icon: TrendingUp },
+  { key: 'tasks', label: 'Tasks & Weekly plan', icon: ListChecks },
   { key: 'org-chart', label: 'Org Chart', icon: Network },
   { key: 'group-charges', label: 'Billing Charges', icon: Receipt },
   { key: 'settings', label: 'Settings', icon: Settings },
@@ -181,6 +183,7 @@ export default function GroupOverviewPage() {
       {section === 'finance' && <GroupFinanceTab />}
       {section === 'dashboard' && <GroupDashboardTab />}
       {section === 'projections' && <ProjectionsTab />}
+      {section === 'tasks' && <GroupTasksTab />}
       {section === 'org-chart' && <GroupOrgChartTab />}
       {section === 'group-charges' && <GroupChargesTab />}
       {section === 'settings' && <GroupSettingsTab />}

@@ -7,6 +7,7 @@ const superDashboardService = require('./superDashboard.service');
 const { computeSchema, rollupQuerySchema, financialsRollupQuerySchema } = require('./superDashboard.validation');
 const financialsService = require('../financials/financials.service');
 const groupFinance = require('./groupFinance.service');
+const groupTasks = require('./groupTasks.service');
 const { fail } = require('../../utils/response');
 
 // HLD §7: a single cross-org read API, org_id-agnostic by design, gated to
@@ -86,6 +87,31 @@ router.get(
   '/group/projection',
   asyncHandler(async (req, res) => ok(res, await groupFinance.projection(req.user.org_group_ids, req.query)))
 );
+
+// --- Group task management: one-time and recurring tasks across the companies, and the weekly company-day table ---
+const TASK_ERRORS = {
+  not_found: [404, 'Task not found'],
+  company_not_found: [422, 'That company is not in this group'],
+  due_date_required: [422, 'A one-time task needs a due date'],
+  frequency_required: [422, 'A recurring task needs a frequency'],
+  start_date_required: [422, 'A recurring task needs a start date'],
+  weekdays_required: [422, 'Pick at least one weekday for a weekly task'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  bad_date: [422, 'Use YYYY-MM-DD'],
+  not_an_occurrence: [422, 'That task does not fall due on that date'],
+};
+const taskResult = (res, r, key, status = 200) => {
+  if (r.error) { const m = TASK_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+router.get('/group/tasks', asyncHandler(async (req, res) => ok(res, await groupTasks.listMonth(req.user.org_group_ids, req.query))));
+router.get('/group/tasks/upcoming', asyncHandler(async (req, res) => ok(res, await groupTasks.upcoming(req.user.org_group_ids, req.query))));
+router.post('/group/tasks', asyncHandler(async (req, res) => taskResult(res, await groupTasks.create(req.user.org_group_ids, req.user.id, req.body), 'task', 201)));
+router.patch('/group/tasks/:id', asyncHandler(async (req, res) => taskResult(res, await groupTasks.update(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'task')));
+router.delete('/group/tasks/:id', asyncHandler(async (req, res) => taskResult(res, await groupTasks.remove(req.user.org_group_ids, req.user.id, req.params.id))));
+router.put('/group/tasks/:id/occurrences/:date', asyncHandler(async (req, res) => taskResult(res, await groupTasks.setDone(req.user.org_group_ids, req.user.id, req.params.id, req.params.date, req.body))));
+router.get('/group/weekly-plan', asyncHandler(async (req, res) => ok(res, await groupTasks.weeklyPlan(req.user.org_group_ids, req.query))));
+router.put('/group/weekly-plan', asyncHandler(async (req, res) => { const r = await groupTasks.setWeeklyPlan(req.user.org_group_ids, req.user.id, req.body); return r.error ? taskResult(res, r) : ok(res, r); }));
 
 router.get(
   '/group/activity',

@@ -1801,6 +1801,8 @@ model OrgGroup {
   orgs                  Org[]
   memberships           OrgGroupMembership[]
   group_billing_charges GroupBillingCharge[]
+  group_tasks           GroupTask[]
+  group_company_days    GroupCompanyDay[]
 
   @@map("org_groups")
 }
@@ -5361,4 +5363,65 @@ model FxPeriodClose {
 
   @@unique([org_id, month])
   @@map("fx_period_closes")
+}
+
+// ===================== Group task management (Super Admin / Group Dashboard) =====================
+// One-time and recurring tasks across the companies of a holding group. A recurring task is a rule; its dates are
+// computed on demand (modules/superDashboard/groupTasks.calc.js) and each date is ticked off in group_task_done.
+model GroupTask {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String           @db.Uuid
+  org_group    OrgGroup         @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id       String?          @db.Uuid // null = applies to every company of the group
+  title        String
+  notes        String?
+  priority     String           @default("medium") // low | medium | high
+  kind         String           @default("one_time") // one_time | recurring
+  due_date     DateTime?        @db.Date // one_time
+  frequency    String? // recurring: daily | weekly | monthly | quarterly | yearly
+  interval     Int              @default(1) // every N days / weeks / months / quarters / years
+  weekdays     Int[]            @default([]) // weekly: ISO weekdays, 1 = Monday ... 7 = Sunday
+  day_of_month Int? // monthly / quarterly / yearly (clamped to the month end)
+  start_date   DateTime?        @db.Date // recurring
+  end_date     DateTime?        @db.Date // recurring, optional
+  status       String           @default("active") // active | paused | cancelled
+  assignee_id  String?          @db.Uuid
+  created_by   String?          @db.Uuid
+  created_at   DateTime         @default(now())
+  updated_at   DateTime         @default(now()) @updatedAt
+  deleted_at   DateTime?
+  done         GroupTaskDone[]
+
+  @@index([org_group_id, kind, status])
+  @@index([org_group_id, due_date])
+  @@map("group_tasks")
+}
+
+model GroupTaskDone {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  task_id         String    @db.Uuid
+  task            GroupTask @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  occurrence_date DateTime  @db.Date
+  done_by         String?   @db.Uuid
+  done_at         DateTime  @default(now())
+  note            String?
+
+  @@unique([task_id, occurrence_date])
+  @@map("group_task_done")
+}
+
+// Which weekday a company is reviewed on (the weekly table). A company may have more than one day.
+model GroupCompanyDay {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String   @db.Uuid
+  org_group    OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id       String   @db.Uuid
+  weekday      Int // ISO: 1 = Monday ... 7 = Sunday
+  note         String?
+  updated_by   String?  @db.Uuid
+  updated_at   DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, weekday])
+  @@index([org_group_id])
+  @@map("group_company_days")
 }

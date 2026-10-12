@@ -30,6 +30,9 @@ function earliestLogIso() {
   return `${start.getFullYear()}-${month}-${day}`;
 }
 
+// Overtime hours are not logged or shown on the employee's own timesheet (overtime is raised as a ticket instead).
+const OT_HIDDEN = true;
+
 function blankRow() {
   return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
@@ -249,10 +252,10 @@ export default function ItTimesheetPage() {
           )}
           <div className="space-y-2">
             {rows.map((row) => (
-              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_0.6fr_2.2fr_auto]">
+              <div key={row.key} className="grid grid-cols-1 gap-2 rounded-xl border border-tertiary-100 p-2.5 sm:grid-cols-[1.5fr_0.6fr_2.2fr_auto]">
                 <SearchableSelect value={row.account_id} onChange={(v) => setRow(row.key, 'account_id', v)} options={projectOptions} placeholder="Project" searchPlaceholder="Search your projects…" />
                 <input required type="number" min="0.25" max="24" step="0.25" placeholder="Hrs" aria-label="Hours worked" value={row.hours} onChange={(e) => setRow(row.key, 'hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
-                {usesTickets ? (
+                {OT_HIDDEN ? null : usesTickets ? (
                   <span className="self-center text-xs text-tertiary-500" title="Overtime is raised as a ticket and approved by your manager">OT: use OT Tickets</span>
                 ) : (
                   <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
@@ -295,7 +298,7 @@ export default function ItTimesheetPage() {
             </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
+            <span className="text-sm font-medium text-tertiary-700">{filtered ? 'Filtered total' : 'Month total'}: {monthTotal.toFixed(1)} hrs{!OT_HIDDEN && monthOt > 0 ? ` · ${monthOt.toFixed(1)}h OT` : ''}</span>
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportExcel}>
               <Download className="h-4 w-4" /> Export to Excel
             </button>
@@ -314,7 +317,7 @@ export default function ItTimesheetPage() {
                   <span className="text-sm font-semibold text-tertiary-900">{dateLabel(day.date)}</span>
                   <span className="text-xs font-medium text-tertiary-600">
                     {day.total_hours} hrs
-                    {day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
+                    {!OT_HIDDEN && day.ot_hours > 0 && <span className="ml-1.5 font-semibold text-purple-700" title={`Beyond your ${day.expected_hours || 0}h expected for this day — goes to your manager for OT approval`}>· {day.ot_hours}h OT</span>}
                   </span>
                 </div>
                 <table className="w-full text-sm">
@@ -331,13 +334,13 @@ export default function ItTimesheetPage() {
                       <tr key={entry.id} className="border-t border-tertiary-100">
                         <td className="px-4 py-1.5 text-tertiary-700">
                           {entry.account?.name || '—'}
-                          {entry.is_holiday_overtime && (
+                          {!OT_HIDDEN && entry.is_holiday_overtime && (
                             <span title={entry.holiday_label || 'Project holiday'} className="ml-1.5 inline-block rounded-full bg-warning-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-700">
                               Holiday OT
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
+                        <td className="px-4 py-1.5 text-tertiary-700">{entry.hours}{!OT_HIDDEN && entry.overtime_hours ? <span className="ml-1 text-xs text-warning-700">+{entry.overtime_hours} OT</span> : null}</td>
                         <td className="px-4 py-1.5 text-tertiary-500"><NoteText text={entry.notes} /></td>
                         <td className="px-4 py-1.5">
                           <StatusBadge status={entry.status} label={STATUS_LABEL[entry.status]} size="xs" />
