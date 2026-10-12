@@ -7,7 +7,9 @@ const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./reports.service');
 const explorerService = require('./explorer.service');
+const drilldownService = require('./drilldown.service');
 const {
+  drilldownSchema,
   dateRangeSchema,
   agingSchema,
   closureSchema,
@@ -187,6 +189,19 @@ router.get(
     if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
     const data = await service.recruiterVendorGaps(query);
     return ok(res, data);
+  })
+);
+
+// Records behind a count in a report table (click a count -> side panel).
+router.get(
+  '/drilldown',
+  authorize('admin', 'sales', 'recruiter', 'bda'),
+  asyncHandler(async (req, res) => {
+    const query = drilldownSchema.parse(req.query);
+    const result = await drilldownService.drilldown(req.user, query);
+    if (result.error === 'forbidden') return fail(res, 403, 'Not permitted');
+    if (result.error) return fail(res, 422, 'Unknown report table');
+    return ok(res, result.data);
   })
 );
 

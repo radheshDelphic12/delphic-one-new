@@ -1235,6 +1235,7 @@ async function joinings({ date_from, date_to }) {
           month: mk.label,
           sort: mk.sort,
           vendor: p.vendor_account?.name || 'Unknown vendor',
+          vendor_id: p.vendor_account_id,
           joinings: 0,
         });
       }
@@ -1372,10 +1373,19 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
 
   const meetingsScheduled = new Map();
   const meetingsConversion = new Map();
+  // An account rescheduled several times has several meeting events but converts to
+  // active once — count each account's conversion once per row, so "converted" can
+  // never exceed the number of accounts (or meetings) it is measured against.
+  const convertedSeen = new Set();
   for (const e of meetingEvents) {
     const day = dayKey(e.changed_at);
-    const converted = activeNow.has(e.entity_id) ? 1 : 0;
     const dayKeyStr = `${e.changed_by}|${day}`;
+    const dayConvertedKey = `${dayKeyStr}|${e.entity_id}`;
+    const dayConverted = activeNow.has(e.entity_id) && !convertedSeen.has(dayConvertedKey) ? 1 : 0;
+    if (dayConverted) convertedSeen.add(dayConvertedKey);
+    const rollupConvertedKey = `${e.changed_by}|${e.entity_id}`;
+    const rollupConverted = activeNow.has(e.entity_id) && !convertedSeen.has(rollupConvertedKey) ? 1 : 0;
+    if (rollupConverted) convertedSeen.add(rollupConvertedKey);
     if (!meetingsScheduled.has(dayKeyStr)) {
       meetingsScheduled.set(dayKeyStr, {
         bda: e.changed_by_user?.name || 'Unknown',
@@ -1387,7 +1397,7 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     }
     const dRow = meetingsScheduled.get(dayKeyStr);
     dRow.meetings_scheduled += 1;
-    dRow.converted_to_active += converted;
+    dRow.converted_to_active += dayConverted;
 
     if (!meetingsConversion.has(e.changed_by)) {
       meetingsConversion.set(e.changed_by, {
@@ -1399,7 +1409,7 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     }
     const cRow = meetingsConversion.get(e.changed_by);
     cRow.meetings_scheduled += 1;
-    cRow.converted_to_active += converted;
+    cRow.converted_to_active += rollupConverted;
   }
 
   // 4 & 5. requirements on BDA-brought *client* accounts
@@ -1771,4 +1781,9 @@ module.exports = {
   timeToSubmit,
   bdaReports,
   salesReports,
+  // shared with drilldown.service so a drill-down uses the exact same IST day/range rules
+  dayKey,
+  reportFrom,
+  reportTo,
+  optionalDateRange,
 };

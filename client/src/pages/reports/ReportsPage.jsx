@@ -738,8 +738,10 @@ export default function ReportsPage() {
   }
 
   function drillLabel(row, col) {
+    // Rows name their subject as plain text (HR / BDA / Sales / Joinings) or as { id, name } (coverage reports).
+    const nameOf = (value) => (value && typeof value === 'object' ? value.name : value);
     const who =
-      row.sourcer || row.interviewer || row.bda || row.sales_poc || row.vendor?.name || row.vendor || row.client?.name || '';
+      [row.vendor, row.client, row.sourcer, row.interviewer, row.bda, row.sales_poc].map(nameOf).find(Boolean) || '';
     const when = row.date ? formatReportDate(row.date) : row.month || '';
     return [col.header, who, when].filter(Boolean).join(' · ');
   }
@@ -756,9 +758,50 @@ export default function ReportsPage() {
           const inner = col.render ? col.render(row) : (row[col.key] ?? 0);
           const params = drillParams(active, tableKey, col.key, row, drillFilters());
           if (!params || !Number(row[col.key])) return inner;
-          return <DrillCount onClick={() => setDrill({ params, label: drillLabel(row, col) })}>{inner}</DrillCount>;
+          return (
+            <DrillCount onClick={() => setDrill({ title: drillLabel(row, col), lists: [{ params }] })}>{inner}</DrillCount>
+          );
         },
       };
+    });
+  }
+
+  /**
+   * Row click: open the panel with the records behind every count of that row (plus the row's
+   * own fields). Rows with nothing to drill into keep the plain summary panel.
+   */
+  function openRow(row, tableKey, tableColumns) {
+    const lists = drillMetrics(active, tableKey)
+      .filter((metric) => Number(row[metric]) > 0)
+      .map((metric) => {
+        const params = drillParams(active, tableKey, metric, row, drillFilters());
+        const header = tableColumns.find((c) => c.key === metric)?.header || metric;
+        return params ? { params, heading: `${header}: ${row[metric]}` } : null;
+      })
+      .filter(Boolean);
+    if (!lists.length) {
+      setDrawerRow(row);
+      return;
+    }
+    // One list carries its own title; several need the count they belong to.
+    if (lists.length === 1) lists[0].heading = undefined;
+    const fields = Object.entries(row).filter(
+      ([key, value]) => key !== 'id' && key !== 'details' && key !== 'sort' && !key.endsWith('_id') && value != null && typeof value !== 'object'
+    );
+    setDrill({
+      title: drillLabel(row, { header: '' }) || 'Records',
+      summary: (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {fields.slice(0, 12).map(([key, value]) => (
+            <DetailField
+              key={key}
+              label={key.replace(/_/g, ' ')}
+              value={/(_at|date)$/.test(key) ? formatReportDate(value) : String(value)}
+            />
+          ))}
+        </div>
+      ),
+      lists,
     });
   }
 
@@ -1436,6 +1479,7 @@ export default function ReportsPage() {
             rows={hrSection?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
+            onRowClick={(row) => openRow(row, hrSection?.key, hrColumns)}
           />
         </div>
       ) : isJoinings ? (
@@ -1473,6 +1517,7 @@ export default function ReportsPage() {
             rows={joiningsSection?.rows || []}
             loading={loading}
             emptyLabel="No joinings in this range"
+            onRowClick={(row) => openRow(row, joiningsSection?.key, joiningsSection?.columns || [])}
           />
         </div>
       ) : isBdaReports || isSalesReports ? (
@@ -1519,7 +1564,13 @@ export default function ReportsPage() {
             rows={(isBdaReports ? bdaReportsSection : salesReportsSection)?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
-            onRowClick={setDrawerRow}
+            onRowClick={(row) =>
+              openRow(
+                row,
+                (isBdaReports ? bdaReportsSection : salesReportsSection)?.key,
+                (isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || []
+              )
+            }
           />
         </div>
       ) : isTimeToSubmit ? (
@@ -1553,7 +1604,7 @@ export default function ReportsPage() {
           rows={tableRows}
           loading={loading}
           emptyLabel="No rows for this range"
-          onRowClick={setDrawerRow}
+          onRowClick={(row) => openRow(row, 'main', columns)}
         />
       )}
 
@@ -1567,7 +1618,11 @@ export default function ReportsPage() {
                 .filter(([key, value]) => key !== 'id' && key !== 'details' && typeof value !== 'object')
                 .slice(0, 16)
                 .map(([key, value]) => (
-                  <DetailField key={key} label={key.replace(/_/g, ' ')} value={String(value)} />
+                  <DetailField
+                    key={key}
+                    label={key.replace(/_/g, ' ')}
+                    value={/(_at|date)$/.test(key) ? formatReportDate(value) : String(value)}
+                  />
                 ))}
             </div>
             {Array.isArray(drawerRow.details) && drawerRow.details.length > 0 && (

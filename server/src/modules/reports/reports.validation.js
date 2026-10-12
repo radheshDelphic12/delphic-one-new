@@ -114,7 +114,27 @@ const explorerSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
+// Drill-down: the records behind one count. `table` is the report's table key, `metric` the
+// clicked count column; the rest are the identifiers of the clicked row plus the report filters.
+const drilldownSchema = z.object({
+  report: z.string().min(1),
+  table: z.string().min(1),
+  metric: z.string().optional(),
+  person_id: optionalUuid,
+  person_name: z.string().optional(),
+  account_id: optionalUuid,
+  recruiter_id: optionalUuid,
+  client_id: optionalUuid,
+  account_type: z.enum(['client', 'vendor', 'unclassified']).optional(),
+  source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  date_from: z.string().optional(),
+  date_to: z.string().optional(),
+});
+
 module.exports = {
+  drilldownSchema,
   dateRangeSchema,
   agingSchema,
   closureSchema,
