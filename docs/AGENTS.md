@@ -40,7 +40,11 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [ACCOUNT-CLIENT-MEETINGS.md](features/ACCOUNT-CLIENT-MEETINGS.md) - extra tracked meetings with active clients/vendors (shown on the calendar, no stage change) + sales My/All requirements pill (2026-10-09)
 - [GULATI-FOUNDATION.md](features/GULATI-FOUNDATION.md) - 5th company: campaigns, budgets, planned vs actual investment, funding, projections, group dashboard integration (module foundation, tables fx_*, 2026-10-09)
 - [GROUP-TASKS-WEEKLY-PLAN.md](features/GROUP-TASKS-WEEKLY-PLAN.md) - Group Dashboard tasks (one-time/recurring), weekly company-day table, derived-OT hiding (tables group_tasks/group_task_done/group_company_days, 2026-10-12)
-- [ZKLYRERA-SPIRITS.md](features/ZKLYRERA-SPIRITS.md) - 6th company: investments (principal vs earnings), income, expenses, salaries, monthly reports, projections, group dashboard block (module zklyrera, tables zk_*, 2026-10-12)
+- [ZKLYRERA-SPIRITS.md](features/ZKLYRERA-SPIRITS.md) - 6th company: investments (principal vs earnings), income, expenses, salaries, monthly reports, projections, group dashboard block (module zklyrera, tables zk_*, 2026-10-12; live on staging + production, org seeded with seed-admin)
+- [SALES-REQUIREMENTS-SHARED-ACCESS.md](features/SALES-REQUIREMENTS-SHARED-ACCESS.md) - whole Sales team sees/manages every requirement (list, Pipeline, notes/files via entityAccess); owner change admin-only; activity log tags the actor (2026-10-12)
+- [REPORTS-DRILLDOWN.md](features/REPORTS-DRILLDOWN.md) - Reports: click a count or row to see the records behind it (`GET /reports/drilldown`), meeting-conversion + coverage-chart count fixes (2026-10-12)
+
+**Release gotcha (2026-10-12):** a push to `main` runs CI and then auto-deploys production (`.github/workflows/deploy.yml`). Staging is the `staging` branch + `render deploys create`. A new company needs its migration AND its `seed-admin` script per environment, or it never shows on the Group Dashboard.
 - [ZEPHYR-MAIN-RELEASE.md](guides/ZEPHYR-MAIN-RELEASE.md) — 2026-10-06 runbook to promote staging -> main: 8 additive `zx_*` migrations, data-rewriting UPDATEs in #7, safe sequence (migrate status, dump + rehearsal, human-only ff merge), rollback
 
 ### UI

@@ -4,7 +4,7 @@ Multi-company group platform for the Delphic holding group. It started as the in
 
 - **Recruitment core:** **client / vendor accounts → requirements → seats → candidate profiles → submissions → interview rounds**, with role-based dashboards, margin tracking, locking, and reporting.
 - **Company platform:** HR directory, calendars, attendance, leave, project-centric timesheets, payroll, billing, expenses and vendor payments, accounting, org chart, and Live Analytics / Financials.
-- **Company workspaces:** standalone **Zephyr Infrastructure**, **Gulati Industries** (trading) and **Acconcy Finance** modules, plus "coming soon" companies.
+- **Company workspaces:** standalone **Zephyr Infrastructure**, **Gulati Industries** (trading), **Acconcy Finance**, **Gulati Foundation** and **Zklyrera Spirits** (investments) modules, plus "coming soon" companies.
 
 | | |
 |---|---|
@@ -130,7 +130,7 @@ flowchart TB
   end
 
   subgraph ReqWrite[Requirement mutations]
-    ReqW[Create · edit · status · assign]
+    ReqW[Create · edit · status · assign · seats · delete]
   end
 
   BDA[BDA] --> AccR
@@ -155,6 +155,8 @@ flowchart TB
   Super[Superadmin] --> Admin
   Super --> Override[Stage override]
 ```
+
+The whole **Sales team shares every requirement**: any Sales user sees all of them (Requirements list, Pipeline, notes and files) and can edit, assign, add seats or delete any of them; a "My requirements" toggle narrows to their own. Only changing the *sales owner* is admin-only. Every change is tagged with who made it in the activity log. Details: [docs/features/SALES-REQUIREMENTS-SHARED-ACCESS.md](docs/features/SALES-REQUIREMENTS-SHARED-ACCESS.md).
 
 POC credit stays on the account: `owner_id` is the current internal POC (reassignable); `origin_owner_id` is “Brought by” (set at create; admin/BDA/superadmin may correct).
 
@@ -215,7 +217,9 @@ flowchart TB
   Group --> O2[Org — Zephyr Infrastructure]
   Group --> O3[Org — Gulati Industries]
   Group --> O4[Org — Acconcy Finance]
-  Group --> O5[Org — Coming soon]
+  Group --> O5[Org — Gulati Foundation]
+  Group --> O6[Org — Zklyrera Spirits]
+  Group --> O7[Org — Coming soon]
 
   User[User] --> M[OrgMembership — role per company]
   M --> O1
@@ -234,9 +238,11 @@ Each company has `enabled_modules`; route groups such as `/expenses/vendor-payme
 | **Zephyr Infrastructure** | `/zephyr` (`Zx`) | Real estate and construction: services, properties, units, rent, trading, consulting, tasks, finance, service P&L |
 | **Gulati Industries** | `/gulati` (`Gx`) | Trading workspace (Copper Cathode and other deals): leads, deals, parties, ledger, finance, tasks |
 | **Acconcy Finance** | `/acconcy` (`Ax`) | Finance services: leads, deals, investments, parties, ledger, salaries, valuation |
+| **Gulati Foundation** | `/foundation` (`fx_`) | Campaigns, initiatives, budgets with revision history, planned vs actual investment, funding vs spending, projections |
+| **Zklyrera Spirits** | `/zklyrera` (`zk_`) | Investments with principal vs earnings returns, income, expenses, salaries, monthly reports, projections; principal returned is never income and there is no valuation (group assets = principal still invested) |
 | **Coming soon** | marker in `enabled_modules` | Listed but not openable; excluded from all totals |
 
-Zephyr, Gulati and Acconcy are standalone modules (own tables prefixed `zx_` / `gx_` / `ax_`, own access and audit helpers) that mirror one another's layout rather than sharing Delphic Global code.
+Zephyr, Gulati, Acconcy, Gulati Foundation and Zklyrera are standalone modules (own tables prefixed `zx_` / `gx_` / `ax_` / `fx_` / `zk_`, own access and audit helpers) that mirror one another's layout rather than sharing Delphic Global code. A new company needs its migration **and** its org row: the migration only creates tables, so run that company's non-destructive `*:seed-admin` script (for example `npm run zklyrera:seed-admin`) once per environment, otherwise it never appears on the Group Dashboard.
 
 ### Group Dashboard and on-demand admin access
 
@@ -303,8 +309,8 @@ Pay comes from **approved timesheet hours**, never raw check-in / check-out. Wee
 | **Money** | Payroll runs and payslips, billing / invoices, expenses and vendor payments, vendor commissions, accounting ledger and tax, finance categories, profitability |
 | **Live Analytics** | Financials, calculations, contracts, projects, per-record locks, valuation trends |
 | **Group** | Group Dashboard, org-wide alerts, company switching, coming-soon companies |
-| **Company workspaces** | Zephyr (`/zephyr`), Gulati (`/gulati`), Acconcy (`/acconcy`), trading (`/trading`), leads (`/leads`) |
-| **Ops & insights** | Role-scoped dashboard with click-through KPI cards, stuck lists, reports (incl. client / vendor performance), Excel / PDF export |
+| **Company workspaces** | Zephyr (`/zephyr`), Gulati (`/gulati`), Acconcy (`/acconcy`), Gulati Foundation (`/foundation`), Zklyrera Spirits (`/zklyrera`), trading (`/trading`), leads (`/leads`) |
+| **Ops & insights** | Role-scoped dashboard with click-through KPI cards, stuck lists, reports (incl. client / vendor performance) with click-a-count / click-a-row record drill-down, Excel / PDF export |
 
 ---
 
@@ -491,8 +497,8 @@ From **any** stage: `backout` or `rejected` (reason required).
 | Accounts (edit / stage / meeting / type / brought-by) | All | — | — | All |
 | Unlock accounts | Yes | — | — | Yes |
 | Unlock requirements / seats / submissions | — | — | — | Yes |
-| Requirements + seats (view) | All | Own + assigned | Assigned | All |
-| Requirements + seats (mutate) | — | Own | — | All |
+| Requirements + seats (view) | All | All (shared Sales team) | Assigned | All |
+| Requirements + seats (mutate) | — | All (shared Sales team; owner change admin-only) | — | All |
 | Assign recruiters | — | Yes | — | Yes |
 | Profiles + submissions | View | View | CRUD | Full |
 | Stage override (any → any) | — | — | — | Superadmin only |
@@ -528,6 +534,10 @@ Response envelope: `{ success: boolean, data: T, message?: string, errors?: [] }
 | BDA performance | Lead funnel by owner; unclassified leads; leads via LinkedIn; avg days lead → meeting |
 | Aging / SLA | Stuck leads, requirements with no submissions, submissions stuck in stage, past `sla_days` |
 | Closure | Joins with dates, final rates, margins — by period / client / recruiter |
+
+The Reports page lists these: **HR reports** (sourcing, submissions, internal round 1 by sourcer / interviewer), **Joinings**, **Time to submit**, **BDA reports**, **Sales reports**, **Clients without requirements** and **Recruiter-vendor gaps** (the performance, aging and closure reports above stay reachable by API but are hidden from the picker).
+
+**Drill-down:** click any count, or any row, and a right-side panel lists the individual records behind it (candidates, submissions, requirements, accounts, interview rounds) with links to their detail pages. `GET /reports/drilldown` rebuilds the same filters the report used, so the list always adds up to the number clicked, and it applies each report's role scope (a BDA or Sales user cannot widen it to other people). Up to 500 records are shown. Details: [docs/features/REPORTS-DRILLDOWN.md](docs/features/REPORTS-DRILLDOWN.md).
 
 In-app tables and charts plus server-side **Excel / PDF export**. Dashboard adds live widgets: counts, stuck lists, recent activity — different per role. Each KPI card is a **click-through** into its list page, pre-filtered to exactly what the card counts.
 
@@ -676,8 +686,9 @@ Full roster: `server/prisma/team-roster.js`. Domain data: `npm run seed:accounts
 flowchart LR
   Dev[Feature branch] --> CI[CI — lint, client build, 4 test shards, compose smoke]
   CI --> Stg[staging]
-  Stg --> Main[main — human push only]
-  Main --> Deploy[deploy.yml — SSH to VPS]
+  Stg --> Main[main]
+  Main --> CIMain[CI on main must pass]
+  CIMain --> Deploy[deploy.yml — SSH to VPS]
   Deploy --> Script[start-delphic.sh --prod]
   Script --> Bak[Verified pg_dump to backups/]
   Bak --> Mig[prisma migrate deploy]
@@ -685,7 +696,9 @@ flowchart LR
   Up --> Health[Health check]
 ```
 
-`.github/workflows/ci.yml` skips docs-only changes and runs `build` plus four Jest shards (each with its own Postgres service) in parallel. `.github/workflows/deploy.yml` runs on push to `main`; enable it with repository variable `DEPLOY_ENABLED=true` and secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`. A separate workflow handles Render staging.
+`.github/workflows/ci.yml` skips docs-only changes and runs `build` plus four Jest shards (each with its own Postgres service) in parallel. `.github/workflows/deploy.yml` runs after CI passes for a push to `main` and deploys exactly the commit CI tested, so **a push to `main` is a production deploy**. It needs secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` and is paused only by setting the repository variable `DEPLOY_ENABLED=false`. Staging is a separate Render service deployed from the `staging` branch (`render deploys create <service> --commit <sha>`); its boot step (`scripts/staging-bootstrap.js`) runs `prisma migrate deploy`.
+
+New-company checklist per environment (staging and production): deploy, confirm `prisma migrate status` is up to date, then run the company's `seed-admin` script once. On production: `docker exec -w /app/server delphic-server-1 node prisma/zklyrera/seed-admin.js`.
 
 ### Production layout
 

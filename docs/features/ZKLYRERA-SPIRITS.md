@@ -1,6 +1,6 @@
 # Zklyrera Spirits - the 6th company (2026-10-12)
 
-Status: **built locally (Z0-Z6), not pushed.** See "As built" at the end; the plan below is what it followed. A capital / investment-tracking and monthly-reporting workspace. Module key `zklyrera`
+Status: **built (Z0-Z6) and live on staging and production (2026-10-12, commit 89b69b1).** Migrations applied on both; the company row + Super Admin membership were created with `seed-admin.js` on staging (Neon) and on production. See "As built" at the end; the plan below is what it followed. A capital / investment-tracking and monthly-reporting workspace. Module key `zklyrera`
 (`enabled_modules` marker, like `foundation`, `acconcy`), tables `zk_*`, API `/api/v1/zklyrera`, UI `/zklyrera`.
 
 ## 1. What the inspection found (reuse map)
@@ -79,4 +79,5 @@ The logo is monochrome: a black bottle with a padlock, serif wordmark "Zklyrera 
 - Group Dashboard: `kind: zklyrera`; P&L = earnings + other income vs expenses + salaries (capital placed and principal returned are NOT revenue/profit; transfers ignored); assets = principal still invested; valuation N/A; block "Zklyrera Spirits - capital, returns and projections" on Group Finance and Projections tabs; drill-down; asset value is managed in the company.
 - Assumptions: the company places capital and recovers it (investments are money out, returns money in); INR; salaries are entries (`kind=salary`, restricted to finance/admin); no opening balance unless set; no attachments in v1; the opening cash balance is never invented.
 - Run: `cd server && npx prisma migrate deploy && npm run zklyrera:seed` (local demo, logins `admin@/manager@/finance@/staff@zklyrera.in`, password `Zklyrera@2026!`). Staging / production: `ZKLYRERA_ADMIN_EMAIL=<admin> npm run zklyrera:seed-admin` (non-destructive; with no email every group Super Admin becomes admin).
+- Rollout (2026-10-12): deploying code is not enough. The migrations only create the `zk_*` tables; the `zklyrera` org row comes from the seed-admin step. Until it ran, staging and production still showed 5 companies on the Group Dashboard. Staging: run `node prisma/zklyrera/seed-admin.js` with the staging `DATABASE_URL`. Production: `docker exec -w /app/server delphic-server-1 node prisma/zklyrera/seed-admin.js` (no email, so the group Super Admin, `paras.gulati@multiorg.in`, becomes the admin). Both are idempotent; neither loads demo data, so the company starts empty.
 - Tests: `server/tests/zklyrera-workspace.test.js` (10) + group dashboard suite; Playwright pass on all pages.

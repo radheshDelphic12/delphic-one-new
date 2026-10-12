@@ -162,13 +162,13 @@ flowchart TB
 | **Submissions** | Put forward, pipeline stages, margin, kanban, **closure progress %** |
 | **Interviews** | Internal + client rounds, feedback, rating |
 | **Collaboration** | Comments, documents, stage history |
-| **Ops & insights** | Role dashboard, stuck lists, reports, Excel/PDF export, **requirement × stage matrix board** |
+| **Ops & insights** | Role dashboard, stuck lists, reports with click-a-count / click-a-row record drill-down, Excel/PDF export, **requirement × stage matrix board** (Sales see every requirement) |
 | **Org & HR** | Orgs, departments, designations, teams, assets, org chart, invites, external CA / Legal access |
 | **Time & leave** | Company and project calendars, attendance, leave balances, project-centric timesheets, overtime approval |
 | **Money** | Payroll and payslips, billing / invoices, expenses and vendor payments, accounting, profitability |
 | **Live Analytics** | Financials, per-record locks, valuation trends |
 | **Group** | Group Dashboard, company switching, coming-soon companies |
-| **Company workspaces** | Zephyr, Gulati, Acconcy, trading |
+| **Company workspaces** | Zephyr, Gulati, Acconcy, Gulati Foundation, Zklyrera Spirits, trading |
 
 ### 3.2 Entity happy path
 
@@ -337,7 +337,9 @@ flowchart TB
   Group --> O2[Org — Zephyr Infrastructure]
   Group --> O3[Org — Gulati Industries]
   Group --> O4[Org — Acconcy Finance]
-  Group --> O5[Org — Coming soon]
+  Group --> O5[Org — Gulati Foundation]
+  Group --> O6[Org — Zklyrera Spirits]
+  Group --> O7[Org — Coming soon]
 
   User[User] --> M[OrgMembership — role per company]
   M --> O1
@@ -356,6 +358,8 @@ Every tenant-owned row carries `org_id`. The active company is set at login or w
 | Zephyr Infrastructure | `/zephyr` | Real estate and construction |
 | Gulati Industries | `/gulati` | Trading (Copper Cathode and other deals) |
 | Acconcy Finance | `/acconcy` | Finance services |
+| Gulati Foundation | `/foundation` | Campaigns, budgets, planned vs actual investment, projections |
+| Zklyrera Spirits | `/zklyrera` | Investments (principal vs earnings), income, expenses, salaries, reports, projections |
 | Coming soon | marker in `enabled_modules` | Listed, not openable, excluded from totals |
 
 ### 7.3 Group Dashboard access
