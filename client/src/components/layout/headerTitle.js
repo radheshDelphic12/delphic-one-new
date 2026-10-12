@@ -61,6 +61,20 @@ const FOUNDATION_TITLES = {
   '/foundation/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
   '/foundation/settings': ['Foundation setup', 'Budget rules, projection method and the audit log.'],
 };
+const ZKLYRERA_TITLES = {
+  '/zklyrera': ['Overview', 'Investments, returns, income, expenses and salaries of Zklyrera Spirits.'],
+  '/zklyrera/investments': ['Investments', 'Capital placed, principal returned and earnings, investment by investment.'],
+  '/zklyrera/income': ['Income & Returns', 'Investment earnings, principal recovered and other income received.'],
+  '/zklyrera/expenses': ['Expenses', 'Operating and other business expenses by category.'],
+  '/zklyrera/salaries': ['Salaries', 'Salary paid and payable, by employee.'],
+  '/zklyrera/reports': ['Monthly Reports', 'The monthly financial report and every other report, with export.'],
+  '/zklyrera/projections': ['Projections', 'Plan future months and compare them with the actuals.'],
+  '/zklyrera/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
+  '/zklyrera/financials': ['Financials', 'Income, expenses and capital by month, with month close.'],
+  '/zklyrera/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/zklyrera/settings': ['Zklyrera setup', 'Opening balance, financial year, categories and the audit log.'],
+};
+const zklyreraEntry = (pathname) => ZKLYRERA_TITLES[pathname] || ZKLYRERA_TITLES['/zklyrera'];
 const foundationEntry = (pathname) => (/^\/foundation\/campaigns\/[^/]+/.test(pathname) ? ['Campaign', 'Budget, spending, timeline and projection for one campaign.'] : FOUNDATION_TITLES[pathname] || FOUNDATION_TITLES['/foundation']);
 const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
 
@@ -70,6 +84,7 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[0];
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[0];
+  if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[0];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
@@ -102,6 +117,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[1];
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[1];
+  if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[1];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {

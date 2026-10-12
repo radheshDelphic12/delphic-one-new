@@ -7,6 +7,7 @@ const BRAND_LOGOS = {
   zephyr: '/zephyr-logo.png',
   acconcy: '/acconcy-logo.png',
   foundation: '/foundation-mark.svg',
+  zklyrera: '/zklyrera-mark.png',
 };
 
 export function orgLogo(org) {

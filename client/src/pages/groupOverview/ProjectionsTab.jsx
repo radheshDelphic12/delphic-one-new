@@ -16,6 +16,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
+import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
 
 const POLL_MS = 60000;
@@ -210,6 +211,7 @@ export default function ProjectionsTab() {
 
           <DataTable columns={cols} rows={data.companies.map((o) => ({ ...o, id: o.org.id }))} loading={false} emptyLabel="No active companies" />
           <FoundationGroupSection foundation={data.foundation} />
+          <ZklyreraGroupSection zklyrera={data.zklyrera} />
         </div>
       )}
 

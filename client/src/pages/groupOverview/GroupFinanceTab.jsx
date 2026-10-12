@@ -17,6 +17,7 @@ import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
+import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
@@ -197,6 +198,7 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
   if (!company) return <Drawer open={false} onClose={onClose} title="" />;
   const v = company.valuation;
   const isFx = company.org.kind === 'foundation';
+  const isZk = company.org.kind === 'zklyrera';
   const isZx = company.org.kind === 'zephyr';
   const lastM = [...(company.months || [])].reverse().find((m) => m.property_count !== undefined);
   return (
@@ -204,7 +206,7 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
       <div className="space-y-5">
         <section>
           <h4 className="mb-2 font-heading text-sm font-semibold">Valuation</h4>
-          {isFx ? <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">Not applicable: valuation (profit × {formula.profit} + asset value × {formula.asset_value}) is a business measure. A foundation is followed through its income, expenses, fund balance and campaign budgets instead. Its assets here are the fund balance: {money(company.assets)}.</p> : !v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
+          {isZk ? <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">Not applicable: valuation (profit × {formula.profit} + asset value × {formula.asset_value}) is not applied to this capital company. It is followed through its income (investment earnings and other income), expenses and salaries, net result and the principal still invested. Capital placed and principal returned are not revenue or profit.</p> : isFx ? <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">Not applicable: valuation (profit × {formula.profit} + asset value × {formula.asset_value}) is a business measure. A foundation is followed through its income, expenses, fund balance and campaign budgets instead. Its assets here are the fund balance: {money(company.assets)}.</p> : !v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
             <div className="space-y-1 rounded-xl border border-tertiary-100 p-3 text-sm">
               <div className="flex justify-between"><span>Profit component ({money(v.profit_component / formula.profit)} × {formula.profit})</span><b>{money(v.profit_component)}</b></div>
               <div className="flex justify-between"><span>Asset component ({money(company.assets)} × {formula.asset_value})</span><b>{money(v.asset_component)}</b></div>
@@ -229,8 +231,8 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
           <p className="rounded-xl bg-primary-50 px-3 py-2 text-sm text-primary-900">Asset value includes the company&apos;s <b>active properties</b>, added automatically: <b>{money(lastM.property_value)}</b> for {lastM.property_count} propert{lastM.property_count === 1 ? 'y' : 'ies'} (as at {lastM.month}), plus other assets recorded below: <b>{money(lastM.recorded_asset_value)}</b>. The property list is under &quot;Where the numbers come from&quot;.</p>
         )}
         <section>
-          <h4 className="mb-2 font-heading text-sm font-semibold">{isFx ? 'Fund balance' : isZx ? 'Other assets (monthly)' : 'Monthly asset values'}</h4>
-          {isFx ? <p className="text-sm text-tertiary-600">The fund balance is funds received minus paid spending, so it is not typed in. Record funding and spending in the foundation (open it with the button below); campaigns, budgets and their projections are managed there too.</p> : <AssetValueForm company={company} onSaved={onChanged} />}
+          <h4 className="mb-2 font-heading text-sm font-semibold">{isZk ? 'Principal still invested' : isFx ? 'Fund balance' : isZx ? 'Other assets (monthly)' : 'Monthly asset values'}</h4>
+          {isZk ? <p className="text-sm text-tertiary-600">Assets here are the principal still invested (capital placed minus principal returned), so they are not typed in. Record investments and returns in the company (open it with the button below).</p> : isFx ? <p className="text-sm text-tertiary-600">The fund balance is funds received minus paid spending, so it is not typed in. Record funding and spending in the foundation (open it with the button below); campaigns, budgets and their projections are managed there too.</p> : <AssetValueForm company={company} onSaved={onChanged} />}
         </section>
       </div>
     </Drawer>
@@ -476,6 +478,7 @@ export default function GroupFinanceTab() {
           )}
 
           <FoundationGroupSection foundation={data.foundation} />
+          <ZklyreraGroupSection zklyrera={data.zklyrera} />
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">

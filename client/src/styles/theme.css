@@ -215,6 +215,58 @@
   color: rgb(var(--p-800));
 }
 
+/* Zklyrera Spirits: the logo is a black bottle and a serif wordmark on white, so the workspace is ink / charcoal on warm
+   off-white with an antique-brass accent (used sparingly: selected tab, active nav bar, key figures) and serif headings. */
+.theme-zklyrera {
+  --p-50: 247 246 243;
+  --p-100: 236 234 228;
+  --p-200: 218 214 204;
+  --p-300: 184 178 164;
+  --p-400: 138 132 118;
+  --p-500: 96 92 82;
+  --p-600: 58 56 52;
+  --p-700: 40 39 36;
+  --p-800: 28 27 25;
+  --p-900: 17 17 16;
+
+  --zk-brass: 176 141 87;
+  --color-bg: 250 249 246;
+  --color-sidebar: 243 241 236;
+  --color-border: 226 222 212;
+  --color-border-subtle: 235 232 224;
+  --color-primary: 58 56 52;
+  --color-primary-soft: 247 246 243;
+  --font-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
+}
+
+.theme-zklyrera .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(176 141 87 / 0.09), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 90% 0%, rgb(40 39 36 / 0.05), transparent 52%);
+}
+
+.theme-zklyrera .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(40 39 36 / 0.16);
+}
+
+.theme-zklyrera nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.7);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--zk-brass));
+}
+
+.theme-zklyrera [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--zk-brass));
+  color: rgb(var(--p-900));
+}
+
+.theme-zklyrera .bg-primary-600 {
+  background-color: rgb(var(--p-700));
+}
+.theme-zklyrera .bg-primary-600:hover {
+  background-color: rgb(var(--p-800));
+}
+
 /* Acconcy Finance: plum taken from the logo's chevrons (#722F50 at 700) on warm off-white surfaces, so it reads
    as a different company from the green Zephyr / Gulati workspaces, with a muted gold accent (finance, gold
    investments) used sparingly for key figures and the selected tab. */

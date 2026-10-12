@@ -86,6 +86,16 @@ import FoundationFinancialsPage from '../pages/foundation/FoundationFinancialsPa
 import FoundationReportsPage from '../pages/foundation/FoundationReportsPage.jsx';
 import FoundationPeoplePage from '../pages/foundation/FoundationPeoplePage.jsx';
 import FoundationSettingsPage from '../pages/foundation/FoundationSettingsPage.jsx';
+import ZklyreraHomePage from '../pages/zklyrera/ZklyreraHomePage.jsx';
+import ZklyreraInvestmentsPage from '../pages/zklyrera/ZklyreraInvestmentsPage.jsx';
+import ZklyreraEntriesPage from '../pages/zklyrera/ZklyreraEntriesPage.jsx';
+import ZklyreraTransactionsPage from '../pages/zklyrera/ZklyreraTransactionsPage.jsx';
+import ZklyreraReportsPage from '../pages/zklyrera/ZklyreraReportsPage.jsx';
+import ZklyreraProjectionsPage from '../pages/zklyrera/ZklyreraProjectionsPage.jsx';
+import ZklyreraFinancialsPage from '../pages/zklyrera/ZklyreraFinancialsPage.jsx';
+import ZklyreraPeoplePage from '../pages/zklyrera/ZklyreraPeoplePage.jsx';
+import ZklyreraSettingsPage from '../pages/zklyrera/ZklyreraSettingsPage.jsx';
+import { isZklyreraOrg } from '../lib/zklyrera/useZklyrera.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
 import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
@@ -137,6 +147,8 @@ function HomePage() {
   if (isAcconcyOrg(user)) return <Navigate to="/acconcy" replace />;
   // Gulati Foundation is a standalone workspace with its own home.
   if (isFoundationOrg(user)) return <Navigate to="/foundation" replace />;
+  // Zklyrera Spirits is a standalone workspace with its own home.
+  if (isZklyreraOrg(user)) return <Navigate to="/zklyrera" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -213,6 +225,15 @@ function RequireAcconcy({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isAcconcyOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Zklyrera Spirits workspace needs the `zklyrera` module on the ACTIVE company. */
+function RequireZklyrera({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isZklyreraOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -365,6 +386,18 @@ export default function App() {
         <Route path="foundation/people" element={<RequireFoundation><FoundationPeoplePage /></RequireFoundation>} />
         <Route path="foundation/settings" element={<RequireFoundation><FoundationSettingsPage /></RequireFoundation>} />
         <Route path="foundation/*" element={<Navigate to="/foundation" replace />} />
+        <Route path="zklyrera" element={<RequireZklyrera><ZklyreraHomePage /></RequireZklyrera>} />
+        <Route path="zklyrera/investments" element={<RequireZklyrera><ZklyreraInvestmentsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/income" element={<RequireZklyrera><ZklyreraEntriesPage type="income" /></RequireZklyrera>} />
+        <Route path="zklyrera/expenses" element={<RequireZklyrera><ZklyreraEntriesPage type="expense" /></RequireZklyrera>} />
+        <Route path="zklyrera/salaries" element={<RequireZklyrera><ZklyreraEntriesPage type="salary" /></RequireZklyrera>} />
+        <Route path="zklyrera/transactions" element={<RequireZklyrera><ZklyreraTransactionsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/reports" element={<RequireZklyrera><ZklyreraReportsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/projections" element={<RequireZklyrera><ZklyreraProjectionsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/financials" element={<RequireZklyrera><ZklyreraFinancialsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/people" element={<RequireZklyrera><ZklyreraPeoplePage /></RequireZklyrera>} />
+        <Route path="zklyrera/settings" element={<RequireZklyrera><ZklyreraSettingsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/*" element={<Navigate to="/zklyrera" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
