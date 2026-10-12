@@ -16,7 +16,7 @@ import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
-import { COMPANY_COLORS, CompanyCard, ContributionDonut, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
+import { COMPANY_COLORS, CompanyCard, ContributionLines, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
 const PALETTE = COMPANY_COLORS;
@@ -444,8 +444,8 @@ export default function GroupFinanceTab() {
           <ZklyreraGroupSection zklyrera={data.zklyrera} />
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} rangeLabel={`${range.from} to ${range.to}`} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
           </div>
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -493,8 +493,8 @@ export default function GroupFinanceTab() {
 
           <SectionTitle title="4. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
-            <ContributionDonut title="Revenue contribution" subtitle="Share of the group total (companies with a loss count as 0%)" rows={data.contribution.revenue} colorOfOrg={colorOfOrg} />
-            <ContributionDonut title="Profit contribution" subtitle="Share of the group total (companies with a loss count as 0%)" rows={data.contribution.profit} colorOfOrg={colorOfOrg} />
+            <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
+            <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={data.trends.profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

@@ -1,4 +1,4 @@
-import { Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis, CartesianGrid, Line, LineChart } from 'recharts';
+import { ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis, CartesianGrid, Line, LineChart } from 'recharts';
 import { ArrowDownRight, ArrowUpRight, Building2, Minus } from 'lucide-react';
 import { orgLogo } from '../../lib/orgLogo.js';
 
@@ -122,7 +122,6 @@ export function DeltaPill({ pct, invert = false, suffix = 'vs previous period' }
 /** Headline figure with an icon chip, a change pill and a soft sparkline of the trend underneath. */
 export function StatTile({ label, value, icon: Icon, tone = 'green', pct, invert, series, note }) {
   const t = TONES[tone] || TONES.green;
-  const gid = `spark-${label.replace(/\W+/g, '')}`;
   const points = (series || []).map((v, i) => ({ i, v: Number(v) || 0 }));
   const showSpark = points.length > 1 && points.some((p) => p.v !== points[0].v);
   return (
@@ -143,15 +142,9 @@ export function StatTile({ label, value, icon: Icon, tone = 'green', pct, invert
         {showSpark && (
           <div className="h-10 w-24 shrink-0 opacity-90" aria-hidden="true">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={points} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={t.line} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={t.line} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area type="monotone" dataKey="v" stroke={t.line} strokeWidth={2} fill={`url(#${gid})`} dot={false} isAnimationActive={false} />
-              </AreaChart>
+              <LineChart data={points} margin={{ top: 6, right: 2, left: 2, bottom: 2 }}>
+                <Line type="monotone" dataKey="v" stroke={t.line} strokeWidth={2.25} dot={false} isAnimationActive={false} />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         )}
@@ -163,138 +156,155 @@ export function StatTile({ label, value, icon: Icon, tone = 'green', pct, invert
 function Avatar({ org, color }) {
   const logo = orgLogo(org);
   return (
-    <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-tertiary-100 bg-white shadow-sm" style={{ boxShadow: `0 0 0 2px ${color}22` }}>
-      {logo ? <img src={logo} alt="" className="h-full w-full object-contain p-1" /> : <Building2 className="h-5 w-5" style={{ color }} />}
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-tertiary-100 bg-white shadow-sm" style={{ boxShadow: `0 0 0 2px ${color}22` }}>
+      {logo ? <img src={logo} alt="" className="h-full w-full object-contain p-1" /> : <Building2 className="h-4 w-4" style={{ color }} />}
     </span>
   );
 }
 
-/** One company as a card: logo, status, revenue / profit / margin, its share of group revenue and valuation. */
-export function CompanyCard({ company, color, groupRevenue, rangeLabel, onOpen }) {
+/** One company as a compact card: logo + status, revenue / profit / margin, share-of-group bar and valuation. */
+export function CompanyCard({ company, color, groupRevenue, onOpen }) {
   const { org } = company;
   if (company.coming_soon) {
     return (
-      <div className="rounded-2xl border border-dashed border-tertiary-200 bg-white/60 p-4 text-tertiary-400">
-        <div className="flex items-center gap-3">
-          <Avatar org={org} color="#94a3b8" />
-          <div>
-            <p className="font-heading text-sm font-semibold text-tertiary-500">{org.name}</p>
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Coming soon</span>
-          </div>
+      <div className="flex items-center gap-3 rounded-xl border border-dashed border-tertiary-200 bg-white/60 p-3 text-tertiary-400">
+        <Avatar org={org} color="#94a3b8" />
+        <div className="min-w-0">
+          <p className="truncate font-heading text-sm font-semibold text-tertiary-500">{org.name}</p>
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Coming soon</span>
         </div>
-        <p className="mt-3 text-xs">Not live yet; left out of the totals.</p>
       </div>
     );
   }
   const loss = company.totals.profit < 0;
   const share = groupRevenue > 0 && company.totals.revenue > 0 ? Math.min(100, (company.totals.revenue / groupRevenue) * 100) : 0;
-  const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profitable', 'bg-emerald-100 text-emerald-700'];
+  const status = !company.has_data ? ['No data', 'bg-tertiary-100 text-tertiary-500'] : loss ? ['Loss', 'bg-rose-100 text-rose-700'] : ['Profit', 'bg-emerald-100 text-emerald-700'];
+  const margin = company.totals.margin_pct;
   return (
     <button
       type="button"
       onClick={() => onOpen(org)}
-      className="group relative overflow-hidden rounded-2xl border border-tertiary-100 bg-white p-4 text-left shadow-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-cardHover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+      className="group relative overflow-hidden rounded-xl border border-tertiary-100 bg-white py-2.5 pl-4 pr-3 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-cardHover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
     >
-      <span className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} aria-hidden="true" />
-      <div className="flex items-center gap-3">
+      <span className="absolute inset-y-0 left-0 w-1" style={{ background: `linear-gradient(180deg, ${color}, ${color}66)` }} aria-hidden="true" />
+      <div className="flex items-center gap-2.5">
         <Avatar org={org} color={color} />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-sm font-semibold text-tertiary-900">{org.name}</p>
-          <p className="text-xs text-tertiary-500">{company.people.employees + company.people.contractors} people</p>
+          <p className="truncate font-heading text-[13px] font-semibold leading-tight text-tertiary-900">{org.name}</p>
+          <p className="truncate text-[11px] text-tertiary-500">
+            {company.people.employees + company.people.contractors} people · Valuation {company.valuation ? compact(company.valuation.current) : 'N/A'}
+          </p>
         </div>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${status[1]}`}>{status[0]}</span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${status[1]}`}>{status[0]}</span>
       </div>
 
-      <div className="mt-4 flex items-end justify-between">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-tertiary-400">Revenue</div>
-          <div className="font-heading text-xl font-bold tabular-nums text-tertiary-900">{company.has_data ? compact(company.totals.revenue) : '—'}</div>
+      {company.has_data ? (
+        <div className="mt-2.5 grid grid-cols-3 gap-2">
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Revenue</div>
+            <div className="text-sm font-bold tabular-nums text-tertiary-900">{compact(company.totals.revenue)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Profit</div>
+            <div className={`text-sm font-bold tabular-nums ${loss ? 'text-rose-600' : 'text-emerald-700'}`}>{compact(company.totals.profit)}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-tertiary-400">Margin</div>
+            <div className="text-sm font-bold tabular-nums text-tertiary-900">{margin === null || margin === undefined ? 'N/A' : `${margin}%`}</div>
+          </div>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-tertiary-400">Profit</div>
-          <div className={`font-heading text-xl font-bold tabular-nums ${loss ? 'text-rose-600' : 'text-emerald-700'}`}>{company.has_data ? compact(company.totals.profit) : '—'}</div>
-        </div>
-      </div>
+      ) : (
+        <p className="mt-2.5 text-[11px] text-tertiary-400">Nothing recorded in this period.</p>
+      )}
 
-      <div className="mt-3">
-        <div className="mb-1 flex justify-between text-[10px] font-medium text-tertiary-500">
-          <span>Share of group revenue</span>
-          <span className="tabular-nums">{share ? `${share.toFixed(share < 10 ? 1 : 0)}%` : '—'}</span>
-        </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-tertiary-100">
+      <div className="mt-2 flex items-center gap-2" title="Share of group revenue">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-tertiary-100">
           <div className="h-full rounded-full transition-all duration-700" style={{ width: `${share}%`, background: `linear-gradient(90deg, ${color}, ${color}aa)` }} />
         </div>
+        <span className="w-9 text-right text-[10px] font-medium tabular-nums text-tertiary-500">{share ? `${share.toFixed(share < 10 ? 1 : 0)}%` : '—'}</span>
       </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-tertiary-100 pt-3 text-xs">
-        <div>
-          <div className="text-tertiary-400">Expenses</div>
-          <div className="font-semibold text-tertiary-800">{company.has_data ? compact(company.totals.expenses) : '—'}</div>
-        </div>
-        <div>
-          <div className="text-tertiary-400">Margin</div>
-          <div className="font-semibold text-tertiary-800">{company.totals.margin_pct === null || company.totals.margin_pct === undefined ? 'N/A' : `${company.totals.margin_pct}%`}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-tertiary-400">Valuation</div>
-          <div className="font-semibold text-tertiary-800">{company.valuation ? compact(company.valuation.current) : 'N/A'}</div>
-        </div>
-      </div>
-      {rangeLabel && !company.has_data && <p className="mt-2 text-[11px] text-tertiary-400">Nothing recorded in {rangeLabel}.</p>}
     </button>
   );
 }
 
-function DonutTooltip({ active, payload }) {
+function ShareTooltip({ active, payload, label, companies }) {
   if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
+  const rows = payload.filter((p) => p.value != null).sort((a, b) => b.value - a.value);
   return (
-    <div className="rounded-xl border border-tertiary-100 bg-white px-3 py-2 text-xs shadow-card">
-      <div className="font-semibold text-tertiary-900">{p.name}</div>
-      <div className="text-tertiary-600">{p.share}% · {money(p.value)}</div>
+    <div className="min-w-[10rem] rounded-xl border border-tertiary-100 bg-white px-3 py-2 text-xs shadow-card">
+      <div className="mb-1 font-semibold text-tertiary-900">{label}</div>
+      {rows.map((p) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-3 py-0.5">
+          <span className="flex items-center gap-1.5 text-tertiary-600"><span className="h-2 w-2 rounded-full" style={{ background: p.color }} />{companies.find((c) => c.org.id === p.dataKey)?.org.name || p.name}</span>
+          <span className="font-semibold tabular-nums text-tertiary-900">{p.value}%</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-/** Donut of each company's share of a group total, with a ranked legend beside it. */
-export function ContributionDonut({ title, subtitle, rows, colorOfOrg }) {
-  const data = rows.map((r) => ({ id: r.org_id, name: r.org_name, share: r.share_pct ?? 0, value: r.value })).filter((r) => r.share > 0);
-  const lead = [...data].sort((a, b) => b.share - a.share)[0];
+/**
+ * Each company's share of the group total over time (a line per company), with the share for the whole selected
+ * period listed beside it. Shares come from the trend rows the tab already has; a company in loss counts as 0%.
+ */
+export function ContributionLines({ title, subtitle, trendRows, rows, companies, colorOfOrg }) {
+  const series = trendRows.map((r) => {
+    // Same rule as the server's contribution table: only companies in profit count, so the shares add up to 100%.
+    const total = companies.reduce((sum, c) => sum + Math.max(0, Number(r[c.org.id]) || 0), 0);
+    const point = { label: r.label };
+    for (const c of companies) {
+      const v = Number(r[c.org.id]);
+      point[c.org.id] = total > 0 && Number.isFinite(v) ? Math.round((Math.max(0, v) / total) * 1000) / 10 : null;
+    }
+    return point;
+  });
+  const legend = rows
+    .map((r) => ({ id: r.org_id, name: r.org_name, share: r.share_pct ?? 0, value: r.value }))
+    .filter((r) => r.share > 0)
+    .sort((a, b) => b.share - a.share);
+  const hasLines = series.some((p) => companies.some((c) => p[c.org.id] != null));
   return (
     <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
       <h3 className="font-heading text-sm font-semibold text-tertiary-900">{title}</h3>
       <p className="text-xs text-tertiary-500">{subtitle}</p>
-      {data.length === 0 ? (
+      {!hasLines ? (
         <p className="py-10 text-center text-sm text-tertiary-500">Nothing to compare in this period.</p>
       ) : (
-        <div className="mt-2 flex flex-wrap items-center gap-4">
-          <div className="relative h-44 w-44 shrink-0">
+        <>
+          <div className="mt-2 h-52">
             <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={data} dataKey="share" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={2} stroke="none" isAnimationActive={false}>
-                  {data.map((d) => <Cell key={d.id} fill={colorOfOrg(d.id)} />)}
-                </Pie>
-                <RTooltip content={<DonutTooltip />} />
-              </PieChart>
+              <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `${v}%`} width={44} axisLine={false} tickLine={false} />
+                <RTooltip content={<ShareTooltip companies={companies} />} cursor={{ stroke: '#cbd5e1', strokeDasharray: '3 3' }} />
+                {companies.map((c) => (
+                  <Line
+                    key={c.org.id}
+                    type="monotone"
+                    dataKey={c.org.id}
+                    name={c.org.name}
+                    stroke={colorOfOrg(c.org.id)}
+                    strokeWidth={2.25}
+                    dot={series.length < 25 ? { r: 3, strokeWidth: 0, fill: colorOfOrg(c.org.id) } : false}
+                    activeDot={{ r: 5 }}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
             </ResponsiveContainer>
-            {lead && (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="font-heading text-xl font-bold tabular-nums text-tertiary-900">{lead.share}%</span>
-                <span className="max-w-[5.5rem] truncate text-[10px] font-medium text-tertiary-500">{lead.name}</span>
-              </div>
-            )}
           </div>
-          <ul className="min-w-[10rem] flex-1 space-y-1.5 text-sm">
-            {[...data].sort((a, b) => b.share - a.share).map((d) => (
+          <ul className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+            {legend.map((d) => (
               <li key={d.id} className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colorOfOrg(d.id) }} />
                 <span className="min-w-0 flex-1 truncate text-tertiary-700">{d.name}</span>
                 <span className="font-semibold tabular-nums text-tertiary-900">{d.share}%</span>
-                <span className="hidden w-20 text-right text-xs tabular-nums text-tertiary-500 sm:inline">{compact(d.value)}</span>
+                <span className="w-16 text-right text-xs tabular-nums text-tertiary-500">{compact(d.value)}</span>
               </li>
             ))}
           </ul>
-        </div>
+        </>
       )}
     </div>
   );

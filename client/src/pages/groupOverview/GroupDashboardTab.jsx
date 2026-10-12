@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Area, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Building2, PiggyBank, RefreshCw, TrendingUp, Users2, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -101,17 +101,16 @@ export default function GroupDashboardTab() {
             ) : (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <LineChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="2 4" stroke="#e2e8f0" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} tickFormatter={compact} width={70} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={compact} width={70} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <defs><linearGradient id="grp-rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2f7d57" stopOpacity={0.35} /><stop offset="100%" stopColor="#2f7d57" stopOpacity={0.02} /></linearGradient></defs>
-                    <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#2f7d57" strokeWidth={2.5} fill="url(#grp-rev)" dot={chart.length < 25} />
-                    <Bar dataKey="expenses" name="Expenses" fill="#f59e0b" radius={[6, 6, 0, 0]} maxBarSize={28} />
-                    <Line type="monotone" dataKey="profit" name="Profit" stroke="#1d4ed8" strokeWidth={2.5} dot={chart.length < 25} />
-                  </ComposedChart>
+                    <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#2f7d57" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
+                    <Line type="monotone" dataKey="expenses" name="Expenses" stroke="#f59e0b" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
+                    <Line type="monotone" dataKey="profit" name="Profit" stroke="#1d4ed8" strokeWidth={2.5} dot={chart.length < 25 ? { r: 3, strokeWidth: 0 } : false} activeDot={{ r: 5 }} />
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
             )}
@@ -119,8 +118,8 @@ export default function GroupDashboardTab() {
 
           <div>
             <h3 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Companies</h3>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {data.companies.map((c, i) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} rangeLabel={`${range.from} to ${range.to}`} onOpen={openCompany} />)}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              {data.companies.map((c, i) => <CompanyCard key={c.org.id} company={c} color={colorAt(i)} groupRevenue={t.revenue} onOpen={openCompany} />)}
             </div>
           </div>
         </div>

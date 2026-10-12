@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowUpRight, Flag } from 'lucide-react';
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -73,15 +73,15 @@ export default function FoundationGroupSection({ foundation }) {
           {monthly.length === 0 ? <p className="py-8 text-center text-sm text-tertiary-500">No projected spending: no campaign has a planned end date and budget yet.</p> : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={monthly} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+                <LineChart data={monthly} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={short} width={64} />
                   <Tooltip contentStyle={chartTooltipStyle} formatter={(v, n) => [inr(v), n]} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="planned_investment" name="Planned investment" fill="#9CC9AB" radius={[4, 4, 0, 0]} />
+                  <Line type="monotone" dataKey="planned_investment" name="Planned investment" stroke="#4f8f60" strokeWidth={2.5} dot={{ r: 2.5 }} />
                   <Line type="monotone" dataKey="projected" name="Projected spending" stroke="#7A6BB5" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} />
-                </ComposedChart>
+                </LineChart>
               </ResponsiveContainer>
             </div>
           )}

@@ -81,7 +81,8 @@ Filter UI (2026-10-09, Zephyr pattern): one Filters button opens a panel with cu
 ## Visual refresh (2026-10-12, local, not pushed)
 Presentation only; no API, calculation or data change. New shared building blocks in `client/src/pages/groupOverview/groupUi.jsx`:
 - `GroupHero` (emerald gradient + dot grid, date, greeting) and `GroupTabs` (pill tab bar, same `role=tab` contract).
-- `StatTile` (tinted card, icon chip, change pill - rising expenses count as bad - and a sparkline when the period has more than one point); `KpiTile` adapts the old `KpiCard` props so the Foundation and Zklyrera blocks match.
-- `CompanyCard` grid above the comparison table (logo, status, revenue / profit, share-of-group bar, margin, valuation); `ContributionDonut` for revenue and profit contribution; `RankCard` with medal ranks; `TrendLines` with a ranked tooltip and legend pills.
+- `StatTile` (tinted card, icon chip, change pill - rising expenses count as bad - and a line sparkline when the period has more than one point); `KpiTile` adapts the old `KpiCard` props so the Foundation and Zklyrera blocks match.
+- compact `CompanyCard` grid above the comparison table (logo, status, revenue / profit / margin, share-of-group bar, valuation; 3 per row, 4 on very wide screens); `ContributionLines` (share of the group total over time, one line per company; only companies in profit count so shares add to 100%); `RankCard` with medal ranks; `TrendLines` with a ranked tooltip and legend pills.
 - Styles: `.group-hero` and `.group-tab-active` in `client/src/styles/theme.css`.
 Applied to the Group Finance and Dashboard tabs and the page shell; Projections, Tasks, Org Chart, Billing Charges and Settings keep their content and get the new hero and tab bar.
+Charts on the group pages are line graphs only (no bars, areas or pies): Dashboard revenue / expenses / profit, trends, contribution, sparklines and the Foundation projection.
