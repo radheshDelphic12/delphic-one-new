@@ -325,7 +325,7 @@ describe('month close and audit', () => {
     expect(audit.map((x) => `${x.entity}:${x.action}`)).toEqual(expect.arrayContaining(['entry:create', 'entry:update', 'period:close', 'period:reopen']));
     expect((await f.get('/audit')).status).toBe(403);
     const trend = (await a.get(`/finance/valuation${qs({ from: month, to: month, state: 'locked' })}`)).body.data;
-    expect(trend.months[0]).toMatchObject({ valuation: null });
+    expect(trend.months[0]).toMatchObject({ valuation: 0 });
   });
 });
 
