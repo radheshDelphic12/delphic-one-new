@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart } from 'recharts';
 import { AlertTriangle, Building2, PiggyBank, Plus, RefreshCw, Scale, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import KpiCard from '../../components/ui/KpiCard.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
@@ -19,9 +16,10 @@ import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
+import { COMPANY_COLORS, CompanyCard, ContributionDonut, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
-const PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#be185d', '#65a30d', '#475569', '#ea580c'];
+const PALETTE = COMPANY_COLORS;
 
 const money = (n) => (n === null || n === undefined ? 'N/A' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
 const compact = (n) => {
@@ -37,13 +35,8 @@ const LIVE_EVERY_MS = 30000;
 const DEFAULTS = { granularity: 'month', state: 'all' };
 
 function SectionTitle({ title, hint }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-3 border-b border-tertiary-100 pb-2 pt-3">
-      <span className="h-5 w-1.5 self-center rounded-full bg-[#4f8f60]" aria-hidden="true" />
-      <h2 className="font-heading text-lg font-bold tracking-tight text-tertiary-900">{title}</h2>
-      {hint && <span className="text-xs text-tertiary-500">{hint}</span>}
-    </div>
-  );
+  const m = /^(d+).s*(.*)$/.exec(title);
+  return <SectionHeading n={m ? Number(m[1]) : null} title={m ? m[2] : title} hint={hint} />;
 }
 
 const TREND_METRICS = [
@@ -54,50 +47,14 @@ const TREND_METRICS = [
   ['assets', 'Assets', 'Recorded asset value, carried forward until the next entry'],
 ];
 
-function TrendChart({ title, subtitle, rows, companies, metric }) {
+function TrendChart({ title, subtitle, rows, companies, metric, colorOfOrg }) {
   const hasData = rows.some((r) => companies.some((c) => r[c.org.id]));
   return (
     <ChartCard title={title} subtitle={subtitle}>
       {!hasData ? (
         <EmptyState title="No data in this period" description="Nothing has been recorded for the selected companies and dates." />
       ) : (
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={compact} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              {companies.map((c, i) => (
-                <Line key={`${metric}-${c.org.id}`} type="monotone" dataKey={c.org.id} name={c.org.name} stroke={PALETTE[i % PALETTE.length]} strokeWidth={2} dot={rows.length < 25} connectNulls />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </ChartCard>
-  );
-}
-
-function ShareBars({ title, rows }) {
-  const data = rows.map((r) => ({ name: r.org_name, share: r.share_pct ?? 0, value: r.value }));
-  return (
-    <ChartCard title={title} subtitle="Share of the group total (companies with a loss count as 0%)">
-      {data.length === 0 ? (
-        <EmptyState title="No companies" description="" />
-      ) : (
-        <div className="h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ left: 20, right: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(v, n, p) => [`${v}%  (${money(p.payload.value)})`, 'Share']} />
-              <Bar dataKey="share" fill="#2563eb" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <TrendLines rows={rows} companies={companies} colorOfOrg={colorOfOrg} metric={metric} />
       )}
     </ChartCard>
   );
@@ -405,6 +362,12 @@ export default function GroupFinanceTab() {
     if (kind === 'csv') downloadCsv(`${set.title.toLowerCase().replace(/\s+/g, '-')}-${range.from}-${range.to}.csv`, set.headers, set.rows);
     else if (!printReport(set.title, sub, set.headers, set.rows)) pushError('Allow pop-ups to export the PDF', 'Export blocked');
   }
+  const colorOfOrg = useCallback((id) => {
+    const i = allCompanies.findIndex((o) => o.id === id);
+    return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
+  }, [allCompanies]);
+  // Cards follow the table order that matters most: live companies by valuation, coming-soon ones last.
+  const cardOrder = useMemo(() => [...everyCompany].sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
   const t = data?.totals;
   const openCompanyData = companies.find((c) => c.org.id === openOrgId) || null;
 
@@ -460,13 +423,13 @@ export default function GroupFinanceTab() {
         <div className={`space-y-5 transition-opacity ${loading ? 'pointer-events-none opacity-60' : ''}`}>
           {t.mixed_currency && <div className="rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-sm">Companies report in different currencies, so group totals are shown as plain sums.</div>}
           <SectionTitle title="1. Group at a glance" hint={`${range.from} to ${range.to} - ${t.active_companies} companies`} />
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <KpiCard label="Group revenue" value={compact(t.revenue)} hint={t.change_pct?.revenue != null ? `${pctText(t.change_pct.revenue)} vs previous period` : undefined} icon={Wallet} theme="green" />
-            <KpiCard label="Group profit" value={compact(t.profit)} hint={t.change_pct?.profit != null ? `${pctText(t.change_pct.profit)} vs previous period` : undefined} icon={TrendingUp} theme="blue" />
-            <KpiCard label="Group expenses" value={compact(t.expenses)} hint={t.change_pct?.expenses != null ? `${pctText(t.change_pct.expenses)} vs previous period` : undefined} icon={Scale} theme="orange" />
-            <KpiCard label="Group assets" value={compact(t.assets)} hint={t.change_pct?.assets != null ? `${pctText(t.change_pct.assets)} vs previous period` : undefined} icon={PiggyBank} theme="purple" />
-            <KpiCard label="Group valuation" value={compact(t.valuation)} hint={t.change_pct?.valuation != null ? `${pctText(t.change_pct.valuation)} vs previous period` : undefined} icon={PiggyBank} theme="blue" />
-            <KpiCard label="Active companies" value={t.active_companies} hint={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : undefined} icon={Building2} theme="purple" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <StatTile label="Group revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={data.trends.revenue.map((r) => r.total)} />
+            <StatTile label="Group profit" value={compact(t.profit)} icon={TrendingUp} tone="blue" pct={t.change_pct?.profit} series={data.trends.profit.map((r) => r.total)} />
+            <StatTile label="Group expenses" value={compact(t.expenses)} icon={Scale} tone="amber" pct={t.change_pct?.expenses} invert series={data.trends.expenses.map((r) => r.total)} />
+            <StatTile label="Group assets" value={compact(t.assets)} icon={PiggyBank} tone="violet" pct={t.change_pct?.assets} series={data.trends.assets.map((r) => r.total)} />
+            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="teal" pct={t.change_pct?.valuation} series={data.trends.valuation.map((r) => r.total)} />
+            <StatTile label="Active companies" value={t.active_companies} icon={Building2} tone="rose" note={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : `${t.employees} employees · ${t.contractors} contractors`} />
           </div>
           <p className="text-xs text-tertiary-500">Profit margin {t.margin_pct === null ? 'N/A' : `${t.margin_pct}%`} · {t.employees} employees · {t.contractors} contractors. Group valuation = sum of each company&apos;s valuation (profit × {data.formula.profit} + asset value × {data.formula.asset_value}).</p>
 
@@ -481,6 +444,9 @@ export default function GroupFinanceTab() {
           <ZklyreraGroupSection zklyrera={data.zklyrera} />
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} rangeLabel={`${range.from} to ${range.to}`} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
+          </div>
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="font-heading text-sm font-semibold">Company comparison</h3>
@@ -520,29 +486,26 @@ export default function GroupFinanceTab() {
           <SectionTitle title="3. Trends" hint="Every company has its own line and legend" />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Trend metric">
             {TREND_METRICS.map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'border-primary-600 bg-primary-600 text-white' : 'border-tertiary-200 bg-white text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
+              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-600 bg-gradient-to-b from-[#3a8a5f] to-[#2b6b48] text-white shadow-[0_6px_14px_-6px_rgba(43,107,72,0.7)]' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-primary-50 hover:text-primary-800'}`}>{label}</button>
             ))}
           </div>
-          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} />
+          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
 
           <SectionTitle title="4. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
-            <ShareBars title="Revenue contribution" rows={data.contribution.revenue} />
-            <ShareBars title="Profit contribution" rows={data.contribution.profit} />
+            <ContributionDonut title="Revenue contribution" subtitle="Share of the group total (companies with a loss count as 0%)" rows={data.contribution.revenue} colorOfOrg={colorOfOrg} />
+            <ContributionDonut title="Profit contribution" subtitle="Share of the group total (companies with a loss count as 0%)" rows={data.contribution.profit} colorOfOrg={colorOfOrg} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {[['revenue', 'Highest revenue', money], ['profit', 'Highest profit', money], ['valuation', 'Highest valuation', money], ['growth', 'Highest valuation growth', pctText]].map(([k, label, fmt]) => (
-              <div key={k} className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
-                <h4 className="mb-2 font-heading text-sm font-semibold">{label}</h4>
-                <ol className="space-y-1 text-sm">{data.rankings[k].map((r) => <li key={r.org_id} className="flex justify-between"><span>{r.rank}. {r.org_name}</span><span className="text-tertiary-600">{fmt(r.value)}</span></li>)}</ol>
-              </div>
+              <RankCard key={k} title={label} rows={data.rankings[k]} format={fmt} />
             ))}
           </div>
 
           <SectionTitle title="5. Recent activity" hint="Last 7 days - changes made in any company of the group" />
           <div className="rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
-            <ActivityFeed items={activity} colorOf={(id) => PALETTE[Math.max(0, allCompanies.findIndex((o) => o.id === id)) % PALETTE.length]} />
+            <ActivityFeed items={activity} colorOf={colorOfOrg} />
           </div>
         </div>
       )}

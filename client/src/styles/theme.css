@@ -423,3 +423,38 @@
   border-color: rgb(var(--ax-gold));
   color: rgb(var(--p-800));
 }
+
+/* Group Dashboard hero: deep emerald with soft light and a faint dot grid. Presentation only. */
+.group-hero {
+  background:
+    radial-gradient(ellipse 60% 120% at 100% 0%, rgb(110 190 140 / 0.45), transparent 60%),
+    radial-gradient(ellipse 40% 90% at 0% 100%, rgb(20 60 40 / 0.55), transparent 70%),
+    linear-gradient(120deg, #14302a 0%, #1f4d38 48%, #3a8458 100%);
+}
+.group-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 0.16) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  -webkit-mask-image: linear-gradient(to right, transparent 10%, #000 85%);
+  mask-image: linear-gradient(to right, transparent 10%, #000 85%);
+  pointer-events: none;
+}
+.group-hero::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  top: -80px;
+  width: 280px;
+  height: 280px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.18), transparent 65%);
+  pointer-events: none;
+}
+
+/* The selected pill of the group tab bar keeps white text (the generic selected-tab rule above would darken it). */
+.theme-group [role='tablist'] button.group-tab-active {
+  color: #fff;
+  border-color: transparent;
+}

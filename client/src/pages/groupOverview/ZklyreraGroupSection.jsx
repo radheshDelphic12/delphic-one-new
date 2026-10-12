@@ -8,7 +8,7 @@ import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { INVESTMENT_STATUS_META } from '../../lib/zklyrera/meta.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import KpiCard from '../../components/ui/KpiCard.jsx';
+import { KpiTile as KpiCard } from './groupUi.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -42,7 +42,7 @@ export default function ZklyreraGroupSection({ zklyrera }) {
   return (
     <section className="space-y-4" aria-label={`${name} capital and returns`}>
       <div className="flex flex-wrap items-baseline gap-x-3 border-b border-tertiary-100 pb-2 pt-3">
-        <span className="h-5 w-1.5 self-center rounded-full bg-[#B08D57]" aria-hidden="true" />
+        <span className="h-6 w-1.5 self-center rounded-full bg-gradient-to-b from-[#d2ad73] to-[#8a6a3a]" aria-hidden="true" />
         <h2 className="font-heading text-lg font-bold tracking-tight text-tertiary-900">{name} - capital, returns and projections</h2>
         <span className="text-xs text-tertiary-500">Capital placed and principal returned are not revenue or profit; projections are plans</span>
         <button type="button" className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline" onClick={() => open(orgId, '/zklyrera/investments')}>Open investments<ArrowUpRight className="h-3.5 w-3.5" /></button>

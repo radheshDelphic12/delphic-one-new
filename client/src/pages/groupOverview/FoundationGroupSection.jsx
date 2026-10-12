@@ -8,7 +8,7 @@ import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import { FLAG_META, STATUS_META } from '../../lib/foundation/meta.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import KpiCard from '../../components/ui/KpiCard.jsx';
+import { KpiTile as KpiCard } from './groupUi.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -51,7 +51,7 @@ export default function FoundationGroupSection({ foundation }) {
   return (
     <section className="space-y-4" aria-label={`${name} campaigns`}>
       <div className="flex flex-wrap items-baseline gap-x-3 border-b border-tertiary-100 pb-2 pt-3">
-        <span className="h-5 w-1.5 self-center rounded-full bg-[#4f8f60]" aria-hidden="true" />
+        <span className="h-6 w-1.5 self-center rounded-full bg-gradient-to-b from-[#3a8a5f] to-[#1f4d33]" aria-hidden="true" />
         <h2 className="font-heading text-lg font-bold tracking-tight text-tertiary-900">{name} - campaigns and fund projections</h2>
         <span className="text-xs text-tertiary-500">Budgets and estimates, kept apart from the income and expenses above</span>
         <button type="button" className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline" onClick={() => open(orgId, '/foundation/campaigns')}>Open campaigns<ArrowUpRight className="h-3.5 w-3.5" /></button>

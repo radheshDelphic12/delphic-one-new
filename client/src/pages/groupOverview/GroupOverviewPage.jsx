@@ -16,6 +16,8 @@ import GroupFinanceTab from './GroupFinanceTab.jsx';
 import GroupDashboardTab from './GroupDashboardTab.jsx';
 import GroupSettingsTab from './GroupSettingsTab.jsx';
 import GroupTasksTab from './GroupTasksTab.jsx';
+import { GroupHero, GroupTabs } from './groupUi.jsx';
+import { useAuth } from '../../lib/authContext.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -157,29 +159,14 @@ export default function GroupOverviewPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { user } = useAuth();
   const requested = pathname === '/group-overview/settings' ? 'settings' : params.get('section') || 'finance';
   const section = TABS.some((t) => t.key === requested) ? requested : 'finance';
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-5 overflow-hidden rounded-2xl bg-gradient-to-r from-[#1f3a2c] via-[#2f5d43] to-[#4f8f60] p-4 text-white shadow-card sm:p-5">
-        <div className="flex h-24 w-32 shrink-0 items-center justify-center rounded-xl bg-white p-2 shadow-soft sm:h-28 sm:w-40">
-          <img src="/group-logo.svg" alt="Gulati Industries" className="h-full w-full object-contain" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Multi-organization group</p>
-          <h2 className="font-heading text-xl font-bold tracking-tight sm:text-2xl">Gulati Industries</h2>
-          <p className="mt-1 max-w-2xl text-sm text-white/80">One view of every company in the group: revenue, profit, assets and valuation side by side. Open any company from the sidebar to work inside it; the Group Dashboard link brings you back.</p>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button key={key} type="button" role="tab" aria-selected={section === key} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => navigate(key === 'settings' ? '/group-overview/settings' : `/group-overview?section=${key}`)}>
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+      <GroupHero userName={user?.name} />
+      <GroupTabs tabs={TABS} value={section} onChange={(key) => navigate(key === 'settings' ? '/group-overview/settings' : `/group-overview?section=${key}`)} />
       {section === 'finance' && <GroupFinanceTab />}
       {section === 'dashboard' && <GroupDashboardTab />}
       {section === 'projections' && <ProjectionsTab />}

@@ -77,3 +77,11 @@ The Delphic finance engine runs ~3500 queries per 12-month window, so over Neon 
 Projection basis (2026-10-09): the projection starts the month after the history end but never later than the current month (a history ending this month still projects this month), and its basis is the last six complete months before the start, independent of the history window - so This month / Last month / Pick a month all project properly.
 
 Filter UI (2026-10-09, Zephyr pattern): one Filters button opens a panel with custom dropdowns (Period grouped into Months / Quarters / Years / Custom with a date hint, Group by, Project, Companies as toggles, month inputs when needed), active filters show as removable chips with Clear all, and **Figures** (All live / Locked / Unlocked) are pills under the filters, outside the panel. Shared in groupOverview/groupFilters.jsx (GroupFilterBar, ChoiceMenu, FigureSwitch, periodBinding).
+
+## Visual refresh (2026-10-12, local, not pushed)
+Presentation only; no API, calculation or data change. New shared building blocks in `client/src/pages/groupOverview/groupUi.jsx`:
+- `GroupHero` (emerald gradient + dot grid, date, greeting) and `GroupTabs` (pill tab bar, same `role=tab` contract).
+- `StatTile` (tinted card, icon chip, change pill - rising expenses count as bad - and a sparkline when the period has more than one point); `KpiTile` adapts the old `KpiCard` props so the Foundation and Zklyrera blocks match.
+- `CompanyCard` grid above the comparison table (logo, status, revenue / profit, share-of-group bar, margin, valuation); `ContributionDonut` for revenue and profit contribution; `RankCard` with medal ranks; `TrendLines` with a ranked tooltip and legend pills.
+- Styles: `.group-hero` and `.group-tab-active` in `client/src/styles/theme.css`.
+Applied to the Group Finance and Dashboard tabs and the page shell; Projections, Tasks, Org Chart, Billing Charges and Settings keep their content and get the new hero and tab bar.
