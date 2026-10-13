@@ -2459,6 +2459,7 @@ model Requirement {
   timesheet_entries      TimesheetEntry[]        @relation("TimesheetRequirement")
   billing_rates          BillingRate[]           @relation("BillingRateRequirement")
   daily_project_revenues DailyProjectRevenue[]   @relation("DailyRevenueRequirement")
+  applicants             JobApplicant[]
 
   @@index([account_id])
   @@index([status, priority])
@@ -2467,6 +2468,33 @@ model Requirement {
   @@index([org_id])
   @@index([tat_ends_at])
   @@map("requirements")
+}
+
+// People who applied to a requirement (from the website once it is connected, or added by hand). Everything starts in the
+// pool; the first recruiter to claim an applicant owns them (first come, first served). Claiming creates (or reuses) the
+// candidate Profile, so one person applying to two requirements stays one Profile.
+model JobApplicant {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirement_id   String      @db.Uuid
+  requirement      Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  name             String
+  email            String?
+  phone            String?
+  experience_years Decimal?    @db.Decimal(4, 1)
+  source           String      @default("website") // website | manual | referral
+  status           String      @default("new") // new | assigned | rejected
+  assigned_to      String?     @db.Uuid
+  assigned_at      DateTime?
+  profile_id       String?     @db.Uuid
+  notes            String?
+  applied_at       DateTime    @default(now())
+  created_by       String?     @db.Uuid
+  created_at       DateTime    @default(now())
+  updated_at       DateTime    @default(now()) @updatedAt
+
+  @@index([requirement_id, status])
+  @@index([assigned_to])
+  @@map("job_applicants")
 }
 
 model RequirementSeat {
