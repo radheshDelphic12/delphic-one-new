@@ -41,6 +41,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [GULATI-FOUNDATION.md](features/GULATI-FOUNDATION.md) - 5th company: campaigns, budgets, planned vs actual investment, funding, projections, group dashboard integration (module foundation, tables fx_*, 2026-10-09)
 - [GROUP-TASKS-WEEKLY-PLAN.md](features/GROUP-TASKS-WEEKLY-PLAN.md) - Group Dashboard tasks (one-time/recurring), weekly company-day table, derived-OT hiding (tables group_tasks/group_task_done/group_company_days, 2026-10-12)
 - [ZKLYRERA-SPIRITS.md](features/ZKLYRERA-SPIRITS.md) - 6th company: investments (principal vs earnings), income, expenses, salaries, monthly reports, projections, group dashboard block (module zklyrera, tables zk_*, 2026-10-12; live on staging + production, org seeded with seed-admin)
+- [TAT-TRAVEL-APPLICANTS.md](features/TAT-TRAVEL-APPLICANTS.md) - requirement TAT tags + TAT Active tab, Group Dashboard Travel tab, Pipeline In-progress jobs + Applicant pool (website publish/intake are stubs in utils/websiteIntegration.js), capacity not-started fix (2026-10-13, local only)
 - [SALES-REQUIREMENTS-SHARED-ACCESS.md](features/SALES-REQUIREMENTS-SHARED-ACCESS.md) - whole Sales team sees/manages every requirement (list, Pipeline, notes/files via entityAccess); owner change admin-only; activity log tags the actor (2026-10-12)
 - [REPORTS-DRILLDOWN.md](features/REPORTS-DRILLDOWN.md) - Reports: click a count or row to see the records behind it (`GET /reports/drilldown`), meeting-conversion + coverage-chart count fixes (2026-10-12)
 
