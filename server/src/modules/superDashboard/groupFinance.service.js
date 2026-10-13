@@ -6,6 +6,8 @@ const gulatiFinance = require('../gulati/finance.service');
 const acconcyFinance = require('../acconcy/finance.service');
 const foundationFinance = require('../foundation/finance.service');
 const zklyreraFinance = require('../zklyrera/finance.service');
+const valterraFinance = require('../valterra/finance.service');
+const groupInsights = require('./groupInsights.service');
 const zephyrMoney = require('../zephyr/money.service');
 const records = require('../calculations/records.service');
 
@@ -45,7 +47,7 @@ const FORMULA = { profit: 240, asset_value: 3 };
 const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
 
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
-const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : org.enabled_modules?.includes('foundation') ? 'foundation' : org.enabled_modules?.includes('zklyrera') ? 'zklyrera' : 'delphic');
+const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : org.enabled_modules?.includes('foundation') ? 'foundation' : org.enabled_modules?.includes('zklyrera') ? 'zklyrera' : org.enabled_modules?.includes('valterra') ? 'valterra' : 'delphic');
 // Companies the Delphic valuation formula (profit x 240 + assets x 3) does not apply to.
 const noValuation = (org) => kindOf(org) === 'foundation';
 
@@ -84,10 +86,10 @@ async function computeCompanyMonths(org, from, to, state) {
       ...(kind === 'zephyr' ? { property_value: m.property_value, property_count: m.property_count, recorded_asset_value: m.recorded_asset_value } : {}),
     }));
   }
-  if (kind === 'zklyrera') {
-    // Income = investment earnings + other income, expenses = expenses + salaries, profit = net result; assets = principal still
-    // invested. Capital placed and principal recovered are NOT revenue or profit. Valuation = profit x 240 + principal still invested x 3.
-    const t = await zklyreraFinance.valuationTrend(org.id, { from, to, state });
+  if (kind === 'zklyrera' || kind === 'valterra') {
+    // Income = investment earnings + other income (Valterra: mining revenue), expenses = expenses + salaries, profit = net result; assets = principal
+    // still invested. Capital placed and principal recovered are NOT revenue or profit. Valuation = profit x 240 + principal still invested x 3.
+    const t = await (kind === 'valterra' ? valterraFinance : zklyreraFinance).valuationTrend(org.id, { from, to, state });
     if (t.error) return [];
     return t.months.map((m) => ({
       month: m.month, revenue: m.income, profit: m.profit, expenses: m.expenses,
@@ -252,6 +254,7 @@ async function projection(orgGroupIds, query = {}) {
   const live = companies.filter((c) => !c.coming_soon);
   const foundationData = await Promise.all(orgs.map((org) => (kindOf(org) === 'foundation' && !isSoon(org) ? foundationFinance.groupSummary(org.id, {}) : null)));
   const zklyreraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'zklyrera' && !isSoon(org) ? zklyreraFinance.groupSummary(org.id, {}) : null)));
+  const valterraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'valterra' && !isSoon(org) ? valterraFinance.groupSummary(org.id, {}) : null)));
   const currencies = [...new Set(live.map((c) => c.org.currency))];
   const byMonth = (pick) => {
     const keys = [...new Set(live.flatMap((c) => pick(c).map((r) => r.month)))].sort();
@@ -269,6 +272,7 @@ async function projection(orgGroupIds, query = {}) {
     companies,
     foundation: foundationGroup(live, foundationData, orgs),
     zklyrera: zklyreraGroup(live, zklyreraData, orgs),
+    valterra: valterraGroup(live, valterraData, orgs),
     group: {
       history: gh, projected: gp,
       totals: { history_revenue: tot('history_revenue'), history_profit: tot('history_profit'), projected_revenue: tot('projected_revenue'), projected_profit: tot('projected_profit'), current_valuation: tot('current_valuation'), projected_valuation: tot('projected_valuation') },
@@ -316,14 +320,14 @@ function alertsFor(company, thresholds, nowMonth) {
   }
   const loss = s.filter((r) => r.profit < 0);
   if (loss.length) {
-    if (company.org.kind === 'zklyrera') push('loss_period', 'warning', `Expenses and salaries passed income in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
+    if (['zklyrera', 'valterra'].includes(company.org.kind)) push('loss_period', 'warning', `Expenses and salaries passed income in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
     else if (company.org.kind === 'foundation') push('loss_period', 'warning', `Spent more than it received in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
     else push('loss_period', 'critical', `Loss in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
   }
   // Months in the past that carry figures but were never locked (only companies that lock months report this).
   const unlocked = company.months.filter((m) => m.closed === false && m.month < nowMonth && (m.revenue || m.profit));
   if (unlocked.length) push('pending_lock', 'info', `${unlocked.length} past month(s) with figures are not locked yet`);
-  if (!['foundation', 'zklyrera'].includes(company.org.kind) && !company.months.some((m) => m.asset_value > 0)) push('no_asset_value', 'info', 'No asset value recorded - valuation uses profit only');
+  if (!['foundation', 'zklyrera', 'valterra'].includes(company.org.kind) && !company.months.some((m) => m.asset_value > 0)) push('no_asset_value', 'info', 'No asset value recorded - valuation uses profit only');
   return out;
 }
 
@@ -356,6 +360,9 @@ async function overview(orgGroupIds, query = {}) {
   const foundationData = await Promise.all(orgs.map((org) => (kindOf(org) === 'foundation' && !isSoon(org) ? foundationFinance.groupSummary(org.id, {}) : null)));
   // Zklyrera Spirits' capital, returns and projections sit beside its books too.
   const zklyreraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'zklyrera' && !isSoon(org) ? zklyreraFinance.groupSummary(org.id, {}) : null)));
+  const valterraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'valterra' && !isSoon(org) ? valterraFinance.groupSummary(org.id, {}) : null)));
+  // Delphic Global, Gulati Industries, Zephyr and Acconcy get the same kind of company insight (their own services' numbers).
+  const insightData = await Promise.all(orgs.map((org) => (isSoon(org) ? null : groupInsights.build(org, kindOf(org)))));
 
   const companies = [];
   for (const [i, org] of orgs.entries()) {
@@ -379,9 +386,11 @@ async function overview(orgGroupIds, query = {}) {
     const hasBooks = months.some((m) => m.revenue || m.profit || m.asset_value);
     companies.push({
       org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org) },
-      has_data: hasBooks || Boolean(foundationData[i]?.campaigns.total) || Boolean(zklyreraData[i]?.investments.total),
+      has_data: hasBooks || Boolean(foundationData[i]?.campaigns.total) || Boolean(zklyreraData[i]?.investments.total) || Boolean(valterraData[i]?.investments.total) || Boolean(valterraData[i]?.sites.total),
       ...(foundationData[i] ? { foundation: foundationData[i] } : {}),
       ...(zklyreraData[i] ? { zklyrera: zklyreraData[i] } : {}),
+      ...(valterraData[i] ? { valterra: valterraData[i] } : {}),
+      ...(insightData[i] ? { insight: insightData[i] } : {}),
       previous_totals: prevMonths.length
         ? { revenue: round2(prevMonths.reduce((a, m) => a + m.revenue, 0)), expenses: round2(prevMonths.reduce((a, m) => a + m.expenses, 0)), profit: round2(prevMonths.reduce((a, m) => a + m.profit, 0)), assets: prevMonths[prevMonths.length - 1].asset_value, valuation: prevMonths[prevMonths.length - 1].valuation }
         : null,
@@ -475,6 +484,7 @@ async function overview(orgGroupIds, query = {}) {
     alerts: live.flatMap((c) => alertsFor(c, thresholds, now)),
     foundation: foundationGroup(live, foundationData, orgs),
     zklyrera: zklyreraGroup(live, zklyreraData, orgs),
+    valterra: valterraGroup(live, valterraData, orgs),
   };
 }
 
@@ -499,6 +509,36 @@ function zklyreraGroup(live, zkData, orgs) {
     projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)), total_income: add((d) => d.projected.total_income), total_expenses: add((d) => d.projected.total_expenses), total_net: add((d) => d.projected.total_net) },
     attention: { overdue_investments: parts.flatMap((x) => x.data.attention.overdue_investments.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))) },
     top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
+  };
+}
+
+/** All Valterra-type (mining) companies of the group together (normally one): capital, returns, position, projections, and the mining sites. */
+function valterraGroup(live, vtData, orgs) {
+  const parts = orgs.map((org, i) => (vtData[i] ? { org, data: vtData[i] } : null)).filter((x) => x && live.some((c) => c.org.id === x.org.id));
+  if (!parts.length) return null;
+  const add = (pick) => round2(parts.reduce((a, x) => a + (pick(x.data) || 0), 0));
+  const monthly = new Map();
+  for (const x of parts) {
+    for (const m of x.data.projected.monthly) {
+      const r = monthly.get(m.month) || { month: m.month, projected_income: 0, projected_expenses: 0, projected_net: 0, projected_investment: 0, projected_principal: 0 };
+      for (const k of Object.keys(r)) if (k !== 'month') r[k] = round2(r[k] + m[k]);
+      monthly.set(m.month, r);
+    }
+  }
+  return {
+    companies: parts.map((x) => ({ org_id: x.org.id, org_name: x.org.name })),
+    investments: Object.fromEntries(Object.keys(parts[0].data.investments).map((k) => [k, parts.reduce((a, x) => a + x.data.investments[k], 0)])),
+    money: Object.fromEntries(Object.keys(parts[0].data.money).map((k) => [k, add((d) => d.money[k])])),
+    period: Object.fromEntries(Object.keys(parts[0].data.period).filter((k) => !['from', 'to'].includes(k)).map((k) => [k, add((d) => d.period[k])])),
+    projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)), total_income: add((d) => d.projected.total_income), total_expenses: add((d) => d.projected.total_expenses), total_net: add((d) => d.projected.total_net) },
+    attention: { overdue_investments: parts.flatMap((x) => x.data.attention.overdue_investments.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))) },
+    top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
+    sites: {
+      total: parts.reduce((a, x) => a + x.data.sites.total, 0),
+      active: parts.reduce((a, x) => a + x.data.sites.active, 0),
+      rows: parts.flatMap((x) => x.data.sites.rows.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))).sort((a, b) => b.invested_total - a.invested_total).slice(0, 10),
+      company_level_net: add((d) => d.sites.company_level?.net_result),
+    },
   };
 }
 
@@ -552,6 +592,13 @@ async function drilldown(org, query) {
     sec('months', 'Income, expenses and capital by month', ['Month', 'Income (earnings + other)', 'Expenses (incl. salaries)', 'Net result', 'Capital placed', 'Principal returned', 'Principal still invested'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.net_result, m.investment_added, m.principal_returned, m.outstanding_principal]));
     const inv = await zklyreraFinance.report(org.id, { report: 'investments' });
     sec('investments', 'Investments', inv.columns, inv.rows || []);
+  } else if (kind === 'valterra') {
+    const t = await valterraFinance.valuationTrend(org.id, { from: q.from, to: q.to, state: q.state });
+    sec('months', 'Income, expenses and capital by month', ['Month', 'Income (earnings + mining revenue)', 'Expenses (incl. salaries)', 'Net result', 'Capital placed', 'Principal returned', 'Principal still invested'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.net_result, m.investment_added, m.principal_returned, m.outstanding_principal]));
+    const st = await valterraFinance.report(org.id, { report: 'sites', from: `${q.from}-01`, to: monthEndDay(q.to) });
+    sec('sites', 'Mining sites (same period)', st.columns || [], st.rows || []);
+    const inv = await valterraFinance.report(org.id, { report: 'investments' });
+    sec('investments', 'Investments', inv.columns, inv.rows || []);
   } else if (kind === 'foundation') {
     const items = await foundationFinance.base(org.id, {});
     sec('campaigns', 'Campaigns', ['Campaign', 'Status', 'Allocated budget', 'Actual expenditure', 'Remaining budget', 'Funds received'], items.map((c) => [`${c.code} ${c.name}`, c.status, c.metrics.allocated_budget, c.metrics.actual_expenditure, c.metrics.remaining_allocated, c.metrics.funds_received]));
@@ -584,7 +631,7 @@ async function drilldown(org, query) {
 async function listAssetValues(org) {
   const kind = kindOf(org);
   if (kind === 'gulati') return (await prisma.gxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
-  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera') return [];
+  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera' || kind === 'valterra') return [];
   if (kind === 'zephyr') return (await prisma.zxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
   const rows = await prisma.financialAssetValue.findMany({ where: { org_id: org.id }, orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }] });
   return rows.map((r) => ({ id: r.id, month: `${r.period_year}-${String(r.period_month).padStart(2, '0')}`, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
@@ -603,7 +650,7 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
   if (input.month > currentMonth()) return { error: 'future_month' };
   const kind = kindOf(org);
   invalidateCompany(org.id);
-  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera') return { error: 'managed_in_company' };
+  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera' || kind === 'valterra') return { error: 'managed_in_company' };
   const before = (await listAssetValues(org)).find((r) => r.month === input.month) || null;
   let result;
   if (kind === 'gulati') result = await gulatiFinance.setAssetValue(org.id, actorId, input);
