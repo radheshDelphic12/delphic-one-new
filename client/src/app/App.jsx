@@ -18,6 +18,7 @@ import ProfileDetailPage from '../pages/profiles/ProfileDetailPage.jsx';
 import SubmissionsListPage from '../pages/submissions/SubmissionsListPage.jsx';
 import SubmissionDetailPage from '../pages/submissions/SubmissionDetailPage.jsx';
 import ReportsPage from '../pages/reports/ReportsPage.jsx';
+import WebsitePage from '../pages/website/WebsitePage.jsx';
 import CalendarPage from '../pages/calendar/CalendarPage.jsx';
 import NotificationsPage from '../pages/notifications/NotificationsPage.jsx';
 import SettingsPage from '../pages/settings/SettingsPage.jsx';
@@ -447,6 +448,7 @@ export default function App() {
             </RequireMasterWorkspace>
           }
         />
+        <Route path="website" element={<RequireMasterWorkspace><RequirePermission capability="manageWebsite"><WebsitePage /></RequirePermission></RequireMasterWorkspace>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

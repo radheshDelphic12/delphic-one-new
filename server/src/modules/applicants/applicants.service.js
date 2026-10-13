@@ -2,7 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
-// through utils/websiteIntegration.js later), every recruiter sees the pool, and the first recruiter to claim an applicant
+// through the website module's career submissions), every recruiter sees the pool, and the first recruiter to claim an applicant
 // owns them. Claiming creates - or reuses - the candidate Profile, so one person applying to two requirements is one Profile.
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
@@ -68,6 +68,7 @@ async function inProgressRequirements() {
       account: { select: { id: true, name: true } },
       assignments: { where: { role_on_req: 'recruiter', unassigned_at: null }, select: { user: { select: { id: true, name: true } } } },
       applicants: { select: { status: true } },
+      website_posting: { select: { status: true } },
     },
   });
   return rows.map((r) => ({
@@ -88,8 +89,8 @@ async function inProgressRequirements() {
     recruiters: r.assignments.map((a) => a.user),
     updated_at: r.updated_at,
     applicants: { new: r.applicants.filter((a) => a.status === 'new').length, assigned: r.applicants.filter((a) => a.status === 'assigned').length },
-    // Publishing is connected by the website developer (utils/websiteIntegration.js); until then it is not available.
-    website: { connected: false, published: false },
+    // Publishing itself lives in modules/website (Apps Script); this is only the listing's state.
+    website: { published: r.website_posting?.status === 'published', closed: r.website_posting?.status === 'closed' },
   }));
 }
 

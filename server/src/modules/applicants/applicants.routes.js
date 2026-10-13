@@ -4,7 +4,6 @@ const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace'
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, fail } = require('../../utils/response');
 const service = require('./applicants.service');
-const website = require('../../utils/websiteIntegration');
 
 const router = express.Router();
 router.use(authenticate, requireMasterWorkspace);
@@ -40,20 +39,5 @@ router.post('/', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (r
 router.post('/:id/assign', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.assign(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/release', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.release(req.user, req.params.id), 'applicant')));
 router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id))));
-
-// Website seam - a stub until the website developer connects it (see utils/websiteIntegration.js).
-router.post(
-  '/requirements/:id/publish-website',
-  authorize('admin', 'sales'),
-  asyncHandler(async (req, res) => {
-    try {
-      await website.publishRequirementToWebsite({ id: req.params.id });
-    } catch (e) {
-      if (e.statusCode === 501) return fail(res, 501, e.message);
-      throw e;
-    }
-    return ok(res, { published: true });
-  })
-);
 
 module.exports = router;

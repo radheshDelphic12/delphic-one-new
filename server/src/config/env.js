@@ -71,6 +71,19 @@ const env = {
       clientSecret: process.env.MS_GRAPH_CLIENT_SECRET || null,
     },
   },
+  // Marketing website control (modules/website). Each URL is one Apps Script
+  // web app (…/exec) the website already uses; the secret must equal the
+  // PLATFORM_SECRET script property on every one of them. Any value unset →
+  // the feature is off (routes answer 503, the sync job does nothing).
+  website: {
+    scriptSecret: process.env.WEBSITE_SCRIPT_SECRET || null,
+    scripts: {
+      jobs: process.env.WEBSITE_JOBS_SCRIPT_URL || null,
+      contact: process.env.WEBSITE_CONTACT_SCRIPT_URL || null,
+      career: process.env.WEBSITE_CAREER_SCRIPT_URL || null,
+      secure: process.env.WEBSITE_SECURE_SCRIPT_URL || null,
+    },
+  },
 };
 
 assertProductionConfig(env);

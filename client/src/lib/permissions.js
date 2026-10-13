@@ -56,6 +56,8 @@ const ROLE_CAPS = {
     'viewTrading',
     'viewContracts',
     'viewProjects',
+    // Marketing website control (job postings + form submissions), master workspace only.
+    'manageWebsite',
   ]),
   sales: new Set([
     'viewPeople',

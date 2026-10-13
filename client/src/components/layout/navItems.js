@@ -18,6 +18,7 @@ import {
   FileSignature,
   HardHat,
   Settings,
+  Globe,
 } from 'lucide-react';
 
 /**
@@ -52,6 +53,7 @@ export const NAV_ITEMS = [
   { to: '/contracts', label: 'Contracts', icon: FileSignature, capability: 'viewContracts', module: 'contracts' },
   { to: '/projects', label: 'Self Projects', icon: HardHat, capability: 'viewProjects', module: 'projects' },
   { to: '/reports', label: 'Reports', icon: BarChart3, capability: 'viewReports', masterOnly: true },
+  { to: '/website', label: 'Website', icon: Globe, capability: 'manageWebsite', masterOnly: true },
   { to: '/group-overview', label: 'Group Overview', icon: Network, groupSuperadminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];

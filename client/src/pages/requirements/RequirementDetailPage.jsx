@@ -30,6 +30,7 @@ import {
   requiresJoinedAt,
 } from '../../lib/requirementStages.js';
 import RequirementStatusOverrideDrawer from './RequirementStatusOverrideDrawer.jsx';
+import WebsitePublishPanel from '../website/WebsitePublishPanel.jsx';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -384,6 +385,8 @@ export default function RequirementDetailPage() {
           {user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
         </div>
       )}
+
+      {userCan(user, 'manageWebsite') && <WebsitePublishPanel requirementId={requirement.id} requirementStatus={requirement.status} />}
 
       {/* Status controls */}
       <section className="rounded-lg border bg-white p-4">
