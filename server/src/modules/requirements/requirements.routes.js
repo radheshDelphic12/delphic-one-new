@@ -19,6 +19,7 @@ router.post('/', authorize('sales', 'admin'), controller.create);
 router.patch('/:id', authorize('sales', 'admin'), lockCheck('requirements'), controller.update);
 router.delete('/:id', authorize('sales', 'admin'), controller.remove);
 router.post('/:id/status', authorize('sales', 'admin'), controller.changeStatus);
+router.post('/:id/tat/extend', authorize('sales', 'admin'), controller.extendTat);
 router.post('/:id/status/override', authorizeSuperadmin, controller.changeStatusOverride);
 router.post('/:id/assign', authorize('sales', 'admin'), controller.assign);
 router.post('/:id/unassign', authorize('sales', 'admin'), controller.unassign);

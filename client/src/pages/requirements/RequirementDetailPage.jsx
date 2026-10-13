@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
+import TatTag from '../../components/ui/TatTag.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Modal from '../../components/ui/Modal.jsx';
@@ -92,6 +93,18 @@ export default function RequirementDetailPage() {
   useEffect(() => {
     if (searchParams.get('edit') === '1') setEditOpen(true);
   }, [searchParams]);
+
+  async function extendTat(hours) {
+    setBusy(true);
+    try {
+      const { data } = await apiClient.post(`/requirements/${id}/tat/extend`, { hours });
+      setRequirement((prev) => ({ ...prev, ...data.data }));
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to extend the TAT'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function closeEdit() {
     setEditOpen(false);
@@ -456,6 +469,20 @@ export default function RequirementDetailPage() {
             <dd>
               {requirement.budget_min ?? '—'}–{requirement.budget_max ?? '—'} {requirement.budget_currency || ''}{' '}
               {requirement.budget_type ? `(${requirement.budget_type.replace(/_/g, ' ')})` : ''}
+            </dd>
+            <dt className="text-tertiary-500">TAT</dt>
+            <dd className="flex flex-wrap items-center gap-2">
+              {requirement.tat?.hours ? (
+                <>
+                  <span>{requirement.tat.hours % 24 === 0 ? `${requirement.tat.hours / 24} day(s)` : `${requirement.tat.hours} hours`}</span>
+                  {requirement.tat.tag ? <TatTag tat={requirement.tat} /> : <span className="text-xs text-tertiary-500">{requirement.tat.state === 'expired' ? 'TAT ended' : ''}</span>}
+                  {canEdit && ['open', 'in_progress'].includes(requirement.status) && [12, 24, 48].map((h) => (
+                    <button key={h} type="button" className="rounded-md border border-tertiary-100 px-1.5 py-0.5 text-xs text-primary-700 hover:bg-primary-50" disabled={busy} onClick={() => extendTat(h)}>
+                      +{h === 12 ? '12h' : `${h / 24}d`}
+                    </button>
+                  ))}
+                </>
+              ) : '—'}
             </dd>
             <dt className="text-tertiary-500">SLA</dt>
             <dd>{requirement.sla_days != null ? `${requirement.sla_days} days` : '—'}</dd>

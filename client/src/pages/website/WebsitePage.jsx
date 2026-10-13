@@ -127,8 +127,11 @@ function SubmissionDrawer({ submission, onClose, onDone }) {
   const { pushError, pushSuccess } = useAlerts();
   const [busy, setBusy] = useState(false);
   const [profile, setProfile] = useState({ total_experience_years: '', primary_skills: '' });
+  const [requirementId, setRequirementId] = useState('');
   const isCareer = submission.form_type === 'career';
   const isNew = submission.status === 'new';
+  // In-progress requirements: the ones whose applicant pool can take this person.
+  const pools = useLiveData(() => apiClient.get('/applicants/requirements').then((r) => r.data.data), { enabled: isCareer && isNew });
 
   async function run(path, body, message) {
     setBusy(true);
@@ -179,7 +182,20 @@ function SubmissionDrawer({ submission, onClose, onDone }) {
           {submission.handled_by_user && <span>by {submission.handled_by_user.name}{submission.handled_at ? ` · ${dateLabel(submission.handled_at)}` : ''}</span>}
           {submission.converted_lead_id && <Link to="/leads" className="text-primary-700 hover:underline">Open leads</Link>}
           {submission.converted_profile_id && <Link to={`/profiles/${submission.converted_profile_id}`} className="text-primary-700 hover:underline">Open candidate</Link>}
+          {submission.converted_applicant_id && <Link to="/pipeline" className="text-primary-700 hover:underline">In the applicant pool</Link>}
         </div>
+        {isNew && isCareer && (
+          <div className="space-y-2 rounded-lg border border-primary-100 bg-primary-50/40 p-3">
+            <p className="text-xs text-tertiary-600">Send to a job&apos;s applicant pool, where the first recruiter to claim the applicant owns them. Applications for a job you published are routed there automatically.</p>
+            <div className="flex flex-wrap gap-2">
+              <select aria-label="Requirement" value={requirementId} onChange={(e) => setRequirementId(e.target.value)} className="min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm">
+                <option value="">{pools.loading ? 'Loading jobs...' : 'Choose an in-progress job'}</option>
+                {(pools.data || []).map((r) => <option key={r.id} value={r.id}>{r.title}{r.client ? ` · ${r.client}` : ''}</option>)}
+              </select>
+              <button type="button" className="btn-secondary" disabled={busy || !requirementId} onClick={() => run('to-applicant', { requirement_id: requirementId }, 'Added to the applicant pool')}>Send to pool</button>
+            </div>
+          </div>
+        )}
         {isNew && isCareer && (
           <form id="convert-profile" onSubmit={convertProfile} className="space-y-3 rounded-lg bg-tertiary-50 p-3">
             <p className="text-xs text-tertiary-600">The website form doesn&apos;t ask for these, so fill them in to create the candidate. If a candidate with this email already exists, the application is linked to them instead.</p>

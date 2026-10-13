@@ -364,6 +364,14 @@ function describeProject(a) {
   };
 }
 
+// A signed client contract (active, not completed) whose start date is still ahead: its people are reserved for it.
+function contractUpcoming(a, date) {
+  const d = A.toDate(date);
+  return a.type === 'client' && a.stage === 'active' && a.contract_status !== 'completed'
+    && Boolean(a.agreement_start_date) && A.toDate(a.agreement_start_date) > d
+    && (!a.agreement_end_date || A.toDate(a.agreement_end_date) >= d);
+}
+
 // A client contract that is running on `date` (the thing capacity counts).
 function contractRunning(a, date) {
   const d = A.toDate(date);
@@ -420,8 +428,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
     getSettings(orgId),
     loadPeopleAndTeams(orgId),
     prisma.projectMemberAssignment.findMany({
-      where: { org_id: orgId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: day } }] }, { OR: [{ end_date: null }, { end_date: { gte: day } }] }] },
-      select: { org_membership_id: true, account_id: true, allocation_percent: true, account: { select: ACCOUNT_SELECT } },
+      where: { org_id: orgId, OR: [{ end_date: null }, { end_date: { gte: day } }] },
+      select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, account: { select: ACCOUNT_SELECT } },
     }),
   ]);
 
@@ -449,14 +457,18 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
   }
   for (const s of spans) {
     const m = ctx.membershipsById.get(s.org_membership_id);
-    if (!m || !employedOn(m, day) || !contractRunning(s.account, day)) continue;
+    const started = !s.start_date || A.toDate(s.start_date) <= day;
+    const upcoming = contractUpcoming(s.account, day);
+    if (!m || !employedOn(m, day) || !((started && contractRunning(s.account, day)) || upcoming)) continue;
     const teamId = ctx.teamOf(m.id, day);
     const row = rowFor(teamId ? ctx.teamsById.get(teamId) : null);
     if (!row.projects.has(s.account_id)) {
       const end = s.account.agreement_end_date ? A.toDate(s.account.agreement_end_date) : null;
       row.projects.set(s.account_id, {
         ...describeProject(s.account),
-        ending_soon: Boolean(end && end >= day && end <= windowEnd),
+        ending_soon: Boolean(end && end >= day && end <= windowEnd) && !upcoming,
+        not_started: upcoming,
+        starts_in_days: upcoming ? Math.round((A.toDate(s.account.agreement_start_date) - day) / A.DAY) : null,
         days_remaining: end ? Math.round((end - day) / A.DAY) : null,
         resources: [],
       });

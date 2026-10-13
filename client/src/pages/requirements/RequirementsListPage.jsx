@@ -8,6 +8,7 @@ import { useClientAccountOptions, useUserOptions } from '../../lib/lookups.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
+import TatTag from '../../components/ui/TatTag.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import RequirementScopeToggle from '../../components/ui/RequirementScopeToggle.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
@@ -37,6 +38,8 @@ function RequirementPeek({ row, onClose, onAssign }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState(row);
   const [loading, setLoading] = useState(true);
+  // A recruiter opens only requirements they are assigned to; the TAT tab also lists the ones still open for pick-up.
+  const canOpen = user?.role !== 'recruiter' || (row.assigned_recruiters || []).some((r) => r.id === user.id);
 
   useEffect(() => {
     setLoading(true);
@@ -69,6 +72,7 @@ function RequirementPeek({ row, onClose, onAssign }) {
           </span>
         </PeekField>
         <PeekField label="Priority"><Badge value={detail.priority} /></PeekField>
+        {detail.tat?.tag && <PeekField label="TAT"><TatTag tat={detail.tat} /></PeekField>}
         <PeekField label="Type">{detail.req_type ? <Badge value={detail.req_type} /> : '—'}</PeekField>
         <PeekField label="Work mode"><span className="capitalize">{detail.work_mode || '—'}</span></PeekField>
         <PeekField label="Seats">{`${detail.seats_closed ?? 0}/${detail.seats_total ?? 0}`}</PeekField>
@@ -89,12 +93,16 @@ function RequirementPeek({ row, onClose, onAssign }) {
         </div>
       </dl>
       <PeekActions>
-        <Link to={`/requirements/${detail.id}`} className="btn-primary">
-          Job details
-        </Link>
-        <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
-          Open board
-        </Link>
+        {canOpen && (
+          <>
+            <Link to={`/requirements/${detail.id}`} className="btn-primary">
+              Job details
+            </Link>
+            <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
+              Open board
+            </Link>
+          </>
+        )}
         <button
           type="button"
           className="btn-secondary"
@@ -137,6 +145,9 @@ export default function RequirementsListPage() {
   const isSales = user?.role === 'sales';
   const [scope, setScope] = useState(() => (searchParams.get('scope') === 'mine' ? 'mine' : 'all'));
   const [recruiterId, setRecruiterId] = useState(() => searchParams.get('recruiter_id') || '');
+  // 'active' = the TAT Active tab: every requirement whose TAT clock is still running.
+  const [tat, setTat] = useState(() => (searchParams.get('tat') === 'active' ? 'active' : ''));
+  const [tatCount, setTatCount] = useState(null);
   const [workMode, setWorkMode] = useState(() => searchParams.get('work_mode') || '');
   const [techStack, setTechStack] = useState(() => searchParams.get('tech_stack') || '');
   const [appliedTechStack, setAppliedTechStack] = useState(() => searchParams.get('tech_stack') || '');
@@ -175,12 +186,13 @@ export default function RequirementsListPage() {
     sync('scope', isSales ? scope : '', 'all');
     sync('recruiter_id', recruiterId);
     sync('work_mode', workMode);
+    sync('tat', tat);
     sync('tech_stack', appliedTechStack);
     sync('sort_by', sortBy, 'created_at');
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, scope, recruiterId, workMode, appliedTechStack, sortBy, sortOrder]);
+  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   // Guarded so it converges with the mirror effect above instead of looping.
@@ -198,6 +210,7 @@ export default function RequirementsListPage() {
     set(setScope, g('scope') === 'mine' ? 'mine' : 'all');
     set(setRecruiterId, g('recruiter_id'));
     set(setWorkMode, g('work_mode'));
+    set(setTat, g('tat') === 'active' ? 'active' : '');
     set(setAppliedTechStack, g('tech_stack'));
     set(setTechStack, g('tech_stack'));
     set(setSortBy, g('sort_by', 'created_at'));
@@ -206,7 +219,7 @@ export default function RequirementsListPage() {
 
   const hasActiveFilters = Boolean(
     status || priority || stuck || closedFrom || closedTo || reqType || accountId || salesOwnerId ||
-      recruiterId || workMode || appliedTechStack || appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
+      recruiterId || workMode || tat || appliedTechStack || appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
   );
 
   function clearAllFilters() {
@@ -221,6 +234,7 @@ export default function RequirementsListPage() {
     setSalesOwnerId('');
     setRecruiterId('');
     setWorkMode('');
+    setTat('');
     setTechStack('');
     setAppliedTechStack('');
     setSortBy('created_at');
@@ -246,6 +260,7 @@ export default function RequirementsListPage() {
     if (isSales && scope === 'mine') params.scope = 'mine';
     if (recruiterId) params.recruiter_id = recruiterId;
     if (workMode) params.work_mode = workMode;
+    if (tat) params.tat = tat;
     if (appliedTechStack) params.tech_stack = appliedTechStack;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
@@ -262,8 +277,13 @@ export default function RequirementsListPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, accountId,
-    salesOwnerId, scope, recruiterId, workMode, appliedTechStack, sortBy, sortOrder,
+    salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder,
   ]);
+
+  // The TAT Active tab badge: how many requirements are hot right now (refreshed with the list).
+  useEffect(() => {
+    apiClient.get('/requirements', { params: { tat: 'active', limit: 1 } }).then(({ data }) => setTatCount(data.pagination?.total ?? 0)).catch(() => setTatCount(null));
+  }, [rows]);
 
   useEffect(() => {
     if (searchParams.get('create') === '1') setCreateOpen(true);
@@ -293,6 +313,7 @@ export default function RequirementsListPage() {
           <div className="min-w-0">
             <div className="text-sm font-medium text-primary-600">{reqKey(row.id)}</div>
             <div className="font-semibold text-tertiary-900">{row.title}</div>
+            {row.tat?.tag && <div className="mt-1"><TatTag tat={row.tat} /></div>}
           </div>
         ),
       },
@@ -353,6 +374,22 @@ export default function RequirementsListPage() {
           )}
         </div>
       )}
+
+      <div className="flex gap-1 border-b border-tertiary-100" role="tablist" aria-label="Requirement views">
+        {[{ key: '', label: 'All requirements' }, { key: 'active', label: 'TAT Active', count: tatCount }].map((t) => (
+          <button
+            key={t.key || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={tat === t.key}
+            onClick={() => { setPage(1); setTat(t.key); }}
+            className={`-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tat === t.key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500 hover:text-tertiary-800'}`}
+          >
+            {t.label}
+            {t.count != null && t.key && <span className="rounded-full bg-green-50 px-1.5 text-xs font-semibold text-green-700">{t.count}</span>}
+          </button>
+        ))}
+      </div>
 
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <div className="space-y-2 border-b border-tertiary-100 px-4 py-2.5">

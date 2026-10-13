@@ -19,6 +19,8 @@ const ERRORS = {
   requirement_closed: [409, 'A closed or dropped requirement cannot be published'],
   wrong_form: [422, 'That conversion does not apply to this form'],
   already_handled: [409, 'This submission has already been handled'],
+  requirement_not_in_progress: [409, 'Only in-progress requirements take applicants'],
+  duplicate_applicant: [409, 'This person has already applied to that requirement'],
 };
 
 function failFor(res, result) {
@@ -86,6 +88,12 @@ router.post(
   '/submissions/:id/convert-profile',
   asyncHandler(async (req, res) =>
     send(undefined, 201)(res, await submissions.convertToProfile(orgId(req), req.user.id, req.params.id, submissions.convertProfileSchema.parse(req.body)))
+  )
+);
+router.post(
+  '/submissions/:id/to-applicant',
+  asyncHandler(async (req, res) =>
+    send(undefined, 201)(res, await submissions.toApplicant(orgId(req), req.user.id, req.params.id, submissions.toApplicantSchema.parse(req.body)))
   )
 );
 router.post('/submissions/:id/dismiss', asyncHandler(async (req, res) => send('submission')(res, await submissions.dismiss(orgId(req), req.user.id, req.params.id))));

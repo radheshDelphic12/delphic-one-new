@@ -39,6 +39,26 @@ function isStuck(row) {
   );
 }
 
+const DEFAULT_TAT_HOURS = 24;
+const TAT_OPEN_STATUSES = ['open', 'in_progress'];
+
+/**
+ * TAT = how long a requirement is "hot" for recruiters. While the clock runs the card is tagged Super Active; in the last
+ * quarter of the window (at least one hour) it is tagged Expiring soon; afterwards the requirement stays active but leaves
+ * the TAT Active tab. Older requirements with no TAT, and ones that are no longer open, carry no tag.
+ */
+function tatInfo(row, now = new Date()) {
+  if (!row.tat_ends_at) return { state: 'none', hours: null, ends_at: null, remaining_minutes: null, tag: null };
+  const ends = new Date(row.tat_ends_at);
+  const remaining = Math.max(0, Math.round((ends.getTime() - now.getTime()) / 60000));
+  const base = { hours: row.tat_hours ?? null, ends_at: ends.toISOString(), remaining_minutes: remaining };
+  if (!TAT_OPEN_STATUSES.includes(row.status)) return { ...base, state: 'closed', tag: null };
+  if (ends <= now) return { ...base, state: 'expired', tag: null };
+  const windowMin = (row.tat_hours || DEFAULT_TAT_HOURS) * 60;
+  if (remaining <= Math.max(60, windowMin * 0.25)) return { ...base, state: 'expiring', tag: 'Expiring soon' };
+  return { ...base, state: 'active', tag: 'Super Active' };
+}
+
 function serialize(row) {
   if (!row) return null;
   const { account_id, account, sales_owner_id, sales_owner, assignments, seats, ...rest } = row;
@@ -55,6 +75,7 @@ function serialize(row) {
   return {
     ...rest,
     is_stuck: isStuck(row),
+    tat: tatInfo(row),
     account: account ? { id: account.id, name: account.name, type: account.type } : undefined,
     sales_owner: sales_owner ? { id: sales_owner.id, name: sales_owner.name } : undefined,
     assigned_recruiters: assignments
@@ -89,7 +110,7 @@ const DECORATE_INCLUDE = {
 };
 
 async function list(filters) {
-  const { status, req_type, account_id, sales_owner_id, recruiter_id, priority, work_mode, stuck, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
+  const { status, req_type, account_id, sales_owner_id, recruiter_id, priority, work_mode, stuck, tat, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
 
   const stuckClause = { status: { in: STUCK_STATUSES }, updated_at: { lte: stuckCutoff() } };
 
@@ -101,6 +122,7 @@ async function list(filters) {
     ...(status ? { status } : {}),
     ...(stuck === 'stuck' ? { AND: [stuckClause] } : {}),
     ...(stuck === 'not_stuck' ? { NOT: [stuckClause] } : {}),
+    ...(tat === 'active' ? { status: { in: TAT_OPEN_STATUSES }, tat_ends_at: { gt: new Date() } } : {}),
     ...(Object.keys(closedRange).length ? { closed_at: closedRange } : {}),
     ...(req_type ? { req_type } : {}),
     ...(account_id ? { account_id } : {}),
@@ -134,7 +156,7 @@ async function list(filters) {
     prisma.requirement.findMany({
       where,
       include: DECORATE_INCLUDE,
-      orderBy: { [sort_by]: sort_order },
+      orderBy: tat === 'active' ? { tat_ends_at: 'asc' } : { [sort_by]: sort_order },
       take: limit,
       skip: (page - 1) * limit,
     }),
@@ -161,11 +183,13 @@ async function create(data, salesOwnerId, actor = null) {
     return { error: 'invalid_account' };
   }
 
-  const { seats_total = 1, ...rest } = data;
+  const { seats_total = 1, tat_hours = DEFAULT_TAT_HOURS, ...rest } = data;
 
   const row = await prisma.requirement.create({
     data: {
       ...rest,
+      tat_hours,
+      tat_ends_at: new Date(Date.now() + tat_hours * 3600000),
       seats_total,
       sales_owner_id: salesOwnerId,
       seats: {
@@ -230,9 +254,27 @@ async function update(id, patch, user) {
     if (!OWNER_ROLES.includes(target.role)) return { error: 'invalid_owner_role' };
   }
 
-  const row = await prisma.requirement.update({ where: { id }, data: patch, include: DECORATE_INCLUDE });
+  // A different TAT restarts the clock from now.
+  const data = patch.tat_hours && patch.tat_hours !== existing.tat_hours ? { ...patch, tat_ends_at: new Date(Date.now() + patch.tat_hours * 3600000) } : patch;
+  const row = await prisma.requirement.update({ where: { id }, data, include: DECORATE_INCLUDE });
   const changes = changedFields(existing, row, patch);
   if (Object.keys(changes).length) await logActivity(user, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
+  return { requirement: serialize(row) };
+}
+
+// Gives a requirement more TAT time: counted from the end of the current window, or from now when it already ran out.
+async function extendTat(id, hours, user) {
+  const existing = await prisma.requirement.findUnique({ where: { id } });
+  if (!existing) return { error: 'not_found' };
+  if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  const from = existing.tat_ends_at && new Date(existing.tat_ends_at) > new Date() ? new Date(existing.tat_ends_at) : new Date();
+  const ends = new Date(from.getTime() + hours * 3600000);
+  const row = await prisma.requirement.update({
+    where: { id },
+    data: { tat_ends_at: ends, tat_hours: (existing.tat_hours || DEFAULT_TAT_HOURS) + hours },
+    include: DECORATE_INCLUDE,
+  });
+  await logActivity(user, id, 'update', `Extended TAT by ${hours} hours`, { changes: { TAT: { from: existing.tat_ends_at, to: ends.toISOString() } } });
   return { requirement: serialize(row) };
 }
 
@@ -568,6 +610,7 @@ module.exports = {
   update,
   changeStatus,
   changeStatusOverride,
+  extendTat,
   assign: assignLogged,
   unassign: unassignLogged,
   getAssignments,

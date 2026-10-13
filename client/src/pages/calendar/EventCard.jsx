@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CalendarX, ExternalLink, RefreshCw } from 'lucide-react';
+import { CalendarX, ExternalLink, Plane, RefreshCw } from 'lucide-react';
 import Badge from '../../components/ui/Badge.jsx';
 import AvatarStack from '../../components/ui/AvatarStack.jsx';
 import {
@@ -44,6 +44,11 @@ export default function EventCard({ event, onOpenDetail, onFeedback, onCancel })
         </span>
         <span className={`rounded-full border px-2 py-0.5 ${meeting ? look.pill : meta.color}`}>{typeLabel}</span>
         <Badge value={event.status} />
+        {event.travel && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 font-medium text-primary-700" title={`Part of the trip "${event.travel.title}"`}>
+            <Plane className="h-3 w-3" aria-hidden="true" />Travel · {event.travel.destination}
+          </span>
+        )}
         {event.result && event.result !== 'pending' && <Badge value={event.result} />}
         <span className="ml-auto text-tertiary-400">{formatRelative(event.scheduled_at)}</span>
       </div>

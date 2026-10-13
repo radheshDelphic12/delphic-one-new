@@ -183,6 +183,34 @@ describe('job postings', () => {
   });
 });
 
+describe('pipeline seam (utils/websiteIntegration)', () => {
+  it('publishes and unpublishes from Pipeline > In-progress jobs, and the board shows it live', async () => {
+    const req = await openRequirement({ experience_min: 3, experience_max: 6 });
+    await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'in_progress' });
+
+    const pub = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/publish-website`), adminToken).send({});
+    expect(pub.status).toBe(200);
+    expect(pub.body.data.published).toBe(true);
+    expect(jobs[req.id]).toMatchObject({ title: 'Senior Node Engineer', status: 'Open' });
+    expect(jobs[req.id].description).toMatch(/^Experience: 3–6 years\n\nBuild APIs\.$/);
+    expect(JSON.stringify(jobs[req.id])).not.toMatch(/1500000|2500000|margin/);
+
+    const board = await authed(request(app).get('/api/v1/applicants/requirements'), adminToken);
+    expect(board.body.data.find((r) => r.id === req.id).website).toMatchObject({ connected: true, published: true, sync_error: null });
+
+    const unpub = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/unpublish-website`), adminToken).send({});
+    expect(unpub.status).toBe(200);
+    expect(jobs[req.id].status).toBe('Closed');
+  });
+
+  it('still answers 501 from the pipeline when the bridge is not configured', async () => {
+    client.isConfigured.mockReturnValue(false);
+    const req = await openRequirement();
+    const res = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/publish-website`), adminToken).send({});
+    expect(res.status).toBe(501);
+  });
+});
+
 describe('form submissions', () => {
   it('imports each sheet row once and marks it Imported in the sheet', async () => {
     const first = await api('post', '/submissions/sync');
@@ -241,7 +269,7 @@ describe('form submissions', () => {
     const row = await prisma.websiteSubmission.findUnique({ where: { external_id: 'k-1' } });
 
     expect((await api('post', `/submissions/${row.id}/convert-lead`)).status).toBe(422);
-    expect((await api('post', `/submissions/${row.id}/convert-profile`).send({})).status).toBe(400);
+    expect((await api('post', `/submissions/${row.id}/convert-profile`).send({})).status).toBe(422);
 
     const res = await api('post', `/submissions/${row.id}/convert-profile`).send({ total_experience_years: 4, primary_skills: ['Node.js'] });
     expect(res.status).toBe(201);
@@ -260,6 +288,37 @@ describe('form submissions', () => {
     expect(res.status).toBe(201);
     expect(res.body.data).toMatchObject({ linked_existing: true, profile: { id: existing.id } });
     expect(await prisma.profile.count()).toBe(1);
+  });
+
+  it('routes a career application for a live job straight into that requirement applicant pool', async () => {
+    const req = await openRequirement();
+    await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'in_progress' });
+    await api('post', '/postings').send({ requirement_id: req.id, title: 'node engineer' });
+
+    const res = await api('post', '/submissions/sync');
+    expect(res.body.data.routed).toBe(1);
+
+    const row = await prisma.websiteSubmission.findUnique({ where: { external_id: 'k-1' } });
+    expect(row).toMatchObject({ status: 'converted', handled_by: null });
+    const applicant = await prisma.jobApplicant.findUnique({ where: { id: row.converted_applicant_id } });
+    expect(applicant).toMatchObject({ requirement_id: req.id, name: 'Chen Li', email: 'chen@mail.test', source: 'website', status: 'new' });
+    expect(applicant.notes).toContain('https://drive.test/cv');
+    expect(sheets.career[0].status).toBe('Converted');
+  });
+
+  it('leaves a career application for an unknown role for an admin to send to a pool by hand', async () => {
+    await api('post', '/submissions/sync');
+    const row = await prisma.websiteSubmission.findUnique({ where: { external_id: 'k-1' } });
+    expect(row.status).toBe('new');
+
+    const req = await openRequirement();
+    expect((await api('post', `/submissions/${row.id}/to-applicant`).send({ requirement_id: req.id })).status).toBe(409);
+    await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'in_progress' });
+
+    const res = await api('post', `/submissions/${row.id}/to-applicant`).send({ requirement_id: req.id });
+    expect(res.status).toBe(201);
+    expect(res.body.data.submission).toMatchObject({ status: 'converted', converted_applicant_id: res.body.data.applicant.id });
+    expect(sheets.career[0].status).toBe('Converted');
   });
 
   it('dismisses a submission', async () => {

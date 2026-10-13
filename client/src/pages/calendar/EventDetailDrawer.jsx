@@ -148,6 +148,7 @@ export default function EventDetailDrawer({ event, open, onClose, onFeedback, on
             <>
               <Row label="Mode">{event.meeting_mode === 'offline' ? 'In person' : 'Online'}</Row>
               {event.meeting_location && <Row label="Location">{event.meeting_location}</Row>}
+              {event.travel && <Row label="Travel">{event.travel.title} · {event.travel.destination} ({event.travel.start_date} to {event.travel.end_date})</Row>}
             </>
           ) : (
             <>

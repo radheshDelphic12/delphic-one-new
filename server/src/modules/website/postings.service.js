@@ -25,12 +25,17 @@ const WORK_MODE_LABEL = { remote: 'Remote', onsite: 'On-site', hybrid: 'Hybrid' 
 function defaultsFor(requirement) {
   const mode = WORK_MODE_LABEL[requirement.work_mode];
   const location = [requirement.work_location, mode].filter(Boolean).join(' · ');
+  const min = requirement.experience_min == null ? null : Number(requirement.experience_min);
+  const max = requirement.experience_max == null ? null : Number(requirement.experience_max);
+  const experience = min != null && max != null ? `${min}–${max} years` : min != null ? `${min}+ years` : max != null ? `Up to ${max} years` : null;
+  const body = requirement.job_description || requirement.description || null;
+  const description = [experience && `Experience: ${experience}`, body].filter(Boolean).join('\n\n');
   return {
     title: requirement.title,
     department: requirement.department || null,
     location: location || null,
     employment_type: ENGAGEMENT_LABEL[requirement.engagement_type] || null,
-    public_description: requirement.job_description || requirement.description || null,
+    public_description: description || null,
   };
 }
 
