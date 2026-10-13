@@ -2433,6 +2433,10 @@ model Requirement {
   priority Priority @default(medium)
   sla_days Int?
 
+  // TAT (turnaround time): how long the requirement stays highlighted as "active" for recruiters. Null on older requirements.
+  tat_hours   Int?
+  tat_ends_at DateTime?
+
   sales_owner_id String    @db.Uuid
   sales_owner    User      @relation("RequirementSalesOwner", fields: [sales_owner_id], references: [id])
   is_locked      Boolean   @default(false)
@@ -2460,6 +2464,7 @@ model Requirement {
   @@index([sales_owner_id])
   @@index([deleted_at])
   @@index([org_id])
+  @@index([tat_ends_at])
   @@map("requirements")
 }
 

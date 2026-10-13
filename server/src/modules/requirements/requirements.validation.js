@@ -30,6 +30,8 @@ const baseFields = {
 
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   sla_days: z.number().int().optional(),
+  // TAT in hours (24 = one day, 48 = two days...). New requirements default to 24 hours; changing it on an edit restarts the clock.
+  tat_hours: z.number().int().min(1).max(24 * 60).optional(),
 };
 
 const createSchema = z.object({
@@ -59,6 +61,10 @@ const statusOverrideSchema = z.object({
   to_status: z.enum(['open', 'in_progress', 'on_hold', 'closed', 'dropped']),
   reason: z.string().min(1),
   is_locked: z.boolean().optional(),
+});
+
+const tatExtendSchema = z.object({
+  hours: z.number().int().min(1).max(24 * 60),
 });
 
 const assignSchema = z.object({
@@ -91,6 +97,8 @@ const listQuerySchema = z.object({
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   work_mode: z.enum(['remote', 'onsite', 'hybrid']).optional(),
   stuck: z.enum(['stuck', 'not_stuck']).optional(),
+  // 'active' = requirements whose TAT is still running (the recruiters' TAT Active tab).
+  tat: z.enum(['active']).optional(),
   // closed_at window (ISO strings) — dashboard "Closed this month" tile drills in with these.
   closed_from: z.string().optional(),
   closed_to: z.string().optional(),
@@ -107,6 +115,7 @@ module.exports = {
   updateSchema,
   statusSchema,
   statusOverrideSchema,
+  tatExtendSchema,
   assignSchema,
   unassignSchema,
   seatCreateSchema,

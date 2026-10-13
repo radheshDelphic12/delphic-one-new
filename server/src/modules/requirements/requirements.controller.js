@@ -6,6 +6,7 @@ const {
   updateSchema,
   statusSchema,
   statusOverrideSchema,
+  tatExtendSchema,
   assignSchema,
   unassignSchema,
   seatCreateSchema,
@@ -36,7 +37,8 @@ function mapError(res, error) {
 
 const list = asyncHandler(async (req, res) => {
   const query = listQuerySchema.parse(req.query);
-  if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
+  // Recruiters see their own requirements, except on the TAT Active tab, which shows every hot requirement so they can pick one up.
+  if (req.user.role === 'recruiter' && query.tat !== 'active') query.recruiter_id = req.user.id;
   // Every requirement is visible to the whole Sales team; ?scope=mine narrows to the user's own.
   if (req.user.role === 'sales' && query.scope === 'mine') query.sales_owner_id = req.user.id;
   delete query.scope;
@@ -78,6 +80,13 @@ const update = asyncHandler(async (req, res) => {
 const changeStatus = asyncHandler(async (req, res) => {
   const body = statusSchema.parse(req.body);
   const result = await service.changeStatus(req.params.id, body, req.user);
+  if (result.error) return mapError(res, result.error);
+  return ok(res, result.requirement);
+});
+
+const extendTat = asyncHandler(async (req, res) => {
+  const body = tatExtendSchema.parse(req.body);
+  const result = await service.extendTat(req.params.id, body.hours, req.user);
   if (result.error) return mapError(res, result.error);
   return ok(res, result.requirement);
 });
@@ -169,6 +178,7 @@ module.exports = {
   update,
   changeStatus,
   changeStatusOverride,
+  extendTat,
   assign,
   unassign,
   assignments,

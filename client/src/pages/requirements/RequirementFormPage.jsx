@@ -41,9 +41,18 @@ const emptyForm = {
   budget_type: '',
   billing_notes: '',
   sla_days: '',
+  tat_value: '1',
+  tat_unit: 'days',
   start_date_target: '',
   notice_period_max_days: '',
 };
+
+// TAT is typed as a number plus hours/days; the API takes hours (empty = the 24 hour default).
+function toTatHours(form) {
+  const n = Math.round(Number(form.tat_value));
+  if (!n || n < 1) return undefined;
+  return form.tat_unit === 'days' ? n * 24 : n;
+}
 
 function toOptionalNumber(value) {
   if (value === '' || value === null || value === undefined) return undefined;
@@ -77,6 +86,7 @@ function buildPayload(form, { isCreate }) {
     budget_type: form.budget_type || undefined,
     billing_notes: form.billing_notes.trim() || undefined,
     sla_days: toOptionalNumber(form.sla_days),
+    tat_hours: toTatHours(form),
     start_date_target: form.start_date_target || undefined,
     notice_period_max_days: toOptionalNumber(form.notice_period_max_days),
   };
@@ -121,6 +131,8 @@ function hydrateForm(req) {
     budget_type: req.budget_type || '',
     billing_notes: req.billing_notes || '',
     sla_days: req.sla_days ?? '',
+    tat_value: req.tat?.hours ? String(req.tat.hours % 24 === 0 ? req.tat.hours / 24 : req.tat.hours) : '',
+    tat_unit: req.tat?.hours && req.tat.hours % 24 !== 0 ? 'hours' : 'days',
     start_date_target: req.start_date_target ? String(req.start_date_target).slice(0, 10) : '',
     notice_period_max_days: req.notice_period_max_days ?? '',
   };
@@ -354,6 +366,25 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
               </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">TAT (how long recruiters see it as Super Active)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={form.tat_value}
+                  onChange={(e) => updateField('tat_value', e.target.value)}
+                  className={FIELD_INPUT}
+                  aria-label="TAT value"
+                />
+                <select value={form.tat_unit} onChange={(e) => updateField('tat_unit', e.target.value)} className={FIELD_INPUT} aria-label="TAT unit">
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+              <p className="mt-1 text-[11px] text-tertiary-500">Default 1 day. On an older requirement with no TAT, leave empty to keep it without one. Changing it restarts the clock.</p>
             </div>
 
             <p className="sm:col-span-2 mt-3 border-t border-tertiary-100 pt-3 font-heading text-xs font-semibold uppercase tracking-wide text-tertiary-500">
