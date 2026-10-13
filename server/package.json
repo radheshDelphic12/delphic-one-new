@@ -28,6 +28,8 @@
     "foundation:seed-admin": "node prisma/foundation/seed-admin.js",
     "zklyrera:seed": "node prisma/zklyrera/seed.js",
     "zklyrera:seed-admin": "node prisma/zklyrera/seed-admin.js",
+    "valterra:seed": "node prisma/valterra/seed.js",
+    "valterra:seed-admin": "node prisma/valterra/seed-admin.js",
     "zephyr:seed-admin": "node prisma/zephyr/seed-admin.js",
     "erp:seed:locations": "node prisma/erp/seed-locations-calendars.js",
     "erp:seed:multi-org": "node prisma/erp/seed-multi-org-demo.js",

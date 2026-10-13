@@ -37,13 +37,13 @@ const add = (token, body) => authed(request(app).post(api), token).send(body);
 const claim = (token, id, body = {}) => authed(request(app).post(`${api}/${id}/assign`), token).send(body);
 
 describe('applicant pool', () => {
-  test('only sales, recruiters and admins use it; the in-progress requirements show their pool counts and a website stub', async () => {
+  test('only sales, recruiters and admins use it; the in-progress requirements show their pool counts and their website state', async () => {
     expect((await authed(request(app).get(api), empToken)).status).toBe(403);
     const first = await add(sToken, { requirement_id: reqA.id, name: 'Asha Rao', email: 'Asha@Example.com', phone: '+91 98765 43210', experience_years: 4.5 });
     expect(first.status).toBe(201);
     const reqs = (await authed(request(app).get(`${api}/requirements`), r1Token)).body.data;
     expect(reqs.map((r) => r.title).sort()).toEqual(['Java Developer', 'Java Lead']);
-    expect(reqs.find((r) => r.id === reqA.id)).toMatchObject({ applicants: { new: 1, assigned: 0 }, website: { connected: false, published: false } });
+    expect(reqs.find((r) => r.id === reqA.id)).toMatchObject({ applicants: { new: 1, assigned: 0 }, website: { published: false, closed: false } });
   });
 
   test('the same person cannot apply twice to one requirement; an open (not in-progress) requirement takes nobody', async () => {
@@ -100,11 +100,5 @@ describe('applicant pool', () => {
     expect(handed.status).toBe(200);
     expect(handed.body.data.assigned_to.id).toBe(r2.id);
     expect((await claim(r1Token, extra.body.data.id)).status).toBe(409);
-  });
-
-  test('publishing to the website is a stub that says it is not connected', async () => {
-    const res = await authed(request(app).post(`${api}/requirements/${reqA.id}/publish-website`), sToken).send({});
-    expect(res.status).toBe(501);
-    expect(res.body.message).toMatch(/not connected/i);
   });
 });

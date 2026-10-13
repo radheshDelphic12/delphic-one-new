@@ -97,6 +97,18 @@ import ZklyreraFinancialsPage from '../pages/zklyrera/ZklyreraFinancialsPage.jsx
 import ZklyreraPeoplePage from '../pages/zklyrera/ZklyreraPeoplePage.jsx';
 import ZklyreraSettingsPage from '../pages/zklyrera/ZklyreraSettingsPage.jsx';
 import { isZklyreraOrg } from '../lib/zklyrera/useZklyrera.js';
+import ValterraHomePage from '../pages/valterra/ValterraHomePage.jsx';
+import ValterraSitesPage from '../pages/valterra/ValterraSitesPage.jsx';
+import ValterraSiteDetailPage from '../pages/valterra/ValterraSiteDetailPage.jsx';
+import ValterraInvestmentsPage from '../pages/valterra/ValterraInvestmentsPage.jsx';
+import ValterraEntriesPage from '../pages/valterra/ValterraEntriesPage.jsx';
+import ValterraTransactionsPage from '../pages/valterra/ValterraTransactionsPage.jsx';
+import ValterraReportsPage from '../pages/valterra/ValterraReportsPage.jsx';
+import ValterraProjectionsPage from '../pages/valterra/ValterraProjectionsPage.jsx';
+import ValterraFinancialsPage from '../pages/valterra/ValterraFinancialsPage.jsx';
+import ValterraPeoplePage from '../pages/valterra/ValterraPeoplePage.jsx';
+import ValterraSettingsPage from '../pages/valterra/ValterraSettingsPage.jsx';
+import { isValterraOrg } from '../lib/valterra/useValterra.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
 import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
@@ -150,6 +162,8 @@ function HomePage() {
   if (isFoundationOrg(user)) return <Navigate to="/foundation" replace />;
   // Zklyrera Spirits is a standalone workspace with its own home.
   if (isZklyreraOrg(user)) return <Navigate to="/zklyrera" replace />;
+  // Valterra Resources is a standalone workspace with its own home.
+  if (isValterraOrg(user)) return <Navigate to="/valterra" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -226,6 +240,15 @@ function RequireAcconcy({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isAcconcyOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Valterra Resources workspace needs the `valterra` module on the ACTIVE company. */
+function RequireValterra({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isValterraOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -399,6 +422,20 @@ export default function App() {
         <Route path="zklyrera/people" element={<RequireZklyrera><ZklyreraPeoplePage /></RequireZklyrera>} />
         <Route path="zklyrera/settings" element={<RequireZklyrera><ZklyreraSettingsPage /></RequireZklyrera>} />
         <Route path="zklyrera/*" element={<Navigate to="/zklyrera" replace />} />
+        <Route path="valterra" element={<RequireValterra><ValterraHomePage /></RequireValterra>} />
+        <Route path="valterra/sites" element={<RequireValterra><ValterraSitesPage /></RequireValterra>} />
+        <Route path="valterra/sites/:id" element={<RequireValterra><ValterraSiteDetailPage /></RequireValterra>} />
+        <Route path="valterra/investments" element={<RequireValterra><ValterraInvestmentsPage /></RequireValterra>} />
+        <Route path="valterra/income" element={<RequireValterra><ValterraEntriesPage type="income" /></RequireValterra>} />
+        <Route path="valterra/expenses" element={<RequireValterra><ValterraEntriesPage type="expense" /></RequireValterra>} />
+        <Route path="valterra/salaries" element={<RequireValterra><ValterraEntriesPage type="salary" /></RequireValterra>} />
+        <Route path="valterra/transactions" element={<RequireValterra><ValterraTransactionsPage /></RequireValterra>} />
+        <Route path="valterra/reports" element={<RequireValterra><ValterraReportsPage /></RequireValterra>} />
+        <Route path="valterra/projections" element={<RequireValterra><ValterraProjectionsPage /></RequireValterra>} />
+        <Route path="valterra/financials" element={<RequireValterra><ValterraFinancialsPage /></RequireValterra>} />
+        <Route path="valterra/people" element={<RequireValterra><ValterraPeoplePage /></RequireValterra>} />
+        <Route path="valterra/settings" element={<RequireValterra><ValterraSettingsPage /></RequireValterra>} />
+        <Route path="valterra/*" element={<Navigate to="/valterra" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route

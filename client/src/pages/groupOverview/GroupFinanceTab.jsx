@@ -16,6 +16,7 @@ import useTrendWindow from './trendWindow.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
+import ValterraGroupSection from './ValterraGroupSection.jsx';
 import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
 import { COMPANY_COLORS, CompanyCard, ContributionLines, Disclosure, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
@@ -156,7 +157,7 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
   if (!company) return <Drawer open={false} onClose={onClose} title="" />;
   const v = company.valuation;
   const isFx = company.org.kind === 'foundation';
-  const isZk = company.org.kind === 'zklyrera';
+  const isZk = company.org.kind === 'zklyrera' || company.org.kind === 'valterra';
   const isZx = company.org.kind === 'zephyr';
   const lastM = [...(company.months || [])].reverse().find((m) => m.property_count !== undefined);
   return (
@@ -508,11 +509,11 @@ export default function GroupFinanceTab() {
             ))}
           </div>
 
-          {(data.foundation || data.zklyrera) && (
+          {(data.foundation || data.zklyrera || data.valterra) && (
             <>
               <SectionTitle title="5. Company insights" hint="Open a company-specific view only when you need it" />
               <div className="flex flex-wrap gap-2" role="tablist" aria-label="Company insights">
-                {[data.foundation && ['foundation', 'Gulati Foundation', 'Campaigns, budgets and fund projections'], data.zklyrera && ['zklyrera', 'Zklyrera Spirits', 'Investments, returns and projections']].filter(Boolean).map(([key, label, hint]) => (
+                {[data.foundation && ['foundation', 'Gulati Foundation', 'Campaigns, budgets and fund projections'], data.zklyrera && ['zklyrera', 'Zklyrera Spirits', 'Investments, returns and projections'], data.valterra && ['valterra', 'Valterra Resources', 'Mining sites, investments, returns and projections']].filter(Boolean).map(([key, label, hint]) => (
                   <button key={key} type="button" role="tab" aria-selected={insight === key} onClick={() => setInsight((cur) => (cur === key ? '' : key))} className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition-all ${insight === key ? 'border-primary-300 bg-primary-50 shadow-card ring-1 ring-primary-200' : 'border-tertiary-100 bg-white hover:border-tertiary-200 hover:shadow-card'}`}>
                     <span className="min-w-0"><span className="block text-sm font-semibold text-tertiary-900">{label}</span><span className="block text-xs text-tertiary-500">{hint}</span></span>
                     <span className="text-xs font-semibold text-primary-700">{insight === key ? 'Hide' : 'View'}</span>
@@ -521,6 +522,7 @@ export default function GroupFinanceTab() {
               </div>
               {insight === 'foundation' && <FoundationGroupSection foundation={data.foundation} />}
               {insight === 'zklyrera' && <ZklyreraGroupSection zklyrera={data.zklyrera} />}
+              {insight === 'valterra' && <ValterraGroupSection valterra={data.valterra} />}
             </>
           )}
         </div>

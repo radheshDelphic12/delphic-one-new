@@ -8,6 +8,7 @@ const BRAND_LOGOS = {
   acconcy: '/acconcy-logo.png',
   foundation: '/foundation-mark.svg',
   zklyrera: '/zklyrera-mark.png',
+  valterra: '/valterra-mark.png',
 };
 
 export function orgLogo(org) {

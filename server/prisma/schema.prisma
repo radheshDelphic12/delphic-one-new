@@ -449,6 +449,7 @@ model User {
   ax_people                       AxPerson[]
   fx_people                       FxPerson[]
   zk_people                       ZkPerson[]
+  vt_people                       VtPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1965,6 +1966,16 @@ model Org {
   zk_entries ZkEntry[]
   zk_projections ZkProjection[]
   zk_period_closes ZkPeriodClose[]
+  vt_settings VtSetting[]
+  vt_categories VtCategory[]
+  vt_audit VtAudit[]
+  vt_people VtPerson[]
+  vt_sites VtSite[]
+  vt_investments VtInvestment[]
+  vt_returns VtReturn[]
+  vt_entries VtEntry[]
+  vt_projections VtProjection[]
+  vt_period_closes VtPeriodClose[]
   zx_parties    ZxParty[]
   zx_documents  ZxDocument[]
   zx_leads      ZxLead[]
@@ -5748,6 +5759,279 @@ model ZkPeriodClose {
 
   @@unique([org_id, month])
   @@map("zk_period_closes")
+}
+
+// ===================== Valterra Resources (Vt) =====================
+// Mining operations and finance. Same accounting as Zklyrera (capital placed, principal recovered and earnings are kept apart;
+// every actual figure is derived in modules/valterra/valterra.calc.js) plus MINING SITES: investments, income, expenses,
+// salaries and projections may carry a site; company-level records carry none and are never silently spread over sites.
+
+model VtSetting {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @unique @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency          String    @default("INR")
+  investment_prefix String    @default("VT")
+  investment_seq    Int       @default(0)
+  site_prefix       String    @default("VS")
+  site_seq          Int       @default(0)
+  // null = no opening balance entered; cash balances are then not shown (never invented).
+  opening_balance   Decimal?  @db.Decimal(16, 2)
+  opening_date      DateTime? @db.Date
+  fy_start_month    Int       @default(4)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  @@map("vt_settings")
+}
+
+model VtCategory {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String         @db.Uuid
+  org         Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  scope       String // investment | income | expense | mining_type | material
+  name        String
+  description String?
+  active      Boolean        @default(true)
+  sort_order  Int            @default(0)
+  created_by  String?        @db.Uuid
+  created_at  DateTime       @default(now())
+  updated_at  DateTime       @default(now()) @updatedAt
+  deleted_at  DateTime?
+  investments VtInvestment[]
+  entries     VtEntry[]
+  projections VtProjection[]
+  sites_by_type     VtSite[] @relation("VtSiteMiningType")
+  sites_by_material VtSite[] @relation("VtSiteMaterial")
+
+  @@unique([org_id, scope, name])
+  @@index([org_id, scope])
+  @@map("vt_categories")
+}
+
+model VtAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("vt_audit")
+}
+
+// One mining site. Never deleted: closing / archiving keeps every transaction and report. status: planned | active | inactive | closed.
+model VtSite {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String         @db.Uuid
+  org                   Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                  String
+  name                  String
+  location              String?
+  state                 String?
+  district              String?
+  country               String?
+  latitude              Decimal?       @db.Decimal(9, 6)
+  longitude             Decimal?       @db.Decimal(9, 6)
+  mining_type_id        String?        @db.Uuid
+  mining_type           VtCategory?    @relation("VtSiteMiningType", fields: [mining_type_id], references: [id])
+  material_id           String?        @db.Uuid
+  material              VtCategory?    @relation("VtSiteMaterial", fields: [material_id], references: [id])
+  additional_materials  String[]       @default([])
+  description           String?
+  status                String         @default("active")
+  start_date            DateTime?      @db.Date
+  expected_closure_date DateTime?      @db.Date
+  manager_name          String?
+  notes                 String?
+  archived_at           DateTime?
+  created_by            String?        @db.Uuid
+  updated_by            String?        @db.Uuid
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @default(now()) @updatedAt
+  investments           VtInvestment[]
+  entries               VtEntry[]
+  projections           VtProjection[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@map("vt_sites")
+}
+
+model VtPerson {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name         String
+  user_id      String?   @db.Uuid
+  user         User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role  String    @default("none") // none | manager | finance | staff
+  active       Boolean   @default(true)
+  kind         String    @default("employee") // employee | contractor
+  designation  String?
+  phone        String?
+  email        String?
+  joining_date DateTime? @db.Date
+  leaving_date DateTime? @db.Date
+  notes        String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+  entries      VtEntry[]
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("vt_people")
+}
+
+// One investment (capital put in). status stored: planned | active | cancelled. partially_returned / completed / overdue
+// are derived from the returns and the expected date. A planned investment is not yet counted as invested.
+model VtInvestment {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String         @db.Uuid
+  org                    Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                   String?
+  name                   String
+  category_id            String?        @db.Uuid
+  category               VtCategory?    @relation(fields: [category_id], references: [id])
+  site_id        String?        @db.Uuid
+  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  investor               String?
+  investment_date        DateTime       @db.Date
+  amount                 Decimal        @db.Decimal(16, 2)
+  expected_return_amount Decimal?       @db.Decimal(16, 2)
+  expected_return_date   DateTime?      @db.Date
+  expected_return_rate   Decimal?       @db.Decimal(7, 3)
+  status                 String         @default("active")
+  reference              String?
+  notes                  String?
+  created_by             String?        @db.Uuid
+  updated_by             String?        @db.Uuid
+  created_at             DateTime       @default(now())
+  updated_at             DateTime       @default(now()) @updatedAt
+  deleted_at             DateTime?
+  returns                VtReturn[]
+  entries                VtEntry[]
+  projections            VtProjection[]
+
+  @@index([org_id, investment_date])
+  @@index([site_id])
+  @@index([org_id, status])
+  @@map("vt_investments")
+}
+
+// Money coming back from an investment: principal and earnings are two separate amounts (never guessed from one).
+model VtReturn {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String       @db.Uuid
+  org            Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  investment_id  String       @db.Uuid
+  investment     VtInvestment @relation(fields: [investment_id], references: [id], onDelete: Cascade)
+  return_date    DateTime     @db.Date
+  principal      Decimal      @default(0) @db.Decimal(16, 2)
+  earnings       Decimal      @default(0) @db.Decimal(16, 2)
+  status         String       @default("received") // received | reversed
+  payment_method String?
+  reference      String?
+  notes          String?
+  created_by     String?      @db.Uuid
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, return_date])
+  @@index([investment_id])
+  @@map("vt_returns")
+}
+
+// income | expense | salary | transfer. payment_status paid | unpaid | cancelled (unpaid income = receivable, unpaid expense = payable).
+model VtEntry {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String        @db.Uuid
+  org            Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind           String
+  category_id    String?       @db.Uuid
+  category       VtCategory?   @relation(fields: [category_id], references: [id])
+  site_id        String?        @db.Uuid
+  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  person_id      String?       @db.Uuid
+  person         VtPerson?     @relation(fields: [person_id], references: [id], onDelete: SetNull)
+  investment_id  String?       @db.Uuid
+  investment     VtInvestment? @relation(fields: [investment_id], references: [id], onDelete: SetNull)
+  entry_date     DateTime      @db.Date
+  due_date       DateTime?     @db.Date
+  amount         Decimal       @db.Decimal(16, 2)
+  expense_class  String? // operating | other (expense only)
+  payment_status String        @default("paid")
+  payment_method String?
+  party_name     String?
+  reference      String?
+  description    String?
+  created_by     String?       @db.Uuid
+  updated_by     String?       @db.Uuid
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, entry_date])
+  @@index([org_id, kind, payment_status])
+  @@index([site_id])
+  @@map("vt_entries")
+}
+
+// A plan, never a transaction. line: new_investment | principal_recovery | investment_earnings | other_income |
+// operating_expense | salary | other_expense.
+model VtProjection {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String        @db.Uuid
+  org           Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name          String
+  month         String
+  line          String
+  category_id   String?       @db.Uuid
+  category      VtCategory?   @relation(fields: [category_id], references: [id])
+  site_id        String?        @db.Uuid
+  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  investment_id String?       @db.Uuid
+  investment    VtInvestment? @relation(fields: [investment_id], references: [id], onDelete: SetNull)
+  amount        Decimal       @db.Decimal(16, 2)
+  status        String        @default("draft") // draft | approved | archived
+  notes         String?
+  created_by    String?       @db.Uuid
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@index([org_id, month])
+  @@index([site_id])
+  @@map("vt_projections")
+}
+
+model VtPeriodClose {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month         String
+  status        String    @default("open")
+  snapshot      Json?
+  closed_by     String?   @db.Uuid
+  closed_at     DateTime?
+  reopen_reason String?
+  reopened_at   DateTime?
+  stale         Boolean   @default(false)
+  stale_at      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("vt_period_closes")
 }
 
 // ─── Marketing website control (modules/website) ────────────────────────────

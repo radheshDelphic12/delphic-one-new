@@ -3,7 +3,7 @@ const prisma = require('../../config/db');
 const { pageArgs, pagination, userNames } = require('../../lib/vertical');
 const leadsService = require('../leads/leads.service');
 const profilesService = require('../profiles/profiles.service');
-const website = require('../../utils/websiteIntegration');
+const applicantsService = require('../applicants/applicants.service');
 const client = require('./appsScriptClient');
 
 // Website form submissions (contact / career / secure). Each form's sheet row
@@ -201,7 +201,7 @@ async function routeCareerApplications(externalIds) {
   for (const row of rows) {
     const requirementId = byTitle.get(field(row.payload, 'Role').toLowerCase());
     if (!requirementId) continue;
-    const result = await website.ingestWebsiteApplication(applicantPayload(row, requirementId));
+    const result = await applicantsService.addApplicant(null, applicantPayload(row, requirementId), { source: 'website' });
     if (result.error) continue;
     await finish(row, null, { status: 'converted', converted_applicant_id: result.applicant.id }, null, null, { mark: false });
     routed += 1;
@@ -217,7 +217,7 @@ async function toApplicant(orgId, userId, id, { requirement_id }) {
   if (!submission) return { error: 'not_found' };
   if (submission.form_type !== 'career') return { error: 'wrong_form' };
   if (submission.status !== 'new') return { error: 'already_handled' };
-  const result = await website.ingestWebsiteApplication(applicantPayload(submission, requirement_id));
+  const result = await applicantsService.addApplicant(null, applicantPayload(submission, requirement_id), { source: 'website' });
   if (result.error) return { error: APPLICANT_ERRORS[result.error] || result.error };
   const row = await finish(submission, userId, { status: 'converted', converted_applicant_id: result.applicant.id }, 'website_to_applicant', 'Sent website application to the applicant pool');
   return { submission: row, applicant: result.applicant };
