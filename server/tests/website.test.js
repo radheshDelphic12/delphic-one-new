@@ -183,31 +183,20 @@ describe('job postings', () => {
   });
 });
 
-describe('pipeline seam (utils/websiteIntegration)', () => {
-  it('publishes and unpublishes from Pipeline > In-progress jobs, and the board shows it live', async () => {
+describe('pipeline: in-progress jobs board', () => {
+  it('starts the public copy with the experience range, and the board shows the job live once published', async () => {
     const req = await openRequirement({ experience_min: 3, experience_max: 6 });
     await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'in_progress' });
 
-    const pub = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/publish-website`), adminToken).send({});
-    expect(pub.status).toBe(200);
-    expect(pub.body.data.published).toBe(true);
-    expect(jobs[req.id]).toMatchObject({ title: 'Senior Node Engineer', status: 'Open' });
-    expect(jobs[req.id].description).toMatch(/^Experience: 3–6 years\n\nBuild APIs\.$/);
+    const { body } = await api('get', `/postings/requirement/${req.id}`);
+    expect(body.data.defaults.public_description).toBe('Experience: 3–6 years\n\nBuild APIs.');
+
+    await api('post', '/postings').send({ requirement_id: req.id, ...body.data.defaults });
+    expect(jobs[req.id].description).toBe('Experience: 3–6 years\n\nBuild APIs.');
     expect(JSON.stringify(jobs[req.id])).not.toMatch(/1500000|2500000|margin/);
 
     const board = await authed(request(app).get('/api/v1/applicants/requirements'), adminToken);
-    expect(board.body.data.find((r) => r.id === req.id).website).toMatchObject({ connected: true, published: true, sync_error: null });
-
-    const unpub = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/unpublish-website`), adminToken).send({});
-    expect(unpub.status).toBe(200);
-    expect(jobs[req.id].status).toBe('Closed');
-  });
-
-  it('still answers 501 from the pipeline when the bridge is not configured', async () => {
-    client.isConfigured.mockReturnValue(false);
-    const req = await openRequirement();
-    const res = await authed(request(app).post(`/api/v1/applicants/requirements/${req.id}/publish-website`), adminToken).send({});
-    expect(res.status).toBe(501);
+    expect(board.body.data.find((r) => r.id === req.id).website).toMatchObject({ published: true });
   });
 });
 

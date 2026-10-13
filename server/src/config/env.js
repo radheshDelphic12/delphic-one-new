@@ -76,8 +76,6 @@ const env = {
   // PLATFORM_SECRET script property on every one of them. Any value unset →
   // the feature is off (routes answer 503, the sync job does nothing).
   website: {
-    // Public careers page, returned as the "url" of a published job (optional).
-    careersUrl: process.env.WEBSITE_CAREERS_URL || null,
     scriptSecret: process.env.WEBSITE_SCRIPT_SECRET || null,
     scripts: {
       jobs: process.env.WEBSITE_JOBS_SCRIPT_URL || null,
