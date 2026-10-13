@@ -1804,6 +1804,7 @@ model OrgGroup {
   group_billing_charges GroupBillingCharge[]
   group_tasks           GroupTask[]
   group_company_days    GroupCompanyDay[]
+  group_travel          GroupTravel[]
 
   @@map("org_groups")
 }
@@ -5439,6 +5440,60 @@ model GroupCompanyDay {
   @@unique([org_id, weekday])
   @@index([org_group_id])
   @@map("group_company_days")
+}
+
+// Group Dashboard > Travel: a trip by anyone in the group (IT or non-IT) with one total budget and the meetings it is for.
+// Meetings stay where they are (the Delphic Global calendar); a trip only links to them by calendar event id.
+model GroupTravel {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String   @db.Uuid
+  org_group    OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id       String?  @db.Uuid // the company the trip is for; null = the whole group
+  title        String
+  origin       String?
+  destination  String
+  start_date   DateTime @db.Date
+  end_date     DateTime @db.Date
+  purpose      String?
+  budget       Decimal  @default(0) @db.Decimal(14, 2)
+  actual_spent Decimal? @db.Decimal(14, 2)
+  currency     String   @default("INR")
+  status       String   @default("planned") // planned | completed | cancelled
+  notes        String?
+  created_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  travelers GroupTravelTraveler[]
+  meetings  GroupTravelMeeting[]
+
+  @@index([org_group_id, start_date])
+  @@map("group_travel")
+}
+
+model GroupTravelTraveler {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  travel_id String      @db.Uuid
+  travel    GroupTravel @relation(fields: [travel_id], references: [id], onDelete: Cascade)
+  user_id   String?     @db.Uuid
+  name      String
+  org_id    String?     @db.Uuid
+
+  @@index([travel_id])
+  @@map("group_travel_travelers")
+}
+
+model GroupTravelMeeting {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  travel_id   String      @db.Uuid
+  travel      GroupTravel @relation(fields: [travel_id], references: [id], onDelete: Cascade)
+  meeting_key String // calendar event id: "cm-<uuid>" (follow-up meeting) or "meeting-<uuid>" (an account's meeting)
+  created_at  DateTime    @default(now())
+
+  @@unique([travel_id, meeting_key])
+  @@index([meeting_key])
+  @@map("group_travel_meetings")
 }
 
 // ===================== Zklyrera Spirits (Zk) =====================

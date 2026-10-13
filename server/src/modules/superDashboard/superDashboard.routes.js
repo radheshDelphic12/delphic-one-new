@@ -8,6 +8,7 @@ const { computeSchema, rollupQuerySchema, financialsRollupQuerySchema } = requir
 const financialsService = require('../financials/financials.service');
 const groupFinance = require('./groupFinance.service');
 const groupTasks = require('./groupTasks.service');
+const groupTravel = require('./groupTravel.service');
 const { fail } = require('../../utils/response');
 
 // HLD §7: a single cross-org read API, org_id-agnostic by design, gated to
@@ -104,6 +105,29 @@ const taskResult = (res, r, key, status = 200) => {
   if (r.error) { const m = TASK_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
   return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
 };
+// --- Group travel: trips by anyone in the group, one total budget, linked to Delphic Global meetings ---
+const TRAVEL_ERRORS = {
+  not_found: [404, 'Trip not found'],
+  company_not_found: [422, 'That company is not in this group'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  bad_date: [422, 'Enter a valid date and time'],
+  bad_meeting: [422, 'Not a valid calendar meeting'],
+  meeting_not_found: [404, 'That meeting no longer exists'],
+  client_not_found: [422, 'Pick an active Delphic Global client'],
+};
+const travelResult = (res, r, key, status = 200) => {
+  if (r.error) { const m = TRAVEL_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+router.get('/group/travel', asyncHandler(async (req, res) => ok(res, await groupTravel.list(req.user.org_group_ids, req.query))));
+router.get('/group/travel/options', asyncHandler(async (req, res) => ok(res, await groupTravel.options(req.user.org_group_ids))));
+router.post('/group/travel', asyncHandler(async (req, res) => travelResult(res, await groupTravel.create(req.user.org_group_ids, req.user.id, req.body), 'trip', 201)));
+router.patch('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.update(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip')));
+router.delete('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.remove(req.user.org_group_ids, req.user.id, req.params.id))));
+router.post('/group/travel/:id/meetings', asyncHandler(async (req, res) => travelResult(res, await groupTravel.linkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body?.meeting_key), 'trip', 201)));
+router.post('/group/travel/:id/meetings/new', asyncHandler(async (req, res) => travelResult(res, await groupTravel.createMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip', 201)));
+router.delete('/group/travel/:id/meetings/:key', asyncHandler(async (req, res) => travelResult(res, await groupTravel.unlinkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.params.key), 'trip')));
+
 router.get('/group/tasks', asyncHandler(async (req, res) => ok(res, await groupTasks.listMonth(req.user.org_group_ids, req.query))));
 router.get('/group/tasks/upcoming', asyncHandler(async (req, res) => ok(res, await groupTasks.upcoming(req.user.org_group_ids, req.query))));
 router.post('/group/tasks', asyncHandler(async (req, res) => taskResult(res, await groupTasks.create(req.user.org_group_ids, req.user.id, req.body), 'task', 201)));

@@ -258,7 +258,9 @@ async function listForCalendar(user, opts = {}) {
   // the user has narrowed the calendar to internal interviews only.
   if (audience !== 'internal') {
     const meetings = await listClientMeetings({ from, to, mine, user, status: opts.status });
-    events = events.concat(meetings);
+    // A meeting that belongs to a Group Dashboard travel plan carries a Travel tag.
+    const tags = await require('../superDashboard/groupTravel.service').tagsFor(meetings.map((m) => m.id));
+    events = events.concat(meetings.map((m) => (tags.has(m.id) ? { ...m, travel: tags.get(m.id) } : m)));
   }
 
   if (sort === 'audience') {
@@ -359,6 +361,7 @@ module.exports = {
   submitFeedback,
   cancelRound,
   serializeCalendarEvent,
+  listClientMeetings,
   INTERNAL_AUDIENCE_TYPES,
   EXTERNAL_AUDIENCE_TYPES,
 };
