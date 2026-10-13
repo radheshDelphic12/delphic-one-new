@@ -2050,6 +2050,10 @@ model Org {
   finance_categories     FinanceCategory[]
   financial_calculations FinancialCalculation[]
 
+  // Marketing website control (Apps Script bridge, see modules/website).
+  website_job_postings WebsiteJobPosting[]
+  website_submissions  WebsiteSubmission[]
+
   @@index([org_group_id])
   @@map("orgs")
 }
@@ -2454,6 +2458,7 @@ model Requirement {
   timesheet_entries      TimesheetEntry[]        @relation("TimesheetRequirement")
   billing_rates          BillingRate[]           @relation("BillingRateRequirement")
   daily_project_revenues DailyProjectRevenue[]   @relation("DailyRevenueRequirement")
+  website_posting        WebsiteJobPosting?
 
   @@index([account_id])
   @@index([status, priority])
@@ -5655,4 +5660,61 @@ model ZkPeriodClose {
 
   @@unique([org_id, month])
   @@map("zk_period_closes")
+}
+
+// ─── Marketing website control (modules/website) ────────────────────────────
+// The website (delphic.*) has no backend: its forms and its /career job list
+// live in Google Sheets behind Apps Script web apps. These tables are the
+// platform's side of that bridge.
+
+// A recruitment Requirement published to the website's /career page. Holds
+// only the public copy of the job; budget / billing never leave Requirement.
+model WebsiteJobPosting {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String      @db.Uuid
+  org                Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  requirement_id     String      @unique @db.Uuid
+  requirement        Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  title              String
+  department         String?
+  location           String?
+  employment_type    String?
+  public_description String?
+  status             String      @default("published") // published | closed
+  last_synced_at     DateTime?
+  sync_error         String?
+  created_by         String      @db.Uuid
+  updated_by         String?     @db.Uuid
+  created_at         DateTime    @default(now())
+  updated_at         DateTime    @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@map("website_job_postings")
+}
+
+// One row from a website form sheet (contact / career / secure), pulled in by
+// the sync job. external_id is the sheet's "Submission ID".
+model WebsiteSubmission {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id               String    @db.Uuid
+  org                  Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  form_type            String // contact | career | secure
+  external_id          String    @unique
+  sheet_row            Int?
+  payload              Json
+  name                 String?
+  email                String?
+  submitted_at         DateTime?
+  status               String    @default("new") // new | converted | dismissed
+  converted_lead_id    String?   @db.Uuid
+  converted_profile_id String?   @db.Uuid
+  handled_by           String?   @db.Uuid
+  handled_at           DateTime?
+  sheet_status_synced  Boolean   @default(false)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  @@index([org_id, form_type, status])
+  @@index([submitted_at])
+  @@map("website_submissions")
 }

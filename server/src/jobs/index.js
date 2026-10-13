@@ -5,6 +5,7 @@ const payrollDraft = require('./payrollDraft');
 const emailOutbox = require('./emailOutbox');
 const timesheetWeeklyLock = require('./timesheetWeeklyLock');
 const autoAttendance = require('./autoAttendance');
+const websiteSync = require('./websiteSync');
 
 /**
  * Start in-process background jobs. Called once from src/index.js after app.listen,
@@ -21,7 +22,8 @@ function startJobs() {
   tasks.push(emailOutbox.schedule());
   tasks.push(timesheetWeeklyLock.schedule());
   tasks.push(autoAttendance.schedule());
-  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance'] });
+  tasks.push(websiteSync.schedule());
+  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance', 'websiteSync'] });
   return tasks;
 }
 

@@ -1,6 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
 const service = require('./requirements.service');
+const websitePostings = require('../website/postings.service');
 const {
   createSchema,
   updateSchema,
@@ -79,6 +80,7 @@ const changeStatus = asyncHandler(async (req, res) => {
   const body = statusSchema.parse(req.body);
   const result = await service.changeStatus(req.params.id, body, req.user);
   if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
   return ok(res, result.requirement);
 });
 
@@ -86,6 +88,7 @@ const changeStatusOverride = asyncHandler(async (req, res) => {
   const body = statusOverrideSchema.parse(req.body);
   const result = await service.changeStatusOverride(req.params.id, body, req.user);
   if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
   return ok(res, result.requirement);
 });
 
@@ -125,6 +128,7 @@ const remove = asyncHandler(async (req, res) => {
   if (reason.length < 3) return fail(res, 400, 'Give the reason for deleting this requirement');
   const result = await service.remove(req.params.id, reason, req.user);
   if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
   return ok(res, { id: req.params.id });
 });
 
@@ -157,6 +161,8 @@ const changeSeatStatus = asyncHandler(async (req, res) => {
   const body = seatStageSchema.parse(req.body);
   const result = await service.changeSeatStatus(req.params.id, body, req.user.id);
   if (result.error) return mapError(res, result.error);
+  // Closing the last seat auto-closes the requirement.
+  await websitePostings.followRequirement(result.seat.requirement_id, { background: true });
   return ok(res, result.seat);
 });
 
