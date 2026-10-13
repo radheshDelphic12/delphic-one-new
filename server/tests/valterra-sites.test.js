@@ -165,7 +165,7 @@ describe('site-wise accounting, filters and reports', () => {
     expect(qr.net_result + gr.net_result + co.net_result).toBe(all.period.net_result);
     expect(all.sites.totals.net_result).toBe(all.period.net_result);
     expect(all.sites.ranking.best[0].site_id).toBe(q.id);
-    expect(all.sites.trend.keys.map((k) => k.id).sort()).toEqual([g.id, q.id].sort());
+    expect(all.sites.trend.keys.map((k) => k.id).sort()).toEqual([g.id, q.id, 'none'].sort()); // the company-level line keeps the graph equal to the company total
 
     // filters change every figure together
     const bySite = (await a.get(`/dashboard${qs({ ...range, site_id: q.id })}`)).body.data;

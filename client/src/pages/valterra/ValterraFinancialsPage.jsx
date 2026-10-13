@@ -11,6 +11,7 @@ import { compact, shortMonth } from '../../lib/format.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { VT_COLORS } from '../../lib/valterra/meta.js';
+import { Kpi } from '../../components/valterra/ui.jsx';
 
 const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
 const rupees = (n) => `${Number(n) < 0 ? '-' : ''}₹${Math.abs(Number(n || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -60,6 +61,7 @@ export default function ValterraFinancialsPage() {
   const rangeError = !from || !to ? 'Pick a start and an end month.' : monthIndex(to) < monthIndex(from) ? 'The end month cannot be before the start month.' : monthIndex(to) - monthIndex(from) >= 36 ? 'Pick at most 36 months.' : null;
   const { data, loading: busyData, refresh } = useLiveData(() => (rangeError ? Promise.resolve(null) : vtApi.valuation({ from, to, state })), { enabled: Boolean(me), deps: [from, to, state, rangeError] });
   const rows = useMemo(() => data?.months.map((m) => ({ ...m, label: shortMonth(m.month) })) || [], [data]);
+  const latest = rows.length ? rows[rows.length - 1] : null;
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (me && !vtCan(me, 'financials')) return <Navigate to="/valterra" replace />;
   const canClose = vtCan(me, 'closeMonth');
@@ -104,18 +106,30 @@ export default function ValterraFinancialsPage() {
       {busyData && data && <p role="status" className="text-xs font-medium text-primary-700">Updating for the new filter…</p>}
       {rangeError ? null : busyData && !data ? <p className="text-sm text-tertiary-500">Loading…</p> : (
         <div aria-busy={busyData} className={`grid gap-4 transition-opacity xl:grid-cols-2 ${busyData && data ? 'opacity-50' : ''}`}>
+          {latest && (
+            <section className="xl:col-span-2" aria-label="Valuation">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <Kpi label={`Valuation - ${latest.label}`} value={rupee(latest.valuation)} tone={latest.valuation < 0 ? 'text-red-600' : undefined} hint={VIEW_NAME[state]} />
+                <Kpi label="Profit component" value={rupee(latest.profit_x)} tone={latest.profit_x < 0 ? 'text-red-600' : undefined} hint={`${rupee(latest.profit)} profit in ${latest.label} x 240`} />
+                <Kpi label="Asset component" value={rupee(latest.asset_value_x)} hint={`${rupee(latest.asset_value)} principal still invested x 3`} />
+                <Kpi label="Principal still invested" value={rupee(latest.asset_value)} hint="Capital placed less principal recovered, at month end" />
+              </div>
+              <p className="mt-2 text-xs text-tertiary-500">Valuation uses the same group formula as the other companies: profit of the month x 240 + principal still invested x 3. Capital placed and principal recovered are never profit; internal transfers are ignored. In the Locked view only closed months count, using the frozen figures.</p>
+            </section>
+          )}
+          <Trend className="xl:col-span-2" title="Valuation - month on month" subtitle={`${VIEW_NAME[state]}: profit x 240 + principal still invested x 3`} data={rows} dataKey="valuation" name="Valuation" color={VT_COLORS.brass} />
           <Trend title="Income - month on month" subtitle={`${VIEW_NAME[state]} investment earnings and other income`} data={rows} dataKey="income" name="Income" color={VT_COLORS.sage} />
           <Trend title="Expenses - month on month" subtitle={`${VIEW_NAME[state]} expenses and salaries`} data={rows} dataKey="expenses" name="Expenses" color={VT_COLORS.wine} />
           <Trend className="xl:col-span-2" title="Principal still invested - month on month" subtitle="Capital placed minus principal recovered, at each month end" data={rows} dataKey="asset_value" name="Principal still invested" color={VT_COLORS.ink} />
         </div>
       )}
       {rows.length > 0 && (
-        <section className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white" aria-label="Income and expenses by month">
-          <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">Income and expenses by month</h3>
+        <section className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white" aria-label="Income, expenses and valuation by month">
+          <h3 className="px-4 pt-3 font-heading text-sm font-semibold text-tertiary-900">Income, expenses and valuation by month</h3>
           <table className="mt-2 w-full text-sm">
             <thead className="text-left text-xs text-tertiary-500"><tr>
               <th className="px-4 py-2 font-medium">Month</th><th className="px-3 py-2 text-right font-medium">Income</th><th className="px-3 py-2 text-right font-medium">Expenses</th>
-              <th className="px-3 py-2 text-right font-medium">Net result</th><th className="px-3 py-2 text-right font-medium">Capital placed</th><th className="px-3 py-2 text-right font-medium">Principal returned</th><th className="px-3 py-2 text-right font-medium">Still invested</th>{canClose && <th className="px-3 py-2 text-right font-medium">Lock</th>}
+              <th className="px-3 py-2 text-right font-medium">Net result</th><th className="px-3 py-2 text-right font-medium">Capital placed</th><th className="px-3 py-2 text-right font-medium">Principal returned</th><th className="px-3 py-2 text-right font-medium">Still invested</th><th className="px-3 py-2 text-right font-medium">Profit x 240</th><th className="px-3 py-2 text-right font-medium">Still invested x 3</th><th className="px-3 py-2 text-right font-medium">Valuation</th>{canClose && <th className="px-3 py-2 text-right font-medium">Lock</th>}
             </tr></thead>
             <tbody>
               {rows.map((r) => (
@@ -127,6 +141,9 @@ export default function ValterraFinancialsPage() {
                   <td className="px-3 py-2 text-right tabular-nums">{rupees(r.investment_added)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{rupees(r.principal_returned)}</td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary-700">{rupees(r.asset_value)}</td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${r.profit_x < 0 ? 'text-red-600' : ''}`}>{rupees(r.profit_x)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{rupees(r.asset_value_x)}</td>
+                  <td className={`px-3 py-2 text-right font-semibold tabular-nums ${r.valuation < 0 ? 'text-red-600' : ''}`}>{rupees(r.valuation)}</td>
                   {canClose && (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {r.closed ? <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" disabled={busy === r.month} onClick={() => toggleLock(r)}><LockOpen className="h-3.5 w-3.5" />Reopen</button>

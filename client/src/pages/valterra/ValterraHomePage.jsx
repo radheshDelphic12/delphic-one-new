@@ -17,6 +17,15 @@ import { Delta, Empty, Kpi, Money, card } from '../../components/valterra/ui.jsx
 
 const KPI_HINT = (text, change, inverse) => (<><span className="block">{text}</span>{change && <Delta pct={change.pct} inverse={inverse} />}</>);
 
+function KpiGroup({ title, children }) {
+  return (
+    <section aria-label={title}>
+      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-tertiary-500">{title}</h3>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">{children}</div>
+    </section>
+  );
+}
+
 function PeriodTable({ title, s }) {
   const rows = [['Investment added', s.investment_added], ['Principal returned', s.principal_returned], ['Investment earnings', s.investment_earnings], ['Mining revenue / other income', s.other_income], ['Expenses', s.expenses], ['Net result', s.net_result]];
   return (
@@ -71,23 +80,33 @@ export default function ValterraHomePage() {
 
       {!p ? <div className="py-8 text-center text-sm text-tertiary-500">{busy ? 'Loading...' : 'No data.'}</div> : (
         <div className={`space-y-4 transition-opacity ${busy ? 'opacity-60' : ''}`}>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          <KpiGroup title="Capital">
             <Kpi label="Total investment added" value={<Money v={p.investment_added} />} hint={KPI_HINT(`${p.investment_count} placed · ${inr(data.cumulative.investment_added)} all time`, ch.investment_added)} />
-            <Kpi label="Principal returned" value={<Money v={p.principal_returned} />} hint={KPI_HINT('Original capital back - not income', ch.principal_returned)} />
-            <Kpi label="Investment earnings" value={<Money v={p.investment_earnings} />} hint={KPI_HINT('Profit on top of the principal', ch.investment_earnings)} tone="text-emerald-700" />
+            <Kpi label="Principal recovered" value={<Money v={p.principal_returned} />} hint={KPI_HINT(`${inr(data.cumulative.principal_returned)} all time · not income`, ch.principal_returned)} />
+            <Kpi label="Principal still invested" value={<Money v={data.position.outstanding_principal} />} hint={`Expected returns still to come ${inr(data.position.expected_returns_outstanding)}`} />
+            <Kpi label="Active mining sites" value={data.sites ? data.sites.active : 0} hint={`${data.sites?.total ?? 0} site${data.sites?.total === 1 ? '' : 's'} in view`} />
+          </KpiGroup>
+          <KpiGroup title="Income">
             <Kpi label="Mining revenue / other income" value={<Money v={p.other_income} />} hint={KPI_HINT('Sales and business income - not investment earnings', ch.other_income)} />
-            <Kpi label="Business expenses" value={<Money v={p.expenses_ex_salary} />} hint={KPI_HINT(`Operating ${inr(p.operating_expenses)} · other ${inr(p.other_expenses)}`, null)} />
-            <Kpi label="Salaries" value={p.salaries === null ? <span className="text-tertiary-400">Restricted</span> : <Money v={p.salaries} />} hint={p.salaries === null ? 'Payroll is visible to finance and admin' : `${inr(p.salaries_paid)} paid`} />
-            <Kpi label="Total cash outflows" value={<Money v={p.cash_out} />} hint={KPI_HINT(`Capital ${inr(p.cash_outflow_parts.capital_invested)} + paid expenses ${inr(p.cash_outflow_parts.expenses_paid)}${p.cash_outflow_parts.salaries_paid === null ? '' : ` + salaries ${inr(p.cash_outflow_parts.salaries_paid)}`}`, ch.cash_out, true)} />
-            <Kpi label="Net income / result" value={<Money v={p.net_result} signed />} hint={KPI_HINT('Income less expenses; capital and principal excluded', ch.net_result)} tone={p.net_result < 0 ? 'text-red-600' : 'text-tertiary-900'} />
+            <Kpi label="Investment earnings" value={<Money v={p.investment_earnings} />} hint={KPI_HINT('Profit on top of the principal', ch.investment_earnings)} tone="text-emerald-700" />
+            <Kpi label="Recognised income" value={<Money v={p.income} />} hint={KPI_HINT('Mining revenue + other income + earnings; capital and principal excluded', ch.income)} tone="text-emerald-700" />
+          </KpiGroup>
+          <KpiGroup title="Costs">
+            <Kpi label="Site operating expenses" value={<Money v={p.operating_expenses} />} hint="Operations, fuel, rent, repairs and other running costs" />
+            <Kpi label="Other expenses" value={<Money v={p.other_expenses} />} hint="One-off and non-operating costs" />
+            <Kpi label="Salaries" value={p.salaries === null ? <span className="text-tertiary-400">Restricted</span> : <Money v={p.salaries} />} hint={p.salaries === null ? 'Payroll is visible to finance and admin' : `${inr(p.salaries_paid)} paid · counted once`} />
+            <Kpi label="Recognised expenses" value={<Money v={p.expenses} />} hint={KPI_HINT('Operating + other + salaries', ch.expenses, true)} />
+          </KpiGroup>
+          <KpiGroup title="Result and outlook">
+            <Kpi label="Net profit / loss" value={<Money v={p.net_result} signed />} hint={KPI_HINT('Recognised income less recognised expenses', ch.net_result)} tone={p.net_result < 0 ? 'text-red-600' : 'text-emerald-700'} />
             <Kpi label="Outstanding receivables" value={<Money v={data.position.receivables} />} hint={`${data.position.overdue_receivables} overdue · money owed to the company`} />
             <Kpi label="Outstanding payables" value={<Money v={data.position.payables} />} hint={`${data.position.overdue_payables} overdue · money the company owes`} />
-          </div>
-          <div className="grid gap-3 text-xs text-tertiary-600 md:grid-cols-4">
-            <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Principal still invested<div className="mt-0.5 text-sm font-semibold text-tertiary-900"><Money v={data.position.outstanding_principal} /></div></div>
-            <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Expected returns still to come<div className="mt-0.5 text-sm font-semibold text-tertiary-900"><Money v={data.position.expected_returns_outstanding} /></div></div>
+            <Kpi label="Projected future returns" value={<Money v={data.projected_future.returns} />} hint={`Principal ${inr(data.projected_future.principal_recovery)} + earnings ${inr(data.projected_future.earnings)} from ${data.projected_future.from} on - a plan, not received`} />
+          </KpiGroup>
+          <div className="grid gap-3 text-xs text-tertiary-600 md:grid-cols-3">
             <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Cash in (principal + earnings + paid income)<div className="mt-0.5 text-sm font-semibold text-tertiary-900"><Money v={p.cash_in} /></div></div>
-            <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Cash balance<div className="mt-0.5 text-sm font-semibold text-tertiary-900">{data.cash_balance === null ? <span className="font-normal text-tertiary-400">Set an opening balance in setup</span> : <Money v={data.cash_balance} signed />}</div></div>
+            <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Cash out (capital placed + paid expenses + paid salaries)<div className="mt-0.5 text-sm font-semibold text-tertiary-900"><Money v={p.cash_out} /></div></div>
+            <div className="rounded-xl border bg-tertiary-50/50 px-3 py-2">Cash balance (company)<div className="mt-0.5 text-sm font-semibold text-tertiary-900">{data.cash_balance_company_only ? <span className="font-normal text-tertiary-400">Company-wide figure - clear the site filters to see it</span> : data.cash_balance === null ? <span className="font-normal text-tertiary-400">Set an opening balance in setup</span> : <Money v={data.cash_balance} signed />}</div></div>
           </div>
 
           <SitesOverview sites={data.sites} canOpen={vtCan(me, 'sites')} />

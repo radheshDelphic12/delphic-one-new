@@ -176,15 +176,22 @@ async function dashboard(orgId, rawFilter = {}, ctx = {}) {
     return { id: i.id, code: i.code, name: i.name, category: i.category?.name || null, investment_date: dayOf(i.investment_date), amount: v.amount, status: v.status, principal_returned: v.principal_returned, earnings: v.earnings, outstanding_principal: v.outstanding_principal, expected_return_amount: v.expected_return_amount, expected_return_date: v.expected_return_date, received: v.received, return_variance: v.return_variance, overdue: v.overdue };
   });
   const position = calc.position({ ...data, to, today, payroll });
+  const futureRows = await loadProjections(orgId, { month: { gte: m } }, f, data.sites);
+  const fut = calc.projectedTotals(futureRows);
+  const projectedFuture = {
+    from: m, months: new Set(futureRows.map((r) => r.month)).size,
+    returns: round2(fut.principal_recovery + fut.investment_earnings), principal_recovery: fut.principal_recovery, earnings: fut.investment_earnings,
+    revenue: fut.other_income, new_investment: fut.new_investment,
+  };
   const siteView = siteSection(data, { from, to, today, payroll, f, trendFrom, trendTo });
 
   return {
-    sites: siteView,
+    sites: siteView, projected_future: projectedFuture,
     currency: settings.currency, filters: { ...f, from, to }, generated_for: m,
     period: current, previous, change, previous_range: { from: prevFrom, to: prevTo },
     current_month: sum(monthFrom, monthEnd(monthOf(to))), previous_month: sum(`${prevMonth}-01`, monthEnd(prevMonth)),
     year_to_date: sum(ytdFrom, to), cumulative: sum(undefined, to), ytd_from: ytdFrom,
-    position, cash_balance: await cashBalance(scope(await loadData(orgId), {}, today), settings, to),
+    position, cash_balance: siteFiltered(f) ? null : await cashBalance(scope(await loadData(orgId), {}, today), settings, to), cash_balance_company_only: siteFiltered(f),
     trend, projected_by_month: projectedByMonth, comparison, projected_totals: calc.projectedTotals(projRows),
     expenses_by_category: byCategory(periodEntries, 'expense'), income_by_category: byCategory(periodEntries, 'income'),
     salary_by_person: payroll ? salaryByPerson(periodEntries) : null,
@@ -205,19 +212,26 @@ function siteSection(data, { from, to, today, payroll, f, trendFrom, trendTo }) 
   const rows = breakdown.rows.filter((r) => r.site_id || (hasCompany && (r.invested_total || r.income || r.expenses || r.outstanding_principal || r.receivables || r.payables)));
   const shown = rows.filter((r) => r.site_id);
   const months = monthsBetween(trendFrom, trendTo);
-  const top = [...shown].sort((a, b) => (b.invested_total + b.income + b.expenses) - (a.invested_total + a.income + a.expenses)).slice(0, 8);
+  const MAX_LINES = 8;
+  const ranked = [...shown].sort((a, b) => (b.invested_total + b.income + b.expenses) - (a.invested_total + a.income + a.expenses));
+  const named = ranked.length > MAX_LINES ? ranked.slice(0, MAX_LINES - 1) : ranked;
+  const restIds = new Set(ranked.slice(named.length).map((r) => r.site_id));
+  // Every record lands in exactly one line, so the lines of a month add up to the company figure for that month.
+  const lines = named.map((t) => ({ id: t.site_id, code: t.code, name: t.name, has: (siteId) => siteId === t.site_id }));
+  if (restIds.size) lines.push({ id: 'other', code: null, name: `Other sites (${restIds.size})`, has: (siteId) => restIds.has(siteId) });
+  if (rows.some((r) => !r.site_id)) lines.push({ id: 'none', code: null, name: 'Company level', has: (siteId) => !siteId });
   const series = (pick) => months.map((mo) => {
     const row = { month: mo };
-    for (const t of top) {
-      const g = { investments: data.investments.filter((i) => i.site_id === t.site_id), entries: data.entries.filter((e) => e.site_id === t.site_id) };
-      row[t.site_id] = round2(pick(calc.summarize({ ...g, from: `${mo}-01`, to: monthEnd(mo), payroll })));
+    for (const t of lines) {
+      const g = { investments: data.investments.filter((i) => t.has(i.site_id)), entries: data.entries.filter((e) => t.has(e.site_id)) };
+      row[t.id] = round2(pick(calc.summarize({ ...g, from: `${mo}-01`, to: monthEnd(mo), payroll })));
     }
     return row;
   });
   return {
     total: listed.length, active: listed.filter((s) => s.status === 'active').length,
     rows, totals: breakdown.totals, ranking: calc.ranking(rows),
-    trend: { keys: top.map((t) => ({ id: t.site_id, code: t.code, name: t.name })), investment: series((s) => s.investment_added), revenue: series((s) => s.income), expenses: series((s) => s.expenses), net: series((s) => s.net_result) },
+    trend: { keys: lines.map((t) => ({ id: t.id, code: t.code, name: t.name })), investment: series((s) => s.investment_added), revenue: series((s) => s.income), expenses: series((s) => s.expenses), net: series((s) => s.net_result) },
   };
 }
 

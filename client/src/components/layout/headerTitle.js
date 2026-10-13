@@ -85,7 +85,7 @@ const VALTERRA_TITLES = {
   '/valterra/reports': ['Monthly Reports', 'The monthly financial report, site-wise results and every other report, with export.'],
   '/valterra/projections': ['Projections', 'Plan future months by site and compare them with the actuals.'],
   '/valterra/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
-  '/valterra/financials': ['Financials', 'Income, expenses and capital by month, with month close.'],
+  '/valterra/financials': ['Financials', 'Valuation, income, expenses and capital by month, with month close.'],
   '/valterra/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
   '/valterra/settings': ['Valterra setup', 'Opening balance, financial year, categories, mining types and the audit log.'],
 };

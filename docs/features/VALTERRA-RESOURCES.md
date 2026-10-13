@@ -24,6 +24,13 @@ Per site and period (same `summarize` / `position` rules): capital invested (per
 
 `kindOf` gives `valterra`; the company's monthly figures use the same feed as Zklyrera (income = earnings + revenue, expenses incl. salaries, assets = principal still invested). The Group Finance and Projections tabs show a "Valterra Resources - mining sites, capital, returns and projections" block (KPIs, site table with drill-down to each site, projected income/expenses, overdue investments). Drill-down sections: months, sites, investments. Asset value is managed in the company (not typed on the group page). The Travel module's "Delphic Global" detection now also excludes the `valterra` marker.
 
+## Valuation and number checks
+
+- Valuation = profit of the month x 240 + principal still invested x 3 (the group formula). Financials shows the headline valuation, its two components, a month-on-month valuation line and a Profit x 240 / Still invested x 3 / Valuation column for every month; the Locked / Unlocked / All views and month close behave as for the other companies. The Group Dashboard shows the same figure (company valuation of the last month in view = group valuation).
+- Overview KPIs follow the spec in four groups: Capital (investment added, principal recovered, principal still invested, active sites), Income (mining revenue, investment earnings, recognised income), Costs (site operating, other, salaries, recognised expenses) and Result (net profit / loss, receivables, payables, projected future returns). Projected future returns = planned principal recovery + planned investment earnings from this month on (a plan, never an actual; archived plans excluded).
+- The per-site graphs have one line per site, plus "Other sites" (when there are more than eight) and "Company level", so the lines of every month add up to the company figure. The company cash balance is not shown while a site / type / material filter is on (it is a company-wide figure).
+- Verified two ways:  (plain arithmetic for valuation, graphs, filters, cash balance and projected returns) and an independent recomputation straight from the database against the API for every month, every site and the group valuation (all matched).
+
 ## Theme
 
 `.theme-valterra` (maroon `#6B2A2A` from the excavator logo, gold `#C99A2E` accent from the ground line, warm sand surfaces). Logo `client/public/valterra-logo.png`, sidebar/switcher mark `valterra-mark.png`. Charts are line charts only.
