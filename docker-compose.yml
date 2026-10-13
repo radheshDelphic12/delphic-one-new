@@ -45,6 +45,13 @@ services:
       UPLOAD_DIR: /app/server/uploads
       MAX_UPLOAD_MB: 10
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Website control (modules/website) - unset keeps the feature off.
+      WEBSITE_SCRIPT_SECRET: ${WEBSITE_SCRIPT_SECRET:-}
+      WEBSITE_JOBS_SCRIPT_URL: ${WEBSITE_JOBS_SCRIPT_URL:-}
+      WEBSITE_CONTACT_SCRIPT_URL: ${WEBSITE_CONTACT_SCRIPT_URL:-}
+      WEBSITE_CAREER_SCRIPT_URL: ${WEBSITE_CAREER_SCRIPT_URL:-}
+      WEBSITE_SECURE_SCRIPT_URL: ${WEBSITE_SECURE_SCRIPT_URL:-}
+      WEBSITE_CAREERS_URL: ${WEBSITE_CAREERS_URL:-}
     volumes:
       - uploads:/app/server/uploads
     ports:
