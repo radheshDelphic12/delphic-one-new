@@ -27,6 +27,8 @@ import { foundationNavFor } from '../../lib/foundation/sections.js';
 import { isFoundationOrg, useFoundation, fxCan } from '../../lib/foundation/useFoundation.js';
 import { zklyreraNavFor } from '../../lib/zklyrera/sections.js';
 import { isZklyreraOrg, useZklyrera, zkCan } from '../../lib/zklyrera/useZklyrera.js';
+import { valterraNavFor } from '../../lib/valterra/sections.js';
+import { isValterraOrg, useValterra, vtCan } from '../../lib/valterra/useValterra.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -95,6 +97,8 @@ const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings
 const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settings', '/notifications'].includes(pathname);
 // Zklyrera Spirits as well.
 const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || ['/settings', '/notifications'].includes(pathname);
+// Valterra Resources as well.
+const isValterraPath = (pathname) => pathname.startsWith('/valterra') || ['/settings', '/notifications'].includes(pathname);
 // Gulati Foundation as well.
 const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || ['/settings', '/notifications'].includes(pathname);
 
@@ -120,8 +124,14 @@ export default function AppLayout() {
   const { me: fxMe } = useFoundation();
   const isZklyrera = isZklyreraOrg(user);
   const { me: zkMe } = useZklyrera();
+  const isValterra = isValterraOrg(user);
+  const { me: vtMe } = useValterra();
   const navBase = useMemo(
     () => {
+      if (isValterra) {
+        const setup = vtCan(vtMe, 'settings') ? [{ to: '/valterra/settings', label: 'Valterra setup', icon: Settings }] : [];
+        return [...valterraNavFor(vtMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
       if (isZklyrera) {
         const setup = zkCan(zkMe, 'settings') ? [{ to: '/zklyrera/settings', label: 'Zklyrera setup', icon: Settings }] : [];
         return [...zklyreraNavFor(zkMe), ...setup, ...ZEPHYR_EXTRA_NAV];
@@ -152,7 +162,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
@@ -186,6 +196,13 @@ export default function AppLayout() {
     document.documentElement.classList.add('theme-zklyrera');
     return () => document.documentElement.classList.remove('theme-zklyrera');
   }, [isZklyrera, isGroupPath]);
+
+  // Valterra Resources gets the maroon and gold of its logo.
+  useEffect(() => {
+    if (!isValterra || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-valterra');
+    return () => document.documentElement.classList.remove('theme-valterra');
+  }, [isValterra, isGroupPath]);
 
   // Gulati Foundation gets the calm green of its logo.
   useEffect(() => {
@@ -265,6 +282,19 @@ export default function AppLayout() {
             <span className="h-px flex-1 bg-primary-200" />
           </div>
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
+        </Link>
+      )}
+      {isValterra && !isGroupPath && !collapsed && (
+        <Link
+          to="/valterra"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Valterra Resources home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-white shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/valterra-logo.png'} alt={user?.active_org?.name || 'Valterra Resources'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--vt-gold))]" />
         </Link>
       )}
       {isZklyrera && !isGroupPath && !collapsed && (
@@ -552,7 +582,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>
