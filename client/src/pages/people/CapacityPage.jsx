@@ -89,7 +89,8 @@ function TeamDetailDrawer({ row, date, onClose }) {
                       <span className="font-medium text-tertiary-900">{p.name}<span className="ml-2 text-xs font-normal text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span>
                       <span className="text-xs text-tertiary-500">
                         {p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'}
-                        {p.ending_soon && <span className="ml-2"><Pill tone="amber">Ending soon · {p.days_remaining}d</Pill></span>}
+                        {p.not_started && <span className="ml-2"><Pill tone="blue">Not started · starts in {p.starts_in_days}d</Pill></span>}
+                        {p.ending_soon &&<span className="ml-2"><Pill tone="amber">Ending soon · {p.days_remaining}d</Pill></span>}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-tertiary-600">{p.resources.map((r) => `${r.name}${r.allocation_percent != null ? ` (${r.allocation_percent}%)` : ''}`).join(', ')}</p>

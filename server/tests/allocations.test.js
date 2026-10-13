@@ -39,11 +39,11 @@ async function person(ctx, name) {
   return { user, membership, token: (await loginAs(user)).access_token };
 }
 
-async function project(ctx, name, { end } = {}) {
+async function project(ctx, name, { end, start = '2026-01-01' } = {}) {
   const res = await authed(request(app).post('/api/v1/calendars/projects'), ctx.adminToken).send({ name, service_category: 'managed_services', client_account_id: ctx.client.id });
   expect(res.status).toBe(201);
   await authed(request(app).patch(`/api/v1/billing/projects/${res.body.data.id}`), ctx.adminToken).send({
-    agreement_start_date: '2026-01-01',
+    agreement_start_date: start,
     ...(end ? { agreement_end_date: end } : {}),
     billing: { rate_type: 'monthly', rate: 210000, currency: 'INR' },
   });
@@ -206,6 +206,19 @@ describe('Team capacity', () => {
     const soon = (await report('ending-soon', {})).body.data.projects;
     expect(soon.map((p) => p.project.name)).toEqual(['Project A']);
     expect(soon[0]).toMatchObject({ days_remaining: 10, resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
+  });
+
+  test('a signed project that has not started yet still reserves its team (shown as not started)', async () => {
+    const ctx = await seed();
+    const { assign, report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Future Team' })).body.data;
+    const p = await person(ctx, 'Meera');
+    expect((await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' })).status).toBe(200);
+    const later = await project(ctx, 'Starts Later', { start: inDays(20), end: inDays(200) });
+    expect((await assign({ account_id: later.id, org_membership_id: p.membership.id })).status).toBeLessThan(300);
+    const row = (await report('team-capacity', {})).body.data.teams.find((t) => t.team?.id === team.id);
+    expect(row).toMatchObject({ current_allocation: 1, projects_ending_soon: 0 });
+    expect(row.projects[0]).toMatchObject({ not_started: true, starts_in_days: 20 });
   });
 
   test('team capacity is date-aware: a member who moves team on 17 Aug counts for the old team before it', async () => {
