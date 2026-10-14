@@ -2498,6 +2498,18 @@ model JobApplicant {
   phone            String?
   experience_years Decimal?    @db.Decimal(4, 1)
   source           String      @default("website") // website | manual | referral
+  channel          String? // where the applicant came from: linkedin | website | whatsapp | referral | other
+  // Screening answers (all optional for old rows; the public apply form requires most of them)
+  linkedin_url       String?
+  cv_url             String?
+  currently_working  Boolean?
+  joiner_status      String? // yes (immediate) | no | serving_notice
+  notice_period_days Int?
+  last_working_day   DateTime? @db.Date
+  current_ctc_lpa    Decimal?  @db.Decimal(7, 2)
+  expected_ctc_lpa   Decimal?  @db.Decimal(7, 2)
+  work_mode          String? // remote | onsite | hybrid
+  extra_skills       String[]  @default([])
   status           String      @default("new") // new | assigned | rejected
   assigned_to      String?     @db.Uuid
   assigned_at      DateTime?
@@ -2510,6 +2522,8 @@ model JobApplicant {
 
   @@index([requirement_id, status])
   @@index([assigned_to])
+  @@index([channel])
+  @@index([joiner_status])
   @@map("job_applicants")
 }
 
@@ -6047,6 +6061,7 @@ model WebsiteJobPosting {
   org                Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
   requirement_id     String      @unique @db.Uuid
   requirement        Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  slug               String?     @unique // public link: /careers/<slug>
   title              String
   department         String?
   location           String?

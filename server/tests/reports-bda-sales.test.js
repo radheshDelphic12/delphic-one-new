@@ -293,6 +293,34 @@ describe('column filters', () => {
     expect(scheduled.reduce((s, r) => s + r.meetings_scheduled, 0)).toBe(1);
   });
 
+  test('bda-reports: the account type narrows every table, meetings and requirements included', async () => {
+    const client = await mkAccount();
+    const vendor = await mkAccount({ type: 'vendor' });
+    const withReq = await mkAccount({ stage: 'active' });
+    await scheduleMeeting(client.id, bdaToken);
+    // the stage route only takes client meetings here, so the vendor's meeting event is written directly
+    await prisma.stageHistory.create({ data: { entity_type: 'account', entity_id: vendor.id, from_stage: 'lead', to_stage: 'meeting_scheduled', changed_by: bda.id, changed_at: new Date() } });
+    await createRequirement(salesToken, withReq.id, { title: 'Needs a type' });
+
+    const get = async (account_type) =>
+      (await authed(request(app).get('/api/v1/reports/bda-reports').query({ ...RANGE, ...(account_type ? { account_type } : {}) }), adminToken)).body.data.tables;
+    const sum = (tables, key, col) => tables.find((t) => t.key === key).rows.reduce((s, r) => s + r[col], 0);
+
+    const all = await get();
+    expect(sum(all, 'meetings_scheduled', 'meetings_scheduled')).toBe(2);
+    const asClient = await get('client');
+    expect(sum(asClient, 'meetings_scheduled', 'meetings_scheduled')).toBe(1);
+    expect(sum(asClient, 'meetings_conversion', 'meetings_scheduled')).toBe(1);
+    expect(sum(asClient, 'requirements_brought_counts', 'count')).toBe(1);
+    const asVendor = await get('vendor');
+    expect(sum(asVendor, 'meetings_scheduled', 'meetings_scheduled')).toBe(1);
+    expect(sum(asVendor, 'accounts_created', 'count')).toBe(1);
+    expect(asVendor.find((t) => t.key === 'requirements_brought').rows).toHaveLength(0);
+    // the types split the whole: nothing is lost or counted twice
+    const asNone = await get('unclassified');
+    expect(sum(asClient, 'meetings_scheduled', 'meetings_scheduled') + sum(asVendor, 'meetings_scheduled', 'meetings_scheduled') + sum(asNone, 'meetings_scheduled', 'meetings_scheduled')).toBe(2);
+  });
+
   test('bda-reports: client_id narrows requirements_brought to that client', async () => {
     const client = await mkAccount({ stage: 'active', name: 'Filter Target' });
     const otherClient = await mkAccount({ stage: 'active', name: 'Filter Other' });

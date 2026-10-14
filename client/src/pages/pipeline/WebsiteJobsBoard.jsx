@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Globe, Info, UserPlus } from 'lucide-react';
+import { Globe, Info, Link2, UserPlus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -11,6 +11,28 @@ import FormDrawer from '../../components/ui/FormDrawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { POSTING_FIELDS, PostingStatus } from '../website/WebsitePublishPanel.jsx';
 import { AddApplicantDrawer } from './ApplicantPoolBoard.jsx';
+
+const SOURCES = [['linkedin', 'LinkedIn'], ['website', 'Website'], ['whatsapp', 'WhatsApp'], ['naukri', 'Naukri'], ['referral', 'Referral'], ['other', 'Other']];
+const CHANNEL_LABEL = { ...Object.fromEntries(SOURCES), internal: 'Internal' };
+// The public page of a published job. VITE_PUBLIC_JOBS_BASE can point it at the public domain (for example https://app.delphic.in).
+const jobLink = (slug, src) => `${(import.meta.env.VITE_PUBLIC_JOBS_BASE || window.location.origin).replace(/\/$/, '')}/careers/${slug}?src=${src}`;
+
+/** Copies the job's public link with the chosen source, so each post (LinkedIn, WhatsApp, ...) can be tracked. */
+function CopyLink({ slug, onCopied, onFailed }) {
+  const [src, setSrc] = useState('linkedin');
+  async function copy() {
+    const url = jobLink(slug, src);
+    try { await navigator.clipboard.writeText(url); onCopied(url); } catch { onFailed(url); }
+  }
+  return (
+    <span className="inline-flex items-center gap-1" data-testid="job-link">
+      <select aria-label="Source of this link" className="rounded-lg border border-tertiary-200 px-1.5 py-1 text-xs" value={src} onChange={(e) => setSrc(e.target.value)}>
+        {SOURCES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" onClick={copy}><Link2 className="h-3.5 w-3.5" />Copy link</button>
+    </span>
+  );
+}
 
 const money = (r) => {
   if (r.budget_min == null && r.budget_max == null) return null;
@@ -84,10 +106,12 @@ export default function WebsiteJobsBoard() {
                     <td className="px-3 tabular-nums">{r.experience_min != null || r.experience_max != null ? `${r.experience_min ?? 0}–${r.experience_max ?? '?'} yrs` : '—'}</td>
                     <td className="px-3">{money(r) || <span className="text-tertiary-400">Not mentioned</span>}</td>
                     <td className="px-3 capitalize">{r.work_mode || '—'}{r.work_location ? <span className="block text-xs normal-case text-tertiary-500">{r.work_location}</span> : null}</td>
-                    <td className="px-3"><Pill tone={r.applicants.new ? 'blue' : 'gray'}>{r.applicants.new} waiting</Pill> <span className="text-xs text-tertiary-500">{r.applicants.assigned} claimed</span></td>
+                    <td className="px-3"><Pill tone={r.applicants.new ? 'blue' : 'gray'}>{r.applicants.new} waiting</Pill> <span className="text-xs text-tertiary-500">{r.applicants.assigned} claimed</span>
+                      {Object.keys(r.channels || {}).length > 0 && <p className="mt-0.5 text-xs text-tertiary-500" data-testid="channel-counts">{Object.entries(r.channels).map(([k, n]) => `${CHANNEL_LABEL[k] || 'Unknown'} ${n}`).join(' · ')}</p>}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex gap-2">
                         <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => setAddFor(r.id)}><UserPlus className="h-3.5 w-3.5" />Add applicant</button>
+                        {posting?.status === 'published' && posting.slug && <CopyLink slug={posting.slug} onCopied={() => pushSuccess('Link copied. Anyone who applies through it is counted under the source you chose.')} onFailed={(url) => pushError(`Copy this link: ${url}`, 'Link')} />}
                         {canPublish && (
                           <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} title={configured ? undefined : 'Website control is not configured on this server'} onClick={() => openPublish(r)}>
                             <Globe className="h-3.5 w-3.5" />{posting ? 'Edit website listing' : 'Publish on website'}

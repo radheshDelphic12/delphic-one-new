@@ -111,6 +111,34 @@ async function listLocations(orgId) {
   return prisma.location.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } });
 }
 
+// The Offices page: every location with how many working people sit there and how many expense claims and calendars point at it.
+// CCTV and biometric devices are not connected yet: each office reports them as "not_connected" until the integration exists.
+async function officesOverview(orgId) {
+  const rows = await prisma.location.findMany({
+    where: { org_id: orgId },
+    orderBy: [{ is_default: 'desc' }, { name: 'asc' }],
+    include: { _count: { select: { calendars: true, expense_claims: true } } },
+  });
+  const people = await prisma.orgMembership.groupBy({
+    by: ['location_id'],
+    where: { org_id: orgId, location_id: { not: null }, employment_status: { in: WORKING_STATUSES } },
+    _count: { _all: true },
+  });
+  const headcount = new Map(people.map((p) => [p.location_id, p._count._all]));
+  return rows.map((l) => ({
+    id: l.id,
+    name: l.name,
+    city: l.city,
+    country: l.country,
+    is_default: l.is_default,
+    people_count: headcount.get(l.id) || 0,
+    calendars: l._count.calendars,
+    expense_claims: l._count.expense_claims,
+    cctv: { status: 'not_connected', cameras: 0 },
+    biometric: { status: 'not_connected', devices: 0 },
+  }));
+}
+
 // An org has ONE default location: marking a location as the default moves
 // the flag, so two defaults never coexist.
 async function createLocation(orgId, { name, city, country, is_default }) {
@@ -356,6 +384,7 @@ async function updatePersonalDetails(orgId, membershipId, patch) {
 }
 
 module.exports = {
+  officesOverview,
   getReporting,
   getPersonalDetails,
   updatePersonalDetails,

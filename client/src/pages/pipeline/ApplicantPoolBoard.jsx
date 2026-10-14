@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Undo2, UserCheck, UserPlus } from 'lucide-react';
+import { Plus, SlidersHorizontal, Undo2, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import useLiveData from '../../lib/useLiveData.js';
@@ -8,6 +8,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
+import ScreeningFields, { emptyScreening, screeningPayload, JOINER_LABEL, WORK_MODE_LABEL } from '../../components/applicants/ScreeningFields.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -22,6 +23,7 @@ const ago = (iso) => {
 export function AddApplicantDrawer({ open, requirements, requirementId, onClose, onSaved }) {
   const { pushSuccess } = useAlerts();
   const [v, setV] = useState({ requirement_id: requirementId || '', name: '', email: '', phone: '', experience_years: '', notes: '' });
+  const [screening, setScreening] = useState(emptyScreening);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) { setV((c) => ({ ...c, requirement_id: requirementId || c.requirement_id })); setError(''); } }, [open, requirementId]);
@@ -31,9 +33,10 @@ export function AddApplicantDrawer({ open, requirements, requirementId, onClose,
     setSaving(true);
     setError('');
     try {
-      await apiClient.post('/applicants', { ...v, experience_years: v.experience_years === '' ? undefined : Number(v.experience_years) });
+      await apiClient.post('/applicants', { ...v, ...screeningPayload(screening), experience_years: v.experience_years === '' ? undefined : Number(v.experience_years) });
       pushSuccess('Applicant added to the pool');
       setV((c) => ({ ...c, name: '', email: '', phone: '', experience_years: '', notes: '' }));
+      setScreening(emptyScreening);
       onSaved();
       onClose();
     } catch (err) { setError(apiErrorMessage(err, 'Could not add the applicant')); } finally { setSaving(false); }
@@ -53,11 +56,36 @@ export function AddApplicantDrawer({ open, requirements, requirementId, onClose,
           <label className={labelCls}>Phone<input className={inputCls} value={v.phone} onChange={set('phone')} /></label>
         </div>
         <label className={labelCls}>Experience (years)<input type="number" min="0" max="70" step="0.5" className={inputCls} value={v.experience_years} onChange={set('experience_years')} /></label>
+        <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Screening answers (optional here)</p>
+        <ScreeningFields value={screening} onChange={setScreening} inputCls={inputCls} labelCls={labelCls} />
         <label className={labelCls}>Notes<textarea rows={2} className={inputCls} value={v.notes} onChange={set('notes')} /></label>
         {error && <p className="text-sm text-danger-600" role="alert">{error}</p>}
         <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={saving || !v.requirement_id || !v.name.trim()}>{saving ? 'Adding…' : 'Add to pool'}</button></div>
       </form>
     </Drawer>
+  );
+}
+
+const lpa = (n) => (n == null ? '—' : `${n} L`);
+
+/** What the candidate said when applying: joiner status, notice, CTC, work mode, links. Older applicants have none of it. */
+function ScreeningSummary({ a }) {
+  if (!a.joiner_status && a.current_ctc_lpa == null && a.expected_ctc_lpa == null && !a.work_mode && !a.linkedin_url && !a.cv_url) return <span className="text-tertiary-400">Not answered</span>;
+  return (
+    <div className="space-y-0.5">
+      <p>
+        {a.joiner_status && <Pill tone={a.joiner_status === 'yes' ? 'green' : a.joiner_status === 'serving_notice' ? 'amber' : 'gray'}>{JOINER_LABEL[a.joiner_status]}</Pill>}
+        {a.notice_period_days != null && <span className="ml-1">{a.notice_period_days === 0 ? 'no notice' : `${a.notice_period_days}d notice`}</span>}
+        {a.last_working_day && <span className="ml-1">· LWD {String(a.last_working_day).slice(0, 10)}</span>}
+      </p>
+      <p>CTC {lpa(a.current_ctc_lpa)} → {lpa(a.expected_ctc_lpa)}{a.currently_working === false ? ' · not working' : ''}{a.work_mode ? ` · ${WORK_MODE_LABEL[a.work_mode]}` : ''}</p>
+      {a.extra_skills?.length > 0 && <p className="text-tertiary-500">{a.extra_skills.slice(0, 5).join(', ')}</p>}
+      <p>
+        {a.linkedin_url && <a className="text-primary-700 hover:underline" href={a.linkedin_url} target="_blank" rel="noreferrer">LinkedIn</a>}
+        {a.linkedin_url && a.cv_url && ' · '}
+        {a.cv_url && <a className="text-primary-700 hover:underline" href={a.cv_url} target="_blank" rel="noreferrer">CV</a>}
+      </p>
+    </div>
   );
 }
 
@@ -71,12 +99,17 @@ export default function ApplicantPoolBoard() {
   const [applied, setApplied] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState('');
+  const [filters, setFilters] = useState({});
+  const [showFilters, setShowFilters] = useState(false);
   const canClaim = ['recruiter', 'admin'].includes(user?.role);
+  const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v !== undefined));
+  const filterKey = JSON.stringify(activeFilters);
+  const setFilter = (k) => (e) => setFilters((c) => ({ ...c, [k]: e.target.value }));
 
   const reqs = useLiveData(() => apiClient.get('/applicants/requirements').then((r) => r.data.data), { deps: [] });
   const list = useLiveData(
-    () => apiClient.get('/applicants', { params: { view, ...(requirementId ? { requirement_id: requirementId } : {}), ...(applied ? { search: applied } : {}), limit: 50 } }).then((r) => ({ rows: r.data.data, counts: r.data.counts, pagination: r.data.pagination })),
-    { intervalMs: 20000, deps: [view, requirementId, applied] }
+    () => apiClient.get('/applicants', { params: { view, ...(requirementId ? { requirement_id: requirementId } : {}), ...(applied ? { search: applied } : {}), ...activeFilters, limit: 50 } }).then((r) => ({ rows: r.data.data, counts: r.data.counts, pagination: r.data.pagination })),
+    { intervalMs: 20000, deps: [view, requirementId, applied, filterKey] }
   );
   const refresh = useCallback(() => { list.refresh(); reqs.refresh(); }, [list, reqs]);
   useEffect(() => { if (list.error) pushError(apiErrorMessage(list.error, 'Could not load the applicants'), 'Load failed'); }, [list.error]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -104,14 +137,57 @@ export default function ApplicantPoolBoard() {
           <input className="w-56 rounded-l-xl border border-tertiary-200 bg-white px-3 py-1.5 text-sm" placeholder="Search name, email, phone" value={search} onChange={(e) => setSearch(e.target.value)} />
           <button type="submit" className="rounded-r-xl border border-l-0 border-tertiary-200 bg-[#EEF5FC] px-3 py-1.5 text-xs font-semibold text-[#105AA9]">Search</button>
         </form>
+        <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+          <SlidersHorizontal className="h-4 w-4" />Filters{Object.keys(activeFilters).length ? ` (${Object.keys(activeFilters).length})` : ''}
+        </button>
         <button type="button" className="btn-primary ml-auto inline-flex items-center gap-1.5" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />Add applicant</button>
       </div>
 
+      {showFilters && (
+        <section className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4" data-testid="applicant-filters">
+          <label className={labelCls}>Immediate joiner
+            <select className={inputCls} value={filters.joiner || ''} onChange={setFilter('joiner')}>
+              <option value="">Any</option>{Object.entries(JOINER_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <label className={labelCls}>Working now
+            <select className={inputCls} value={filters.working || ''} onChange={setFilter('working')}>
+              <option value="">Any</option><option value="yes">Yes</option><option value="no">No</option>
+            </select>
+          </label>
+          <label className={labelCls}>Notice period up to
+            <select className={inputCls} value={filters.notice_max || ''} onChange={setFilter('notice_max')}>
+              <option value="">Any</option><option value="0">Immediate</option><option value="15">15 days</option><option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option>
+            </select>
+          </label>
+          <label className={labelCls}>Last working day on or before<input type="date" className={inputCls} value={filters.lwd_before || ''} onChange={setFilter('lwd_before')} /></label>
+          <label className={labelCls}>Work mode
+            <select className={inputCls} value={filters.work_mode || ''} onChange={setFilter('work_mode')}>
+              <option value="">Any</option>{Object.entries(WORK_MODE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className={labelCls}>Expected CTC from (LPA)<input type="number" min="0" step="0.5" className={inputCls} value={filters.expected_ctc_min || ''} onChange={setFilter('expected_ctc_min')} /></label>
+            <label className={labelCls}>to (LPA)<input type="number" min="0" step="0.5" className={inputCls} value={filters.expected_ctc_max || ''} onChange={setFilter('expected_ctc_max')} /></label>
+          </div>
+          <label className={labelCls}>Current CTC up to (LPA)<input type="number" min="0" step="0.5" className={inputCls} value={filters.current_ctc_max || ''} onChange={setFilter('current_ctc_max')} /></label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className={labelCls}>Experience from (yrs)<input type="number" min="0" step="0.5" className={inputCls} value={filters.exp_min || ''} onChange={setFilter('exp_min')} /></label>
+            <label className={labelCls}>to (yrs)<input type="number" min="0" step="0.5" className={inputCls} value={filters.exp_max || ''} onChange={setFilter('exp_max')} /></label>
+          </div>
+          <label className={labelCls}>Skill<input className={inputCls} placeholder="e.g. react" value={filters.skill || ''} onChange={setFilter('skill')} /></label>
+          <div className="flex items-end sm:col-span-2 lg:col-span-3">
+            <button type="button" className="btn-secondary px-3 py-1.5 text-xs" disabled={!Object.keys(activeFilters).length} onClick={() => setFilters({})}>Clear filters</button>
+            <p className="ml-3 text-xs text-tertiary-500">People who did not answer a question never match a filter on it.</p>
+          </div>
+        </section>
+      )}
+
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[46rem] text-sm">
+          <table className="w-full min-w-[58rem] text-sm">
             <thead className="bg-[#F9FAFB] text-left text-xs uppercase tracking-wide text-tertiary-500">
-              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Requirement</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
+              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Requirement</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Screening</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
             </thead>
             <tbody>
               {rows.map((a) => (
@@ -119,7 +195,8 @@ export default function ApplicantPoolBoard() {
                   <td className="px-4 py-2"><p className="font-medium text-tertiary-900">{a.name}</p><p className="text-xs text-tertiary-500">{[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact details'}</p></td>
                   <td className="px-3"><p className="text-tertiary-800">{a.requirement_title}</p><p className="text-xs text-tertiary-500">{a.client}</p></td>
                   <td className="px-3 tabular-nums">{a.experience_years != null ? `${a.experience_years} yrs` : '—'}</td>
-                  <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.source}</span></td>
+                  <td className="px-3 text-xs text-tertiary-700" data-testid="screening-cell"><ScreeningSummary a={a} /></td>
+                  <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.channel || a.source}</span></td>
                   <td className="px-3">
                     {view === 'mine' && a.profile_id ? <Link className="text-primary-700 hover:underline" to={`/profiles/${a.profile_id}`}>Open profile</Link>
                       : a.status === 'new' ? <Pill tone="blue">In pool</Pill> : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
@@ -135,7 +212,7 @@ export default function ApplicantPoolBoard() {
                 </tr>
               ))}
               {!rows.length && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-tertiary-500">
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500">
                   <UserPlus className="mx-auto mb-2 h-6 w-6 text-tertiary-300" />
                   {view === 'mine' ? 'You have not claimed anyone yet. Open the Pool and press "Assign to me".' : 'Nobody is waiting in the pool. Applicants appear here as they apply (or add one by hand).'}
                 </td></tr>

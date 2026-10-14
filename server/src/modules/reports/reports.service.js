@@ -1323,7 +1323,8 @@ const byDateThenNameDesc = (nameKey) => (a, b) =>
  * BDA reports — 5 tables, all keyed off `origin_owner_id` ("Brought by", the
  * immutable account creator). `bda_id` scopes every table to one person;
  * `client_id` scopes every table to one account (client or vendor);
- * `account_type` further narrows `accounts_created` to client/vendor/unclassified.
+ * `account_type` (client / vendor / unclassified) narrows every table to accounts of that type: accounts brought,
+ * the meetings (by the account's current type) and the requirements (only client accounts have any).
  *   1. accounts_created        - accounts brought per BDA per day (+ type split on hover)
  *   2. meetings_scheduled      - account meetings scheduled per BDA per day, with how
  *                                many of those accounts are active now
@@ -1369,14 +1370,18 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     row.by_type[label] = (row.by_type[label] || 0) + 1;
   }
 
-  // 2 & 3. meetings scheduled (stage_history: account -> meeting_scheduled)
+  // 2 & 3. meetings scheduled (stage_history: account -> meeting_scheduled). With an account type chosen only
+  // accounts of that type count, the same way the "Accounts brought" table is narrowed.
+  const typedAccountIds = account_type
+    ? (await prisma.account.findMany({ where: { ...accountScope, ...typeScope }, select: { id: true } })).map((a) => a.id)
+    : null;
   const meetingEvents = await prisma.stageHistory.findMany({
     where: {
       entity_type: 'account',
       to_stage: 'meeting_scheduled',
       ...(range ? { changed_at: range } : {}),
       ...(bda_id ? { changed_by: bda_id } : {}),
-      ...(client_id ? { entity_id: client_id } : {}),
+      ...(typedAccountIds ? { entity_id: { in: typedAccountIds } } : client_id ? { entity_id: client_id } : {}),
     },
     select: {
       changed_at: true,
@@ -1439,7 +1444,8 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
   }
 
   // 4 & 5. requirements on BDA-brought *client* accounts
-  const requirements = await prisma.requirement.findMany({
+  // Only client accounts have requirements, so a vendor / unclassified type filter leaves this table empty.
+  const requirements = account_type && account_type !== 'client' ? [] : await prisma.requirement.findMany({
     where: {
       ...(range ? { created_at: range } : {}),
       account: { type: 'client', ...ownerScope, ...accountScope },

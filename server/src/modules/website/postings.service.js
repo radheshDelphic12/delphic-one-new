@@ -17,6 +17,16 @@ const publicFieldsSchema = z.object({
 });
 const updateSchema = publicFieldsSchema.partial();
 
+/** A readable, unique public slug: the title plus 4 random hex characters ("senior-react-developer-3fa9"). */
+async function newSlug(title) {
+  const base = String(title || 'job').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'job';
+  for (let i = 0; i < 6; i += 1) {
+    const slug = `${base}-${Math.random().toString(16).slice(2, 6).padEnd(4, '0')}`;
+    if (!(await prisma.websiteJobPosting.findUnique({ where: { slug }, select: { id: true } }))) return slug;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
 const CLOSED_REQUIREMENT = ['closed', 'dropped'];
 const ENGAGEMENT_LABEL = { full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract' };
 const WORK_MODE_LABEL = { remote: 'Remote', onsite: 'On-site', hybrid: 'Hybrid' };
@@ -103,9 +113,10 @@ async function publish(orgId, userId, requirementId, fields) {
   const data = { ...fields, status: 'published', updated_by: userId };
   const saved = await prisma.websiteJobPosting.upsert({
     where: { requirement_id: requirementId },
-    create: { ...data, org_id: orgId, requirement_id: requirementId, created_by: userId },
+    create: { ...data, org_id: orgId, requirement_id: requirementId, created_by: userId, slug: await newSlug(fields.title) },
     update: data,
   });
+  if (!saved.slug) saved.slug = (await prisma.websiteJobPosting.update({ where: { id: saved.id }, data: { slug: await newSlug(saved.title) } })).slug;
   const posting = await push(saved);
   await audit(userId, posting, 'website_publish', `Published to website as "${posting.title}"`);
   return { posting };
@@ -190,4 +201,5 @@ module.exports = {
   retry,
   followRequirement,
   reconcile,
+  newSlug,
 };
