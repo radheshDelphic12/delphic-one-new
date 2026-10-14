@@ -19,6 +19,8 @@ import {
   HardHat,
   Settings,
   Globe,
+  MapPin,
+  UserPlus,
 } from 'lucide-react';
 
 /**
@@ -42,6 +44,8 @@ export const NAV_ITEMS = [
   { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', masterOnly: true },
   // Sales, HR and Management departments only (see lib/departments.js).
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true },
+  { to: '/offices', label: 'Offices', icon: MapPin, capability: 'viewPeople' },
+  { to: '/internal-jobs', label: 'Internal Jobs', icon: UserPlus, masterOnly: true },
   { to: '/people', label: 'People', icon: Users, capability: 'viewPeople' },
   { to: '/attendance', label: 'Time & Attendance', icon: Clock, capability: 'viewAttendance' },
   { to: '/finance', label: 'Finance', icon: Wallet, capability: 'viewExpenses' },

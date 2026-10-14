@@ -6,7 +6,7 @@ const prisma = require('../../config/db');
 // owns them. Claiming creates - or reuses - the candidate Profile, so one person applying to two requirements is one Profile.
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
-const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'other'];
+const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'internal', 'other'];
 const addSchema = z.object({
   requirement_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),

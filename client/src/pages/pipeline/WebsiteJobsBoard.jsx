@@ -13,7 +13,7 @@ import { POSTING_FIELDS, PostingStatus } from '../website/WebsitePublishPanel.js
 import { AddApplicantDrawer } from './ApplicantPoolBoard.jsx';
 
 const SOURCES = [['linkedin', 'LinkedIn'], ['website', 'Website'], ['whatsapp', 'WhatsApp'], ['naukri', 'Naukri'], ['referral', 'Referral'], ['other', 'Other']];
-const CHANNEL_LABEL = Object.fromEntries(SOURCES);
+const CHANNEL_LABEL = { ...Object.fromEntries(SOURCES), internal: 'Internal' };
 // The public page of a published job. VITE_PUBLIC_JOBS_BASE can point it at the public domain (for example https://app.delphic.in).
 const jobLink = (slug, src) => `${(import.meta.env.VITE_PUBLIC_JOBS_BASE || window.location.origin).replace(/\/$/, '')}/careers/${slug}?src=${src}`;
 

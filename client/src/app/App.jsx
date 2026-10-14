@@ -29,6 +29,8 @@ import FinanceHubPage from '../pages/finance/FinanceHubPage.jsx';
 import PayrollHubPage from '../pages/payroll/PayrollHubPage.jsx';
 import GroupOverviewPage from '../pages/groupOverview/GroupOverviewPage.jsx';
 import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
+import OfficesPage from '../pages/offices/OfficesPage.jsx';
+import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import CareerJobPage, { CareerListPage } from '../pages/public/CareerJobPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
@@ -447,6 +449,8 @@ export default function App() {
         />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="people" element={<PeopleHubPage />} />
+        <Route path="offices" element={<OfficesPage />} />
+        <Route path="internal-jobs" element={<RequireMasterWorkspace><InternalJobsPage /></RequireMasterWorkspace>} />
         <Route path="people/:id" element={<EmployeeProfilePage />} />
         {/* Merged into the People / Time & Attendance hubs — keep old links working. */}
         <Route path="people/settings" element={<Navigate to="/people?section=hr-settings" replace />} />

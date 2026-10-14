@@ -63,6 +63,7 @@ const invitesRoutes = require('./modules/invites/invites.routes');
 const uploadsRoutes = require('./modules/uploads/uploads.routes');
 const websiteRoutes = require('./modules/website/website.routes');
 const publicJobsRoutes = require('./modules/publicJobs/publicJobs.routes');
+const internalJobsRoutes = require('./modules/internalJobs/internalJobs.routes');
 
 const app = express();
 
@@ -157,6 +158,7 @@ app.use('/api/v1/finance-categories', financeCategoriesRoutes);
 app.use('/api/v1/invites', invitesRoutes);
 app.use('/api/v1/website', websiteRoutes);
 app.use('/api/v1/public', publicJobsRoutes);
+app.use('/api/v1/internal-jobs', internalJobsRoutes);
 
 app.use((req, res) => res.status(404).json({ success: false, message: 'Not found' }));
 app.use(errorHandler);
