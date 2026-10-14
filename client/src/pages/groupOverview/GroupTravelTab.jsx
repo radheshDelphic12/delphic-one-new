@@ -11,16 +11,16 @@ import KpiCard from '../../components/ui/KpiCard.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
-const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+export const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const todayLocal = () => new Date().toLocaleDateString('en-CA');
-const dayText = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '');
+export const dayText = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '');
 const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'time not set');
-const STATE = {
+export const STATE = {
   planned: ['blue', 'Planned'], ongoing: ['green', 'On the trip now'], completed: ['gray', 'Completed'],
   cancelled: ['red', 'Cancelled'], overdue_close: ['amber', 'Dates over - mark completed'],
 };
 
-function TripForm({ initial, options, companies, onSubmit, saving, error }) {
+export function TripForm({ initial, options, companies, onSubmit, saving, error }) {
   const t = initial || {};
   const [v, setV] = useState(() => ({
     title: t.title || '', org_id: t.org_id || '', origin: t.origin || '', destination: t.destination || '',
@@ -106,7 +106,7 @@ function TripForm({ initial, options, companies, onSubmit, saving, error }) {
   );
 }
 
-function MeetingsPanel({ trip, options, onChanged }) {
+export function MeetingsPanel({ trip, options, onChanged }) {
   const { pushError } = useAlerts();
   const [mode, setMode] = useState('link');
   const [key, setKey] = useState('');

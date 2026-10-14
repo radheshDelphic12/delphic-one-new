@@ -7,7 +7,8 @@ import {
   eventPrimaryLabel,
   eventTypeLabel,
   hasSubmittedFeedback,
-  isClientMeeting,
+  isMeetingLike,
+  isTrip,
   roundTypeMeta,
 } from '../../lib/interviewRounds.js';
 import { formatRelative } from '../../lib/notifications/notificationLinks.js';
@@ -18,12 +19,12 @@ import { formatTimeRange } from './monthGrid.js';
  */
 export default function EventCard({ event, onOpenDetail, onFeedback, onCancel }) {
   const look = eventAppearance(event);
-  const meeting = isClientMeeting(event);
+  const meeting = isMeetingLike(event);
   const cancelled = event.status === 'cancelled';
   const rescheduled = event.result === 'rescheduled';
   const meta = roundTypeMeta(event.round_type);
   const typeLabel = eventTypeLabel(event);
-  const primaryTo = meeting ? `/accounts/${event.account_id}` : `/submissions/${event.submission_id}`;
+  const primaryTo = isTrip(event) ? '/group-overview?section=travel' : meeting ? `/accounts/${event.account_id}` : `/submissions/${event.submission_id}`;
   const nowMs = new Date().getTime();
   const isPastStart = event.scheduled_at && new Date(event.scheduled_at).getTime() <= nowMs;
   const isFuture = event.scheduled_at && new Date(event.scheduled_at).getTime() > nowMs;

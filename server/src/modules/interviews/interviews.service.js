@@ -261,6 +261,13 @@ async function listForCalendar(user, opts = {}) {
     // A meeting that belongs to a Group Dashboard travel plan carries a Travel tag.
     const tags = await require('../superDashboard/groupTravel.service').tagsFor(meetings.map((m) => m.id));
     events = events.concat(meetings.map((m) => (tags.has(m.id) ? { ...m, travel: tags.get(m.id) } : m)));
+
+    // Group Dashboard trips are shown (and managed) on the calendar for the Group Super Admin only: they carry budgets.
+    if (!mine && user?.id) {
+      const groupIds = await require('../../lib/groupAccess').groupIdsForSuperadmin(user.id);
+      const trips = await require('../superDashboard/groupTravel.service').calendarEvents(groupIds, from, to);
+      events = events.concat(opts.status ? trips.filter((t) => t.status === opts.status) : trips);
+    }
   }
 
   if (sort === 'audience') {

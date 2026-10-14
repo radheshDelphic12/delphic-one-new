@@ -98,3 +98,7 @@ The look is deliberately restrained; keep new group-dashboard UI to these rules:
 - Navigation is an underline tab bar; section headings are plain text with a hairline, no numbers or badges.
 - Charts: thin (2px) smooth lines, hairline solid grid, no markers or labels until hover, plain legend with the latest values, no tinted panels.
 - Numbers use tabular figures and Indian compact units (L, Cr).
+
+## Company insights for every company (2026-10-13)
+
+Group Finance > 5. Company insights now has a button for every live company. Gulati Foundation, Zklyrera Spirits and Valterra keep their dedicated sections; **Delphic Global, Gulati Industries, Zephyr and Acconcy** use one generic section (`CompanyInsightSection.jsx`) fed by `server/src/modules/superDashboard/groupInsights.service.js`, which returns the same shape for each (KPI tiles, an attention list, a top list) and rides on `/group/overview` as `companies[].insight`. Figures come from each company's own services (Delphic: requirements, TAT, clients, submissions; Gulati Industries and Acconcy: leads, deals, receivables / payables; Zephyr: properties, occupancy, projects, overdue rent). Cached 60s per company; one failing company shows "not available" and never breaks the dashboard. Test: `server/tests/group-insights.test.js`. Open: add a company to `BUILDERS` for any future vertical.

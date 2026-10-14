@@ -111,7 +111,7 @@ async function main() {
   let membership = await prisma.orgMembership.findFirst({ where: { org_id: org.id, person_id: user.id } });
   if (!membership) {
     membership = await prisma.orgMembership.create({
-      data: { org_id: org.id, person_id: user.id, role: 'employee', employment_status: 'active', joined_at: new Date(`${YEAR}-01-01`), worker_type: 'contractor', vendor_account_id: vendor.id, vendor_rate: VENDOR_RATE, vendor_rate_currency: 'INR' },
+      data: { org_id: org.id, person_id: user.id, role: 'employee', employment_status: 'active', joined_at: new Date(`${PERIODS[0].year}-01-01`), worker_type: 'contractor', vendor_account_id: vendor.id, vendor_rate: VENDOR_RATE, vendor_rate_currency: 'INR' },
     });
     console.log(`  + contractor of "${vendor.name}", vendor rate INR ${VENDOR_RATE}/month`);
   }

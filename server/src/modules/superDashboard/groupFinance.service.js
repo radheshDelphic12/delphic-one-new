@@ -7,6 +7,7 @@ const acconcyFinance = require('../acconcy/finance.service');
 const foundationFinance = require('../foundation/finance.service');
 const zklyreraFinance = require('../zklyrera/finance.service');
 const valterraFinance = require('../valterra/finance.service');
+const groupInsights = require('./groupInsights.service');
 const zephyrMoney = require('../zephyr/money.service');
 const records = require('../calculations/records.service');
 
@@ -360,6 +361,8 @@ async function overview(orgGroupIds, query = {}) {
   // Zklyrera Spirits' capital, returns and projections sit beside its books too.
   const zklyreraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'zklyrera' && !isSoon(org) ? zklyreraFinance.groupSummary(org.id, {}) : null)));
   const valterraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'valterra' && !isSoon(org) ? valterraFinance.groupSummary(org.id, {}) : null)));
+  // Delphic Global, Gulati Industries, Zephyr and Acconcy get the same kind of company insight (their own services' numbers).
+  const insightData = await Promise.all(orgs.map((org) => (isSoon(org) ? null : groupInsights.build(org, kindOf(org)))));
 
   const companies = [];
   for (const [i, org] of orgs.entries()) {
@@ -387,6 +390,7 @@ async function overview(orgGroupIds, query = {}) {
       ...(foundationData[i] ? { foundation: foundationData[i] } : {}),
       ...(zklyreraData[i] ? { zklyrera: zklyreraData[i] } : {}),
       ...(valterraData[i] ? { valterra: valterraData[i] } : {}),
+      ...(insightData[i] ? { insight: insightData[i] } : {}),
       previous_totals: prevMonths.length
         ? { revenue: round2(prevMonths.reduce((a, m) => a + m.revenue, 0)), expenses: round2(prevMonths.reduce((a, m) => a + m.expenses, 0)), profit: round2(prevMonths.reduce((a, m) => a + m.profit, 0)), assets: prevMonths[prevMonths.length - 1].asset_value, valuation: prevMonths[prevMonths.length - 1].valuation }
         : null,

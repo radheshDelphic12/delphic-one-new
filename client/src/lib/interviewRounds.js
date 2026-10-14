@@ -118,14 +118,37 @@ export function isClientMeeting(event) {
   return event?.kind === 'client_meeting';
 }
 
+/** A Group Dashboard trip shown on the calendar (Group Super Admin only). */
+export function isTrip(event) {
+  return event?.kind === 'trip';
+}
+
+/** Meetings and trips share the "no interview actions" layout. */
+export function isMeetingLike(event) {
+  return isClientMeeting(event) || isTrip(event);
+}
+
+const TRIP_LOOK = {
+  key: 'trip',
+  pill: 'bg-indigo-500/15 text-indigo-900 border-indigo-200',
+  pillBar: 'bg-indigo-500',
+  block: 'bg-indigo-500 text-white',
+  accent: 'border-l-indigo-500',
+  card: 'border-indigo-200 bg-indigo-50/50',
+  isMuted: false,
+  isStruck: false,
+};
+
 /** Primary line for a calendar event: candidate for interviews, client for meetings. */
 export function eventPrimaryLabel(event, fallback = 'Interview') {
+  if (isTrip(event)) return event.trip?.title || 'Trip';
   if (isClientMeeting(event)) return event?.account_name || 'Client meeting';
   return event?.candidate_name || fallback;
 }
 
 /** Type line: the round label for interviews, the meeting mode for meetings. */
 export function eventTypeLabel(event) {
+  if (isTrip(event)) return `Trip · ${event.trip?.destination || ''} (day ${event.day_number}/${event.days})`;
   if (isClientMeeting(event)) {
     if (event?.round_name) return event.round_type_label;
     return event?.meeting_mode === 'offline' ? 'Client meeting · In person' : 'Client meeting · Online';
@@ -215,6 +238,7 @@ const CANCELLED_LOOK = {
  */
 export function eventAppearance(event) {
   if (event?.status === 'cancelled') return CANCELLED_LOOK;
+  if (isTrip(event)) return TRIP_LOOK;
   if (isClientMeeting(event)) {
     return CLIENT_MEETING_LOOK[event.meeting_mode === 'offline' ? 'offline' : 'online'];
   }

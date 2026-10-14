@@ -25,7 +25,8 @@ export const ALL_REPORTS = [
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },
   { key: 'bda-reports', label: 'BDA reports', roles: ['admin', 'bda'] },
   { key: 'sales-reports', label: 'Sales reports', roles: ['admin', 'sales'] },
-  { key: 'recruiter-reports', label: 'Recruiter reports', roles: ['admin', 'recruiter'] },
+  // Temporarily hidden from the Reports dropdown (still fully working): remove `hidden: true` to bring it back.
+  { key: 'recruiter-reports', label: 'Recruiter reports', roles: ['admin', 'recruiter'], hidden: true },
 ];
 
 export function reportsForRole(role) {

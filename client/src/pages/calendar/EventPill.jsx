@@ -1,5 +1,5 @@
 import { CalendarX, RefreshCw } from 'lucide-react';
-import { eventAppearance, eventPrimaryLabel, isClientMeeting } from '../../lib/interviewRounds.js';
+import { eventAppearance, eventPrimaryLabel, isMeetingLike, isTrip } from '../../lib/interviewRounds.js';
 import { formatTime } from './monthGrid.js';
 import EventHoverCard from './EventHoverCard.jsx';
 import useDelayedHoverCard from './useDelayedHoverCard.js';
@@ -14,7 +14,7 @@ export default function EventPill({ event, onClick, onFeedback }) {
 
   const timeLabel = formatTime(event.scheduled_at);
   const nameLabel = eventPrimaryLabel(event);
-  const meeting = isClientMeeting(event);
+  const meeting = isMeetingLike(event);
 
   return (
     <>
@@ -45,7 +45,7 @@ export default function EventPill({ event, onClick, onFeedback }) {
                   : 'bg-sky-500/20 text-sky-800'
             }`}
           >
-            {meeting ? 'Mtg' : (event.audience || 'internal') === 'external' ? 'Ext' : 'Int'}
+            {isTrip(event) ? 'Trip' : meeting ? 'Mtg' : (event.audience || 'internal') === 'external' ? 'Ext' : 'Int'}
           </span>
           <span className={`shrink-0 text-[10px] font-semibold tabular-nums tracking-tight ${look.isStruck ? 'line-through opacity-70' : ''}`}>
             {timeLabel}

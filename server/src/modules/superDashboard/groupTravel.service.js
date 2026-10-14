@@ -287,4 +287,55 @@ async function tagsFor(keys) {
   return new Map(links.map((l) => [l.meeting_key, { id: l.travel.id, title: l.travel.title, destination: l.travel.destination, start_date: ymd(l.travel.start_date), end_date: ymd(l.travel.end_date) }]));
 }
 
-module.exports = { list, options, create, update, remove, linkMeeting, unlinkMeeting, createMeeting, tagsFor };
+/**
+ * For the calendar (Group Super Admin only): one event per day of every trip that overlaps [from, to], so the trip is
+ * visible on the Delphic Global calendar and can be opened (and managed) from there. 9 AM IST keeps it on the right day.
+ */
+async function calendarEvents(groupIds, from, to) {
+  if (!groupIds.length) return [];
+  const first = toDate(ymd(from));
+  const last = toDate(ymd(to));
+  const rows = await prisma.groupTravel.findMany({
+    where: { org_group_id: { in: groupIds }, deleted_at: null, start_date: { lte: last }, end_date: { gte: first } },
+    include: { travelers: true, meetings: true },
+    orderBy: { start_date: 'asc' },
+  });
+  if (!rows.length) return [];
+  const orgs = await groupOrgs(groupIds);
+  const orgName = new Map(orgs.map((o) => [o.id, o.name]));
+  const trips = await shape(rows, todayIst());
+  const status = { planned: 'scheduled', completed: 'completed', cancelled: 'cancelled' };
+  const events = [];
+  for (const t of trips) {
+    t.org_name = t.org_id ? orgName.get(t.org_id) || null : 'Whole group';
+    const days = t.days;
+    for (let i = 0; i < days; i += 1) {
+      const day = ymd(new Date(toDate(t.start_date).getTime() + i * DAY));
+      if (day < ymd(first) || day > ymd(last)) continue;
+      const startsAt = new Date(`${day}T03:30:00.000Z`);
+      events.push({
+        id: `trip-${t.id}-${day}`,
+        kind: 'trip',
+        trip_id: t.id,
+        trip: t,
+        day_number: i + 1,
+        days,
+        scheduled_at: startsAt,
+        duration_minutes: 30,
+        ends_at: new Date(startsAt.getTime() + 30 * 60000),
+        status: status[t.status] || 'scheduled',
+        audience: 'external',
+        round_name: null,
+        account_name: t.org_name,
+        meeting_mode: 'offline',
+        meeting_location: t.destination,
+        meeting_notes: t.purpose,
+        interviewers: t.travelers.map((p) => ({ id: p.user_id || `guest-${p.id}`, name: p.name })),
+        scheduled_by: null,
+      });
+    }
+  }
+  return events;
+}
+
+module.exports = { list, options, create, update, remove, linkMeeting, unlinkMeeting, createMeeting, tagsFor, one, calendarEvents };

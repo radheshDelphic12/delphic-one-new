@@ -127,4 +127,22 @@ describe('group travel', () => {
     await patch(`/group/travel/${trip.id}`, { status: 'cancelled' });
     expect((await groupTravel.tagsFor([key])).size).toBe(0);
   });
+
+  test('a trip is on the calendar (one event per day) for the group superadmin only, and is fetched by id', async () => {
+    const trip = (await post('/group/travel', { title: 'Mumbai', destination: 'Mumbai', start_date: inDays(2), end_date: inDays(4), budget: 7000, travelers: [{ name: 'Guest' }] })).body.data;
+    expect((await get(`/group/travel/${trip.id}`)).body.data).toMatchObject({ id: trip.id, budget: 7000, days: 3 });
+    expect((await get('/group/travel/options')).status).toBe(200);
+    expect((await get(`/group/travel/${trip.id}`, adminToken)).status).toBe(403);
+
+    const feed = (token, q = '') => authed(request(app).get(`/api/v1/interviews?from=${new Date().toISOString()}&to=${new Date(Date.now() + 10 * 86400000).toISOString()}${q}`), token);
+    const mine = (await feed(superToken)).body.data.filter((e) => e.kind === 'trip');
+    expect(mine).toHaveLength(3);
+    expect(mine[0]).toMatchObject({ trip_id: trip.id, days: 3, day_number: 1, status: 'scheduled', meeting_location: 'Mumbai' });
+    expect(mine[0].trip.budget).toBe(7000);
+    expect((await feed(adminToken)).body.data.filter((e) => e.kind === 'trip')).toHaveLength(0);
+
+    // managing it from the calendar side: the trip record is the same one
+    await patch(`/group/travel/${trip.id}`, { status: 'cancelled' });
+    expect((await feed(superToken)).body.data.filter((e) => e.kind === 'trip').every((e) => e.status === 'cancelled')).toBe(true);
+  });
 });

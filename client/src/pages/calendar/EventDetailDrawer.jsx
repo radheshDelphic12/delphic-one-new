@@ -12,8 +12,11 @@ import {
   eventTypeLabel,
   hasSubmittedFeedback,
   isClientMeeting,
+  isTrip,
 } from '../../lib/interviewRounds.js';
 import { formatTimeRange } from './monthGrid.js';
+import TripEventDrawer from './TripEventDrawer.jsx';
+import { useAuth } from '../../lib/authContext.jsx';
 
 function Row({ label, children }) {
   return (
@@ -27,6 +30,8 @@ function Row({ label, children }) {
 /** Full event view + feedback / cancel / reschedule actions. */
 export default function EventDetailDrawer({ event, open, onClose, onFeedback, onChanged }) {
   const { pushSuccess, pushError } = useAlerts();
+  const { isGroupSuperadmin } = useAuth();
+  const [tripOpen, setTripOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
@@ -42,6 +47,7 @@ export default function EventDetailDrawer({ event, open, onClose, onFeedback, on
   }, [open, event]);
 
   if (!event) return null;
+  if (isTrip(event)) return <TripEventDrawer tripId={event.trip_id} open={open} onClose={onClose} onChanged={onChanged} />;
   const cancelled = event.status === 'cancelled';
   const meeting = isClientMeeting(event);
   const typeLabel = eventTypeLabel(event);
@@ -191,6 +197,12 @@ export default function EventDetailDrawer({ event, open, onClose, onFeedback, on
           {meeting && event.meeting_notes && <Row label="Notes">{event.meeting_notes}</Row>}
         </div>
 
+        {meeting && event.travel && isGroupSuperadmin && (
+          <button type="button" className="btn-secondary inline-flex w-full items-center justify-center gap-2 text-sm" onClick={() => setTripOpen(true)}>
+            Manage trip · {event.travel.title}
+          </button>
+        )}
+
         {event.meeting_link && !cancelled && (
           <a
             href={event.meeting_link}
@@ -283,6 +295,7 @@ export default function EventDetailDrawer({ event, open, onClose, onFeedback, on
           </div>
         )}
       </div>
+      <TripEventDrawer tripId={event.travel?.id} open={tripOpen} onClose={() => setTripOpen(false)} onChanged={onChanged} />
     </Drawer>
   );
 }

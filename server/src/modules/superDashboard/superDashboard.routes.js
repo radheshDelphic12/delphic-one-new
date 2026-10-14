@@ -120,7 +120,11 @@ const travelResult = (res, r, key, status = 200) => {
   return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
 };
 router.get('/group/travel', asyncHandler(async (req, res) => ok(res, await groupTravel.list(req.user.org_group_ids, req.query))));
-router.get('/group/travel/options', asyncHandler(async (req, res) => ok(res, await groupTravel.options(req.user.org_group_ids))));
+router.get('/group/travel/options',asyncHandler(async (req, res) => ok(res, await groupTravel.options(req.user.org_group_ids))));
+router.get('/group/travel/:id', asyncHandler(async (req, res) => {
+  const trip = await groupTravel.one(req.user.org_group_ids, req.params.id);
+  return trip ? ok(res, trip) : fail(res, 404, 'Trip not found');
+}));
 router.post('/group/travel', asyncHandler(async (req, res) => travelResult(res, await groupTravel.create(req.user.org_group_ids, req.user.id, req.body), 'trip', 201)));
 router.patch('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.update(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip')));
 router.delete('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.remove(req.user.org_group_ids, req.user.id, req.params.id))));
