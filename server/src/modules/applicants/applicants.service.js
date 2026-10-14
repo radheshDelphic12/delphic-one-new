@@ -6,6 +6,7 @@ const prisma = require('../../config/db');
 // owns them. Claiming creates - or reuses - the candidate Profile, so one person applying to two requirements is one Profile.
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
+const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'other'];
 const addSchema = z.object({
   requirement_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
@@ -13,6 +14,7 @@ const addSchema = z.object({
   phone: text(40),
   experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional()),
   notes: text(2000),
+  channel: z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(CHANNELS).nullable().optional()),
 });
 const listSchema = z.object({
   requirement_id: z.string().uuid().optional(),
@@ -41,6 +43,7 @@ function serialize(a, userNames, reqs) {
     phone: a.phone,
     experience_years: num(a.experience_years),
     source: a.source,
+    channel: a.channel,
     status: a.status,
     assigned_to: a.assigned_to ? { id: a.assigned_to, name: userNames.get(a.assigned_to) || null } : null,
     assigned_at: a.assigned_at,
@@ -67,8 +70,8 @@ async function inProgressRequirements() {
       budget_min: true, budget_max: true, budget_currency: true, primary_tech_stack: true, job_description: true, priority: true, updated_at: true,
       account: { select: { id: true, name: true } },
       assignments: { where: { role_on_req: 'recruiter', unassigned_at: null }, select: { user: { select: { id: true, name: true } } } },
-      applicants: { select: { status: true } },
-      website_posting: { select: { status: true } },
+      applicants: { select: { status: true, channel: true } },
+      website_posting: { select: { status: true, slug: true } },
     },
   });
   return rows.map((r) => ({
@@ -90,7 +93,9 @@ async function inProgressRequirements() {
     updated_at: r.updated_at,
     applicants: { new: r.applicants.filter((a) => a.status === 'new').length, assigned: r.applicants.filter((a) => a.status === 'assigned').length },
     // Publishing itself lives in modules/website (Apps Script); this is only the listing's state.
-    website: { published: r.website_posting?.status === 'published', closed: r.website_posting?.status === 'closed' },
+    website: { published: r.website_posting?.status === 'published', closed: r.website_posting?.status === 'closed', slug: r.website_posting?.slug || null },
+    // How many applicants came from each channel (linkedin, website, ...).
+    channels: r.applicants.reduce((acc, a) => { const k = a.channel || 'unknown'; acc[k] = (acc[k] || 0) + 1; return acc; }, {}),
   }));
 }
 
@@ -130,7 +135,7 @@ async function addApplicant(user, body, { source = 'manual' } = {}) {
     if (existing.some((e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone))) return { error: 'duplicate_applicant' };
   }
   const row = await prisma.jobApplicant.create({
-    data: { requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, created_by: user?.id || null },
+    data: { requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null, created_by: user?.id || null },
   });
   return { applicant: serialize(row, new Map(), null) };
 }

@@ -29,6 +29,7 @@ import FinanceHubPage from '../pages/finance/FinanceHubPage.jsx';
 import PayrollHubPage from '../pages/payroll/PayrollHubPage.jsx';
 import GroupOverviewPage from '../pages/groupOverview/GroupOverviewPage.jsx';
 import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
+import CareerJobPage, { CareerListPage } from '../pages/public/CareerJobPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
 import TradingHubPage from '../pages/trading/TradingHubPage.jsx';
@@ -284,6 +285,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
+      <Route path="/careers" element={<CareerListPage />} />
+      <Route path="/careers/:slug" element={<CareerJobPage />} />
       <Route
         path="/"
         element={

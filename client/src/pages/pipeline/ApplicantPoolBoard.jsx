@@ -119,7 +119,7 @@ export default function ApplicantPoolBoard() {
                   <td className="px-4 py-2"><p className="font-medium text-tertiary-900">{a.name}</p><p className="text-xs text-tertiary-500">{[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact details'}</p></td>
                   <td className="px-3"><p className="text-tertiary-800">{a.requirement_title}</p><p className="text-xs text-tertiary-500">{a.client}</p></td>
                   <td className="px-3 tabular-nums">{a.experience_years != null ? `${a.experience_years} yrs` : '—'}</td>
-                  <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.source}</span></td>
+                  <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.channel || a.source}</span></td>
                   <td className="px-3">
                     {view === 'mine' && a.profile_id ? <Link className="text-primary-700 hover:underline" to={`/profiles/${a.profile_id}`}>Open profile</Link>
                       : a.status === 'new' ? <Pill tone="blue">In pool</Pill> : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
