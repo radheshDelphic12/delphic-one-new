@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
+const screening = require('./screening');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
 // through the website module's career submissions), every recruiter sees the pool, and the first recruiter to claim an applicant
@@ -15,13 +16,26 @@ const addSchema = z.object({
   experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional()),
   notes: text(2000),
   channel: z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(CHANNELS).nullable().optional()),
-});
+  ...screening.optionalShape,
+}).superRefine(screening.checkScreening);
 const listSchema = z.object({
   requirement_id: z.string().uuid().optional(),
   view: z.enum(['pool', 'mine', 'all']).default('pool'),
   search: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  // screening filters
+  joiner: z.enum(screening.JOINER).optional(),
+  working: z.enum(['yes', 'no']).optional(),
+  work_mode: z.enum(screening.WORK_MODES).optional(),
+  notice_max: z.coerce.number().int().min(0).max(365).optional(),
+  expected_ctc_min: z.coerce.number().min(0).optional(),
+  expected_ctc_max: z.coerce.number().min(0).optional(),
+  current_ctc_max: z.coerce.number().min(0).optional(),
+  exp_min: z.coerce.number().min(0).optional(),
+  exp_max: z.coerce.number().min(0).optional(),
+  lwd_before: z.coerce.date().optional(),
+  skill: z.string().trim().max(60).optional(),
 });
 const assignSchema = z.object({ user_id: z.string().uuid().optional() });
 
@@ -42,6 +56,16 @@ function serialize(a, userNames, reqs) {
     email: a.email,
     phone: a.phone,
     experience_years: num(a.experience_years),
+    linkedin_url: a.linkedin_url,
+    cv_url: a.cv_url,
+    currently_working: a.currently_working,
+    joiner_status: a.joiner_status,
+    notice_period_days: a.notice_period_days,
+    last_working_day: a.last_working_day,
+    current_ctc_lpa: num(a.current_ctc_lpa),
+    expected_ctc_lpa: num(a.expected_ctc_lpa),
+    work_mode: a.work_mode,
+    extra_skills: a.extra_skills || [],
     source: a.source,
     channel: a.channel,
     status: a.status,
@@ -99,12 +123,28 @@ async function inProgressRequirements() {
   }));
 }
 
+/** The screening filters of the Applicants list; a person with no answer for a filtered question never matches it. */
+function screeningWhere(q) {
+  const and = [];
+  if (q.joiner) and.push({ joiner_status: q.joiner });
+  if (q.working) and.push({ currently_working: q.working === 'yes' });
+  if (q.work_mode) and.push({ work_mode: q.work_mode });
+  if (q.notice_max !== undefined) and.push({ notice_period_days: { lte: q.notice_max } });
+  if (q.expected_ctc_min !== undefined || q.expected_ctc_max !== undefined) and.push({ expected_ctc_lpa: { ...(q.expected_ctc_min !== undefined ? { gte: q.expected_ctc_min } : {}), ...(q.expected_ctc_max !== undefined ? { lte: q.expected_ctc_max } : {}) } });
+  if (q.current_ctc_max !== undefined) and.push({ current_ctc_lpa: { lte: q.current_ctc_max } });
+  if (q.exp_min !== undefined || q.exp_max !== undefined) and.push({ experience_years: { ...(q.exp_min !== undefined ? { gte: q.exp_min } : {}), ...(q.exp_max !== undefined ? { lte: q.exp_max } : {}) } });
+  if (q.lwd_before) and.push({ last_working_day: { lte: q.lwd_before } });
+  if (q.skill) and.push({ extra_skills: { has: q.skill.toLowerCase() } });
+  return and.length ? { AND: and } : {};
+}
+
 async function list(user, rawQuery) {
   const q = listSchema.parse(rawQuery);
   const where = {
     ...(q.requirement_id ? { requirement_id: q.requirement_id } : {}),
     requirement: liveRequirement,
     ...(q.view === 'pool' ? { status: 'new' } : q.view === 'mine' ? { assigned_to: user.id, status: 'assigned' } : {}),
+    ...screeningWhere(q),
     ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { email: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] } : {}),
   };
   const [total, rows, pool, mine] = await Promise.all([
@@ -135,7 +175,7 @@ async function addApplicant(user, body, { source = 'manual' } = {}) {
     if (existing.some((e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone))) return { error: 'duplicate_applicant' };
   }
   const row = await prisma.jobApplicant.create({
-    data: { requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null, created_by: user?.id || null },
+    data: { requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null, ...screening.toColumns(d), created_by: user?.id || null },
   });
   return { applicant: serialize(row, new Map(), null) };
 }
@@ -155,9 +195,18 @@ async function findOrCreateProfile(tx, applicant, addedBy) {
       total_experience_years: applicant.experience_years ?? 0,
       source: 'linkedin',
       added_by: addedBy,
+      linkedin_url: applicant.linkedin_url || null,
+      resume_url: applicant.cv_url || null,
+      // the candidate typed CTC in lakh per annum; the Profile keeps rupees
+      current_ctc: applicant.current_ctc_lpa == null ? null : Number(applicant.current_ctc_lpa) * 100000,
+      expected_ctc: applicant.expected_ctc_lpa == null ? null : Number(applicant.expected_ctc_lpa) * 100000,
+      notice_period_days: applicant.notice_period_days ?? null,
+      is_serving_notice: applicant.joiner_status === 'serving_notice',
+      last_working_day: applicant.last_working_day || null,
+      preferred_work_mode: applicant.work_mode || null,
       preferred_locations: [],
       primary_skills: [],
-      secondary_skills: [],
+      secondary_skills: applicant.extra_skills || [],
       certifications: [],
       domain_experience: [],
       recruiter_notes: `Applied (${applicant.source}) to a requirement; claimed from the applicant pool.`,

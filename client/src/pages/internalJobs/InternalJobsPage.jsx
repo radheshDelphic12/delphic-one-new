@@ -5,19 +5,22 @@ import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../../components/ui/Pill.jsx';
+import ScreeningFields, { emptyScreening, screeningPayload } from '../../components/applicants/ScreeningFields.jsx';
 
 const input = 'mt-1 w-full rounded-lg border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none';
 
 function ReferForm({ job, onDone }) {
   const { pushSuccess, pushError } = useAlerts();
   const [v, setV] = useState({ name: '', email: '', phone: '', experience_years: '', message: '' });
+  const [screening, setScreening] = useState(emptyScreening);
+  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     try {
-      await apiClient.post(`/internal-jobs/${job.slug}/refer`, v);
+      await apiClient.post(`/internal-jobs/${job.slug}/refer`, { ...v, ...screeningPayload(screening) });
       pushSuccess('Thank you, your referral has been sent to the recruitment team');
       onDone();
     } catch (err) { pushError(apiErrorMessage(err, 'Could not send the referral'), 'Referral'); } finally { setBusy(false); }
@@ -30,6 +33,8 @@ function ReferForm({ job, onDone }) {
         <label className="text-xs font-medium text-tertiary-600">Phone<input className={input} value={v.phone} onChange={set('phone')} /></label>
         <label className="text-xs font-medium text-tertiary-600">Experience (years)<input className={input} type="number" min="0" step="0.5" value={v.experience_years} onChange={set('experience_years')} /></label>
       </div>
+      <button type="button" className="text-xs font-medium text-primary-700 hover:underline" onClick={() => setMore((m) => !m)}>{more ? 'Hide details' : 'Add more details if you know them (LinkedIn, CTC, notice period ...)'}</button>
+      {more && <ScreeningFields value={screening} onChange={setScreening} inputCls={input} labelCls="text-xs font-medium text-tertiary-600" />}
       <label className="block text-xs font-medium text-tertiary-600">Why are they a good fit?<textarea className={input} rows={2} value={v.message} onChange={set('message')} /></label>
       <button type="submit" className="btn-primary px-4 py-1.5 text-xs" disabled={busy}>{busy ? 'Sending…' : 'Send referral'}</button>
     </form>

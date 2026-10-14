@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Briefcase, CheckCircle2, MapPin } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
+import ScreeningFields, { emptyScreening, missingScreening, screeningPayload } from '../../components/applicants/ScreeningFields.jsx';
 
 /** Shown on every public jobs page: a LinkedIn / WhatsApp / website link opens this without any login. */
 function Shell({ children }) {
@@ -56,18 +57,22 @@ export default function CareerJobPage() {
   const channel = (sp.get('src') || '').slice(0, 40);
   const [job, setJob] = useState(undefined); // undefined = loading, null = not open
   const [form, setForm] = useState({ name: '', email: '', phone: '', experience_years: '', message: '', company_website: '' });
+  const [screening, setScreening] = useState(emptyScreening);
   const [state, setState] = useState({ busy: false, done: false, error: '' });
   useEffect(() => { apiClient.get(`/public/jobs/${slug}`).then((r) => setJob(r.data.data)).catch(() => setJob(null)); }, [slug]);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function submit(e) {
     e.preventDefault();
+    const missing = missingScreening(screening);
+    if (missing) { setState({ busy: false, done: false, error: missing }); return; }
     setState({ busy: true, done: false, error: '' });
     try {
-      await apiClient.post(`/public/jobs/${slug}/apply`, { ...form, channel: channel || undefined });
+      await apiClient.post(`/public/jobs/${slug}/apply`, { ...form, ...screeningPayload(screening), channel: channel || undefined });
       setState({ busy: false, done: true, error: '' });
     } catch (err) {
-      setState({ busy: false, done: false, error: err.response?.data?.message || 'Could not send your application. Please try again.' });
+      const first = err.response?.data?.errors?.[0]?.message;
+      setState({ busy: false, done: false, error: first || err.response?.data?.message || 'Could not send your application. Please try again.' });
     }
   }
 
@@ -95,9 +100,10 @@ export default function CareerJobPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-sm">Full name *<input className={input} required maxLength={200} value={form.name} onChange={set('name')} /></label>
               <label className="text-sm">Email *<input className={input} type="email" required maxLength={200} value={form.email} onChange={set('email')} /></label>
-              <label className="text-sm">Phone<input className={input} maxLength={40} value={form.phone} onChange={set('phone')} /></label>
+              <label className="text-sm">Phone *<input className={input} required maxLength={40} value={form.phone} onChange={set('phone')} /></label>
               <label className="text-sm">Experience (years)<input className={input} type="number" min="0" max="70" step="0.5" value={form.experience_years} onChange={set('experience_years')} /></label>
             </div>
+            <ScreeningFields value={screening} onChange={setScreening} required inputCls={input} labelCls="text-sm" />
             <label className="block text-sm">Anything you would like to add<textarea className={input} rows={3} maxLength={2000} value={form.message} onChange={set('message')} /></label>
             {/* Honeypot: hidden from people, filled by bots. */}
             <input tabIndex={-1} autoComplete="off" aria-hidden="true" className="hidden" name="company_website" value={form.company_website} onChange={set('company_website')} />

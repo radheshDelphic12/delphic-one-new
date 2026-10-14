@@ -22,7 +22,9 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => { await prisma.$disconnect(); });
 
-const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...body });
+let seq = 0;
+const screening = { phone: '98765 43210', linkedin_url: 'https://www.linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'no', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid' };
+const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...screening, phone: `98765 ${String(20000 + (seq += 1))}`, ...body });
 
 describe('public job link', () => {
   test('slug is the readable title plus 4 characters, and the page is open without login and shows only the public copy', async () => {

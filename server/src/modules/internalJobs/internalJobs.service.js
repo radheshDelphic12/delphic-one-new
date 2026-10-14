@@ -1,20 +1,24 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const applicantsService = require('../applicants/applicants.service');
+const screening = require('../applicants/screening');
 
 // Internal job board: every employee of the master workspace sees the jobs that are published on the website, can refer
 // someone (a friend, an ex-colleague) or apply for one themselves (for example from the bench). Both land in the same applicant
 // pool as website applications - source "referral" or "internal" - so recruiters work one list. No new table.
 
 const OPEN = { status: 'published', requirement: { status: 'in_progress', deleted_at: null } };
+const years = z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional());
 const referSchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(200),
   phone: z.string().trim().max(40).optional().nullable(),
-  experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional()),
+  experience_years: years,
   message: z.string().trim().max(2000).optional().nullable(),
-});
-const applySchema = z.object({ phone: z.string().trim().max(40).optional().nullable(), experience_years: referSchema.shape.experience_years, message: z.string().trim().max(2000).optional().nullable() });
+  // what the referrer knows about the person; all optional
+  ...screening.optionalShape,
+}).superRefine(screening.checkScreening);
+const applySchema = z.object({ phone: z.string().trim().max(40).optional().nullable(), experience_years: years, message: z.string().trim().max(2000).optional().nullable() });
 
 const serialize = (p) => ({ slug: p.slug, title: p.title, department: p.department, location: p.location, employment_type: p.employment_type, description: p.public_description, posted_at: p.created_at });
 
@@ -45,6 +49,7 @@ async function refer(user, slug, body) {
   const r = await applicantsService.addApplicant(user, {
     requirement_id: p.requirement_id, name: d.name, email: d.email, phone: d.phone || '', experience_years: d.experience_years,
     notes: `Referred by ${user.name || user.email}${d.message ? `: ${d.message}` : ''}`, channel: 'referral',
+    ...Object.fromEntries(Object.keys(screening.fields).map((k) => [k, d[k]])),
   }, { source: 'referral' });
   return r.error === 'duplicate_applicant' ? { error: 'already_applied' } : r.error ? { error: 'not_found' } : { ok: true };
 }

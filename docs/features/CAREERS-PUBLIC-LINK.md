@@ -22,3 +22,18 @@ Left menu **Offices** (`/offices`): one card per office location (Ahmedabad, Gur
 Left menu **Internal Jobs** (`/internal-jobs`, Delphic Global employees): the jobs open on the website. **Refer someone** (name, email, phone, experience, why) creates an applicant with source and channel `referral` (notes "Referred by ..."); **Apply myself** creates one with source and channel `internal`. Both land in the recruiters' Applicants pool, the same person is never added twice to one job. API `/api/v1/internal-jobs` (+ `/:slug/refer`, `/:slug/apply`). Not done: suggesting jobs to people whose project is ending (Capacity & Allocation already knows who is free soon) and referral rewards.
 
 Tests: `server/tests/public-jobs.test.js` (4), `server/tests/internal-jobs-offices.test.js` (3).
+
+## 4. Screening questions and filters (2026-10-14)
+
+Migration `20261016100000_applicant_screening` (additive; old applicants keep the new columns empty).
+
+- **What the candidate answers** (public apply page, `ScreeningFields.jsx`): LinkedIn link (required), link to the CV (optional), working somewhere (yes / no), immediate joiner (yes / no / serving notice), notice period (Immediate / 15 / 30 / 60 / 90 / Other days), last working day (required when serving notice), current and expected CTC in LPA, how they can join (remote / on-site / hybrid), other skills. Phone is required too. Required on the public form: phone, LinkedIn, working yes/no, joiner status, notice period, both CTCs, work mode. CV link and skills are optional.
+- The same questions are available, but optional, when a recruiter uses "Add applicant" and when an employee refers someone (behind "Add more details"). Server rules: `server/src/modules/applicants/screening.js` (valid links, last working day while serving notice, an immediate joiner gets notice 0, skills stored lower-case).
+- Stored on `job_applicants`: `linkedin_url, cv_url, currently_working, joiner_status, notice_period_days, last_working_day, current_ctc_lpa, expected_ctc_lpa, work_mode, extra_skills`. When a recruiter claims the applicant, the new Profile gets them (CTC converted from lakh to rupees, CV link as resume, skills as secondary skills).
+- **Filters** (Pipeline > Applicants > Filters, server side, live with the 20 s refresh): joiner status, working now, notice period up to, last working day on or before, work mode, expected CTC from / to, current CTC up to, experience from / to, skill. A person who did not answer a question never matches a filter on it. The table has a Screening column (joiner, notice, LWD, CTC now -> expected, work mode, skills, LinkedIn / CV links).
+- HR role does not see the Applicants tab (it was not visible before); unchanged.
+- Tests: `server/tests/applicant-screening.test.js` (4).
+
+## 5. Reports filters fix (same day)
+
+BDA reports: the account **type** filter now narrows every table (it only narrowed "Accounts brought"): meetings scheduled / converted use the account's type, requirements are client-only, and the drill-downs repeat the same filter. Every open report now refreshes itself every 30 seconds and when the browser tab is shown again (no spinner, a failed refresh keeps the numbers on screen). Checked by partition audits against the local data: the person, account, type, source and sourcer filters of the BDA, Sales, Recruiter and HR reports and Time-to-submit add up to the unfiltered totals. Test: `reports-bda-sales.test.js` (account type case).
