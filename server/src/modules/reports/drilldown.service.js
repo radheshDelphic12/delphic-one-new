@@ -232,7 +232,11 @@ async function meetingEvents(title, q, { converted = false } = {}) {
   const events = await prisma.stageHistory.findMany({ where, orderBy: { changed_at: 'desc' } });
   const accountRows = events.length
     ? await prisma.account.findMany({
-        where: { id: { in: [...new Set(events.map((e) => e.entity_id))] }, ...(converted ? { stage: 'active' } : {}) },
+        where: {
+          id: { in: [...new Set(events.map((e) => e.entity_id))] },
+          ...(converted ? { stage: 'active' } : {}),
+          ...(q.account_type ? { type: q.account_type === 'unclassified' ? null : q.account_type } : {}),
+        },
         include: ACCOUNT_INCLUDE,
       })
     : [];
@@ -330,6 +334,8 @@ const RESOLVERS = {
     }),
   'bda-reports:requirements_brought_counts': (q) => {
     const range = rangeOf(q);
+    // only client accounts have requirements: a vendor / unclassified type filter matches none
+    if (q.account_type && q.account_type !== 'client') return requirements('Requirements from BDA clients', { id: { in: [] } });
     return requirements('Requirements from BDA clients', {
       ...(range ? { created_at: range } : {}),
       account: {

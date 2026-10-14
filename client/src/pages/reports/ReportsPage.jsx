@@ -653,21 +653,35 @@ export default function ReportsPage() {
     return params;
   }
 
-  async function runReport() {
+  // silent = a background refresh: no spinner, and a failed refresh keeps what is on screen instead of blanking it.
+  async function runReport({ silent = false } = {}) {
     const requestId = ++reportRequestId.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const { data } = await apiClient.get(`/reports/${active}`, { params: buildParams() });
       if (requestId !== reportRequestId.current) return;
       setPayload(data.data);
     } catch (err) {
       if (requestId !== reportRequestId.current) return;
+      if (silent) return;
       setPayload(null);
       pushError(apiErrorMessage(err, 'Failed to load report'), 'Something went wrong');
     } finally {
-      if (requestId === reportRequestId.current) setLoading(false);
+      if (requestId === reportRequestId.current && !silent) setLoading(false);
     }
   }
+
+  // Live data: the open report refreshes itself every 30 seconds and when the tab is shown again, with the filters
+  // that are on screen, so the numbers follow what the team is doing without pressing anything.
+  const runReportRef = useRef(runReport);
+  runReportRef.current = runReport;
+  useEffect(() => {
+    if (!available.length) return undefined;
+    const tick = () => { if (document.visibilityState === 'visible') runReportRef.current({ silent: true }); };
+    const timer = setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
+  }, [available.length]);
 
   useEffect(() => {
     if (available.length) runReport();
