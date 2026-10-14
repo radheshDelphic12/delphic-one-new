@@ -35,6 +35,10 @@ Per site and period (same `summarize` / `position` rules): capital invested (per
 
 `.theme-valterra` (maroon `#6B2A2A` from the excavator logo, gold `#C99A2E` accent from the ground line, warm sand surfaces). Logo `client/public/valterra-logo.png`, sidebar/switcher mark `valterra-mark.png`. Charts are line charts only.
 
+## Going live on production (no manual seed)
+
+Migration `20261015100000_valterra_company_registration` registers Valterra Resources as a company of the Delphic holding group and gives the group Super Admin(s) admin access to it, so it appears on the Group Dashboard and in the company switcher like the other companies as soon as the deploy runs. It creates ONLY the company row and that access: no sites, investments, categories, settings or demo data (the company creates those itself). It is idempotent (an existing Valterra company is left untouched) and does nothing on a database without the Delphic company. Test: `server/tests/valterra-registration.test.js`. The `valterra:seed-admin` script is therefore only needed for other databases.
+
 ## Run
 
 `cd server && npx prisma migrate deploy && npm run valterra:seed` (local demo: 5 sites incl. a closed one, site-wise investments, returns, sales, costs, salaries, overheads, projections; logins `admin@ / manager@ / finance@ / staff@valterra.in`, password `Valterra@2026!`). Staging / production: migration `20261015090000_valterra_resources`, then `VALTERRA_ADMIN_EMAIL=<admin> npm run valterra:seed-admin` (non-destructive; with no email every group Super Admin becomes admin). Tests: `server/tests/valterra-workspace.test.js` (10), `valterra-sites.test.js` (6).
