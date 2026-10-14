@@ -573,7 +573,7 @@ export default function RequirementsListPage() {
           headerClassName="bg-[#F9FAFB]"
           striped
           embedded
-          maxHeight="calc(100dvh - 18rem)"
+          maxHeight="max(22rem, calc(100dvh - 18rem))"
         />
       </section>
 

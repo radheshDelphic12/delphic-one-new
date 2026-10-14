@@ -471,7 +471,7 @@ export default function RequirementDetailPage() {
               {requirement.budget_type ? `(${requirement.budget_type.replace(/_/g, ' ')})` : ''}
             </dd>
             <dt className="text-tertiary-500">TAT</dt>
-            <dd className="flex flex-wrap items-center gap-2">
+            <dd className="flex min-w-0 flex-wrap items-center gap-2">
               {requirement.tat?.hours ? (
                 <>
                   <span>{requirement.tat.hours % 24 === 0 ? `${requirement.tat.hours / 24} day(s)` : `${requirement.tat.hours} hours`}</span>

@@ -32,3 +32,5 @@ Signed (active) projects whose start date is still ahead now count as allocated 
 ## Release notes
 
 Nothing is pushed. Migrations apply automatically on Render boot; for production run `prisma migrate deploy`.
+
+Note (2026-10-14): the Requirements list table keeps a minimum height of 22rem (`maxHeight="max(22rem, calc(100dvh - 18rem))"` in `RequirementsListPage.jsx`) so the TAT Active tab never collapses on short screens; the table scrolls inside, the page (`main`) scrolls around it.
