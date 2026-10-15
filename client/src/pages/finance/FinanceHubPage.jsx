@@ -1,3 +1,4 @@
+import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarRange, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -39,7 +40,9 @@ const ADMIN_TABS = [
  * codebase so turning them back on is a small change.
  */
 export default function FinanceHubPage() {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const isAdmin = user?.role === 'admin';
   const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
   const [params, setParams] = useSearchParams();
@@ -47,24 +50,8 @@ export default function FinanceHubPage() {
   const section = tabs.some((t) => t.key === requested) ? requested : 'expenses';
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={section === key}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${
-              section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'
-            }`}
-            onClick={() => setParams({ section: key })}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
+      <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
       {section === 'expenses' && <ExpensesTab />}
       {section === 'projects' && isAdmin && <ProjectsTab />}
       {section === 'month-view' && isAdmin && <MonthProjectsTab />}

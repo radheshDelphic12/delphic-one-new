@@ -1,3 +1,4 @@
+import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
@@ -690,7 +691,9 @@ const ADMIN_TABS = [
  * the backend's own authorize('admin') gating on those endpoints.
  */
 export default function PayrollHubPage() {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const isAdmin = user?.role === 'admin';
   const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
   const [params, setParams] = useSearchParams();
@@ -700,24 +703,8 @@ export default function PayrollHubPage() {
   const [people, setPeople] = useState(EMPTY_PEOPLE_FILTERS);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={section === key}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${
-              section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'
-            }`}
-            onClick={() => setParams({ section: key })}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
+      <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
       {isAdmin && section !== 'my-payslips' && (
         <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Payroll filters">
           <PeopleFilters value={people} onChange={setPeople} />

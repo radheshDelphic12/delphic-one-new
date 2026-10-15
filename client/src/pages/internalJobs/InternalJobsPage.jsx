@@ -5,6 +5,7 @@ import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../../components/ui/Pill.jsx';
+import { useAuth } from '../../lib/authContext.jsx';
 import ScreeningFields, { emptyScreening, screeningPayload } from '../../components/applicants/ScreeningFields.jsx';
 
 const input = 'mt-1 w-full rounded-lg border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none';
@@ -47,7 +48,11 @@ function ReferForm({ job, onDone }) {
  */
 export default function InternalJobsPage() {
   const { pushSuccess, pushError } = useAlerts();
+  const { isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const jobs = useLiveData(() => apiClient.get('/internal-jobs').then((r) => r.data.data), { intervalMs: 60000, deps: [] });
+  const rows = jobs.data || [];
   const [referring, setReferring] = useState(null);
   async function applyMyself(job) {
     try {
@@ -56,24 +61,37 @@ export default function InternalJobsPage() {
       jobs.refresh();
     } catch (err) { pushError(apiErrorMessage(err, 'Could not apply'), 'Internal jobs'); }
   }
-  const rows = jobs.data || [];
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-tertiary-900">Internal jobs</h1>
-        <p className="text-sm text-tertiary-500">Open positions at Delphic. Refer someone you know, or apply yourself if your project is ending.</p>
-      </div>
+    <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
+      {modern ? (
+        <div className="ta-head flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Careers</p>
+            <h1 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Internal jobs</h1>
+            <p className="mt-1 text-sm text-tertiary-500">Open positions at Delphic. Refer someone you know, or apply yourself if your project is ending.</p>
+          </div>
+          <span className="rounded-full border border-primary-100 bg-white px-3 py-1 text-xs font-semibold text-primary-700 shadow-sm">{rows.length} open position{rows.length === 1 ? '' : 's'}</span>
+        </div>
+      ) : (
+        <div>
+          <h1 className="text-xl font-semibold text-tertiary-900">Internal jobs</h1>
+          <p className="text-sm text-tertiary-500">Open positions at Delphic. Refer someone you know, or apply yourself if your project is ending.</p>
+        </div>
+      )}
       <div className="space-y-3">
         {rows.map((j) => (
-          <article key={j.slug} className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card" data-testid="internal-job">
+          <article key={j.slug} className={`rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card ${modern ? 'transition-shadow hover:shadow-cardHover' : ''}`} data-testid="internal-job">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
+              <div className="flex items-start gap-3">
+                {modern && <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Briefcase className="h-5 w-5" /></span>}
+                <div>
                 <h2 className="text-base font-semibold text-tertiary-900">{j.title}</h2>
                 <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-tertiary-500">
                   {j.department && <span className="inline-flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{j.department}</span>}
                   {j.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{j.location}</span>}
                   {j.employment_type && <span>{j.employment_type}</span>}
                 </p>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {j.referrals > 0 && <Pill tone="blue">{j.referrals} referred by you</Pill>}

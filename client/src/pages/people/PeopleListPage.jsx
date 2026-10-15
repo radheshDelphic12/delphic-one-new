@@ -113,7 +113,7 @@ export default function PeopleListPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card md:flex-row md:items-end md:justify-between">
+      <div className="ta-head flex flex-col gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Employee directory</h2>
