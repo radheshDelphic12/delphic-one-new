@@ -32,6 +32,21 @@
     errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  // phone: digits only, at most 10 (a pasted +91 / 0 prefix is dropped)
+  var phoneInput = field('phone');
+  phoneInput.addEventListener('input', function () {
+    var d = phoneInput.value.replace(/\D/g, '');
+    if (d.length > 10) d = d.replace(/^(91|0)(?=\d{10}$)/, '').slice(0, 10);
+    phoneInput.value = d;
+  });
+  var cvInput = field('cv');
+  cvInput.addEventListener('change', function () {
+    var f = cvInput.files[0];
+    var bad = f && (!/\.(pdf|docx?)$/i.test(f.name) ? 'Attach your CV as a PDF, DOC or DOCX file' : f.size > 5 * 1024 * 1024 ? 'Your CV is larger than 5 MB' : '');
+    cvInput.setCustomValidity(bad || '');
+    if (bad) cvInput.reportValidity();
+  });
+
   var params = new URLSearchParams(window.location.search);
   var source = (params.get('src') || '').slice(0, 40);
 
@@ -48,7 +63,6 @@
       message: value('message'),
       company_website: value('company_website'),
       linkedin_url: value('linkedin_url'),
-      cv_url: value('cv_url'),
       currently_working: value('currently_working'),
       joiner_status: value('joiner_status'),
       notice_period_days: notice.value === 'other' ? value('notice_other') : notice.value,
@@ -59,13 +73,16 @@
       extra_skills: value('extra_skills'),
     };
     if (source) payload.channel = source;
+    var data = new FormData();
+    Object.keys(payload).forEach(function (k) { data.append(k, payload[k]); });
+    if (cvInput.files[0]) data.append('cv', cvInput.files[0]);
 
     button.disabled = true;
     button.textContent = 'Sending...';
     fetch(form.getAttribute('data-action'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(payload),
+      headers: { Accept: 'application/json' },
+      body: data,
     })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (body) { return { status: res.status, body: body }; }); })
       .then(function (r) {

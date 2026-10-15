@@ -68,9 +68,20 @@ export function AddApplicantDrawer({ open, requirements, requirementId, onClose,
 
 const lpa = (n) => (n == null ? '—' : `${n} L`);
 
+/** The CV a candidate attached: fetched with the login (the file is never public) and saved from a blob. */
+async function downloadCv(a) {
+  const res = await apiClient.get(`/applicants/${a.id}/cv`, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = a.cv_file_name || `${a.name} CV`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 /** What the candidate said when applying: joiner status, notice, CTC, work mode, links. Older applicants have none of it. */
 function ScreeningSummary({ a }) {
-  if (!a.joiner_status && a.current_ctc_lpa == null && a.expected_ctc_lpa == null && !a.work_mode && !a.linkedin_url && !a.cv_url) return <span className="text-tertiary-400">Not answered</span>;
+  if (!a.joiner_status && a.current_ctc_lpa == null && a.expected_ctc_lpa == null && !a.work_mode && !a.linkedin_url && !a.cv_url && !a.has_cv_file) return <span className="text-tertiary-400">Not answered</span>;
   return (
     <div className="space-y-0.5">
       <p>
@@ -82,7 +93,9 @@ function ScreeningSummary({ a }) {
       {a.extra_skills?.length > 0 && <p className="text-tertiary-500">{a.extra_skills.slice(0, 5).join(', ')}</p>}
       <p>
         {a.linkedin_url && <a className="text-primary-700 hover:underline" href={a.linkedin_url} target="_blank" rel="noreferrer">LinkedIn</a>}
-        {a.linkedin_url && a.cv_url && ' · '}
+        {a.linkedin_url && (a.cv_url || a.has_cv_file) && ' · '}
+        {a.has_cv_file && <button type="button" className="text-primary-700 hover:underline" onClick={() => downloadCv(a)}>CV (file)</button>}
+        {a.has_cv_file && a.cv_url && ' · '}
         {a.cv_url && <a className="text-primary-700 hover:underline" href={a.cv_url} target="_blank" rel="noreferrer">CV</a>}
       </p>
     </div>

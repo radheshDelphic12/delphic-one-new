@@ -28,6 +28,32 @@ const fields = {
 
 const isUrl = (v) => { try { const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`); return Boolean(u.hostname.includes('.')); } catch { return false; } };
 
+/** An Indian mobile number typed any way (+91, 0, spaces, dashes) -> its 10 digits, or null when it is not one. */
+function normalizePhone(v) {
+  let s = String(v || '').replace(/[\s\-().]/g, '');
+  if (/[^\d+]/.test(s)) return null;
+  s = s.replace(/^\+?91(?=\d{10}$)/, '').replace(/^0(?=\d{10}$)/, '');
+  return /^[6-9]\d{9}$/.test(s) ? s : null;
+}
+
+/** A personal LinkedIn profile link only: linkedin.com (or a country sub-domain) with /in/<name> or /pub/<name>. */
+function isLinkedInUrl(v) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    const host = u.hostname.toLowerCase();
+    return (host === 'linkedin.com' || host.endsWith('.linkedin.com')) && /^\/(in|pub)\/[^/]+/i.test(u.pathname);
+  } catch { return false; }
+}
+
+/** One key for a LinkedIn profile so the same person is recognised however the link was typed. */
+function linkedInKey(v) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    const m = u.pathname.match(/^\/(in|pub)\/([^/]+)/i);
+    return m ? decodeURIComponent(m[2]).toLowerCase() : null;
+  } catch { return null; }
+}
+
 /** Optional version (recruiter adds someone by hand, an employee refers someone). */
 const optionalShape = fields;
 
@@ -45,7 +71,7 @@ function requireScreening(d, ctx) {
 
 /** Cross-field rules that hold everywhere. */
 function checkScreening(d, ctx) {
-  if (d.linkedin_url && !isUrl(d.linkedin_url)) ctx.addIssue({ code: 'custom', path: ['linkedin_url'], message: 'Enter a valid LinkedIn link' });
+  if (d.linkedin_url && !isLinkedInUrl(d.linkedin_url)) ctx.addIssue({ code: 'custom', path: ['linkedin_url'], message: 'Enter your LinkedIn profile link (linkedin.com/in/...)' });
   if (d.cv_url && !isUrl(d.cv_url)) ctx.addIssue({ code: 'custom', path: ['cv_url'], message: 'Enter a valid link to your CV' });
   if (d.joiner_status === 'serving_notice' && !d.last_working_day) ctx.addIssue({ code: 'custom', path: ['last_working_day'], message: 'Last working day is required while serving notice' });
 }
@@ -69,4 +95,4 @@ function toColumns(d) {
   };
 }
 
-module.exports = { fields, optionalShape, requireScreening, checkScreening, toColumns, JOINER, WORK_MODES };
+module.exports = { normalizePhone, isLinkedInUrl, linkedInKey, fields, optionalShape, requireScreening, checkScreening, toColumns, JOINER, WORK_MODES };

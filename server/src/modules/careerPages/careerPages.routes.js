@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const env = require('../../config/env');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -74,8 +75,46 @@ router.get('/:slug', asyncHandler(async (req, res) => {
   return html(res, 200, jobPage({ job: r.job, canonical: canonicalFor(`/${r.job.slug}`) }));
 }));
 
-router.post('/:slug/apply', asyncHandler(async (req, res) => {
-  const r = await publicJobs.apply(req.params.slug, req.body, req.params.orgSlug);
+// The CV is optional: PDF / DOC / DOCX up to 5 MB. The form sends multipart; plain JSON (no file) still works.
+fs.mkdirSync(env.uploadDir, { recursive: true });
+const CV_EXT = ['.pdf', '.doc', '.docx'];
+const cvUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, env.uploadDir),
+    filename: (req, file, cb) => cb(null, `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => (CV_EXT.includes(path.extname(file.originalname).toLowerCase()) ? cb(null, true) : cb(new Error('cv_type'))),
+}).single('cv');
+const takeCv = (req, res, next) => cvUpload(req, res, (err) => {
+  if (!err) return next();
+  const tooBig = err.code === 'LIMIT_FILE_SIZE';
+  return res.status(422).json({ success: false, message: tooBig ? 'Your CV is larger than 5 MB' : 'Attach your CV as a PDF, DOC or DOCX file', errors: [{ path: 'cv', message: tooBig ? 'Your CV is larger than 5 MB' : 'Attach your CV as a PDF, DOC or DOCX file' }] });
+});
+
+/** A file really is what its extension says (PDF, old Word, or docx = zip), not a renamed script. */
+function looksLikeCv(file) {
+  const head = Buffer.alloc(8);
+  const fd = fs.openSync(file.path, 'r');
+  try { fs.readSync(fd, head, 0, 8, 0); } finally { fs.closeSync(fd); }
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.pdf') return head.slice(0, 4).toString() === '%PDF';
+  if (ext === '.docx') return head[0] === 0x50 && head[1] === 0x4b;
+  return head[0] === 0xd0 && head[1] === 0xcf;
+}
+
+router.post('/:slug/apply', takeCv, asyncHandler(async (req, res) => {
+  const file = req.file;
+  const drop = () => { if (file) fs.rmSync(file.path, { force: true }); };
+  if (file && !looksLikeCv(file)) {
+    drop();
+    return res.status(422).json({ success: false, message: 'Attach your CV as a PDF, DOC or DOCX file' });
+  }
+  let r;
+  try {
+    r = await publicJobs.apply(req.params.slug, req.body, req.params.orgSlug, file ? { filename: file.filename, name: path.basename(file.originalname).slice(0, 150) } : null);
+  } catch (err) { drop(); throw err; }
+  if (r.error || r.stored === false) drop();
   if (r.error === 'already_applied') return res.status(409).json({ success: false, message: 'You have already applied for this job' });
   if (r.error) return res.status(404).json({ success: false, message: 'This job is no longer open' });
   return res.status(201).json({ success: true, data: { applied: true } });

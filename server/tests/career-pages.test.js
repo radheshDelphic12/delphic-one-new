@@ -97,6 +97,48 @@ describe('careers pages', () => {
     expect((await request(app).get('/api/v1/public/jobs')).body.data.map((j) => j.slug)).toContain(slug);
   });
 
+  test('apply form rules: 10-digit phone, LinkedIn profile only, CV file, one application per person', async () => {
+    const url = `/${orgSlug}/career/${slug}/apply`;
+    const base = { name: 'Rule Tester', email: 'rules@example.com', ...answers, phone: '9876544444', linkedin_url: 'https://www.linkedin.com/in/rule-tester' };
+    const post = (body) => request(app).post(url).send({ ...base, ...body });
+    for (const phone of ['98765', '12345678901', '5876544444', 'abcdefghij']) expect((await post({ phone })).status).toBe(422);
+    for (const linkedin_url of ['https://example.com/in/rule-tester', 'https://www.linkedin.com/company/acme', 'https://notlinkedin.com/in/x']) expect((await post({ linkedin_url })).status).toBe(422);
+    expect(await prisma.jobApplicant.count({ where: { email: 'rules@example.com' } })).toBe(0);
+
+    // multipart with a real PDF: stored, 10-digit phone saved, downloadable by recruiters only
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\n');
+    const sent = await request(app).post(url).field('name', 'Rule Tester').field('email', 'rules@example.com').field('phone', '+91 98765 44444')
+      .field('linkedin_url', 'linkedin.com/in/Rule-Tester').field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
+      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid')
+      .field('message', 'I fit because...')
+      .attach('cv', pdf, 'my cv.pdf');
+    expect(sent.status).toBe(201);
+    const row = await prisma.jobApplicant.findFirst({ where: { email: 'rules@example.com' } });
+    expect(row).toMatchObject({ phone: '9876544444', cv_file_name: 'my cv.pdf', notes: 'I fit because...' });
+    expect(row.cv_file).toMatch(/^cv-.*\.pdf$/);
+    const dl = await authed(request(app).get(`/api/v1/applicants/${row.id}/cv`), rToken);
+    expect(dl.status).toBe(200);
+    expect((await request(app).get(`/api/v1/applicants/${row.id}/cv`)).status).toBe(401);
+
+    // the same person again - by phone only, or by LinkedIn only - is refused, and no stray file is left behind
+    const fs = require('fs');
+    const before = fs.readdirSync(env.uploadDir).length;
+    expect((await post({ email: 'other@example.com', linkedin_url: 'https://www.linkedin.com/in/someone-else' })).status).toBe(409);
+    expect((await post({ email: 'other@example.com', phone: '9123456789' })).status).toBe(409);
+    const again = await request(app).post(url).field('name', 'Rule Tester').field('email', 'rules@example.com').field('phone', '9876544444')
+      .field('linkedin_url', 'https://www.linkedin.com/in/rule-tester').field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
+      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid').attach('cv', pdf, 'cv.pdf');
+    expect(again.status).toBe(409);
+    expect(fs.readdirSync(env.uploadDir).length).toBe(before);
+    // a script renamed to .pdf, and a wrong type, are refused
+    expect((await request(app).post(url).field('name', 'X').field('email', 'x2@example.com').attach('cv', Buffer.from('#!/bin/sh'), 'evil.pdf')).status).toBe(422);
+    expect((await request(app).post(url).field('name', 'X').field('email', 'x3@example.com').attach('cv', Buffer.from('MZ'), 'evil.exe')).status).toBe(422);
+    // two clicks at once make one applicant
+    const twin = { ...base, email: 'twin@example.com', phone: '9000000001', linkedin_url: 'https://www.linkedin.com/in/twin' };
+    const both = await Promise.all([request(app).post(url).send(twin), request(app).post(url).send(twin)]);
+    expect(both.map((r) => r.status).sort()).toEqual([201, 409]);
+  });
+
   test('the canonical link points at the website address once PUBLIC_CAREERS_BASE is set, and the Copy link button learns it', async () => {
     expect((await page(`/${slug}`)).text).not.toContain('rel="canonical"');
     env.publicCareersBase = 'https://delphic.in/career';
@@ -109,6 +151,21 @@ describe('careers pages', () => {
     }
     expect((await authed(request(app).get('/api/v1/applicants/career-base'), rToken)).body.data).toEqual({ base: null });
     expect((await request(app).get('/api/v1/applicants/career-base')).status).toBe(401);
+  });
+
+  test('the phone and LinkedIn pattern attributes compile in current browsers (the v flag) and accept / reject the right values', async () => {
+    const html = (await page(`/${slug}`)).text;
+    const attr = (name) => {
+      const tag = html.match(new RegExp(`<input name="${name}"[^>]*>`))[0];
+      return tag.match(/pattern="([^"]*)"/)[1].replace(/&amp;/g, '&');
+    };
+    const matcher = (name) => new RegExp(`^(?:${attr(name)})$`, 'v'); // browsers compile pattern with the v flag: a bare "-" in a class is an error there
+    const linkedin = matcher('linkedin_url');
+    ['https://www.linkedin.com/in/asha-rao', 'https://in.linkedin.com/in/asha-rao/', 'http://linkedin.com/pub/asha/1/2/3'].forEach((u) => expect(linkedin.test(u)).toBe(true));
+    ['https://www.linkedin.com/company/acme', 'https://example.com/in/someone', 'https://linkedin.com.evil.com/in/x', 'linkedin.com/in/asha'].forEach((u) => expect(linkedin.test(u)).toBe(false));
+    const phone = matcher('phone');
+    expect(phone.test('9876543210')).toBe(true);
+    ['5876543210', '98765', '98765432101'].forEach((n) => expect(phone.test(n)).toBe(false));
   });
 
   test('behind the website proxy the visitor is the first X-Forwarded-For address, so applicants are not limited as one', () => {

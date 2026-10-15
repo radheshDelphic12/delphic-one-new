@@ -71,9 +71,9 @@ function applyForm(slug) {
 <div class="grid">
 <label>Full name *<input name="name" required maxlength="200" autocomplete="name"></label>
 <label>Email *<input name="email" type="email" required maxlength="200" autocomplete="email"></label>
-<label>Phone *<input name="phone" type="tel" required maxlength="40" autocomplete="tel"></label>
-<label>LinkedIn profile link *<input name="linkedin_url" type="url" required maxlength="300" placeholder="https://www.linkedin.com/in/..."></label>
-<label>Link to your CV (Drive, Dropbox ...)<input name="cv_url" type="url" maxlength="500" placeholder="https://..."></label>
+<label>Phone *<input name="phone" type="tel" required inputmode="numeric" maxlength="14" pattern="[6-9][0-9]{9}" title="10-digit mobile number" placeholder="10-digit mobile number" autocomplete="tel-national"></label>
+<label>LinkedIn profile link *<input name="linkedin_url" type="url" required maxlength="300" pattern="https?://([a-zA-Z0-9\\-]+[.])?linkedin[.]com/(in|pub)/.+" title="Your LinkedIn profile link, e.g. https://www.linkedin.com/in/yourname" placeholder="https://www.linkedin.com/in/..."></label>
+<label>Attach your CV (PDF, DOC or DOCX, up to 5 MB)<input name="cv" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
 <label>Are you working somewhere? *<select name="currently_working" required><option value="">Choose...</option><option value="yes">Yes</option><option value="no">No</option></select></label>
 <label>Immediate joiner? *<select name="joiner_status" required><option value="">Choose...</option><option value="yes">Yes</option><option value="no">No</option><option value="serving_notice">Serving notice</option></select></label>
 <label>Notice period *<select name="notice_choice" required><option value="">Choose...</option>${opt(NOTICE)}</select></label>
@@ -83,7 +83,7 @@ function applyForm(slug) {
 <label>Expected CTC (LPA) *<input name="expected_ctc_lpa" type="number" min="0" step="0.1" required placeholder="e.g. 12"></label>
 <label>How can you join? *<select name="work_mode" required><option value="">Choose...</option><option value="remote">Remote</option><option value="onsite">On-site</option><option value="hybrid">Hybrid</option></select></label>
 <label class="wide">Other skills you have experience in, apart from this job<input name="extra_skills" maxlength="500" placeholder="e.g. React, Node.js, AWS"></label>
-<label class="wide">Anything you would like to add<textarea name="message" rows="3" maxlength="2000"></textarea></label>
+<label class="wide">Why you are fit for this role<textarea name="message" rows="3" maxlength="2000"></textarea></label>
 <div class="hp" aria-hidden="true"><label>Company website<input name="company_website" tabindex="-1" autocomplete="off"></label></div>
 </div>
 <p style="margin-top:16px"><button type="submit">Submit application</button></p>

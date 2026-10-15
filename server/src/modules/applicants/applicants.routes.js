@@ -3,6 +3,8 @@ const { authenticate, authorize } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, fail } = require('../../utils/response');
+const path = require('path');
+const fs = require('fs');
 const env = require('../../config/env');
 const service = require('./applicants.service');
 
@@ -39,6 +41,15 @@ router.get(
   })
 );
 router.post('/', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.addApplicant(req.user, req.body), 'applicant', 201)));
+// The CV a candidate attached on the public apply form. Only recruiters / sales / admins of the master workspace get it.
+router.get('/:id/cv', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => {
+  const cv = await service.cvFileOf(req.params.id);
+  const root = path.resolve(env.uploadDir);
+  if (!cv || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(cv.filename) || !fs.existsSync(path.join(root, cv.filename))) return fail(res, 404, 'No CV attached');
+  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.attachment(cv.name.replace(/[^A-Za-z0-9 ._-]/g, '') || cv.filename);
+  return res.sendFile(cv.filename, { root, dotfiles: 'deny' });
+}));
 router.post('/:id/assign', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.assign(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/release', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.release(req.user, req.params.id), 'applicant')));
 router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id))));

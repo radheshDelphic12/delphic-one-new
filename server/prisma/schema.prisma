@@ -760,20 +760,20 @@ model AttendanceRecord {
 }
 
 model LeaveType {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id       String   @db.Uuid
-  org          Org      @relation(fields: [org_id], references: [id])
-  name         String
-  paid         Boolean  @default(true)
-  annual_quota Int?
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @db.Uuid
+  org                Org      @relation(fields: [org_id], references: [id])
+  name               String
+  paid               Boolean  @default(true)
+  annual_quota       Int?
   // Admin / HR configuration: is the type offered at all, does it count against a balance
   // (false = excluded from the balance, taken without a cap), and does a request beyond
   // the remaining balance spill over into Unpaid Leave for salary.
-  is_applicable      Boolean @default(true)
-  counts_in_balance  Boolean @default(true)
-  overflow_to_unpaid Boolean @default(false)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @default(now()) @updatedAt
+  is_applicable      Boolean  @default(true)
+  counts_in_balance  Boolean  @default(true)
+  overflow_to_unpaid Boolean  @default(false)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
 
   balances LeaveBalance[]
   requests LeaveRequest[]
@@ -895,23 +895,23 @@ model TimesheetEntry {
 // `approved` row's hours are paid as OT by payroll (capped to the approved
 // excess); `pending` shows as projected, `comp_off` earns time off instead.
 model TimesheetDayOvertime {
-  id                String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String                  @db.Uuid
-  org               Org                     @relation(fields: [org_id], references: [id])
-  org_membership_id String                  @db.Uuid
-  org_membership    OrgMembership           @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
-  date              DateTime                @db.Date
-  hours             Decimal                 @db.Decimal(4, 1)
-  status            TimesheetOvertimeStatus @default(pending)
-  decided_by        String?                 @db.Uuid
-  decider           User?                   @relation(fields: [decided_by], references: [id])
-  decided_at        DateTime?
-  decision_reason   String?
+  id                  String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String                  @db.Uuid
+  org                 Org                     @relation(fields: [org_id], references: [id])
+  org_membership_id   String                  @db.Uuid
+  org_membership      OrgMembership           @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date                DateTime                @db.Date
+  hours               Decimal                 @db.Decimal(4, 1)
+  status              TimesheetOvertimeStatus @default(pending)
+  decided_by          String?                 @db.Uuid
+  decider             User?                   @relation(fields: [decided_by], references: [id])
+  decided_at          DateTime?
+  decision_reason     String?
   // First step of the approval chain (the admin still has to decide when Org.timesheet_admin_approval is on).
-  manager_approved_by String?  @db.Uuid
+  manager_approved_by String?                 @db.Uuid
   manager_approved_at DateTime?
-  created_at        DateTime                @default(now())
-  updated_at        DateTime                @default(now()) @updatedAt
+  created_at          DateTime                @default(now())
+  updated_at          DateTime                @default(now()) @updatedAt
 
   @@unique([org_membership_id, date])
   @@index([org_id, date])
@@ -923,27 +923,27 @@ model TimesheetDayOvertime {
 // admin) approves it. Approved hours are paid as OT (hours x hourly rate x multiplier) and, when the
 // ticket names a project that bills overtime, billed to the client. Never derived from timesheet hours.
 model OvertimeTicket {
-  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String        @db.Uuid
-  org               Org           @relation(fields: [org_id], references: [id])
-  org_membership_id String        @db.Uuid
-  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
-  date              DateTime      @db.Date
-  hours             Decimal       @db.Decimal(4, 2)
-  account_id        String?       @db.Uuid
-  account           Account?      @relation(fields: [account_id], references: [id])
-  reason            String
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String        @db.Uuid
+  org                 Org           @relation(fields: [org_id], references: [id])
+  org_membership_id   String        @db.Uuid
+  org_membership      OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date                DateTime      @db.Date
+  hours               Decimal       @db.Decimal(4, 2)
+  account_id          String?       @db.Uuid
+  account             Account?      @relation(fields: [account_id], references: [id])
+  reason              String
   // pending -> approved | rejected (manager / admin); pending -> cancelled (the employee).
-  status            String        @default("pending")
-  decided_by        String?       @db.Uuid
-  decider           User?         @relation("OvertimeTicketDecidedBy", fields: [decided_by], references: [id])
-  decided_at        DateTime?
-  decision_reason   String?
+  status              String        @default("pending")
+  decided_by          String?       @db.Uuid
+  decider             User?         @relation("OvertimeTicketDecidedBy", fields: [decided_by], references: [id])
+  decided_at          DateTime?
+  decision_reason     String?
   // Status 'manager_approved' = the manager approved, the admin still has to (see Org.timesheet_admin_approval).
-  manager_approved_by String?     @db.Uuid
+  manager_approved_by String?       @db.Uuid
   manager_approved_at DateTime?
-  created_at        DateTime      @default(now())
-  updated_at        DateTime      @default(now()) @updatedAt
+  created_at          DateTime      @default(now())
+  updated_at          DateTime      @default(now()) @updatedAt
 
   events OvertimeTicketEvent[]
 
@@ -975,14 +975,14 @@ model OvertimeTicketEvent {
 // workflow). Previous-month timesheets are expected to be locked by the 5th of the next month;
 // the lock is manual. Unlock = reopen (audited with a reason).
 model TimesheetMonthLock {
-  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String        @db.Uuid
-  org               Org           @relation(fields: [org_id], references: [id])
-  org_membership_id String        @db.Uuid
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org               Org      @relation(fields: [org_id], references: [id])
+  org_membership_id String   @db.Uuid
   period_month      Int
   period_year       Int
-  locked_by         String        @db.Uuid
-  locked_at         DateTime      @default(now())
+  locked_by         String   @db.Uuid
+  locked_at         DateTime @default(now())
 
   @@unique([org_membership_id, period_year, period_month])
   @@index([org_id, period_year, period_month])
@@ -1042,30 +1042,30 @@ model TimesheetLock {
 // approval, not trusted as an arbitrary write) so the ticket records
 // exactly what was asked for even before it's decided.
 model TimesheetRegularizationTicket {
-  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                  String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   // Null for a "missed the weekly deadline" request where no entry exists yet
   // — approval then CREATES the entry from date/account/target_hours below.
-  timesheet_entry_id String?                    @db.Uuid
-  timesheet_entry    TimesheetEntry?            @relation(fields: [timesheet_entry_id], references: [id], onDelete: Cascade)
-  org_id             String?                    @db.Uuid
-  org_membership_id  String?                    @db.Uuid
-  org_membership     OrgMembership?             @relation("RegularizationMembership", fields: [org_membership_id], references: [id])
-  date               DateTime?                  @db.Date
-  account_id         String?                    @db.Uuid
-  account            Account?                   @relation("RegularizationAccount", fields: [account_id], references: [id])
-  target_hours       Decimal?                   @db.Decimal(4, 1)
-  requested_by       String                     @db.Uuid
-  requester          User                       @relation("RegularizationRequestedBy", fields: [requested_by], references: [id])
-  requested_change   Json
-  reason             String
-  status             RegularizationTicketStatus @default(pending)
-  decided_by         String?                    @db.Uuid
-  decider            User?                      @relation("RegularizationDecidedBy", fields: [decided_by], references: [id])
-  decided_at         DateTime?
-  manager_approved_by String?                   @db.Uuid
+  timesheet_entry_id  String?                    @db.Uuid
+  timesheet_entry     TimesheetEntry?            @relation(fields: [timesheet_entry_id], references: [id], onDelete: Cascade)
+  org_id              String?                    @db.Uuid
+  org_membership_id   String?                    @db.Uuid
+  org_membership      OrgMembership?             @relation("RegularizationMembership", fields: [org_membership_id], references: [id])
+  date                DateTime?                  @db.Date
+  account_id          String?                    @db.Uuid
+  account             Account?                   @relation("RegularizationAccount", fields: [account_id], references: [id])
+  target_hours        Decimal?                   @db.Decimal(4, 1)
+  requested_by        String                     @db.Uuid
+  requester           User                       @relation("RegularizationRequestedBy", fields: [requested_by], references: [id])
+  requested_change    Json
+  reason              String
+  status              RegularizationTicketStatus @default(pending)
+  decided_by          String?                    @db.Uuid
+  decider             User?                      @relation("RegularizationDecidedBy", fields: [decided_by], references: [id])
+  decided_at          DateTime?
+  manager_approved_by String?                    @db.Uuid
   manager_approved_at DateTime?
-  decision_reason    String?
-  created_at         DateTime                   @default(now())
+  decision_reason     String?
+  created_at          DateTime                   @default(now())
 
   @@index([timesheet_entry_id])
   @@index([org_id, status])
@@ -1304,39 +1304,39 @@ enum ProjectResourceType {
 // ADDITIONAL cost layer on top of a person's existing salary cost
 // (DailyEmployeeProfitability), not a replacement — see computeDayForOrg.
 model ProjectMemberAssignment {
-  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String              @db.Uuid
-  org                Org                 @relation(fields: [org_id], references: [id])
-  account_id         String              @db.Uuid
-  account            Account             @relation(fields: [account_id], references: [id])
-  org_membership_id  String              @db.Uuid
-  org_membership     OrgMembership       @relation(fields: [org_membership_id], references: [id])
+  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String              @db.Uuid
+  org                    Org                 @relation(fields: [org_id], references: [id])
+  account_id             String              @db.Uuid
+  account                Account             @relation(fields: [account_id], references: [id])
+  org_membership_id      String              @db.Uuid
+  org_membership         OrgMembership       @relation(fields: [org_membership_id], references: [id])
   // Optional: an assignment is first an ALLOCATION (Employee <-> Project),
   // a cost rate is an extra layer set only where a per-project pay rate exists.
-  cost_rate_per_hr   Decimal?            @db.Decimal(10, 2)
+  cost_rate_per_hr       Decimal?            @db.Decimal(10, 2)
   // Only company_employee is offered in the UI for now; the other two are
   // schema-ready for contractors / vendor resources.
-  resource_type      ProjectResourceType @default(company_employee)
+  resource_type          ProjectResourceType @default(company_employee)
   // Share of this person's monthly cost (salary, or vendor rate for a
   // contractor) charged to this project. Null = split evenly across all of
   // the person's project assignments (see projectPnl.service).
-  allocation_percent Decimal?            @db.Decimal(5, 2)
+  allocation_percent     Decimal?            @db.Decimal(5, 2)
   // Hours a day this person can bill the client on this project (client / project timesheet).
   // Separate from allocation_percent (a share of the person's COST, never above 100% in total),
   // so one person can be 8h on project A and 8h on project B. A project's daily cap is the sum
   // over its allocated people (timesheets/projectDay.service.js).
-  billable_hours_per_day Decimal         @default(8) @db.Decimal(4, 2)
+  billable_hours_per_day Decimal             @default(8) @db.Decimal(4, 2)
   // Effective period of this allocation (both inclusive). An allocation is a
   // span of days, never "the current project": moving someone ends one row
   // and starts another, so any past date still resolves to what applied then.
   // start_date null = from the project's start; end_date null = open-ended.
   // The same person can hold several rows for one project (left, came back).
-  start_date         DateTime?           @db.Date
-  end_date           DateTime?           @db.Date
-  created_by         String              @db.Uuid
-  creator            User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
-  created_at         DateTime            @default(now())
-  updated_at         DateTime            @default(now()) @updatedAt
+  start_date             DateTime?           @db.Date
+  end_date               DateTime?           @db.Date
+  created_by             String              @db.Uuid
+  creator                User                @relation("ProjectMemberAssignmentCreatedBy", fields: [created_by], references: [id])
+  created_at             DateTime            @default(now())
+  updated_at             DateTime            @default(now()) @updatedAt
 
   @@index([account_id, org_membership_id])
   @@index([org_membership_id, start_date])
@@ -1806,6 +1806,7 @@ model OrgGroup {
   group_tasks           GroupTask[]
   group_company_days    GroupCompanyDay[]
   group_travel          GroupTravel[]
+  legal_entities        LegalEntity[]
 
   @@map("org_groups")
 }
@@ -1827,15 +1828,15 @@ model OrgGroupMembership {
 }
 
 model Org {
-  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id          String    @db.Uuid
-  org_group             OrgGroup  @relation(fields: [org_group_id], references: [id])
-  name                  String
-  slug                  String    @unique
-  logo_url              String?
-  timezone              String    @default("Asia/Kolkata")
-  default_currency      Currency  @default(INR)
-  status                OrgStatus @default(active)
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id               String    @db.Uuid
+  org_group                  OrgGroup  @relation(fields: [org_group_id], references: [id])
+  name                       String
+  slug                       String    @unique
+  logo_url                   String?
+  timezone                   String    @default("Asia/Kolkata")
+  default_currency           Currency  @default(INR)
+  status                     OrgStatus @default(active)
   // True only for Delphic Global. Gates the recruitment pipeline
   // (accounts/requirements/profiles/submissions/pipeline), Reports,
   // Analytics, and Financials — the strategic/recruitment layer that other
@@ -1843,41 +1844,41 @@ model Org {
   // Finance/Calendar) stays available to every org regardless of this flag.
   // Defaults false (fail-closed for new orgs); backfilled true for
   // slug='delphic' by this column's own migration.
-  is_master_workspace   Boolean   @default(false)
+  is_master_workspace        Boolean   @default(false)
   // Manually set by a group superadmin (Phase 3 group dashboard) — no
   // valuation methodology exists yet, so this is an admin-entered figure,
   // not a computed one. Null until set.
-  valuation             Decimal?  @db.Decimal(16, 2)
+  valuation                  Decimal?  @db.Decimal(16, 2)
   // Dynamic valuation (Super Admin dashboard): 'manual' keeps the figure
   // above; 'revenue_multiple' / 'ebitda_multiple' compute one from live
   // financials x valuation_multiple (a default per method applies when null).
-  valuation_method      String    @default("manual")
-  valuation_multiple    Decimal?  @db.Decimal(8, 2)
+  valuation_method           String    @default("manual")
+  valuation_multiple         Decimal?  @db.Decimal(8, 2)
   // Feature switches for the vertical modules a company uses — 'trading',
   // 'leads', 'contracts', 'projects'. Core ERP is always on. Drives the
   // sidebar and is enforced by requireModule() on the vertical APIs.
-  enabled_modules       String[]  @default([])
+  enabled_modules            String[]  @default([])
   // People → Capacity: how many concurrent projects one resource can carry.
   // A team's capacity = its active members × this (or the team's override).
-  projects_per_resource Decimal   @default(1.5) @db.Decimal(4, 2)
+  projects_per_resource      Decimal   @default(1.5) @db.Decimal(4, 2)
   // Timesheet / OT approval chain: Employee -> Manager (optional) -> Admin (mandatory).
   // timesheet_manager_approval = false skips the manager step (the admin decides directly).
   // timesheet_admin_approval = true means a manager approval is only a first step: the entry
   // is final (feeds pay and billing) only once an admin approves it.
-  timesheet_manager_approval Boolean  @default(true)
-  timesheet_admin_approval   Boolean  @default(true)
+  timesheet_manager_approval Boolean   @default(true)
+  timesheet_admin_approval   Boolean   @default(true)
   // Financial lock stages run in order: timesheets locked -> calculations locked -> financials locked.
   // true = a calculation cannot be locked while the month's timesheets are open, and the month's
   // financials cannot be locked while calculations are still open.
-  enforce_lock_order         Boolean  @default(true)
-  created_at            DateTime  @default(now())
-  updated_at            DateTime  @default(now()) @updatedAt
+  enforce_lock_order         Boolean   @default(true)
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @default(now()) @updatedAt
 
-  lock_audits           LockAudit[]
-  salary_adjustments    SalaryAdjustment[]
-  salary_payments       SalaryPayment[]
-  timesheet_month_locks TimesheetMonthLock[]
-  resource_billing_rates ResourceBillingRate[]
+  lock_audits             LockAudit[]
+  salary_adjustments      SalaryAdjustment[]
+  salary_payments         SalaryPayment[]
+  timesheet_month_locks   TimesheetMonthLock[]
+  resource_billing_rates  ResourceBillingRate[]
   memberships             OrgMembership[]
   team_membership_periods TeamMembershipPeriod[]
 
@@ -1896,98 +1897,98 @@ model Org {
   resource_mappings  ResourceMapping[]
 
   // Zephyr Infrastructure workspace (standalone Zx* module).
-  zx_settings   ZxSetting[]
-  zx_asset_values ZxAssetValue[]
-  zx_service_types ZxServiceType[]
-  zx_properties ZxProperty[]
-  zx_property_units ZxPropertyUnit[]
-  zx_property_loans ZxPropertyLoan[]
-  zx_property_valuations ZxPropertyValuation[]
-  zx_property_events ZxPropertyEvent[]
-  zx_tenants    ZxTenant[]
-  zx_leases     ZxLease[]
-  zx_rent_dues  ZxRentDue[]
-  zx_rent_payments ZxRentPayment[]
-  zx_property_sales ZxPropertySale[]
-  zx_tasks      ZxTask[]
-  zx_categories ZxCategory[]
-  zx_audit      ZxAudit[]
-  zx_people     ZxPerson[]
-  gx_settings GxSetting[]
-  gx_categories GxCategory[]
-  gx_units GxUnit[]
-  gx_trading_types GxTradingType[]
-  gx_audit GxAudit[]
-  gx_people GxPerson[]
-  gx_parties GxParty[]
-  gx_documents GxDocument[]
-  gx_leads GxLead[]
-  gx_lead_activities GxLeadActivity[]
-  gx_deals GxDeal[]
-  gx_purchases GxPurchase[]
-  gx_sales GxSale[]
-  gx_payments GxPayment[]
-  gx_ledger_entries GxLedgerEntry[]
-  gx_tasks GxTask[]
-  gx_period_closes GxPeriodClose[]
-  gx_asset_values  GxAssetValue[]
-  ax_settings AxSetting[]
-  ax_categories AxCategory[]
-  ax_audit AxAudit[]
-  ax_people AxPerson[]
-  ax_parties AxParty[]
-  ax_documents AxDocument[]
-  ax_leads AxLead[]
-  ax_lead_activities AxLeadActivity[]
-  ax_deals AxDeal[]
-  ax_ledger_entries AxLedgerEntry[]
-  ax_investments AxInvestment[]
+  zx_settings                ZxSetting[]
+  zx_asset_values            ZxAssetValue[]
+  zx_service_types           ZxServiceType[]
+  zx_properties              ZxProperty[]
+  zx_property_units          ZxPropertyUnit[]
+  zx_property_loans          ZxPropertyLoan[]
+  zx_property_valuations     ZxPropertyValuation[]
+  zx_property_events         ZxPropertyEvent[]
+  zx_tenants                 ZxTenant[]
+  zx_leases                  ZxLease[]
+  zx_rent_dues               ZxRentDue[]
+  zx_rent_payments           ZxRentPayment[]
+  zx_property_sales          ZxPropertySale[]
+  zx_tasks                   ZxTask[]
+  zx_categories              ZxCategory[]
+  zx_audit                   ZxAudit[]
+  zx_people                  ZxPerson[]
+  gx_settings                GxSetting[]
+  gx_categories              GxCategory[]
+  gx_units                   GxUnit[]
+  gx_trading_types           GxTradingType[]
+  gx_audit                   GxAudit[]
+  gx_people                  GxPerson[]
+  gx_parties                 GxParty[]
+  gx_documents               GxDocument[]
+  gx_leads                   GxLead[]
+  gx_lead_activities         GxLeadActivity[]
+  gx_deals                   GxDeal[]
+  gx_purchases               GxPurchase[]
+  gx_sales                   GxSale[]
+  gx_payments                GxPayment[]
+  gx_ledger_entries          GxLedgerEntry[]
+  gx_tasks                   GxTask[]
+  gx_period_closes           GxPeriodClose[]
+  gx_asset_values            GxAssetValue[]
+  ax_settings                AxSetting[]
+  ax_categories              AxCategory[]
+  ax_audit                   AxAudit[]
+  ax_people                  AxPerson[]
+  ax_parties                 AxParty[]
+  ax_documents               AxDocument[]
+  ax_leads                   AxLead[]
+  ax_lead_activities         AxLeadActivity[]
+  ax_deals                   AxDeal[]
+  ax_ledger_entries          AxLedgerEntry[]
+  ax_investments             AxInvestment[]
   ax_investment_realisations AxInvestmentRealisation[]
-  ax_assets AxAsset[]
-  ax_tasks AxTask[]
-  ax_salaries AxSalary[]
-  ax_period_closes AxPeriodClose[]
-  ax_valuation_history AxValuationHistory[]
-  fx_settings FxSetting[]
-  fx_categories FxCategory[]
-  fx_audit FxAudit[]
-  fx_people FxPerson[]
-  fx_campaigns FxCampaign[]
-  fx_campaign_plans FxCampaignPlan[]
-  fx_budget_history FxBudgetHistory[]
-  fx_entries FxEntry[]
-  fx_period_closes FxPeriodClose[]
-  zk_settings ZkSetting[]
-  zk_categories ZkCategory[]
-  zk_audit ZkAudit[]
-  zk_people ZkPerson[]
-  zk_investments ZkInvestment[]
-  zk_returns ZkReturn[]
-  zk_entries ZkEntry[]
-  zk_projections ZkProjection[]
-  zk_period_closes ZkPeriodClose[]
-  vt_settings VtSetting[]
-  vt_categories VtCategory[]
-  vt_audit VtAudit[]
-  vt_people VtPerson[]
-  vt_sites VtSite[]
-  vt_investments VtInvestment[]
-  vt_returns VtReturn[]
-  vt_entries VtEntry[]
-  vt_projections VtProjection[]
-  vt_period_closes VtPeriodClose[]
-  zx_parties    ZxParty[]
-  zx_documents  ZxDocument[]
-  zx_leads      ZxLead[]
-  zx_lead_activities ZxLeadActivity[]
-  zx_projects   ZxProject[]
-  zx_milestones ZxMilestone[]
-  zx_work_orders ZxWorkOrder[]
-  zx_assignments ZxAssignment[]
-  zx_salary_records ZxSalaryRecord[]
-  zx_ledger_entries ZxLedgerEntry[]
-  zx_plans      ZxPlan[]
-  zx_period_closes ZxPeriodClose[]
+  ax_assets                  AxAsset[]
+  ax_tasks                   AxTask[]
+  ax_salaries                AxSalary[]
+  ax_period_closes           AxPeriodClose[]
+  ax_valuation_history       AxValuationHistory[]
+  fx_settings                FxSetting[]
+  fx_categories              FxCategory[]
+  fx_audit                   FxAudit[]
+  fx_people                  FxPerson[]
+  fx_campaigns               FxCampaign[]
+  fx_campaign_plans          FxCampaignPlan[]
+  fx_budget_history          FxBudgetHistory[]
+  fx_entries                 FxEntry[]
+  fx_period_closes           FxPeriodClose[]
+  zk_settings                ZkSetting[]
+  zk_categories              ZkCategory[]
+  zk_audit                   ZkAudit[]
+  zk_people                  ZkPerson[]
+  zk_investments             ZkInvestment[]
+  zk_returns                 ZkReturn[]
+  zk_entries                 ZkEntry[]
+  zk_projections             ZkProjection[]
+  zk_period_closes           ZkPeriodClose[]
+  vt_settings                VtSetting[]
+  vt_categories              VtCategory[]
+  vt_audit                   VtAudit[]
+  vt_people                  VtPerson[]
+  vt_sites                   VtSite[]
+  vt_investments             VtInvestment[]
+  vt_returns                 VtReturn[]
+  vt_entries                 VtEntry[]
+  vt_projections             VtProjection[]
+  vt_period_closes           VtPeriodClose[]
+  zx_parties                 ZxParty[]
+  zx_documents               ZxDocument[]
+  zx_leads                   ZxLead[]
+  zx_lead_activities         ZxLeadActivity[]
+  zx_projects                ZxProject[]
+  zx_milestones              ZxMilestone[]
+  zx_work_orders             ZxWorkOrder[]
+  zx_assignments             ZxAssignment[]
+  zx_salary_records          ZxSalaryRecord[]
+  zx_ledger_entries          ZxLedgerEntry[]
+  zx_plans                   ZxPlan[]
+  zx_period_closes           ZxPeriodClose[]
 
   // Backfilled onto every existing tenant-scoped table in this same
   // migration (nullable — Phase 1 flips these to NOT NULL once app code
@@ -2065,6 +2066,10 @@ model Org {
   // Marketing website control (Apps Script bridge, see modules/website).
   website_job_postings WebsiteJobPosting[]
   website_submissions  WebsiteSubmission[]
+
+  // Group cash: the legal entity this workspace is (if any) and the wallets it owns.
+  legal_entity_links LegalEntity[]
+  owned_wallets      Wallet[]
 
   @@index([org_group_id])
   @@map("orgs")
@@ -2490,35 +2495,37 @@ model Requirement {
 // pool; the first recruiter to claim an applicant owns them (first come, first served). Claiming creates (or reuses) the
 // candidate Profile, so one person applying to two requirements stays one Profile.
 model JobApplicant {
-  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  requirement_id   String      @db.Uuid
-  requirement      Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
-  name             String
-  email            String?
-  phone            String?
-  experience_years Decimal?    @db.Decimal(4, 1)
-  source           String      @default("website") // website | manual | referral
-  channel          String? // where the applicant came from: linkedin | website | whatsapp | referral | other
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirement_id     String      @db.Uuid
+  requirement        Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  name               String
+  email              String?
+  phone              String?
+  experience_years   Decimal?    @db.Decimal(4, 1)
+  source             String      @default("website") // website | manual | referral
+  channel            String? // where the applicant came from: linkedin | website | whatsapp | referral | other
   // Screening answers (all optional for old rows; the public apply form requires most of them)
   linkedin_url       String?
   cv_url             String?
+  cv_file            String? // stored file name of the CV the candidate attached (served only to recruiters)
+  cv_file_name       String? // the name it had on the candidate's computer
   currently_working  Boolean?
   joiner_status      String? // yes (immediate) | no | serving_notice
   notice_period_days Int?
-  last_working_day   DateTime? @db.Date
-  current_ctc_lpa    Decimal?  @db.Decimal(7, 2)
-  expected_ctc_lpa   Decimal?  @db.Decimal(7, 2)
+  last_working_day   DateTime?   @db.Date
+  current_ctc_lpa    Decimal?    @db.Decimal(7, 2)
+  expected_ctc_lpa   Decimal?    @db.Decimal(7, 2)
   work_mode          String? // remote | onsite | hybrid
-  extra_skills       String[]  @default([])
-  status           String      @default("new") // new | assigned | rejected
-  assigned_to      String?     @db.Uuid
-  assigned_at      DateTime?
-  profile_id       String?     @db.Uuid
-  notes            String?
-  applied_at       DateTime    @default(now())
-  created_by       String?     @db.Uuid
-  created_at       DateTime    @default(now())
-  updated_at       DateTime    @default(now()) @updatedAt
+  extra_skills       String[]    @default([])
+  status             String      @default("new") // new | assigned | rejected
+  assigned_to        String?     @db.Uuid
+  assigned_at        DateTime?
+  profile_id         String?     @db.Uuid
+  notes              String?
+  applied_at         DateTime    @default(now())
+  created_by         String?     @db.Uuid
+  created_at         DateTime    @default(now())
+  updated_at         DateTime    @default(now()) @updatedAt
 
   @@index([requirement_id, status])
   @@index([assigned_to])
@@ -3527,15 +3534,15 @@ model ZxSetting {
 
 // Admin-editable revenue / expense categories (not hard-coded).
 model ZxCategory {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id     String    @db.Uuid
-  org        Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String          @db.Uuid
+  org        Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
   kind       String // revenue | expense
   name       String
-  active     Boolean   @default(true)
-  sort_order Int       @default(0)
-  created_at DateTime  @default(now())
-  updated_at DateTime  @default(now()) @updatedAt
+  active     Boolean         @default(true)
+  sort_order Int             @default(0)
+  created_at DateTime        @default(now())
+  updated_at DateTime        @default(now()) @updatedAt
   deleted_at DateTime?
   entries    ZxLedgerEntry[]
 
@@ -3568,30 +3575,30 @@ model ZxAudit {
 // access_role: manager | staff | none. Org-membership admins are Zephyr
 // admins regardless of this row.
 model ZxPerson {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  name        String
-  user_id     String?   @db.Uuid
-  user        User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  access_role String    @default("none")
-  active      Boolean   @default(true)
-  kind        String    @default("employee")
-  designation String?
-  phone       String?
-  email       String?
-  joining_date DateTime? @db.Date
-  leaving_date DateTime? @db.Date
-  pay_basis   String?
-  rate        Decimal?  @db.Decimal(14, 2)
-  vendor_party_id String? @db.Uuid
-  vendor_party ZxParty? @relation(fields: [vendor_party_id], references: [id], onDelete: SetNull)
-  notes       String?
-  assignments ZxAssignment[]
-  salary_records ZxSalaryRecord[]
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @default(now()) @updatedAt
-  deleted_at  DateTime?
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String           @db.Uuid
+  org             Org              @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name            String
+  user_id         String?          @db.Uuid
+  user            User?            @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role     String           @default("none")
+  active          Boolean          @default(true)
+  kind            String           @default("employee")
+  designation     String?
+  phone           String?
+  email           String?
+  joining_date    DateTime?        @db.Date
+  leaving_date    DateTime?        @db.Date
+  pay_basis       String?
+  rate            Decimal?         @db.Decimal(14, 2)
+  vendor_party_id String?          @db.Uuid
+  vendor_party    ZxParty?         @relation(fields: [vendor_party_id], references: [id], onDelete: SetNull)
+  notes           String?
+  assignments     ZxAssignment[]
+  salary_records  ZxSalaryRecord[]
+  created_at      DateTime         @default(now())
+  updated_at      DateTime         @default(now()) @updatedAt
+  deleted_at      DateTime?
 
   @@unique([org_id, user_id])
   @@index([org_id])
@@ -3601,36 +3608,36 @@ model ZxPerson {
 // Z1: one directory of clients and vendors / subcontractors.
 // kind: client | vendor | both. status: active | inactive.
 model ZxParty {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id        String    @db.Uuid
-  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  kind          String    @default("client")
-  name          String
-  contact_name  String?
-  phone         String?
-  email         String?
-  gstin         String?
-  pan           String?
-  address       String?
-  city          String?
-  state         String?
-  country       String?
-  company_name  String?
-  interested_services String[] @default([])
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String          @db.Uuid
+  org                 Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind                String          @default("client")
+  name                String
+  contact_name        String?
+  phone               String?
+  email               String?
+  gstin               String?
+  pan                 String?
+  address             String?
+  city                String?
+  state               String?
+  country             String?
+  company_name        String?
+  interested_services String[]        @default([])
   vendor_category     String?
   materials_services  String?
-  payment_terms String?
-  status        String    @default("active") // active | inactive | hold
-  notes         String?
-  created_by    String?   @db.Uuid
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @default(now()) @updatedAt
-  deleted_at    DateTime?
-  leads         ZxLead[]
-  projects      ZxProject[]
-  work_orders   ZxWorkOrder[]
-  contractor_people ZxPerson[]
-  ledger_entries ZxLedgerEntry[]
+  payment_terms       String?
+  status              String          @default("active") // active | inactive | hold
+  notes               String?
+  created_by          String?         @db.Uuid
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @default(now()) @updatedAt
+  deleted_at          DateTime?
+  leads               ZxLead[]
+  projects            ZxProject[]
+  work_orders         ZxWorkOrder[]
+  contractor_people   ZxPerson[]
+  ledger_entries      ZxLedgerEntry[]
 
   @@index([org_id, kind, status])
   @@index([org_id, name])
@@ -3668,27 +3675,27 @@ model ZxDocument {
 // proposal | negotiation | won | lost. A self_project lead states its basis
 // (investor | customer_deal | project_type) and the value for that basis.
 model ZxLead {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String    @db.Uuid
-  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String           @db.Uuid
+  org                Org              @relation(fields: [org_id], references: [id], onDelete: Cascade)
   name               String
-  category           String    @default("client_project")
+  category           String           @default("client_project")
   self_project_basis String?
   basis_value        String?
-  party_id           String?   @db.Uuid
-  party              ZxParty?  @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  party_id           String?          @db.Uuid
+  party              ZxParty?         @relation(fields: [party_id], references: [id], onDelete: SetNull)
   contact_name       String?
   phone              String?
   email              String?
   source             String?
   location           String?
-  estimated_value    Decimal?  @db.Decimal(16, 2)
-  expected_close     DateTime? @db.Date
-  stage              String    @default("new") // new | in_discussion | negotiation | on_hold | won | closed | dropped
+  estimated_value    Decimal?         @db.Decimal(16, 2)
+  expected_close     DateTime?        @db.Date
+  stage              String           @default("new") // new | in_discussion | negotiation | on_hold | won | closed | dropped
   lost_reason        String?
-  owner_id           String?   @db.Uuid
+  owner_id           String?          @db.Uuid
   notes              String?
-  project_id         String?   @db.Uuid
+  project_id         String?          @db.Uuid
   closed_at          DateTime?
   code               String?
   service_type       String?
@@ -3696,17 +3703,17 @@ model ZxLead {
   address            String?
   city               String?
   state              String?
-  assignee_id        String?   @db.Uuid
-  contractor_id      String?   @db.Uuid
-  expected_start     DateTime? @db.Date
-  expected_end       DateTime? @db.Date
-  expected_profit    Decimal?  @db.Decimal(16, 2)
+  assignee_id        String?          @db.Uuid
+  contractor_id      String?          @db.Uuid
+  expected_start     DateTime?        @db.Date
+  expected_end       DateTime?        @db.Date
+  expected_profit    Decimal?         @db.Decimal(16, 2)
   property_ref       String?
   description        String?
   details            Json?
-  created_by         String?   @db.Uuid
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @default(now()) @updatedAt
+  created_by         String?          @db.Uuid
+  created_at         DateTime         @default(now())
+  updated_at         DateTime         @default(now()) @updatedAt
   deleted_at         DateTime?
   activities         ZxLeadActivity[]
 
@@ -3718,17 +3725,17 @@ model ZxLead {
 
 // Z2: calls, visits, meetings and notes on a lead; stage moves are logged here too.
 model ZxLeadActivity {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id           String    @db.Uuid
-  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  lead_id          String    @db.Uuid
-  lead             ZxLead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-  kind             String    @default("note")
-  summary          String
-  follow_up_date   DateTime? @db.Date
-  follow_up_done   Boolean   @default(false)
-  created_by       String?   @db.Uuid
-  created_at       DateTime  @default(now())
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  lead_id        String    @db.Uuid
+  lead           ZxLead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  kind           String    @default("note")
+  summary        String
+  follow_up_date DateTime? @db.Date
+  follow_up_done Boolean   @default(false)
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
 
   @@index([lead_id, created_at])
   @@index([org_id, follow_up_date])
@@ -3740,42 +3747,42 @@ model ZxLeadActivity {
 // progress_pct is the manual figure, used only while the project has no milestones
 // (otherwise progress is the weighted average of milestone percent_done).
 model ZxProject {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id         String    @db.Uuid
-  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  code           String
-  name           String
-  kind           String    @default("client")
-  party_id       String?   @db.Uuid
-  party          ZxParty?  @relation(fields: [party_id], references: [id], onDelete: SetNull)
-  lead_id        String?   @db.Uuid
-  location       String?
-  status         String    @default("planned") // planned | active | on_hold | completed | cancelled | closed
-  start_date     DateTime? @db.Date
-  end_date       DateTime? @db.Date
-  contract_value Decimal?  @db.Decimal(16, 2)
-  budget         Decimal?  @db.Decimal(16, 2)
-  progress_pct   Int       @default(0)
-  manager_id     String?   @db.Uuid
-  notes          String?
-  service_type   String?
-  actual_end     DateTime? @db.Date
-  agreement_ref  String?
-  property_id    String?   @db.Uuid
-  expected_profit Decimal? @db.Decimal(16, 2)
-  assignee_id    String?   @db.Uuid
-  contractor_id  String?   @db.Uuid
-  description    String?
-  details        Json?
-  created_by     String?   @db.Uuid
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @default(now()) @updatedAt
-  deleted_at     DateTime?
-  milestones     ZxMilestone[]
-  work_orders    ZxWorkOrder[]
-  assignments    ZxAssignment[]
-  ledger_entries ZxLedgerEntry[]
-  plans          ZxPlan[]
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String          @db.Uuid
+  org             Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  kind            String          @default("client")
+  party_id        String?         @db.Uuid
+  party           ZxParty?        @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  lead_id         String?         @db.Uuid
+  location        String?
+  status          String          @default("planned") // planned | active | on_hold | completed | cancelled | closed
+  start_date      DateTime?       @db.Date
+  end_date        DateTime?       @db.Date
+  contract_value  Decimal?        @db.Decimal(16, 2)
+  budget          Decimal?        @db.Decimal(16, 2)
+  progress_pct    Int             @default(0)
+  manager_id      String?         @db.Uuid
+  notes           String?
+  service_type    String?
+  actual_end      DateTime?       @db.Date
+  agreement_ref   String?
+  property_id     String?         @db.Uuid
+  expected_profit Decimal?        @db.Decimal(16, 2)
+  assignee_id     String?         @db.Uuid
+  contractor_id   String?         @db.Uuid
+  description     String?
+  details         Json?
+  created_by      String?         @db.Uuid
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @default(now()) @updatedAt
+  deleted_at      DateTime?
+  milestones      ZxMilestone[]
+  work_orders     ZxWorkOrder[]
+  assignments     ZxAssignment[]
+  ledger_entries  ZxLedgerEntry[]
+  plans           ZxPlan[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -3786,21 +3793,21 @@ model ZxProject {
 // Z3: a billable / trackable step of a project. status follows percent_done
 // (0 pending, 1-99 in_progress, 100 done); weight sets its share of project progress.
 model ZxMilestone {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id         String    @db.Uuid
-  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  project_id     String    @db.Uuid
-  project        ZxProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String          @db.Uuid
+  org            Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  project_id     String          @db.Uuid
+  project        ZxProject       @relation(fields: [project_id], references: [id], onDelete: Cascade)
   name           String
-  due_date       DateTime? @db.Date
-  weight         Int       @default(1)
-  percent_done   Int       @default(0)
-  status         String    @default("pending")
-  billing_amount Decimal?  @db.Decimal(16, 2)
-  billed         Boolean   @default(false)
-  sort_order     Int       @default(0)
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @default(now()) @updatedAt
+  due_date       DateTime?       @db.Date
+  weight         Int             @default(1)
+  percent_done   Int             @default(0)
+  status         String          @default("pending")
+  billing_amount Decimal?        @db.Decimal(16, 2)
+  billed         Boolean         @default(false)
+  sort_order     Int             @default(0)
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @default(now()) @updatedAt
   deleted_at     DateTime?
   ledger_entries ZxLedgerEntry[]
 
@@ -3811,23 +3818,23 @@ model ZxMilestone {
 // Z3: work given to a vendor / subcontractor (a ZxParty of kind vendor or both) on a project.
 // status: draft | issued | in_progress | completed | cancelled. billed_to_date <= value.
 model ZxWorkOrder {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id         String    @db.Uuid
-  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  project_id     String    @db.Uuid
-  project        ZxProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  vendor_id      String    @db.Uuid
-  vendor         ZxParty   @relation(fields: [vendor_id], references: [id])
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String          @db.Uuid
+  org            Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  project_id     String          @db.Uuid
+  project        ZxProject       @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  vendor_id      String          @db.Uuid
+  vendor         ZxParty         @relation(fields: [vendor_id], references: [id])
   wo_number      String?
   scope          String
-  value          Decimal   @db.Decimal(16, 2)
-  billed_to_date Decimal   @default(0) @db.Decimal(16, 2)
-  status         String    @default("draft")
-  issued_on      DateTime? @db.Date
+  value          Decimal         @db.Decimal(16, 2)
+  billed_to_date Decimal         @default(0) @db.Decimal(16, 2)
+  status         String          @default("draft")
+  issued_on      DateTime?       @db.Date
   notes          String?
-  created_by     String?   @db.Uuid
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @default(now()) @updatedAt
+  created_by     String?         @db.Uuid
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @default(now()) @updatedAt
   deleted_at     DateTime?
   ledger_entries ZxLedgerEntry[]
 
@@ -4009,40 +4016,40 @@ model ZxServiceType {
 // --- Zephyr real-estate (R3-R8) ---------------------------------------------------------------
 // A property can be managed and traded at once; the lifecycle lives on its units.
 model ZxProperty {
-  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id              String    @db.Uuid
-  org                 Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  code                String
-  name                String
-  property_type       String    @default("other") // plot | house | building | shops | office | commercial_complex | other
-  address             String?
-  city                String?
-  state               String?
-  location            String?
-  area_value          Decimal?  @db.Decimal(14, 2)
-  area_unit           String    @default("sqft")
-  current_use         String?
-  status              String    @default("active") // active | under_construction | under_renovation | held | sold | inactive
-  notes               String?
-  purchase_date       DateTime? @db.Date
-  purchase_cost       Decimal   @default(0) @db.Decimal(16, 2)
-  brokerage           Decimal   @default(0) @db.Decimal(16, 2)
-  documentation_cost  Decimal   @default(0) @db.Decimal(16, 2)
-  registration_cost   Decimal   @default(0) @db.Decimal(16, 2)
-  construction_cost   Decimal   @default(0) @db.Decimal(16, 2)
-  renovation_cost     Decimal   @default(0) @db.Decimal(16, 2)
-  other_cost          Decimal   @default(0) @db.Decimal(16, 2)
-  valuation           Decimal?  @db.Decimal(16, 2)
-  valuation_date      DateTime? @db.Date
-  valuation_notes     String?
-  created_by          String?   @db.Uuid
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @default(now()) @updatedAt
-  deleted_at          DateTime?
-  units               ZxPropertyUnit[]
-  loans               ZxPropertyLoan[]
-  valuations          ZxPropertyValuation[]
-  events              ZxPropertyEvent[]
+  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String                @db.Uuid
+  org                Org                   @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code               String
+  name               String
+  property_type      String                @default("other") // plot | house | building | shops | office | commercial_complex | other
+  address            String?
+  city               String?
+  state              String?
+  location           String?
+  area_value         Decimal?              @db.Decimal(14, 2)
+  area_unit          String                @default("sqft")
+  current_use        String?
+  status             String                @default("active") // active | under_construction | under_renovation | held | sold | inactive
+  notes              String?
+  purchase_date      DateTime?             @db.Date
+  purchase_cost      Decimal               @default(0) @db.Decimal(16, 2)
+  brokerage          Decimal               @default(0) @db.Decimal(16, 2)
+  documentation_cost Decimal               @default(0) @db.Decimal(16, 2)
+  registration_cost  Decimal               @default(0) @db.Decimal(16, 2)
+  construction_cost  Decimal               @default(0) @db.Decimal(16, 2)
+  renovation_cost    Decimal               @default(0) @db.Decimal(16, 2)
+  other_cost         Decimal               @default(0) @db.Decimal(16, 2)
+  valuation          Decimal?              @db.Decimal(16, 2)
+  valuation_date     DateTime?             @db.Date
+  valuation_notes    String?
+  created_by         String?               @db.Uuid
+  created_at         DateTime              @default(now())
+  updated_at         DateTime              @default(now()) @updatedAt
+  deleted_at         DateTime?
+  units              ZxPropertyUnit[]
+  loans              ZxPropertyLoan[]
+  valuations         ZxPropertyValuation[]
+  events             ZxPropertyEvent[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -4050,24 +4057,24 @@ model ZxProperty {
 }
 
 model ZxPropertyUnit {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id         String    @db.Uuid
-  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  property_id    String    @db.Uuid
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String     @db.Uuid
+  org            Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id    String     @db.Uuid
   property       ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
   name           String
   building       String?
   floor          String?
   unit_type      String?
-  area_value     Decimal?  @db.Decimal(14, 2)
-  status         String    @default("available") // available | rented | sold | held | under_construction | under_renovation | vacant
-  ownership      String    @default("zephyr") // zephyr | third_party
-  allocated_cost Decimal?  @db.Decimal(16, 2)
-  valuation      Decimal?  @db.Decimal(16, 2)
-  valuation_date DateTime? @db.Date
+  area_value     Decimal?   @db.Decimal(14, 2)
+  status         String     @default("available") // available | rented | sold | held | under_construction | under_renovation | vacant
+  ownership      String     @default("zephyr") // zephyr | third_party
+  allocated_cost Decimal?   @db.Decimal(16, 2)
+  valuation      Decimal?   @db.Decimal(16, 2)
+  valuation_date DateTime?  @db.Date
   notes          String?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @default(now()) @updatedAt
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @default(now()) @updatedAt
   deleted_at     DateTime?
   leases         ZxLease[]
 
@@ -4076,24 +4083,24 @@ model ZxPropertyUnit {
 }
 
 model ZxPropertyLoan {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String    @db.Uuid
-  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  property_id        String    @db.Uuid
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String     @db.Uuid
+  org                Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id        String     @db.Uuid
   property           ZxProperty @relation(fields: [property_id], references: [id], onDelete: Cascade)
-  financing_type     String    @default("bank_loan") // bank_loan | private_loan | other
+  financing_type     String     @default("bank_loan") // bank_loan | private_loan | other
   lender             String?
-  loan_amount        Decimal   @default(0) @db.Decimal(16, 2)
-  outstanding_amount Decimal   @default(0) @db.Decimal(16, 2)
-  emi_amount         Decimal   @default(0) @db.Decimal(16, 2)
-  emi_frequency      String    @default("monthly") // monthly | quarterly | yearly
-  interest_rate      Decimal?  @db.Decimal(6, 3)
-  start_date         DateTime? @db.Date
-  end_date           DateTime? @db.Date
-  status             String    @default("active") // active | closed
+  loan_amount        Decimal    @default(0) @db.Decimal(16, 2)
+  outstanding_amount Decimal    @default(0) @db.Decimal(16, 2)
+  emi_amount         Decimal    @default(0) @db.Decimal(16, 2)
+  emi_frequency      String     @default("monthly") // monthly | quarterly | yearly
+  interest_rate      Decimal?   @db.Decimal(6, 3)
+  start_date         DateTime?  @db.Date
+  end_date           DateTime?  @db.Date
+  status             String     @default("active") // active | closed
   notes              String?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @default(now()) @updatedAt
+  created_at         DateTime   @default(now())
+  updated_at         DateTime   @default(now()) @updatedAt
   deleted_at         DateTime?
 
   @@index([org_id, property_id])
@@ -4187,22 +4194,22 @@ model ZxLease {
 }
 
 model ZxRentDue {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id        String    @db.Uuid
-  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  lease_id      String    @db.Uuid
-  lease         ZxLease   @relation(fields: [lease_id], references: [id], onDelete: Cascade)
-  property_id   String    @db.Uuid
-  unit_id       String    @db.Uuid
-  tenant_id     String    @db.Uuid
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String          @db.Uuid
+  org           Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  lease_id      String          @db.Uuid
+  lease         ZxLease         @relation(fields: [lease_id], references: [id], onDelete: Cascade)
+  property_id   String          @db.Uuid
+  unit_id       String          @db.Uuid
+  tenant_id     String          @db.Uuid
   period        String // YYYY-MM
-  amount        Decimal   @db.Decimal(16, 2)
-  due_date      DateTime  @db.Date
-  paid_amount   Decimal   @default(0) @db.Decimal(16, 2)
-  waived        Boolean   @default(false)
+  amount        Decimal         @db.Decimal(16, 2)
+  due_date      DateTime        @db.Date
+  paid_amount   Decimal         @default(0) @db.Decimal(16, 2)
+  waived        Boolean         @default(false)
   waived_reason String?
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @default(now()) @updatedAt
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @default(now()) @updatedAt
   payments      ZxRentPayment[]
 
   @@unique([lease_id, period])
@@ -4237,24 +4244,24 @@ model ZxRentPayment {
 }
 
 model ZxPropertySale {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String    @db.Uuid
-  org                Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  property_id        String    @db.Uuid
-  unit_id            String?   @db.Uuid
-  buyer_party_id     String?   @db.Uuid
-  sale_value         Decimal   @db.Decimal(16, 2)
-  sale_date          DateTime  @db.Date
-  selling_costs      Decimal   @default(0) @db.Decimal(16, 2)
-  cost_basis         Decimal   @db.Decimal(16, 2)
-  realized_profit    Decimal   @db.Decimal(16, 2)
-  holding_days       Int?
-  notes              String?
-  revenue_entry_id   String?   @db.Uuid
-  cost_entry_id      String?   @db.Uuid
-  created_by         String?   @db.Uuid
-  created_at         DateTime  @default(now())
-  deleted_at         DateTime?
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String    @db.Uuid
+  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  property_id      String    @db.Uuid
+  unit_id          String?   @db.Uuid
+  buyer_party_id   String?   @db.Uuid
+  sale_value       Decimal   @db.Decimal(16, 2)
+  sale_date        DateTime  @db.Date
+  selling_costs    Decimal   @default(0) @db.Decimal(16, 2)
+  cost_basis       Decimal   @db.Decimal(16, 2)
+  realized_profit  Decimal   @db.Decimal(16, 2)
+  holding_days     Int?
+  notes            String?
+  revenue_entry_id String?   @db.Uuid
+  cost_entry_id    String?   @db.Uuid
+  created_by       String?   @db.Uuid
+  created_at       DateTime  @default(now())
+  deleted_at       DateTime?
 
   @@index([org_id, property_id])
   @@index([org_id, sale_date])
@@ -4262,28 +4269,28 @@ model ZxPropertySale {
 }
 
 model ZxTask {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id        String    @db.Uuid
-  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  code          String
-  person_id     String?   @db.Uuid
-  property_id   String?   @db.Uuid
-  unit_id       String?   @db.Uuid
-  project_id    String?   @db.Uuid
-  task_type     String    @default("other") // visit_property | collect_rent | inspect | coordinate_vendor | collect_documents | verify_work | follow_up_tenant | follow_up_client | collect_payment | update_property | other
-  title         String
-  description   String?
-  due_date      DateTime? @db.Date
-  priority      String    @default("normal") // low | normal | high
-  status        String    @default("pending") // pending | in_progress | completed | cancelled
-  amount        Decimal?  @db.Decimal(16, 2)
-  completed_on  DateTime? @db.Date
-  rent_due_id   String?   @db.Uuid
-  notes         String?
-  created_by    String?   @db.Uuid
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @default(now()) @updatedAt
-  deleted_at    DateTime?
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code         String
+  person_id    String?   @db.Uuid
+  property_id  String?   @db.Uuid
+  unit_id      String?   @db.Uuid
+  project_id   String?   @db.Uuid
+  task_type    String    @default("other") // visit_property | collect_rent | inspect | coordinate_vendor | collect_documents | verify_work | follow_up_tenant | follow_up_client | collect_payment | update_property | other
+  title        String
+  description  String?
+  due_date     DateTime? @db.Date
+  priority     String    @default("normal") // low | normal | high
+  status       String    @default("pending") // pending | in_progress | completed | cancelled
+  amount       Decimal?  @db.Decimal(16, 2)
+  completed_on DateTime? @db.Date
+  rent_due_id  String?   @db.Uuid
+  notes        String?
+  created_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -5244,17 +5251,17 @@ model FxSetting {
 }
 
 model FxCategory {
-  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String     @db.Uuid
-  org         Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String       @db.Uuid
+  org         Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
   scope       String // initiative | expense | funding
   name        String
   description String?
-  active      Boolean    @default(true)
-  sort_order  Int        @default(0)
-  created_by  String?    @db.Uuid
-  created_at  DateTime   @default(now())
-  updated_at  DateTime   @default(now()) @updatedAt
+  active      Boolean      @default(true)
+  sort_order  Int          @default(0)
+  created_by  String?      @db.Uuid
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @default(now()) @updatedAt
   deleted_at  DateTime?
   campaigns   FxCampaign[]
   entries     FxEntry[]
@@ -5310,38 +5317,38 @@ model FxPerson {
 }
 
 model FxCampaign {
-  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id            String            @db.Uuid
-  org               Org               @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  code              String
-  name              String
-  description       String?
-  objective         String?
-  category_id       String?           @db.Uuid
-  category          FxCategory?       @relation(fields: [category_id], references: [id])
-  status            String            @default("draft") // draft | planned | active | on_hold | completed | cancelled
-  country           String?
-  state             String?
-  city              String?
-  area              String?
-  address           String?
-  planned_start     DateTime?         @db.Date
-  planned_end       DateTime?         @db.Date
-  actual_start      DateTime?         @db.Date
-  actual_end        DateTime?         @db.Date
-  allocated_budget  Decimal           @default(0) @db.Decimal(16, 2)
-  planned_investment Decimal          @default(0) @db.Decimal(16, 2)
-  financial_notes   String?
-  manager_id        String?           @db.Uuid
-  manager           FxPerson?         @relation(fields: [manager_id], references: [id], onDelete: SetNull)
-  created_by        String?           @db.Uuid
-  updated_by        String?           @db.Uuid
-  created_at        DateTime          @default(now())
-  updated_at        DateTime          @default(now()) @updatedAt
-  deleted_at        DateTime?
-  plan              FxCampaignPlan[]
-  budget_history    FxBudgetHistory[]
-  entries           FxEntry[]
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String            @db.Uuid
+  org                Org               @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code               String
+  name               String
+  description        String?
+  objective          String?
+  category_id        String?           @db.Uuid
+  category           FxCategory?       @relation(fields: [category_id], references: [id])
+  status             String            @default("draft") // draft | planned | active | on_hold | completed | cancelled
+  country            String?
+  state              String?
+  city               String?
+  area               String?
+  address            String?
+  planned_start      DateTime?         @db.Date
+  planned_end        DateTime?         @db.Date
+  actual_start       DateTime?         @db.Date
+  actual_end         DateTime?         @db.Date
+  allocated_budget   Decimal           @default(0) @db.Decimal(16, 2)
+  planned_investment Decimal           @default(0) @db.Decimal(16, 2)
+  financial_notes    String?
+  manager_id         String?           @db.Uuid
+  manager            FxPerson?         @relation(fields: [manager_id], references: [id], onDelete: SetNull)
+  created_by         String?           @db.Uuid
+  updated_by         String?           @db.Uuid
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @default(now()) @updatedAt
+  deleted_at         DateTime?
+  plan               FxCampaignPlan[]
+  budget_history     FxBudgetHistory[]
+  entries            FxEntry[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -5389,29 +5396,29 @@ model FxBudgetHistory {
 // Every actual movement of money. kind: expense (money out) | funding (money in) | transfer (internal, never income or expense).
 // Only expense rows with status 'paid' are actual spending; 'approved' is an outstanding commitment; funding counts once 'received'.
 model FxEntry {
-  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id         String      @db.Uuid
-  org            Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  campaign_id    String?     @db.Uuid
-  campaign       FxCampaign? @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
-  kind           String // expense | funding | transfer
-  status         String      @default("pending") // expense: pending|approved|paid|rejected|cancelled|reversed; funding: pledged|received|cancelled; transfer: recorded
-  expense_class  String? // programme | operational (expense only)
-  category_id    String?     @db.Uuid
-  category       FxCategory? @relation(fields: [category_id], references: [id])
-  entry_date     DateTime    @db.Date
-  amount         Decimal     @db.Decimal(16, 2)
-  payment_method String?
-  party_name     String? // payee, donor or counterparty
-  reference      String?
-  description    String?
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String      @db.Uuid
+  org             Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  campaign_id     String?     @db.Uuid
+  campaign        FxCampaign? @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
+  kind            String // expense | funding | transfer
+  status          String      @default("pending") // expense: pending|approved|paid|rejected|cancelled|reversed; funding: pledged|received|cancelled; transfer: recorded
+  expense_class   String? // programme | operational (expense only)
+  category_id     String?     @db.Uuid
+  category        FxCategory? @relation(fields: [category_id], references: [id])
+  entry_date      DateTime    @db.Date
+  amount          Decimal     @db.Decimal(16, 2)
+  payment_method  String?
+  party_name      String? // payee, donor or counterparty
+  reference       String?
+  description     String?
   override_reason String?
-  approved_by    String?     @db.Uuid
-  approved_at    DateTime?
-  created_by     String?     @db.Uuid
-  created_at     DateTime    @default(now())
-  updated_at     DateTime    @default(now()) @updatedAt
-  deleted_at     DateTime?
+  approved_by     String?     @db.Uuid
+  approved_at     DateTime?
+  created_by      String?     @db.Uuid
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @default(now()) @updatedAt
+  deleted_at      DateTime?
 
   @@index([org_id, entry_date])
   @@index([org_id, campaign_id])
@@ -5443,26 +5450,26 @@ model FxPeriodClose {
 // One-time and recurring tasks across the companies of a holding group. A recurring task is a rule; its dates are
 // computed on demand (modules/superDashboard/groupTasks.calc.js) and each date is ticked off in group_task_done.
 model GroupTask {
-  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id String           @db.Uuid
-  org_group    OrgGroup         @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
-  org_id       String?          @db.Uuid // null = applies to every company of the group
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String          @db.Uuid
+  org_group    OrgGroup        @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id       String?         @db.Uuid // null = applies to every company of the group
   title        String
   notes        String?
-  priority     String           @default("medium") // low | medium | high
-  kind         String           @default("one_time") // one_time | recurring
-  due_date     DateTime?        @db.Date // one_time
+  priority     String          @default("medium") // low | medium | high
+  kind         String          @default("one_time") // one_time | recurring
+  due_date     DateTime?       @db.Date // one_time
   frequency    String? // recurring: daily | weekly | monthly | quarterly | yearly
-  interval     Int              @default(1) // every N days / weeks / months / quarters / years
-  weekdays     Int[]            @default([]) // weekly: ISO weekdays, 1 = Monday ... 7 = Sunday
+  interval     Int             @default(1) // every N days / weeks / months / quarters / years
+  weekdays     Int[]           @default([]) // weekly: ISO weekdays, 1 = Monday ... 7 = Sunday
   day_of_month Int? // monthly / quarterly / yearly (clamped to the month end)
-  start_date   DateTime?        @db.Date // recurring
-  end_date     DateTime?        @db.Date // recurring, optional
-  status       String           @default("active") // active | paused | cancelled
-  assignee_id  String?          @db.Uuid
-  created_by   String?          @db.Uuid
-  created_at   DateTime         @default(now())
-  updated_at   DateTime         @default(now()) @updatedAt
+  start_date   DateTime?       @db.Date // recurring
+  end_date     DateTime?       @db.Date // recurring, optional
+  status       String          @default("active") // active | paused | cancelled
+  assignee_id  String?         @db.Uuid
+  created_by   String?         @db.Uuid
+  created_at   DateTime        @default(now())
+  updated_at   DateTime        @default(now()) @updatedAt
   deleted_at   DateTime?
   done         GroupTaskDone[]
 
@@ -5503,24 +5510,24 @@ model GroupCompanyDay {
 // Group Dashboard > Travel: a trip by anyone in the group (IT or non-IT) with one total budget and the meetings it is for.
 // Meetings stay where they are (the Delphic Global calendar); a trip only links to them by calendar event id.
 model GroupTravel {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id String   @db.Uuid
-  org_group    OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
-  org_id       String?  @db.Uuid // the company the trip is for; null = the whole group
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String    @db.Uuid
+  org_group    OrgGroup  @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id       String?   @db.Uuid // the company the trip is for; null = the whole group
   title        String
   origin       String?
   destination  String
-  start_date   DateTime @db.Date
-  end_date     DateTime @db.Date
+  start_date   DateTime  @db.Date
+  end_date     DateTime  @db.Date
   purpose      String?
-  budget       Decimal  @default(0) @db.Decimal(14, 2)
-  actual_spent Decimal? @db.Decimal(14, 2)
-  currency     String   @default("INR")
-  status       String   @default("planned") // planned | completed | cancelled
+  budget       Decimal   @default(0) @db.Decimal(14, 2)
+  actual_spent Decimal?  @db.Decimal(14, 2)
+  currency     String    @default("INR")
+  status       String    @default("planned") // planned | completed | cancelled
   notes        String?
-  created_by   String?  @db.Uuid
-  created_at   DateTime @default(now())
-  updated_at   DateTime @default(now()) @updatedAt
+  created_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
   deleted_at   DateTime?
 
   travelers GroupTravelTraveler[]
@@ -5800,23 +5807,23 @@ model VtSetting {
 }
 
 model VtCategory {
-  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String         @db.Uuid
-  org         Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  scope       String // investment | income | expense | mining_type | material
-  name        String
-  description String?
-  active      Boolean        @default(true)
-  sort_order  Int            @default(0)
-  created_by  String?        @db.Uuid
-  created_at  DateTime       @default(now())
-  updated_at  DateTime       @default(now()) @updatedAt
-  deleted_at  DateTime?
-  investments VtInvestment[]
-  entries     VtEntry[]
-  projections VtProjection[]
-  sites_by_type     VtSite[] @relation("VtSiteMiningType")
-  sites_by_material VtSite[] @relation("VtSiteMaterial")
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String         @db.Uuid
+  org               Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  scope             String // investment | income | expense | mining_type | material
+  name              String
+  description       String?
+  active            Boolean        @default(true)
+  sort_order        Int            @default(0)
+  created_by        String?        @db.Uuid
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @default(now()) @updatedAt
+  deleted_at        DateTime?
+  investments       VtInvestment[]
+  entries           VtEntry[]
+  projections       VtProjection[]
+  sites_by_type     VtSite[]       @relation("VtSiteMiningType")
+  sites_by_material VtSite[]       @relation("VtSiteMaterial")
 
   @@unique([org_id, scope, name])
   @@index([org_id, scope])
@@ -5915,8 +5922,8 @@ model VtInvestment {
   name                   String
   category_id            String?        @db.Uuid
   category               VtCategory?    @relation(fields: [category_id], references: [id])
-  site_id        String?        @db.Uuid
-  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  site_id                String?        @db.Uuid
+  site                   VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
   investor               String?
   investment_date        DateTime       @db.Date
   amount                 Decimal        @db.Decimal(16, 2)
@@ -5973,8 +5980,8 @@ model VtEntry {
   kind           String
   category_id    String?       @db.Uuid
   category       VtCategory?   @relation(fields: [category_id], references: [id])
-  site_id        String?        @db.Uuid
-  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  site_id        String?       @db.Uuid
+  site           VtSite?       @relation(fields: [site_id], references: [id], onDelete: SetNull)
   person_id      String?       @db.Uuid
   person         VtPerson?     @relation(fields: [person_id], references: [id], onDelete: SetNull)
   investment_id  String?       @db.Uuid
@@ -6011,8 +6018,8 @@ model VtProjection {
   line          String
   category_id   String?       @db.Uuid
   category      VtCategory?   @relation(fields: [category_id], references: [id])
-  site_id        String?        @db.Uuid
-  site           VtSite?        @relation(fields: [site_id], references: [id], onDelete: SetNull)
+  site_id       String?       @db.Uuid
+  site          VtSite?       @relation(fields: [site_id], references: [id], onDelete: SetNull)
   investment_id String?       @db.Uuid
   investment    VtInvestment? @relation(fields: [investment_id], references: [id], onDelete: SetNull)
   amount        Decimal       @db.Decimal(16, 2)
@@ -6106,4 +6113,171 @@ model WebsiteSubmission {
   @@index([org_id, form_type, status])
   @@index([submitted_at])
   @@map("website_submissions")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Group cash: legal entities own bank accounts, companies own wallets (their share of money inside an account).
+// Nothing here stores a balance: a wallet balance is its opening balance plus its transactions, and an account balance
+// is the sum of its wallets. Legal entities and workspaces are separate records (the workspace link is optional).
+// ---------------------------------------------------------------------------------------------------------------------
+model LegalEntity {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id   String   @db.Uuid
+  org_group      OrgGroup @relation(fields: [org_group_id], references: [id])
+  workspace_id   String?  @db.Uuid // the company workspace this entity is, if it has one
+  workspace      Org?     @relation(fields: [workspace_id], references: [id], onDelete: SetNull)
+  name           String
+  gstin          String?
+  pan            String?
+  address        String?
+  invoice_prefix String?
+  logo_url       String?
+  active         Boolean  @default(true)
+  created_by     String?  @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  bank_accounts BankAccount[]
+  wallets       Wallet[]
+
+  @@unique([org_group_id, name])
+  @@index([workspace_id])
+  @@map("legal_entities")
+}
+
+model BankAccount {
+  id                       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  legal_entity_id          String      @db.Uuid
+  legal_entity             LegalEntity @relation(fields: [legal_entity_id], references: [id])
+  name                     String
+  type                     String // current | savings | cash
+  bank_name                String? // empty for cash
+  account_last4            String? // empty for cash
+  currency                 String // INR | USD
+  declared_opening_balance Decimal     @default(0) @db.Decimal(16, 2)
+  opening_date             DateTime    @db.Date
+  active                   Boolean     @default(true)
+  created_by               String?     @db.Uuid
+  created_at               DateTime    @default(now())
+  updated_at               DateTime    @default(now()) @updatedAt
+
+  wallets         Wallet[]
+  reconciliations BankReconciliation[]
+
+  @@index([legal_entity_id])
+  @@map("bank_accounts")
+}
+
+// Exactly one owner: a workspace (owner_org_id) or a legal entity (owner_legal_entity_id, e.g. the Unallocated wallet).
+// The migration adds a CHECK constraint for it.
+model Wallet {
+  id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bank_account_id       String       @db.Uuid
+  bank_account          BankAccount  @relation(fields: [bank_account_id], references: [id])
+  owner_org_id          String?      @db.Uuid
+  owner_org             Org?         @relation(fields: [owner_org_id], references: [id])
+  owner_legal_entity_id String?      @db.Uuid
+  owner_legal_entity    LegalEntity? @relation(fields: [owner_legal_entity_id], references: [id])
+  purpose               String // general | salary | travel | unallocated
+  name                  String
+  opening_balance       Decimal      @default(0) @db.Decimal(16, 2)
+  active                Boolean      @default(true)
+  created_by            String?      @db.Uuid
+  created_at            DateTime     @default(now())
+  updated_at            DateTime     @default(now()) @updatedAt
+
+  transactions  WalletTransaction[]
+  transfers_out WalletTransfer[]    @relation("TransferFrom")
+  transfers_in  WalletTransfer[]    @relation("TransferTo")
+
+  @@index([bank_account_id])
+  @@index([owner_org_id])
+  @@index([owner_legal_entity_id])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  wallet_id       String          @db.Uuid
+  wallet          Wallet          @relation(fields: [wallet_id], references: [id])
+  date            DateTime        @db.Date
+  direction       String // in | out
+  amount          Decimal         @db.Decimal(16, 2) // always positive
+  mode            String // cash | upi | cheque | neft | rtgs | imps | swift | other
+  category        String?
+  party           String?
+  reference_type  String          @default("manual") // manual | invoice | salary_run | vendor_payment | expense | transfer
+  reference_id    String?         @db.Uuid
+  transfer_id     String?         @db.Uuid
+  transfer        WalletTransfer? @relation(fields: [transfer_id], references: [id], onDelete: Cascade)
+  notes           String?
+  attachment_url  String?
+  attachment_name String?
+  created_by      String?         @db.Uuid
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @default(now()) @updatedAt
+  deleted_at      DateTime? // soft delete: a deleted entry no longer counts in any balance, the audit keeps what it was
+  deleted_by      String?         @db.Uuid
+
+  @@index([wallet_id, date])
+  @@index([transfer_id])
+  @@index([reference_type, reference_id])
+  @@map("wallet_transactions")
+}
+
+model WalletTransfer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_wallet_id  String    @db.Uuid
+  from_wallet     Wallet    @relation("TransferFrom", fields: [from_wallet_id], references: [id])
+  to_wallet_id    String    @db.Uuid
+  to_wallet       Wallet    @relation("TransferTo", fields: [to_wallet_id], references: [id])
+  date            DateTime  @db.Date
+  amount          Decimal   @db.Decimal(16, 2)
+  kind            String // bank_transfer (different accounts) | reallocation (same account)
+  is_intercompany Boolean   @default(false)
+  notes           String?
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+  deleted_at      DateTime?
+  deleted_by      String?   @db.Uuid
+
+  transactions WalletTransaction[]
+
+  @@index([from_wallet_id])
+  @@index([to_wallet_id])
+  @@map("wallet_transfers")
+}
+
+model BankReconciliation {
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bank_account_id   String      @db.Uuid
+  bank_account      BankAccount @relation(fields: [bank_account_id], references: [id])
+  statement_date    DateTime    @db.Date
+  statement_balance Decimal     @db.Decimal(16, 2)
+  system_balance    Decimal     @db.Decimal(16, 2) // the derived balance on that date, frozen when saved
+  difference        Decimal     @db.Decimal(16, 2)
+  notes             String?
+  created_by        String?     @db.Uuid
+  created_at        DateTime    @default(now())
+
+  @@index([bank_account_id, statement_date])
+  @@map("bank_reconciliations")
+}
+
+// Every create, edit and delete in group cash, with what it looked like before and after.
+model WalletAudit {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String   @db.Uuid
+  entity_type  String // legal_entity | bank_account | wallet | transaction | transfer | reconciliation
+  entity_id    String   @db.Uuid
+  action       String // create | update | delete
+  before       Json?
+  after        Json?
+  actor_id     String?  @db.Uuid
+  created_at   DateTime @default(now())
+
+  @@index([entity_type, entity_id])
+  @@index([org_group_id, created_at])
+  @@map("wallet_audit")
 }

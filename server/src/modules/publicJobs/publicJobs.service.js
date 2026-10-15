@@ -13,7 +13,12 @@ const openFor = (orgSlug) => (orgSlug ? { ...OPEN, org: { slug: orgSlug } } : OP
 const applySchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(200),
-  phone: z.string().trim().min(5, 'Phone number is required').max(40),
+  phone: z.string().trim().min(1, 'Phone number is required').max(40)
+    .transform((v, ctx) => {
+      const p = screening.normalizePhone(v);
+      if (!p) ctx.addIssue({ code: 'custom', message: 'Enter a valid 10-digit mobile number' });
+      return p || v;
+    }),
   experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional()),
   message: z.string().trim().max(2000).optional().nullable(),
   // Where the visitor came from (the ?src= of the link). Anything unknown is stored as "other".
@@ -36,17 +41,17 @@ async function get(slug, orgSlug) {
   return p ? { job: serialize(p) } : { error: 'not_found' };
 }
 
-async function apply(slug, body, orgSlug) {
+async function apply(slug, body, orgSlug, cvFile = null) {
   const d = applySchema.parse(body);
   const p = await prisma.websiteJobPosting.findFirst({ where: { slug: String(slug).toLowerCase(), ...openFor(orgSlug) }, select: { requirement_id: true } });
   if (!p) return { error: 'not_found' };
-  if (d.company_website) return { ok: true }; // a bot: pretend it worked, store nothing
+  if (d.company_website) return { ok: true, stored: false }; // a bot: pretend it worked, store nothing
   const known = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri'];
   const channel = d.channel ? (known.includes(d.channel) ? d.channel : 'other') : 'website';
   const r = await applicantsService.addApplicant(null, {
     requirement_id: p.requirement_id, name: d.name, email: d.email, phone: d.phone, experience_years: d.experience_years, notes: d.message || '', channel,
     ...Object.fromEntries(Object.keys(screening.fields).map((k) => [k, d[k]])),
-  }, { source: 'website' });
+  }, { source: 'website', cvFile });
   if (r.error === 'duplicate_applicant') return { error: 'already_applied' };
   if (r.error) return { error: 'not_found' };
   return { ok: true };

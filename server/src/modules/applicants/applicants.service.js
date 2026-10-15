@@ -1,5 +1,8 @@
 const { z } = require('zod');
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../../config/db');
+const env = require('../../config/env');
 const screening = require('./screening');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
@@ -58,6 +61,8 @@ function serialize(a, userNames, reqs) {
     experience_years: num(a.experience_years),
     linkedin_url: a.linkedin_url,
     cv_url: a.cv_url,
+    has_cv_file: Boolean(a.cv_file),
+    cv_file_name: a.cv_file_name || null,
     currently_working: a.currently_working,
     joiner_status: a.joiner_status,
     notice_period_days: a.notice_period_days,
@@ -163,21 +168,37 @@ async function list(user, rawQuery) {
 }
 
 /** Adds one applicant to a requirement's pool. The same person (email or phone) is never added twice to one requirement. */
-async function addApplicant(user, body, { source = 'manual' } = {}) {
+async function addApplicant(user, body, { source = 'manual', cvFile = null } = {}) {
   const d = addSchema.parse(body);
   const requirement = await prisma.requirement.findFirst({ where: { id: d.requirement_id, deleted_at: null }, select: { id: true, status: true } });
   if (!requirement) return { error: 'requirement_not_found' };
   if (!LIVE_STATUSES.includes(requirement.status)) return { error: 'requirement_not_in_progress' };
   const email = norm(d.email);
   const phone = digits(d.phone);
-  if (email || phone) {
-    const existing = await prisma.jobApplicant.findMany({ where: { requirement_id: d.requirement_id }, select: { email: true, phone: true } });
-    if (existing.some((e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone))) return { error: 'duplicate_applicant' };
-  }
-  const row = await prisma.jobApplicant.create({
-    data: { requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null, ...screening.toColumns(d), created_by: user?.id || null },
+  const profile = d.linkedin_url ? screening.linkedInKey(d.linkedin_url) : null;
+  // The check and the insert run under one lock per requirement, so two quick clicks cannot both get in.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`applicant:${d.requirement_id}`}))`;
+    if (email || phone || profile) {
+      const existing = await tx.jobApplicant.findMany({ where: { requirement_id: d.requirement_id }, select: { email: true, phone: true, linkedin_url: true } });
+      const same = (e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone) || (profile && e.linkedin_url && screening.linkedInKey(e.linkedin_url) === profile);
+      if (existing.some(same)) return { error: 'duplicate_applicant' };
+    }
+    const row = await tx.jobApplicant.create({
+      data: {
+        requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null,
+        ...screening.toColumns(d), cv_file: cvFile?.filename || null, cv_file_name: cvFile?.name || null, created_by: user?.id || null,
+      },
+    });
+    return { applicant: serialize(row, new Map(), null) };
   });
-  return { applicant: serialize(row, new Map(), null) };
+}
+
+/** The stored CV of an applicant, for the authenticated download. */
+async function cvFileOf(id) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(id))) return null;
+  const a = await prisma.jobApplicant.findUnique({ where: { id }, select: { cv_file: true, cv_file_name: true } });
+  return a?.cv_file ? { filename: a.cv_file, name: a.cv_file_name || a.cv_file } : null;
 }
 
 async function findOrCreateProfile(tx, applicant, addedBy) {
@@ -263,8 +284,10 @@ async function remove(user, id) {
   const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
   if (!applicant) return { error: 'not_found' };
   await prisma.jobApplicant.delete({ where: { id } });
+  // the CV file the candidate attached goes with the record
+  if (applicant.cv_file && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(applicant.cv_file)) fs.rm(path.join(path.resolve(env.uploadDir), applicant.cv_file), { force: true }, () => {});
   await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_delete', entity_type: 'job_applicant', entity_id: id, reason: applicant.name, snapshot: {} } });
   return { id };
 }
 
-module.exports = { inProgressRequirements, list, addApplicant, assign, release, remove };
+module.exports = { inProgressRequirements, list, addApplicant, cvFileOf, assign, release, remove };

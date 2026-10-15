@@ -7,7 +7,7 @@ const api = '/api/v1/applicants';
 const full = { phone: '98765 43210', linkedin_url: 'linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'serving_notice', last_working_day: '2026-11-15', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid', extra_skills: 'React, Node.js', cv_url: 'https://drive.example.com/cv' };
 let seq = 0;
 // every applicant gets their own phone number: the same phone on one job counts as the same person
-const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...full, phone: `98765 ${String(10000 + (seq += 1))}`, ...body });
+const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...full, phone: `98765 ${String(10000 + (seq += 1))}`, ...(seq > 1 && body?.email ? { linkedin_url: `https://www.linkedin.com/in/asha-${seq}` } : {}), ...body });
 
 beforeAll(async () => {
   await cleanDatabase();
