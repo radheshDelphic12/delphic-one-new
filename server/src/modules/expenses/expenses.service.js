@@ -1,4 +1,6 @@
 const prisma = require('../../config/db');
+const cashHooks = require('../cashPosition/cash.hooks');
+const today = () => new Date().toISOString().slice(0, 10);
 const { approverScope, canActOn, actionableWhere, nextStage } = require('../../lib/claimApprovers');
 
 const CLAIM_INCLUDE = {
@@ -186,14 +188,20 @@ async function decideClaim(orgId, claimId, user, { status, reason }) {
 
 // Only reachable from 'approved' — the money is actually paid out here,
 // a separate step from the approve/reject decision.
-async function reimburseClaim(orgId, claimId) {
+async function reimburseClaim(orgId, claimId, ctx = {}) {
   const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId } });
   if (!claim) return { error: 'not_found' };
   if (claim.status !== 'approved') return { error: 'not_approved' };
 
-  const updated = await prisma.expenseClaim.update({
-    where: { id: claimId },
-    data: { status: 'reimbursed', reimbursed_at: new Date() },
+  const hook = await cashHooks.prepare({
+    orgId, user: ctx.user, kind: 'expense', walletPayment: ctx.walletPayment,
+    record: { id: claim.id, created_at: claim.created_at, currency: claim.currency, amount: claim.amount, date: today(), party: claim.description || null, category: claim.category },
+  });
+  if (hook.error) return { error: hook.error };
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.expenseClaim.update({ where: { id: claimId }, data: { status: 'reimbursed', reimbursed_at: new Date() } });
+    await hook.post(tx);
+    return row;
   });
   return { claim: updated };
 }
@@ -239,14 +247,23 @@ async function decideVendorPayment(orgId, paymentId, adminUserId, { status, reas
 }
 
 // Only reachable from 'approved'.
-async function markVendorPaymentPaid(orgId, paymentId) {
+async function markVendorPaymentPaid(orgId, paymentId, ctx = {}) {
   const payment = await prisma.vendorPayment.findFirst({ where: { id: paymentId, org_id: orgId } });
   if (!payment) return { error: 'not_found' };
   if (payment.status !== 'approved') return { error: 'not_approved' };
   const frozen = await require('../calculations/financialLock').assertOpen(orgId, payment.period_month, payment.period_year);
   if (frozen) return frozen;
 
-  const updated = await prisma.vendorPayment.update({ where: { id: paymentId }, data: { status: 'paid', paid_at: new Date() } });
+  const hook = await cashHooks.prepare({
+    orgId, user: ctx.user, kind: 'vendor_payment', walletPayment: ctx.walletPayment,
+    record: { id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, date: today(), party: payment.vendor_name, category: 'Vendor payment' },
+  });
+  if (hook.error) return { error: hook.error };
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.vendorPayment.update({ where: { id: paymentId }, data: { status: 'paid', paid_at: new Date() } });
+    await hook.post(tx);
+    return row;
+  });
   return { payment: updated };
 }
 
@@ -260,10 +277,11 @@ async function deleteClaim(orgId, claimId, actor = { isSuperadmin: true }) {
     if (actor.role !== 'admin' && claim.org_membership_id !== actor.orgMembershipId) return { error: 'not_found' };
     if (claim.status !== 'pending') return { error: 'not_deletable' };
   }
-  await prisma.$transaction([
-    prisma.document.deleteMany({ where: { entity_type: 'expense_claim', entity_id: claimId } }),
-    prisma.expenseClaim.delete({ where: { id: claimId } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await cashHooks.unlink(tx, actor.userId || null, 'expense', claimId);
+    await tx.document.deleteMany({ where: { entity_type: 'expense_claim', entity_id: claimId } });
+    await tx.expenseClaim.delete({ where: { id: claimId } });
+  });
   return { deleted: true };
 }
 

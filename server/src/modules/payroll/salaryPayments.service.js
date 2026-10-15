@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const live = require('../calculations/live.service');
+const cashHooks = require('../cashPosition/cash.hooks');
 
 const MONTH_CONCURRENCY = 3;
 const MAX_MONTHS = 24;
@@ -96,7 +97,10 @@ async function save(orgId, admin, input, now = new Date()) {
 
   if (input.status === 'not_paid') {
     if (!before) return { payment: null };
-    await prisma.salaryPayment.delete({ where: { id: before.id } });
+    await prisma.$transaction(async (tx) => {
+      await cashHooks.unlink(tx, admin.id, 'salary_run', before.id);
+      await tx.salaryPayment.delete({ where: { id: before.id } });
+    });
     await audit('salary_payment_clear', { period: `${input.period_year}-${input.period_month}`, before: paymentOut(before) }, input.notes || 'Marked not paid');
     return { payment: null };
   }
@@ -117,9 +121,20 @@ async function save(orgId, admin, input, now = new Date()) {
     notes: input.notes,
     updated_by: admin.id,
   };
-  const row = before
-    ? await prisma.salaryPayment.update({ where: { id: before.id }, data })
-    : await prisma.salaryPayment.create({ data: { org_id: orgId, org_membership_id: input.org_membership_id, period_month: input.period_month, period_year: input.period_year, ...data } });
+  // After the group's go-live date a salary paid out names the wallet it was paid from (see cashPosition/cash.hooks).
+  const person = await prisma.orgMembership.findUnique({ where: { id: input.org_membership_id }, select: { person: { select: { name: true } } } });
+  const hook = await cashHooks.prepare({
+    orgId, user: admin, kind: 'salary_run', walletPayment: input.wallet_payment,
+    record: { id: before?.id, created_at: before?.created_at || now, amount, date: input.paid_on, party: person?.person?.name, category: `Salary ${input.period_year}-${String(input.period_month).padStart(2, '0')}` },
+  });
+  if (hook.error) return { error: hook.error };
+  const row = await prisma.$transaction(async (tx) => {
+    const saved = before
+      ? await tx.salaryPayment.update({ where: { id: before.id }, data })
+      : await tx.salaryPayment.create({ data: { org_id: orgId, org_membership_id: input.org_membership_id, period_month: input.period_month, period_year: input.period_year, ...data } });
+    await hook.post(tx, { id: saved.id });
+    return saved;
+  });
   await audit(before ? 'salary_payment_update' : 'salary_payment_create', { period: `${input.period_year}-${input.period_month}`, before: paymentOut(before), after: paymentOut(row) }, input.notes || 'Marked paid');
   return { payment: paymentOut(row) };
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Banknote, CheckCircle2, Clock3, Pencil } from 'lucide-react';
+import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -108,15 +109,16 @@ export default function SalaryPaymentsTab({ filters }) {
   }, [key]);
   useEffect(() => { load(); }, [load]);
 
+  const walletPay = useWalletPayment('out');
   async function save(body) {
     setSaving(true);
     try {
-      await apiClient.put('/payroll/salary-payments', { org_membership_id: edit.org_membership_id, period_month: edit.period_month, period_year: edit.period_year, ...body });
+      await walletPay.run((wp) => apiClient.put('/payroll/salary-payments', { org_membership_id: edit.org_membership_id, period_month: edit.period_month, period_year: edit.period_year, ...body, ...(wp && body.status === 'paid' ? { wallet_payment: wp } : {}) }));
       pushSuccess(body.status === 'paid' ? 'Marked as paid' : 'Marked as not paid');
       setEdit(null);
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Could not save the payment'), 'Save failed');
+      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Could not save the payment'), 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -137,6 +139,7 @@ export default function SalaryPaymentsTab({ filters }) {
 
   return (
     <div className="space-y-4">
+      {walletPay.dialog}
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-3">
         <label className={labelCls}>From month<input type="month" className={inputCls} value={range.from} max={range.to} onChange={(e) => e.target.value && setRange((r) => ({ ...r, from: e.target.value }))} /></label>
         <label className={labelCls}>To month<input type="month" className={inputCls} value={range.to} min={range.from} max={thisMonth()} onChange={(e) => e.target.value && setRange((r) => ({ ...r, to: e.target.value }))} /></label>

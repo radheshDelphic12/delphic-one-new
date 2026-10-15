@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
+import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -325,13 +326,14 @@ export default function ExpensesTab() {
     apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
   }
 
+  const walletPay = useWalletPayment('out');
   async function reimburse(row) {
     try {
-      await apiClient.post(`/expenses/claims/${row.id}/reimburse`);
+      await walletPay.run((wp) => apiClient.post(`/expenses/claims/${row.id}/reimburse`, wp ? { wallet_payment: wp } : {}));
       pushInfo('Marked reimbursed');
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
+      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
     }
   }
 
@@ -386,6 +388,7 @@ export default function ExpensesTab() {
 
   return (
     <div className="space-y-4">
+      {walletPay.dialog}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
           {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'group'] : [])].map((key) => (

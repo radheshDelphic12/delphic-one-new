@@ -38,6 +38,7 @@ const payrollRoutes = require('./modules/payroll/payroll.routes');
 const billingRoutes = require('./modules/billing/billing.routes');
 const profitabilityRoutes = require('./modules/profitability/profitability.routes');
 const superDashboardRoutes = require('./modules/superDashboard/superDashboard.routes');
+const groupCashRoutes = require('./modules/cashPosition/cash.routes');
 const expensesRoutes = require('./modules/expenses/expenses.routes');
 const vendorCommissionsRoutes = require('./modules/vendorCommissions/vendorCommissions.routes');
 const tasksRoutes = require('./modules/tasks/tasks.routes');
@@ -133,6 +134,9 @@ app.use('/api/v1/payroll', payrollRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/profitability', profitabilityRoutes);
 app.use('/api/v1/super-dashboard', superDashboardRoutes);
+// Group cash: bank accounts + wallets (group superadmin), and a read-only view of a workspace's own wallets.
+app.use('/api/v1/group-cash', groupCashRoutes.group);
+app.use('/api/v1/wallets', groupCashRoutes.company);
 // Finance scope reduction — see middleware/financeScope.js. Expense claims stay
 // on; only the vendor-payment sub-routes of /expenses are switched off.
 app.use('/api/v1/expenses/vendor-payments', requireFinanceModule('vendor_payments'));

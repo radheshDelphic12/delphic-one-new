@@ -28,6 +28,7 @@ const router = express.Router();
 router.use(authenticate, requireOrgMembership);
 
 const ERRORS = {
+  ...require('../cashPosition/cash.hooks').HOOK_ERRORS,
   membership_not_found: [404, 'Org membership not found'],
   not_found: [404, 'Not found'],
   already_processed: [409, 'That payroll run has already been processed'],

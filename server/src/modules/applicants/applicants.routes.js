@@ -50,6 +50,7 @@ router.get('/:id/cv', authorize('admin', 'sales', 'recruiter'), asyncHandler(asy
   res.attachment(cv.name.replace(/[^A-Za-z0-9 ._-]/g, '') || cv.filename);
   return res.sendFile(cv.filename, { root, dotfiles: 'deny' });
 }));
+router.patch('/:id', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.updateApplicant(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/assign', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.assign(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/release', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.release(req.user, req.params.id), 'applicant')));
 router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id))));

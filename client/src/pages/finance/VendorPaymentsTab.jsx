@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Truck } from 'lucide-react';
+import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -130,13 +131,14 @@ export default function VendorPaymentsTab() {
     }
   }
 
+  const walletPay = useWalletPayment('out');
   async function pay(row) {
     try {
-      await apiClient.post(`/expenses/vendor-payments/${row.id}/pay`);
+      await walletPay.run((wp) => apiClient.post(`/expenses/vendor-payments/${row.id}/pay`, wp ? { wallet_payment: wp } : {}));
       pushInfo('Marked paid');
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to mark paid'), 'Something went wrong');
+      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark paid'), 'Something went wrong');
     }
   }
 
@@ -165,6 +167,7 @@ export default function VendorPaymentsTab() {
 
   return (
     <div className="space-y-4">
+      {walletPay.dialog}
       <div className="flex justify-end">
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
           <Plus className="h-4 w-4" /> Raise payment

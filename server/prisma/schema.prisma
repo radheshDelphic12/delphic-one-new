@@ -6131,14 +6131,18 @@ model LegalEntity {
   pan            String?
   address        String?
   invoice_prefix String?
+  state_code     String? // 2-digit GST state code of the registered address (place of supply rule)
+  lut_note       String? // printed on USD export invoices
   logo_url       String?
   active         Boolean  @default(true)
   created_by     String?  @db.Uuid
   created_at     DateTime @default(now())
   updated_at     DateTime @default(now()) @updatedAt
 
-  bank_accounts BankAccount[]
-  wallets       Wallet[]
+  bank_accounts    BankAccount[]
+  wallets          Wallet[]
+  invoices         GroupInvoice[]
+  invoice_counters InvoiceCounter[]
 
   @@unique([org_group_id, name])
   @@index([workspace_id])
@@ -6156,6 +6160,7 @@ model BankAccount {
   currency                 String // INR | USD
   declared_opening_balance Decimal     @default(0) @db.Decimal(16, 2)
   opening_date             DateTime    @db.Date
+  payment_instructions     String? // bank / IFSC / SWIFT lines printed on invoices paid into this account
   active                   Boolean     @default(true)
   created_by               String?     @db.Uuid
   created_at               DateTime    @default(now())
@@ -6260,6 +6265,8 @@ model BankReconciliation {
   notes             String?
   created_by        String?     @db.Uuid
   created_at        DateTime    @default(now())
+  deleted_at        DateTime?
+  deleted_by        String?     @db.Uuid
 
   @@index([bank_account_id, statement_date])
   @@map("bank_reconciliations")
@@ -6280,4 +6287,87 @@ model WalletAudit {
   @@index([entity_type, entity_id])
   @@index([org_group_id, created_at])
   @@map("wallet_audit")
+}
+
+// Group cash settings (one row per holding group). Payments of records created on or after go_live_date must name a wallet.
+model GroupCashSetting {
+  org_group_id String    @id @db.Uuid
+  go_live_date DateTime? @db.Date
+  updated_by   String?   @db.Uuid
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  @@map("group_cash_settings")
+}
+
+// Invoices issued by a legal entity. Each entity has its own number series per financial year; the counter row is locked
+// while a number is taken, so numbers are gap-safe and never reused (a cancelled invoice keeps its number).
+model InvoiceCounter {
+  legal_entity_id String      @db.Uuid
+  legal_entity    LegalEntity @relation(fields: [legal_entity_id], references: [id])
+  series          String // financial year, e.g. 2026-27
+  last_number     Int         @default(0)
+
+  @@id([legal_entity_id, series])
+  @@map("invoice_counters")
+}
+
+model GroupInvoice {
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id         String      @db.Uuid
+  legal_entity_id      String      @db.Uuid
+  legal_entity         LegalEntity @relation(fields: [legal_entity_id], references: [id])
+  workspace_id         String?     @db.Uuid // optional tag: which company the work was for
+  series               String
+  seq                  Int
+  number               String
+  type                 String // gst | non_gst | usd_export
+  status               String      @default("issued") // issued | cancelled (paid state is derived from the payments)
+  invoice_date         DateTime    @db.Date
+  due_date             DateTime?   @db.Date
+  currency             String // INR | USD
+  seller               Json // name, gstin, pan, address, state_code, logo_url as on the day it was issued
+  buyer_name           String
+  buyer_gstin          String?
+  buyer_address        String?
+  buyer_state_code     String?
+  place_of_supply      String? // state code the supply is made to
+  lines                Json // [{description, hsn_sac, qty, rate, gst_rate, amount}]
+  subtotal             Decimal     @db.Decimal(16, 2)
+  cgst                 Decimal     @default(0) @db.Decimal(16, 2)
+  sgst                 Decimal     @default(0) @db.Decimal(16, 2)
+  igst                 Decimal     @default(0) @db.Decimal(16, 2)
+  total                Decimal     @db.Decimal(16, 2)
+  receiving_wallet_id  String      @db.Uuid
+  notes                String?
+  payment_instructions String?
+  lut_note             String?
+  cancelled_reason     String?
+  created_by           String?     @db.Uuid
+  created_at           DateTime    @default(now())
+  updated_at           DateTime    @default(now()) @updatedAt
+
+  payments GroupInvoicePayment[]
+
+  @@unique([legal_entity_id, number])
+  @@unique([legal_entity_id, series, seq])
+  @@index([org_group_id, invoice_date])
+  @@map("group_invoices")
+}
+
+model GroupInvoicePayment {
+  id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoice_id            String       @db.Uuid
+  invoice               GroupInvoice @relation(fields: [invoice_id], references: [id])
+  date                  DateTime     @db.Date
+  amount                Decimal      @db.Decimal(16, 2)
+  mode                  String
+  notes                 String?
+  wallet_transaction_id String?      @db.Uuid
+  created_by            String?      @db.Uuid
+  created_at            DateTime     @default(now())
+  deleted_at            DateTime?
+  deleted_by            String?      @db.Uuid
+
+  @@index([invoice_id])
+  @@map("group_invoice_payments")
 }

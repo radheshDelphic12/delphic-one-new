@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, SlidersHorizontal, Undo2, UserCheck, UserPlus } from 'lucide-react';
+import { Pencil, Plus, SlidersHorizontal, Undo2, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import useLiveData from '../../lib/useLiveData.js';
@@ -8,7 +8,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
-import ScreeningFields, { emptyScreening, screeningPayload, JOINER_LABEL, WORK_MODE_LABEL } from '../../components/applicants/ScreeningFields.jsx';
+import ScreeningFields, { emptyScreening, screeningPayload, NOTICE_CHOICES, JOINER_LABEL, WORK_MODE_LABEL } from '../../components/applicants/ScreeningFields.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -19,20 +19,55 @@ const ago = (iso) => {
   return `${Math.round(mins / 1440)}d ago`;
 };
 
-/** Adds one applicant to an in-progress requirement by hand (the website will feed the pool later). */
-export function AddApplicantDrawer({ open, requirements, requirementId, onClose, onSaved }) {
+const NOTICE_VALUES = NOTICE_CHOICES.map(([v]) => v).filter((v) => v !== 'other');
+
+/** The form values of an applicant row, for the edit drawer. */
+function screeningOf(a) {
+  const notice = a.notice_period_days;
+  const known = notice != null && NOTICE_VALUES.includes(String(notice));
+  return {
+    linkedin_url: a.linkedin_url || '', cv_url: a.cv_url || '', currently_working: a.currently_working == null ? '' : a.currently_working ? 'yes' : 'no',
+    joiner_status: a.joiner_status || '', notice_choice: notice == null ? '' : known ? String(notice) : 'other', notice_other: notice != null && !known ? String(notice) : '',
+    last_working_day: a.last_working_day ? String(a.last_working_day).slice(0, 10) : '', current_ctc_lpa: a.current_ctc_lpa ?? '', expected_ctc_lpa: a.expected_ctc_lpa ?? '',
+    work_mode: a.work_mode || '', extra_skills: (a.extra_skills || []).join(', '),
+  };
+}
+
+/** Adds one applicant to an in-progress requirement by hand, or (with `applicant`) corrects one that is already in the pool. */
+export function AddApplicantDrawer({ open, requirements, requirementId, applicant, onClose, onSaved }) {
   const { pushSuccess } = useAlerts();
   const [v, setV] = useState({ requirement_id: requirementId || '', name: '', email: '', phone: '', experience_years: '', notes: '' });
   const [screening, setScreening] = useState(emptyScreening);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  useEffect(() => { if (open) { setV((c) => ({ ...c, requirement_id: requirementId || c.requirement_id })); setError(''); } }, [open, requirementId]);
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    if (applicant) {
+      setV({ requirement_id: applicant.requirement_id, name: applicant.name || '', email: applicant.email || '', phone: applicant.phone || '', experience_years: applicant.experience_years ?? '', notes: applicant.notes || '' });
+      setScreening(screeningOf(applicant));
+    } else setV((c) => ({ ...c, requirement_id: requirementId || c.requirement_id }));
+  }, [open, requirementId, applicant]);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   async function submit(e) {
     e.preventDefault();
     setSaving(true);
     setError('');
     try {
+      if (applicant) {
+        // an edit sends every answer, so a field the admin empties is cleared
+        const notice = screening.notice_choice === 'other' ? screening.notice_other : screening.notice_choice;
+        await apiClient.patch(`/applicants/${applicant.id}`, {
+          name: v.name, email: v.email, phone: v.phone, notes: v.notes, experience_years: v.experience_years === '' ? '' : Number(v.experience_years),
+          linkedin_url: screening.linkedin_url, cv_url: screening.cv_url, currently_working: screening.currently_working, joiner_status: screening.joiner_status,
+          notice_period_days: notice, last_working_day: screening.joiner_status === 'serving_notice' ? screening.last_working_day : '',
+          current_ctc_lpa: screening.current_ctc_lpa, expected_ctc_lpa: screening.expected_ctc_lpa, work_mode: screening.work_mode, extra_skills: screening.extra_skills,
+        });
+        pushSuccess('Applicant updated');
+        onSaved();
+        onClose();
+        return;
+      }
       await apiClient.post('/applicants', { ...v, ...screeningPayload(screening), experience_years: v.experience_years === '' ? undefined : Number(v.experience_years) });
       pushSuccess('Applicant added to the pool');
       setV((c) => ({ ...c, name: '', email: '', phone: '', experience_years: '', notes: '' }));
@@ -42,14 +77,14 @@ export function AddApplicantDrawer({ open, requirements, requirementId, onClose,
     } catch (err) { setError(apiErrorMessage(err, 'Could not add the applicant')); } finally { setSaving(false); }
   }
   return (
-    <Drawer open={open} onClose={onClose} size="md" tone="create" title="Add applicant">
+    <Drawer open={open} onClose={onClose} size="md" tone={applicant ? 'edit' : 'create'} title={applicant ? 'Edit applicant' : 'Add applicant'}>
       <form className="space-y-3" onSubmit={submit}>
-        <label className={labelCls}>Requirement
+        {!applicant && <label className={labelCls}>Requirement
           <select required className={inputCls} value={v.requirement_id} onChange={set('requirement_id')}>
             <option value="">Choose an in-progress requirement…</option>
             {(requirements || []).map((r) => <option key={r.id} value={r.id}>{r.title}{r.client ? ` · ${r.client}` : ''}</option>)}
           </select>
-        </label>
+        </label>}
         <label className={labelCls}>Name<input required className={inputCls} value={v.name} onChange={set('name')} maxLength={200} /></label>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className={labelCls}>Email<input type="email" className={inputCls} value={v.email} onChange={set('email')} /></label>
@@ -60,7 +95,7 @@ export function AddApplicantDrawer({ open, requirements, requirementId, onClose,
         <ScreeningFields value={screening} onChange={setScreening} inputCls={inputCls} labelCls={labelCls} />
         <label className={labelCls}>Notes<textarea rows={2} className={inputCls} value={v.notes} onChange={set('notes')} /></label>
         {error && <p className="text-sm text-danger-600" role="alert">{error}</p>}
-        <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={saving || !v.requirement_id || !v.name.trim()}>{saving ? 'Adding…' : 'Add to pool'}</button></div>
+        <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={saving || !v.requirement_id || !v.name.trim()}>{saving ? 'Saving…' : applicant ? 'Save changes' : 'Add to pool'}</button></div>
       </form>
     </Drawer>
   );
@@ -111,6 +146,7 @@ export default function ApplicantPoolBoard() {
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState('');
   const [filters, setFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
@@ -215,6 +251,9 @@ export default function ApplicantPoolBoard() {
                       : a.status === 'new' ? <Pill tone="blue">In pool</Pill> : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
                   </td>
                   <td className="px-3 py-2 text-right">
+                    {(user?.role === 'admin' || user?.role === 'sales' || a.assigned_to?.id === user?.id) && (
+                      <button type="button" title="Edit applicant" className="mr-1 rounded p-1.5 text-tertiary-400 hover:bg-tertiary-100 hover:text-primary-700" onClick={() => setEditing(a)}><Pencil className="h-4 w-4" /></button>
+                    )}
                     {a.status === 'new' && canClaim && (
                       <button type="button" className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
                     )}
@@ -236,6 +275,7 @@ export default function ApplicantPoolBoard() {
       </section>
       {list.data?.pagination && <p className="px-1 text-xs text-tertiary-500">{rows.length} of {list.data.pagination.total}</p>}
       <AddApplicantDrawer open={addOpen} requirements={reqs.data} requirementId={requirementId} onClose={() => setAddOpen(false)} onSaved={refresh} />
+      <AddApplicantDrawer open={Boolean(editing)} applicant={editing} requirements={reqs.data} onClose={() => setEditing(null)} onSaved={refresh} />
     </div>
   );
 }

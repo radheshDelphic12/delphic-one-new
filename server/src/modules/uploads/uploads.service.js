@@ -91,6 +91,13 @@ async function resolveFile(filename, user) {
     return finish(filename, axDoc.file_name || axDoc.title);
   }
 
+  // Group cash: an attachment of a wallet entry, for the group superadmin or an admin of the owning workspace.
+  if (filename.startsWith('wallet-')) {
+    const access = await require('../cashPosition/cash.service').canReadAttachment(user, fileUrl);
+    if (access === false) return { error: 'forbidden' };
+    if (access) return finish(filename, access.label);
+  }
+
   return { error: 'not_found' };
 }
 

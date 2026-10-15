@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Printer, RefreshCw } from 'lucide-react';
+import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -173,13 +174,14 @@ export default function InvoicingSection() {
     }
   }
 
+  const walletPay = useWalletPayment('in');
   async function transition(row, status) {
     try {
-      await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
+      await walletPay.run((wp) => apiClient.post(`/billing/invoices/${row.id}/status`, { status, ...(wp ? { wallet_payment: wp } : {}) }));
       pushInfo(`Invoice marked ${status}`);
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to update invoice status'), 'Something went wrong');
+      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to update invoice status'), 'Something went wrong');
     }
   }
 
@@ -205,6 +207,7 @@ export default function InvoicingSection() {
 
   return (
     <div className="space-y-3">
+      {walletPay.dialog}
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setComputeOpen(true)}><RefreshCw className="h-4 w-4" /> Compute revenue</button>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setGenerateOpen(true)}><Plus className="h-4 w-4" /> Generate invoice</button>

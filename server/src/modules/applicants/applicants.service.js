@@ -11,7 +11,7 @@ const screening = require('./screening');
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
 const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'internal', 'other'];
-const addSchema = z.object({
+const addBase = z.object({
   requirement_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
   email: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().email().max(200).nullable().optional()),
@@ -20,7 +20,10 @@ const addSchema = z.object({
   notes: text(2000),
   channel: z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(CHANNELS).nullable().optional()),
   ...screening.optionalShape,
-}).superRefine(screening.checkScreening);
+});
+const addSchema = addBase.superRefine(screening.checkScreening);
+// editing: every field optional, a blank one clears it
+const updateSchema = addBase.omit({ requirement_id: true }).partial().superRefine(screening.checkScreening);
 const listSchema = z.object({
   requirement_id: z.string().uuid().optional(),
   view: z.enum(['pool', 'mine', 'all']).default('pool'),
@@ -280,6 +283,37 @@ async function release(user, id) {
   return { applicant: serialize(row, new Map(), null) };
 }
 
+const SCREENING_COLUMNS = ['linkedin_url', 'cv_url', 'currently_working', 'joiner_status', 'notice_period_days', 'last_working_day', 'current_ctc_lpa', 'expected_ctc_lpa', 'work_mode', 'extra_skills'];
+
+/** An admin / recruiter corrects an applicant: any field sent is changed, a blank one is cleared. Same duplicate rules as adding. */
+async function updateApplicant(user, id, body) {
+  const d = updateSchema.parse(body || {});
+  const existing = await prisma.jobApplicant.findUnique({ where: { id } });
+  if (!existing) return { error: 'not_found' };
+  const sent = (k) => Object.prototype.hasOwnProperty.call(body || {}, k);
+  const data = {};
+  if (sent('name') && d.name) data.name = d.name;
+  if (sent('email')) data.email = norm(d.email);
+  if (sent('phone')) data.phone = d.phone || null;
+  if (sent('experience_years')) data.experience_years = d.experience_years ?? null;
+  if (sent('notes')) data.notes = d.notes || null;
+  if (sent('channel')) data.channel = d.channel || null;
+  const cols = screening.toColumns(d);
+  for (const k of SCREENING_COLUMNS) if (sent(k)) data[k] = cols[k];
+  if (sent('joiner_status') && d.joiner_status !== 'serving_notice' && !sent('last_working_day')) data.last_working_day = null;
+
+  const email = norm('email' in data ? data.email : existing.email);
+  const phone = digits('phone' in data ? data.phone : existing.phone);
+  const profile = 'linkedin_url' in data ? (data.linkedin_url ? screening.linkedInKey(data.linkedin_url) : null) : (existing.linkedin_url ? screening.linkedInKey(existing.linkedin_url) : null);
+  const others = await prisma.jobApplicant.findMany({ where: { requirement_id: existing.requirement_id, id: { not: id } }, select: { email: true, phone: true, linkedin_url: true } });
+  const same = (e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone) || (profile && e.linkedin_url && screening.linkedInKey(e.linkedin_url) === profile);
+  if (others.some(same)) return { error: 'duplicate_applicant' };
+
+  const row = await prisma.jobApplicant.update({ where: { id }, data });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_update', entity_type: 'job_applicant', entity_id: id, reason: row.name, snapshot: JSON.parse(JSON.stringify({ before: existing, after: row })) } });
+  return { applicant: serialize(row, new Map(), null) };
+}
+
 async function remove(user, id) {
   const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
   if (!applicant) return { error: 'not_found' };
@@ -290,4 +324,4 @@ async function remove(user, id) {
   return { id };
 }
 
-module.exports = { inProgressRequirements, list, addApplicant, cvFileOf, assign, release, remove };
+module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, remove };

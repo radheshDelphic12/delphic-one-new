@@ -13,6 +13,7 @@ const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
 const { WORKER_ERRORS } = require('../../lib/workerType');
+const cashHooks = require('../cashPosition/cash.hooks');
 const {
   exchangeRatesSchema,
   createRateSchema,
@@ -57,6 +58,7 @@ const router = express.Router();
 router.use(authenticate);
 
 const ERRORS = {
+  ...cashHooks.HOOK_ERRORS,
   account_not_found: [404, 'Account not found'],
   requirement_not_found: [404, 'Requirement not found for that account'],
   not_found: [404, 'Not found'],
@@ -516,7 +518,8 @@ router.post(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const { status } = transitionInvoiceSchema.parse(req.body);
-    const result = await service.transitionInvoice(req.user.org_id, req.params.id, status);
+    const walletPayment = cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment);
+    const result = await service.transitionInvoice(req.user.org_id, req.params.id, status, { user: req.user, walletPayment });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
   })

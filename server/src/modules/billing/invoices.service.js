@@ -359,7 +359,10 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   if (invoice.status !== 'draft' && !why) return { error: 'reason_required' };
   const account = await prisma.account.findFirst({ where: { id: invoice.client_account_id }, select: { service_category: true } });
   if (fixedBid.isFixedBid(account) && (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year }))) return { error: 'billing_locked' };
-  await prisma.clientInvoice.delete({ where: { id: invoice.id } });
+  await prisma.$transaction(async (tx) => {
+    await require('../cashPosition/cash.hooks').unlink(tx, user.id, 'invoice', invoice.id);
+    await tx.clientInvoice.delete({ where: { id: invoice.id } });
+  });
   await prisma.auditLog.create({
     data: {
       org_id: orgId,

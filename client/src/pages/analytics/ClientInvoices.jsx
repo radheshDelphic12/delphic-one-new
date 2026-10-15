@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FileText, Printer } from 'lucide-react';
+import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -239,13 +240,14 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     }
   }
 
+  const walletPay = useWalletPayment('in');
   async function transition(row, status) {
     try {
-      await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
+      await walletPay.run((wp) => apiClient.post(`/billing/invoices/${row.id}/status`, { status, ...(wp ? { wallet_payment: wp } : {}) }));
       pushInfo(`Invoice ${row.invoice_number || ''} marked ${status}`);
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
+      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
     }
   }
 
@@ -282,7 +284,12 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     if (!printClientInvoice(r, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked');
   }
 
-  return <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} />;
+  return (
+    <>
+      {walletPay.dialog}
+      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} />
+    </>
+  );
 }
 
 export function GenerateInvoiceButton({ onClick, label = 'Generate invoice', compact = false }) {

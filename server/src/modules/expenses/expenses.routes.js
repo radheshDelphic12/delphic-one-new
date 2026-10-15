@@ -14,10 +14,12 @@ const {
   listVendorPaymentsQuerySchema,
 } = require('./expenses.validation');
 
+const cashHooks = require('../cashPosition/cash.hooks');
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
 
 const ERRORS = {
+  ...cashHooks.HOOK_ERRORS,
   location_not_found: [404, 'Location not found'],
   not_found: [404, 'Not found'],
   already_decided: [409, 'Already decided'],
@@ -61,7 +63,7 @@ router.patch(
   loadSuperadminFlag,
   asyncHandler(async (req, res) => {
     const body = updateClaimSchema.parse(req.body);
-    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: req.user.is_superadmin };
+    const actor = { userId: req.user.id, role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: req.user.is_superadmin };
     const result = await service.updateClaim(req.user.org_id, req.params.id, actor, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
@@ -74,7 +76,7 @@ router.delete(
   '/claims/:id',
   loadSuperadminFlag,
   asyncHandler(async (req, res) => {
-    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: Boolean(req.user.is_superadmin) };
+    const actor = { userId: req.user.id, role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: Boolean(req.user.is_superadmin) };
     const result = await service.deleteClaim(req.user.org_id, req.params.id, actor);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
@@ -124,7 +126,7 @@ router.post(
   '/claims/:id/reimburse',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.reimburseClaim(req.user.org_id, req.params.id);
+    const result = await service.reimburseClaim(req.user.org_id, req.params.id, { user: req.user, walletPayment: cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
   })
@@ -178,7 +180,7 @@ router.post(
   '/vendor-payments/:id/pay',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id);
+    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id, { user: req.user, walletPayment: cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.payment);
   })
