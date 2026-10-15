@@ -10,6 +10,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
+import { AttendanceDays, AttendanceHeader, AttendanceSummary } from './AttendanceModern.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -94,9 +95,11 @@ function RegularizeDrawer({ row, open, onClose, onSaved }) {
 }
 
 export default function AttendancePage() {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const isAdmin = user?.role === 'admin';
+  // everyone except the group superadmin gets the refreshed screen; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const [tab, setTab] = useState('mine');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -162,6 +165,10 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-4">
+      {modern ? (
+        <AttendanceHeader user={user} rows={rows} from={from} to={to} status={status} setFrom={setFrom} setTo={setTo} setStatus={setStatus} statusOptions={STATUS_OPTIONS} tab={tab} setTab={setTab} isAdmin={isAdmin} />
+      ) : (
+        <>
       <div className="flex flex-col gap-4 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p>
@@ -181,6 +188,8 @@ export default function AttendancePage() {
         <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My attendance</button>
         {isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Team attendance</button>}
       </div>
+        </>
+      )}
       {tab === 'team' && (
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setMonthOpen(true)}><History className="h-4 w-4" /> Backfill previous month</button>
@@ -189,7 +198,8 @@ export default function AttendancePage() {
         </div>
       )}
       {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}
-      {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
+      {modern && tab === 'mine' && <AttendanceSummary rows={rows} />}
+      {modern && tab === 'mine' && !(!loading && rows.filter((row) => !status || row.status === status).length === 0) ? <AttendanceDays rows={rows.filter((row) => !status || row.status === status)} loading={loading} /> : !loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
       {isAdmin && <BackfillMonthDrawer open={monthOpen} onClose={() => setMonthOpen(false)} onApplied={loadAttendance} />}
       {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}
