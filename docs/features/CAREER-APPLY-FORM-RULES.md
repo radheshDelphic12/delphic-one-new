@@ -9,7 +9,7 @@ Requested by Diksha (HR), 2026-10-15. Applies to the public apply form (`/<org>/
 |---|---|---|
 | 1 | Phone must be exactly 10 digits | Form: numeric, max 10 digits. Server: `screening.normalizePhone` accepts `+91` / `0` prefixes, requires `^[6-9]\d{9}$`, stores the 10 digits. |
 | 2 | Only a LinkedIn URL | `screening.isLinkedInUrl`: host `linkedin.com` or `*.linkedin.com`, path `/in/...` or `/pub/...`. Company pages and other sites are rejected. Applies to every screening form (public, referral, recruiter). |
-| 3 | CV attachment instead of Drive link | Public form has a file input (PDF / DOC / DOCX, max 1.5 MB), sent as multipart. Stored in `UPLOAD_DIR`, columns `cv_file` + `cv_file_name`. Recruiters download it from Pipeline > Applicants (`GET /applicants/:id/cv`, authenticated). `cv_url` stays for old rows and the recruiter's manual form. The file is optional. |
+| 3 | CV attachment instead of Drive link | Public form has a file input (PDF / DOC / DOCX, max 2.5 MB), sent as multipart. Stored in `UPLOAD_DIR`, columns `cv_file` + `cv_file_name`. Recruiters download it from Pipeline > Applicants (`GET /applicants/:id/cv`, authenticated). `cv_url` stays for old rows and the recruiter's manual form. The file is optional. |
 | 4 | Last field label | "Anything you would like to add" -> "Why you are fit for this role" (still optional; stored in `notes`). |
 | 5 | Same person must not apply again | Match per requirement on email, phone (last 10 digits) **or LinkedIn profile**. The check and the insert run under a per-requirement advisory lock so two quick clicks cannot both pass. |
 

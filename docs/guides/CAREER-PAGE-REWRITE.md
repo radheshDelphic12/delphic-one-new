@@ -24,8 +24,8 @@ query string, are passed through unchanged).
    `https://one.delphic.in/delphic/career/...` and returning it with status 200. A 301/302 redirect would put
    `one.delphic.in` in the address bar, which is what we want to avoid.
 2. Pass the **path after /career**, the **query string** and the **request method and body** unchanged. The apply form sends a POST as
-   `multipart/form-data` and can carry a CV file of up to 1.5 MB, so the rewrite must allow request bodies of **at least 2 MB**
-   (nginx: `client_max_body_size 2m;`) and must not buffer-limit or rewrite the body.
+   `multipart/form-data` and can carry a CV file of up to 2.5 MB, so the rewrite must allow request bodies of **at least 3 MB**
+   (nginx: `client_max_body_size 3m;`) and must not buffer-limit or rewrite the body.
 3. Send the visitor's address in `X-Forwarded-For` (the client IP first). Delphic One limits applications per visitor
    (20 per hour); without this header every candidate would look like the website server and would share one limit.
 4. Do not cache the HTML (jobs open and close). The stylesheet / script / logo may be cached for a few minutes.
@@ -45,7 +45,7 @@ location /career/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_ssl_server_name on;
-    client_max_body_size 2m;   # CV attachment (up to 1.5 MB)
+    client_max_body_size 3m;   # CV attachment (up to 2.5 MB)
 }
 ```
 (Delphic One also redirects `/career` to `career/` by itself, so the first line is optional.)
