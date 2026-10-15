@@ -14,14 +14,15 @@ import { AddApplicantDrawer } from './ApplicantPoolBoard.jsx';
 
 const SOURCES = [['linkedin', 'LinkedIn'], ['website', 'Website'], ['whatsapp', 'WhatsApp'], ['naukri', 'Naukri'], ['referral', 'Referral'], ['other', 'Other']];
 const CHANNEL_LABEL = { ...Object.fromEntries(SOURCES), internal: 'Internal' };
-// The public page of a published job. VITE_PUBLIC_JOBS_BASE can point it at the public domain (for example https://app.delphic.in).
-const jobLink = (slug, src) => `${(import.meta.env.VITE_PUBLIC_JOBS_BASE || window.location.origin).replace(/\/$/, '')}/careers/${slug}?src=${src}`;
+// The public page of a published job. The server reports the address candidates should see (PUBLIC_CAREERS_BASE, e.g.
+// https://delphic.in/career once the website rewrite is live); until then the app's own /delphic/career pages are used.
+const jobLink = (base, slug, src) => `${(base || `${window.location.origin}/delphic/career`).replace(/\/$/, '')}/${slug}?src=${src}`;
 
 /** Copies the job's public link with the chosen source, so each post (LinkedIn, WhatsApp, ...) can be tracked. */
-function CopyLink({ slug, onCopied, onFailed }) {
+function CopyLink({ base, slug, onCopied, onFailed }) {
   const [src, setSrc] = useState('linkedin');
   async function copy() {
-    const url = jobLink(slug, src);
+    const url = jobLink(base, slug, src);
     try { await navigator.clipboard.writeText(url); onCopied(url); } catch { onFailed(url); }
   }
   return (
@@ -55,6 +56,7 @@ export default function WebsiteJobsBoard() {
   const status = useLiveData(() => apiClient.get('/website/status').then((r) => r.data.data), { enabled: canPublish, deps: [canPublish] });
   const configured = Boolean(status.data?.configured);
   const postings = useLiveData(() => apiClient.get('/website/postings').then((r) => r.data.data), { deps: [configured], enabled: canPublish && configured });
+  const careerBase = useLiveData(() => apiClient.get('/applicants/career-base').then((r) => r.data.data), { deps: [] });
   const postingOf = new Map((postings.data || []).map((p) => [p.requirement_id, p]));
 
   async function openPublish(r) {
@@ -111,7 +113,7 @@ export default function WebsiteJobsBoard() {
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex gap-2">
                         <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => setAddFor(r.id)}><UserPlus className="h-3.5 w-3.5" />Add applicant</button>
-                        {posting?.status === 'published' && posting.slug && <CopyLink slug={posting.slug} onCopied={() => pushSuccess('Link copied. Anyone who applies through it is counted under the source you chose.')} onFailed={(url) => pushError(`Copy this link: ${url}`, 'Link')} />}
+                        {posting?.status === 'published' && posting.slug && <CopyLink base={careerBase.data?.base} slug={posting.slug} onCopied={() => pushSuccess('Link copied. Anyone who applies through it is counted under the source you chose.')} onFailed={(url) => pushError(`Copy this link: ${url}`, 'Link')} />}
                         {canPublish && (
                           <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} title={configured ? undefined : 'Website control is not configured on this server'} onClick={() => openPublish(r)}>
                             <Globe className="h-3.5 w-3.5" />{posting ? 'Edit website listing' : 'Publish on website'}

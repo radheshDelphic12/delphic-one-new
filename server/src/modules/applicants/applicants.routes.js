@@ -3,6 +3,7 @@ const { authenticate, authorize } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, fail } = require('../../utils/response');
+const env = require('../../config/env');
 const service = require('./applicants.service');
 
 const router = express.Router();
@@ -26,6 +27,8 @@ const result = (res, r, key, status = 200) => {
   return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
 };
 
+// Where the public careers pages are reachable (the website's address once its rewrite is live), for the "Copy link" button.
+router.get('/career-base', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, { base: env.publicCareersBase || null })));
 router.get('/requirements', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, await service.inProgressRequirements())));
 router.get(
   '/',

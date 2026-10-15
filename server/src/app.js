@@ -63,6 +63,7 @@ const invitesRoutes = require('./modules/invites/invites.routes');
 const uploadsRoutes = require('./modules/uploads/uploads.routes');
 const websiteRoutes = require('./modules/website/website.routes');
 const publicJobsRoutes = require('./modules/publicJobs/publicJobs.routes');
+const careerPagesRoutes = require('./modules/careerPages/careerPages.routes');
 const internalJobsRoutes = require('./modules/internalJobs/internalJobs.routes');
 
 const app = express();
@@ -158,6 +159,8 @@ app.use('/api/v1/finance-categories', financeCategoriesRoutes);
 app.use('/api/v1/invites', invitesRoutes);
 app.use('/api/v1/website', websiteRoutes);
 app.use('/api/v1/public', publicJobsRoutes);
+// Public careers pages (HTML), e.g. /delphic/career/. Only reachable where the web server forwards /<org>/career to the API.
+app.use('/:orgSlug([a-z0-9-]+)/career', careerPagesRoutes);
 app.use('/api/v1/internal-jobs', internalJobsRoutes);
 
 app.use((req, res) => res.status(404).json({ success: false, message: 'Not found' }));

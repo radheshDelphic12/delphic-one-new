@@ -51,6 +51,8 @@ services:
       WEBSITE_CONTACT_SCRIPT_URL: ${WEBSITE_CONTACT_SCRIPT_URL:-}
       WEBSITE_CAREER_SCRIPT_URL: ${WEBSITE_CAREER_SCRIPT_URL:-}
       WEBSITE_SECURE_SCRIPT_URL: ${WEBSITE_SECURE_SCRIPT_URL:-}
+      # Address candidates see for the careers pages, e.g. https://delphic.in/career. Leave empty until the website rewrite is live.
+      PUBLIC_CAREERS_BASE: ${PUBLIC_CAREERS_BASE:-}
     volumes:
       - uploads:/app/server/uploads
     ports:

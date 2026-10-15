@@ -47,6 +47,9 @@ const env = {
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  // The address candidates see for the careers pages, e.g. https://delphic.in/career (no trailing slash). Leave it empty until
+  // the website's rewrite to /delphic/career is live; it only feeds the "Copy link" button and the canonical link.
+  publicCareersBase: String(process.env.PUBLIC_CAREERS_BASE || '').trim().replace(/\/+$/, ''),
   // Business timezone for human-readable dates in notifications / emails. The
   // server clock is UTC; without this, notification times render in UTC.
   timezone: process.env.APP_TIMEZONE || 'Asia/Kolkata',
