@@ -131,7 +131,7 @@ function DayDetail({ day }) {
 }
 
 function MonthCalendar({ year, month, member, onBack }) {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -202,7 +202,8 @@ function MonthCalendar({ year, month, member, onBack }) {
           <DayDetail day={selected} />
         </div>
       )}
-      {data && logs.length > 0 && (
+      {/* the per-log list (with bulk delete) is only kept for the group superadmin; everyone else works from the calendar */}
+      {isGroupSuperadmin && data && logs.length > 0 && (
         <section className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-heading text-sm font-semibold text-tertiary-900">Project logs of the month ({logs.length})</h4>
