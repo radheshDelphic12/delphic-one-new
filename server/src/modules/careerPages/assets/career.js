@@ -42,7 +42,7 @@
   var cvInput = field('cv');
   cvInput.addEventListener('change', function () {
     var f = cvInput.files[0];
-    var bad = f && (!/\.(pdf|docx?)$/i.test(f.name) ? 'Attach your CV as a PDF, DOC or DOCX file' : f.size > 5 * 1024 * 1024 ? 'Your CV is larger than 5 MB' : '');
+    var bad = f && (!/\.(pdf|docx?)$/i.test(f.name) ? 'Attach your CV as a PDF, DOC or DOCX file' : f.size > 1.5 * 1024 * 1024 ? 'Your CV is larger than 1.5 MB' : '');
     cvInput.setCustomValidity(bad || '');
     if (bad) cvInput.reportValidity();
   });

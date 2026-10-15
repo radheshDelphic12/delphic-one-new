@@ -73,7 +73,7 @@ function applyForm(slug) {
 <label>Email *<input name="email" type="email" required maxlength="200" autocomplete="email"></label>
 <label>Phone *<input name="phone" type="tel" required inputmode="numeric" maxlength="14" pattern="[6-9][0-9]{9}" title="10-digit mobile number" placeholder="10-digit mobile number" autocomplete="tel-national"></label>
 <label>LinkedIn profile link *<input name="linkedin_url" type="url" required maxlength="300" pattern="https?://([a-zA-Z0-9\\-]+[.])?linkedin[.]com/(in|pub)/.+" title="Your LinkedIn profile link, e.g. https://www.linkedin.com/in/yourname" placeholder="https://www.linkedin.com/in/..."></label>
-<label>Attach your CV (PDF, DOC or DOCX, up to 5 MB)<input name="cv" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
+<label>Attach your CV (PDF, DOC or DOCX, up to 1.5 MB)<input name="cv" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
 <label>Are you working somewhere? *<select name="currently_working" required><option value="">Choose...</option><option value="yes">Yes</option><option value="no">No</option></select></label>
 <label>Immediate joiner? *<select name="joiner_status" required><option value="">Choose...</option><option value="yes">Yes</option><option value="no">No</option><option value="serving_notice">Serving notice</option></select></label>
 <label>Notice period *<select name="notice_choice" required><option value="">Choose...</option>${opt(NOTICE)}</select></label>

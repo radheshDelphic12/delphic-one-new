@@ -75,7 +75,7 @@ router.get('/:slug', asyncHandler(async (req, res) => {
   return html(res, 200, jobPage({ job: r.job, canonical: canonicalFor(`/${r.job.slug}`) }));
 }));
 
-// The CV is optional: PDF / DOC / DOCX up to 5 MB. The form sends multipart; plain JSON (no file) still works.
+// The CV is optional: PDF / DOC / DOCX up to 1.5 MB. The form sends multipart; plain JSON (no file) still works.
 fs.mkdirSync(env.uploadDir, { recursive: true });
 const CV_EXT = ['.pdf', '.doc', '.docx'];
 const cvUpload = multer({
@@ -83,13 +83,13 @@ const cvUpload = multer({
     destination: (req, file, cb) => cb(null, env.uploadDir),
     filename: (req, file, cb) => cb(null, `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`),
   }),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 1.5 * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => (CV_EXT.includes(path.extname(file.originalname).toLowerCase()) ? cb(null, true) : cb(new Error('cv_type'))),
 }).single('cv');
 const takeCv = (req, res, next) => cvUpload(req, res, (err) => {
   if (!err) return next();
   const tooBig = err.code === 'LIMIT_FILE_SIZE';
-  return res.status(422).json({ success: false, message: tooBig ? 'Your CV is larger than 5 MB' : 'Attach your CV as a PDF, DOC or DOCX file', errors: [{ path: 'cv', message: tooBig ? 'Your CV is larger than 5 MB' : 'Attach your CV as a PDF, DOC or DOCX file' }] });
+  return res.status(422).json({ success: false, message: tooBig ? 'Your CV is larger than 1.5 MB' : 'Attach your CV as a PDF, DOC or DOCX file', errors: [{ path: 'cv', message: tooBig ? 'Your CV is larger than 1.5 MB' : 'Attach your CV as a PDF, DOC or DOCX file' }] });
 });
 
 /** A file really is what its extension says (PDF, old Word, or docx = zip), not a renamed script. */

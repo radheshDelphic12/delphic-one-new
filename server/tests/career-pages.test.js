@@ -153,6 +153,24 @@ describe('careers pages', () => {
     expect((await request(app).get('/api/v1/applicants/career-base')).status).toBe(401);
   });
 
+  test('a CV can be at most 1.5 MB: a bigger file is refused with a clear message and leaves nothing on disk', async () => {
+    const fs = require('fs');
+    const url = `/${orgSlug}/career/${slug}/apply`;
+    const form = (n) => request(app).post(url).field('name', `Size Tester ${n}`).field('email', `size${n}@example.com`).field('phone', `99999${n}0000`.slice(0, 10))
+      .field('linkedin_url', `https://www.linkedin.com/in/size-tester-${n}`).field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
+      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid');
+    const pdfOfSize = (bytes) => Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(bytes - 9, 0x20)]);
+    const before = fs.readdirSync(env.uploadDir).length;
+    const tooBig = await form(1).attach('cv', pdfOfSize(1.6 * 1024 * 1024), 'big.pdf');
+    expect(tooBig.status).toBe(422);
+    expect(tooBig.body.message).toBe('Your CV is larger than 1.5 MB');
+    expect(await prisma.jobApplicant.count({ where: { email: 'size1@example.com' } })).toBe(0);
+    expect(fs.readdirSync(env.uploadDir).length).toBe(before);
+    const fits = await form(2).attach('cv', pdfOfSize(1.4 * 1024 * 1024), 'fits.pdf');
+    expect(fits.status).toBe(201);
+    expect((await prisma.jobApplicant.findFirst({ where: { email: 'size2@example.com' } })).cv_file_name).toBe('fits.pdf');
+  });
+
   test('the phone and LinkedIn pattern attributes compile in current browsers (the v flag) and accept / reject the right values', async () => {
     const html = (await page(`/${slug}`)).text;
     const attr = (name) => {
