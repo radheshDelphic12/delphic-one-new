@@ -56,7 +56,7 @@ export default function ProjectTeamTimesheet() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+      <div className="ta-head flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Timesheet</p>
           <h2 className="mt-1 flex items-center gap-2 font-heading text-xl font-semibold text-tertiary-900"><Users className="h-5 w-5" /> Project team timesheet</h2>

@@ -7,6 +7,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
+import { useAuth } from '../../lib/authContext.jsx';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
@@ -141,6 +142,9 @@ function AdminTicketModal({ mode, ticket, onClose, onDone }) {
  */
 export default function OvertimeTicketsTab({ isAdmin }) {
   const { pushError, pushSuccess } = useAlerts();
+  const { isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const [mine, setMine] = useState({ tickets: [], uses_tickets: false });
   const [queue, setQueue] = useState([]);
   const [all, setAll] = useState([]);
@@ -225,10 +229,17 @@ export default function OvertimeTicketsTab({ isAdmin }) {
 
   return (
     <div className="space-y-8">
+      {modern && (
+        <div className="ta-head rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Time &amp; Attendance</p>
+          <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Overtime tickets</h2>
+          <p className="mt-1 text-sm text-tertiary-500">Raise a ticket for the extra hours you worked. Your manager approves it, and approved overtime is paid.</p>
+        </div>
+      )}
       <section className="space-y-3">
-        <h2 className="font-heading text-sm font-semibold text-tertiary-900">My overtime tickets</h2>
+        {modern ? <h3 className="font-heading text-sm font-semibold text-tertiary-900">Raise a ticket</h3> : <h2 className="font-heading text-sm font-semibold text-tertiary-900">My overtime tickets</h2>}
         {mine.uses_tickets ? (
-          <form onSubmit={raise} className="grid gap-2 rounded-xl border border-tertiary-100 bg-white p-3 sm:grid-cols-[8rem_6rem_1fr_2fr_auto]">
+          <form onSubmit={raise} className={`grid gap-2 border border-tertiary-100 bg-white sm:grid-cols-[8rem_6rem_1fr_2fr_auto] ${modern ? 'rounded-2xl p-4 shadow-card' : 'rounded-xl p-3'}`}>
             <label className="text-xs font-medium text-tertiary-600">Date<input required type="date" max={todayIso()} value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
             <label className="text-xs font-medium text-tertiary-600">Hours<input required type="number" min="0.25" max="12" step="0.25" value={form.hours} onChange={(e) => setForm((f) => ({ ...f, hours: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
             <label className="text-xs font-medium text-tertiary-600">Project (billed to the client if it bills overtime)
