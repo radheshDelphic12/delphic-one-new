@@ -375,3 +375,8 @@ h3,
     padding: 1.5rem;
   }
 }
+
+/* Time & Attendance for employees: the section header cards share one soft look (the group superadmin keeps the original). */
+.ta-modern .ta-head {
+  @apply bg-gradient-to-r from-primary-50 via-white to-white;
+}
