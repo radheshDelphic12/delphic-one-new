@@ -28,7 +28,9 @@ import { isFoundationOrg, useFoundation, fxCan } from '../../lib/foundation/useF
 import { zklyreraNavFor } from '../../lib/zklyrera/sections.js';
 import { isZklyreraOrg, useZklyrera, zkCan } from '../../lib/zklyrera/useZklyrera.js';
 import { valterraNavFor } from '../../lib/valterra/sections.js';
+import { novarexNavFor } from '../../lib/novarex/sections.js';
 import { isValterraOrg, useValterra, vtCan } from '../../lib/valterra/useValterra.js';
+import { isNovarexOrg, useNovarex, nxCan } from '../../lib/novarex/useNovarex.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -99,6 +101,8 @@ const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settin
 const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || ['/settings', '/notifications'].includes(pathname);
 // Valterra Resources as well.
 const isValterraPath = (pathname) => pathname.startsWith('/valterra') || ['/settings', '/notifications'].includes(pathname);
+// Novarex Pharmaceuticals as well.
+const isNovarexPath = (pathname) => pathname.startsWith('/novarex') || ['/settings', '/notifications'].includes(pathname);
 // Gulati Foundation as well.
 const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || ['/settings', '/notifications'].includes(pathname);
 
@@ -126,8 +130,14 @@ export default function AppLayout() {
   const { me: zkMe } = useZklyrera();
   const isValterra = isValterraOrg(user);
   const { me: vtMe } = useValterra();
+  const isNovarex = isNovarexOrg(user);
+  const { me: nxMe } = useNovarex();
   const navBase = useMemo(
     () => {
+      if (isNovarex) {
+        const setup = nxCan(nxMe, 'settings') ? [{ to: '/novarex/settings', label: 'Novarex setup', icon: Settings }] : [];
+        return [...novarexNavFor(nxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+      }
       if (isValterra) {
         const setup = vtCan(vtMe, 'settings') ? [{ to: '/valterra/settings', label: 'Valterra setup', icon: Settings }] : [];
         return [...valterraNavFor(vtMe), ...setup, ...ZEPHYR_EXTRA_NAV];
@@ -162,7 +172,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe]
+    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
@@ -203,6 +213,13 @@ export default function AppLayout() {
     document.documentElement.classList.add('theme-valterra');
     return () => document.documentElement.classList.remove('theme-valterra');
   }, [isValterra, isGroupPath]);
+
+  // Novarex Pharmaceuticals gets the teal and medical blue of its logo.
+  useEffect(() => {
+    if (!isNovarex || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-novarex');
+    return () => document.documentElement.classList.remove('theme-novarex');
+  }, [isNovarex, isGroupPath]);
 
   // Gulati Foundation gets the calm green of its logo.
   useEffect(() => {
@@ -295,6 +312,19 @@ export default function AppLayout() {
             <img src={user?.active_org?.logo_url || '/valterra-logo.png'} alt={user?.active_org?.name || 'Valterra Resources'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
           </div>
           <div className="h-0.5 bg-[rgb(var(--vt-gold))]" />
+        </Link>
+      )}
+      {isNovarex && !isGroupPath && !collapsed && (
+        <Link
+          to="/novarex"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Novarex Pharmaceuticals home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-white shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/novarex-logo.svg'} alt={user?.active_org?.name || 'Novarex Pharmaceuticals'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--nx-accent))]" />
         </Link>
       )}
       {isZklyrera && !isGroupPath && !collapsed && (
@@ -582,7 +612,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

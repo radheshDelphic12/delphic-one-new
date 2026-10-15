@@ -162,7 +162,7 @@ async function assetValues(gulati, zephyr, actor) {
 
 async function main() {
   assertNonProdDestructive('seed-demo-gaps');
-  const delphic = await orgBy((o) => !(o.enabled_modules || []).some((x) => ['gulati', 'zephyr', 'acconcy', 'foundation', 'zklyrera', 'valterra', 'coming_soon'].includes(x)));
+  const delphic = await orgBy((o) => !(o.enabled_modules || []).some((x) => ['gulati', 'zephyr', 'acconcy', 'foundation', 'zklyrera', 'valterra', 'novarex', 'coming_soon'].includes(x)));
   if (!delphic) throw new Error('Delphic Global org not found');
   const gulati = await orgBy((o) => (o.enabled_modules || []).includes('gulati'));
   const zephyr = await orgBy((o) => (o.enabled_modules || []).includes('zephyr'));

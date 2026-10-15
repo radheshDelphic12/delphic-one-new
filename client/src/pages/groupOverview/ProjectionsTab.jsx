@@ -19,6 +19,7 @@ import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
 import FoundationGroupSection from './FoundationGroupSection.jsx';
 import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import ValterraGroupSection from './ValterraGroupSection.jsx';
+import NovarexGroupSection from './NovarexGroupSection.jsx';
 import { GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
 
 const POLL_MS = 60000;
@@ -215,6 +216,7 @@ export default function ProjectionsTab() {
           <FoundationGroupSection foundation={data.foundation} />
           <ZklyreraGroupSection zklyrera={data.zklyrera} />
           <ValterraGroupSection valterra={data.valterra} />
+          <NovarexGroupSection novarex={data.novarex} />
         </div>
       )}
 

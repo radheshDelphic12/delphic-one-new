@@ -486,3 +486,60 @@
   background-color: rgb(var(--p-200) / 0.85);
   color: rgb(var(--p-900));
 }
+
+/* Novarex Pharmaceuticals: the logo is a teal (#0F766E) and medical-blue (#2563A8) capsule, so the workspace is
+   teal on cool white surfaces with a blue accent (selected tab, active nav bar, key figures), clean sans headings. */
+.theme-novarex {
+  --p-50: 240 253 250;
+  --p-100: 204 251 241;
+  --p-200: 167 235 224;
+  --p-300: 110 211 198;
+  --p-400: 52 176 164;
+  --p-500: 20 145 135;
+  --p-600: 15 130 120;
+  --p-700: 15 118 110;
+  --p-800: 17 94 89;
+  --p-900: 19 78 74;
+
+  --nx-accent: 37 99 168;
+  --color-bg: 246 251 251;
+  --color-sidebar: 238 247 247;
+  --color-border: 214 232 232;
+  --color-border-subtle: 228 241 241;
+  --color-primary: 15 118 110;
+  --color-primary-soft: 240 253 250;
+}
+
+.theme-novarex .dashboard-canvas-glow {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 12% -5%, rgb(37 99 168 / 0.10), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 90% 0%, rgb(15 118 110 / 0.07), transparent 52%);
+}
+
+.theme-novarex .shadow-card {
+  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 8px 24px -6px rgb(17 94 89 / 0.16);
+}
+
+.theme-novarex nav a.bg-primary-600 {
+  background-color: rgb(var(--p-200) / 0.7);
+  color: rgb(var(--p-900));
+  box-shadow: inset 3px 0 0 rgb(var(--nx-accent));
+}
+
+.theme-novarex [role='tablist'] button[aria-selected='true'] {
+  border-color: rgb(var(--nx-accent));
+  color: rgb(var(--p-900));
+}
+
+.theme-novarex .bg-primary-600 {
+  background-color: rgb(var(--p-700));
+}
+.theme-novarex .bg-primary-600:hover {
+  background-color: rgb(var(--p-800));
+}
+
+/* The selected sidebar item keeps its soft fill on hover (the button rules above must not turn it dark). */
+.theme-novarex nav a.bg-primary-600:hover {
+  background-color: rgb(var(--p-200) / 0.85);
+  color: rgb(var(--p-900));
+}

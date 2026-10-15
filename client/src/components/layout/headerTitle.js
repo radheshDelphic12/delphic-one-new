@@ -78,18 +78,42 @@ const zklyreraEntry = (pathname) => ZKLYRERA_TITLES[pathname] || ZKLYRERA_TITLES
 const VALTERRA_TITLES = {
   '/valterra': ['Overview', 'Mining sites, investments, revenue, expenses and salaries of Valterra Resources.'],
   '/valterra/sites': ['Mining Sites', 'Every site with its location, mining type, material and status.'],
-  '/valterra/investments': ['Investments', 'Capital placed, principal recovered and earnings, site by site.'],
-  '/valterra/income': ['Revenue & Returns', 'Mining revenue, investment earnings, principal recovered and other income.'],
+  '/valterra/investments': ['Investments', 'Capital placed, principal recovered and earnings, outlet by outlet.'],
+  '/valterra/income': ['Revenue & Returns', 'Sales revenue, franchise fees, investment earnings, principal recovered and other income.'],
   '/valterra/expenses': ['Expenses', 'Site operating costs and company overheads by category.'],
-  '/valterra/salaries': ['Salaries', 'Salary and labour cost paid and payable, by employee and site.'],
-  '/valterra/reports': ['Monthly Reports', 'The monthly financial report, site-wise results and every other report, with export.'],
-  '/valterra/projections': ['Projections', 'Plan future months by site and compare them with the actuals.'],
+  '/valterra/salaries': ['Salaries', 'Salary and labour cost paid and payable, by employee and outlet.'],
+  '/valterra/reports': ['Monthly Reports', 'The monthly financial report, outlet-wise results and every other report, with export.'],
+  '/valterra/projections': ['Projections', 'Plan future months by outlet and compare them with the actuals.'],
   '/valterra/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
   '/valterra/financials': ['Financials', 'Valuation, income, expenses and capital by month, with month close.'],
   '/valterra/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
-  '/valterra/settings': ['Valterra setup', 'Opening balance, financial year, categories, mining types and the audit log.'],
+  '/valterra/settings': ['Valterra setup', 'Opening balance, financial year, categories, ownership types and the audit log.'],
 };
-const valterraEntry = (pathname) => (pathname.startsWith('/valterra/sites/') ? ['Mining site', 'The site profile, its dashboard, investments and transactions.'] : VALTERRA_TITLES[pathname] || VALTERRA_TITLES['/valterra']);
+const valterraEntry = (pathname) => (pathname.startsWith('/valterra/sites/') ? ['Mining site', 'The outlet profile, its dashboard, investments and transactions.'] : VALTERRA_TITLES[pathname] || VALTERRA_TITLES['/valterra']);
+const NOVAREX_TITLES = {
+  '/novarex': ['Overview', 'Outlets, investments, sales, expenses and salaries of Novarex Pharmaceuticals.'],
+  '/novarex/operations': ['Operations', 'Sales, gross profit, stock value, receivables, franchise fees and logistics, with live filters and reports.'],
+  '/novarex/products': ['Products', 'The pharmaceutical product master with tax, price and handling.'],
+  '/novarex/purchasing': ['Purchasing', 'Suppliers, purchase orders and goods receipts.'],
+  '/novarex/stock': ['Stock', 'Stock by batch and location, expiry, transfers, adjustments and alerts.'],
+  '/novarex/sales': ['Sales orders', 'Customers, outlets and sales orders.'],
+  '/novarex/logistics': ['Shipments', 'Dispatch, delivery, freight, partners and vehicles.'],
+  '/novarex/invoices': ['Invoices', 'Sales, purchase and franchise invoices, credit notes and payments.'],
+  '/novarex/returns': ['Returns and recalls', 'Returns, inspection of returned goods and product recalls.'],
+  '/novarex/franchise': ['Franchise', 'Agreements, fees, royalties and settlements.'],
+  '/novarex/outlets': ['Outlets', 'Every outlet with its location, ownership type, format and status.'],
+  '/novarex/investments': ['Investments', 'Capital placed, principal recovered and earnings, outlet by outlet.'],
+  '/novarex/income': ['Revenue & Returns', 'Sales revenue, franchise fees, investment earnings, principal recovered and other income.'],
+  '/novarex/expenses': ['Expenses', 'Outlet operating costs and company overheads by category.'],
+  '/novarex/salaries': ['Salaries', 'Salary and labour cost paid and payable, by employee and outlet.'],
+  '/novarex/reports': ['Monthly Reports', 'The monthly financial report, outlet-wise results and every other report, with export.'],
+  '/novarex/projections': ['Projections', 'Plan future months by outlet and compare them with the actuals.'],
+  '/novarex/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
+  '/novarex/financials': ['Financials', 'Valuation, income, expenses and capital by month, with month close.'],
+  '/novarex/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/novarex/settings': ['Novarex setup', 'Opening balance, financial year, categories, ownership types and the audit log.'],
+};
+const novarexEntry = (pathname) => (pathname.startsWith('/novarex/outlets/') ? ['Outlet', 'The outlet profile, its dashboard, investments and transactions.'] : NOVAREX_TITLES[pathname] || NOVAREX_TITLES['/novarex']);
 const foundationEntry = (pathname) => (/^\/foundation\/campaigns\/[^/]+/.test(pathname) ? ['Campaign', 'Budget, spending, timeline and projection for one campaign.'] : FOUNDATION_TITLES[pathname] || FOUNDATION_TITLES['/foundation']);
 const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
 
@@ -101,6 +125,7 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[0];
   if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[0];
   if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[0];
+  if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[0];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
@@ -135,6 +160,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[1];
   if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[1];
   if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[1];
+  if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[1];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {

@@ -450,6 +450,7 @@ model User {
   fx_people                       FxPerson[]
   zk_people                       ZkPerson[]
   vt_people                       VtPerson[]
+  nx_people                       NxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
@@ -1977,6 +1978,39 @@ model Org {
   vt_entries                 VtEntry[]
   vt_projections             VtProjection[]
   vt_period_closes           VtPeriodClose[]
+  nx_settings                NxSetting[]
+  nx_categories              NxCategory[]
+  nx_audit                   NxAudit[]
+  nx_people                  NxPerson[]
+  nx_outlets                 NxOutlet[]
+  nx_investments             NxInvestment[]
+  nx_returns                 NxReturn[]
+  nx_entries                 NxEntry[]
+  nx_projections             NxProjection[]
+  nx_period_closes           NxPeriodClose[]
+  nx_products                NxProduct[]
+  nx_warehouses              NxWarehouse[]
+  nx_suppliers               NxSupplier[]
+  nx_customers               NxCustomer[]
+  nx_logistics_partners      NxLogisticsPartner[]
+  nx_rate_cards              NxRateCard[]
+  nx_vehicles                NxVehicle[]
+  nx_batches                 NxBatch[]
+  nx_stock_ledger            NxStockLedger[]
+  nx_stock_adjustments       NxStockAdjustment[]
+  nx_purchase_orders         NxPurchaseOrder[]
+  nx_goods_receipts          NxGoodsReceipt[]
+  nx_transfers               NxTransfer[]
+  nx_sales_orders            NxSalesOrder[]
+  nx_invoices                NxInvoice[]
+  nx_payments                NxPayment[]
+  nx_goods_returns           NxGoodsReturn[]
+  nx_shipments               NxShipment[]
+  nx_trips                   NxTrip[]
+  nx_recalls                 NxRecall[]
+  nx_franchise_agreements    NxFranchiseAgreement[]
+  nx_franchise_settlements   NxFranchiseSettlement[]
+  nx_counters                NxCounter[]
   zx_parties                 ZxParty[]
   zx_documents               ZxDocument[]
   zx_leads                   ZxLead[]
@@ -6053,6 +6087,917 @@ model VtPeriodClose {
 
   @@unique([org_id, month])
   @@map("vt_period_closes")
+}
+
+// ===================== Novarex Pharmaceuticals (Vt) =====================
+// Mining operations and finance. Same accounting as Zklyrera (capital placed, principal recovered and earnings are kept apart;
+// every actual figure is derived in modules/novarex/novarex.calc.js) plus MINING SITES: investments, income, expenses,
+// salaries and projections may carry a outlet; company-level records carry none and are never silently spread over outlets.
+
+model NxSetting {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                    String    @unique @db.Uuid
+  org                       Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  currency                  String    @default("INR")
+  investment_prefix         String    @default("NX")
+  investment_seq            Int       @default(0)
+  outlet_prefix             String    @default("NO")
+  outlet_seq                Int       @default(0)
+  // null = no opening balance entered; cash balances are then not shown (never invented).
+  opening_balance           Decimal?  @db.Decimal(16, 2)
+  opening_date              DateTime? @db.Date
+  fy_start_month            Int       @default(4)
+  // Operations policy (all editable in Setup).
+  invoice_timing            String    @default("delivery") // delivery | dispatch | order
+  expiry_warning_days       Int       @default(90)
+  expiry_block_days         Int       @default(0) // stock expiring within this many days is not allocated
+  require_transfer_approval Boolean   @default(false)
+  invoice_prefix            String    @default("INV")
+  default_gst_rate          Decimal   @default(12) @db.Decimal(7, 3)
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @default(now()) @updatedAt
+
+  @@map("nx_settings")
+}
+
+model NxCategory {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String         @db.Uuid
+  org               Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  scope             String // investment | income | expense | ownership_type | format
+  name              String
+  kind              String? // ownership_type scope only: company_owned | franchise | third_party | other
+  description       String?
+  active            Boolean        @default(true)
+  sort_order        Int            @default(0)
+  created_by        String?        @db.Uuid
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @default(now()) @updatedAt
+  deleted_at        DateTime?
+  investments       NxInvestment[]
+  entries           NxEntry[]
+  projections       NxProjection[]
+  outlets_by_type   NxOutlet[]     @relation("NxOutletOwnershipType")
+  outlets_by_format NxOutlet[]     @relation("NxOutletFormat")
+
+  @@unique([org_id, scope, name])
+  @@index([org_id, scope])
+  @@map("nx_categories")
+}
+
+model NxAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  entity     String
+  entity_id  String?  @db.Uuid
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actor_id   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([org_id, entity, entity_id])
+  @@index([org_id, created_at])
+  @@map("nx_audit")
+}
+
+// One mining outlet. Never deleted: closing / archiving keeps every transaction and report. status: planned | active | inactive | closed.
+model NxOutlet {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String         @db.Uuid
+  org                   Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                  String
+  name                  String
+  location              String?
+  state                 String?
+  district              String?
+  country               String?
+  latitude              Decimal?       @db.Decimal(9, 6)
+  longitude             Decimal?       @db.Decimal(9, 6)
+  ownership_type_id     String?        @db.Uuid
+  ownership_type        NxCategory?    @relation("NxOutletOwnershipType", fields: [ownership_type_id], references: [id])
+  format_id             String?        @db.Uuid
+  format                NxCategory?    @relation("NxOutletFormat", fields: [format_id], references: [id])
+  tags                  String[]       @default([])
+  description           String?
+  gstin                 String?
+  drug_licence_no       String?
+  drug_licence_expiry   DateTime?      @db.Date
+  legal_entity          String?
+  agreement_ref         String?
+  status                String         @default("active")
+  start_date            DateTime?      @db.Date
+  expected_closure_date DateTime?      @db.Date
+  manager_name          String?
+  notes                 String?
+  archived_at           DateTime?
+  created_by            String?        @db.Uuid
+  updated_by            String?        @db.Uuid
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @default(now()) @updatedAt
+  investments           NxInvestment[]
+  entries               NxEntry[]
+  projections           NxProjection[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@map("nx_outlets")
+}
+
+model NxPerson {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name         String
+  user_id      String?   @db.Uuid
+  user         User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  access_role  String    @default("none") // none | manager | finance | staff
+  outlet_ids   String[]  @default([])
+  active       Boolean   @default(true)
+  kind         String    @default("employee") // employee | contractor
+  designation  String?
+  phone        String?
+  email        String?
+  joining_date DateTime? @db.Date
+  leaving_date DateTime? @db.Date
+  notes        String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+  entries      NxEntry[]
+
+  @@unique([org_id, user_id])
+  @@index([org_id])
+  @@map("nx_people")
+}
+
+// One investment (capital put in). status stored: planned | active | cancelled. partially_returned / completed / overdue
+// are derived from the returns and the expected date. A planned investment is not yet counted as invested.
+model NxInvestment {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String         @db.Uuid
+  org                    Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code                   String?
+  name                   String
+  category_id            String?        @db.Uuid
+  category               NxCategory?    @relation(fields: [category_id], references: [id])
+  outlet_id              String?        @db.Uuid
+  outlet                 NxOutlet?      @relation(fields: [outlet_id], references: [id], onDelete: SetNull)
+  investor               String?
+  investment_date        DateTime       @db.Date
+  amount                 Decimal        @db.Decimal(16, 2)
+  expected_return_amount Decimal?       @db.Decimal(16, 2)
+  expected_return_date   DateTime?      @db.Date
+  expected_return_rate   Decimal?       @db.Decimal(7, 3)
+  status                 String         @default("active")
+  reference              String?
+  notes                  String?
+  created_by             String?        @db.Uuid
+  updated_by             String?        @db.Uuid
+  created_at             DateTime       @default(now())
+  updated_at             DateTime       @default(now()) @updatedAt
+  deleted_at             DateTime?
+  returns                NxReturn[]
+  entries                NxEntry[]
+  projections            NxProjection[]
+
+  @@index([org_id, investment_date])
+  @@index([outlet_id])
+  @@index([org_id, status])
+  @@map("nx_investments")
+}
+
+// Money coming back from an investment: principal and earnings are two separate amounts (never guessed from one).
+model NxReturn {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String       @db.Uuid
+  org            Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  investment_id  String       @db.Uuid
+  investment     NxInvestment @relation(fields: [investment_id], references: [id], onDelete: Cascade)
+  return_date    DateTime     @db.Date
+  principal      Decimal      @default(0) @db.Decimal(16, 2)
+  earnings       Decimal      @default(0) @db.Decimal(16, 2)
+  status         String       @default("received") // received | reversed
+  payment_method String?
+  reference      String?
+  notes          String?
+  created_by     String?      @db.Uuid
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, return_date])
+  @@index([investment_id])
+  @@map("nx_returns")
+}
+
+// income | expense | salary | transfer. payment_status paid | unpaid | cancelled (unpaid income = receivable, unpaid expense = payable).
+model NxEntry {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String        @db.Uuid
+  org            Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  kind           String
+  category_id    String?       @db.Uuid
+  category       NxCategory?   @relation(fields: [category_id], references: [id])
+  outlet_id      String?       @db.Uuid
+  outlet         NxOutlet?     @relation(fields: [outlet_id], references: [id], onDelete: SetNull)
+  person_id      String?       @db.Uuid
+  person         NxPerson?     @relation(fields: [person_id], references: [id], onDelete: SetNull)
+  investment_id  String?       @db.Uuid
+  investment     NxInvestment? @relation(fields: [investment_id], references: [id], onDelete: SetNull)
+  entry_date     DateTime      @db.Date
+  due_date       DateTime?     @db.Date
+  amount         Decimal       @db.Decimal(16, 2)
+  expense_class  String? // operating | other (expense only)
+  payment_status String        @default("paid")
+  payment_method String?
+  party_name     String?
+  reference      String?
+  description    String?
+  // Set by the stock / invoice / shipment workflows: sales_invoice | franchise_invoice | cogs | shipment | trip. non_cash = recognised but moves no cash (cost of goods sold).
+  source_type    String?
+  source_id      String?       @db.Uuid
+  non_cash       Boolean       @default(false)
+  created_by     String?       @db.Uuid
+  updated_by     String?       @db.Uuid
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, entry_date])
+  @@index([org_id, kind, payment_status])
+  @@index([outlet_id])
+  @@index([org_id, source_type, source_id])
+  @@map("nx_entries")
+}
+
+// A plan, never a transaction. line: new_investment | principal_recovery | investment_earnings | other_income |
+// operating_expense | salary | other_expense.
+model NxProjection {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String        @db.Uuid
+  org           Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name          String
+  month         String
+  line          String
+  category_id   String?       @db.Uuid
+  category      NxCategory?   @relation(fields: [category_id], references: [id])
+  outlet_id     String?       @db.Uuid
+  outlet        NxOutlet?     @relation(fields: [outlet_id], references: [id], onDelete: SetNull)
+  investment_id String?       @db.Uuid
+  investment    NxInvestment? @relation(fields: [investment_id], references: [id], onDelete: SetNull)
+  amount        Decimal       @db.Decimal(16, 2)
+  status        String        @default("draft") // draft | approved | archived
+  notes         String?
+  created_by    String?       @db.Uuid
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@index([org_id, month])
+  @@index([outlet_id])
+  @@map("nx_projections")
+}
+
+model NxPeriodClose {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  month         String
+  status        String    @default("open")
+  snapshot      Json?
+  closed_by     String?   @db.Uuid
+  closed_at     DateTime?
+  reopen_reason String?
+  reopened_at   DateTime?
+  stale         Boolean   @default(false)
+  stale_at      DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, month])
+  @@map("nx_period_closes")
+}
+
+// ===================== Novarex operations (products, stock, orders, invoices, logistics, franchise) =====================
+// Ids between these tables are validated in the services (no foreign keys), stock is an append-only ledger.
+
+model NxProduct {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String    @db.Uuid
+  org                   Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  sku                   String
+  name                  String
+  brand                 String?
+  generic_name          String?
+  category_id           String?   @db.Uuid
+  manufacturer          String?
+  strength              String?
+  dosage_form           String?
+  pack_size             String?
+  uom                   String    @default("unit")
+  hsn                   String?
+  gst_rate              Decimal   @default(12) @db.Decimal(7, 3)
+  mrp                   Decimal?  @db.Decimal(16, 2)
+  purchase_price        Decimal   @default(0) @db.Decimal(16, 2)
+  selling_price         Decimal   @default(0) @db.Decimal(16, 2)
+  barcode               String?
+  status                String    @default("active")
+  regulatory_class      String?
+  requires_prescription Boolean   @default(false)
+  cold_chain            Boolean   @default(false)
+  reorder_level         Decimal   @default(0) @db.Decimal(14, 3)
+  shelf_life_days       Int?
+  notes                 String?
+  created_by            String?   @db.Uuid
+  updated_by            String?   @db.Uuid
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @default(now()) @updatedAt
+  deleted_at            DateTime?
+
+  @@unique([org_id, sku])
+  @@index([org_id, status])
+  @@map("nx_products")
+}
+
+model NxWarehouse {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  type         String    @default("warehouse")
+  city         String?
+  state        String?
+  address      String?
+  manager_name String?
+  outlet_id    String?   @db.Uuid
+  status       String    @default("active")
+  notes        String?
+  created_by   String?   @db.Uuid
+  updated_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  @@unique([org_id, code])
+  @@map("nx_warehouses")
+}
+
+model NxSupplier {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  contact_name   String?
+  phone          String?
+  email          String?
+  gstin          String?
+  licence_no     String?
+  licence_expiry DateTime? @db.Date
+  state          String?
+  address        String?
+  credit_days    Int       @default(0)
+  status         String    @default("active")
+  notes          String?
+  created_by     String?   @db.Uuid
+  updated_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@unique([org_id, code])
+  @@map("nx_suppliers")
+}
+
+model NxCustomer {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  outlet_id    String?   @db.Uuid
+  kind         String    @default("external")
+  contact_name String?
+  phone        String?
+  email        String?
+  gstin        String?
+  state        String?
+  address      String?
+  credit_days  Int       @default(0)
+  status       String    @default("active")
+  notes        String?
+  created_by   String?   @db.Uuid
+  updated_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  @@unique([org_id, code])
+  @@map("nx_customers")
+}
+
+model NxLogisticsPartner {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  code          String
+  name          String
+  contact_name  String?
+  phone         String?
+  email         String?
+  gstin         String?
+  regions       String[]  @default([])
+  pricing_model String    @default("fixed")
+  payment_terms String?
+  status        String    @default("active")
+  notes         String?
+  created_by    String?   @db.Uuid
+  updated_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@unique([org_id, code])
+  @@map("nx_logistics_partners")
+}
+
+model NxRateCard {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  partner_id        String    @db.Uuid
+  name              String
+  model             String    @default("fixed")
+  base_amount       Decimal   @default(0) @db.Decimal(16, 2)
+  rate              Decimal   @default(0) @db.Decimal(16, 2)
+  handling_charge   Decimal   @default(0) @db.Decimal(16, 2)
+  cold_chain_charge Decimal   @default(0) @db.Decimal(16, 2)
+  zone              String?
+  active            Boolean   @default(true)
+  notes             String?
+  created_by        String?   @db.Uuid
+  updated_by        String?   @db.Uuid
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+  deleted_at        DateTime?
+
+  @@index([org_id, partner_id])
+  @@map("nx_rate_cards")
+}
+
+model NxVehicle {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String    @db.Uuid
+  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  reg_no           String
+  vehicle_type     String?
+  capacity         String?
+  driver_name      String?
+  driver_person_id String?   @db.Uuid
+  status           String    @default("available")
+  insurance_expiry DateTime? @db.Date
+  permit_expiry    DateTime? @db.Date
+  notes            String?
+  created_by       String?   @db.Uuid
+  updated_by       String?   @db.Uuid
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @default(now()) @updatedAt
+  deleted_at       DateTime?
+
+  @@unique([org_id, reg_no])
+  @@map("nx_vehicles")
+}
+
+model NxBatch {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  product_id     String    @db.Uuid
+  batch_no       String
+  mfg_date       DateTime? @db.Date
+  expiry_date    DateTime? @db.Date
+  supplier_id    String?   @db.Uuid
+  unit_cost      Decimal   @default(0) @db.Decimal(16, 2)
+  quality_status String    @default("released")
+  received_qty   Decimal   @default(0) @db.Decimal(14, 3)
+  receipt_id     String?   @db.Uuid
+  notes          String?
+  created_by     String?   @db.Uuid
+  updated_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@unique([org_id, product_id, batch_no])
+  @@index([org_id, expiry_date])
+  @@map("nx_batches")
+}
+
+model NxStockLedger {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  product_id   String   @db.Uuid
+  batch_id     String   @db.Uuid
+  warehouse_id String   @db.Uuid
+  bucket       String   @default("available")
+  qty          Decimal  @db.Decimal(14, 3)
+  movement     String
+  ref_type     String?
+  ref_id       String?  @db.Uuid
+  posting_key  String?
+  note         String?
+  actor_id     String?  @db.Uuid
+  created_at   DateTime @default(now())
+
+  @@unique([org_id, posting_key])
+  @@index([org_id, product_id, warehouse_id])
+  @@index([org_id, batch_id])
+  @@index([org_id, ref_type, ref_id])
+  @@map("nx_stock_ledger")
+}
+
+model NxStockAdjustment {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  product_id   String   @db.Uuid
+  batch_id     String   @db.Uuid
+  warehouse_id String   @db.Uuid
+  bucket       String   @default("available")
+  qty          Decimal  @db.Decimal(14, 3)
+  reason       String
+  status       String   @default("posted")
+  actor_id     String?  @db.Uuid
+  created_by   String?  @db.Uuid
+  updated_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  @@index([org_id, warehouse_id])
+  @@map("nx_stock_adjustments")
+}
+
+model NxPurchaseOrder {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  org           Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  po_no         String
+  supplier_id   String    @db.Uuid
+  warehouse_id  String    @db.Uuid
+  order_date    DateTime  @db.Date
+  expected_date DateTime? @db.Date
+  status        String    @default("draft")
+  subtotal      Decimal   @default(0) @db.Decimal(16, 2)
+  tax_total     Decimal   @default(0) @db.Decimal(16, 2)
+  total         Decimal   @default(0) @db.Decimal(16, 2)
+  lines         Json
+  notes         String?
+  approved_by   String?   @db.Uuid
+  created_by    String?   @db.Uuid
+  updated_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@unique([org_id, po_no])
+  @@index([org_id, status])
+  @@map("nx_purchase_orders")
+}
+
+model NxGoodsReceipt {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  org          Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  grn_no       String
+  po_id        String?   @db.Uuid
+  supplier_id  String    @db.Uuid
+  warehouse_id String    @db.Uuid
+  receipt_date DateTime  @db.Date
+  status       String    @default("draft")
+  lines        Json
+  invoice_id   String?   @db.Uuid
+  notes        String?
+  created_by   String?   @db.Uuid
+  updated_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  @@unique([org_id, grn_no])
+  @@map("nx_goods_receipts")
+}
+
+model NxTransfer {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  transfer_no       String
+  from_warehouse_id String    @db.Uuid
+  to_warehouse_id   String    @db.Uuid
+  status            String    @default("draft")
+  request_date      DateTime  @db.Date
+  lines             Json
+  notes             String?
+  approved_by       String?   @db.Uuid
+  dispatched_at     DateTime?
+  received_at       DateTime?
+  created_by        String?   @db.Uuid
+  updated_by        String?   @db.Uuid
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+  deleted_at        DateTime?
+
+  @@unique([org_id, transfer_no])
+  @@map("nx_transfers")
+}
+
+model NxSalesOrder {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String    @db.Uuid
+  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  so_no            String
+  customer_id      String    @db.Uuid
+  outlet_id        String?   @db.Uuid
+  warehouse_id     String    @db.Uuid
+  order_date       DateTime  @db.Date
+  expected_date    DateTime? @db.Date
+  status           String    @default("draft")
+  fulfilment       String    @default("none")
+  invoice_status   String    @default("none")
+  payment_status   String    @default("unpaid")
+  subtotal         Decimal   @default(0) @db.Decimal(16, 2)
+  tax_total        Decimal   @default(0) @db.Decimal(16, 2)
+  total            Decimal   @default(0) @db.Decimal(16, 2)
+  payment_terms    String?
+  delivery_address String?
+  logistics_method String?
+  lines            Json
+  notes            String?
+  created_by       String?   @db.Uuid
+  updated_by       String?   @db.Uuid
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @default(now()) @updatedAt
+  deleted_at       DateTime?
+
+  @@unique([org_id, so_no])
+  @@index([org_id, status])
+  @@index([org_id, outlet_id])
+  @@map("nx_sales_orders")
+}
+
+model NxInvoice {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String    @db.Uuid
+  org             Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  invoice_no      String
+  type            String
+  source_type     String?
+  source_id       String?   @db.Uuid
+  customer_id     String?   @db.Uuid
+  supplier_id     String?   @db.Uuid
+  outlet_id       String?   @db.Uuid
+  party_name      String?
+  issue_date      DateTime  @db.Date
+  due_date        DateTime? @db.Date
+  subtotal        Decimal   @default(0) @db.Decimal(16, 2)
+  tax_total       Decimal   @default(0) @db.Decimal(16, 2)
+  total           Decimal   @default(0) @db.Decimal(16, 2)
+  paid_amount     Decimal   @default(0) @db.Decimal(16, 2)
+  credited_amount Decimal   @default(0) @db.Decimal(16, 2)
+  status          String    @default("issued")
+  lines           Json
+  tax_split       Json?
+  einvoice_status String    @default("not_filed")
+  eway_status     String    @default("not_required")
+  entry_id        String?   @db.Uuid
+  cogs_entry_id   String?   @db.Uuid
+  ref_invoice_id  String?   @db.Uuid
+  notes           String?
+  created_by      String?   @db.Uuid
+  updated_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+  deleted_at      DateTime?
+
+  @@unique([org_id, invoice_no])
+  @@unique([org_id, type, source_type, source_id])
+  @@index([org_id, status])
+  @@index([org_id, outlet_id])
+  @@map("nx_invoices")
+}
+
+model NxPayment {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  invoice_id String   @db.Uuid
+  direction  String
+  amount     Decimal  @db.Decimal(16, 2)
+  pay_date   DateTime @db.Date
+  method     String?
+  reference  String?
+  notes      String?
+  actor_id   String?  @db.Uuid
+  created_by String?  @db.Uuid
+  updated_by String?  @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([org_id, invoice_id])
+  @@map("nx_payments")
+}
+
+model NxGoodsReturn {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  return_no         String
+  type              String
+  invoice_id        String?   @db.Uuid
+  shipment_id       String?   @db.Uuid
+  supplier_id       String?   @db.Uuid
+  warehouse_id      String    @db.Uuid
+  product_id        String    @db.Uuid
+  batch_id          String    @db.Uuid
+  qty               Decimal   @db.Decimal(14, 3)
+  reason            String
+  status            String    @default("pending")
+  disposition       String?
+  return_date       DateTime  @db.Date
+  credit_invoice_id String?   @db.Uuid
+  actor_id          String?   @db.Uuid
+  created_by        String?   @db.Uuid
+  updated_by        String?   @db.Uuid
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+  deleted_at        DateTime?
+
+  @@unique([org_id, return_no])
+  @@map("nx_goods_returns")
+}
+
+model NxShipment {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org               Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  shipment_no       String
+  sales_order_id    String?   @db.Uuid
+  transfer_id       String?   @db.Uuid
+  from_warehouse_id String    @db.Uuid
+  to_warehouse_id   String?   @db.Uuid
+  customer_id       String?   @db.Uuid
+  outlet_id         String?   @db.Uuid
+  method            String    @default("own_vehicle")
+  vehicle_id        String?   @db.Uuid
+  partner_id        String?   @db.Uuid
+  rate_card_id      String?   @db.Uuid
+  driver_name       String?
+  status            String    @default("pending_dispatch")
+  dispatch_at       DateTime?
+  expected_at       DateTime? @db.Date
+  delivered_at      DateTime?
+  tracking_ref      String?
+  estimated_freight Decimal   @default(0) @db.Decimal(16, 2)
+  actual_freight    Decimal?  @db.Decimal(16, 2)
+  freight_status    String    @default("unpaid")
+  freight_entry_id  String?   @db.Uuid
+  weight_kg         Decimal?  @db.Decimal(14, 3)
+  distance_km       Decimal?  @db.Decimal(14, 3)
+  lines             Json
+  pod_note          String?
+  damaged_qty       Decimal   @default(0) @db.Decimal(14, 3)
+  missing_qty       Decimal   @default(0) @db.Decimal(14, 3)
+  notes             String?
+  created_by        String?   @db.Uuid
+  updated_by        String?   @db.Uuid
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+  deleted_at        DateTime?
+
+  @@unique([org_id, shipment_no])
+  @@index([org_id, status])
+  @@index([org_id, sales_order_id])
+  @@map("nx_shipments")
+}
+
+model NxTrip {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String    @db.Uuid
+  org              Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  vehicle_id       String    @db.Uuid
+  shipment_id      String?   @db.Uuid
+  trip_date        DateTime  @db.Date
+  distance_km      Decimal?  @db.Decimal(14, 3)
+  fuel_cost        Decimal   @default(0) @db.Decimal(16, 2)
+  toll_cost        Decimal   @default(0) @db.Decimal(16, 2)
+  maintenance_cost Decimal   @default(0) @db.Decimal(16, 2)
+  other_cost       Decimal   @default(0) @db.Decimal(16, 2)
+  entry_id         String?   @db.Uuid
+  notes            String?
+  created_by       String?   @db.Uuid
+  updated_by       String?   @db.Uuid
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @default(now()) @updatedAt
+  deleted_at       DateTime?
+
+  @@index([org_id, vehicle_id])
+  @@map("nx_trips")
+}
+
+model NxRecall {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  recall_no   String
+  product_id  String    @db.Uuid
+  batch_id    String?   @db.Uuid
+  reason      String
+  status      String    @default("open")
+  recall_date DateTime  @db.Date
+  notes       String?
+  actor_id    String?   @db.Uuid
+  created_by  String?   @db.Uuid
+  updated_by  String?   @db.Uuid
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+  deleted_at  DateTime?
+
+  @@unique([org_id, recall_no])
+  @@map("nx_recalls")
+}
+
+model NxFranchiseAgreement {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String    @db.Uuid
+  org                   Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  outlet_id             String    @db.Uuid
+  partner_name          String
+  start_date            DateTime  @db.Date
+  end_date              DateTime? @db.Date
+  initial_fee           Decimal   @default(0) @db.Decimal(16, 2)
+  royalty_pct           Decimal   @default(0) @db.Decimal(7, 3)
+  revenue_share_pct     Decimal   @default(0) @db.Decimal(7, 3)
+  purchase_discount_pct Decimal   @default(0) @db.Decimal(7, 3)
+  security_deposit      Decimal   @default(0) @db.Decimal(16, 2)
+  payment_terms         String?
+  status                String    @default("draft")
+  renewal_date          DateTime? @db.Date
+  terms                 String?
+  notes                 String?
+  created_by            String?   @db.Uuid
+  updated_by            String?   @db.Uuid
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @default(now()) @updatedAt
+  deleted_at            DateTime?
+
+  @@index([org_id, outlet_id])
+  @@index([org_id, status])
+  @@map("nx_franchise_agreements")
+}
+
+model NxFranchiseSettlement {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String    @db.Uuid
+  org            Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  agreement_id   String    @db.Uuid
+  outlet_id      String    @db.Uuid
+  month          String
+  kind           String    @default("royalty")
+  reported_sales Decimal   @default(0) @db.Decimal(16, 2)
+  basis_visible  Boolean   @default(true)
+  royalty_due    Decimal   @default(0) @db.Decimal(16, 2)
+  share_due      Decimal   @default(0) @db.Decimal(16, 2)
+  fee_due        Decimal   @default(0) @db.Decimal(16, 2)
+  total_due      Decimal   @default(0) @db.Decimal(16, 2)
+  status         String    @default("draft")
+  invoice_id     String?   @db.Uuid
+  notes          String?
+  created_by     String?   @db.Uuid
+  updated_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+
+  @@index([org_id, agreement_id, month])
+  @@map("nx_franchise_settlements")
+}
+
+model NxCounter {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  key        String
+  seq        Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, key])
+  @@map("nx_counters")
 }
 
 // ─── Marketing website control (modules/website) ────────────────────────────

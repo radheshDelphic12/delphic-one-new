@@ -61,7 +61,7 @@ async function groupOrgs(groupIds) {
   });
 }
 /** Delphic Global is the company with no vertical marker (the others carry one in enabled_modules). */
-const MARKERS = ['gulati', 'zephyr', 'acconcy', 'foundation', 'zklyrera', 'valterra', 'coming_soon'];
+const MARKERS = ['gulati', 'zephyr', 'acconcy', 'foundation', 'zklyrera', 'valterra', 'novarex', 'coming_soon'];
 const isDelphic = (o) => !MARKERS.some((m) => o.enabled_modules?.includes(m));
 
 function stateOf(t, today) {

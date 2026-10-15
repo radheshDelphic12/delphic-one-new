@@ -101,17 +101,38 @@ import ZklyreraPeoplePage from '../pages/zklyrera/ZklyreraPeoplePage.jsx';
 import ZklyreraSettingsPage from '../pages/zklyrera/ZklyreraSettingsPage.jsx';
 import { isZklyreraOrg } from '../lib/zklyrera/useZklyrera.js';
 import ValterraHomePage from '../pages/valterra/ValterraHomePage.jsx';
+import NovarexHomePage from '../pages/novarex/NovarexHomePage.jsx';
+import NovarexOperationsPage from '../pages/novarex/NovarexOperationsPage.jsx';
+import NovarexProductsPage from '../pages/novarex/NovarexProductsPage.jsx';
+import NovarexPurchasingPage from '../pages/novarex/NovarexPurchasingPage.jsx';
+import NovarexStockPage from '../pages/novarex/NovarexStockPage.jsx';
+import NovarexSalesPage from '../pages/novarex/NovarexSalesPage.jsx';
+import NovarexLogisticsPage from '../pages/novarex/NovarexLogisticsPage.jsx';
+import NovarexInvoicesPage from '../pages/novarex/NovarexInvoicesPage.jsx';
+import NovarexReturnsPage from '../pages/novarex/NovarexReturnsPage.jsx';
+import NovarexFranchisePage from '../pages/novarex/NovarexFranchisePage.jsx';
 import ValterraSitesPage from '../pages/valterra/ValterraSitesPage.jsx';
+import NovarexOutletsPage from '../pages/novarex/NovarexOutletsPage.jsx';
 import ValterraSiteDetailPage from '../pages/valterra/ValterraSiteDetailPage.jsx';
+import NovarexOutletDetailPage from '../pages/novarex/NovarexOutletDetailPage.jsx';
 import ValterraInvestmentsPage from '../pages/valterra/ValterraInvestmentsPage.jsx';
+import NovarexInvestmentsPage from '../pages/novarex/NovarexInvestmentsPage.jsx';
 import ValterraEntriesPage from '../pages/valterra/ValterraEntriesPage.jsx';
+import NovarexEntriesPage from '../pages/novarex/NovarexEntriesPage.jsx';
 import ValterraTransactionsPage from '../pages/valterra/ValterraTransactionsPage.jsx';
+import NovarexTransactionsPage from '../pages/novarex/NovarexTransactionsPage.jsx';
 import ValterraReportsPage from '../pages/valterra/ValterraReportsPage.jsx';
+import NovarexReportsPage from '../pages/novarex/NovarexReportsPage.jsx';
 import ValterraProjectionsPage from '../pages/valterra/ValterraProjectionsPage.jsx';
+import NovarexProjectionsPage from '../pages/novarex/NovarexProjectionsPage.jsx';
 import ValterraFinancialsPage from '../pages/valterra/ValterraFinancialsPage.jsx';
+import NovarexFinancialsPage from '../pages/novarex/NovarexFinancialsPage.jsx';
 import ValterraPeoplePage from '../pages/valterra/ValterraPeoplePage.jsx';
+import NovarexPeoplePage from '../pages/novarex/NovarexPeoplePage.jsx';
 import ValterraSettingsPage from '../pages/valterra/ValterraSettingsPage.jsx';
+import NovarexSettingsPage from '../pages/novarex/NovarexSettingsPage.jsx';
 import { isValterraOrg } from '../lib/valterra/useValterra.js';
+import { isNovarexOrg } from '../lib/novarex/useNovarex.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
 import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
@@ -166,7 +187,9 @@ function HomePage() {
   // Zklyrera Spirits is a standalone workspace with its own home.
   if (isZklyreraOrg(user)) return <Navigate to="/zklyrera" replace />;
   // Valterra Resources is a standalone workspace with its own home.
+  // Novarex Pharmaceuticals is a standalone workspace with its own home.
   if (isValterraOrg(user)) return <Navigate to="/valterra" replace />;
+  if (isNovarexOrg(user)) return <Navigate to="/novarex" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -252,6 +275,15 @@ function RequireValterra({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isValterraOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Novarex Pharmaceuticals workspace needs the `novarex` module on the ACTIVE company. */
+function RequireNovarex({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isNovarexOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -428,19 +460,42 @@ export default function App() {
         <Route path="zklyrera/settings" element={<RequireZklyrera><ZklyreraSettingsPage /></RequireZklyrera>} />
         <Route path="zklyrera/*" element={<Navigate to="/zklyrera" replace />} />
         <Route path="valterra" element={<RequireValterra><ValterraHomePage /></RequireValterra>} />
+        <Route path="novarex" element={<RequireNovarex><NovarexHomePage /></RequireNovarex>} />
         <Route path="valterra/sites" element={<RequireValterra><ValterraSitesPage /></RequireValterra>} />
+        <Route path="novarex/operations" element={<RequireNovarex><NovarexOperationsPage /></RequireNovarex>} />
+        <Route path="novarex/products" element={<RequireNovarex><NovarexProductsPage /></RequireNovarex>} />
+        <Route path="novarex/purchasing" element={<RequireNovarex><NovarexPurchasingPage /></RequireNovarex>} />
+        <Route path="novarex/stock" element={<RequireNovarex><NovarexStockPage /></RequireNovarex>} />
+        <Route path="novarex/sales" element={<RequireNovarex><NovarexSalesPage /></RequireNovarex>} />
+        <Route path="novarex/logistics" element={<RequireNovarex><NovarexLogisticsPage /></RequireNovarex>} />
+        <Route path="novarex/invoices" element={<RequireNovarex><NovarexInvoicesPage /></RequireNovarex>} />
+        <Route path="novarex/returns" element={<RequireNovarex><NovarexReturnsPage /></RequireNovarex>} />
+        <Route path="novarex/franchise" element={<RequireNovarex><NovarexFranchisePage /></RequireNovarex>} />
+        <Route path="novarex/outlets" element={<RequireNovarex><NovarexOutletsPage /></RequireNovarex>} />
         <Route path="valterra/sites/:id" element={<RequireValterra><ValterraSiteDetailPage /></RequireValterra>} />
+        <Route path="novarex/outlets/:id" element={<RequireNovarex><NovarexOutletDetailPage /></RequireNovarex>} />
         <Route path="valterra/investments" element={<RequireValterra><ValterraInvestmentsPage /></RequireValterra>} />
+        <Route path="novarex/investments" element={<RequireNovarex><NovarexInvestmentsPage /></RequireNovarex>} />
         <Route path="valterra/income" element={<RequireValterra><ValterraEntriesPage type="income" /></RequireValterra>} />
+        <Route path="novarex/income" element={<RequireNovarex><NovarexEntriesPage type="income" /></RequireNovarex>} />
         <Route path="valterra/expenses" element={<RequireValterra><ValterraEntriesPage type="expense" /></RequireValterra>} />
+        <Route path="novarex/expenses" element={<RequireNovarex><NovarexEntriesPage type="expense" /></RequireNovarex>} />
         <Route path="valterra/salaries" element={<RequireValterra><ValterraEntriesPage type="salary" /></RequireValterra>} />
+        <Route path="novarex/salaries" element={<RequireNovarex><NovarexEntriesPage type="salary" /></RequireNovarex>} />
         <Route path="valterra/transactions" element={<RequireValterra><ValterraTransactionsPage /></RequireValterra>} />
+        <Route path="novarex/transactions" element={<RequireNovarex><NovarexTransactionsPage /></RequireNovarex>} />
         <Route path="valterra/reports" element={<RequireValterra><ValterraReportsPage /></RequireValterra>} />
+        <Route path="novarex/reports" element={<RequireNovarex><NovarexReportsPage /></RequireNovarex>} />
         <Route path="valterra/projections" element={<RequireValterra><ValterraProjectionsPage /></RequireValterra>} />
+        <Route path="novarex/projections" element={<RequireNovarex><NovarexProjectionsPage /></RequireNovarex>} />
         <Route path="valterra/financials" element={<RequireValterra><ValterraFinancialsPage /></RequireValterra>} />
+        <Route path="novarex/financials" element={<RequireNovarex><NovarexFinancialsPage /></RequireNovarex>} />
         <Route path="valterra/people" element={<RequireValterra><ValterraPeoplePage /></RequireValterra>} />
+        <Route path="novarex/people" element={<RequireNovarex><NovarexPeoplePage /></RequireNovarex>} />
         <Route path="valterra/settings" element={<RequireValterra><ValterraSettingsPage /></RequireValterra>} />
+        <Route path="novarex/settings" element={<RequireNovarex><NovarexSettingsPage /></RequireNovarex>} />
         <Route path="valterra/*" element={<Navigate to="/valterra" replace />} />
+        <Route path="novarex/*" element={<Navigate to="/novarex" replace />} />
         <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
