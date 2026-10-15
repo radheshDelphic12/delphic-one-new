@@ -1,8 +1,7 @@
-import { CalendarCheck, CalendarClock, CalendarOff, CheckCircle2, Clock3, Home, PartyPopper, XCircle } from 'lucide-react';
+import { CalendarClock, CalendarOff, CheckCircle2, Clock3, Home, PartyPopper, XCircle } from 'lucide-react';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 
-// The employee's own Attendance screen: a greeting with today's status, a summary of the chosen period and the days as a
-// clean list. Same colours and cards as the rest of the app. (The group superadmin keeps the original screen.)
+// The employee's own Attendance screen: a greeting with today's status and the days as a clean list. Same colours and cards as the rest of the app. (The group superadmin keeps the original screen.)
 
 const STATUS = {
   present: { label: 'Present', icon: CheckCircle2, pill: 'bg-green-50 text-green-700', tile: 'border-t-[#10B981]', iconBg: 'bg-[#ECFDF5] text-[#059669]' },
@@ -14,7 +13,6 @@ const STATUS = {
 };
 const FALLBACK = { label: '', icon: CalendarClock, pill: 'bg-tertiary-100 text-tertiary-700', tile: 'border-t-tertiary-300', iconBg: 'bg-tertiary-100 text-tertiary-600' };
 const metaOf = (status) => ({ ...FALLBACK, label: String(status || '').replace(/_/g, ' '), ...(STATUS[status] || {}) });
-const SUMMARY = ['present', 'absent', 'leave', 'holiday', 'half_day', 'wfh'];
 
 const dayKey = (row) => String(row.work_date || row.date || row.created_at || '').slice(0, 10);
 const partsOf = (key) => {
@@ -23,15 +21,6 @@ const partsOf = (key) => {
 };
 const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
-
-/** Counts per status and an attendance rate (present, work from home and half days count; leave and holidays do not hurt it). */
-export function summarize(rows) {
-  const counts = Object.fromEntries(SUMMARY.map((s) => [s, 0]));
-  for (const r of rows) if (counts[r.status] !== undefined) counts[r.status] += 1;
-  const worked = counts.present + counts.wfh + counts.half_day * 0.5;
-  const expected = counts.present + counts.wfh + counts.half_day + counts.absent;
-  return { counts, rate: expected ? Math.round((worked / expected) * 100) : null };
-}
 
 const RANGES = [
   ['This month', () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth(), 1)), iso(n)]; }],
@@ -80,38 +69,6 @@ export function AttendanceHeader({ user, rows, from, to, status, setFrom, setTo,
           <label className="text-xs font-medium text-tertiary-600">Status<select value={status} onChange={(e) => setStatus(e.target.value)} className={input}><option value="">All statuses</option>{statusOptions.filter(Boolean).map((v) => <option key={v} value={v}>{metaOf(v).label}</option>)}</select></label>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function AttendanceSummary({ rows }) {
-  const { counts, rate } = summarize(rows);
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-      <div className="rounded-2xl border border-tertiary-100 border-t-4 border-t-primary-500 bg-white p-4 shadow-card sm:col-span-2 lg:col-span-4 xl:col-span-1">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><CalendarCheck className="h-5 w-5" /></span>
-          <div>
-            <p className="text-xs font-medium text-tertiary-500">Attendance rate</p>
-            <p className="font-heading text-2xl font-semibold text-tertiary-900">{rate === null ? '—' : `${rate}%`}</p>
-          </div>
-        </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-tertiary-100"><div className="h-full rounded-full bg-primary-500 transition-all" style={{ width: `${rate ?? 0}%` }} /></div>
-      </div>
-      {SUMMARY.map((key) => {
-        const m = metaOf(key);
-        return (
-          <div key={key} className={`rounded-2xl border border-tertiary-100 border-t-4 bg-white p-4 shadow-card ${m.tile}`}>
-            <div className="flex items-center gap-3">
-              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${m.iconBg}`}><m.icon className="h-5 w-5" /></span>
-              <div>
-                <p className="text-xs font-medium text-tertiary-500">{m.label}</p>
-                <p className="font-heading text-2xl font-semibold text-tertiary-900">{counts[key]}</p>
-              </div>
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }

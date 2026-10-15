@@ -10,7 +10,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
-import { AttendanceDays, AttendanceHeader, AttendanceSummary } from './AttendanceModern.jsx';
+import { AttendanceDays, AttendanceHeader } from './AttendanceModern.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -198,7 +198,6 @@ export default function AttendancePage() {
         </div>
       )}
       {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}
-      {modern && tab === 'mine' && <AttendanceSummary rows={rows} />}
       {modern && tab === 'mine' && !(!loading && rows.filter((row) => !status || row.status === status).length === 0) ? <AttendanceDays rows={rows.filter((row) => !status || row.status === status)} loading={loading} /> : !loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
       {isAdmin && <BackfillMonthDrawer open={monthOpen} onClose={() => setMonthOpen(false)} onApplied={loadAttendance} />}
