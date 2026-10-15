@@ -449,7 +449,7 @@ export default function App() {
         />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="people" element={<PeopleHubPage />} />
-        <Route path="offices" element={<OfficesPage />} />
+        <Route path="offices" element={<RequireGroupSuperadmin><OfficesPage /></RequireGroupSuperadmin>} />
         <Route path="internal-jobs" element={<RequireMasterWorkspace><InternalJobsPage /></RequireMasterWorkspace>} />
         <Route path="people/:id" element={<EmployeeProfilePage />} />
         {/* Merged into the People / Time & Attendance hubs — keep old links working. */}
