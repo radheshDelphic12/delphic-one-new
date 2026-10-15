@@ -170,11 +170,19 @@ CREATE INDEX "wallet_audit_entity_type_entity_id_idx" ON "wallet_audit"("entity_
 -- CreateIndex
 CREATE INDEX "wallet_audit_org_group_id_created_at_idx" ON "wallet_audit"("org_group_id", "created_at");
 
--- AddForeignKey
-ALTER TABLE "gx_tasks" ADD CONSTRAINT "gx_tasks_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "gx_deals"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- AddForeignKey (idempotent: these two older Gulati keys may already exist on some databases)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gx_tasks_deal_id_fkey') THEN
+    ALTER TABLE "gx_tasks" ADD CONSTRAINT "gx_tasks_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "gx_deals"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
--- AddForeignKey
-ALTER TABLE "gx_period_closes" ADD CONSTRAINT "gx_period_closes_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (idempotent: these two older Gulati keys may already exist on some databases)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gx_period_closes_org_id_fkey') THEN
+    ALTER TABLE "gx_period_closes" ADD CONSTRAINT "gx_period_closes_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
 ALTER TABLE "legal_entities" ADD CONSTRAINT "legal_entities_org_group_id_fkey" FOREIGN KEY ("org_group_id") REFERENCES "org_groups"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
