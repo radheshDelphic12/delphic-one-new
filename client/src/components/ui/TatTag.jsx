@@ -10,6 +10,18 @@ export function formatTatRemaining(minutes) {
 
 /** The "Super Active" / "Expiring soon" tag of a requirement whose TAT is running; nothing otherwise. */
 export default function TatTag({ tat, withTime = true }) {
+  if (tat?.state === 'expired') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] font-semibold text-tertiary-600"
+        title={`TAT ${tat.hours ?? ''}h, ended ${tat.ends_at ? new Date(tat.ends_at).toLocaleString() : ''}`}
+      >
+        <Timer className="h-3 w-3" aria-hidden="true" />
+        TAT ended
+        {tat.hours ? <span className="font-normal opacity-80">· {tat.hours}h</span> : null}
+      </span>
+    );
+  }
   if (!tat?.tag) return null;
   const hot = tat.state === 'active';
   return (

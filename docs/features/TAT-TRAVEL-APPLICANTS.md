@@ -34,3 +34,5 @@ Signed (active) projects whose start date is still ahead now count as allocated 
 Nothing is pushed. Migrations apply automatically on Render boot; for production run `prisma migrate deploy`.
 
 Note (2026-10-14): the Requirements list table keeps a minimum height of 22rem (`maxHeight="max(22rem, calc(100dvh - 18rem))"` in `RequirementsListPage.jsx`) so the TAT Active tab never collapses on short screens; the table scrolls inside, the page (`main`) scrolls around it.
+
+Note (2026-10-15): after a TAT runs out, the Requirements list and the peek panel show a grey **TAT ended · <hours>h** chip (before, the tag simply disappeared and only the detail page said "TAT ended"). Expired requirements still do not appear on the TAT Active tab; use Extend TAT to make them Super Active again. Change is in `components/ui/TatTag.jsx` + `RequirementsListPage.jsx`.

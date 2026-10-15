@@ -72,7 +72,7 @@ function RequirementPeek({ row, onClose, onAssign }) {
           </span>
         </PeekField>
         <PeekField label="Priority"><Badge value={detail.priority} /></PeekField>
-        {detail.tat?.tag && <PeekField label="TAT"><TatTag tat={detail.tat} /></PeekField>}
+        {(detail.tat?.tag || detail.tat?.state === 'expired') && <PeekField label="TAT"><TatTag tat={detail.tat} /></PeekField>}
         <PeekField label="Type">{detail.req_type ? <Badge value={detail.req_type} /> : '—'}</PeekField>
         <PeekField label="Work mode"><span className="capitalize">{detail.work_mode || '—'}</span></PeekField>
         <PeekField label="Seats">{`${detail.seats_closed ?? 0}/${detail.seats_total ?? 0}`}</PeekField>
@@ -313,7 +313,7 @@ export default function RequirementsListPage() {
           <div className="min-w-0">
             <div className="text-sm font-medium text-primary-600">{reqKey(row.id)}</div>
             <div className="font-semibold text-tertiary-900">{row.title}</div>
-            {row.tat?.tag && <div className="mt-1"><TatTag tat={row.tat} /></div>}
+            {(row.tat?.tag || row.tat?.state === 'expired') && <div className="mt-1"><TatTag tat={row.tat} /></div>}
           </div>
         ),
       },
