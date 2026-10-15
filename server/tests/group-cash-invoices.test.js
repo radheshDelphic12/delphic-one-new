@@ -184,7 +184,7 @@ describe('group cash: invoices', () => {
     expect((await patch(inv.id, { ...body, notes: 'still editable' })).status).toBe(200);
     const live = d(await get(`/invoices/${inv.id}`)).payments[0];
     await authed(request(app).delete(`${G}/invoices/${inv.id}/payments/${live.id}`), superToken);
-    expect((await post(`/invoices/${inv.id}/cancel`, { reason: 'x' })).status).toBe(200);
+    expect((await post(`/invoices/${inv.id}/cancel`, { reason: 'Raised by mistake' })).status).toBe(200);
     expect((await patch(inv.id, body)).status).toBe(409); // cancelled stays cancelled
   });
 
