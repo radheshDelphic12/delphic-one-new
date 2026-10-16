@@ -75,9 +75,19 @@ function LeaveBalance({ rows }) {
   );
 }
 
+// Office / home can be applied for up to 3 months ahead.
+function lastApplyDate() {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 3);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function DayPanel({ day, member, canAct, onApply }) {
   const [reason, setReason] = useState('');
-  useEffect(() => setReason(''), [day?.date]);
+  const [until, setUntil] = useState('');
+  useEffect(() => { setReason(''); setUntil(''); }, [day?.date]);
+  const maxDate = lastApplyDate();
+  const tooFar = Boolean(day) && day.date > maxDate;
   if (!day) return <p className="rounded-2xl border border-dashed border-tertiary-200 p-4 text-sm text-tertiary-500">Select a day to see its details.</p>;
   const remote = day.work_type === 'remote';
   const other = day.work_place === 'home' ? 'office' : 'home';
@@ -95,9 +105,13 @@ function DayPanel({ day, member, canAct, onApply }) {
       {canAct && !remote && day.day_type === 'working' && (
         <div className="space-y-1 rounded-xl bg-tertiary-50 p-2">
           <input className="w-full rounded-lg border px-2 py-1 text-xs" placeholder="Reason (optional)" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
-          <button type="button" className="btn-secondary w-full text-xs" onClick={() => onApply(day.date, other, reason, member.org_membership_id)}>
-            {other === 'home' ? 'Apply work from home' : 'Switch to work from office'} for this day
+          <label className="block text-xs text-tertiary-600">Until (optional, to apply for several days)
+            <input type="date" className="mt-1 w-full rounded-lg border px-2 py-1 text-xs" value={until} min={day.date} max={maxDate} disabled={tooFar} onChange={(e) => setUntil(e.target.value)} />
+          </label>
+          <button type="button" className="btn-secondary w-full text-xs" disabled={tooFar} onClick={() => onApply(day.date, other, reason, member.org_membership_id, until)}>
+            {other === 'home' ? 'Apply work from home' : 'Switch to work from office'} {until && until > day.date ? `from this day to ${until}` : 'for this day'}
           </button>
+          {tooFar && <p className="text-xs text-amber-700">You can apply up to 3 months ahead (till {maxDate}).</p>}
         </div>
       )}
       {remote && <p className="text-xs text-tertiary-500">Remote employees work from home by default.</p>}
@@ -209,12 +223,13 @@ export default function AttendanceDashboard() {
     setMonth(d.getMonth() + 1);
   };
   const cells = useMemo(() => (data ? [...Array(data.days[0]?.weekday || 0).fill(null), ...data.days] : []), [data]);
-  const canAct = Boolean(data) && (isAdmin || data.member.org_membership_id === user?.org_membership_id);
+  const canAct = Boolean(data) && (isAdmin || data.member.is_self);
 
-  async function apply(date, workPlace, reason, orgMembershipId) {
+  async function apply(date, workPlace, reason, orgMembershipId, until) {
     try {
-      const { data: res } = await apiClient.post('/attendance-dashboard/place', { org_membership_id: orgMembershipId, date, work_place: workPlace, ...(reason ? { reason } : {}) });
-      pushSuccess(res.data.row?.status === 'approved' ? 'Saved' : res.data.reverted_to_default ? 'Back to the default' : 'Request sent for approval');
+      const { data: res } = await apiClient.post('/attendance-dashboard/place', { org_membership_id: orgMembershipId, date, work_place: workPlace, ...(until && until > date ? { to_date: until } : {}), ...(reason ? { reason } : {}) });
+      const days = res.data.count > 1 ? ` for ${res.data.count} days` : '';
+      pushSuccess((res.data.row?.status === 'approved' ? 'Saved' : res.data.reverted_to_default ? 'Back to the default' : 'Request sent for approval') + days);
       refresh();
     } catch (err) { pushError(apiErrorMessage(err, 'Could not save'), 'Something went wrong'); }
   }

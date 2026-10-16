@@ -8,10 +8,15 @@
 const prisma = require('../../config/db');
 const dashboard = require('../timesheets/dashboard.service');
 const leave = require('../leave/leave.service');
+const { todayIst } = require('../../lib/istDate');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 const monthBounds = (year, month) => ({ from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) });
 const dateOnly = (s) => new Date(`${s}T00:00:00.000Z`);
+
+// How far ahead office / home can be applied for.
+const MAX_MONTHS_AHEAD = 3;
+const lastApplyDay = () => { const t = todayIst(); return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + MAX_MONTHS_AHEAD, t.getUTCDate())); };
 
 const workTypeOf = (membership) => (membership.work_mode === 'remote' ? 'remote' : 'onsite');
 
@@ -174,7 +179,7 @@ async function officeHistory(orgId, orgMembershipId) {
 
 // Apply for office / home on a day. The person themselves, or an admin on their behalf (an admin's own
 // choice is approved straight away; someone else's needs their manager or an admin).
-async function requestPlace(orgId, user, { org_membership_id, date, work_place, reason }) {
+async function requestPlace(orgId, user, { org_membership_id, date, to_date, work_place, reason }) {
   const target = org_membership_id || user.org_membership_id;
   const member = await prisma.orgMembership.findFirst({ where: { id: target, org_id: orgId }, select: { id: true, work_mode: true, manager_id: true, worker_type: true, vendor_account_id: true } });
   if (!member) return { error: 'member_not_found' };
@@ -183,10 +188,23 @@ async function requestPlace(orgId, user, { org_membership_id, date, work_place, 
   if (target !== user.org_membership_id && !isAdmin) return { error: 'forbidden' };
   const defaultPlace = workTypeOf(member) === 'remote' ? 'home' : 'office';
   const when = dateOnly(date);
+  const last = to_date ? dateOnly(to_date) : when;
+  if (last < when) return { error: 'end_before_start' };
+  if (last > lastApplyDay()) return { error: 'too_far' };
+  // One day, or every working day in the range (weekends and holidays are skipped).
+  let days = [when];
+  if (to_date && to_date !== date) {
+    days = [];
+    for (let y = when.getUTCFullYear(), m = when.getUTCMonth() + 1; y < last.getUTCFullYear() || (y === last.getUTCFullYear() && m <= last.getUTCMonth() + 1); m === 12 ? (y += 1, m = 1) : (m += 1)) {
+      const cal = await dashboard.monthCalendar(orgId, target, { year: y, month: m });
+      for (const d of cal.days) if (d.day_type === 'working' && dateOnly(d.date) >= when && dateOnly(d.date) <= last) days.push(dateOnly(d.date));
+    }
+    if (!days.length) return { error: 'no_working_days' };
+  }
   if (work_place === defaultPlace) {
     // back to the default: nothing to decide, drop any earlier request
-    await prisma.workPlaceDay.deleteMany({ where: { org_membership_id: target, date: when } });
-    return { row: null, reverted_to_default: true };
+    await prisma.workPlaceDay.deleteMany({ where: { org_membership_id: target, date: { in: days } } });
+    return { row: null, count: days.length, reverted_to_default: true };
   }
   if (workTypeOf(member) === 'remote') return { error: 'remote_is_home' };
   const approved = isAdmin;
@@ -199,12 +217,15 @@ async function requestPlace(orgId, user, { org_membership_id, date, work_place, 
     decided_at: approved ? new Date() : null,
     decision_reason: null,
   };
-  const row = await prisma.workPlaceDay.upsert({
-    where: { org_membership_id_date: { org_membership_id: target, date: when } },
-    create: { org_id: orgId, org_membership_id: target, date: when, ...data },
-    update: data,
-  });
-  return { row };
+  const rows = [];
+  for (const day of days) {
+    rows.push(await prisma.workPlaceDay.upsert({
+      where: { org_membership_id_date: { org_membership_id: target, date: day } },
+      create: { org_id: orgId, org_membership_id: target, date: day, ...data },
+      update: data,
+    }));
+  }
+  return { row: rows[0], count: rows.length };
 }
 
 async function pendingPlaces(orgId, user) {

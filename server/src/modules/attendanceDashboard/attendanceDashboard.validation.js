@@ -15,6 +15,8 @@ const setOfficeSchema = z.object({
 const requestPlaceSchema = z.object({
   org_membership_id: z.string().uuid().optional(),
   date: day,
+  // Optional last day: applies to every working day from `date` to `to_date` (weekends and holidays are skipped).
+  to_date: day.optional(),
   work_place: z.enum(['office', 'home']),
   reason: z.string().trim().max(500).optional(),
 });

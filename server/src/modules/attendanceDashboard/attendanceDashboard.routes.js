@@ -20,6 +20,9 @@ const ERRORS = {
   account_not_found: [404, 'Project not found'],
   project_not_assigned: [403, 'You are not assigned to this project'],
   already_decided: [409, 'This request was already decided'],
+  too_far: [422, 'You can apply for work from home up to 3 months ahead'],
+  end_before_start: [422, 'The end date cannot be before the start date'],
+  no_working_days: [422, 'There is no working day in that range'],
 };
 const failFor = (res, code) => fail(res, ...(ERRORS[code] || [400, code]));
 
@@ -40,6 +43,8 @@ router.get(
     if (!(await canOpen(req, org_membership_id))) return failFor(res, 'forbidden');
     const result = await service.calendar(req.user.org_id, org_membership_id || req.user.org_membership_id, { year, month });
     if (result.error) return failFor(res, result.error);
+    // The client does not know its own membership id, so say whether this calendar is the caller's own.
+    result.member.is_self = result.member.org_membership_id === req.user.org_membership_id;
     return ok(res, result);
   })
 );

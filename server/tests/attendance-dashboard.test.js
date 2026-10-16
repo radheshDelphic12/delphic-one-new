@@ -63,6 +63,33 @@ describe('attendance dashboard', () => {
     expect((await post('/offices', emp.token, { org_membership_id: emp.membership.id, location_id: ctx.indore.id, effective_from: '2026-12-01' })).status).toBe(403);
   });
 
+  test('work from home can be applied for a range of future days, up to 3 months ahead', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Planner');
+    const ist = new Date(Date.now() + 330 * 60000);
+    const today = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
+    const ymdOf = (d) => d.toISOString().slice(0, 10);
+    const plus = (days) => ymdOf(new Date(today.getTime() + days * 86400000));
+    const plusMonths = (n, dd = 0) => ymdOf(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + n, today.getUTCDate() + dd)));
+
+    const range = await post('/place', emp.token, { date: plus(1), to_date: plus(14), work_place: 'home' });
+    expect(range.status).toBe(201);
+    // the client relies on this flag to show the apply button to an employee on their own calendar
+    expect((await get('/calendar?year=2026&month=11', emp.token)).body.data.member.is_self).toBe(true);
+    expect((await get(`/calendar?year=2026&month=11&org_membership_id=${emp.membership.id}`, ctx.admin)).body.data.member.is_self).toBe(false);
+    expect(range.body.data.count).toBeGreaterThan(5); // two weeks of working days, weekends skipped
+    expect(range.body.data.count).toBeLessThanOrEqual(14);
+    const d1 = new Date(plus(1));
+    const cal = await get(`/calendar?year=${d1.getUTCFullYear()}&month=${d1.getUTCMonth() + 1}`, emp.token);
+    expect(cal.body.data.days.filter((d) => d.requested_place === 'home').length).toBeGreaterThan(0);
+
+    // exactly 3 months ahead is allowed; beyond it is refused
+    expect((await post('/place', emp.token, { date: plusMonths(3), work_place: 'home' })).status).toBe(201);
+    expect((await post('/place', emp.token, { date: plusMonths(3, 1), work_place: 'home' })).status).toBe(422);
+    expect((await post('/place', emp.token, { date: plus(2), to_date: plusMonths(4), work_place: 'home' })).status).toBe(422);
+    expect((await post('/place', emp.token, { date: plus(5), to_date: plus(3), work_place: 'home' })).status).toBe(422);
+  });
+
   test('work from home on an onsite day needs the manager / admin to approve; remote is home by default', async () => {
     const ctx = await seed();
     const manager = await ctx.person('Boss');
