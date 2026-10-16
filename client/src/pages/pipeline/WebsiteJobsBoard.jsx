@@ -58,6 +58,9 @@ export default function WebsiteJobsBoard() {
   const postings = useLiveData(() => apiClient.get('/website/postings').then((r) => r.data.data), { deps: [configured], enabled: canPublish && configured });
   const careerBase = useLiveData(() => apiClient.get('/applicants/career-base').then((r) => r.data.data), { deps: [] });
   const postingOf = new Map((postings.data || []).map((p) => [p.requirement_id, p]));
+  // Anyone who can see this board (a recruiter too) may copy the link of a job that is live; only the slug is needed.
+  const links = useLiveData(() => apiClient.get('/applicants/published-links').then((r) => r.data.data), { intervalMs: 60000, deps: [] });
+  const slugOf = new Map((links.data || []).map((l) => [l.requirement_id, l.slug]));
 
   async function openPublish(r) {
     try {
@@ -113,7 +116,7 @@ export default function WebsiteJobsBoard() {
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex gap-2">
                         <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => setAddFor(r.id)}><UserPlus className="h-3.5 w-3.5" />Add applicant</button>
-                        {posting?.status === 'published' && posting.slug && <CopyLink base={careerBase.data?.base} slug={posting.slug} onCopied={() => pushSuccess('Link copied. Anyone who applies through it is counted under the source you chose.')} onFailed={(url) => pushError(`Copy this link: ${url}`, 'Link')} />}
+                        {slugOf.get(r.id) && <CopyLink base={careerBase.data?.base} slug={slugOf.get(r.id)} onCopied={() => pushSuccess('Link copied. Anyone who applies through it is counted under the source you chose.')} onFailed={(url) => pushError(`Copy this link: ${url}`, 'Link')} />}
                         {canPublish && (
                           <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} title={configured ? undefined : 'Website control is not configured on this server'} onClick={() => openPublish(r)}>
                             <Globe className="h-3.5 w-3.5" />{posting ? 'Edit website listing' : 'Publish on website'}

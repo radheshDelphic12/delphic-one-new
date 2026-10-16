@@ -41,6 +41,28 @@ describe('careers pages', () => {
     expect(job.text).not.toContain('<script>alert(1)');
   });
 
+  test('the list has Department and Location filters on the left, built from the open jobs (a multi-place location is split into places)', async () => {
+    const html = (await page('/')).text;
+    expect(html).toContain('id="job-filters"');
+    expect(html).toContain('data-filter="dept" value="engineering"');
+    expect(html).toContain('data-filter="loc" value="indore"');
+    expect(html).toContain('data-dept="engineering"');
+    expect(html).toContain('data-loc="indore"');
+    expect(html).toContain('src="assets/career.js"');
+    const { listPage } = require('../src/modules/careerPages/careerPages.views');
+    const two = listPage({ jobs: [{ slug: 'a', title: 'A', department: 'Sales', location: 'Gurgaon, Haryana & Ahmedabad' }, { slug: 'b', title: 'B', department: 'IT', location: 'Remote' }], canonical: '' });
+    expect(two).toContain('value="gurgaon, haryana"');
+    expect(two).toContain('value="ahmedabad"');
+    expect(two).toContain('data-loc="gurgaon, haryana|ahmedabad"');
+  });
+
+  test('a recruiter can learn which jobs are live (to copy their link) without the website-management permission', async () => {
+    const res = await authed(request(app).get('/api/v1/applicants/published-links'), rToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ requirement_id: req.id, slug }]);
+    expect((await request(app).get('/api/v1/applicants/published-links')).status).toBe(401);
+  });
+
   test('every URL in the pages is relative, so the website rewrite (/career -> /<org>/career) works without changes', async () => {
     for (const html of [(await page('/')).text, (await page(`/${slug}`)).text]) {
       expect(html).not.toMatch(/(href|src|action)="\//);

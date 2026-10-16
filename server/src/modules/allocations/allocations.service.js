@@ -608,10 +608,11 @@ async function resourceAllocations(orgId, { team_id, org_membership_id, account_
 
 /**
  * Employees & Projects on `date` (default today): every employee employed that
- * day with their team and the projects they are allocated to (running, or
- * reserved for a contract that has not started). Employees with none come back
- * with an empty list so "no project" is visible. `team_ids` narrows by the
- * team the person was in on that date.
+ * day with their team and the projects they are allocated to. A project counts
+ * by exactly the rule Team Capacity uses (a running client contract, or one
+ * signed but not yet started), so the two screens always agree. Employees with
+ * none come back with an empty list so "no project" is visible. `team_ids`
+ * narrows by the team the person was in on that date.
  */
 async function employeeProjects(orgId, { date, team_id, team_ids } = {}) {
   const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
@@ -625,15 +626,14 @@ async function employeeProjects(orgId, { date, team_id, team_ids } = {}) {
   ]);
   const byMember = new Map();
   for (const s of spans) {
-    if (s.account.contract_status === 'completed') continue;
     const started = !s.start_date || A.toDate(s.start_date) <= day;
-    if (!byMember.has(s.org_membership_id)) byMember.set(s.org_membership_id, []);
-    byMember.get(s.org_membership_id).push({
-      ...describeProject(s.account),
+    const upcoming = contractUpcoming(s.account, day);
+    if (!((started && contractRunning(s.account, day)) || upcoming)) continue;
+    if (!byMember.has(s.org_membership_id)) byMember.set(s.org_membership_id, new Map());
+    byMember.get(s.org_membership_id).set(s.account.id, {
+      ...describeProject(s.account), // includes the project's own agreement start / end dates
       allocation_percent: s.allocation_percent !== null ? Number(s.allocation_percent) : null,
-      start_date: ymdOrNull(s.start_date),
-      end_date: ymdOrNull(s.end_date),
-      status: started ? 'active' : 'upcoming',
+      status: upcoming ? 'upcoming' : 'active',
     });
   }
   const rows = [];
@@ -641,7 +641,7 @@ async function employeeProjects(orgId, { date, team_id, team_ids } = {}) {
     if (!employedOn(m, day)) continue;
     const teamId = ctx.teamOf(m.id, day);
     if (onlyTeams.size && !onlyTeams.has(teamId)) continue;
-    const projects = (byMember.get(m.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+    const projects = [...(byMember.get(m.id)?.values() || [])].sort((a, b) => a.name.localeCompare(b.name));
     rows.push({
       id: m.id,
       name: m.person.name,

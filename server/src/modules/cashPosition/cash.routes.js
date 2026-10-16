@@ -29,6 +29,7 @@ const ERRORS = {
   one_owner: [422, 'A wallet has at most one owner: a company or a legal entity'],
   entity_in_use: [409, 'This legal entity still has bank accounts, wallets or invoices: switch it off instead of deleting it'],
   account_has_wallets: [409, 'Wallets are still mapped to this bank account: map them elsewhere (or to none) first'],
+  wallet_has_balance: [409, 'This wallet still holds a balance: bring its opening balance to zero (or switch it off) before deleting it'],
   wallet_in_use: [409, 'This wallet has entries, transfers or invoices: switch it off instead of deleting it'],
   wallet_inactive: [409, 'That wallet is not active'],
   balance_not_zero: [409, 'The balance is not zero: move the money to another wallet first'],

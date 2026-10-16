@@ -18,6 +18,14 @@ const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 te
 const labelCls = 'block text-xs font-medium text-tertiary-600';
 const today = () => new Date().toLocaleDateString('en-CA');
 const TYPE_LABEL = { current: 'Current', savings: 'Savings', cash: 'Cash in hand' };
+
+/** "GI Retail – Current": the name plus the account type, so accounts that share a name can be told apart (last 4 digits only if still identical). */
+function accountLabels(accounts) {
+  const base = (a) => `${a.name} – ${TYPE_LABEL[a.type] || a.type}`;
+  const seen = {};
+  for (const a of accounts) seen[base(a)] = (seen[base(a)] || 0) + 1;
+  return new Map(accounts.map((a) => [a.id, seen[base(a)] > 1 && a.account_last4 ? `${base(a)} (…${a.account_last4})` : base(a)]));
+}
 const PURPOSE_LABEL = { general: 'General', salary: 'Salary', travel: 'Travel', unallocated: 'Unallocated' };
 const MODE_LABEL = { cash: 'Cash', upi: 'UPI', cheque: 'Cheque', neft: 'NEFT', rtgs: 'RTGS', imps: 'IMPS', swift: 'SWIFT', other: 'Other' };
 const api = (path, params) => apiClient.get(`/group-cash${path}`, { params }).then((r) => r.data.data);
@@ -461,6 +469,9 @@ function SetupView({ options, position, onChanged }) {
   const run = async (fn, ok, fallback) => { try { const res = await fn(); saved.done(ok, res); refreshAll(); return true; } catch (err) { saved.fail(err, fallback); return false; } };
   const wallets = setup.data?.wallets || [];
   const allAccounts = setup.data?.accounts || [];
+  const accountLabel = accountLabels(allAccounts);
+  // what each bank account is made of: its mapped wallets and their total (from the live position)
+  const accountMap = new Map((position?.entities || []).flatMap((e) => e.accounts || []).map((a) => [a.id, a]));
   const none = !(options?.entities || []).length;
   // delete asks first; the server refuses (and says why) while anything still hangs on the record
   const remove = (path, label) => { if (window.confirm(`Delete ${label}? This cannot be undone.`)) run(() => apiClient.delete(`/group-cash/${path}`), `${label} deleted`, 'Could not delete'); };
@@ -500,7 +511,7 @@ function SetupView({ options, position, onChanged }) {
           if (await run(() => apiClient.post('/group-cash/wallets', { bank_account_id: wallet.bank_account_id || null, ...(wallet.bank_account_id ? {} : { currency: wallet.currency }), purpose: wallet.purpose, name: wallet.name, opening_balance: wallet.opening_balance, ...(!id ? {} : kind === 'org' ? { owner_org_id: id } : { owner_legal_entity_id: id }) }), 'Wallet added', 'Could not add')) setWallet((c) => ({ ...c, name: '', opening_balance: '0' }));
         }}>
           <h3 className="font-heading font-semibold text-tertiary-900">New wallet</h3>
-          <label className={labelCls}>Bank account (optional, you can map it later)<select className={inputCls} value={wallet.bank_account_id} onChange={(e) => setWallet((c) => ({ ...c, bank_account_id: e.target.value }))}><option value="">Not mapped</option>{(options?.accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}</select></label>
+          <label className={labelCls}>Bank account (optional, you can map it later)<select className={inputCls} value={wallet.bank_account_id} onChange={(e) => setWallet((c) => ({ ...c, bank_account_id: e.target.value }))}><option value="">Not mapped</option>{(options?.accounts || []).map((a) => <option key={a.id} value={a.id}>{accountLabel.get(a.id) || a.name} ({a.currency})</option>)}</select></label>
           {!wallet.bank_account_id && <label className={labelCls}>Currency<select className={inputCls} value={wallet.currency} onChange={(e) => setWallet((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option></select></label>}
           <label className={labelCls}>Whose money (optional)<select className={inputCls} value={wallet.owner} onChange={(e) => setWallet((c) => ({ ...c, owner: e.target.value }))}><option value="">No owner</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select></label>
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Purpose<select className={inputCls} value={wallet.purpose} onChange={(e) => setWallet((c) => ({ ...c, purpose: e.target.value }))}><option value="general">General</option><option value="salary">Salary</option><option value="travel">Travel</option></select></label><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={wallet.opening_balance} onChange={(e) => setWallet((c) => ({ ...c, opening_balance: e.target.value }))} /></label></div>
@@ -526,10 +537,21 @@ function SetupView({ options, position, onChanged }) {
           <h3 className="mb-2 font-heading font-semibold text-tertiary-900">Bank accounts</h3>
           <ul className="divide-y divide-tertiary-100 text-sm">
             {allAccounts.map((a) => (
-              <li key={a.id} className="flex items-center gap-2 py-2">
+              <li key={a.id} className="py-2">
+                <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{a.name}</span> {!a.active && <Pill tone="gray">Switched off</Pill>} <span className="text-xs text-tertiary-500">{a.legal_entity_name || 'No legal entity'} · {TYPE_LABEL[a.type]} · {a.currency}{a.payment_instructions ? '' : ' · no payment details for invoices'}</span></span>
                 <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditAccount(a)}><Pencil className="h-4 w-4" /></button>
                 <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`accounts/${a.id}`, a.name)}><Trash2 className="h-4 w-4" /></button>
+                </div>
+                {(() => { const m = accountMap.get(a.id); const ws = m?.wallets || []; return (
+                  <div className="mt-1 pl-1 text-xs text-tertiary-600">
+                    {ws.length === 0 ? <span className="text-tertiary-400">No wallets mapped, so no balance yet. Map wallets from the Wallets list below.</span> : (
+                      <>
+                        <span className="font-medium text-tertiary-900">Balance <Money value={m.balance} currency={a.currency} /></span> = {ws.map((w, k) => <span key={w.id}>{k ? ' + ' : ''}{w.name} <Money value={w.balance} currency={a.currency} /></span>)}
+                      </>
+                    )}
+                  </div>
+                ); })()}
               </li>
             ))}
           </ul>
@@ -538,7 +560,8 @@ function SetupView({ options, position, onChanged }) {
       <EntityEditDrawer entity={editEntity} workspaces={options?.workspaces} onClose={() => setEditEntity(null)} onSaved={refreshAll} />
       <AccountEditDrawer account={editAccount} entities={options?.entities} onClose={() => setEditAccount(null)} onSaved={refreshAll} />
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4">
-        <h3 className="mb-2 font-heading font-semibold text-tertiary-900">Wallets</h3>
+        <h3 className="font-heading font-semibold text-tertiary-900">Wallets</h3>
+        <p className="mb-2 text-xs text-tertiary-500">A bank account can have many wallets; a wallet belongs to one bank account at most. A bank balance is the sum of its wallets. Wallets set to &quot;Not mapped&quot; are not part of any bank balance.</p>
         <ul className="divide-y divide-tertiary-100 text-sm">
           {wallets.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-2 py-2">
@@ -546,12 +569,12 @@ function SetupView({ options, position, onChanged }) {
               <label className="text-xs text-tertiary-500">Bank account
                 <select className="ml-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs" value={w.bank_account_id || ''} onChange={(e) => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { bank_account_id: e.target.value || null }), e.target.value ? 'Wallet mapped to the bank account' : 'Wallet un-mapped', 'Could not map')}>
                   <option value="">Not mapped</option>
-                  {allAccounts.filter((a) => a.currency === w.currency && (a.active || a.id === w.bank_account_id)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {allAccounts.filter((a) => a.currency === w.currency && (a.active || a.id === w.bank_account_id)).map((a) => <option key={a.id} value={a.id}>{accountLabel.get(a.id)}</option>)}
                 </select>
               </label>
               <Money value={w.balance} currency={w.currency} />
               <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditWallet({ id: w.id, name: w.name, opening_balance: w.opening_balance, purpose: w.purpose, owner: w.owner_org_id ? `org:${w.owner_org_id}` : w.owner_legal_entity_id ? `entity:${w.owner_legal_entity_id}` : '' })}><Pencil className="h-4 w-4" /></button>
-              {w.purpose !== 'unallocated' && <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`wallets/${w.id}`, w.name)}><Trash2 className="h-4 w-4" /></button>}
+              <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`wallets/${w.id}`, w.name)}><Trash2 className="h-4 w-4" /></button>
               {w.purpose !== 'unallocated' && (w.active
                 ? <button type="button" className="text-xs text-danger-600 hover:underline" onClick={() => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { active: false }), 'Wallet switched off', 'Could not switch off')}>Switch off</button>
                 : <button type="button" className="text-xs text-primary-700 hover:underline" onClick={() => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { active: true }), 'Wallet switched on', 'Could not switch on')}>Switch on</button>)}

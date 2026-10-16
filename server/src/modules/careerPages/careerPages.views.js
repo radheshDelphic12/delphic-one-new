@@ -12,7 +12,7 @@ const esc = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-function layout({ title, description, canonical, body }) {
+function layout({ title, description, canonical, body, wide = false }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -26,7 +26,7 @@ ${canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
 </head>
 <body>
 <header class="bar"><div class="bar-in"><img src="assets/logo.svg" alt="Delphic Global"><span>Careers</span></div></header>
-<main>
+<main${wide ? ' class="wide"' : ''}>
 ${body}
 </main>
 </body>
@@ -38,18 +38,55 @@ function meta(job) {
   return parts.length ? `<div class="meta">${parts.map((p) => `<span>${esc(p)}</span>`).join('')}</div>` : '';
 }
 
+// A job's location can name several places ("Gurgaon, Haryana & Ahmedabad"): the filter lists each one separately.
+// Split on "&", "/", ";" and "and", never on a comma, so "Gurgaon, Haryana" stays one place.
+const locationsOf = (job) => String(job.location || '').split(/\s*(?:&|\/|;|\band\b)\s*/i).map((s) => s.trim()).filter(Boolean);
+
+/** Checkbox group for one filter: every distinct value with the number of jobs that have it. */
+function filterGroup(label, key, counts) {
+  const entries = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if (!entries.length) return '';
+  return `<fieldset><legend>${label}</legend>${entries
+    .map(([value, n]) => `<label class="opt"><input type="checkbox" data-filter="${key}" value="${esc(value.toLowerCase())}"> <span>${esc(value)}</span> <em>${n}</em></label>`)
+    .join('')}</fieldset>`;
+}
+
 /** `slugPrefix` is '' on the list page, where job links are relative to the list's own directory. */
 function listPage({ jobs, canonical }) {
-  const items = jobs.length
-    ? jobs
-        .map((j) => `<a class="card job" href="${esc(j.slug)}${j.src ? `?src=${encodeURIComponent(j.src)}` : ''}" data-testid="career-job"><strong>${esc(j.title)}</strong>${meta(j)}</a>`)
-        .join('\n')
-    : '<div class="card empty">There are no open positions right now. Please check back soon.</div>';
+  const departments = new Map();
+  const places = new Map();
+  for (const j of jobs) {
+    if (j.department) departments.set(j.department, (departments.get(j.department) || 0) + 1);
+    for (const place of new Set(locationsOf(j))) places.set(place, (places.get(place) || 0) + 1);
+  }
+  const cards = jobs
+    .map((j) => `<a class="card job" href="${esc(j.slug)}${j.src ? `?src=${encodeURIComponent(j.src)}` : ''}" data-testid="career-job" data-dept="${esc(String(j.department || '').toLowerCase())}" data-loc="${esc(locationsOf(j).map((p) => p.toLowerCase()).join('|'))}"><strong>${esc(j.title)}</strong>${meta(j)}</a>`)
+    .join('\n');
+  const body = jobs.length
+    ? `<h1>Open positions</h1>
+<p class="meta">Pick a role and apply in a few minutes.</p>
+<div class="list-layout">
+<aside class="filters card" id="job-filters" aria-label="Filter jobs">
+<h2>Filter jobs</h2>
+${filterGroup('Department', 'dept', departments)}${filterGroup('Location', 'loc', places)}
+<p class="note"><button type="button" class="link" id="filters-clear">Clear filters</button></p>
+</aside>
+<section>
+<p class="note" id="job-count" aria-live="polite"></p>
+<div id="job-list">
+${cards}
+</div>
+<div class="card empty hidden" id="no-match">No positions match these filters. <button type="button" class="link" id="no-match-clear">Clear filters</button></div>
+</section>
+</div>
+<script src="assets/career.js" defer></script>`
+    : '<h1>Open positions</h1>\n<div class="card empty">There are no open positions right now. Please check back soon.</div>';
   return layout({
     title: 'Careers | Delphic Global',
     description: 'Open positions at Delphic Global.',
     canonical,
-    body: `<h1>Open positions</h1>\n<p class="meta">Pick a role and apply in a few minutes.</p>\n${items}`,
+    wide: true,
+    body,
   });
 }
 

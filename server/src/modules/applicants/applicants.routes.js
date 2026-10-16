@@ -31,6 +31,12 @@ const result = (res, r, key, status = 200) => {
 
 // Where the public careers pages are reachable (the website's address once its rewrite is live), for the "Copy link" button.
 router.get('/career-base', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, { base: env.publicCareersBase || null })));
+// Which in-progress jobs are live on the website, as {requirement_id, slug} only, so a recruiter can copy a job's link
+// without having the website-management permission (the full postings list stays behind /website/postings).
+router.get('/published-links', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => {
+  const rows = await require('../website/postings.service').list(req.user.org_id, { status: 'published' });
+  return ok(res, rows.filter((p) => p.slug).map((p) => ({ requirement_id: p.requirement_id, slug: p.slug })));
+}));
 router.get('/requirements', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, await service.inProgressRequirements())));
 router.get(
   '/',

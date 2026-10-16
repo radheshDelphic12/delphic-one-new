@@ -483,3 +483,30 @@ describe('group cash: manual wallet to bank account mapping, statements and dele
     expect(audit.filter((x) => x.action === 'delete').map((x) => x.entity_type)).toEqual(expect.arrayContaining(['wallet', 'bank_account', 'legal_entity']));
   });
 });
+
+describe('Setup: deleting wallets and mapping several wallets to one bank account', () => {
+  test('a wallet (Unallocated too) is deleted only while empty; a wallet holding a balance is refused', async () => {
+    const acc = data(await post('/accounts', { name: 'GI Retail', type: 'current', currency: 'INR', declared_opening_balance: '0', opening_date: '2026-10-01' })).account;
+    const empty = data(await post('/wallets', { name: 'Empty', purpose: 'general', bank_account_id: acc.id, opening_balance: '0' })).wallet;
+    await prisma.wallet.update({ where: { id: empty.id }, data: { purpose: 'unallocated' } }); // accounts made before the optional-links change still carry one
+    const funded = data(await post('/wallets', { name: 'Funded', purpose: 'general', bank_account_id: acc.id, opening_balance: '50' })).wallet;
+    const refused = await del(`/wallets/${funded.id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toMatch(/balance/i);
+    expect((await del(`/wallets/${empty.id}`)).status).toBe(200);
+  });
+
+  test('one bank account takes many wallets; its balance is their sum; an unmapped wallet counts toward no account', async () => {
+    const acc = data(await post('/accounts', { name: 'GI Retail', type: 'current', currency: 'INR', declared_opening_balance: '0', opening_date: '2026-10-01' })).account;
+    const w1 = data(await post('/wallets', { name: 'A', purpose: 'general', bank_account_id: acc.id, opening_balance: '5' })).wallet;
+    const w2 = data(await post('/wallets', { name: 'B', purpose: 'general', bank_account_id: acc.id, opening_balance: '3' })).wallet;
+    const loose = data(await post('/wallets', { name: 'Loose', purpose: 'general', currency: 'INR', opening_balance: '100' })).wallet;
+    const pos = data(await get('/position'));
+    const row = pos.entities.flatMap((e) => e.accounts).find((x) => x.id === acc.id);
+    expect(Number(row.balance)).toBe(8);
+    expect(row.wallets.map((w) => w.name).sort()).toEqual(['A', 'B']);
+    expect(pos.unmapped_wallets.map((w) => w.id)).toEqual([loose.id]);
+    expect(w1.bank_account_id).toBe(acc.id);
+    expect(w2.bank_account_id).toBe(acc.id);
+  });
+});

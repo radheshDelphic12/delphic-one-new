@@ -171,10 +171,19 @@ describe('Employees & Projects report', () => {
     await teamChange({ org_membership_id: idle.membership.id, team_id: team.id, effective_date: '2026-08-01' });
     const proj = await project(ctx, 'Project X', { end: inDays(60) });
     await assign({ account_id: proj.id, org_membership_id: busy.membership.id });
+    // finished projects must not be listed: one marked completed, one whose agreement ended in the past
+    const done = await project(ctx, 'Project Done', { end: inDays(60) });
+    const lapsed = await project(ctx, 'Project Lapsed', { end: inDays(60) });
+    await assign({ account_id: done.id, org_membership_id: busy.membership.id });
+    await assign({ account_id: lapsed.id, org_membership_id: busy.membership.id });
+    await prisma.account.update({ where: { id: done.id }, data: { contract_status: 'completed' } });
+    await prisma.account.update({ where: { id: lapsed.id }, data: { agreement_end_date: new Date(`${inDays(-3)}T00:00:00.000Z`) } });
 
     const all = (await report('employee-projects', {})).body.data;
     const byName = Object.fromEntries(all.rows.map((r) => [r.name, r]));
-    expect(byName['Busy Bee'].projects.map((p) => p.name)).toEqual(['Project X']);
+    expect(byName['Busy Bee'].projects.map((p) => p.name)).toEqual(['Project X']); // same rule as Team Capacity
+    expect(byName['Busy Bee'].project_count).toBe(1);
+    expect(byName['Busy Bee'].projects[0].agreement_end_date).toBe(inDays(60));
     expect(byName['Idle Ida'].project_count).toBe(0);
     expect(byName['Other Olu'].team).toBeNull();
     expect(all.unassigned).toBeGreaterThanOrEqual(2);

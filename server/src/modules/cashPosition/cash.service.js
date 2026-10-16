@@ -589,6 +589,8 @@ async function removeWallet(groupIds, userId, id) {
     prisma.groupInvoice.count({ where: { receiving_wallet_id: id } }),
   ]);
   if (entries || transfers || invoices) return { error: 'wallet_in_use' };
+  // With no entries the balance is just the opening balance: a wallet holding money is switched off, not deleted.
+  if (Number(before.opening_balance) !== 0) return { error: 'wallet_has_balance' };
   await prisma.$transaction(async (tx) => {
     await tx.wallet.delete({ where: { id } });
     await audit(tx, before.org_group_id, 'wallet', id, 'delete', { ...before, bank_account: undefined, owner_org: undefined, owner_legal_entity: undefined }, null, userId);

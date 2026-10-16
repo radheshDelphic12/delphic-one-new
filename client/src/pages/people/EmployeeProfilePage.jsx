@@ -12,6 +12,7 @@ import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
+import { EMPLOYMENT_STATUS_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -23,12 +24,6 @@ const EMPTY_OPTIONS = {
   managerOptions: [],
   personOptions: [],
 };
-
-const WORK_MODE_OPTIONS = [
-  { value: 'onsite', label: 'Onsite' },
-  { value: 'hybrid', label: 'Hybrid' },
-  { value: 'remote', label: 'Remote' },
-];
 
 const WORKER_TYPE_OPTIONS = [
   { value: 'full_time_employee', label: 'Full-Time Employee' },
@@ -43,14 +38,6 @@ function formatMoney(value, currency) {
 function workModeLabel(value) {
   return WORK_MODE_OPTIONS.find((option) => option.value === value)?.label || 'Not set';
 }
-
-const EMPLOYMENT_STATUS_OPTIONS = [
-  { value: 'active', label: 'Active' },
-  { value: 'notice_period', label: 'Serving notice' },
-  { value: 'on_leave', label: 'On long leave' },
-  { value: 'pending_onboarding', label: 'Joining soon' },
-  { value: 'terminated', label: 'Exited' },
-];
 
 // Calendar days from the notice date to the last working day, both included.
 function noticeDays(start, end) {
@@ -411,7 +398,7 @@ export default function EmployeeProfilePage() {
         <h3 className="mb-4 font-heading text-base font-semibold text-tertiary-900">Employment details</h3>
         <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <PeekField label="Role"><span className="capitalize">{row.role}</span></PeekField>
-          <PeekField label="Employment status"><Badge value={row.employment_status} /></PeekField>
+          <PeekField label="Employment status"><Badge value={row.employment_status} label={employmentStatusLabel(row.employment_status)} /></PeekField>
           <PeekField label="User type">{row.worker_type === 'contractor' ? 'Contractor' : 'Full-Time Employee'}</PeekField>
           {row.worker_type === 'contractor' && (
             <>

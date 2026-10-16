@@ -99,3 +99,44 @@
       .then(function () { button.disabled = false; button.textContent = 'Submit application'; });
   });
 })();
+
+/* Job list: tick departments and / or locations to narrow the list. Within one group the ticks add up (any of them);
+   between groups both must match. Nothing ticked in a group means no restriction from it. */
+(function () {
+  var panel = document.getElementById('job-filters');
+  if (!panel) return;
+  var cards = Array.prototype.slice.call(document.querySelectorAll('#job-list .job'));
+  var boxes = Array.prototype.slice.call(panel.querySelectorAll('input[data-filter]'));
+  var empty = document.getElementById('no-match');
+  var count = document.getElementById('job-count');
+
+  function picked(key) {
+    return boxes.filter(function (b) { return b.checked && b.getAttribute('data-filter') === key; }).map(function (b) { return b.value; });
+  }
+
+  function apply() {
+    var depts = picked('dept');
+    var locs = picked('loc');
+    var shown = 0;
+    cards.forEach(function (card) {
+      var cardLocs = (card.getAttribute('data-loc') || '').split('|');
+      var okDept = !depts.length || depts.indexOf(card.getAttribute('data-dept')) !== -1;
+      var okLoc = !locs.length || locs.some(function (l) { return cardLocs.indexOf(l) !== -1; });
+      var on = okDept && okLoc;
+      card.classList.toggle('hidden', !on);
+      if (on) shown += 1;
+    });
+    empty.classList.toggle('hidden', shown !== 0);
+    count.textContent = depts.length || locs.length ? 'Showing ' + shown + ' of ' + cards.length + ' positions' : '';
+  }
+
+  function clear() {
+    boxes.forEach(function (b) { b.checked = false; });
+    apply();
+  }
+
+  boxes.forEach(function (b) { b.addEventListener('change', apply); });
+  document.getElementById('filters-clear').addEventListener('click', clear);
+  document.getElementById('no-match-clear').addEventListener('click', clear);
+  apply();
+})();

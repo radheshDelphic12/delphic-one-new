@@ -5,6 +5,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
+import { EMPLOYMENT_STATUS_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
@@ -27,7 +28,7 @@ function EmployeePeek({ row, onClose }) {
       </div>
       <dl className="grid gap-4 sm:grid-cols-2">
         <PeekField label="Role"><span className="capitalize">{row.role}</span></PeekField>
-        <PeekField label="Status"><Badge value={row.employment_status} /></PeekField>
+        <PeekField label="Status"><Badge value={row.employment_status} label={employmentStatusLabel(row.employment_status)} /></PeekField>
         <PeekField label="Department">{row.department?.name || 'Not assigned'}</PeekField>
         <PeekField label="Designation">{row.designation?.name || 'Not assigned'}</PeekField>
         <PeekField label="Location">{row.location?.name || 'Not assigned'}</PeekField>
@@ -55,14 +56,16 @@ function sortByDepartment(rows) {
 }
 
 const NONE = '__none__';
-const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', manager: '', joinedFrom: '', joinedTo: '' };
+const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', workMode: '', manager: '', joinedFrom: '', joinedTo: '' };
 
 const FILTER_FIELDS = [
   { key: 'department', label: 'Department', get: (r) => r.department?.name },
   { key: 'designation', label: 'Designation', get: (r) => r.designation?.name },
   { key: 'role', label: 'Role', get: (r) => r.role },
   { key: 'location', label: 'Location', get: (r) => r.location?.name },
-  { key: 'status', label: 'Status', get: (r) => r.employment_status },
+  // Status and work mode list every value the system knows (from one shared source), not just the ones in the loaded rows.
+  { key: 'status', label: 'Status', get: (r) => r.employment_status, fixed: EMPLOYMENT_STATUS_OPTIONS },
+  { key: 'workMode', label: 'Work mode', get: (r) => r.work_mode, fixed: WORK_MODE_OPTIONS },
   { key: 'manager', label: 'Manager', get: (r) => r.manager?.person?.name },
 ];
 
@@ -90,6 +93,9 @@ export default function PeopleListPage() {
   const [search, setSearch] = useState('');
   const [includeTerminated, setIncludeTerminated] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // Exited people are terminated memberships, which the list leaves out unless asked: choosing Status = Exited asks for them by itself.
+  const exitedChosen = filters.status === 'terminated';
+  const withTerminated = includeTerminated || exitedChosen;
   const [loading, setLoading] = useState(true);
   const [peek, setPeek] = useState(null);
 
@@ -98,7 +104,7 @@ export default function PeopleListPage() {
     setLoading(true);
     apiClient
       .get('/orgs/memberships', {
-        params: { search: search.trim() || undefined, include_terminated: includeTerminated },
+        params: { search: search.trim() || undefined, include_terminated: withTerminated },
       })
       .then(({ data }) => {
         if (!cancelled) setRows(sortByDepartment(data.data || []));
@@ -110,9 +116,10 @@ export default function PeopleListPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [includeTerminated, pushError, search]);
+  }, [withTerminated, pushError, search]);
 
-  // Dropdown options come from the live rows, so only values that really exist are offered.
+  // Dropdown options come from the live rows (only values that really exist), except status and work mode,
+  // which always list everything the system knows.
   const options = useMemo(() => {
     const out = {};
     for (const f of FILTER_FIELDS) {
@@ -123,7 +130,10 @@ export default function PeopleListPage() {
         if (v) values.add(v);
         else hasNone = true;
       }
-      out[f.key] = { values: [...values].sort((a, b) => String(a).localeCompare(String(b))), hasNone };
+      const items = f.fixed
+        ? f.fixed
+        : [...values].sort((a, b) => String(a).localeCompare(String(b))).map((v) => ({ value: v, label: f.key === 'role' ? humanize(v) : v }));
+      out[f.key] = { items, hasNone: f.fixed ? f.key === 'workMode' && hasNone : hasNone };
     }
     return out;
   }, [rows]);
@@ -152,7 +162,7 @@ export default function PeopleListPage() {
       header: 'Status',
       render: (row) => (
         <span>
-          <Badge value={row.employment_status} />
+          <Badge value={row.employment_status} label={employmentStatusLabel(row.employment_status)} />
           {row.employment_status === 'notice_period' && row.notice_end_date && (
             <span className="mt-0.5 block text-xs text-warning-700">LWD {formatDate(row.notice_end_date)}</span>
           )}
@@ -181,8 +191,8 @@ export default function PeopleListPage() {
             />
           </label>
           <label className="flex items-center gap-2 text-sm text-tertiary-700">
-            <input type="checkbox" checked={includeTerminated} onChange={(event) => setIncludeTerminated(event.target.checked)} />
-            Include terminated
+            <input type="checkbox" checked={withTerminated} disabled={exitedChosen} onChange={(event) => setIncludeTerminated(event.target.checked)} />
+            <span title={exitedChosen ? 'Always on while Status is Exited' : undefined}>Include terminated</span>
           </label>
         </div>
       </div>
@@ -194,13 +204,13 @@ export default function PeopleListPage() {
               <select
                 value={filters[f.key]}
                 onChange={(event) => setFilter(f.key, event.target.value)}
-                className="mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm capitalize text-tertiary-900 outline-none focus:border-primary-400"
+                className="mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm text-tertiary-900 outline-none focus:border-primary-400"
               >
                 <option value="">All</option>
-                {options[f.key].values.map((v) => (
-                  <option key={v} value={v}>{f.key === 'role' || f.key === 'status' ? humanize(v) : v}</option>
+                {options[f.key].items.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
-                {options[f.key].hasNone && <option value={NONE}>Not assigned</option>}
+                {options[f.key].hasNone && <option value={NONE}>{f.key === 'workMode' ? 'Not set' : 'Not assigned'}</option>}
               </select>
             </label>
           ))}

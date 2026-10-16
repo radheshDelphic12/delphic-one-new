@@ -216,8 +216,8 @@ function EmployeeProjectsReport() {
     { key: 'projects', header: 'Assigned projects', render: (r) => (r.projects.length === 0 ? <Pill tone="gray">No project assigned</Pill> : (
       <div className="flex flex-wrap gap-1.5">
         {r.projects.map((p) => (
-          <span key={`${p.id}-${p.start_date}`} title={[p.code, p.client_name, p.end_date ? `Ends ${formatDay(p.end_date)}` : 'No end date'].filter(Boolean).join(' · ')}>
-            <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.name}{p.allocation_percent != null ? ` (${p.allocation_percent}%)` : ''}{p.status === 'upcoming' ? ' · upcoming' : ''}</Pill>
+          <span key={p.id} title={[p.code, p.client_name, p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'].filter(Boolean).join(' Â· ')}>
+            <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.name}{p.allocation_percent != null ? ` (${p.allocation_percent}%)` : ''}{p.status === 'upcoming' ? ' Â· upcoming' : ''}</Pill>
           </span>
         ))}
       </div>
@@ -229,7 +229,7 @@ function EmployeeProjectsReport() {
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
         <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
         <Filter label="Teams">
-          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
+          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teamsâ€¦" emptyMessage="No teams yet" />
         </Filter>
         <Filter label="Project status">
           <select value={assignment} onChange={(e) => setAssignment(e.target.value)} className={dateInput}>
@@ -246,7 +246,7 @@ function EmployeeProjectsReport() {
         </Filter>
       </div>
       <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No employees match the current filters." />
-      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees · {data.unassigned} with no project on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
+      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees Â· {data.unassigned} with no project on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
     </div>
   );
 }

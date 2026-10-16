@@ -380,7 +380,7 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
                   value={form.added_by}
                   onChange={(v) => updateField('added_by', v)}
                   placeholder="Select user"
-                  searchPlaceholder="Search users…"
+                  searchPlaceholder="Search usersâ€¦"
                   options={userOptions}
                 />
               </Field>
