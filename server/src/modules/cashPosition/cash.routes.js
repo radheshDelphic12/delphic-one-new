@@ -26,7 +26,10 @@ const ERRORS = {
   account_not_found: [404, 'Bank account not found'],
   account_inactive: [409, 'That bank account is not active'],
   duplicate_entity: [409, 'A legal entity with this name already exists'],
-  one_owner: [422, 'A wallet has exactly one owner: a company or a legal entity'],
+  one_owner: [422, 'A wallet has at most one owner: a company or a legal entity'],
+  entity_in_use: [409, 'This legal entity still has bank accounts, wallets or invoices: switch it off instead of deleting it'],
+  account_has_wallets: [409, 'Wallets are still mapped to this bank account: map them elsewhere (or to none) first'],
+  wallet_in_use: [409, 'This wallet has entries, transfers or invoices: switch it off instead of deleting it'],
   wallet_inactive: [409, 'That wallet is not active'],
   balance_not_zero: [409, 'The balance is not zero: move the money to another wallet first'],
   unallocated_locked: [409, 'The Unallocated wallet cannot be renamed to another purpose or switched off'],
@@ -94,12 +97,20 @@ group.get('/entities', A(async (req, res) => ok(res, await service.listEntities(
 group.post('/entities/seed-defaults', A(async (req, res) => ok(res, await service.seedDefaultEntities(gids(req), req.user.id), {}, 201)));
 group.post('/entities', A(async (req, res) => result(res, await service.createEntity(gids(req), req.user.id, v.entityBody.parse(req.body)), 201)));
 group.patch('/entities/:id', A(async (req, res) => result(res, await service.updateEntity(gids(req), req.user.id, req.params.id, v.entityBody.partial().parse(req.body)))));
+group.delete('/entities/:id', A(async (req, res) => result(res, await service.removeEntity(gids(req), req.user.id, req.params.id))));
 
 group.post('/accounts', A(async (req, res) => result(res, await service.createAccount(gids(req), req.user.id, v.accountBody.parse(req.body)), 201)));
 group.patch('/accounts/:id', A(async (req, res) => result(res, await service.updateAccount(gids(req), req.user.id, req.params.id, v.accountUpdate.parse(req.body)))));
+group.delete('/accounts/:id', A(async (req, res) => result(res, await service.removeAccount(gids(req), req.user.id, req.params.id))));
+// a bank account's statement: the entries of every wallet mapped to it, date-wise
+group.get('/accounts/:id/entries', A(async (req, res) => {
+  const q = v.entriesQuery.parse(req.query);
+  return sendEntries(res, await service.accountEntries(gids(req), req.params.id, q), q.format);
+}));
 
 group.post('/wallets', A(async (req, res) => result(res, await service.createWallet(gids(req), req.user.id, v.walletBody.parse(req.body)), 201)));
 group.patch('/wallets/:id', A(async (req, res) => result(res, await service.updateWallet(gids(req), req.user.id, req.params.id, v.walletUpdate.parse(req.body)))));
+group.delete('/wallets/:id', A(async (req, res) => result(res, await service.removeWallet(gids(req), req.user.id, req.params.id))));
 group.get('/wallets/:id/entries', A(async (req, res) => {
   const q = v.entriesQuery.parse(req.query);
   return sendEntries(res, await service.walletEntries(gids(req), req.params.id, q), q.format);

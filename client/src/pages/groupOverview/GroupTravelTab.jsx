@@ -113,7 +113,11 @@ export function MeetingsPanel({ trip, options, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [m, setM] = useState({ account_id: '', title: '', scheduled_at: '', duration_minutes: 60, location: trip.destination || '', notes: '' });
   const linked = new Set(trip.meetings.map((x) => x.key));
-  const choices = (options?.meetings || []).filter((x) => !linked.has(x.key));
+  const [showAll, setShowAll] = useState(false);
+  const ymd = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10); // IST calendar day
+  const unlinked = (options?.meetings || []).filter((x) => !linked.has(x.key));
+  const onTripDates = unlinked.filter((x) => ymd(x.scheduled_at) >= trip.start_date && ymd(x.scheduled_at) <= trip.end_date);
+  const choices = showAll ? unlinked : onTripDates;
   async function run(fn, fail) {
     setBusy(true);
     try { await fn(); await onChanged(); } catch (e) { pushError(apiErrorMessage(e, fail), 'Not saved'); } finally { setBusy(false); }
@@ -143,7 +147,9 @@ export function MeetingsPanel({ trip, options, onChanged }) {
       </div>
       {mode === 'link' ? (
         <div className="space-y-2">
-          <p className="text-xs text-tertiary-500">Meetings already on the Delphic Global calendar (next 6 months). Linking does not move or change them.</p>
+          <p className="text-xs text-tertiary-500">Meetings on the Delphic Global calendar{showAll ? ' (past year to next 6 months)' : ' during the trip dates'}. Linking does not move or change them.</p>
+          <label className="flex items-center gap-2 text-xs text-tertiary-600"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show meetings outside the trip dates</label>
+          {!choices.length && <p className="text-xs text-warning-700">No meetings found {showAll ? '' : 'on the trip dates '}- use &ldquo;Add a new meeting&rdquo; if it is not on the calendar yet.</p>}
           <select className={inputCls} value={key} onChange={(e) => setKey(e.target.value)} aria-label="Calendar meeting">
             <option value="">Choose a meeting…</option>
             {choices.map((x) => <option key={x.key} value={x.key}>{when(x.scheduled_at)} · {x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.mode === 'offline' ? ' (in person)' : ''}</option>)}

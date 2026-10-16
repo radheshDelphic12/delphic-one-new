@@ -148,7 +148,6 @@ async function list(groupIds, rawQuery) {
 async function options(groupIds) {
   const orgs = await groupOrgs(groupIds);
   const delphic = orgs.filter(isDelphic);
-  const today = todayIst();
   const [members, accounts, meetings] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { org_id: { in: orgs.map((o) => o.id) }, left_at: null, employment_status: { not: 'terminated' } },
@@ -159,7 +158,7 @@ async function options(groupIds) {
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
-    interviews.listClientMeetings({ from: new Date(`${today}T00:00:00.000Z`), to: new Date(Date.now() + 180 * DAY), mine: false, user: null, status: undefined }),
+    interviews.listClientMeetings({ from: new Date(Date.now() - 365 * DAY), to: new Date(Date.now() + 180 * DAY), mine: false, user: null, status: undefined }),
   ]);
   const orgName = new Map(orgs.map((o) => [o.id, o.name]));
   const seen = new Set();

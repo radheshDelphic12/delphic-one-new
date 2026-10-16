@@ -32,6 +32,7 @@ router.put('/settings', asyncHandler(async (req, res) => ok(res, await service.u
 router.get('/reports/team-capacity', asyncHandler(async (req, res) => ok(res, await service.teamCapacity(req.user.org_id, v.capacityQuerySchema.parse(req.query)))));
 router.get('/reports/ending-soon', asyncHandler(async (req, res) => ok(res, await service.endingSoon(req.user.org_id, v.endingSoonQuerySchema.parse(req.query)))));
 router.get('/reports/resources', asyncHandler(async (req, res) => ok(res, await service.resourceAllocations(req.user.org_id, v.resourcesQuerySchema.parse(req.query)))));
+router.get('/reports/employee-projects', asyncHandler(async (req, res) => ok(res, await service.employeeProjects(req.user.org_id, v.capacityQuerySchema.parse(req.query)))));
 router.get('/reports/movements', asyncHandler(async (req, res) => ok(res, await service.movements(req.user.org_id, v.movementsQuerySchema.parse(req.query)))));
 
 router.post(

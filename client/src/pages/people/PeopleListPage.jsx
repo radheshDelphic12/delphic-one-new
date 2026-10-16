@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, UserRound } from 'lucide-react';
+import { Search, UserRound, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -54,11 +54,42 @@ function sortByDepartment(rows) {
   });
 }
 
+const NONE = '__none__';
+const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', manager: '', joinedFrom: '', joinedTo: '' };
+
+const FILTER_FIELDS = [
+  { key: 'department', label: 'Department', get: (r) => r.department?.name },
+  { key: 'designation', label: 'Designation', get: (r) => r.designation?.name },
+  { key: 'role', label: 'Role', get: (r) => r.role },
+  { key: 'location', label: 'Location', get: (r) => r.location?.name },
+  { key: 'status', label: 'Status', get: (r) => r.employment_status },
+  { key: 'manager', label: 'Manager', get: (r) => r.manager?.person?.name },
+];
+
+const humanize = (v) => String(v).replace(/_/g, ' ');
+
+function matchesFilters(row, filters) {
+  for (const f of FILTER_FIELDS) {
+    const wanted = filters[f.key];
+    if (!wanted) continue;
+    const value = f.get(row);
+    if (wanted === NONE ? Boolean(value) : value !== wanted) return false;
+  }
+  if (filters.joinedFrom || filters.joinedTo) {
+    if (!row.joined_at) return false;
+    const day = new Date(row.joined_at).toISOString().slice(0, 10);
+    if (filters.joinedFrom && day < filters.joinedFrom) return false;
+    if (filters.joinedTo && day > filters.joinedTo) return false;
+  }
+  return true;
+}
+
 export default function PeopleListPage() {
   const { pushError } = useAlerts();
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
   const [includeTerminated, setIncludeTerminated] = useState(false);
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
   const [peek, setPeek] = useState(null);
 
@@ -80,6 +111,26 @@ export default function PeopleListPage() {
       });
     return () => { cancelled = true; };
   }, [includeTerminated, pushError, search]);
+
+  // Dropdown options come from the live rows, so only values that really exist are offered.
+  const options = useMemo(() => {
+    const out = {};
+    for (const f of FILTER_FIELDS) {
+      const values = new Set();
+      let hasNone = false;
+      for (const row of rows) {
+        const v = f.get(row);
+        if (v) values.add(v);
+        else hasNone = true;
+      }
+      out[f.key] = { values: [...values].sort((a, b) => String(a).localeCompare(String(b))), hasNone };
+    }
+    return out;
+  }, [rows]);
+
+  const filteredRows = useMemo(() => rows.filter((row) => matchesFilters(row, filters)), [rows, filters]);
+  const activeCount = Object.values(filters).filter(Boolean).length;
+  const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
 
   const columns = [
     {
@@ -135,11 +186,59 @@ export default function PeopleListPage() {
           </label>
         </div>
       </div>
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {FILTER_FIELDS.map((f) => (
+            <label key={f.key} className="block text-xs font-medium text-tertiary-600">
+              {f.label}
+              <select
+                value={filters[f.key]}
+                onChange={(event) => setFilter(f.key, event.target.value)}
+                className="mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm capitalize text-tertiary-900 outline-none focus:border-primary-400"
+              >
+                <option value="">All</option>
+                {options[f.key].values.map((v) => (
+                  <option key={v} value={v}>{f.key === 'role' || f.key === 'status' ? humanize(v) : v}</option>
+                ))}
+                {options[f.key].hasNone && <option value={NONE}>Not assigned</option>}
+              </select>
+            </label>
+          ))}
+          <label className="block text-xs font-medium text-tertiary-600">
+            Joined from
+            <input
+              type="date"
+              value={filters.joinedFrom}
+              max={filters.joinedTo || undefined}
+              onChange={(event) => setFilter('joinedFrom', event.target.value)}
+              className="mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm outline-none focus:border-primary-400"
+            />
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Joined to
+            <input
+              type="date"
+              value={filters.joinedTo}
+              min={filters.joinedFrom || undefined}
+              onChange={(event) => setFilter('joinedTo', event.target.value)}
+              className="mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm outline-none focus:border-primary-400"
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs text-tertiary-500">
+          <span>Showing {filteredRows.length} of {rows.length} employees</span>
+          {activeCount > 0 && (
+            <button type="button" className="inline-flex items-center gap-1 font-medium text-primary-700 hover:underline" onClick={() => setFilters(EMPTY_FILTERS)}>
+              <X className="h-3 w-3" /> Clear filters ({activeCount})
+            </button>
+          )}
+        </div>
+      </div>
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={filteredRows}
         loading={loading}
-        maxHeight="calc(100dvh - 16rem)"
+        maxHeight="calc(100dvh - 24rem)"
         emptyLabel="No employees match the current filters."
         onRowClick={setPeek}
       />

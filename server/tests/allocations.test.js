@@ -159,6 +159,32 @@ describe('Resource Revenue splits a month by the allocation in force each day', 
   });
 });
 
+describe('Employees & Projects report', () => {
+  test('lists every employee, shows no-project ones, and filters by team', async () => {
+    const ctx = await seed();
+    const { assign, report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Alpha' })).body.data;
+    const busy = await person(ctx, 'Busy Bee');
+    const idle = await person(ctx, 'Idle Ida');
+    const other = await person(ctx, 'Other Olu');
+    await teamChange({ org_membership_id: busy.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    await teamChange({ org_membership_id: idle.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    const proj = await project(ctx, 'Project X', { end: inDays(60) });
+    await assign({ account_id: proj.id, org_membership_id: busy.membership.id });
+
+    const all = (await report('employee-projects', {})).body.data;
+    const byName = Object.fromEntries(all.rows.map((r) => [r.name, r]));
+    expect(byName['Busy Bee'].projects.map((p) => p.name)).toEqual(['Project X']);
+    expect(byName['Idle Ida'].project_count).toBe(0);
+    expect(byName['Other Olu'].team).toBeNull();
+    expect(all.unassigned).toBeGreaterThanOrEqual(2);
+
+    const filtered = (await report('employee-projects', { team_ids: team.id })).body.data;
+    expect(filtered.rows.map((r) => r.name).sort()).toEqual(['Busy Bee', 'Idle Ida']);
+    expect(other.membership.id).toBeTruthy();
+  });
+});
+
 describe('Team capacity', () => {
   test('same-team members on one project count once; capacity = members × projects per resource; never below zero', async () => {
     const ctx = await seed();

@@ -38,10 +38,20 @@ const scope = (groupIds) => ({ org_group_id: { in: groupIds } });
 async function build(entity, body, issuedSeller = null) {
   if (body.workspace_id && !(await prisma.org.findFirst({ where: { id: body.workspace_id, org_group_id: entity.org_group_id }, select: { id: true } }))) return { error: 'workspace_not_found' };
   const currency = body.type === 'usd_export' ? 'USD' : 'INR';
-  const wallet = await prisma.wallet.findFirst({ where: { id: body.receiving_wallet_id, bank_account: { legal_entity_id: entity.id } }, include: { bank_account: true } });
+  const wallet = await prisma.wallet.findFirst({ where: {
+      id: body.receiving_wallet_id,
+      org_group_id: entity.org_group_id,
+      // links are optional, but a wallet tied to another legal entity (by its bank account or as its owner) is not this entity's
+      AND: [
+        { OR: [{ bank_account_id: null }, { bank_account: { legal_entity_id: null } }, { bank_account: { legal_entity_id: entity.id } }] },
+        { OR: [{ owner_legal_entity_id: null }, { owner_legal_entity_id: entity.id }] },
+      ],
+    },
+    include: { bank_account: true },
+  });
   if (!wallet) return { error: 'wallet_not_in_entity' };
-  if (!wallet.active || !wallet.bank_account.active) return { error: 'wallet_inactive' };
-  if (wallet.bank_account.currency !== currency) return { error: 'wallet_currency' };
+  if (!wallet.active || (wallet.bank_account && !wallet.bank_account.active)) return { error: 'wallet_inactive' };
+  if (wallet.currency !== currency) return { error: 'wallet_currency' };
 
   // an invoice that is being edited keeps the seller details it was issued with
   const seller = issuedSeller || { name: entity.name, gstin: entity.gstin, pan: entity.pan, address: entity.address, state_code: entity.state_code, logo_url: entity.logo_url };
@@ -54,7 +64,7 @@ async function build(entity, body, issuedSeller = null) {
     if (body.lines.some((l) => !l.hsn_sac)) return { error: 'hsn_required' };
     intraState = seller.state_code === placeOfSupply;
   } else if (body.type !== 'usd_export') placeOfSupply = null;
-  const instructions = body.payment_instructions || wallet.bank_account.payment_instructions || null;
+  const instructions = body.payment_instructions || wallet.bank_account?.payment_instructions || null;
   if (body.type === 'usd_export' && !instructions) return { error: 'bank_details_required' };
 
   const totals = invCalc.computeTotals({ type: body.type, lines: body.lines, intraState });

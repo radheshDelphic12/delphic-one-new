@@ -380,3 +380,19 @@ h3,
 .ta-modern .ta-head {
   @apply bg-gradient-to-r from-primary-50 via-white to-white;
 }
+
+/* Policies: rich-text editor + rendered policy body (no typography plugin in this app). */
+.policy-content { font-size: 0.875rem; line-height: 1.6; color: var(--tw-prose-body, #1f2937); overflow-wrap: anywhere; }
+.policy-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.policy-content h2 { font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.policy-content h3 { font-size: 1.1rem; font-weight: 600; margin: 0.875rem 0 0.4rem; }
+.policy-content h4 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; }
+.policy-content p, .policy-content div { margin: 0.4rem 0; }
+.policy-content ul { list-style: disc; padding-left: 1.5rem; margin: 0.4rem 0; }
+.policy-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.4rem 0; }
+.policy-content blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.75rem; color: #475569; margin: 0.5rem 0; }
+.policy-content a { color: #1d4ed8; text-decoration: underline; }
+.policy-content hr { margin: 0.75rem 0; border-color: #e2e8f0; }
+.policy-content table { border-collapse: collapse; margin: 0.5rem 0; }
+.policy-content th, .policy-content td { border: 1px solid #cbd5e1; padding: 0.25rem 0.5rem; }
+.policy-editor:empty::before { content: attr(data-placeholder); color: #94a3b8; }

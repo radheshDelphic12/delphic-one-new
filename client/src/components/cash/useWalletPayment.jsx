@@ -39,7 +39,7 @@ function WalletDialog({ open, direction, onChoose, onCancel }) {
           <label className="block text-xs font-medium text-tertiary-600">Wallet
             <select className={inputCls} value={v.wallet_id} onChange={set('wallet_id')}>
               <option value="">Choose a wallet…</option>
-              {(wallets || []).map((w) => <option key={w.id} value={w.id}>{w.name} · {w.bank_account_name} ({w.currency})</option>)}
+              {(wallets || []).map((w) => <option key={w.id} value={w.id}>{w.name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ""} ({w.currency})</option>)}
             </select>
           </label>
           <div className="grid grid-cols-2 gap-3">

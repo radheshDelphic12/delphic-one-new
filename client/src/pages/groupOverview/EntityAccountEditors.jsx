@@ -51,18 +51,19 @@ export function EntityEditDrawer({ entity, workspaces, onClose, onSaved }) {
 }
 
 /** A bank account's name, bank details and the payment lines printed on invoices paid into it. */
-export function AccountEditDrawer({ account, onClose, onSaved }) {
+export function AccountEditDrawer({ account, entities, onClose, onSaved }) {
   const [v, setV] = useState({});
   const { busy, save } = useSave(onSaved, onClose);
   useEffect(() => {
-    if (account) setV({ name: account.name, bank_name: account.bank_name || '', account_last4: account.account_last4 || '', payment_instructions: account.payment_instructions || '', declared_opening_balance: account.declared_opening_balance ?? '0', opening_date: account.opening_date || '', active: account.active !== false });
+    if (account) setV({ legal_entity_id: account.legal_entity_id || '', name: account.name, bank_name: account.bank_name || '', account_last4: account.account_last4 || '', payment_instructions: account.payment_instructions || '', declared_opening_balance: account.declared_opening_balance ?? '0', opening_date: account.opening_date || '', active: account.active !== false });
   }, [account]);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   return (
     <Drawer open={Boolean(account)} onClose={onClose} size="md" tone="edit" title={account ? `Edit ${account.name}` : 'Edit bank account'}>
       {account && (
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save(() => apiClient.patch(`/group-cash/accounts/${account.id}`, { ...(account.type === 'cash' ? { name: v.name, payment_instructions: v.payment_instructions } : { name: v.name, bank_name: v.bank_name, account_last4: v.account_last4, payment_instructions: v.payment_instructions }), declared_opening_balance: v.declared_opening_balance, ...(v.opening_date ? { opening_date: v.opening_date } : {}), active: v.active }), 'Bank account saved'); }}>
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save(() => apiClient.patch(`/group-cash/accounts/${account.id}`, { ...(account.type === 'cash' ? { name: v.name, payment_instructions: v.payment_instructions } : { name: v.name, bank_name: v.bank_name, account_last4: v.account_last4, payment_instructions: v.payment_instructions }), legal_entity_id: v.legal_entity_id || null, declared_opening_balance: v.declared_opening_balance, ...(v.opening_date ? { opening_date: v.opening_date } : {}), active: v.active }), 'Bank account saved'); }}>
           <label className={labelCls}>Name<input required className={inputCls} value={v.name || ''} onChange={set('name')} /></label>
+          <label className={labelCls}>Legal entity (optional)<select className={inputCls} value={v.legal_entity_id || ''} onChange={set('legal_entity_id')}><option value="">None</option>{(entities || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
           {account.type !== 'cash' && (
             <div className="grid grid-cols-2 gap-3">
               <label className={labelCls}>Bank<input className={inputCls} value={v.bank_name || ''} onChange={set('bank_name')} /></label>

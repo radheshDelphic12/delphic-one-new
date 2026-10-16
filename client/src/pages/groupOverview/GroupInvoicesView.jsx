@@ -125,7 +125,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, onClose, onSaved }
         <label className={labelCls}>Money will be received in (wallet of this entity, {currency})
           <select required className={inputCls} value={v.receiving_wallet_id} onChange={set('receiving_wallet_id')}>
             <option value="">Choose a wallet…</option>
-            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name} · {w.bank_account_name}</option>)}
+            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ""}</option>)}
           </select>
         </label>
         {v.legal_entity_id && !wallets.length && <p className="text-xs text-warning-700">This entity has no {currency} wallet yet. Add one under Setup.</p>}

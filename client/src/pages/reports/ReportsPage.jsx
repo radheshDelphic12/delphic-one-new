@@ -1538,7 +1538,7 @@ export default function ReportsPage() {
                       selected ? 'bg-primary-600 text-white' : 'bg-tertiary-100 text-tertiary-700'
                     }`}
                   >
-                    {section.rows.length}
+                    {section.count ?? section.rows.length}
                   </span>
                 </button>
               );

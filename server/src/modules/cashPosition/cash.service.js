@@ -12,7 +12,8 @@ const toDate = (s) => new Date(`${s}T00:00:00.000Z`);
 const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const plain = (o) => JSON.parse(JSON.stringify(o));
 
-const inGroup = (groupIds) => ({ legal_entity: { org_group_id: { in: groupIds } } });
+// Every cash record carries its holding group, so nothing needs a legal entity or a bank account to be found.
+const grp = (groupIds) => ({ org_group_id: { in: groupIds } });
 const walletInclude = {
   bank_account: { include: { legal_entity: true } },
   owner_org: { select: { id: true, name: true } },
@@ -43,10 +44,10 @@ async function netByWallet(client, walletIds, { from, to } = {}) {
 }
 
 async function loadWallet(client, groupIds, id) {
-  return client.wallet.findFirst({ where: { id, bank_account: inGroup(groupIds) }, include: walletInclude });
+  return client.wallet.findFirst({ where: { id, ...grp(groupIds) }, include: walletInclude });
 }
 
-const ownerLabel = (w) => (w.owner_org ? w.owner_org.name : `${w.owner_legal_entity?.name || 'Entity'} (entity)`);
+const ownerLabel = (w) => (w.owner_org ? w.owner_org.name : w.owner_legal_entity ? `${w.owner_legal_entity.name} (entity)` : 'No owner');
 
 function walletView(w, net) {
   const balance = D(w.opening_balance).plus(net || calc.ZERO);
@@ -56,7 +57,8 @@ function walletView(w, net) {
     purpose: w.purpose,
     active: w.active,
     bank_account_id: w.bank_account_id,
-    currency: w.bank_account?.currency,
+    currency: w.currency,
+    bank_account_name: w.bank_account?.name || null,
     owner_org_id: w.owner_org_id,
     owner_legal_entity_id: w.owner_legal_entity_id,
     owner_name: ownerLabel(w),
@@ -137,24 +139,23 @@ async function openingStatus(client, accountId) {
 const openingWarning = (status) => (status.balanced ? [] : [`The wallets' opening balances add up to ${status.wallets_total}, but the account declares ${status.declared} (difference ${status.difference}).`]);
 
 async function createAccount(groupIds, userId, body) {
-  const entity = await prisma.legalEntity.findFirst({ where: { id: body.legal_entity_id, org_group_id: { in: groupIds } } });
-  if (!entity) return { error: 'entity_not_found' };
+  // a legal entity is optional: an account can stand on its own
+  const entity = body.legal_entity_id ? await prisma.legalEntity.findFirst({ where: { id: body.legal_entity_id, org_group_id: { in: groupIds } } }) : null;
+  if (body.legal_entity_id && !entity) return { error: 'entity_not_found' };
   const isCash = body.type === 'cash';
-  const data = { ...body, bank_name: isCash ? null : body.bank_name ?? null, account_last4: isCash ? null : body.account_last4 ?? null, opening_date: toDate(body.opening_date), created_by: userId };
-  const result = await prisma.$transaction(async (tx) => {
+  const data = { ...body, legal_entity_id: entity?.id ?? null, org_group_id: entity?.org_group_id || groupIds[0], bank_name: isCash ? null : body.bank_name ?? null, account_last4: isCash ? null : body.account_last4 ?? null, opening_date: toDate(body.opening_date), created_by: userId };
+  // wallets are mapped to the account by hand later (Setup > Wallets); nothing is created or linked automatically
+  return prisma.$transaction(async (tx) => {
     const account = await tx.bankAccount.create({ data });
-    // every account holds an "Unallocated" wallet for money whose owner is not known yet; it starts with the whole declared opening balance
-    const wallet = await tx.wallet.create({ data: { bank_account_id: account.id, owner_legal_entity_id: entity.id, purpose: 'unallocated', name: 'Unallocated', opening_balance: account.declared_opening_balance, created_by: userId } });
-    await audit(tx, entity.org_group_id, 'bank_account', account.id, 'create', null, account, userId);
-    await audit(tx, entity.org_group_id, 'wallet', wallet.id, 'create', null, wallet, userId);
-    return { account, wallet: walletView({ ...wallet, bank_account: account, owner_legal_entity: entity }, calc.ZERO) };
+    await audit(tx, account.org_group_id, 'bank_account', account.id, 'create', null, account, userId);
+    return { account };
   });
-  return result;
 }
 
 async function updateAccount(groupIds, userId, id, body) {
-  const before = await prisma.bankAccount.findFirst({ where: { id, ...inGroup(groupIds) }, include: { legal_entity: true } });
+  const before = await prisma.bankAccount.findFirst({ where: { id, ...grp(groupIds) }, include: { legal_entity: true } });
   if (!before) return { error: 'not_found' };
+  if (body.legal_entity_id && !(await prisma.legalEntity.findFirst({ where: { id: body.legal_entity_id, org_group_id: before.org_group_id } }))) return { error: 'entity_not_found' };
   if (body.active === false) {
     const live = await prisma.wallet.findMany({ where: { bank_account_id: id, active: true }, select: { id: true, opening_balance: true } });
     const net = await netByWallet(prisma, live.map((w) => w.id));
@@ -164,7 +165,7 @@ async function updateAccount(groupIds, userId, id, body) {
   if (before.type === 'cash') { delete data.bank_name; delete data.account_last4; }
   const account = await prisma.$transaction(async (tx) => {
     const a = await tx.bankAccount.update({ where: { id }, data });
-    await audit(tx, before.legal_entity.org_group_id, 'bank_account', id, 'update', before, a, userId);
+    await audit(tx, before.org_group_id, 'bank_account', id, 'update', before, a, userId);
     return a;
   });
   return { account, warnings: openingWarning(await openingStatus(prisma, id)) };
@@ -173,19 +174,21 @@ async function updateAccount(groupIds, userId, id, body) {
 // ---------------------------------------------------------------------------------------------------------------- wallets
 
 async function createWallet(groupIds, userId, body) {
-  const account = await prisma.bankAccount.findFirst({ where: { id: body.bank_account_id, ...inGroup(groupIds) }, include: { legal_entity: true } });
-  if (!account) return { error: 'account_not_found' };
-  if (!account.active) return { error: 'account_inactive' };
-  // exactly one owner: a workspace or a legal entity
-  if (Boolean(body.owner_org_id) === Boolean(body.owner_legal_entity_id)) return { error: 'one_owner' };
+  // the bank account is optional (map it later); a mapped wallet has the account's currency
+  const account = body.bank_account_id ? await prisma.bankAccount.findFirst({ where: { id: body.bank_account_id, ...grp(groupIds) } }) : null;
+  if (body.bank_account_id && !account) return { error: 'account_not_found' };
+  if (account && !account.active) return { error: 'account_inactive' };
+  if (account && body.currency && body.currency !== account.currency) return { error: 'currency_mismatch' };
+  // at most one owner: a workspace or a legal entity (or none)
+  if (body.owner_org_id && body.owner_legal_entity_id) return { error: 'one_owner' };
   if (body.owner_org_id && !(await orgInGroup(prisma, groupIds, body.owner_org_id))) return { error: 'owner_not_found' };
   if (body.owner_legal_entity_id && !(await prisma.legalEntity.findFirst({ where: { id: body.owner_legal_entity_id, org_group_id: { in: groupIds } } }))) return { error: 'owner_not_found' };
   const wallet = await prisma.$transaction(async (tx) => {
-    const w = await tx.wallet.create({ data: { ...body, created_by: userId }, include: walletInclude });
-    await audit(tx, account.legal_entity.org_group_id, 'wallet', w.id, 'create', null, w, userId);
+    const w = await tx.wallet.create({ data: { ...body, bank_account_id: account?.id ?? null, currency: account?.currency || body.currency || 'INR', org_group_id: account?.org_group_id || groupIds[0], created_by: userId }, include: walletInclude });
+    await audit(tx, w.org_group_id, 'wallet', w.id, 'create', null, w, userId);
     return w;
   });
-  return { wallet: walletView(wallet, calc.ZERO), warnings: openingWarning(await openingStatus(prisma, account.id)) };
+  return { wallet: walletView(wallet, calc.ZERO), warnings: account ? openingWarning(await openingStatus(prisma, account.id)) : [] };
 }
 
 async function updateWallet(groupIds, userId, id, body) {
@@ -197,7 +200,7 @@ async function updateWallet(groupIds, userId, id, body) {
   if (ownerChange) {
     const orgId = body.owner_org_id ?? null;
     const entityId = body.owner_legal_entity_id ?? null;
-    if (Boolean(orgId) === Boolean(entityId)) return { error: 'one_owner' };
+    if (orgId && entityId) return { error: 'one_owner' };
     if (orgId && !(await orgInGroup(prisma, groupIds, orgId))) return { error: 'owner_not_found' };
     if (entityId && !(await prisma.legalEntity.findFirst({ where: { id: entityId, org_group_id: { in: groupIds } } }))) return { error: 'owner_not_found' };
     body = { ...body, owner_org_id: orgId, owner_legal_entity_id: entityId };
@@ -206,13 +209,23 @@ async function updateWallet(groupIds, userId, id, body) {
     const net = (await netByWallet(prisma, [id])).get(id);
     if (!D(before.opening_balance).plus(net).eq(0)) return { error: 'balance_not_zero' };
   }
+  // Mapping: which bank account this wallet's money sits in (null = none). Entries never change; only where the wallet is counted.
+  if (body.bank_account_id !== undefined) {
+    if (body.bank_account_id) {
+      const account = await prisma.bankAccount.findFirst({ where: { id: body.bank_account_id, ...grp(groupIds) } });
+      if (!account) return { error: 'account_not_found' };
+      if (!account.active) return { error: 'account_inactive' };
+      if (account.currency !== (body.currency || before.currency)) return { error: 'currency_mismatch' };
+      body = { ...body, currency: account.currency };
+    }
+  } else if (body.currency && body.currency !== before.currency && before.bank_account_id) return { error: 'currency_mismatch' };
   const wallet = await prisma.$transaction(async (tx) => {
     const w = await tx.wallet.update({ where: { id }, data: body, include: walletInclude });
-    await audit(tx, before.bank_account.legal_entity.org_group_id, 'wallet', id, 'update', before, w, userId);
+    await audit(tx, before.org_group_id, 'wallet', id, 'update', before, w, userId);
     return w;
   });
   const net = (await netByWallet(prisma, [id])).get(id);
-  return { wallet: walletView(wallet, net), warnings: openingWarning(await openingStatus(prisma, wallet.bank_account_id)) };
+  return { wallet: walletView(wallet, net), warnings: wallet.bank_account_id ? openingWarning(await openingStatus(prisma, wallet.bank_account_id)) : [] };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- transactions
@@ -237,14 +250,14 @@ async function createTransaction(groupIds, userId, walletId, body, attachment) {
         reference_type: 'manual', attachment_url: attachment?.url || null, attachment_name: attachment?.name || null, created_by: userId,
       },
     });
-    await audit(client, wallet.bank_account.legal_entity.org_group_id, 'transaction', row.id, 'create', null, row, userId);
+    await audit(client, wallet.org_group_id, 'transaction', row.id, 'create', null, row, userId);
     return row;
   });
   return { transaction: txView(tx), warnings: negativeWarning(wallet, await walletBalanceOf(prisma, walletId)) };
 }
 
 async function loadTransaction(groupIds, id) {
-  return prisma.walletTransaction.findFirst({ where: { id, deleted_at: null, wallet: { bank_account: inGroup(groupIds) } }, include: { wallet: { include: walletInclude } } });
+  return prisma.walletTransaction.findFirst({ where: { id, deleted_at: null, wallet: grp(groupIds) }, include: { wallet: { include: walletInclude } } });
 }
 
 async function updateTransaction(groupIds, userId, id, body) {
@@ -255,7 +268,7 @@ async function updateTransaction(groupIds, userId, id, body) {
   const data = { ...body, ...(body.date ? { date: toDate(body.date) } : {}) };
   const tx = await prisma.$transaction(async (client) => {
     const row = await client.walletTransaction.update({ where: { id }, data });
-    await audit(client, before.wallet.bank_account.legal_entity.org_group_id, 'transaction', id, 'update', before, row, userId);
+    await audit(client, before.wallet.org_group_id, 'transaction', id, 'update', before, row, userId);
     return row;
   });
   return { transaction: txView(tx), warnings: negativeWarning(before.wallet, await walletBalanceOf(prisma, before.wallet_id)) };
@@ -268,7 +281,7 @@ async function removeTransaction(groupIds, userId, id) {
   if (before.transfer_id) return removeTransfer(groupIds, userId, before.transfer_id);
   await prisma.$transaction(async (client) => {
     await client.walletTransaction.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: userId } });
-    await audit(client, before.wallet.bank_account.legal_entity.org_group_id, 'transaction', id, 'delete', before, null, userId);
+    await audit(client, before.wallet.org_group_id, 'transaction', id, 'delete', before, null, userId);
   });
   return { ok: true };
 }
@@ -282,7 +295,7 @@ async function createTransfer(groupIds, userId, body) {
   const [from, to] = await Promise.all([loadWallet(prisma, groupIds, body.from_wallet_id), loadWallet(prisma, groupIds, body.to_wallet_id)]);
   if (!from || !to) return { error: 'not_found' };
   if (!from.active || !to.active) return { error: 'wallet_inactive' };
-  if (from.bank_account.currency !== to.bank_account.currency) return { error: 'currency_mismatch' };
+  if (from.currency !== to.currency) return { error: 'currency_mismatch' };
   const kind = calc.transferKind(from, to);
   const intercompany = calc.isIntercompany(from, to);
   const result = await prisma.$transaction(async (client) => {
@@ -291,14 +304,14 @@ async function createTransfer(groupIds, userId, body) {
     // exactly two entries, written together with the transfer or not at all
     const out = await client.walletTransaction.create({ data: { ...base, wallet_id: from.id, direction: 'out', party: to.name } });
     const inn = await client.walletTransaction.create({ data: { ...base, wallet_id: to.id, direction: 'in', party: from.name } });
-    await audit(client, from.bank_account.legal_entity.org_group_id, 'transfer', transfer.id, 'create', null, { ...transfer, legs: [out.id, inn.id] }, userId);
+    await audit(client, from.org_group_id, 'transfer', transfer.id, 'create', null, { ...transfer, legs: [out.id, inn.id] }, userId);
     return { transfer, legs: [out, inn] };
   });
   return { transfer: transferView(result.transfer, result.legs), warnings: negativeWarning(from, await walletBalanceOf(prisma, from.id)) };
 }
 
 async function loadTransfer(groupIds, id) {
-  return prisma.walletTransfer.findFirst({ where: { id, deleted_at: null, from_wallet: { bank_account: inGroup(groupIds) } }, include: { from_wallet: { include: walletInclude }, transactions: { where: { deleted_at: null } } } });
+  return prisma.walletTransfer.findFirst({ where: { id, deleted_at: null, from_wallet: grp(groupIds) }, include: { from_wallet: { include: walletInclude }, transactions: { where: { deleted_at: null } } } });
 }
 
 async function updateTransfer(groupIds, userId, id, body) {
@@ -312,7 +325,7 @@ async function updateTransfer(groupIds, userId, id, body) {
     const transfer = await client.walletTransfer.update({ where: { id }, data });
     await client.walletTransaction.updateMany({ where: { transfer_id: id, deleted_at: null }, data });
     const legs = await client.walletTransaction.findMany({ where: { transfer_id: id, deleted_at: null } });
-    await audit(client, before.from_wallet.bank_account.legal_entity.org_group_id, 'transfer', id, 'update', { ...before, from_wallet: undefined }, { ...transfer, legs }, userId);
+    await audit(client, before.from_wallet.org_group_id, 'transfer', id, 'update', { ...before, from_wallet: undefined }, { ...transfer, legs }, userId);
     return { transfer, legs };
   });
   return { transfer: transferView(result.transfer, result.legs), warnings: negativeWarning(before.from_wallet, await walletBalanceOf(prisma, before.from_wallet_id)) };
@@ -325,57 +338,71 @@ async function removeTransfer(groupIds, userId, id) {
   await prisma.$transaction(async (client) => {
     await client.walletTransaction.updateMany({ where: { transfer_id: id, deleted_at: null }, data: { deleted_at: now, deleted_by: userId } });
     await client.walletTransfer.update({ where: { id }, data: { deleted_at: now, deleted_by: userId } });
-    await audit(client, before.from_wallet.bank_account.legal_entity.org_group_id, 'transfer', id, 'delete', { ...before, from_wallet: undefined }, null, userId);
+    await audit(client, before.from_wallet.org_group_id, 'transfer', id, 'delete', { ...before, from_wallet: undefined }, null, userId);
   });
   return { ok: true };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the Cash Position view
 
-/** Legal entity > bank account > wallets, and the same wallets grouped by owner; INR and USD always totalled apart. */
+/**
+ * Legal entity > bank account > wallets, and the same wallets grouped by owner; INR and USD always totalled apart.
+ * Nothing is mandatory: a bank account may have no legal entity (listed under "No legal entity"), and a wallet may be
+ * mapped to no bank account (listed apart as "Not mapped"). A bank account's balance is the sum of the wallets mapped to it.
+ */
 async function position(groupIds, q = {}) {
-  const entities = await prisma.legalEntity.findMany({
-    where: { org_group_id: { in: groupIds }, active: true, ...(q.legal_entity_id ? { id: q.legal_entity_id } : {}) },
-    include: {
-      bank_accounts: {
-        where: { active: true, ...(q.type ? { type: q.type } : {}), ...(q.currency ? { currency: q.currency } : {}) },
-        orderBy: { name: 'asc' },
-        include: { wallets: { where: { active: true }, include: { owner_org: { select: { id: true, name: true } }, owner_legal_entity: true }, orderBy: { name: 'asc' } } },
-      },
-    },
-    orderBy: { name: 'asc' },
-  });
-  const walletIds = entities.flatMap((e) => e.bank_accounts.flatMap((a) => a.wallets.map((w) => w.id)));
+  const walletInc = { where: { active: true }, include: { owner_org: { select: { id: true, name: true } }, owner_legal_entity: true }, orderBy: { name: 'asc' } };
+  const [entities, accounts, loose] = await Promise.all([
+    prisma.legalEntity.findMany({ where: { org_group_id: { in: groupIds }, active: true, ...(q.legal_entity_id ? { id: q.legal_entity_id } : {}) }, orderBy: { name: 'asc' } }),
+    prisma.bankAccount.findMany({
+      where: { ...grp(groupIds), active: true, ...(q.legal_entity_id ? { legal_entity_id: q.legal_entity_id } : {}), ...(q.type ? { type: q.type } : {}), ...(q.currency ? { currency: q.currency } : {}) },
+      orderBy: { name: 'asc' },
+      include: { legal_entity: true, wallets: walletInc },
+    }),
+    q.legal_entity_id || q.type ? [] : prisma.wallet.findMany({ where: { ...grp(groupIds), active: true, bank_account_id: null, ...(q.currency ? { currency: q.currency } : {}) }, include: { owner_org: { select: { id: true, name: true } }, owner_legal_entity: true }, orderBy: { name: 'asc' } }),
+  ]);
+  const walletIds = [...accounts.flatMap((a) => a.wallets.map((w) => w.id)), ...loose.map((w) => w.id)];
   const net = await netByWallet(prisma, walletIds);
   const accountsFlat = [];
-  const tree = entities.map((e) => {
-    const accounts = e.bank_accounts.map((a) => {
-      const all = a.wallets.map((w) => ({ ...walletView({ ...w, bank_account: a }, net.get(w.id)), legal_entity_id: e.id }));
-      const balance = calc.sum(all.map((w) => w.balance));
-      const wallets = q.workspace_id ? all.filter((w) => w.owner_org_id === q.workspace_id) : all;
-      const view = {
-        id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, account_last4: a.account_last4, payment_instructions: a.payment_instructions, currency: a.currency, legal_entity_id: e.id, legal_entity_name: e.name,
-        balance: money(balance), shown_balance: money(calc.sum(wallets.map((w) => w.balance))), opening: { declared: money(a.declared_opening_balance), wallets_total: money(calc.sum(a.wallets.map((w) => w.opening_balance))) }, wallets,
-      };
-      view.opening.difference = money(D(view.opening.declared).minus(view.opening.wallets_total));
-      view.warnings = [...(D(view.opening.difference).eq(0) ? [] : [`Opening balances differ by ${view.opening.difference}`]), ...wallets.filter((w) => w.negative).map((w) => `${w.name} is negative`)];
-      accountsFlat.push(view);
-      return view;
-    }).filter((a) => !q.workspace_id || a.wallets.length);
-    return { id: e.id, name: e.name, workspace_id: e.workspace_id, accounts, totals: calc.totalsByCurrency(accounts, (a) => a.shown_balance) };
-  }).filter((e) => e.accounts.length || (!q.workspace_id && !q.type && !q.currency));
-
-  // fund view: workspace -> its wallets across every bank account; entity-owned wallets sit under "<entity> (entity)"
-  const owners = new Map();
-  for (const a of accountsFlat) {
-    for (const w of a.wallets) {
-      const key = w.owner_org_id ? `org:${w.owner_org_id}` : `entity:${w.owner_legal_entity_id}`;
-      if (!owners.has(key)) owners.set(key, { key, owner_org_id: w.owner_org_id, name: w.owner_name, wallets: [] });
-      owners.get(key).wallets.push({ ...w, bank_account_name: a.name, legal_entity_name: a.legal_entity_name, type: a.type, currency: a.currency });
-    }
+  const accountView = (a) => {
+    const all = a.wallets.map((w) => ({ ...walletView({ ...w, bank_account: a }, net.get(w.id)), legal_entity_id: a.legal_entity_id }));
+    const balance = calc.sum(all.map((w) => w.balance));
+    const wallets = q.workspace_id ? all.filter((w) => w.owner_org_id === q.workspace_id) : all;
+    const view = {
+      id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, account_last4: a.account_last4, payment_instructions: a.payment_instructions, currency: a.currency, legal_entity_id: a.legal_entity_id, legal_entity_name: a.legal_entity?.name || null,
+      balance: money(balance), shown_balance: money(calc.sum(wallets.map((w) => w.balance))), opening: { declared: money(a.declared_opening_balance), wallets_total: money(calc.sum(a.wallets.map((w) => w.opening_balance))) }, wallets,
+    };
+    view.opening.difference = money(D(view.opening.declared).minus(view.opening.wallets_total));
+    view.warnings = [...(D(view.opening.difference).eq(0) ? [] : [`Opening balances differ by ${view.opening.difference}`]), ...wallets.filter((w) => w.negative).map((w) => `${w.name} is negative`)];
+    accountsFlat.push(view);
+    return view;
+  };
+  const byEntity = new Map();
+  for (const a of accounts) {
+    const key = a.legal_entity_id || 'none';
+    if (!byEntity.has(key)) byEntity.set(key, []);
+    byEntity.get(key).push(accountView(a));
   }
+  const shape = (e, list) => {
+    const rows = list.filter((a) => !q.workspace_id || a.wallets.length);
+    return { id: e.id, name: e.name, workspace_id: e.workspace_id || null, accounts: rows, totals: calc.totalsByCurrency(rows, (a) => a.shown_balance) };
+  };
+  const tree = entities.map((e) => shape(e, byEntity.get(e.id) || [])).filter((e) => e.accounts.length || (!q.workspace_id && !q.type && !q.currency));
+  if (byEntity.has('none')) tree.push(shape({ id: null, name: 'No legal entity' }, byEntity.get('none')));
+
+  const unmapped = loose.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: null })).filter((w) => !q.workspace_id || w.owner_org_id === q.workspace_id);
+
+  // fund view: workspace -> its wallets across every bank account; entity-owned wallets sit under "<entity> (entity)"; no owner under "No owner"
+  const owners = new Map();
+  const addToFund = (w, extra) => {
+    const key = w.owner_org_id ? `org:${w.owner_org_id}` : w.owner_legal_entity_id ? `entity:${w.owner_legal_entity_id}` : 'none';
+    if (!owners.has(key)) owners.set(key, { key, owner_org_id: w.owner_org_id, name: w.owner_name, wallets: [] });
+    owners.get(key).wallets.push({ ...w, ...extra });
+  };
+  for (const a of accountsFlat) for (const w of a.wallets) addToFund(w, { bank_account_name: a.name, legal_entity_name: a.legal_entity_name, type: a.type, currency: a.currency });
+  for (const w of unmapped) addToFund(w, { bank_account_name: 'Not mapped', legal_entity_name: null, type: null });
   const funds = [...owners.values()].map((o) => ({ ...o, totals: calc.totalsByCurrency(o.wallets, (w) => w.balance) })).sort((x, y) => x.name.localeCompare(y.name));
-  return { entities: tree, funds, totals: calc.totalsByCurrency(tree.flatMap((e) => e.accounts), (a) => a.shown_balance) };
+  return { entities: tree, unmapped_wallets: unmapped, unmapped_totals: calc.totalsByCurrency(unmapped, (w) => w.balance), funds, totals: calc.totalsByCurrency(tree.flatMap((e) => e.accounts), (a) => a.shown_balance) };
 }
 
 /** Pick-lists for the forms: entities, workspaces, accounts and wallets. */
@@ -383,13 +410,13 @@ async function options(groupIds) {
   const [entities, workspaces, accounts, wallets] = await Promise.all([
     prisma.legalEntity.findMany({ where: { org_group_id: { in: groupIds } }, select: { id: true, name: true, workspace_id: true, active: true }, orderBy: { name: 'asc' } }),
     prisma.org.findMany({ where: { org_group_id: { in: groupIds }, status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.bankAccount.findMany({ where: { active: true, ...inGroup(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
-    prisma.wallet.findMany({ where: { active: true, bank_account: inGroup(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
+    prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
+    prisma.wallet.findMany({ where: { active: true, ...grp(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
   ]);
   return {
     entities, workspaces, modes: calc.MODES, currencies: calc.CURRENCIES,
     accounts: accounts.map((a) => ({ ...a, declared_opening_balance: money(a.declared_opening_balance), opening_date: ymd(a.opening_date) })),
-    wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account.name, currency: w.bank_account.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id })),
+    wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account?.name || null, currency: w.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id })),
   };
 }
 
@@ -406,7 +433,7 @@ async function entriesFor(wallet, { from, to } = {}) {
   const totalIn = calc.sum(rows.filter((r) => r.direction === 'in').map((r) => r.amount));
   const totalOut = calc.sum(rows.filter((r) => r.direction === 'out').map((r) => r.amount));
   return {
-    wallet: { id: wallet.id, name: wallet.name, owner_name: ownerLabel(wallet), bank_account_name: wallet.bank_account.name, legal_entity_name: wallet.bank_account.legal_entity.name, currency: wallet.bank_account.currency },
+    wallet: { id: wallet.id, name: wallet.name, owner_name: ownerLabel(wallet), bank_account_name: wallet.bank_account?.name || 'Not mapped to a bank account', legal_entity_name: wallet.bank_account?.legal_entity?.name || '', currency: wallet.currency },
     from: from || null, to: to || null,
     opening_balance: money(openingBefore), total_in: money(totalIn), total_out: money(totalOut), closing_balance: money(openingBefore.plus(totalIn).minus(totalOut)),
     by_mode: calc.modeBreakdown(rows), rows: withBalance,
@@ -426,7 +453,7 @@ async function receipts(groupIds, q = {}) {
   const rows = await prisma.walletTransaction.findMany({
     where: {
       direction: 'in', deleted_at: null, reference_type: { not: 'transfer' }, ...(q.from || q.to ? { date } : {}),
-      wallet: { bank_account: inGroup(groupIds), ...(q.wallet_id ? { id: q.wallet_id } : {}), ...(q.workspace_id ? { owner_org_id: q.workspace_id } : {}) },
+      wallet: { ...grp(groupIds), ...(q.wallet_id ? { id: q.wallet_id } : {}), ...(q.workspace_id ? { owner_org_id: q.workspace_id } : {}) },
     },
     include: { wallet: { include: walletInclude } },
     orderBy: [{ date: 'desc' }, { created_at: 'desc' }],
@@ -440,7 +467,7 @@ async function receipts(groupIds, q = {}) {
   const summary = [...groups.values()].map((g) => {
     const byCurrency = {};
     for (const r of g.items) {
-      const cur = r.wallet.bank_account.currency;
+      const cur = r.wallet.currency;
       const c = (byCurrency[cur] ||= { total: calc.ZERO, by_mode: {} });
       c.total = c.total.plus(D(r.amount));
       c.by_mode[r.mode] = D(c.by_mode[r.mode] || 0).plus(D(r.amount));
@@ -451,8 +478,8 @@ async function receipts(groupIds, q = {}) {
     };
   }).sort((a, b) => a.owner_name.localeCompare(b.owner_name));
   return {
-    from: q.from || null, to: q.to || null, summary, totals: calc.totalsByCurrency(rows.map((r) => ({ currency: r.wallet.bank_account.currency, amount: r.amount })), (r) => r.amount),
-    rows: rows.map((r) => ({ id: r.id, date: ymd(r.date), owner_name: ownerLabel(r.wallet), wallet: r.wallet.name, bank_account: r.wallet.bank_account.name, currency: r.wallet.bank_account.currency, amount: money(r.amount), mode: r.mode, party: r.party, category: r.category, notes: r.notes })),
+    from: q.from || null, to: q.to || null, summary, totals: calc.totalsByCurrency(rows.map((r) => ({ currency: r.wallet.currency, amount: r.amount })), (r) => r.amount),
+    rows: rows.map((r) => ({ id: r.id, date: ymd(r.date), owner_name: ownerLabel(r.wallet), wallet: r.wallet.name, bank_account: r.wallet.bank_account?.name || '', currency: r.wallet.currency, amount: money(r.amount), mode: r.mode, party: r.party, category: r.category, notes: r.notes })),
   };
 }
 
@@ -467,21 +494,21 @@ async function systemBalanceAt(client, account, date) {
 }
 
 async function previewReconciliation(groupIds, { bank_account_id, statement_date, statement_balance }) {
-  const account = await prisma.bankAccount.findFirst({ where: { id: bank_account_id, ...inGroup(groupIds) } });
+  const account = await prisma.bankAccount.findFirst({ where: { id: bank_account_id, ...grp(groupIds) } });
   if (!account) return { error: 'not_found' };
   const system = await systemBalanceAt(prisma, account, statement_date);
   return { bank_account_id, statement_date, currency: account.currency, system_balance: money(system), statement_balance: money(statement_balance), difference: money(D(statement_balance).minus(system)) };
 }
 
 async function createReconciliation(groupIds, userId, body) {
-  const account = await prisma.bankAccount.findFirst({ where: { id: body.bank_account_id, ...inGroup(groupIds) }, include: { legal_entity: true } });
+  const account = await prisma.bankAccount.findFirst({ where: { id: body.bank_account_id, ...grp(groupIds) }, include: { legal_entity: true } });
   if (!account) return { error: 'not_found' };
   const row = await prisma.$transaction(async (client) => {
     const system = await systemBalanceAt(client, account, body.statement_date);
     const r = await client.bankReconciliation.create({
       data: { bank_account_id: account.id, statement_date: toDate(body.statement_date), statement_balance: body.statement_balance, system_balance: system, difference: D(body.statement_balance).minus(system), notes: body.notes ?? null, created_by: userId },
     });
-    await audit(client, account.legal_entity.org_group_id, 'reconciliation', r.id, 'create', null, r, userId);
+    await audit(client, account.org_group_id, 'reconciliation', r.id, 'create', null, r, userId);
     return r;
   });
   return { reconciliation: reconView(row, account) };
@@ -490,50 +517,126 @@ async function createReconciliation(groupIds, userId, body) {
 const reconView = (r, account) => ({ id: r.id, bank_account_id: r.bank_account_id, bank_account_name: account?.name, currency: account?.currency, statement_date: ymd(r.statement_date), statement_balance: money(r.statement_balance), system_balance: money(r.system_balance), difference: money(r.difference), notes: r.notes, created_at: r.created_at });
 
 async function listReconciliations(groupIds, { bank_account_id } = {}) {
-  const rows = await prisma.bankReconciliation.findMany({ where: { deleted_at: null, ...(bank_account_id ? { bank_account_id } : {}), bank_account: inGroup(groupIds) }, include: { bank_account: true }, orderBy: [{ statement_date: 'desc' }, { created_at: 'desc' }], take: 200 });
+  const rows = await prisma.bankReconciliation.findMany({ where: { deleted_at: null, ...(bank_account_id ? { bank_account_id } : {}), bank_account: grp(groupIds) }, include: { bank_account: true }, orderBy: [{ statement_date: 'desc' }, { created_at: 'desc' }], take: 200 });
   return rows.map((r) => reconView(r, r.bank_account));
 }
 
 /** Fixing a saved reconciliation: the system balance is worked out again for the (possibly new) date. */
 async function updateReconciliation(groupIds, userId, id, body) {
-  const before = await prisma.bankReconciliation.findFirst({ where: { id, deleted_at: null, bank_account: inGroup(groupIds) }, include: { bank_account: { include: { legal_entity: true } } } });
+  const before = await prisma.bankReconciliation.findFirst({ where: { id, deleted_at: null, bank_account: grp(groupIds) }, include: { bank_account: { include: { legal_entity: true } } } });
   if (!before) return { error: 'not_found' };
   const date = body.statement_date || ymd(before.statement_date);
   const statement = body.statement_balance ?? before.statement_balance;
   const row = await prisma.$transaction(async (client) => {
     const system = await systemBalanceAt(client, before.bank_account, date);
     const r = await client.bankReconciliation.update({ where: { id }, data: { statement_date: toDate(date), statement_balance: statement, system_balance: system, difference: D(statement).minus(system), ...(body.notes !== undefined ? { notes: body.notes } : {}) } });
-    await audit(client, before.bank_account.legal_entity.org_group_id, 'reconciliation', id, 'update', before.bank_account && { ...before, bank_account: undefined }, r, userId);
+    await audit(client, before.bank_account.org_group_id, 'reconciliation', id, 'update', before.bank_account && { ...before, bank_account: undefined }, r, userId);
     return r;
   });
   return { reconciliation: reconView(row, before.bank_account) };
 }
 
 async function removeReconciliation(groupIds, userId, id) {
-  const before = await prisma.bankReconciliation.findFirst({ where: { id, deleted_at: null, bank_account: inGroup(groupIds) }, include: { bank_account: { include: { legal_entity: true } } } });
+  const before = await prisma.bankReconciliation.findFirst({ where: { id, deleted_at: null, bank_account: grp(groupIds) }, include: { bank_account: { include: { legal_entity: true } } } });
   if (!before) return { error: 'not_found' };
   await prisma.$transaction(async (client) => {
     await client.bankReconciliation.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: userId } });
-    await audit(client, before.bank_account.legal_entity.org_group_id, 'reconciliation', id, 'delete', { ...before, bank_account: undefined }, null, userId);
+    await audit(client, before.bank_account.org_group_id, 'reconciliation', id, 'delete', { ...before, bank_account: undefined }, null, userId);
   });
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------------------------------------------- delete (Setup)
+
+/** A legal entity can be deleted only while nothing hangs on it. Otherwise switch it off. */
+async function removeEntity(groupIds, userId, id) {
+  const before = await prisma.legalEntity.findFirst({ where: { id, org_group_id: { in: groupIds } } });
+  if (!before) return { error: 'not_found' };
+  const [accounts, wallets, invoices] = await Promise.all([
+    prisma.bankAccount.count({ where: { legal_entity_id: id } }),
+    prisma.wallet.count({ where: { owner_legal_entity_id: id } }),
+    prisma.groupInvoice.count({ where: { legal_entity_id: id } }),
+  ]);
+  if (accounts || wallets || invoices) return { error: 'entity_in_use' };
+  await prisma.$transaction(async (tx) => {
+    await tx.invoiceCounter.deleteMany({ where: { legal_entity_id: id } });
+    await tx.legalEntity.delete({ where: { id } });
+    await audit(tx, before.org_group_id, 'legal_entity', id, 'delete', before, null, userId);
+  });
+  return { ok: true };
+}
+
+/** A bank account is deleted only once no wallet is mapped to it; its saved reconciliations go with it. */
+async function removeAccount(groupIds, userId, id) {
+  const before = await prisma.bankAccount.findFirst({ where: { id, ...grp(groupIds) } });
+  if (!before) return { error: 'not_found' };
+  if (await prisma.wallet.count({ where: { bank_account_id: id } })) return { error: 'account_has_wallets' };
+  await prisma.$transaction(async (tx) => {
+    await tx.bankReconciliation.deleteMany({ where: { bank_account_id: id } });
+    await tx.bankAccount.delete({ where: { id } });
+    await audit(tx, before.org_group_id, 'bank_account', id, 'delete', before, null, userId);
+  });
+  return { ok: true };
+}
+
+/** A wallet is deleted only while it has no entries at all (not even deleted ones); otherwise switch it off. */
+async function removeWallet(groupIds, userId, id) {
+  const before = await loadWallet(prisma, groupIds, id);
+  if (!before) return { error: 'not_found' };
+  const [entries, transfers, invoices] = await Promise.all([
+    prisma.walletTransaction.count({ where: { wallet_id: id } }),
+    prisma.walletTransfer.count({ where: { OR: [{ from_wallet_id: id }, { to_wallet_id: id }] } }),
+    prisma.groupInvoice.count({ where: { receiving_wallet_id: id } }),
+  ]);
+  if (entries || transfers || invoices) return { error: 'wallet_in_use' };
+  await prisma.$transaction(async (tx) => {
+    await tx.wallet.delete({ where: { id } });
+    await audit(tx, before.org_group_id, 'wallet', id, 'delete', { ...before, bank_account: undefined, owner_org: undefined, owner_legal_entity: undefined }, null, userId);
+  });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------------------------------------------- bank account statement
+
+/** A bank account's statement: every live entry of the wallets mapped to it, date-wise, with the running balance of the account. */
+async function accountEntries(groupIds, accountId, { from, to } = {}) {
+  const account = await prisma.bankAccount.findFirst({ where: { id: accountId, ...grp(groupIds) }, include: { legal_entity: true, wallets: { select: { id: true, name: true, opening_balance: true } } } });
+  if (!account) return null;
+  const ids = account.wallets.map((w) => w.id);
+  const names = new Map(account.wallets.map((w) => [w.id, w.name]));
+  const openingTotal = calc.sum(account.wallets.map((w) => w.opening_balance));
+  const before = from ? await netByWallet(prisma, ids, { to: ymd(new Date(toDate(from).getTime() - 86400000)) }) : null;
+  const opening = before ? [...before.values()].reduce((acc, v) => acc.plus(v), openingTotal) : openingTotal;
+  const date = {};
+  if (from) date.gte = toDate(from);
+  if (to) date.lte = toDate(to);
+  const rows = ids.length ? await prisma.walletTransaction.findMany({ where: { wallet_id: { in: ids }, deleted_at: null, ...(from || to ? { date } : {}) }, orderBy: [{ date: 'asc' }, { created_at: 'asc' }] }) : [];
+  const withBalance = calc.withRunningBalance(opening, rows).map((r) => ({ ...txView(r), wallet: names.get(r.wallet_id), balance_after: r.balance_after }));
+  const totalIn = calc.sum(rows.filter((r) => r.direction === 'in').map((r) => r.amount));
+  const totalOut = calc.sum(rows.filter((r) => r.direction === 'out').map((r) => r.amount));
+  return {
+    wallet: { id: account.id, name: account.name, owner_name: `${account.wallets.length} wallet${account.wallets.length === 1 ? '' : 's'} mapped`, bank_account_name: account.name, legal_entity_name: account.legal_entity?.name || '', currency: account.currency },
+    from: from || null, to: to || null,
+    opening_balance: money(opening), total_in: money(totalIn), total_out: money(totalOut), closing_balance: money(opening.plus(totalIn).minus(totalOut)),
+    by_mode: calc.modeBreakdown(rows), rows: withBalance,
+  };
 }
 
 /** Everything the Setup screen lists, switched-off accounts and wallets included, so nothing can get stuck switched off. */
 async function setupLists(groupIds) {
   const [entities, accounts, wallets] = await Promise.all([
     listEntities(groupIds),
-    prisma.bankAccount.findMany({ where: inGroup(groupIds), include: { legal_entity: { select: { id: true, name: true } } }, orderBy: [{ legal_entity_id: 'asc' }, { name: 'asc' }] }),
-    prisma.wallet.findMany({ where: { bank_account: inGroup(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
+    prisma.bankAccount.findMany({ where: grp(groupIds), include: { legal_entity: { select: { id: true, name: true } } }, orderBy: [{ legal_entity_id: 'asc' }, { name: 'asc' }] }),
+    prisma.wallet.findMany({ where: grp(groupIds), include: walletInclude, orderBy: { name: 'asc' } }),
   ]);
   const net = await netByWallet(prisma, wallets.map((w) => w.id));
   return {
     entities,
     accounts: accounts.map((a) => ({
       id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, account_last4: a.account_last4, currency: a.currency, active: a.active, payment_instructions: a.payment_instructions,
-      declared_opening_balance: money(a.declared_opening_balance), opening_date: ymd(a.opening_date), legal_entity_id: a.legal_entity_id, legal_entity_name: a.legal_entity.name,
+      declared_opening_balance: money(a.declared_opening_balance), opening_date: ymd(a.opening_date), legal_entity_id: a.legal_entity_id, legal_entity_name: a.legal_entity?.name || null,
     })),
-    wallets: wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account.name })),
+    wallets: wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null })),
   };
 }
 
@@ -547,7 +650,7 @@ async function listAudit(groupIds, { entity_type, entity_id, limit = 50 } = {}) 
 async function myWallets(orgId) {
   const wallets = await prisma.wallet.findMany({ where: { owner_org_id: orgId, active: true }, include: walletInclude, orderBy: { name: 'asc' } });
   const net = await netByWallet(prisma, wallets.map((w) => w.id));
-  return wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account.name, legal_entity_name: w.bank_account.legal_entity.name, bank_account_type: w.bank_account.type }));
+  return wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null, legal_entity_name: w.bank_account?.legal_entity?.name || null, bank_account_type: w.bank_account?.type || null }));
 }
 
 async function myWalletEntries(orgId, walletId, q) {
@@ -564,7 +667,7 @@ async function canReadAttachment(user, fileUrl) {
   const u = await prisma.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true, org_group_memberships: { select: { org_group_id: true } } } });
   if (!u?.active || !u.is_group_superadmin) return false;
   const groups = u.org_group_memberships.map((m) => m.org_group_id);
-  const ok = groups.length ? groups.includes(w.bank_account.legal_entity.org_group_id) : true;
+  const ok = groups.length ? groups.includes(w.org_group_id) : true;
   return ok ? { label: tx.attachment_name } : false;
 }
 
@@ -573,7 +676,7 @@ module.exports = {
   createAccount, updateAccount, createWallet, updateWallet,
   createTransaction, updateTransaction, removeTransaction,
   createTransfer, updateTransfer, removeTransfer,
-  updateReconciliation, removeReconciliation, setupLists,
+  updateReconciliation, removeReconciliation, setupLists, removeEntity, removeAccount, removeWallet, accountEntries,
   position, options, walletEntries, receipts, previewReconciliation, createReconciliation, listReconciliations, listAudit,
   myWallets, myWalletEntries, canReadAttachment,
 };

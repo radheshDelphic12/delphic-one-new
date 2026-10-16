@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Gauge, History, Save } from 'lucide-react';
+import { CalendarClock, Gauge, History, Save, Search, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -14,6 +14,7 @@ import ProjectsHover from './ProjectsHover.jsx';
 
 const TABS = [
   { key: 'capacity', label: 'Team Capacity', icon: Gauge },
+  { key: 'employees', label: 'Employees & Projects', icon: Users },
   { key: 'ending', label: 'Projects Ending Soon', icon: CalendarClock },
   { key: 'movements', label: 'Movement History', icon: History },
 ];
@@ -187,6 +188,69 @@ function TeamCapacityReport() {
   );
 }
 
+/** Every employee with the projects they are allocated to; empty = no project. */
+function EmployeeProjectsReport() {
+  const teams = useTeamOptions(true);
+  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [] }));
+  const [assignment, setAssignment] = useState('all'); // all | with | without
+  const [search, setSearch] = useState('');
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const { data, loading } = useReport('/allocations/reports/employee-projects', query);
+  const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
+
+  const all = useMemo(() => data?.rows || [], [data]);
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return all.filter((r) => {
+      if (assignment === 'with' && !r.project_count) return false;
+      if (assignment === 'without' && r.project_count) return false;
+      if (!q) return true;
+      return [r.name, r.employee_code, r.team?.name, ...r.projects.map((p) => p.name)].some((v) => String(v || '').toLowerCase().includes(q));
+    });
+  }, [all, assignment, search]);
+
+  const columns = [
+    { key: 'name', header: 'Employee', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span>{r.employee_code && <span className="block text-xs text-tertiary-500">{r.employee_code}</span>}</span> },
+    { key: 'team', header: 'Team', render: (r) => r.team?.name || <span className="text-tertiary-400">No team</span> },
+    { key: 'count', header: 'Projects', render: (r) => r.project_count },
+    { key: 'projects', header: 'Assigned projects', render: (r) => (r.projects.length === 0 ? <Pill tone="gray">No project assigned</Pill> : (
+      <div className="flex flex-wrap gap-1.5">
+        {r.projects.map((p) => (
+          <span key={`${p.id}-${p.start_date}`} title={[p.code, p.client_name, p.end_date ? `Ends ${formatDay(p.end_date)}` : 'No end date'].filter(Boolean).join(' · ')}>
+            <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.name}{p.allocation_percent != null ? ` (${p.allocation_percent}%)` : ''}{p.status === 'upcoming' ? ' · upcoming' : ''}</Pill>
+          </span>
+        ))}
+      </div>
+    )) },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
+        <Filter label="Teams">
+          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
+        </Filter>
+        <Filter label="Project status">
+          <select value={assignment} onChange={(e) => setAssignment(e.target.value)} className={dateInput}>
+            <option value="all">All employees</option>
+            <option value="with">With a project</option>
+            <option value="without">No project assigned</option>
+          </select>
+        </Filter>
+        <Filter label="Search">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-tertiary-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Employee, team or project" className={`${dateInput} pl-9`} />
+          </div>
+        </Filter>
+      </div>
+      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No employees match the current filters." />
+      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees · {data.unassigned} with no project on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
+    </div>
+  );
+}
+
 function EndingSoonReport() {
   const teams = useTeamOptions(true);
   const clients = useLeadClientOptions(true);
@@ -258,6 +322,7 @@ export default function CapacityPage() {
     <div className="space-y-4">
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'capacity' && <TeamCapacityReport />}
+      {tab === 'employees' && <EmployeeProjectsReport />}
       {tab === 'ending' && <EndingSoonReport />}
       {tab === 'movements' && <MovementReport />}
     </div>

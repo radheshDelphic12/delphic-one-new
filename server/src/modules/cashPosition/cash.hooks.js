@@ -54,8 +54,7 @@ async function setGoLive(groupIds, userId, date) {
 
 /** Can this person put this wallet on a payment of this company? Its own wallets, or anything in the group for the group superadmin. */
 async function walletAllowed(client, user, orgId, groupId, wallet) {
-  const entity = wallet.bank_account.legal_entity;
-  if (entity.org_group_id !== groupId) return false;
+  if (wallet.org_group_id !== groupId) return false;
   if (wallet.owner_org_id === orgId || (wallet.owner_legal_entity && wallet.owner_legal_entity.workspace_id === orgId)) return true;
   const u = await client.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true } });
   return Boolean(u?.is_group_superadmin && u.active);
@@ -72,10 +71,10 @@ async function prepare({ orgId, user, kind, record, walletPayment }) {
   const affected = setting.go_live_date && ymd(record.created_at) >= setting.go_live_date;
   if (!affected) return { post: async () => null };
   if (!walletPayment) return { error: 'wallet_required' };
-  const wallet = await prisma.wallet.findUnique({ where: { id: walletPayment.wallet_id }, include: { bank_account: { include: { legal_entity: true } }, owner_legal_entity: true } });
+  const wallet = await prisma.wallet.findUnique({ where: { id: walletPayment.wallet_id }, include: { owner_legal_entity: true } });
   if (!wallet || !(await walletAllowed(prisma, user, orgId, org.org_group_id, wallet))) return { error: 'wallet_not_allowed' };
   if (!wallet.active) return { error: 'wallet_inactive' };
-  if (wallet.bank_account.currency !== (record.currency || org.default_currency)) return { error: 'wallet_currency' };
+  if (wallet.currency !== (record.currency || org.default_currency)) return { error: 'wallet_currency' };
   const cfg = KINDS[kind];
   return {
     post: async (client, over = {}) => {
@@ -94,10 +93,10 @@ async function prepare({ orgId, user, kind, record, walletPayment }) {
 
 /** The payment was un-marked, or its record deleted: the linked wallet entry goes (soft), with an audit record. */
 async function unlink(client, userId, kind, referenceId) {
-  const rows = await client.walletTransaction.findMany({ where: { reference_type: kind, reference_id: referenceId, deleted_at: null }, include: { wallet: { include: { bank_account: { include: { legal_entity: true } } } } } });
+  const rows = await client.walletTransaction.findMany({ where: { reference_type: kind, reference_id: referenceId, deleted_at: null }, include: { wallet: true } });
   for (const row of rows) {
     await client.walletTransaction.update({ where: { id: row.id }, data: { deleted_at: new Date(), deleted_by: userId } });
-    await client.walletAudit.create({ data: { org_group_id: row.wallet.bank_account.legal_entity.org_group_id, entity_type: 'transaction', entity_id: row.id, action: 'delete', before: plain({ ...row, wallet: undefined }), actor_id: userId } });
+    await client.walletAudit.create({ data: { org_group_id: row.wallet.org_group_id, entity_type: 'transaction', entity_id: row.id, action: 'delete', before: plain({ ...row, wallet: undefined }), actor_id: userId } });
   }
   return rows.length;
 }

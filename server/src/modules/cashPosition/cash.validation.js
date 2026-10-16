@@ -26,7 +26,7 @@ const entityBody = z.object({
 });
 
 const accountBody = z.object({
-  legal_entity_id: uuid,
+  legal_entity_id: uuidOrNull,
   name: z.string().trim().min(1).max(200),
   type: z.enum(ACCOUNT_TYPES),
   bank_name: text(120),
@@ -37,6 +37,7 @@ const accountBody = z.object({
   payment_instructions: text(1000),
 });
 const accountUpdate = z.object({
+  legal_entity_id: uuidOrNull,
   name: z.string().trim().min(1).max(200),
   bank_name: text(120),
   account_last4: accountBody.shape.account_last4,
@@ -48,7 +49,8 @@ const accountUpdate = z.object({
 
 const WALLET_PURPOSES = ['general', 'salary', 'travel'];
 const walletBody = z.object({
-  bank_account_id: uuid,
+  bank_account_id: uuidOrNull,
+  currency: z.enum(CURRENCIES).optional(),
   owner_org_id: uuidOrNull,
   owner_legal_entity_id: uuidOrNull,
   purpose: z.enum(WALLET_PURPOSES).default('general'),
@@ -56,6 +58,8 @@ const walletBody = z.object({
   opening_balance: signedAmount.default('0'),
 });
 const walletUpdate = z.object({
+  bank_account_id: uuidOrNull,
+  currency: z.enum(CURRENCIES),
   owner_org_id: uuidOrNull,
   owner_legal_entity_id: uuidOrNull,
   name: z.string().trim().min(1).max(200),

@@ -1,6 +1,6 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
-import { Gauge, Laptop, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
+import { FileText, Gauge, Laptop, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import PeopleListPage from './PeopleListPage.jsx';
 import OrgChartPage from '../orgChart/OrgChartPage.jsx';
@@ -8,10 +8,12 @@ import UsersPage from '../users/UsersPage.jsx';
 import HrSettingsPage from './HrSettingsPage.jsx';
 import AssetsPage from './AssetsPage.jsx';
 import CapacityPage from './CapacityPage.jsx';
+import PoliciesPage from './PoliciesPage.jsx';
 
 const BASE_TABS = [
   { key: 'directory', label: 'Directory', icon: UsersRound },
   { key: 'org-chart', label: 'Org Chart', icon: Network },
+  { key: 'policies', label: 'Policies', icon: FileText },
 ];
 const ADMIN_TABS = [
   { key: 'capacity', label: 'Capacity & Allocation', icon: Gauge },
@@ -39,6 +41,7 @@ export default function PeopleHubPage() {
       <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
       {section === 'directory' && <PeopleListPage />}
       {section === 'org-chart' && <OrgChartPage />}
+      {section === 'policies' && <PoliciesPage />}
       {section === 'capacity' && isAdmin && <CapacityPage />}
       {section === 'users' && isAdmin && <UsersPage />}
       {section === 'assets' && isAdmin && <AssetsPage />}

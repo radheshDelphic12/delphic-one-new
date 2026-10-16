@@ -650,10 +650,11 @@ model Location {
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
-  calendars       Calendar[]
-  org_memberships OrgMembership[]
-  expense_claims  ExpenseClaim[]
-  group_charges   GroupBillingCharge[]
+  calendars          Calendar[]
+  org_memberships    OrgMembership[]
+  office_assignments EmployeeOfficeAssignment[]
+  expense_claims     ExpenseClaim[]
+  group_charges      GroupBillingCharge[]
 
   @@unique([org_id, name])
   @@index([org_id])
@@ -2090,6 +2091,7 @@ model Org {
   project_cost_rates      ProjectMemberAssignment[]
   project_vendor_invoices ProjectVendorInvoice[]
   assets                  Asset[]
+  policies                Policy[]
   financial_asset_values  FinancialAssetValue[]
   exchange_rates          ExchangeRate[]
 
@@ -2189,6 +2191,8 @@ model OrgMembership {
 
   employee_calendars      EmployeeCalendar[]
   attendance_records      AttendanceRecord[]
+  office_assignments      EmployeeOfficeAssignment[]
+  work_place_days         WorkPlaceDay[]
   leave_balances          LeaveBalance[]
   leave_requests          LeaveRequest[]                  @relation("LeaveRequestOwner")
   leave_requests_approved LeaveRequest[]                  @relation("LeaveRequestApprover")
@@ -3344,6 +3348,25 @@ enum AssetOwner {
 // holds each device, who owns it, the vendor that supplied it and the client
 // it is used for. asset_type is free text picked from presets in the UI so a
 // new kind of device doesn't need a migration.
+// People -> Policies: company policies the admin writes in a rich-text editor.
+// `content` is sanitized HTML. Employees only see published ones.
+model Policy {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String   @db.Uuid
+  org          Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  title        String
+  category     String?
+  content      String   @default("")
+  is_published Boolean  @default(false)
+  created_by   String?  @db.Uuid
+  updated_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  @@index([org_id, is_published])
+  @@map("policies")
+}
+
 model Asset {
   id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id            String         @db.Uuid
@@ -7095,35 +7118,41 @@ model LegalEntity {
 }
 
 model BankAccount {
-  id                       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  legal_entity_id          String      @db.Uuid
-  legal_entity             LegalEntity @relation(fields: [legal_entity_id], references: [id])
+  id                       String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // The holding group this account belongs to; the legal entity link is optional (a bank account can stand alone).
+  org_group_id             String       @db.Uuid
+  legal_entity_id          String?      @db.Uuid
+  legal_entity             LegalEntity? @relation(fields: [legal_entity_id], references: [id], onDelete: Restrict)
   name                     String
   type                     String // current | savings | cash
   bank_name                String? // empty for cash
   account_last4            String? // empty for cash
   currency                 String // INR | USD
-  declared_opening_balance Decimal     @default(0) @db.Decimal(16, 2)
-  opening_date             DateTime    @db.Date
+  declared_opening_balance Decimal      @default(0) @db.Decimal(16, 2)
+  opening_date             DateTime     @db.Date
   payment_instructions     String? // bank / IFSC / SWIFT lines printed on invoices paid into this account
-  active                   Boolean     @default(true)
-  created_by               String?     @db.Uuid
-  created_at               DateTime    @default(now())
-  updated_at               DateTime    @default(now()) @updatedAt
+  active                   Boolean      @default(true)
+  created_by               String?      @db.Uuid
+  created_at               DateTime     @default(now())
+  updated_at               DateTime     @default(now()) @updatedAt
 
   wallets         Wallet[]
   reconciliations BankReconciliation[]
 
   @@index([legal_entity_id])
+  @@index([org_group_id])
   @@map("bank_accounts")
 }
 
-// Exactly one owner: a workspace (owner_org_id) or a legal entity (owner_legal_entity_id, e.g. the Unallocated wallet).
+// At most one owner: a workspace (owner_org_id) or a legal entity (owner_legal_entity_id), or none.
 // The migration adds a CHECK constraint for it.
 model Wallet {
   id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  bank_account_id       String       @db.Uuid
-  bank_account          BankAccount  @relation(fields: [bank_account_id], references: [id])
+  org_group_id          String       @db.Uuid
+  // The bank account this wallet is mapped to (manual, changeable). Null = not mapped to any bank account.
+  bank_account_id       String?      @db.Uuid
+  bank_account          BankAccount? @relation(fields: [bank_account_id], references: [id], onDelete: Restrict)
+  currency              String       @default("INR") // INR | USD; a mapped wallet has the currency of its account
   owner_org_id          String?      @db.Uuid
   owner_org             Org?         @relation(fields: [owner_org_id], references: [id])
   owner_legal_entity_id String?      @db.Uuid
@@ -7143,6 +7172,7 @@ model Wallet {
   @@index([bank_account_id])
   @@index([owner_org_id])
   @@index([owner_legal_entity_id])
+  @@index([org_group_id])
   @@map("wallets")
 }
 
@@ -7315,4 +7345,45 @@ model GroupInvoicePayment {
 
   @@index([invoice_id])
   @@map("group_invoice_payments")
+}
+
+// Reporting office of an employee from a date onward (history). The office on a day is the latest row with
+// effective_from <= that day; with no row the membership's current location_id applies.
+model EmployeeOfficeAssignment {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  location_id       String        @db.Uuid
+  location          Location      @relation(fields: [location_id], references: [id])
+  effective_from    DateTime      @db.Date
+  created_by        String?       @db.Uuid
+  created_at        DateTime      @default(now())
+
+  @@unique([org_membership_id, effective_from])
+  @@index([org_id, org_membership_id])
+  @@map("employee_office_assignments")
+}
+
+// Where a person works on one day: 'office' or 'home'. A day with no row follows the default for their work
+// type (onsite -> office, remote -> home). A change away from the default is a request a manager / admin decides.
+model WorkPlaceDay {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date              DateTime      @db.Date
+  work_place        String // office | home
+  status            String        @default("pending") // pending | approved | rejected
+  reason            String?
+  requested_by      String?       @db.Uuid
+  decided_by        String?       @db.Uuid
+  decided_at        DateTime?
+  decision_reason   String?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@unique([org_membership_id, date])
+  @@index([org_id, date])
+  @@map("work_place_days")
 }

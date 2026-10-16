@@ -412,6 +412,8 @@ export function joiningsSections(data) {
     title: t.title,
     columns: JOININGS_COLUMNS[t.key] || fallbackColumns(t.rows?.[0]),
     rows: (t.rows || []).map((r, i) => ({ id: `${t.key}-${i}`, ...r })),
+    // Badge = total joinings (sum of the count column), not the number of rows.
+    count: (t.rows || []).reduce((sum, r) => sum + (Number(t.key === 'by_interviewer' ? r.total : r.joinings) || 0), 0),
   }));
 }
 

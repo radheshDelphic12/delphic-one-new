@@ -27,11 +27,11 @@ function ownerKey(wallet) {
   if (wallet.owner_org_id) return `org:${wallet.owner_org_id}`;
   const entity = wallet.owner_legal_entity;
   if (entity?.workspace_id) return `org:${entity.workspace_id}`;
-  return `entity:${wallet.owner_legal_entity_id}`;
+  return wallet.owner_legal_entity_id ? `entity:${wallet.owner_legal_entity_id}` : 'none';
 }
 
 /** Same bank account: only ownership moves (reallocation). Different accounts: real money moves (bank transfer). */
-const transferKind = (from, to) => (from.bank_account_id === to.bank_account_id ? 'reallocation' : 'bank_transfer');
+const transferKind = (from, to) => (from.bank_account_id && from.bank_account_id === to.bank_account_id ? 'reallocation' : 'bank_transfer');
 
 const isIntercompany = (from, to) => ownerKey(from) !== ownerKey(to);
 

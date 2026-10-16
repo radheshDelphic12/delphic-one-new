@@ -607,6 +607,56 @@ async function resourceAllocations(orgId, { team_id, org_membership_id, account_
 }
 
 /**
+ * Employees & Projects on `date` (default today): every employee employed that
+ * day with their team and the projects they are allocated to (running, or
+ * reserved for a contract that has not started). Employees with none come back
+ * with an empty list so "no project" is visible. `team_ids` narrows by the
+ * team the person was in on that date.
+ */
+async function employeeProjects(orgId, { date, team_id, team_ids } = {}) {
+  const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
+  const day = A.toDate(date) || todayIst();
+  const [ctx, spans] = await Promise.all([
+    loadPeopleAndTeams(orgId),
+    prisma.projectMemberAssignment.findMany({
+      where: { org_id: orgId, OR: [{ end_date: null }, { end_date: { gte: day } }] },
+      select: { org_membership_id: true, allocation_percent: true, start_date: true, end_date: true, account: { select: ACCOUNT_SELECT } },
+    }),
+  ]);
+  const byMember = new Map();
+  for (const s of spans) {
+    if (s.account.contract_status === 'completed') continue;
+    const started = !s.start_date || A.toDate(s.start_date) <= day;
+    if (!byMember.has(s.org_membership_id)) byMember.set(s.org_membership_id, []);
+    byMember.get(s.org_membership_id).push({
+      ...describeProject(s.account),
+      allocation_percent: s.allocation_percent !== null ? Number(s.allocation_percent) : null,
+      start_date: ymdOrNull(s.start_date),
+      end_date: ymdOrNull(s.end_date),
+      status: started ? 'active' : 'upcoming',
+    });
+  }
+  const rows = [];
+  for (const m of ctx.memberships) {
+    if (!employedOn(m, day)) continue;
+    const teamId = ctx.teamOf(m.id, day);
+    if (onlyTeams.size && !onlyTeams.has(teamId)) continue;
+    const projects = (byMember.get(m.id) || []).sort((a, b) => a.name.localeCompare(b.name));
+    rows.push({
+      id: m.id,
+      name: m.person.name,
+      employee_code: m.employee_code,
+      worker_type: m.worker_type,
+      team: teamId ? { id: teamId, name: ctx.teamsById.get(teamId)?.name || null } : null,
+      projects,
+      project_count: projects.length,
+    });
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return { date: A.ymd(day), rows, unassigned: rows.filter((r) => !r.project_count).length };
+}
+
+/**
  * Resource Movement History in [from, to] (default last 90 days → +30):
  * team moves and project changes, one row per person per effective date.
  * A project change is an allocation starting the day after another ended.
@@ -697,6 +747,7 @@ module.exports = {
   teamCapacity,
   endingSoon,
   resourceAllocations,
+  employeeProjects,
   movements,
   serializeSpan,
   SPAN_INCLUDE,

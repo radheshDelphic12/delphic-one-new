@@ -11,7 +11,7 @@ import NotificationItem from './NotificationItem.jsx';
  * y-fade motion, role="menu", Esc to close).
  */
 export default function NotificationBell() {
-  const { items, unreadCount, loading, markRead, markAllRead } = useNotifications();
+  const { items, unreadCount, loading, markRead, markAllRead, reload } = useNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -40,7 +40,10 @@ export default function NotificationBell() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Notifications, ${unreadCount} unread`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) reload();
+          setOpen((v) => !v);
+        }}
       >
         <Bell className="h-5 w-5" />
         {unreadCount > 0 && (

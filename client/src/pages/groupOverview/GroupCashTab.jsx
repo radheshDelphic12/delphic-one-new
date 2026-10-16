@@ -148,25 +148,27 @@ function TransferDrawer({ open, options, onClose, onSaved }) {
 }
 
 /** Every entry of one wallet: date range, running balance, split by mode, CSV / PDF, edit and delete. */
-function WalletDrawer({ walletId, options, onClose, onChanged }) {
+function WalletDrawer({ walletId, accountId, options, onClose, onChanged }) {
   const saved = useSaved();
   const [range, setRange] = useState({ from: '', to: '' });
   const [editing, setEditing] = useState(null);
   const params = { ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) };
-  const data = useLiveData(() => api(`/wallets/${walletId}/entries`, params), { deps: [walletId, range.from, range.to], enabled: Boolean(walletId) });
+  // a bank account's statement is the entries of every wallet mapped to it, date-wise; a wallet shows its own
+  const target = accountId ? `accounts/${accountId}` : `wallets/${walletId}`;
+  const data = useLiveData(() => api(`/${target}/entries`, params), { deps: [target, range.from, range.to], enabled: Boolean(walletId || accountId) });
   const d = data.data;
   const cur = d?.wallet.currency;
   async function remove(row) {
     if (!window.confirm(row.transfer_id ? 'This entry is one side of a transfer. Deleting it removes the whole transfer. Continue?' : 'Delete this entry?')) return;
     try { await apiClient.delete(`/group-cash/transactions/${row.id}`); saved.done('Entry deleted'); data.refresh(); onChanged(); } catch (err) { saved.fail(err, 'Could not delete'); }
   }
-  const file = (format) => downloadFile(`/group-cash/wallets/${walletId}/entries`, { ...params, format }, `${d.wallet.name}.${format}`).catch((err) => saved.fail(err, 'Could not download'));
+  const file = (format) => downloadFile(`/group-cash/${target}/entries`, { ...params, format }, `${d.wallet.name}.${format}`).catch((err) => saved.fail(err, 'Could not download'));
   return (
     <>
-      <Drawer open={Boolean(walletId)} onClose={onClose} size="xl" tone="info" title={d ? `${d.wallet.name} · ${d.wallet.owner_name}` : 'Wallet'}>
+      <Drawer open={Boolean(walletId || accountId)} onClose={onClose} size="xl" tone="info" title={d ? `${d.wallet.name} · ${accountId ? 'bank statement' : d.wallet.owner_name}` : 'Wallet'}>
         {!d ? <Skeleton className="h-40" /> : (
           <div className="space-y-4">
-            <p className="text-xs text-tertiary-500">{d.wallet.bank_account_name} · {d.wallet.legal_entity_name} · {cur}</p>
+            <p className="text-xs text-tertiary-500">{[d.wallet.bank_account_name, d.wallet.legal_entity_name, cur].filter(Boolean).join(' · ')}{accountId ? ` · ${d.wallet.owner_name}` : ''}</p>
             <div className="flex flex-wrap items-end gap-3">
               <label className={labelCls}>From<input type="date" className={inputCls} value={range.from} onChange={(e) => setRange((c) => ({ ...c, from: e.target.value }))} /></label>
               <label className={labelCls}>To<input type="date" className={inputCls} value={range.to} onChange={(e) => setRange((c) => ({ ...c, to: e.target.value }))} /></label>
@@ -188,14 +190,14 @@ function WalletDrawer({ walletId, options, onClose, onChanged }) {
                   {d.rows.map((r) => (
                     <tr key={r.id} className="border-t border-tertiary-100">
                       <td className="p-2 whitespace-nowrap">{r.date}</td>
-                      <td className="p-2">{r.party || r.category || '—'}{r.transfer_id && <Pill tone="blue">Transfer</Pill>}{r.attachment_url && <span className="ml-1 text-xs text-tertiary-400">📎</span>}{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
+                      <td className="p-2">{r.party || r.category || '—'}{r.wallet && <span className="text-xs text-tertiary-500"> · {r.wallet}</span>}{r.transfer_id && <Pill tone="blue">Transfer</Pill>}{r.attachment_url && <span className="ml-1 text-xs text-tertiary-400">📎</span>}{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
                       <td className="p-2">{MODE_LABEL[r.mode] || r.mode}</td>
                       <td className="p-2 text-right">{r.direction === 'in' ? <Money value={r.amount} currency={cur} /> : ''}</td>
                       <td className="p-2 text-right">{r.direction === 'out' ? <Money value={r.amount} currency={cur} /> : ''}</td>
                       <td className="p-2 text-right"><Money value={r.balance_after} currency={cur} /></td>
                       <td className="p-2 whitespace-nowrap text-right">
-                        <button type="button" title="Edit" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => setEditing({ ...r, wallet_id: walletId })}><Pencil className="h-4 w-4" /></button>
-                        <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={() => remove(r)}><Trash2 className="h-4 w-4" /></button>
+                        {!accountId && <button type="button" title="Edit" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => setEditing({ ...r, wallet_id: walletId })}><Pencil className="h-4 w-4" /></button>}
+                        {!accountId && <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={() => remove(r)}><Trash2 className="h-4 w-4" /></button>}
                       </td>
                     </tr>
                   ))}
@@ -242,13 +244,14 @@ function WalletRow({ w, currency, checked, onToggle, onOpen, indent = true }) {
   );
 }
 
-function BankView({ position, selected, toggle, setOpenWallet }) {
+function BankView({ position, selected, toggle, setOpenWallet, setOpenAccount }) {
   const [collapsed, setCollapsed] = useState({});
-  if (!position.entities.length) return <EmptyState icon={Landmark} title="No bank accounts yet" description="Add a legal entity and its bank accounts under Setup." />;
+  const unmapped = position.unmapped_wallets || [];
+  if (!position.entities.length && !unmapped.length) return <EmptyState icon={Landmark} title="No bank accounts yet" description="Add bank accounts and wallets under Setup, then map each wallet to its bank account." />;
   return (
     <div className="space-y-4">
       {position.entities.map((e) => (
-        <section key={e.id} className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <section key={e.id || 'no-entity'} className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-tertiary-100 p-3">
             <h3 className="font-heading text-base font-semibold text-tertiary-900">{e.name}</h3>
             <Totals totals={e.totals} />
@@ -264,7 +267,7 @@ function BankView({ position, selected, toggle, setOpenWallet }) {
                     </button>
                     <p className="text-xs text-tertiary-500">{a.bank_name ? `${a.bank_name} ····${a.account_last4 || ''}` : TYPE_LABEL[a.type]}</p>
                   </td>
-                  <td className="p-2"><Pill tone="blue">{TYPE_LABEL[a.type]}</Pill></td>
+                  <td className="p-2"><Pill tone="blue">{TYPE_LABEL[a.type]}</Pill><button type="button" className="ml-2 text-xs font-normal text-primary-700 hover:underline" onClick={() => setOpenAccount(a.id)}>Statement</button></td>
                   <td className="p-2 text-xs text-tertiary-500">{a.currency}</td>
                   <td className="p-2 text-right font-semibold"><Money value={a.shown_balance} currency={a.currency} />{a.shown_balance !== a.balance && <p className="text-xs font-normal text-tertiary-500">of {formatMoney(a.balance, a.currency)}</p>}</td>
                 </tr>
@@ -277,6 +280,17 @@ function BankView({ position, selected, toggle, setOpenWallet }) {
           </tbody></table>
         </section>
       ))}
+      {unmapped.length > 0 && (
+        <section className="rounded-2xl border border-dashed border-tertiary-200 bg-white shadow-card">
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-tertiary-100 p-3">
+            <div><h3 className="font-heading text-base font-semibold text-tertiary-900">Wallets not mapped to a bank account</h3><p className="text-xs text-tertiary-500">Not part of any bank balance. Map them under Setup &gt; Wallets.</p></div>
+            <Totals totals={position.unmapped_totals} />
+          </header>
+          <table className="min-w-full text-sm"><tbody>
+            {unmapped.map((w) => <WalletRow key={w.id} w={w} currency={w.currency} checked={selected.has(walletKey(w.id))} onToggle={() => toggle(walletKey(w.id))} onOpen={() => setOpenWallet(w.id)} indent={false} />)}
+          </tbody></table>
+        </section>
+      )}
     </div>
   );
 }
@@ -296,8 +310,8 @@ function FundView({ position, selected, toggle, setOpenWallet }) {
             {f.wallets.map((w) => (
               <tr key={w.id} className="border-t border-tertiary-100 first:border-t-0 hover:bg-tertiary-50/50">
                 <td className="p-2 pl-3"><input type="checkbox" aria-label={`Select ${w.name}`} checked={selected.has(walletKey(w.id))} onChange={() => toggle(walletKey(w.id))} /></td>
-                <td className="p-2"><button type="button" className="text-left font-medium text-primary-700 hover:underline" onClick={() => setOpenWallet(w.id)}>{w.name}</button><p className="text-xs text-tertiary-500">{w.bank_account_name} · {w.legal_entity_name}</p></td>
-                <td className="p-2"><Pill tone="blue">{TYPE_LABEL[w.type]}</Pill></td>
+                <td className="p-2"><button type="button" className="text-left font-medium text-primary-700 hover:underline" onClick={() => setOpenWallet(w.id)}>{w.name}</button><p className="text-xs text-tertiary-500">{[w.bank_account_name, w.legal_entity_name].filter(Boolean).join(' · ')}</p></td>
+                <td className="p-2">{w.type && <Pill tone="blue">{TYPE_LABEL[w.type]}</Pill>}</td>
                 <td className="p-2 text-xs text-tertiary-500">{w.currency}</td>
                 <td className="p-2 text-right"><Money value={w.balance} currency={w.currency} /></td>
               </tr>
@@ -437,7 +451,7 @@ function SetupView({ options, position, onChanged }) {
   const saved = useSaved();
   const [entity, setEntity] = useState({ name: '', workspace_id: '', gstin: '', pan: '' });
   const [account, setAccount] = useState({ legal_entity_id: '', name: '', type: 'current', bank_name: '', account_last4: '', currency: 'INR', declared_opening_balance: '0', opening_date: today() });
-  const [wallet, setWallet] = useState({ bank_account_id: '', owner: '', purpose: 'general', name: '', opening_balance: '0' });
+  const [wallet, setWallet] = useState({ bank_account_id: '', owner: '', purpose: 'general', name: '', opening_balance: '0', currency: 'INR' });
   const [editWallet, setEditWallet] = useState(null);
   const [editEntity, setEditEntity] = useState(null);
   const [editAccount, setEditAccount] = useState(null);
@@ -448,6 +462,8 @@ function SetupView({ options, position, onChanged }) {
   const wallets = setup.data?.wallets || [];
   const allAccounts = setup.data?.accounts || [];
   const none = !(options?.entities || []).length;
+  // delete asks first; the server refuses (and says why) while anything still hangs on the record
+  const remove = (path, label) => { if (window.confirm(`Delete ${label}? This cannot be undone.`)) run(() => apiClient.delete(`/group-cash/${path}`), `${label} deleted`, 'Could not delete'); };
   return (
     <div className="space-y-5">
       {none && (
@@ -466,9 +482,9 @@ function SetupView({ options, position, onChanged }) {
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>GSTIN<input className={inputCls} value={entity.gstin} onChange={(e) => setEntity((c) => ({ ...c, gstin: e.target.value }))} /></label><label className={labelCls}>PAN<input className={inputCls} value={entity.pan} onChange={(e) => setEntity((c) => ({ ...c, pan: e.target.value }))} /></label></div>
           <button type="submit" className="btn-primary" disabled={!entity.name.trim()}>Add entity</button>
         </form>
-        <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => { e.preventDefault(); if (await run(() => apiClient.post('/group-cash/accounts', { ...account, bank_name: account.bank_name || null, account_last4: account.account_last4 || null }), 'Bank account added (with its Unallocated wallet)', 'Could not add')) setAccount((c) => ({ ...c, name: '', bank_name: '', account_last4: '' })); }}>
+        <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => { e.preventDefault(); if (await run(() => apiClient.post('/group-cash/accounts', { ...account, legal_entity_id: account.legal_entity_id || null, bank_name: account.bank_name || null, account_last4: account.account_last4 || null }), 'Bank account added', 'Could not add')) setAccount((c) => ({ ...c, name: '', bank_name: '', account_last4: '' })); }}>
           <h3 className="font-heading font-semibold text-tertiary-900">New bank account</h3>
-          <label className={labelCls}>Legal entity<select required className={inputCls} value={account.legal_entity_id} onChange={(e) => setAccount((c) => ({ ...c, legal_entity_id: e.target.value }))}><option value="">Choose…</option>{(options?.entities || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+          <label className={labelCls}>Legal entity (optional)<select className={inputCls} value={account.legal_entity_id} onChange={(e) => setAccount((c) => ({ ...c, legal_entity_id: e.target.value }))}><option value="">None</option>{(options?.entities || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
           <label className={labelCls}>Name<input required className={inputCls} value={account.name} onChange={(e) => setAccount((c) => ({ ...c, name: e.target.value }))} placeholder="e.g. HDFC Current" /></label>
           <div className="grid grid-cols-2 gap-2">
             <label className={labelCls}>Type<select className={inputCls} value={account.type} onChange={(e) => setAccount((c) => ({ ...c, type: e.target.value }))}>{Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
@@ -476,19 +492,20 @@ function SetupView({ options, position, onChanged }) {
           </div>
           {account.type !== 'cash' && <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Bank<input className={inputCls} value={account.bank_name} onChange={(e) => setAccount((c) => ({ ...c, bank_name: e.target.value }))} /></label><label className={labelCls}>Last 4 digits<input className={inputCls} maxLength={4} value={account.account_last4} onChange={(e) => setAccount((c) => ({ ...c, account_last4: e.target.value }))} /></label></div>}
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={account.declared_opening_balance} onChange={(e) => setAccount((c) => ({ ...c, declared_opening_balance: e.target.value }))} /></label><label className={labelCls}>As on<input type="date" className={inputCls} value={account.opening_date} onChange={(e) => setAccount((c) => ({ ...c, opening_date: e.target.value }))} /></label></div>
-          <button type="submit" className="btn-primary" disabled={!account.legal_entity_id || !account.name.trim()}>Add account</button>
+          <button type="submit" className="btn-primary" disabled={!account.name.trim()}>Add account</button>
         </form>
         <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => {
           e.preventDefault();
-          const [kind, id] = wallet.owner.split(':');
-          if (await run(() => apiClient.post('/group-cash/wallets', { bank_account_id: wallet.bank_account_id, purpose: wallet.purpose, name: wallet.name, opening_balance: wallet.opening_balance, ...(kind === 'org' ? { owner_org_id: id } : { owner_legal_entity_id: id }) }), 'Wallet added', 'Could not add')) setWallet((c) => ({ ...c, name: '', opening_balance: '0' }));
+          const [kind, id] = (wallet.owner || '').split(':');
+          if (await run(() => apiClient.post('/group-cash/wallets', { bank_account_id: wallet.bank_account_id || null, ...(wallet.bank_account_id ? {} : { currency: wallet.currency }), purpose: wallet.purpose, name: wallet.name, opening_balance: wallet.opening_balance, ...(!id ? {} : kind === 'org' ? { owner_org_id: id } : { owner_legal_entity_id: id }) }), 'Wallet added', 'Could not add')) setWallet((c) => ({ ...c, name: '', opening_balance: '0' }));
         }}>
           <h3 className="font-heading font-semibold text-tertiary-900">New wallet</h3>
-          <label className={labelCls}>Inside bank account<select required className={inputCls} value={wallet.bank_account_id} onChange={(e) => setWallet((c) => ({ ...c, bank_account_id: e.target.value }))}><option value="">Choose…</option>{(options?.accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}</select></label>
-          <label className={labelCls}>Whose money<select required className={inputCls} value={wallet.owner} onChange={(e) => setWallet((c) => ({ ...c, owner: e.target.value }))}><option value="">Choose…</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select></label>
+          <label className={labelCls}>Bank account (optional, you can map it later)<select className={inputCls} value={wallet.bank_account_id} onChange={(e) => setWallet((c) => ({ ...c, bank_account_id: e.target.value }))}><option value="">Not mapped</option>{(options?.accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}</select></label>
+          {!wallet.bank_account_id && <label className={labelCls}>Currency<select className={inputCls} value={wallet.currency} onChange={(e) => setWallet((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option></select></label>}
+          <label className={labelCls}>Whose money (optional)<select className={inputCls} value={wallet.owner} onChange={(e) => setWallet((c) => ({ ...c, owner: e.target.value }))}><option value="">No owner</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select></label>
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Purpose<select className={inputCls} value={wallet.purpose} onChange={(e) => setWallet((c) => ({ ...c, purpose: e.target.value }))}><option value="general">General</option><option value="salary">Salary</option><option value="travel">Travel</option></select></label><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={wallet.opening_balance} onChange={(e) => setWallet((c) => ({ ...c, opening_balance: e.target.value }))} /></label></div>
           <label className={labelCls}>Name<input required className={inputCls} value={wallet.name} onChange={(e) => setWallet((c) => ({ ...c, name: e.target.value }))} placeholder="e.g. Zephyr salary" /></label>
-          <button type="submit" className="btn-primary" disabled={!wallet.bank_account_id || !wallet.owner || !wallet.name.trim()}>Add wallet</button>
+          <button type="submit" className="btn-primary" disabled={!wallet.name.trim()}>Add wallet</button>
         </form>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -499,6 +516,7 @@ function SetupView({ options, position, onChanged }) {
               <li key={x.id} className="flex items-center gap-2 py-2">
                 <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{x.name}</span> <span className="text-xs text-tertiary-500">{x.workspace_name ? `= ${x.workspace_name} · ` : ''}{x.invoice_prefix ? `prefix ${x.invoice_prefix}` : 'no invoice prefix yet'}{x.gstin ? ` · ${x.gstin}` : ''}</span></span>
                 <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditEntity(x)}><Pencil className="h-4 w-4" /></button>
+                <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`entities/${x.id}`, x.name)}><Trash2 className="h-4 w-4" /></button>
               </li>
             ))}
             {entityList.data && !entityList.data.length && <li className="py-2 text-tertiary-500">None yet.</li>}
@@ -509,23 +527,31 @@ function SetupView({ options, position, onChanged }) {
           <ul className="divide-y divide-tertiary-100 text-sm">
             {allAccounts.map((a) => (
               <li key={a.id} className="flex items-center gap-2 py-2">
-                <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{a.name}</span> {!a.active && <Pill tone="gray">Switched off</Pill>} <span className="text-xs text-tertiary-500">{a.legal_entity_name} · {TYPE_LABEL[a.type]} · {a.currency}{a.payment_instructions ? '' : ' · no payment details for invoices'}</span></span>
+                <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{a.name}</span> {!a.active && <Pill tone="gray">Switched off</Pill>} <span className="text-xs text-tertiary-500">{a.legal_entity_name || 'No legal entity'} · {TYPE_LABEL[a.type]} · {a.currency}{a.payment_instructions ? '' : ' · no payment details for invoices'}</span></span>
                 <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditAccount(a)}><Pencil className="h-4 w-4" /></button>
+                <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`accounts/${a.id}`, a.name)}><Trash2 className="h-4 w-4" /></button>
               </li>
             ))}
           </ul>
         </div>
       </div>
       <EntityEditDrawer entity={editEntity} workspaces={options?.workspaces} onClose={() => setEditEntity(null)} onSaved={refreshAll} />
-      <AccountEditDrawer account={editAccount} onClose={() => setEditAccount(null)} onSaved={refreshAll} />
+      <AccountEditDrawer account={editAccount} entities={options?.entities} onClose={() => setEditAccount(null)} onSaved={refreshAll} />
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4">
         <h3 className="mb-2 font-heading font-semibold text-tertiary-900">Wallets</h3>
         <ul className="divide-y divide-tertiary-100 text-sm">
           {wallets.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-2 py-2">
-              <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{w.name}</span> {!w.active && <Pill tone="gray">Switched off</Pill>} <span className="text-xs text-tertiary-500">{w.owner_name} · {w.bank_account_name} · opening {formatMoney(w.opening_balance, w.currency)}</span></span>
+              <span className="min-w-0 flex-1"><span className="font-medium text-tertiary-900">{w.name}</span> {!w.active && <Pill tone="gray">Switched off</Pill>} <span className="text-xs text-tertiary-500">{w.owner_name} · opening {formatMoney(w.opening_balance, w.currency)}</span></span>
+              <label className="text-xs text-tertiary-500">Bank account
+                <select className="ml-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs" value={w.bank_account_id || ''} onChange={(e) => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { bank_account_id: e.target.value || null }), e.target.value ? 'Wallet mapped to the bank account' : 'Wallet un-mapped', 'Could not map')}>
+                  <option value="">Not mapped</option>
+                  {allAccounts.filter((a) => a.currency === w.currency && (a.active || a.id === w.bank_account_id)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </label>
               <Money value={w.balance} currency={w.currency} />
-              <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditWallet({ id: w.id, name: w.name, opening_balance: w.opening_balance, purpose: w.purpose, owner: w.owner_org_id ? `org:${w.owner_org_id}` : `entity:${w.owner_legal_entity_id}` })}><Pencil className="h-4 w-4" /></button>
+              <button type="button" className="rounded p-1 text-tertiary-400 hover:text-primary-600" title="Edit" onClick={() => setEditWallet({ id: w.id, name: w.name, opening_balance: w.opening_balance, purpose: w.purpose, owner: w.owner_org_id ? `org:${w.owner_org_id}` : w.owner_legal_entity_id ? `entity:${w.owner_legal_entity_id}` : '' })}><Pencil className="h-4 w-4" /></button>
+              {w.purpose !== 'unallocated' && <button type="button" className="rounded p-1 text-tertiary-400 hover:text-danger-600" title="Delete" onClick={() => remove(`wallets/${w.id}`, w.name)}><Trash2 className="h-4 w-4" /></button>}
               {w.purpose !== 'unallocated' && (w.active
                 ? <button type="button" className="text-xs text-danger-600 hover:underline" onClick={() => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { active: false }), 'Wallet switched off', 'Could not switch off')}>Switch off</button>
                 : <button type="button" className="text-xs text-primary-700 hover:underline" onClick={() => run(() => apiClient.patch(`/group-cash/wallets/${w.id}`, { active: true }), 'Wallet switched on', 'Could not switch on')}>Switch on</button>)}
@@ -536,11 +562,11 @@ function SetupView({ options, position, onChanged }) {
       <Drawer open={Boolean(editWallet)} onClose={() => setEditWallet(null)} size="sm" tone="edit" title="Edit wallet">
         {editWallet && (
           <form className="space-y-3" onSubmit={async (e) => { e.preventDefault(); const [kind, ownerId] = (editWallet.owner || '').split(':');
-            const body = { name: editWallet.name, opening_balance: editWallet.opening_balance, ...(editWallet.purpose !== 'unallocated' ? { purpose: editWallet.purpose } : {}), ...(editWallet.owner ? (kind === 'org' ? { owner_org_id: ownerId, owner_legal_entity_id: null } : { owner_legal_entity_id: ownerId, owner_org_id: null }) : {}) }; if (await run(() => apiClient.patch(`/group-cash/wallets/${editWallet.id}`, body), 'Wallet updated', 'Could not update')) setEditWallet(null); }}>
+            const body = { name: editWallet.name, opening_balance: editWallet.opening_balance, ...(editWallet.purpose !== 'unallocated' ? { purpose: editWallet.purpose } : {}), ...(editWallet.owner ? (kind === 'org' ? { owner_org_id: ownerId, owner_legal_entity_id: null } : { owner_legal_entity_id: ownerId, owner_org_id: null }) : { owner_org_id: null, owner_legal_entity_id: null }) }; if (await run(() => apiClient.patch(`/group-cash/wallets/${editWallet.id}`, body), 'Wallet updated', 'Could not update')) setEditWallet(null); }}>
             <label className={labelCls}>Name<input required className={inputCls} value={editWallet.name} onChange={(e) => setEditWallet((c) => ({ ...c, name: e.target.value }))} /></label>
             <label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={editWallet.opening_balance} onChange={(e) => setEditWallet((c) => ({ ...c, opening_balance: e.target.value }))} /></label>
             <label className={labelCls}>Whose money
-              <select className={inputCls} value={editWallet.owner || ''} onChange={(e) => setEditWallet((c) => ({ ...c, owner: e.target.value }))}>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select>
+              <select className={inputCls} value={editWallet.owner || ''} onChange={(e) => setEditWallet((c) => ({ ...c, owner: e.target.value }))}><option value="">No owner</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select>
             </label>
             {editWallet.purpose !== 'unallocated' && <label className={labelCls}>Purpose<select className={inputCls} value={editWallet.purpose} onChange={(e) => setEditWallet((c) => ({ ...c, purpose: e.target.value }))}><option value="general">General</option><option value="salary">Salary</option><option value="travel">Travel</option></select></label>}
             <div className="flex justify-end"><button type="submit" className="btn-primary">Save</button></div>
@@ -569,6 +595,7 @@ export default function GroupCashTab() {
   const [filters, setFilters] = useState({ legal_entity_id: '', workspace_id: '', type: '', currency: '' });
   const [selected, setSelected] = useState(() => new Set());
   const [openWallet, setOpenWallet] = useState(null);
+  const [openAccount, setOpenAccount] = useState(null);
   const [txOpen, setTxOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
@@ -610,7 +637,7 @@ export default function GroupCashTab() {
       {['bank', 'fund'].includes(section) && <Filters options={options.data} filters={filters} setFilters={setFilters} />}
       {!p ? <Skeleton className="h-48" /> : (
         <>
-          {section === 'bank' && <BankView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} />}
+          {section === 'bank' && <BankView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} setOpenAccount={setOpenAccount} />}
           {section === 'fund' && <FundView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} />}
           {section === 'invoices' && <GroupInvoicesView options={options.data} onWalletsChanged={refresh} />}
           {section === 'receipts' && <ReceiptsView options={options.data} />}
@@ -618,7 +645,7 @@ export default function GroupCashTab() {
           {section === 'setup' && <SetupView options={options.data} position={p} onChanged={refresh} />}
         </>
       )}
-      <WalletDrawer walletId={openWallet} options={options.data} onClose={() => setOpenWallet(null)} onChanged={refresh} />
+      <WalletDrawer walletId={openWallet} accountId={openAccount} options={options.data} onClose={() => { setOpenWallet(null); setOpenAccount(null); }} onChanged={refresh} />
       <TransactionDrawer open={txOpen} options={options.data} onClose={() => setTxOpen(false)} onSaved={refresh} />
       <TransferDrawer open={transferOpen} options={options.data} onClose={() => setTransferOpen(false)} onSaved={refresh} />
     </div>

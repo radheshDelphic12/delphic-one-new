@@ -37,9 +37,14 @@ const data = (r) => r.body.data;
 async function entity(name = 'Delphic Global', workspace_id = a.id) {
   return data(await post('/entities', { name, workspace_id })).entity;
 }
-async function account(legal_entity_id, over = {}) {
+// An account no longer gets a wallet on its own. Most of these tests still want one that holds the declared opening
+// balance, so this helper adds it (the way Setup used to), unless `bare` is passed.
+async function account(legal_entity_id, { bare = false, ...over } = {}) {
   const r = await post('/accounts', { legal_entity_id, name: 'Current A/C', type: 'current', bank_name: 'HDFC', account_last4: '1234', currency: 'INR', declared_opening_balance: '1000', opening_date: '2026-04-01', ...over });
-  return data(r);
+  const out = data(r);
+  if (bare || !r.status || r.status >= 300) return out;
+  const w = await prisma.wallet.create({ data: { org_group_id: out.account.org_group_id, bank_account_id: out.account.id, currency: out.account.currency, owner_legal_entity_id: legal_entity_id, purpose: 'unallocated', name: 'Unallocated', opening_balance: out.account.declared_opening_balance } });
+  return { ...out, wallet: { ...w, opening_balance: Number(w.opening_balance).toFixed(2) } };
 }
 async function wallet(bank_account_id, over = {}) {
   const r = await post('/wallets', { bank_account_id, owner_org_id: b.id, name: 'Gulati wallet', opening_balance: '0', ...over });
@@ -82,11 +87,18 @@ describe('group cash: legal entities, accounts, wallets', () => {
     expect((await post('/entities', { name: 'Elsewhere', workspace_id: '11111111-1111-4111-8111-111111111111' })).status).toBe(422);
   });
 
-  test('an account gets an Unallocated wallet; cash accounts have no bank details; only INR and USD', async () => {
+  test('legal entity, bank account and wallet are all optional and independent; cash accounts have no bank details; only INR and USD', async () => {
     const e = await entity();
-    const { account: acc, wallet: un } = await account(e.id);
-    expect(un).toMatchObject({ purpose: 'unallocated', owner_legal_entity_id: e.id, owner_org_id: null });
-    expect(un.opening_balance).toBe('1000.00');
+    const { account: acc } = await account(e.id, { bare: true });
+    // no wallet appears by itself
+    expect(data(await get('/setup')).wallets.filter((w) => w.bank_account_id === acc.id)).toHaveLength(0);
+    // an account without a legal entity, and a wallet without an account or an owner
+    const loose = await post('/accounts', { name: 'Standalone', type: 'current', currency: 'INR', opening_date: '2026-04-01' });
+    expect(loose.status).toBe(201);
+    expect(data(loose).account.legal_entity_id).toBeNull();
+    const free = await post('/wallets', { name: 'Free wallet', currency: 'USD', opening_balance: '5' });
+    expect(free.status).toBe(201);
+    expect(data(free).wallet).toMatchObject({ bank_account_id: null, owner_org_id: null, owner_legal_entity_id: null, currency: 'USD', owner_name: 'No owner' });
     const cash = (await account(e.id, { name: 'Cash in hand', type: 'cash', bank_name: 'HDFC', account_last4: '9999' })).account;
     expect(cash.bank_name).toBeNull();
     expect(cash.account_last4).toBeNull();
@@ -95,15 +107,14 @@ describe('group cash: legal entities, accounts, wallets', () => {
     expect(acc.id).toBeTruthy();
   });
 
-  test('a wallet has exactly one owner, in the database as well', async () => {
+  test('a wallet has at most one owner, in the database as well (none is fine)', async () => {
     const e = await entity();
     const { account: acc } = await account(e.id);
-    expect((await post('/wallets', { bank_account_id: acc.id, name: 'No owner' })).status).toBe(422);
+    expect((await post('/wallets', { bank_account_id: acc.id, name: 'No owner' })).status).toBe(201);
     expect((await post('/wallets', { bank_account_id: acc.id, name: 'Two owners', owner_org_id: b.id, owner_legal_entity_id: e.id })).status).toBe(422);
     const w = await wallet(acc.id, { owner_org_id: undefined, owner_legal_entity_id: e.id, name: 'Entity wallet' });
     expect(w.owner_legal_entity_id).toBe(e.id);
-    await expect(prisma.wallet.create({ data: { bank_account_id: acc.id, name: 'Bad', purpose: 'general', owner_org_id: b.id, owner_legal_entity_id: e.id } })).rejects.toThrow();
-    await expect(prisma.wallet.create({ data: { bank_account_id: acc.id, name: 'Bad', purpose: 'general' } })).rejects.toThrow();
+    await expect(prisma.wallet.create({ data: { org_group_id: acc.org_group_id, bank_account_id: acc.id, name: 'Bad', purpose: 'general', owner_org_id: b.id, owner_legal_entity_id: e.id } })).rejects.toThrow();
   });
 
   test('the opening balances of the wallets should add up to the declared one: a warning, never a block', async () => {
@@ -399,7 +410,8 @@ describe('group cash: everything can be corrected by the admin', () => {
     expect(moved.status).toBe(200);
     expect(data(moved).wallet).toMatchObject({ owner_org_id: a.id, owner_legal_entity_id: null });
     expect((await patch(`/wallets/${w.id}`, { owner_org_id: a.id, owner_legal_entity_id: e.id })).status).toBe(422);
-    expect((await patch(`/wallets/${w.id}`, { owner_org_id: null, owner_legal_entity_id: null })).status).toBe(422);
+    expect((await patch(`/wallets/${w.id}`, { owner_org_id: null, owner_legal_entity_id: null })).status).toBe(200); // no owner is allowed now
+    expect((await patch(`/wallets/${w.id}`, { owner_org_id: a.id, owner_legal_entity_id: null })).status).toBe(200);
     expect((await patch(`/wallets/${w.id}`, { owner_org_id: '11111111-1111-4111-8111-111111111111' })).status).toBe(422);
     expect((await patch(`/wallets/${w.id}`, { active: false })).status).toBe(200);
     const listed = data(await get('/setup'));
@@ -420,3 +432,54 @@ describe('group cash: everything can be corrected by the admin', () => {
   });
 });
 
+describe('group cash: manual wallet to bank account mapping, statements and deletes', () => {
+  test('wallets are mapped to a bank account by hand; the account balance and statement follow the mapping', async () => {
+    const acc = data(await post('/accounts', { name: 'ICICI', type: 'current', currency: 'INR', opening_date: '2026-04-01' })).account;
+    const usd = data(await post('/accounts', { name: 'USD A/C', type: 'current', currency: 'USD', opening_date: '2026-04-01' })).account;
+    const w1 = data(await post('/wallets', { name: 'Wallet A', currency: 'INR', opening_balance: '100' })).wallet;
+    const w2 = data(await post('/wallets', { name: 'Wallet B', currency: 'INR', opening_balance: '50' })).wallet;
+    let pos = data(await get('/position'));
+    expect(pos.unmapped_wallets.map((w) => w.name).sort()).toEqual(['Wallet A', 'Wallet B']);
+    expect(pos.unmapped_totals.INR).toBe('150.00');
+    expect(pos.entities.find((e) => e.id === null).accounts[0].balance).toBe('0.00');
+
+    expect((await patch(`/wallets/${w1.id}`, { bank_account_id: acc.id })).status).toBe(200);
+    expect((await patch(`/wallets/${w2.id}`, { bank_account_id: acc.id })).status).toBe(200);
+    expect((await patch(`/wallets/${w1.id}`, { bank_account_id: usd.id })).status).toBe(422); // currencies must match
+    await tx(w1.id, { amount: '20', date: '2026-05-10' });
+    await tx(w2.id, { direction: 'out', amount: '5', date: '2026-05-11' });
+    pos = data(await get('/position'));
+    expect(pos.unmapped_wallets).toHaveLength(0);
+    expect(pos.entities.find((e) => e.id === null).accounts.find((x) => x.id === acc.id).balance).toBe('165.00');
+
+    const stmt = data(await get(`/accounts/${acc.id}/entries`));
+    expect(stmt.rows.map((r) => [r.date, r.wallet, r.direction, r.balance_after])).toEqual([['2026-05-10', 'Wallet A', 'in', '170.00'], ['2026-05-11', 'Wallet B', 'out', '165.00']]);
+    expect(stmt.closing_balance).toBe('165.00');
+    expect((await get(`/accounts/${acc.id}/entries?format=csv`)).status).toBe(200);
+
+    // un-mapping moves the wallet (and its entries) out of the account; nothing is lost
+    expect((await patch(`/wallets/${w2.id}`, { bank_account_id: null })).status).toBe(200);
+    expect(data(await get(`/accounts/${acc.id}/entries`)).closing_balance).toBe('120.00');
+    expect(data(await get('/position')).unmapped_wallets.map((w) => w.name)).toEqual(['Wallet B']);
+  });
+
+  test('entities, accounts and wallets can be deleted while nothing hangs on them; otherwise they are refused', async () => {
+    const e = await entity('Temp Co');
+    const { account: acc } = await account(e.id, { bare: true });
+    const w = data(await post('/wallets', { bank_account_id: acc.id, name: 'Used', currency: 'INR' })).wallet;
+    const empty = data(await post('/wallets', { name: 'Empty', currency: 'INR' })).wallet;
+    await tx(w.id, { amount: '10' });
+    expect((await del(`/entities/${e.id}`)).status).toBe(409); // has an account
+    expect((await del(`/accounts/${acc.id}`)).status).toBe(409); // has a wallet mapped
+    expect((await del(`/wallets/${w.id}`)).status).toBe(409); // has entries
+    expect((await del(`/wallets/${empty.id}`)).status).toBe(200);
+    expect(data(await get('/setup')).wallets.map((x) => x.id)).not.toContain(empty.id);
+    // free the account, then everything can go
+    await tx(w.id, { direction: 'out', amount: '10' });
+    expect((await patch(`/wallets/${w.id}`, { bank_account_id: null })).status).toBe(200);
+    expect((await del(`/accounts/${acc.id}`)).status).toBe(200);
+    expect((await del(`/entities/${e.id}`)).status).toBe(200);
+    const audit = data(await get('/audit?limit=200'));
+    expect(audit.filter((x) => x.action === 'delete').map((x) => x.entity_type)).toEqual(expect.arrayContaining(['wallet', 'bank_account', 'legal_entity']));
+  });
+});

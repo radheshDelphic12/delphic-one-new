@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, ListChecks, Lock, Users } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, LayoutDashboard, ListChecks, UserCheck, Lock, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
+import AttendanceDashboard from './AttendanceDashboard.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
 import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
 import TimesheetDashboard from './TimesheetDashboard.jsx';
+import ProjectCalendarDashboard from './ProjectCalendarDashboard.jsx';
 import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 
@@ -19,6 +21,10 @@ const BASE_TABS = [
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
   // Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
   { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
+  // Attendance only (no project hours): status, reporting office and office / home per day, plus leave balance.
+  { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck },
+  // Every project as a month calendar: hours, tasks, leave, holidays.
+  { key: 'project-calendar', label: 'Project Calendar', icon: CalendarRange },
   // Hours logged by everyone on a project you are assigned to (visibility only, no cap).
   { key: 'project-team', label: 'Project Team', icon: Users },
   // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
@@ -86,6 +92,8 @@ export default function TimeAttendanceHubPage() {
       )}
       {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
       {section === 'dashboard' && <TimesheetDashboard />}
+      {section === 'attendance-dashboard' && <AttendanceDashboard />}
+      {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}
       {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
