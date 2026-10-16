@@ -90,42 +90,71 @@
   });
 })();
 
-/* Job list: tick departments and / or locations to narrow the list. Within one group the ticks add up (any of them);
-   between groups both must match. Nothing ticked in a group means no restriction from it. */
+/* Job list: type to search, tick departments and / or locations to narrow the list. Within one group the ticks add up
+   (any of them); between groups, and with the search, all must match. Nothing chosen means no restriction. */
 (function () {
   var panel = document.getElementById('job-filters');
   if (!panel) return;
   var cards = Array.prototype.slice.call(document.querySelectorAll('#job-list .job'));
   var boxes = Array.prototype.slice.call(panel.querySelectorAll('input[data-filter]'));
+  var search = document.getElementById('job-search');
   var empty = document.getElementById('no-match');
   var count = document.getElementById('job-count');
+  var pills = document.getElementById('job-pills');
 
   function picked(key) {
-    return boxes.filter(function (b) { return b.checked && b.getAttribute('data-filter') === key; }).map(function (b) { return b.value; });
+    return boxes.filter(function (b) { return b.checked && b.getAttribute('data-filter') === key; });
   }
 
   function apply() {
-    var depts = picked('dept');
-    var locs = picked('loc');
+    var depts = picked('dept').map(function (b) { return b.value; });
+    var locs = picked('loc').map(function (b) { return b.value; });
+    var q = search.value.trim().toLowerCase();
     var shown = 0;
     cards.forEach(function (card) {
       var cardLocs = (card.getAttribute('data-loc') || '').split('|');
       var okDept = !depts.length || depts.indexOf(card.getAttribute('data-dept')) !== -1;
       var okLoc = !locs.length || locs.some(function (l) { return cardLocs.indexOf(l) !== -1; });
-      var on = okDept && okLoc;
+      var okText = !q || (card.getAttribute('data-title') || '').indexOf(q) !== -1;
+      var on = okDept && okLoc && okText;
       card.classList.toggle('hidden', !on);
       if (on) shown += 1;
     });
     empty.classList.toggle('hidden', shown !== 0);
-    count.textContent = depts.length || locs.length ? 'Showing ' + shown + ' of ' + cards.length + ' positions' : '';
+    var filtered = depts.length || locs.length || q;
+    count.textContent = filtered ? 'Showing ' + shown + ' of ' + cards.length + ' roles' : cards.length + ' open ' + (cards.length === 1 ? 'role' : 'roles');
+    // a count badge on each dropdown, and a removable pill for every ticked option
+    ['dept', 'loc'].forEach(function (key) {
+      var n = picked(key).length;
+      var badge = panel.querySelector('[data-sel="' + key + '"]');
+      if (badge) badge.textContent = n ? String(n) : '';
+    });
+    pills.innerHTML = '';
+    boxes.filter(function (b) { return b.checked; }).forEach(function (b) {
+      var pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'pill';
+      pill.setAttribute('aria-label', 'Remove filter ' + b.getAttribute('data-label'));
+      pill.textContent = b.getAttribute('data-label') + ' ';
+      var x = document.createElement('i');
+      x.textContent = '\u00d7';
+      pill.appendChild(x);
+      pill.addEventListener('click', function () { b.checked = false; apply(); });
+      pills.appendChild(pill);
+    });
   }
 
   function clear() {
     boxes.forEach(function (b) { b.checked = false; });
+    search.value = '';
     apply();
   }
 
+  if (window.innerWidth < 800) {
+    Array.prototype.forEach.call(panel.querySelectorAll('details.fgroup'), function (d) { d.open = false; });
+  }
   boxes.forEach(function (b) { b.addEventListener('change', apply); });
+  search.addEventListener('input', apply);
   document.getElementById('filters-clear').addEventListener('click', clear);
   document.getElementById('no-match-clear').addEventListener('click', clear);
   apply();

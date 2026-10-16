@@ -27,13 +27,31 @@ const dayStatus = (day) => {
   return null;
 };
 
+// Work from home stands out (blue); work from office is the quiet default. A request still waiting for approval is amber.
 function PlaceBadge({ day }) {
-  const Icon = day.work_place === 'home' ? Home : Building2;
+  const home = day.work_place === 'home';
+  const Icon = home ? Home : Building2;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-tertiary-600" title={PLACE_LABEL[day.work_place]}>
-      <Icon className="h-3 w-3" /> {day.work_place === 'home' ? 'WFH' : 'WFO'}
-      {day.requested_place && <span className="rounded bg-amber-50 px-1 text-amber-700">{day.requested_place === 'home' ? 'WFH' : 'WFO'} {day.place_status}</span>}
+    <span className="flex flex-wrap items-center gap-1 text-[11px]">
+      <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium ${home ? 'bg-sky-100 text-sky-800' : 'text-tertiary-500'}`} title={PLACE_LABEL[day.work_place]}>
+        <Icon className="h-3 w-3" /> {home ? 'WFH' : 'WFO'}
+      </span>
+      {day.requested_place && (
+        <span className={`rounded-md px-1.5 py-0.5 font-medium ${day.place_status === 'rejected' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`} title={`${PLACE_LABEL[day.requested_place]} request: ${day.place_status}`}>
+          {day.requested_place === 'home' ? 'WFH' : 'WFO'} {day.place_status}
+        </span>
+      )}
     </span>
+  );
+}
+
+function PlaceLegend() {
+  return (
+    <p className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-tertiary-500">
+      <span className="inline-flex items-center gap-1"><span className="rounded-md bg-sky-100 px-1.5 py-0.5 font-medium text-sky-800">WFH</span> work from home</span>
+      <span className="inline-flex items-center gap-1"><span className="px-1 font-medium text-tertiary-500">WFO</span> work from office</span>
+      <span className="inline-flex items-center gap-1"><span className="rounded-md bg-amber-50 px-1.5 py-0.5 font-medium text-amber-700">WFH pending</span> waiting for approval</span>
+    </p>
   );
 }
 
@@ -45,7 +63,7 @@ function DayCell({ day, selected, onSelect }) {
       <span className="font-semibold text-tertiary-800">{Number(day.date.slice(8))}</span>
       {label && <span className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_TONE[day.attendance_status] || (day.leaves?.length ? STATUS_TONE.leave : STATUS_TONE.holiday)}`}>{label}</span>}
       {day.pending_leaves?.map((l) => <span key={l.request_id} className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700">{l.name} (pending)</span>)}
-      {day.attendance_status && day.attendance_status !== 'holiday' && day.attendance_status !== 'absent' && (
+      {day.day_type === 'working' && day.attendance_status !== 'leave' && !day.leaves?.length && (
         <>
           <PlaceBadge day={day} />
           {day.reporting_office && <span className="truncate text-[11px] text-tertiary-500">{day.reporting_office.name}</span>}
@@ -283,6 +301,7 @@ export default function AttendanceDashboard() {
         <div className="grid gap-4 lg:grid-cols-[1fr_21rem]">
           <div>
             <h3 className="mb-2 font-heading text-base font-semibold text-tertiary-900">{data.member.name} · {MONTHS[month - 1]} {year}</h3>
+            <PlaceLegend />
             <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs font-medium text-tertiary-500">{WEEKDAYS.map((w) => <span key={w}>{w}</span>)}</div>
             <div className="grid grid-cols-7 gap-1">
               {cells.map((day, i) => (day ? <DayCell key={day.date} day={day} selected={selected?.date === day.date} onSelect={setSelected} /> : <span key={`pad-${i}`} />))}

@@ -4,6 +4,21 @@
 //   job page    : .../career/<slug>     (no trailing slash)
 // Everything that comes from the database is escaped here; nothing is ever put into the page unescaped.
 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// Changes whenever career.css / career.js change, so a browser never keeps an old copy of them.
+const ASSET_VERSION = (() => {
+  try {
+    const h = crypto.createHash('md5');
+    for (const f of ['career.css', 'career.js']) h.update(fs.readFileSync(path.join(__dirname, 'assets', f)));
+    return h.digest('hex').slice(0, 8);
+  } catch (_err) {
+    return '1';
+  }
+})();
+
 const esc = (value) =>
   String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -22,7 +37,7 @@ function layout({ title, description, canonical, body, wide = false }) {
 <meta name="description" content="${esc(description)}">
 <meta name="robots" content="index, follow">
 ${canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
-<link rel="stylesheet" href="assets/career.css">
+<link rel="stylesheet" href="assets/career.css?v=${ASSET_VERSION}">
 </head>
 <body>
 <header class="bar"><div class="bar-in"><img src="assets/logo.svg" alt="Delphic Global"><span>Careers</span></div></header>
@@ -38,18 +53,43 @@ function meta(job) {
   return parts.length ? `<div class="meta">${parts.map((p) => `<span>${esc(p)}</span>`).join('')}</div>` : '';
 }
 
-// A job's location can name several places ("Gurgaon, Haryana & Ahmedabad"): the filter lists each one separately.
-// Split on "&", "/", ";" and "and", never on a comma, so "Gurgaon, Haryana" stays one place.
-const locationsOf = (job) => String(job.location || '').split(/\s*(?:&|\/|;|\band\b)\s*/i).map((s) => s.trim()).filter(Boolean);
+// A job's location is free text such as "Indore · On-site", "Remote · Remote" or "Gurgaon, Haryana & Ahmedabad".
+// Everything after the "·" is how people work there (On-site / Remote / Hybrid), not a place, so the Location filter
+// looks only at the part before it, splits it into separate places, and leaves out state names ("Haryana").
+const STATES = new Set(['andhra pradesh', 'assam', 'bihar', 'chhattisgarh', 'delhi', 'goa', 'gujarat', 'haryana', 'himachal pradesh', 'jharkhand', 'karnataka', 'kerala', 'madhya pradesh', 'maharashtra', 'odisha', 'punjab', 'rajasthan', 'tamil nadu', 'telangana', 'uttar pradesh', 'uttarakhand', 'west bengal']);
 
-/** Checkbox group for one filter: every distinct value with the number of jobs that have it. */
+function placesOf(job) {
+  const base = String(job.location || '').split(/[·|]/)[0];
+  const seen = new Set();
+  const out = [];
+  for (const part of base.split(/\s*(?:&|\/|;|,|\band\b)\s*/i)) {
+    const name = part.trim();
+    const key = name.toLowerCase();
+    if (!name || STATES.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/** How the job is worked, when the location says so ("On-site" in "Indore · On-site"); empty when it only repeats the place. */
+function modeOf(job) {
+  const rest = String(job.location || '').split(/[·|]/).slice(1).map((s) => s.trim()).filter(Boolean);
+  const place = placesOf(job).map((p) => p.toLowerCase());
+  return rest.find((m) => !place.includes(m.toLowerCase())) || '';
+}
+
+/** One filter group as a collapsible dropdown: every distinct value with the number of jobs that have it. */
 function filterGroup(label, key, counts) {
   const entries = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   if (!entries.length) return '';
-  return `<fieldset><legend>${label}</legend>${entries
-    .map(([value, n]) => `<label class="opt"><input type="checkbox" data-filter="${key}" value="${esc(value.toLowerCase())}"> <span>${esc(value)}</span> <em>${n}</em></label>`)
-    .join('')}</fieldset>`;
+  return `<details class="fgroup" open><summary><span>${label}</span><b class="sel" data-sel="${key}"></b></summary>
+<div class="opts">${entries
+    .map(([value, n]) => `<label class="opt"><input type="checkbox" data-filter="${key}" value="${esc(value.toLowerCase())}" data-label="${esc(value)}"><span>${esc(value)}</span><em>${n}</em></label>`)
+    .join('')}</div></details>`;
 }
+
+const chip = (text, cls = '') => (text ? `<span class="chip ${cls}">${esc(text)}</span>` : '');
 
 /** `slugPrefix` is '' on the list page, where job links are relative to the list's own directory. */
 function listPage({ jobs, canonical }) {
@@ -57,30 +97,34 @@ function listPage({ jobs, canonical }) {
   const places = new Map();
   for (const j of jobs) {
     if (j.department) departments.set(j.department, (departments.get(j.department) || 0) + 1);
-    for (const place of new Set(locationsOf(j))) places.set(place, (places.get(place) || 0) + 1);
+    for (const place of placesOf(j)) places.set(place, (places.get(place) || 0) + 1);
   }
   const cards = jobs
-    .map((j) => `<a class="card job" href="${esc(j.slug)}${j.src ? `?src=${encodeURIComponent(j.src)}` : ''}" data-testid="career-job" data-dept="${esc(String(j.department || '').toLowerCase())}" data-loc="${esc(locationsOf(j).map((p) => p.toLowerCase()).join('|'))}"><strong>${esc(j.title)}</strong>${meta(j)}</a>`)
+    .map((j) => {
+      const where = placesOf(j);
+      return `<a class="job" href="${esc(j.slug)}${j.src ? `?src=${encodeURIComponent(j.src)}` : ''}" data-testid="career-job" data-title="${esc(String(j.title).toLowerCase())}" data-dept="${esc(String(j.department || '').toLowerCase())}" data-loc="${esc(where.map((p) => p.toLowerCase()).join('|'))}">
+<span class="job-main"><strong>${esc(j.title)}</strong><span class="chips">${chip(j.department, 'dept')}${chip(where.join(', '), 'place')}${chip(modeOf(j))}${chip(j.employment_type)}</span></span>
+<span class="go">View &amp; apply <i aria-hidden="true">&rarr;</i></span></a>`;
+    })
     .join('\n');
   const body = jobs.length
-    ? `<h1>Open positions</h1>
-<p class="meta">Pick a role and apply in a few minutes.</p>
+    ? `<section class="hero"><div><p class="eyebrow">Careers at Delphic</p><h1>Open positions</h1><p class="lead">Pick a role and apply in a few minutes.</p></div><div class="stat"><span class="num">${jobs.length}</span><span>open ${jobs.length === 1 ? 'role' : 'roles'}</span></div></section>
 <div class="list-layout">
-<aside class="filters card" id="job-filters" aria-label="Filter jobs">
-<h2>Filter jobs</h2>
+<aside class="filters" id="job-filters" aria-label="Filter jobs">
+<div class="fhead"><h2>Filters</h2><button type="button" class="link" id="filters-clear">Clear all</button></div>
+<label class="search"><span class="sr">Search roles</span><input type="search" id="job-search" placeholder="Search roles" autocomplete="off"></label>
 ${filterGroup('Department', 'dept', departments)}${filterGroup('Location', 'loc', places)}
-<p class="note"><button type="button" class="link" id="filters-clear">Clear filters</button></p>
 </aside>
-<section>
-<p class="note" id="job-count" aria-live="polite"></p>
+<section class="results">
+<div class="toolbar"><p class="count" id="job-count" aria-live="polite"></p><div class="pills" id="job-pills"></div></div>
 <div id="job-list">
 ${cards}
 </div>
-<div class="card empty hidden" id="no-match">No positions match these filters. <button type="button" class="link" id="no-match-clear">Clear filters</button></div>
+<div class="empty hidden" id="no-match"><p><strong>No positions match these filters.</strong></p><p><button type="button" class="link" id="no-match-clear">Clear filters</button></p></div>
 </section>
 </div>
-<script src="assets/career.js" defer></script>`
-    : '<h1>Open positions</h1>\n<div class="card empty">There are no open positions right now. Please check back soon.</div>';
+<script src="assets/career.js?v=${ASSET_VERSION}" defer></script>`
+    : '<section class="hero"><div><p class="eyebrow">Careers at Delphic</p><h1>Open positions</h1></div></section>\n<div class="card empty">There are no open positions right now. Please check back soon.</div>';
   return layout({
     title: 'Careers | Delphic Global',
     description: 'Open positions at Delphic Global.',
@@ -136,7 +180,7 @@ function jobPage({ job, canonical }) {
     canonical,
     body: `<article class="card"><h1>${esc(job.title)}</h1>${meta(job)}${job.description ? `<div class="desc">${esc(job.description)}</div>` : ''}<p class="note"><a href="./">&larr; All open positions</a></p></article>
 <section class="card">${applyForm(job.slug)}</section>
-<script src="assets/career.js" defer></script>`,
+<script src="assets/career.js?v=${ASSET_VERSION}" defer></script>`,
   });
 }
 

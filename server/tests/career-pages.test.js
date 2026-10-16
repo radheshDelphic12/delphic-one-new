@@ -48,12 +48,24 @@ describe('careers pages', () => {
     expect(html).toContain('data-filter="loc" value="indore"');
     expect(html).toContain('data-dept="engineering"');
     expect(html).toContain('data-loc="indore"');
-    expect(html).toContain('src="assets/career.js"');
+    expect(html).toContain('src="assets/career.js?v=');
     const { listPage } = require('../src/modules/careerPages/careerPages.views');
-    const two = listPage({ jobs: [{ slug: 'a', title: 'A', department: 'Sales', location: 'Gurgaon, Haryana & Ahmedabad' }, { slug: 'b', title: 'B', department: 'IT', location: 'Remote' }], canonical: '' });
-    expect(two).toContain('value="gurgaon, haryana"');
-    expect(two).toContain('value="ahmedabad"');
-    expect(two).toContain('data-loc="gurgaon, haryana|ahmedabad"');
+    const jobs = [
+      { slug: 'a', title: 'A', department: 'Sales', location: 'Gurgaon, Haryana & Ahmedabad' },
+      { slug: 'b', title: 'B', department: 'IT', location: 'Indore · On-site' },
+      { slug: 'c', title: 'C', department: 'IT', location: 'Remote · Remote' },
+      { slug: 'd', title: 'D', department: 'IT', location: 'Ahmedabad' },
+    ];
+    const two = listPage({ jobs, canonical: '' });
+    // several places in one location are listed separately, a state name is not a place, the "· On-site" part is a work mode, not a place
+    expect(two).toContain('data-loc="gurgaon|ahmedabad"');
+    expect(two).not.toContain('value="haryana"');
+    expect(two).toContain('data-filter="loc" value="indore" data-label="Indore"><span>Indore</span><em>1</em>');
+    expect(two).toContain('data-filter="loc" value="ahmedabad" data-label="Ahmedabad"><span>Ahmedabad</span><em>2</em>'); // "Ahmedabad" + "Ahmedabad" in job A
+    expect(two).toContain('data-filter="loc" value="remote" data-label="Remote"><span>Remote</span><em>1</em>');
+    expect(two).not.toContain('value="indore · on-site"');
+    expect(two).toContain('<span class="chip ">On-site</span>');
+    expect(two).not.toMatch(/<span class="chip ">Remote<\/span>/); // "Remote · Remote" shows the place once
   });
 
   test('a recruiter can learn which jobs are live (to copy their link) without the website-management permission', async () => {
@@ -70,8 +82,8 @@ describe('careers pages', () => {
     }
     const job = (await page(`/${slug}`)).text;
     expect(job).toContain('data-action="' + slug + '/apply"');
-    expect(job).toContain('href="assets/career.css"');
-    expect(job).toContain('src="assets/career.js"');
+    expect(job).toContain('href="assets/career.css?v=');
+    expect(job).toContain('src="assets/career.js?v=');
   });
 
   test('the list always lives at the trailing slash and a job page never does (relative redirects keep the visitor on their own domain)', async () => {
