@@ -45,6 +45,15 @@ function isLinkedInUrl(v) {
   } catch { return false; }
 }
 
+/** A Google Drive / Docs share link (the public form takes the CV as a link, nothing is uploaded to our server). */
+function isDriveUrl(v) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    const host = u.hostname.toLowerCase();
+    return u.protocol === 'https:' && (host === 'drive.google.com' || host === 'docs.google.com') && u.pathname.length > 1;
+  } catch { return false; }
+}
+
 /** One key for a LinkedIn profile so the same person is recognised however the link was typed. */
 function linkedInKey(v) {
   try {
@@ -95,4 +104,4 @@ function toColumns(d) {
   };
 }
 
-module.exports = { normalizePhone, isLinkedInUrl, linkedInKey, fields, optionalShape, requireScreening, checkScreening, toColumns, JOINER, WORK_MODES };
+module.exports = { normalizePhone, isLinkedInUrl, isDriveUrl, linkedInKey, fields, optionalShape, requireScreening, checkScreening, toColumns, JOINER, WORK_MODES };

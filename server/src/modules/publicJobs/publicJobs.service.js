@@ -27,7 +27,12 @@ const applySchema = z.object({
   company_website: z.string().optional().nullable(),
   // screening answers: most are required here, so the recruiters can filter the pool
   ...screening.fields,
-}).superRefine((d, ctx) => { screening.requireScreening(d, ctx); screening.checkScreening(d, ctx); });
+}).superRefine((d, ctx) => {
+  screening.requireScreening(d, ctx);
+  screening.checkScreening(d, ctx);
+  // the public form takes the CV as a Google Drive link only (recruiters may still paste any link by hand)
+  if (d.cv_url && !screening.isDriveUrl(d.cv_url)) ctx.addIssue({ code: 'custom', path: ['cv_url'], message: 'Enter a Google Drive link to your CV (drive.google.com/...)' });
+});
 
 const serialize = (p) => ({ slug: p.slug, title: p.title, department: p.department, location: p.location, employment_type: p.employment_type, description: p.public_description, posted_at: p.created_at });
 
@@ -41,7 +46,7 @@ async function get(slug, orgSlug) {
   return p ? { job: serialize(p) } : { error: 'not_found' };
 }
 
-async function apply(slug, body, orgSlug, cvFile = null) {
+async function apply(slug, body, orgSlug) {
   const d = applySchema.parse(body);
   const p = await prisma.websiteJobPosting.findFirst({ where: { slug: String(slug).toLowerCase(), ...openFor(orgSlug) }, select: { requirement_id: true } });
   if (!p) return { error: 'not_found' };
@@ -51,7 +56,7 @@ async function apply(slug, body, orgSlug, cvFile = null) {
   const r = await applicantsService.addApplicant(null, {
     requirement_id: p.requirement_id, name: d.name, email: d.email, phone: d.phone, experience_years: d.experience_years, notes: d.message || '', channel,
     ...Object.fromEntries(Object.keys(screening.fields).map((k) => [k, d[k]])),
-  }, { source: 'website', cvFile });
+  }, { source: 'website' });
   if (r.error === 'duplicate_applicant') return { error: 'already_applied' };
   if (r.error) return { error: 'not_found' };
   return { ok: true };

@@ -39,14 +39,6 @@
     if (d.length > 10) d = d.replace(/^(91|0)(?=\d{10}$)/, '').slice(0, 10);
     phoneInput.value = d;
   });
-  var cvInput = field('cv');
-  cvInput.addEventListener('change', function () {
-    var f = cvInput.files[0];
-    var bad = f && (!/\.(pdf|docx?)$/i.test(f.name) ? 'Attach your CV as a PDF, DOC or DOCX file' : f.size > 2.5 * 1024 * 1024 ? 'Your CV is larger than 2.5 MB' : '');
-    cvInput.setCustomValidity(bad || '');
-    if (bad) cvInput.reportValidity();
-  });
-
   var params = new URLSearchParams(window.location.search);
   var source = (params.get('src') || '').slice(0, 40);
 
@@ -70,19 +62,17 @@
       current_ctc_lpa: value('current_ctc_lpa'),
       expected_ctc_lpa: value('expected_ctc_lpa'),
       work_mode: value('work_mode'),
+      cv_url: value('cv_url'),
       extra_skills: value('extra_skills'),
     };
     if (source) payload.channel = source;
-    var data = new FormData();
-    Object.keys(payload).forEach(function (k) { data.append(k, payload[k]); });
-    if (cvInput.files[0]) data.append('cv', cvInput.files[0]);
 
     button.disabled = true;
     button.textContent = 'Sending...';
     fetch(form.getAttribute('data-action'), {
       method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: data,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (body) { return { status: res.status, body: body }; }); })
       .then(function (r) {

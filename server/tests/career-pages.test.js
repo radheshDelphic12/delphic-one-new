@@ -119,7 +119,7 @@ describe('careers pages', () => {
     expect((await request(app).get('/api/v1/public/jobs')).body.data.map((j) => j.slug)).toContain(slug);
   });
 
-  test('apply form rules: 10-digit phone, LinkedIn profile only, CV file, one application per person', async () => {
+  test('apply form rules: 10-digit phone, LinkedIn profile only, CV as a Drive link, one application per person', async () => {
     const url = `/${orgSlug}/career/${slug}/apply`;
     const base = { name: 'Rule Tester', email: 'rules@example.com', ...answers, phone: '9876544444', linkedin_url: 'https://www.linkedin.com/in/rule-tester' };
     const post = (body) => request(app).post(url).send({ ...base, ...body });
@@ -127,34 +127,26 @@ describe('careers pages', () => {
     for (const linkedin_url of ['https://example.com/in/rule-tester', 'https://www.linkedin.com/company/acme', 'https://notlinkedin.com/in/x']) expect((await post({ linkedin_url })).status).toBe(422);
     expect(await prisma.jobApplicant.count({ where: { email: 'rules@example.com' } })).toBe(0);
 
-    // multipart with a real PDF: stored, 10-digit phone saved, downloadable by recruiters only
-    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\n');
-    const sent = await request(app).post(url).field('name', 'Rule Tester').field('email', 'rules@example.com').field('phone', '+91 98765 44444')
-      .field('linkedin_url', 'linkedin.com/in/Rule-Tester').field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
-      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid')
-      .field('message', 'I fit because...')
-      .attach('cv', pdf, 'my cv.pdf');
-    expect(sent.status).toBe(201);
-    const row = await prisma.jobApplicant.findFirst({ where: { email: 'rules@example.com' } });
-    expect(row).toMatchObject({ phone: '9876544444', cv_file_name: 'my cv.pdf', notes: 'I fit because...' });
-    expect(row.cv_file).toMatch(/^cv-.*\.pdf$/);
-    const dl = await authed(request(app).get(`/api/v1/applicants/${row.id}/cv`), rToken);
-    expect(dl.status).toBe(200);
-    expect((await request(app).get(`/api/v1/applicants/${row.id}/cv`)).status).toBe(401);
-
-    // the same person again - by phone only, or by LinkedIn only - is refused, and no stray file is left behind
+    // the CV is a Google Drive link: stored as typed, 10-digit phone saved, nothing written to the upload folder
     const fs = require('fs');
     const before = fs.readdirSync(env.uploadDir).length;
+    const drive = 'https://drive.google.com/file/d/1AbC/view?usp=sharing';
+    const sent = await post({ phone: '+91 98765 44444', linkedin_url: 'linkedin.com/in/Rule-Tester', cv_url: drive, message: 'I fit because...' });
+    expect(sent.status).toBe(201);
+    const row = await prisma.jobApplicant.findFirst({ where: { email: 'rules@example.com' } });
+    expect(row).toMatchObject({ phone: '9876544444', cv_url: drive, cv_file: null, notes: 'I fit because...' });
+    expect(fs.readdirSync(env.uploadDir).length).toBe(before);
+    // only Google Drive / Docs links are accepted on the public form
+    for (const cv_url of ['https://example.com/cv.pdf', 'https://evil.com/drive.google.com/x', 'https://drive.google.com.evil.com/x', 'http://drive.google.com/file/d/1', 'not a link']) {
+      expect((await post({ email: 'cv@example.com', phone: '9000000002', linkedin_url: 'https://www.linkedin.com/in/cv-tester', cv_url })).status).toBe(422);
+    }
+    expect(await prisma.jobApplicant.count({ where: { email: 'cv@example.com' } })).toBe(0);
+    // the link is optional
+    expect((await post({ email: 'nocv@example.com', phone: '9000000003', linkedin_url: 'https://www.linkedin.com/in/no-cv' })).status).toBe(201);
+
+    // the same person again - by phone only, or by LinkedIn only - is refused
     expect((await post({ email: 'other@example.com', linkedin_url: 'https://www.linkedin.com/in/someone-else' })).status).toBe(409);
     expect((await post({ email: 'other@example.com', phone: '9123456789' })).status).toBe(409);
-    const again = await request(app).post(url).field('name', 'Rule Tester').field('email', 'rules@example.com').field('phone', '9876544444')
-      .field('linkedin_url', 'https://www.linkedin.com/in/rule-tester').field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
-      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid').attach('cv', pdf, 'cv.pdf');
-    expect(again.status).toBe(409);
-    expect(fs.readdirSync(env.uploadDir).length).toBe(before);
-    // a script renamed to .pdf, and a wrong type, are refused
-    expect((await request(app).post(url).field('name', 'X').field('email', 'x2@example.com').attach('cv', Buffer.from('#!/bin/sh'), 'evil.pdf')).status).toBe(422);
-    expect((await request(app).post(url).field('name', 'X').field('email', 'x3@example.com').attach('cv', Buffer.from('MZ'), 'evil.exe')).status).toBe(422);
     // two clicks at once make one applicant
     const twin = { ...base, email: 'twin@example.com', phone: '9000000001', linkedin_url: 'https://www.linkedin.com/in/twin' };
     const both = await Promise.all([request(app).post(url).send(twin), request(app).post(url).send(twin)]);
@@ -175,22 +167,10 @@ describe('careers pages', () => {
     expect((await request(app).get('/api/v1/applicants/career-base')).status).toBe(401);
   });
 
-  test('a CV can be at most 2.5 MB: a bigger file is refused with a clear message and leaves nothing on disk', async () => {
-    const fs = require('fs');
-    const url = `/${orgSlug}/career/${slug}/apply`;
-    const form = (n) => request(app).post(url).field('name', `Size Tester ${n}`).field('email', `size${n}@example.com`).field('phone', `99999${n}0000`.slice(0, 10))
-      .field('linkedin_url', `https://www.linkedin.com/in/size-tester-${n}`).field('currently_working', 'yes').field('joiner_status', 'no').field('notice_period_days', '30')
-      .field('current_ctc_lpa', '9').field('expected_ctc_lpa', '12').field('work_mode', 'hybrid');
-    const pdfOfSize = (bytes) => Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(bytes - 9, 0x20)]);
-    const before = fs.readdirSync(env.uploadDir).length;
-    const tooBig = await form(1).attach('cv', pdfOfSize(2.6 * 1024 * 1024), 'big.pdf');
-    expect(tooBig.status).toBe(422);
-    expect(tooBig.body.message).toBe('Your CV is larger than 2.5 MB');
-    expect(await prisma.jobApplicant.count({ where: { email: 'size1@example.com' } })).toBe(0);
-    expect(fs.readdirSync(env.uploadDir).length).toBe(before);
-    const fits = await form(2).attach('cv', pdfOfSize(2.4 * 1024 * 1024), 'fits.pdf');
-    expect(fits.status).toBe(201);
-    expect((await prisma.jobApplicant.findFirst({ where: { email: 'size2@example.com' } })).cv_file_name).toBe('fits.pdf');
+  test('the CV field is a Drive link input, not a file upload', async () => {
+    const html = (await page(`/${slug}`)).text;
+    expect(html).not.toContain('type="file"');
+    expect(html).toMatch(/<input name="cv_url" type="url"/);
   });
 
   test('the phone and LinkedIn pattern attributes compile in current browsers (the v flag) and accept / reject the right values', async () => {
@@ -203,6 +183,10 @@ describe('careers pages', () => {
     const linkedin = matcher('linkedin_url');
     ['https://www.linkedin.com/in/asha-rao', 'https://in.linkedin.com/in/asha-rao/', 'http://linkedin.com/pub/asha/1/2/3'].forEach((u) => expect(linkedin.test(u)).toBe(true));
     ['https://www.linkedin.com/company/acme', 'https://example.com/in/someone', 'https://linkedin.com.evil.com/in/x', 'linkedin.com/in/asha'].forEach((u) => expect(linkedin.test(u)).toBe(false));
+    const cv = matcher('cv_url');
+    expect(cv.test('https://drive.google.com/file/d/1AbC/view')).toBe(true);
+    expect(cv.test('https://docs.google.com/document/d/1AbC/edit')).toBe(true);
+    ['https://example.com/x', 'https://drive.google.com.evil.com/x', 'http://drive.google.com/x'].forEach((u) => expect(cv.test(u)).toBe(false));
     const phone = matcher('phone');
     expect(phone.test('9876543210')).toBe(true);
     ['5876543210', '98765', '98765432101'].forEach((n) => expect(phone.test(n)).toBe(false));
