@@ -4,7 +4,7 @@ const websitePostings = require('../src/modules/website/postings.service');
 
 let sToken; let r1Token; let req; let slug;
 const api = '/api/v1/applicants';
-const full = { phone: '98765 43210', linkedin_url: 'linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'serving_notice', last_working_day: '2026-11-15', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid', extra_skills: 'React, Node.js', cv_url: 'https://drive.example.com/cv' };
+const full = { phone: '98765 43210', linkedin_url: 'linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'serving_notice', last_working_day: '2026-11-15', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid', extra_skills: 'React, Node.js', cv_url: 'https://drive.google.com/file/d/abc123/view' };
 let seq = 0;
 // every applicant gets their own phone number: the same phone on one job counts as the same person
 const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...full, phone: `98765 ${String(10000 + (seq += 1))}`, ...(seq > 1 && body?.email ? { linkedin_url: `https://www.linkedin.com/in/asha-${seq}` } : {}), ...body });
@@ -30,12 +30,14 @@ describe('applicant screening', () => {
     expect((await apply({ email: 'lwd@example.com', last_working_day: '' })).status).toBe(422);
     expect((await apply({ email: 'bad@example.com', linkedin_url: 'not a link' })).status).toBe(422);
     expect((await apply({ email: 'mode@example.com', work_mode: 'moon' })).status).toBe(422);
+    // the public form takes the CV as a Google Drive / Docs link only
+    expect((await apply({ email: 'cv@example.com', cv_url: 'https://example.com/cv.pdf' })).status).toBe(422);
   });
 
   test('answers are stored; CTC is lakh per annum; skills lower-case; an immediate joiner needs no last working day', async () => {
     expect((await apply({})).status).toBe(201);
     const a = await prisma.jobApplicant.findFirst({ where: { email: 'asha@example.com' } });
-    expect(a).toMatchObject({ currently_working: true, joiner_status: 'serving_notice', notice_period_days: 30, work_mode: 'hybrid', linkedin_url: 'https://linkedin.com/in/asha', cv_url: 'https://drive.example.com/cv', extra_skills: ['react', 'node.js'] });
+    expect(a).toMatchObject({ currently_working: true, joiner_status: 'serving_notice', notice_period_days: 30, work_mode: 'hybrid', linkedin_url: 'https://linkedin.com/in/asha', cv_url: 'https://drive.google.com/file/d/abc123/view', extra_skills: ['react', 'node.js'] });
     expect(Number(a.current_ctc_lpa)).toBe(10);
     expect(Number(a.expected_ctc_lpa)).toBe(14);
     expect(a.last_working_day.toISOString().slice(0, 10)).toBe('2026-11-15');
@@ -69,7 +71,7 @@ describe('applicant screening', () => {
     const asha = await prisma.jobApplicant.findFirst({ where: { email: 'asha@example.com' } });
     expect((await authed(request(app).post(`${api}/${asha.id}/assign`), r1Token).send({})).status).toBe(200);
     const profile = await prisma.profile.findFirst({ where: { email: 'asha@example.com' } });
-    expect(profile).toMatchObject({ linkedin_url: 'https://linkedin.com/in/asha', resume_url: 'https://drive.example.com/cv', notice_period_days: 30, is_serving_notice: true, preferred_work_mode: 'hybrid', secondary_skills: ['react', 'node.js'] });
+    expect(profile).toMatchObject({ linkedin_url: 'https://linkedin.com/in/asha', resume_url: 'https://drive.google.com/file/d/abc123/view', notice_period_days: 30, is_serving_notice: true, preferred_work_mode: 'hybrid', secondary_skills: ['react', 'node.js'] });
     expect(Number(profile.current_ctc)).toBe(1000000);
     expect(Number(profile.expected_ctc)).toBe(1400000);
   });
