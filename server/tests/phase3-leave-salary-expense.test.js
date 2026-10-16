@@ -145,9 +145,12 @@ describe('Admin leave balances: overview, entitlement control, withdrawing leave
     await leave(org, ravi.membership, ul, '2026-04-06', '2026-04-10'); // unpaid, 5 days
     const left = await seedEmployee(org);
     await prisma.orgMembership.update({ where: { id: left.membership.id }, data: { left_at: new Date('2026-05-01') } });
+    const contractor = await seedEmployee(org);
+    await prisma.orgMembership.update({ where: { id: contractor.membership.id }, data: { worker_type: 'contractor' } });
 
     const res = await authed(request(app).get('/api/v1/leave/balances/overview').query({ year: 2026 }), token);
     expect(res.status).toBe(200);
+    expect(res.body.data.employees.map((e) => e.org_membership_id)).not.toContain(contractor.membership.id); // contractors do not earn leave
     expect(res.body.data.types.map((t) => t.code).sort()).toEqual(['CL', 'CO', 'EL', 'SL', 'UL']);
     expect(res.body.data.employees.map((e) => e.org_membership_id)).not.toContain(left.membership.id); // ex-employees are not listed
 

@@ -253,6 +253,8 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
       where: {
         org_id: orgId,
         left_at: null,
+        // Contractors do not earn leave, so they are not listed on the balances screen.
+        worker_type: { not: 'contractor' },
         ...(department_id ? { department_id } : {}),
         ...(search ? { person: { name: { contains: search, mode: 'insensitive' } } } : {}),
       },
