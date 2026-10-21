@@ -192,6 +192,16 @@ function OfficeChanger({ member, onSaved }) {
   );
 }
 
+// Employee list filter: where each person stands today. "Current" is everyone still working, including serving notice.
+const STATUS_FILTERS = [
+  { value: 'current', label: 'Current employees' },
+  { value: 'active', label: 'Active' },
+  { value: 'notice_period', label: 'Serving notice period' },
+  { value: 'exited', label: 'Exited' },
+  { value: 'all', label: 'Everyone (incl. exited)' },
+];
+const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
+
 /**
  * Attendance Dashboard: attendance only, for every IT and non-IT employee (no contractors). One person's month as a
  * calendar with the day's status, reporting office and office / home; switch person and month without going back.
@@ -204,6 +214,7 @@ export default function AttendanceDashboard() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [view, setView] = useState('person');
+  const [status, setStatus] = useState('current');
   const [list, setList] = useState(null);
   const [memberId, setMemberId] = useState(user?.org_membership_id || '');
   const [data, setData] = useState(null);
@@ -213,16 +224,17 @@ export default function AttendanceDashboard() {
 
   useEffect(() => {
     let alive = true;
-    apiClient.get('/attendance-dashboard/people', { params: { year, month } })
+    apiClient.get('/attendance-dashboard/people', { params: { year, month, status } })
       .then(({ data: res }) => {
         if (!alive) return;
         setList(res.data.people);
-        if (!res.data.people.some((p) => p.org_membership_id === memberId) && res.data.people.length) setMemberId(res.data.people[0].org_membership_id);
+        if (!res.data.people.length) setMemberId('');
+        else if (!res.data.people.some((p) => p.org_membership_id === memberId)) setMemberId(res.data.people[0].org_membership_id);
       })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load employees'), 'Something went wrong'));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month, reloadKey]);
+  }, [year, month, status, reloadKey]);
 
   useEffect(() => {
     if (!memberId) return undefined;
@@ -269,9 +281,14 @@ export default function AttendanceDashboard() {
             <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{[now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
           </label>
           <button type="button" className="btn-ghost" aria-label="Next month" onClick={() => step(1)}><ChevronRight className="h-4 w-4" /></button>
+          {list && (
+            <label className="text-xs font-medium text-tertiary-600">Status
+              <select value={status} onChange={(e) => { setStatus(e.target.value); setView('person'); }} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by status">{STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
+            </label>
+          )}
           {list && list.length > 1 && (
             <label className="text-xs font-medium text-tertiary-600">Employee
-              <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setView('person'); }} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{list.map((p) => <option key={p.org_membership_id} value={p.org_membership_id}>{p.name}</option>)}</select>
+              <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setView('person'); }} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{list.map((p) => <option key={p.org_membership_id} value={p.org_membership_id}>{p.name}{STATE_TAG[p.status] ? ` (${STATE_TAG[p.status]})` : ''}</option>)}</select>
             </label>
           )}
           {list && list.length > 1 && (
@@ -285,19 +302,19 @@ export default function AttendanceDashboard() {
       {view === 'all' ? (
         <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <table className="min-w-full text-sm">
-            <thead><tr className="text-left text-xs text-tertiary-500"><th className="p-3">Employee</th><th>Department</th><th>Reporting office</th><th>Work type</th><th className="text-right">Present</th><th className="text-right">WFH</th><th className="text-right">Half</th><th className="text-right">Leave</th><th className="pr-3 text-right">Absent</th></tr></thead>
+            <thead><tr className="text-left text-xs text-tertiary-500"><th className="p-3">Employee</th><th>Status</th><th>Department</th><th>Reporting office</th><th>Work type</th><th className="text-right">Present</th><th className="text-right">WFH</th><th className="text-right">Half</th><th className="text-right">Leave</th><th className="pr-3 text-right">Absent</th></tr></thead>
             <tbody className="divide-y divide-tertiary-100">
               {(list || []).map((p) => (
                 <tr key={p.org_membership_id} className="cursor-pointer hover:bg-tertiary-50" onClick={() => { setMemberId(p.org_membership_id); setView('person'); }}>
-                  <td className="p-3 font-medium">{p.name}</td><td>{p.department || '—'}</td><td>{p.reporting_office || '—'}</td><td className="capitalize">{p.work_type}</td>
+                  <td className="p-3 font-medium">{p.name}</td><td className="capitalize">{p.status === 'notice_period' ? `Serving notice${p.last_working_day ? ` · LWD ${p.last_working_day}` : ''}` : p.status === 'exited' ? `Exited${p.last_working_day ? ` · ${p.last_working_day}` : ''}` : 'Active'}</td><td>{p.department || '—'}</td><td>{p.reporting_office || '—'}</td><td className="capitalize">{p.work_type}</td>
                   <td className="text-right tabular-nums">{p.counts.present || 0}</td><td className="text-right tabular-nums">{p.counts.wfh || 0}</td><td className="text-right tabular-nums">{p.counts.half_day || 0}</td><td className="text-right tabular-nums">{p.counts.leave || 0}</td><td className="pr-3 text-right tabular-nums">{p.counts.absent || 0}</td>
                 </tr>
               ))}
-              {list && !list.length && <tr><td className="p-4 text-tertiary-500" colSpan={9}>No employees</td></tr>}
+              {list && !list.length && <tr><td className="p-4 text-tertiary-500" colSpan={10}>No employees with this status</td></tr>}
             </tbody>
           </table>
         </div>
-      ) : !data ? <p className="text-sm text-tertiary-500">Loading...</p> : (
+      ) : list && !list.length ? <p className="rounded-2xl border border-dashed border-tertiary-200 p-4 text-sm text-tertiary-500">No employees with this status.</p> : !data ? <p className="text-sm text-tertiary-500">Loading...</p> : (
         <div className="grid gap-4 lg:grid-cols-[1fr_21rem]">
           <div>
             <h3 className="mb-2 font-heading text-base font-semibold text-tertiary-900">{data.member.name} · {MONTHS[month - 1]} {year}</h3>
