@@ -7,7 +7,6 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import TeamChart, { regroupForTeamChart } from './TeamChart.jsx';
-import GroupOrgChart from './GroupOrgChart.jsx';
 
 /**
  * Seniority tiers for visual grouping. There is no rank/level field on
@@ -270,9 +269,9 @@ export default function OrgChartPage({ groupOrgs }) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-tertiary-500">
-          {user?.name} manages every company of the group. Each company shows its admin, then its teams and people.
+          {user?.name} manages every company of the group. Each company shows its teams and people above its name.
         </p>
-        <GroupOrgChart companies={groupOrgs} adminName={user?.name || 'Group Super Admin'} />
+        <TeamChart group={{ companies: groupOrgs, adminName: user?.name || 'Group Super Admin' }} hint="Group Super Admin at the bottom, then each company, then its teams and people." />
       </div>
     );
   }
