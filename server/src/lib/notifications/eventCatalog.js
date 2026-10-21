@@ -43,6 +43,8 @@ const ROLE_EVENT_MATRIX = {
   timesheet_entry_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_regularization_requested: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_regularization_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  // Sent only to Super Admin users (the job names them); the bell shows it until the reminder is decided.
+  increment_review_due: { roles: ['admin'], defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
@@ -67,6 +69,7 @@ const NOTIFICATION_LABELS = {
   timesheet_entry_decided: ['Timesheet decision', 'Your manager approves or rejects a timesheet entry.'],
   timesheet_regularization_requested: ['Regularisation requested', 'A direct report asks to regularise a locked timesheet day.'],
   timesheet_regularization_decided: ['Regularisation decision', 'Your regularisation request is approved or rejected.'],
+  increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
 
 function eventsForRole(role) {
@@ -126,6 +129,12 @@ function renderNotification(type, ctx = {}) {
         'Requirement status changed',
         `${actorPrefix(ctx)}set "${truncate(requirement)}" to ${ctx.toStatus || 'a new status'}.`,
         'requirement', ctx.requirementId, ctx
+      );
+    case 'increment_review_due':
+      return envelope(
+        'Increment review due',
+        `${ctx.employeeName || 'An employee'} completes ${ctx.years || 1} year${Number(ctx.years) === 1 ? '' : 's'} on ${ctx.dueDate || 'today'}. An increment review is due; salary is not changed automatically.`,
+        null, null, ctx
       );
     case 'interview_scheduled':
       return envelope(

@@ -363,6 +363,7 @@ enum NotificationType {
   timesheet_entry_decided
   timesheet_regularization_requested
   timesheet_regularization_decided
+  increment_review_due
 }
 
 enum NotificationEntityType {
@@ -737,6 +738,76 @@ model EmployeeCalendar {
 // org_id is denormalized here (also reachable via org_membership_id ->
 // OrgMembership.org_id) so the (org_id, date) composite index the HLD calls
 // for on every time-series table (§8) is a real index, not a join.
+enum FnfStatus {
+  pending
+  in_progress
+  settled
+}
+
+// Full and final settlement of an exited employee. Created (Pending) when the nightly job exits someone, or when an admin
+// marks them exited by hand; an admin fills in the amount and dates and moves the status along.
+model FnfRecord {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @unique @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  amount            Decimal?      @db.Decimal(14, 2)
+  start_date        DateTime?     @db.Date
+  fnf_date          DateTime?     @db.Date
+  status            FnfStatus     @default(pending)
+  notes             String?
+  updated_by        String?       @db.Uuid
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@map("fnf_records")
+}
+
+// "An increment review is due" for someone who completed another year with the company. It never changes salary. It stays
+// pending (and keeps showing on the Super Admin's dashboard) until someone marks it Completed or Ignored.
+model IncrementReminder {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  years_completed   Int
+  due_date          DateTime      @db.Date
+  status            String        @default("pending") // pending | completed | ignored
+  decided_by        String?       @db.Uuid
+  decided_at        DateTime?
+  created_at        DateTime      @default(now())
+
+  @@unique([org_membership_id, years_completed])
+  @@index([org_id, status])
+  @@map("increment_reminders")
+}
+
+// A previous month's salary the admin chose to add into a later payroll month (an employee who joined late in a month and
+// was not paid for those days). Pending dues are computed live and shown again every month until added; only an "added"
+// decision is stored, so it is never offered twice and never added automatically.
+model PreviousMonthDue {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  org_membership    OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  due_month         Int
+  due_year          Int
+  amount            Decimal       @db.Decimal(14, 2)
+  added_in_month    Int
+  added_in_year     Int
+  adjustment_id     String?       @db.Uuid
+  added_by          String        @db.Uuid
+  created_at        DateTime      @default(now())
+
+  @@unique([org_membership_id, due_year, due_month])
+  @@index([org_id])
+  @@map("previous_month_dues")
+}
+
 // Group-wide change log (see config/changeCapture.js): who changed what, when, in which company, old -> new values.
 // Append-only. `context_id` ties a child record (an allocation, a finance entry, a vendor invoice...) to its project.
 model ChangeLog {
@@ -2114,6 +2185,9 @@ model Org {
   project_calendars                  ProjectCalendar[]
   attendance_records                 AttendanceRecord[]
   attendance_regularization_requests AttendanceRegularizationRequest[]
+  fnf_records                        FnfRecord[]
+  increment_reminders                IncrementReminder[]
+  previous_month_dues                PreviousMonthDue[]
   leave_types                        LeaveType[]
   leave_requests                     LeaveRequest[]
   departments                        Department[]
@@ -2260,6 +2334,9 @@ model OrgMembership {
   employee_calendars                 EmployeeCalendar[]
   attendance_records                 AttendanceRecord[]
   attendance_regularization_requests AttendanceRegularizationRequest[]
+  fnf_records                        FnfRecord[]
+  increment_reminders                IncrementReminder[]
+  previous_month_dues                PreviousMonthDue[]
   office_assignments                 EmployeeOfficeAssignment[]
   work_place_days                    WorkPlaceDay[]
   leave_balances                     LeaveBalance[]
@@ -2285,6 +2362,8 @@ model OrgMembership {
   deleted_at                         DateTime?
   deleted_by                         String?                           @db.Uuid
   delete_reason                      String?
+  // Birthday (day and month are shown on the Announcements card; the year is never shown to others)
+  date_of_birth                      DateTime?                         @db.Date
 
   @@unique([person_id, org_id])
   // Employee codes are unique within a company (null = none yet).

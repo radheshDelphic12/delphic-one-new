@@ -108,6 +108,8 @@ const personalDetailsSchema = z
     emergency_contact_name: optionalText(120),
     emergency_contact_relation: optionalText(60),
     emergency_contact_phone: optionalText(30).refine((v) => !v || /^[+0-9 ()-]{6,30}$/.test(v), 'Enter a valid phone number'),
+    // Birthday: the Announcements card shows day and month only
+    date_of_birth: z.preprocess((v) => (v === '' ? null : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable().optional()).transform((v) => (v ? new Date(`${v}T00:00:00.000Z`) : v)),
     emergency_contact_email: optionalText(160).refine((v) => !v || z.string().email().safeParse(v).success, 'Enter a valid email'),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });

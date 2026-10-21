@@ -5,6 +5,10 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./payroll.service');
 const adjustmentsService = require('./salaryAdjustments.service');
 const paymentsService = require('./salaryPayments.service');
+const fnfService = require('./fnf.service');
+const incrementService = require('./incrementReminders.service');
+const previousDues = require('./previousDues.service');
+const { z } = require('zod');
 const {
   createSalaryStructureSchema,
   updateSalaryStructureSchema,
@@ -251,5 +255,50 @@ router.put(
     return ok(res, result.payment);
   })
 );
+
+// --- FnF (full and final settlement of exited employees) ---
+const fnfPatch = z.object({
+  amount: z.coerce.number().min(0).max(1e12).nullable().optional(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().transform((v) => (v ? new Date(`${v}T00:00:00.000Z`) : v)),
+  fnf_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().transform((v) => (v ? new Date(`${v}T00:00:00.000Z`) : v)),
+  status: z.enum(['pending', 'in_progress', 'settled']).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+router.get('/fnf', authorize('admin'), asyncHandler(async (req, res) => ok(res, await fnfService.list(req.user.org_id, { status: typeof req.query.status === 'string' ? req.query.status : undefined }))));
+router.patch('/fnf/:membershipId', authorize('admin'), asyncHandler(async (req, res) => {
+  const result = await fnfService.upsert(req.user.org_id, req.user.id, req.params.membershipId, fnfPatch.parse(req.body));
+  if (result.error === 'not_found') return fail(res, 404, 'Employee not found');
+  if (result.error === 'not_exited') return fail(res, 422, 'FnF applies to employees who have exited');
+  return ok(res, result.record);
+}));
+
+// --- Increment reminders (Super Admin users only) ---
+router.get('/increment-reminders', asyncHandler(async (req, res) => {
+  const result = await incrementService.list(req.user, { status: ['pending', 'completed', 'ignored', 'all'].includes(req.query.status) ? req.query.status : 'pending' });
+  if (result.error) return fail(res, 403, 'Only Super Admin users see increment reminders');
+  return ok(res, result.rows);
+}));
+router.post('/increment-reminders/:id/decision', asyncHandler(async (req, res) => {
+  const { status } = z.object({ status: z.enum(['completed', 'ignored']) }).parse(req.body);
+  const result = await incrementService.decide(req.user, req.params.id, status);
+  if (result.error === 'forbidden') return fail(res, 403, 'Only Super Admin users can decide increment reminders');
+  if (result.error) return fail(res, 404, 'Reminder not found');
+  return ok(res, result.reminder);
+}));
+
+// --- Previous months' unpaid salary, offered when a month is prepared ---
+router.get('/runs/:id/previous-dues', authorize('admin'), asyncHandler(async (req, res) => {
+  const result = await previousDues.forRun(req.user.org_id, req.params.id);
+  if (result.error) return fail(res, 404, 'Payroll run not found');
+  return ok(res, result.dues, { run: result.run });
+}));
+router.post('/runs/:id/previous-dues/add', authorize('admin'), asyncHandler(async (req, res) => {
+  const body = z.object({ org_membership_id: z.string().uuid(), due_month: z.number().int().min(1).max(12), due_year: z.number().int().min(2000).max(2100) }).parse(req.body);
+  const result = await previousDues.add(req.user.org_id, req.user, req.params.id, body);
+  if (result.error === 'not_found') return fail(res, 404, 'Payroll run not found');
+  if (result.error === 'not_due') return fail(res, 409, 'That amount is no longer due (it was added already or the figures changed)');
+  if (result.error) return failFor(res, result.error, result);
+  return ok(res, result.due, { needs_refresh: result.needs_refresh });
+}));
 
 module.exports = router;

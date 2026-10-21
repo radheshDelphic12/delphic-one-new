@@ -350,6 +350,10 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
     throw err;
   });
   if (updated.error) return updated;
+  // an employee marked exited by hand gets the same FnF record the nightly job creates
+  if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated') {
+    await require('../../lib/fnf').ensureFnf(prisma, orgId, membershipId, updated.left_at || data.left_at || null);
+  }
   return { membership: updated };
 }
 
@@ -369,6 +373,7 @@ const PERSONAL_SELECT = {
   emergency_contact_relation: true,
   emergency_contact_phone: true,
   emergency_contact_email: true,
+  date_of_birth: true,
   personal_details_updated_at: true,
 };
 

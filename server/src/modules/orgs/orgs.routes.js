@@ -106,6 +106,16 @@ router.get(
   })
 );
 
+// Birthdays and work anniversaries in the next N days (default 14): People highlights and the dashboard's Announcements card.
+router.get(
+  '/announcements',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
+    return ok(res, await require('./announcements.service').upcoming(req.user.org_id, { days }));
+  })
+);
+
 router.get(
   '/memberships/:id',
   requireOrgMembership,
