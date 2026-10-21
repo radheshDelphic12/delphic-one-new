@@ -2022,6 +2022,7 @@ model Org {
   resource_billing_rates  ResourceBillingRate[]
   memberships             OrgMembership[]
   custom_roles            CustomRole[]
+  vendor_email_logs       VendorEmailLog[]
   team_membership_periods TeamMembershipPeriod[]
 
   // Vertical modules + email + planning.
@@ -3145,6 +3146,8 @@ model EmailOutbox {
   kind       String
   to_email   String
   to_name    String?
+  // Optional CC (for example the internal owner of a vendor account); sent as a real CC header.
+  cc_email   String?
   subject    String
   body_text  String
   body_html  String?
@@ -3158,6 +3161,25 @@ model EmailOutbox {
   @@index([status, created_at])
   @@index([org_id])
   @@map("email_outbox")
+}
+
+// Requirements emailed to vendors from the Requirements page: one row per send, with who got it and the exact text.
+model VendorEmailLog {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String   @db.Uuid
+  org             Org      @relation(fields: [org_id], references: [id])
+  sent_by         String   @db.Uuid
+  sent_by_name    String?
+  requirement_ids Json     @default("[]")
+  subject         String
+  body_text       String
+  // [{ account_id, vendor, to, cc, outbox_id }] for the ones queued; skipped: [{ account_id, vendor, reason }]
+  recipients      Json     @default("[]")
+  skipped         Json     @default("[]")
+  created_at      DateTime @default(now())
+
+  @@index([org_id, created_at])
+  @@map("vendor_email_logs")
 }
 
 enum PartnerKind {
