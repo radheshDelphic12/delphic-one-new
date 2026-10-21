@@ -32,7 +32,7 @@ const ACCOUNT_INCLUDE = {
   meeting_attendees: { include: { user: { select: { id: true, name: true } } } },
 };
 
-async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
+async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, location, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
   // Accumulate into an AND array so multiple OR-bearing clauses (type scope +
   // search) can coexist without one clobbering the other in the object literal.
   // Projects share this table (type 'client', is_project) but are managed in
@@ -51,6 +51,7 @@ async function list({ type, include_unclassified, stage, stuck, owner_id, origin
   if (owner_id) and.push({ owner_id });
   if (origin_owner_id) and.push({ origin_owner_id });
   if (industry) and.push({ industry: { contains: industry, mode: 'insensitive' } });
+  if (location) and.push({ OR: [{ location: { contains: location, mode: 'insensitive' } }, { location_city: { contains: location, mode: 'insensitive' } }, { location_country: { contains: location, mode: 'insensitive' } }] });
   if (specialization) and.push({ vendor_specializations: { has: specialization } });
   if (search) {
     and.push({

@@ -88,7 +88,7 @@ describe('group travel', () => {
 
     const opts = (await get('/group/travel/options')).body.data;
     expect(opts.companies.map((c) => c.name).sort()).toEqual(['Alpha Global', 'Beta Trading']);
-    expect(opts.clients.map((c) => c.name)).toEqual(['Acme Client']);
+    expect(opts.clients.map((c) => [c.name, c.org_name])).toEqual([['Acme Client', 'Alpha Global']]);
     expect(opts.people.some((p) => p.user_id === traveller.id && p.org_name === 'Beta Trading')).toBe(true);
 
     const made = await post(`/group/travel/${trip.id}/meetings/new`, { account_id: client.id, title: 'Quarterly review', scheduled_at: new Date(Date.now() + 4 * 86400000).toISOString(), location: 'Andheri office' });
@@ -117,10 +117,20 @@ describe('group travel', () => {
     expect((await groupTravel.tagsFor([key])).size).toBe(0);
   });
 
-  test('a cancelled trip carries no calendar tag and a non-Delphic client cannot be used', async () => {
+  test('a meeting can be made for a client of ANY group company and lands on that company calendar; a client outside the group is refused; a cancelled trip carries no tag', async () => {
     const trip = (await post('/group/travel', { title: 'T', destination: 'Pune', start_date: inDays(3), end_date: inDays(4) })).body.data;
-    const other = await prisma.account.create({ data: { type: 'client', name: 'Beta client', stage: 'active', owner_id: (await createUser({ role: 'admin', withOrg: false })).id, org_id: b.id } });
-    expect((await post(`/group/travel/${trip.id}/meetings/new`, { account_id: other.id, title: 'x', scheduled_at: new Date(Date.now() + 86400000).toISOString() })).status).toBe(422);
+    const betaClient = await prisma.account.create({ data: { type: 'client', name: 'Beta client', stage: 'active', owner_id: (await createUser({ role: 'admin', withOrg: false })).id, origin_owner_id: (await createUser({ role: 'admin', withOrg: false })).id, org_id: b.id } });
+    const optsNow = (await get('/group/travel/options')).body.data;
+    expect(optsNow.clients.map((c) => [c.name, c.org_name]).sort()).toEqual([['Acme Client', 'Alpha Global'], ['Beta client', 'Beta Trading']]);
+    const forBeta = await post(`/group/travel/${trip.id}/meetings/new`, { org_id: b.id, account_id: betaClient.id, title: 'Beta visit', scheduled_at: new Date(Date.now() + 86400000).toISOString() });
+    expect(forBeta.status).toBe(201);
+    expect(await prisma.clientMeeting.findFirst({ where: { title: 'Beta visit' } })).toMatchObject({ org_id: b.id, account_id: betaClient.id });
+    // the company has to match the client
+    expect((await post(`/group/travel/${trip.id}/meetings/new`, { org_id: a.id, account_id: betaClient.id, title: 'x', scheduled_at: new Date(Date.now() + 86400000).toISOString() })).status).toBe(422);
+    // a client of a company outside the group
+    const stranger = await createOrg({ name: 'Stranger Co' });
+    const outside = await prisma.account.create({ data: { type: 'client', name: 'Outside client', stage: 'active', owner_id: (await createUser({ role: 'admin', withOrg: false })).id, origin_owner_id: (await createUser({ role: 'admin', withOrg: false })).id, org_id: stranger.id } });
+    expect((await post(`/group/travel/${trip.id}/meetings/new`, { account_id: outside.id, title: 'x', scheduled_at: new Date(Date.now() + 86400000).toISOString() })).status).toBe(422);
     const made = await post(`/group/travel/${trip.id}/meetings/new`, { account_id: client.id, title: 'ok', scheduled_at: new Date(Date.now() + 86400000).toISOString() });
     const key = made.body.data.meetings[0].key;
     expect((await groupTravel.tagsFor([key])).size).toBe(1);
