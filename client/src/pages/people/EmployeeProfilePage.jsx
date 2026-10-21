@@ -12,7 +12,7 @@ import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
-import { EMPLOYMENT_STATUS_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
+import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -24,11 +24,6 @@ const EMPTY_OPTIONS = {
   managerOptions: [],
   personOptions: [],
 };
-
-const WORKER_TYPE_OPTIONS = [
-  { value: 'full_time_employee', label: 'Full-Time Employee' },
-  { value: 'contractor', label: 'Contractor' },
-];
 
 function formatMoney(value, currency) {
   if (value === null || value === undefined) return 'Not set';

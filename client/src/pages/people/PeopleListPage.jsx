@@ -5,7 +5,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
-import { EMPLOYMENT_STATUS_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
+import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel, workerTypeLabel } from '../../lib/employeeOptions.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
@@ -29,6 +29,7 @@ function EmployeePeek({ row, onClose }) {
       <dl className="grid gap-4 sm:grid-cols-2">
         <PeekField label="Role"><span className="capitalize">{row.role}</span></PeekField>
         <PeekField label="Status"><Badge value={row.employment_status} label={employmentStatusLabel(row.employment_status)} /></PeekField>
+        <PeekField label="User type">{workerTypeLabel(row.worker_type)}</PeekField>
         <PeekField label="Department">{row.department?.name || 'Not assigned'}</PeekField>
         <PeekField label="Designation">{row.designation?.name || 'Not assigned'}</PeekField>
         <PeekField label="Location">{row.location?.name || 'Not assigned'}</PeekField>
@@ -56,7 +57,7 @@ function sortByDepartment(rows) {
 }
 
 const NONE = '__none__';
-const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', workMode: '', manager: '', joinedFrom: '', joinedTo: '' };
+const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', userType: '', workMode: '', manager: '', joinedFrom: '', joinedTo: '' };
 
 const FILTER_FIELDS = [
   { key: 'department', label: 'Department', get: (r) => r.department?.name },
@@ -65,6 +66,8 @@ const FILTER_FIELDS = [
   { key: 'location', label: 'Location', get: (r) => r.location?.name },
   // Status and work mode list every value the system knows (from one shared source), not just the ones in the loaded rows.
   { key: 'status', label: 'Status', get: (r) => r.employment_status, fixed: EMPLOYMENT_STATUS_OPTIONS },
+  // User type: Full-Time Employee or Contractor. A row with no stored value counts as a full-time employee (the column default).
+  { key: 'userType', label: 'User type', get: (r) => r.worker_type || 'full_time_employee', fixed: WORKER_TYPE_OPTIONS },
   { key: 'workMode', label: 'Work mode', get: (r) => r.work_mode, fixed: WORK_MODE_OPTIONS },
   { key: 'manager', label: 'Manager', get: (r) => r.manager?.person?.name },
 ];
@@ -156,6 +159,7 @@ export default function PeopleListPage() {
     { key: 'code', header: 'Employee code', render: (row) => row.employee_code || <span className="text-tertiary-400">—</span> },
     { key: 'role', header: 'Role', render: (row) => <span className="capitalize">{row.role}</span> },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not assigned' },
+    { key: 'userType', header: 'User type', render: (row) => workerTypeLabel(row.worker_type) },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
     {
       key: 'status',
