@@ -1,6 +1,7 @@
 // "Increment review due": when an employee completes another year from their joining date, the Super Admin users are told.
 // Nothing here changes salary. A reminder stays pending (and keeps showing) until it is marked Completed or Ignored.
 const prisma = require('../../config/db');
+const { decide: decidePerm } = require('../../lib/permissions');
 const { notify } = require('../../lib/notifications');
 const { todayIst } = require('../../lib/istDate');
 
@@ -8,11 +9,13 @@ const DAY = 86400000;
 const ymd = (d) => new Date(d).toISOString().slice(0, 10);
 
 /** Active users with the Super Admin role for this company: the company's super admins and the group's super admins. */
-async function recipientsFor(orgGroupId) {
+async function recipientsFor(orgGroupId, orgId) {
+  const holders = await prisma.orgMembership.findMany({ where: { ...(orgId ? { org_id: orgId } : {}), custom_role: { is: { permissions: { path: ['increments.receive'], equals: true } } } }, select: { person_id: true } });
+  const roleHolders = holders.map((h) => h.person_id);
   const rows = await prisma.user.findMany({
     where: {
       active: true,
-      OR: [{ is_superadmin: true }, { is_group_superadmin: true, ...(orgGroupId ? { OR: [{ org_group_memberships: { some: { org_group_id: orgGroupId } } }, { org_group_memberships: { none: {} } }] } : {}) }],
+      OR: [{ is_superadmin: true }, { id: { in: roleHolders } }, { is_group_superadmin: true, ...(orgGroupId ? { OR: [{ org_group_memberships: { some: { org_group_id: orgGroupId } } }, { org_group_memberships: { none: {} } }] } : {}) }],
     },
     select: { id: true },
   });
@@ -42,7 +45,7 @@ async function generate({ today = todayIst(), lookbackDays = 7 } = {}) {
         if (exists) continue;
         const reminder = await prisma.incrementReminder.create({ data: { org_id: org.id, org_membership_id: p.id, years_completed: years, due_date: day } });
         created += 1;
-        recipients = recipients || (await recipientsFor(org.org_group_id));
+        recipients = recipients || (await recipientsFor(org.org_group_id, org.id));
         await notify(prisma, {
           type: 'increment_review_due',
           recipientIds: recipients,
@@ -64,6 +67,8 @@ async function scopeFor(user) {
     return orgs.map((o) => o.id);
   }
   if (u.is_superadmin) return [user.org_id];
+  // a custom role that ticks "Receive increment reminders" sees its own company's reminders
+  if (decidePerm(user, 'increments.receive') === true) return [user.org_id];
   return null;
 }
 

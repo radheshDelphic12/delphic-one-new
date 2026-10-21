@@ -1,4 +1,5 @@
 const express = require('express');
+const { can } = require('../../lib/permissions');
 const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -22,7 +23,7 @@ router.get(
 
 router.get(
   '/',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
@@ -65,7 +66,7 @@ router.get(
 
 router.get(
   '/regularization-requests',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const { status } = regularizationListQuerySchema.parse(req.query);
     return ok(res, await regularization.listAll(req.user.org_id, { status }), { pending: await regularization.pendingCount(req.user.org_id) });
@@ -74,7 +75,7 @@ router.get(
 
 router.post(
   '/regularization-requests/:id/decision',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const body = regularizationDecisionSchema.parse(req.body);
     const result = await regularization.decide(req.user.org_id, req.params.id, req.user, body);
@@ -85,7 +86,7 @@ router.post(
 
 router.post(
   '/:id/regularize',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const body = regularizeSchema.parse(req.body);
     const result = await service.regularize(req.user.org_id, req.params.id, req.user.id, body);
@@ -96,7 +97,7 @@ router.post(
 
 router.delete(
   '/:id',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const body = deleteRecordSchema.parse(req.body || {});
     const result = await service.deleteRecord(req.user.org_id, req.params.id, req.user.id, body);
@@ -116,7 +117,7 @@ const BACKFILL_ERRORS = {
 
 router.post(
   '/manual',
-  authorize('admin'),
+  can('attendance.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const body = manualEntrySchema.parse(req.body);
     const result = await service.recordManualDay(req.user.org_id, req.user.id, body);

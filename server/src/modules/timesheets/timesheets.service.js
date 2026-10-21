@@ -1,4 +1,7 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
+// An admin, or a custom role that may check timesheets for everyone.
+const isApprover = (a) => a.role === 'admin' || decide(a, 'timesheets.approve') === true;
 const logger = require('../../config/logger');
 const calendarsService = require('../calendars/calendars.service');
 const leaveService = require('../leave/leave.service');
@@ -56,7 +59,7 @@ async function notifyManager(orgId, orgMembershipId, type, actorId, context) {
 }
 
 function canDecideFor(actor, targetMembership) {
-  return actor.role === 'admin' || targetMembership?.manager_id === actor.org_membership_id;
+  return isApprover(actor) || targetMembership?.manager_id === actor.org_membership_id;
 }
 
 // Total hours the employee has on a date across every project, ignoring
@@ -437,7 +440,7 @@ async function bulkDeleteEntries(orgId, user, { ids, reason }) {
   const deleted = [];
   const failed = [];
   for (const id of unique) {
-    const result = user.role === 'admin'
+    const result = isApprover(user)
       ? await adminDeleteEntry(orgId, user.id, id, { reason })
       : await deleteOwnEntry(orgId, user.org_membership_id, id);
     if (result.error) failed.push({ id, error: result.error });
@@ -504,7 +507,7 @@ async function decideEntry(orgId, entryId, actor, { status, reason }) {
 
   // Approval chain: Employee -> Manager (optional) -> Admin (mandatory). A manager's approval is only the
   // first step when the org requires admin approval; the entry is final (pay, billing) once an admin approves.
-  const isAdmin = actor.role === 'admin';
+  const isAdmin = isApprover(actor);
   const policy = await approvalPolicy(orgId);
   if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
   if (!isAdmin && existing.manager_approved_at) return { error: 'awaiting_admin' };
@@ -670,7 +673,7 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
   if (!canDecideFor(actor, owner)) return { error: 'not_approver' };
   if (owner?.id === actor.org_membership_id && actor.role !== 'admin') return { error: 'own_entry' };
   // Employee -> Manager (optional) -> Admin (mandatory): a manager's approval is only the first step.
-  const isAdmin = actor.role === 'admin';
+  const isAdmin = isApprover(actor);
   const policy = await approvalPolicy(orgId);
   if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
   if (!isAdmin && ticket.manager_approved_at) return { error: 'awaiting_admin' };
@@ -764,13 +767,13 @@ async function approvalsScope(orgId, actor) {
   const directReports = await prisma.orgMembership.count({
     where: { org_id: orgId, manager_id: actor.org_membership_id, employment_status: { not: 'terminated' } },
   });
-  return { is_approver: actor.role === 'admin' || directReports > 0, direct_reports: directReports };
+  return { is_approver: isApprover(actor) || directReports > 0, direct_reports: directReports };
 }
 
 // Pending entries + pending regularisation requests this person may decide:
 // their direct reports' (or, for an admin, everyone's).
 async function pendingApprovals(orgId, actor) {
-  const owner = actor.role === 'admin' ? {} : { manager_id: actor.org_membership_id };
+  const owner = isApprover(actor) ? {} : { manager_id: actor.org_membership_id };
   const policy = await approvalPolicy(orgId);
   const managerOnly = actor.role !== 'admin';
   const [entries, regularizations] = await Promise.all([
@@ -844,7 +847,7 @@ async function listTeamProjects(orgId, user, { year, month }) {
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
   const label = (a) => ({ id: a.id, name: a.project_name || a.name });
-  if (user.role === 'admin') {
+  if (isApprover(user)) {
     const accounts = await prisma.account.findMany({ where: projectListWhere(orgId), select: { id: true, name: true, project_name: true }, orderBy: { name: 'asc' } });
     return accounts.map(label);
   }
@@ -1003,7 +1006,7 @@ async function decideOvertime(orgId, overtimeId, actor, { status, reason }) {
   // A manager decides once; an admin may revise a decision.
   if (row.status !== 'pending' && actor.role !== 'admin') return { error: 'already_decided' };
   // Employee -> Manager (optional) -> Admin (mandatory): a manager's approval is only the first step.
-  const isAdmin = actor.role === 'admin';
+  const isAdmin = isApprover(actor);
   const policy = await approvalPolicy(orgId);
   if (!isAdmin && !policy.timesheet_manager_approval) return { error: 'manager_approval_disabled' };
   if (!isAdmin && row.manager_approved_at) return { error: 'awaiting_admin' };

@@ -2021,6 +2021,7 @@ model Org {
   timesheet_month_locks   TimesheetMonthLock[]
   resource_billing_rates  ResourceBillingRate[]
   memberships             OrgMembership[]
+  custom_roles            CustomRole[]
   team_membership_periods TeamMembershipPeriod[]
 
   // Vertical modules + email + planning.
@@ -2298,6 +2299,9 @@ model OrgMembership {
   manager_id                  String?          @db.Uuid
   manager                     OrgMembership?   @relation("OrgMembershipManager", fields: [manager_id], references: [id], onDelete: SetNull)
   direct_reports              OrgMembership[]  @relation("OrgMembershipManager")
+  // Custom role (Settings > Roles & permissions). Null = the plain system role above decides, exactly as before.
+  custom_role_id              String?          @db.Uuid
+  custom_role                 CustomRole?      @relation(fields: [custom_role_id], references: [id], onDelete: SetNull)
   // HR contact for general queries, and the recruiter who onboarded this
   // person (for recruiter-performance tracking) — both point at User, not
   // OrgMembership, since an HR/sourcing POC may not share this org.
@@ -2377,7 +2381,31 @@ model OrgMembership {
   @@index([org_id])
   @@index([person_id])
   @@index([manager_id])
+  @@index([custom_role_id])
   @@map("org_memberships")
+}
+
+// A role the Super Admin builds by ticking permissions (lib/permissions.js is the catalogue). `base_role` is the plain system
+// role its holders keep for everything not covered by a permission, so nobody loses a screen. `permissions` maps a permission
+// key to true, or to 'own' | 'team' | 'all' where the action has a scope. Per company; seeded roles are marked is_starter.
+model CustomRole {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id])
+  name        String
+  description String?
+  base_role   UserRole @default(employee)
+  permissions Json     @default("{}")
+  is_starter  Boolean  @default(false)
+  created_by  String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  members OrgMembership[]
+
+  @@unique([org_id, name])
+  @@index([org_id])
+  @@map("custom_roles")
 }
 
 model Account {

@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
 const env = require('../../config/env');
 const { SUBMISSION_STAGE_TRANSITIONS, CLIENT_ROUND_TYPES, INTERNAL_ROUND_TYPES, computeMargin, computeMissingMandatoryRounds, isBackwardTransition, roundTypeLabel } = require('./stageMachines');
 const { computeClosureDetail } = require('../../utils/closureProgress');
@@ -153,7 +154,7 @@ async function create(data, user) {
   // Sales may only put forward bench candidates (source = direct/"Bench" AND
   // currently on_bench) — everything else (vendor-sourced, market, off-bench) stays
   // recruiter/admin-only.
-  if (user.role === 'sales' && !(profile.source === 'direct' && profile.on_bench)) {
+  if (user.role === 'sales' && !user.custom_permissions && !(profile.source === 'direct' && profile.on_bench)) {
     return { error: 'sales_bench_only' };
   }
 
@@ -335,6 +336,8 @@ async function getHistory(id) {
 }
 
 function canManageInterviewRound(submission, requirementSalesOwnerId, roundType, user) {
+  const decided = decide(user, 'meetings.schedule');
+  if (decided !== null) return decided;
   if (user.role === 'admin') return true;
   if (user.role === 'recruiter') return submission.submitted_by === user.id;
   if (user.role === 'sales') {

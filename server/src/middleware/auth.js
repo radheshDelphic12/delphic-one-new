@@ -6,6 +6,7 @@ const { isWorking } = require('../lib/employmentStatus');
 const orgContext = require('../lib/orgContext');
 const { fail } = require('../utils/response');
 const { contractorMayAccess } = require('./contractorScope');
+const { teamUserIds } = require('../lib/permissions');
 
 // Multi-company ERP (Phase 1): the JWT carries an `org_id` for users who have
 // an OrgMembership (everyone, post Phase-0 backfill). Tokens issued before
@@ -20,12 +21,21 @@ async function resolveOrgContext(user, orgId) {
   if (!orgId) return user;
   const membership = await prisma.orgMembership.findUnique({
     where: { person_id_org_id: { person_id: user.id, org_id: orgId } },
-    select: { id: true, role: true, employment_status: true, worker_type: true },
+    select: { id: true, role: true, employment_status: true, worker_type: true, custom_role: { select: { id: true, name: true, base_role: true, permissions: true } } },
   });
   if (!membership || !isWorking(membership.employment_status)) return null;
   // A contractor is always self-service, whatever role is on the row.
-  const role = membership.worker_type === 'contractor' ? 'employee' : membership.role;
-  return { ...user, role, org_id: orgId, org_membership_id: membership.id, worker_type: membership.worker_type };
+  const isContractor = membership.worker_type === 'contractor';
+  const custom = !isContractor ? membership.custom_role : null;
+  // A custom role keeps its plain base role for everything its permissions do not cover; its permissions decide the gated endpoints.
+  const role = isContractor ? 'employee' : custom ? custom.base_role : membership.role;
+  const resolved = { ...user, role, org_id: orgId, org_membership_id: membership.id, worker_type: membership.worker_type };
+  if (custom) {
+    resolved.custom_role = { id: custom.id, name: custom.name };
+    resolved.custom_permissions = custom.permissions || {};
+    if (Object.values(resolved.custom_permissions).includes('team')) resolved.team_user_ids = await teamUserIds(orgId, membership.id);
+  }
+  return resolved;
 }
 
 function authenticate(req, res, next) {

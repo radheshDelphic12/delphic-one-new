@@ -32,6 +32,7 @@ const designationsRoutes = require('./modules/designations/designations.routes')
 const assetsRoutes = require('./modules/assets/assets.routes');
 const policiesRoutes = require('./modules/policies/policies.routes');
 const changeLogRoutes = require('./modules/changeLog/changeLog.routes');
+const rolesRoutes = require('./modules/roles/roles.routes');
 const clientErrorsRoutes = require('./modules/clientErrors/clientErrors.routes');
 const teamsRoutes = require('./modules/teams/teams.routes');
 const allocationsRoutes = require('./modules/allocations/allocations.routes');
@@ -134,6 +135,7 @@ app.use('/api/v1/designations', designationsRoutes);
 app.use('/api/v1/assets', assetsRoutes);
 app.use('/api/v1/policies', policiesRoutes);
 app.use('/api/v1/change-log', changeLogRoutes);
+app.use('/api/v1/roles', rolesRoutes);
 app.use('/api/v1/teams', teamsRoutes);
 app.use('/api/v1/allocations', allocationsRoutes);
 app.use('/api/v1/timesheets', timesheetsRoutes);

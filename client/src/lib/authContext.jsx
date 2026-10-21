@@ -23,6 +23,16 @@ function withOrgContext(user, memberships, activeOrg) {
   };
 }
 
+// A custom role's permissions come from /users/me for the company that is open; login and switch-company fetch them too.
+async function withPermissions(user) {
+  try {
+    const { data } = await apiClient.get('/users/me');
+    return data.data?.permissions ? { ...user, permissions: data.data.permissions, custom_role: data.data.custom_role } : { ...user, permissions: undefined, custom_role: undefined };
+  } catch {
+    return user;
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +67,7 @@ export function AuthProvider({ children }) {
     const memberships = data.data.memberships || [];
     const activeOrg = data.data.active_org;
     if (activeOrg) localStorage.setItem('active_org_id', activeOrg.id);
-    const nextUser = withOrgContext(data.data.user, memberships, activeOrg);
+    const nextUser = await withPermissions(withOrgContext(data.data.user, memberships, activeOrg));
     setUser(nextUser);
     return nextUser;
   }
@@ -68,7 +78,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('access_token', data.data.access_token);
     localStorage.setItem('refresh_token', data.data.refresh_token);
     localStorage.setItem('active_org_id', data.data.active_org.id);
-    const nextUser = withOrgContext(user, user.memberships || [], data.data.active_org);
+    const nextUser = await withPermissions(withOrgContext(user, user.memberships || [], data.data.active_org));
     setUser(nextUser);
     return nextUser;
   }

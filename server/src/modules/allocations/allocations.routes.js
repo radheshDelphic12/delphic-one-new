@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { can } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./allocations.service');
@@ -7,7 +8,7 @@ const v = require('./allocations.validation');
 
 // People → Capacity & Allocation (admin). Reports read live, effective-dated data.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, authorize('admin'));
+router.use(authenticate, requireOrgMembership, can('allocations.manage', 'admin'));
 
 const ERRORS = {
   not_found: [404, 'Allocation not found'],

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Activity, Bell, IdCard, LogOut, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+import { Activity, Bell, IdCard, KeyRound, LogOut, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -9,6 +9,7 @@ import Avatar from '../../components/ui/Avatar.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
+import RolesPermissionsPanel from '../../components/admin/RolesPermissionsPanel.jsx';
 import { userCan } from '../../lib/permissions.js';
 import { isZephyrOrg } from '../../lib/zephyr/useZephyr.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
@@ -25,6 +26,7 @@ const BASE_TABS = [
 ];
 
 const DELETED_TAB = { key: 'deleted', label: 'Deleted records', icon: Trash2 };
+const ROLES_TAB = { key: 'roles', label: 'Roles & permissions', icon: KeyRound };
 
 const ENTITY_PATH = {
   account: (id) => `/accounts/${id}`,
@@ -243,10 +245,13 @@ export default function SettingsPage() {
   const canSeeDeleted = userCan(user, 'deleteRecords') && !user?.active_org?.enabled_modules?.includes('zephyr') && !user?.active_org?.enabled_modules?.includes('gulati') && !user?.active_org?.enabled_modules?.includes('foundation') && !user?.active_org?.enabled_modules?.includes('zklyrera') && !user?.active_org?.enabled_modules?.includes('valterra') && !user?.active_org?.enabled_modules?.includes('novarex') && !user?.active_org?.enabled_modules?.includes('acconcy');
   // Zephyr has no HR profile (reporting line, bank, emergency contact, documents), so "My details" is hidden there.
   const hideDetails = isZephyrOrg(user);
+  // Roles & permissions: the Super Admin (and the Group Super Admin, in the company they have open).
+  const canManageRoles = user?.role === 'admin' && Boolean(user?.is_superadmin || user?.is_group_superadmin);
   const TABS = useMemo(() => {
     const base = hideDetails ? BASE_TABS.filter((t) => t.key !== 'details') : BASE_TABS;
-    return canSeeDeleted ? [...base, DELETED_TAB] : base;
-  }, [canSeeDeleted, hideDetails]
+    const withDeleted = canSeeDeleted ? [...base, DELETED_TAB] : base;
+    return canManageRoles ? [...withDeleted, ROLES_TAB] : withDeleted;
+  }, [canSeeDeleted, canManageRoles, hideDetails]
   );
   const active = useMemo(
     () => (TABS.some((t) => t.key === requested) ? requested : 'account'),
@@ -292,6 +297,7 @@ export default function SettingsPage() {
       {active === 'notifications' && <NotificationPreferencesPage />}
       {active === 'activity' && <ActivityTab />}
       {active === 'deleted' && canSeeDeleted && <DeletedRecordsPanel />}
+      {active === 'roles' && canManageRoles && <RolesPermissionsPanel />}
     </div>
   );
 }
