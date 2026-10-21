@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { todayIst } = require('../../lib/istDate');
 
 const MEMBER_SELECT = {
   id: true,
@@ -50,12 +51,24 @@ function adminsOf(roots) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
+// nightly job that flips serving-notice people to terminated may not have run yet). The last working day itself still counts.
+function exitedWhere(today) {
+  return {
+    AND: [
+      { employment_status: { not: 'terminated' } },
+      { OR: [{ left_at: null }, { left_at: { gte: today } }] },
+      { NOT: { employment_status: 'notice_period', notice_end_date: { lt: today } } },
+    ],
+  };
+}
+
 async function getOrgChart(orgId, { include_terminated, exclude_group_admins = false }) {
   const [memberships, teams] = await Promise.all([
     prisma.orgMembership.findMany({
       where: {
         org_id: orgId,
-        ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }),
+        ...(include_terminated ? {} : exitedWhere(todayIst())),
         ...(exclude_group_admins ? { person: { is_group_superadmin: false } } : {}),
       },
       select: MEMBER_SELECT,
