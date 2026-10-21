@@ -1,6 +1,8 @@
 /** Internal job board (refer / apply from the bench) and the Offices overview. */
 const { app, prisma, request, cleanDatabase, createUser, loginAs, createRequirement, createActiveClientAccount, authed } = require('./helpers');
 
+const { todayIst } = require('../src/lib/istDate');
+
 let sales; let sToken; let empToken; let emp; let req; let adminToken; let org;
 const slug = 'java-developer-ab12';
 
@@ -34,6 +36,11 @@ describe('internal job board', () => {
     expect(row).toMatchObject({ source: 'referral', channel: 'referral', status: 'new', created_by: emp.id });
     expect(row.notes).toContain('Referred by');
 
+    // "Apply myself" is only for the bench or notice period; an ordinary employee is refused (referring stays open)
+    expect(list.body.data[0].can_apply).toBe(false);
+    expect((await authed(request(app).post(`/api/v1/internal-jobs/${slug}/apply`), empToken).send({ experience_years: 4 })).status).toBe(403);
+    await prisma.orgMembership.updateMany({ where: { person_id: emp.id }, data: { bench_start_date: todayIst() } });
+    expect((await authed(request(app).get('/api/v1/internal-jobs'), empToken)).body.data[0].can_apply).toBe(true);
     expect((await authed(request(app).post(`/api/v1/internal-jobs/${slug}/apply`), empToken).send({ experience_years: 4 })).status).toBe(201);
     expect((await authed(request(app).post(`/api/v1/internal-jobs/${slug}/apply`), empToken).send({})).status).toBe(409);
     expect(await prisma.jobApplicant.findFirst({ where: { email: emp.email } })).toMatchObject({ source: 'internal', channel: 'internal' });

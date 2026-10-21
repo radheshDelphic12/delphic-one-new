@@ -45,6 +45,8 @@ const ROLE_EVENT_MATRIX = {
   timesheet_regularization_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
   // Sent only to Super Admin users (the job names them); the bell shows it until the reminder is decided.
   increment_review_due: { roles: ['admin'], defaultInApp: true },
+  // To the person on the bench and the admins: days left on the bench.
+  bench_countdown: { roles: ['admin', 'employee'], defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
@@ -69,6 +71,7 @@ const NOTIFICATION_LABELS = {
   timesheet_entry_decided: ['Timesheet decision', 'Your manager approves or rejects a timesheet entry.'],
   timesheet_regularization_requested: ['Regularisation requested', 'A direct report asks to regularise a locked timesheet day.'],
   timesheet_regularization_decided: ['Regularisation decision', 'Your regularisation request is approved or rejected.'],
+  bench_countdown: ['Bench countdown', "Days left of an employee's bench period."],
   increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
 
@@ -129,6 +132,12 @@ function renderNotification(type, ctx = {}) {
         'Requirement status changed',
         `${actorPrefix(ctx)}set "${truncate(requirement)}" to ${ctx.toStatus || 'a new status'}.`,
         'requirement', ctx.requirementId, ctx
+      );
+    case 'bench_countdown':
+      return envelope(
+        'Bench period ending',
+        `${ctx.employeeName || 'An employee'} has ${Number(ctx.daysLeft) === 0 ? 'their last day' : `${ctx.daysLeft} day${Number(ctx.daysLeft) === 1 ? '' : 's'} left`} on the bench (ends ${ctx.endDate || 'soon'}).`,
+        null, null, ctx
       );
     case 'increment_review_due':
       return envelope(

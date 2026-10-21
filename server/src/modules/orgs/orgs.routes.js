@@ -116,6 +116,14 @@ router.get(
   })
 );
 
+// Employees currently on the bench (not allocated to any project today), with the days left: the dashboard section.
+router.get(
+  '/bench',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await require('../bench/bench.service').onBench(req.user.org_id)))
+);
+
 router.get(
   '/memberships/:id',
   requireOrgMembership,
@@ -238,6 +246,8 @@ router.patch(
     if (result.error === 'lwd_before_notice') return fail(res, 422, 'The last working day cannot be before the notice date');
     if (result.error === 'employee_code_taken') return fail(res, 409, 'Another employee in this company already has that employee code');
     if (result.error === 'joined_after_exit') return fail(res, 422, JOINED_AFTER_EXIT);
+    if (result.error === 'bench_end_before_start') return fail(res, 422, 'The bench end date cannot be before the start date');
+    if (result.error === 'bench_end_without_start') return fail(res, 422, 'Set the bench start date first');
     return ok(res, { ...result.membership, can_edit_joining_date: true });
   })
 );

@@ -364,6 +364,7 @@ enum NotificationType {
   timesheet_regularization_requested
   timesheet_regularization_decided
   increment_review_due
+  bench_countdown
 }
 
 enum NotificationEntityType {
@@ -2328,6 +2329,9 @@ model OrgMembership {
   // employment_status = notice_period; left_at follows the LWD on exit.
   notice_start_date           DateTime?        @db.Date
   notice_end_date             DateTime?        @db.Date
+  // Bench: a free period (30 days by default) between projects. Ends the day the person is allocated to a project.
+  bench_start_date            DateTime?        @db.Date
+  bench_end_date              DateTime?        @db.Date
   created_at                  DateTime         @default(now())
   updated_at                  DateTime         @default(now()) @updatedAt
 

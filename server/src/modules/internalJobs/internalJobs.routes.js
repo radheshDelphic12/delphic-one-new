@@ -10,6 +10,7 @@ const router = express.Router();
 router.use(authenticate, requireMasterWorkspace);
 
 const done = (res, r) => {
+  if (r.error === 'not_eligible') return fail(res, 403, 'Applying for a job yourself is only for employees on the bench or serving notice');
   if (r.error === 'already_applied') return fail(res, 409, 'This person has already been put forward for this job');
   if (r.error) return fail(res, 404, 'This job is no longer open');
   return ok(res, { done: true }, {}, 201);

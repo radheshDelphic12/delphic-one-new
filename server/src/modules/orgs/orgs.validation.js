@@ -74,6 +74,9 @@ const updateMembershipSchema = z.object({
   employment_status: z.enum(['active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated']).optional(),
   notice_start_date: optionalDate.nullable(),
   notice_end_date: optionalDate.nullable(),
+  // Bench period (People): end defaults to start + 30 days; being allocated to a project takes the person off the bench.
+  bench_start_date: optionalDate.nullable(),
+  bench_end_date: optionalDate.nullable(),
   work_mode: z.enum(['remote', 'onsite', 'hybrid']).nullable().optional(),
   // People → user type. Contractor needs a vendor account and a monthly vendor rate.
   worker_type: z.enum(['full_time_employee', 'contractor']).optional(),

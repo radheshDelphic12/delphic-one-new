@@ -29,6 +29,7 @@ import { funnelChartData, stageFilterHref, statsForRole } from './dashboardWidge
 import LightweightDashboard from './LightweightDashboard.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
+import BenchCard from './BenchCard.jsx';
 
 const cardMotion = {
   initial: { opacity: 0, y: 12 },
@@ -425,6 +426,12 @@ export default function DashboardPage() {
           <motion.div {...cardMotion}>
             <AnnouncementsCard />
           </motion.div>
+
+          {role === 'admin' && (
+            <motion.div {...cardMotion}>
+              <BenchCard />
+            </motion.div>
+          )}
 
           {role === 'admin' && (
             <motion.div {...cardMotion}>

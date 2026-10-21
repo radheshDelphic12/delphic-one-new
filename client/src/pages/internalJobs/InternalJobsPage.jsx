@@ -97,7 +97,9 @@ export default function InternalJobsPage() {
                 {j.referrals > 0 && <Pill tone="blue">{j.referrals} referred by you</Pill>}
                 {j.applied && <Pill tone="green">You applied</Pill>}
                 <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => setReferring(referring === j.slug ? null : j.slug)}><UserPlus className="h-3.5 w-3.5" />Refer someone</button>
-                {!j.applied && <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={() => applyMyself(j)}>Apply myself</button>}
+                {!j.applied && (j.can_apply
+                  ? <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={() => applyMyself(j)}>Apply myself</button>
+                  : <button type="button" disabled title="Only for employees on the bench or serving notice" className="btn-primary cursor-not-allowed px-3 py-1.5 text-xs opacity-50">Apply myself</button>)}
               </div>
             </div>
             {j.description && <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm text-tertiary-700">{j.description}</p>}
