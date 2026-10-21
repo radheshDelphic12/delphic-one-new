@@ -2600,7 +2600,17 @@ model JobApplicant {
   created_by         String?     @db.Uuid
   created_at         DateTime    @default(now())
   updated_at         DateTime    @default(now()) @updatedAt
+  // Soft delete (restorable from Group Dashboard > Logs). A deleted applicant is invisible to every ordinary read.
+  deleted_at         DateTime?
+  deleted_by         String?     @db.Uuid
+  delete_reason      String?
+  // "Unlink from job": the recruiter detached this person from the job; the Profile stays.
+  unlinked_at        DateTime?
+  // Lower-cased email: one person applies once to a requirement (unique with requirement_id). Empty for a person
+  // with no email, for a deleted applicant, and for older duplicate rows (kept, not merged).
+  dedupe_key         String?
 
+  @@unique([requirement_id, dedupe_key])
   @@index([requirement_id, status])
   @@index([assigned_to])
   @@index([channel])

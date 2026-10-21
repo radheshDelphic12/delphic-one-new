@@ -19,7 +19,7 @@ const prisma = new PrismaClient({
 // soft-deleted parent can still appear via an existing child's `include`. That
 // is acceptable here — deleted records are duplicates / terminal, and the
 // top-level lists + reports are what matter.
-const SOFT_DELETE_MODELS = new Set(['Account', 'Requirement', 'Submission', 'Profile', 'InterviewRound']);
+const SOFT_DELETE_MODELS = new Set(['Account', 'Requirement', 'Submission', 'Profile', 'InterviewRound', 'JobApplicant']);
 const READ_ACTIONS = new Set(['findFirst', 'findMany', 'count', 'aggregate', 'groupBy']);
 
 function mentionsDeletedAt(where) {

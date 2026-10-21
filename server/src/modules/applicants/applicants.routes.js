@@ -59,6 +59,8 @@ router.get('/:id/cv', authorize('admin', 'sales', 'recruiter'), asyncHandler(asy
 router.patch('/:id', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.updateApplicant(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/assign', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.assign(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/release', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.release(req.user, req.params.id), 'applicant')));
-router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id))));
+router.post('/:id/create-profile', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.createProfile(req.user, req.params.id), 'applicant')));
+router.post('/:id/unlink', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.unlink(req.user, req.params.id), 'applicant')));
+router.delete('/:id', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id, typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : undefined))));
 
 module.exports = router;

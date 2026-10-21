@@ -42,6 +42,7 @@ describe('public job link', () => {
     expect(r.status).toBe(201);
     const row = await prisma.jobApplicant.findFirst({ where: { requirement_id: req.id } });
     expect(row).toMatchObject({ name: 'Asha Rao', email: 'asha@example.com', source: 'website', channel: 'linkedin', status: 'new' });
+    expect(Number(row.experience_years)).toBe(3); // stored, so the Applicants list can show it
     expect((await apply({ channel: 'linkedin' })).status).toBe(409);
     const other = await apply({ name: 'Bhavna', email: 'b@example.com', channel: 'mystery' });
     expect(other.status).toBe(201);

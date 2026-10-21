@@ -56,7 +56,7 @@ describe('applicant pool', () => {
     expect((await add(sToken, { requirement_id: reqA.id, name: '' })).status).toBe(422);
   });
 
-  test('two recruiters claiming together: exactly one wins; the Profile is created and the winner joins the requirement', async () => {
+  test('two recruiters claiming together: exactly one wins and joins the requirement; claiming creates no Profile yet', async () => {
     const pool = (await authed(request(app).get(`${api}?view=pool`), r1Token)).body.data;
     expect(pool).toHaveLength(1);
     const id = pool[0].id;
@@ -65,8 +65,8 @@ describe('applicant pool', () => {
     const winner = a.status === 200 ? r1 : r2;
     const row = await prisma.jobApplicant.findUnique({ where: { id } });
     expect(row).toMatchObject({ status: 'assigned', assigned_to: winner.id });
-    const profile = await prisma.profile.findUnique({ where: { id: row.profile_id } });
-    expect(profile).toMatchObject({ name: 'Asha Rao', email: 'asha@example.com', added_by: winner.id });
+    expect(row.profile_id).toBeNull(); // "Assign to me" only claims; "Create profile" is a separate step
+    expect(await prisma.profile.count({ where: { email: 'asha@example.com' } })).toBe(0);
     expect(await prisma.requirementAssignment.count({ where: { requirement_id: reqA.id, user_id: winner.id, role_on_req: 'recruiter', unassigned_at: null } })).toBe(1);
 
     // gone from the pool, shown under the winner's own list only
@@ -83,7 +83,13 @@ describe('applicant pool', () => {
     const first = await prisma.jobApplicant.findFirst({ where: { requirement_id: reqA.id } });
     const win = await claim(r2Token, second.body.data.id);
     expect(win.status).toBe(200);
-    expect(win.body.data.profile_id).toBe(first.profile_id);
+    expect(win.body.data.profile_id).toBeNull();
+    // creating the profile reuses the person's existing Profile (the first claim had made none, so create it through the first applicant)
+    const owner = first.assigned_to === r1.id ? r1Token : r2Token;
+    const made = await authed(request(app).post(`${api}/${first.id}/create-profile`), owner);
+    expect(made.status).toBe(200);
+    const again = await authed(request(app).post(`${api}/${second.body.data.id}/create-profile`), r2Token);
+    expect(again.body.data.profile_id).toBe(made.body.data.profile_id);
     expect(await prisma.profile.count({ where: { email: 'asha@example.com' } })).toBe(1);
 
     expect((await authed(request(app).post(`${api}/${second.body.data.id}/release`), r1Token)).status).toBe(403);

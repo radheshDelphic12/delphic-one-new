@@ -67,9 +67,11 @@ describe('applicant screening', () => {
     expect(row).toMatchObject({ joiner_status: 'serving_notice', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid', extra_skills: ['react', 'node.js'] });
   });
 
-  test('claiming creates the Profile with the answers (CTC in rupees)', async () => {
+  test('creating the profile (after claiming) copies the answers (CTC in rupees)', async () => {
     const asha = await prisma.jobApplicant.findFirst({ where: { email: 'asha@example.com' } });
     expect((await authed(request(app).post(`${api}/${asha.id}/assign`), r1Token).send({})).status).toBe(200);
+    expect(await prisma.profile.count({ where: { email: 'asha@example.com' } })).toBe(0); // claiming alone makes no Profile
+    expect((await authed(request(app).post(`${api}/${asha.id}/create-profile`), r1Token).send({})).status).toBe(200);
     const profile = await prisma.profile.findFirst({ where: { email: 'asha@example.com' } });
     expect(profile).toMatchObject({ linkedin_url: 'https://linkedin.com/in/asha', resume_url: 'https://drive.google.com/file/d/abc123/view', notice_period_days: 30, is_serving_notice: true, preferred_work_mode: 'hybrid', secondary_skills: ['react', 'node.js'] });
     expect(Number(profile.current_ctc)).toBe(1000000);

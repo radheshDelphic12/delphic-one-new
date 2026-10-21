@@ -82,6 +82,7 @@ describe('careers pages', () => {
     }
     const job = (await page(`/${slug}`)).text;
     expect(job).toContain('data-action="' + slug + '/apply"');
+    expect(job).toContain('name="experience_years"'); // the Experience column of Applicants was empty because the form never asked for it
     expect(job).toContain('href="assets/career.css?v=');
     expect(job).toContain('src="assets/career.js?v=');
   });

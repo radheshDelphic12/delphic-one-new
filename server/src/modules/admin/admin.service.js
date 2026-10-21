@@ -51,6 +51,7 @@ const SOFT_DELETE_MODELS = {
   submission: 'submission',
   profile: 'profile',
   interview_round: 'interviewRound',
+  job_applicant: 'jobApplicant',
 };
 
 // Live-dependent counts, shown to the deleter as a heads-up (does not block —
@@ -137,9 +138,11 @@ async function restore(entityType, entityId, reason, user) {
   }
 
   await prisma.$transaction(async (tx) => {
+    // an applicant gets its one-application-per-email key back; if the same person applied again meanwhile it cannot be restored
+    const keyFix = model === 'jobApplicant' && gone.email ? { dedupe_key: String(gone.email).trim().toLowerCase() } : {};
     await tx[model].update({
       where: { id: entityId },
-      data: { deleted_at: null, deleted_by: null, delete_reason: null },
+      data: { deleted_at: null, deleted_by: null, delete_reason: null, ...keyFix },
     });
     await tx.auditLog.create({
       data: {

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Pencil, Plus, SlidersHorizontal, Undo2, UserCheck, UserPlus } from 'lucide-react';
+import { FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { useUserOptions } from '../../lib/lookups.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import ScreeningFields, { emptyScreening, screeningPayload, NOTICE_CHOICES, JOINER_LABEL, WORK_MODE_LABEL } from '../../components/applicants/ScreeningFields.jsx';
@@ -151,6 +152,7 @@ export default function ApplicantPoolBoard() {
   const [filters, setFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const canClaim = ['recruiter', 'admin'].includes(user?.role);
+  const recruiterOptions = useUserOptions('recruiter');
   const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v !== undefined));
   const filterKey = JSON.stringify(activeFilters);
   const setFilter = (k) => (e) => setFilters((c) => ({ ...c, [k]: e.target.value }));
@@ -168,13 +170,26 @@ export default function ApplicantPoolBoard() {
     try { await apiClient.post(`/applicants/${id}/${action}`, {}); pushSuccess(okText); } catch (e) { pushError(apiErrorMessage(e, 'Could not do that'), 'Not saved'); } finally { setBusy(''); refresh(); }
   }
 
+  // "Unlink from job" keeps the Profile; Delete is a soft delete (a group super admin can restore it from Logs).
+  function unlinkFromJob(a) {
+    if (!window.confirm(`Unlink ${a.name} from "${a.requirement_title}"? They leave your candidates for this job; their Profile is kept.`)) return;
+    act(a.id, 'unlink', `${a.name} is unlinked from the job`);
+  }
+  async function deleteApplicant(a) {
+    if (!window.confirm(`Delete ${a.name} from "${a.requirement_title}"? They disappear from the lists. A group super admin can restore them from Group Dashboard > Logs.`)) return;
+    setBusy(a.id);
+    try { await apiClient.delete(`/applicants/${a.id}`); pushSuccess(`${a.name} was deleted`); } catch (e) { pushError(apiErrorMessage(e, 'Could not delete'), 'Not deleted'); } finally { setBusy(''); refresh(); }
+  }
+
   const rows = list.data?.rows || [];
-  const counts = list.data?.counts || { pool: 0, mine: 0 };
+  const counts = list.data?.counts || { pool: 0, mine: 0, all: 0 };
+  // before the first answer arrives (and while a new view loads) show a loading row, not "nobody is waiting"
+  const loadingRows = list.loading && !rows.length;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5" role="tablist" aria-label="Applicant view">
-          {[['pool', `Pool (${counts.pool})`], ['mine', `My candidates (${counts.mine})`]].map(([k, label]) => (
+          {[['pool', `Pool (${counts.pool})`], ['mine', `My candidates (${counts.mine})`], ['all', `All (${counts.all})`]].map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === k ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
           ))}
         </div>
@@ -194,6 +209,21 @@ export default function ApplicantPoolBoard() {
 
       {showFilters && (
         <section className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4" data-testid="applicant-filters">
+          <label className={labelCls}>Assignment
+            <select className={inputCls} value={filters.assignment || ''} onChange={setFilter('assignment')}>
+              <option value="">Any</option><option value="unassigned">Unassigned (in the pool)</option><option value="assigned">Assigned to a recruiter</option>
+            </select>
+          </label>
+          <label className={labelCls}>Profile
+            <select className={inputCls} value={filters.profile || ''} onChange={setFilter('profile')}>
+              <option value="">Any</option><option value="created">Profile created</option><option value="not_created">Profile not created</option>
+            </select>
+          </label>
+          <label className={labelCls}>Recruiter
+            <select className={inputCls} value={filters.recruiter_id || ''} onChange={setFilter('recruiter_id')}>
+              <option value="">Any</option>{recruiterOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
           <label className={labelCls}>Immediate joiner
             <select className={inputCls} value={filters.joiner || ''} onChange={setFilter('joiner')}>
               <option value="">Any</option>{Object.entries(JOINER_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -247,8 +277,12 @@ export default function ApplicantPoolBoard() {
                   <td className="px-3 text-xs text-tertiary-700" data-testid="screening-cell"><ScreeningSummary a={a} /></td>
                   <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.channel || a.source}</span></td>
                   <td className="px-3">
-                    {view === 'mine' && a.profile_id ? <Link className="text-primary-700 hover:underline" to={`/profiles/${a.profile_id}`}>Open profile</Link>
-                      : a.status === 'new' ? <Pill tone="blue">In pool</Pill> : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
+                    {a.status === 'new' ? <Pill tone="blue">In pool</Pill>
+                      : a.status === 'unlinked' ? <Pill tone="gray">Unlinked</Pill>
+                        : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
+                    {a.status === 'assigned' && (a.profile_id
+                      ? <p className="mt-1 text-xs"><Link className="text-primary-700 hover:underline" to={`/profiles/${a.profile_id}`}>Open profile</Link></p>
+                      : <p className="mt-1 text-xs text-tertiary-500">Profile not created</p>)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {(user?.role === 'admin' || user?.role === 'sales' || a.assigned_to?.id === user?.id) && (
@@ -257,13 +291,25 @@ export default function ApplicantPoolBoard() {
                     {a.status === 'new' && canClaim && (
                       <button type="button" className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
                     )}
+                    {a.status === 'assigned' && !a.profile_id && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
+                      <button type="button" className="btn-primary mr-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'create-profile', `Profile created for ${a.name}`)}><FilePlus className="h-3.5 w-3.5" />Create profile</button>
+                    )}
                     {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
-                      <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
+                      <button type="button" title="Unlink from this job (the Profile is kept)" className="btn-secondary mr-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => unlinkFromJob(a)}><Unlink className="h-3.5 w-3.5" />Unlink from job</button>
+                    )}
+                    {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
+                      <button type="button" className="btn-secondary mr-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
+                    )}
+                    {(a.status === 'new' ? ['admin', 'sales', 'recruiter'].includes(user?.role) : (user?.role === 'admin' || a.assigned_to?.id === user?.id)) && (
+                      <button type="button" title="Delete applicant" className="ml-1 rounded p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy === a.id} onClick={() => deleteApplicant(a)}><Trash2 className="h-4 w-4" /></button>
                     )}
                   </td>
                 </tr>
               ))}
-              {!rows.length && (
+              {loadingRows && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500" data-testid="applicants-loading">Loading applicants…</td></tr>
+              )}
+              {!rows.length && !loadingRows && (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500">
                   <UserPlus className="mx-auto mb-2 h-6 w-6 text-tertiary-300" />
                   {view === 'mine' ? 'You have not claimed anyone yet. Open the Pool and press "Assign to me".' : 'Nobody is waiting in the pool. Applicants appear here as they apply (or add one by hand).'}

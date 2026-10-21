@@ -70,6 +70,7 @@ router.patch(
   '/postings/:id',
   asyncHandler(async (req, res) => send('posting')(res, await postings.update(orgId(req), req.user.id, req.params.id, postings.updateSchema.parse(req.body))))
 );
+router.post('/postings/:id/unpublish', asyncHandler(async (req, res) => send('posting')(res, await postings.setStatus(orgId(req), req.user.id, req.params.id, 'closed'))));
 router.post('/postings/:id/close', asyncHandler(async (req, res) => send('posting')(res, await postings.setStatus(orgId(req), req.user.id, req.params.id, 'closed'))));
 router.post('/postings/:id/reopen', asyncHandler(async (req, res) => send('posting')(res, await postings.setStatus(orgId(req), req.user.id, req.params.id, 'published'))));
 router.post('/postings/:id/retry', asyncHandler(async (req, res) => send('posting')(res, await postings.retry(orgId(req), req.params.id))));
