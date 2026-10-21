@@ -157,6 +157,10 @@ const CAP_TO_PERMISSION = {
   createProfile: 'profiles.create',
   editSubmission: 'submissions.update',
   viewFinancials: 'financials.view',
+  viewAnalytics: 'financials.view',
+  viewBillingRates: 'financials.view',
+  manageBillingRates: 'financials.view',
+  viewProjects: 'financials.view',
 };
 
 // Capabilities no ordinary role has — only a superadmin (is_superadmin flag).

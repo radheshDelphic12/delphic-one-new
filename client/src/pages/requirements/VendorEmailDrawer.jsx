@@ -11,7 +11,8 @@ const labelCls = 'block text-xs font-medium text-tertiary-600';
  * Email the selected requirements to vendors. Step 1: choose active vendors (filter by specialization or name; the vendor's owner is
  * CC'd). Step 2: the exact email and recipients are shown before anything is sent. Every send is logged on the server.
  */
-export default function VendorEmailDrawer({ open, requirementIds, onClose, onSent }) {
+export default function VendorEmailDrawer({ open, requirements, onClose, onSent }) {
+  const requirementIds = requirements.map((r) => r.id);
   const { pushError, pushSuccess } = useAlerts();
   const [step, setStep] = useState('pick');
   const [vendors, setVendors] = useState([]);
@@ -20,7 +21,7 @@ export default function VendorEmailDrawer({ open, requirementIds, onClose, onSen
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState([]);
   const [message, setMessage] = useState('');
-  const [preview, setPreview] = useState(null);
+  const [rates, setRates] = useState({});  const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export default function VendorEmailDrawer({ open, requirementIds, onClose, onSen
     setStep('pick');
     setPicked([]);
     setPreview(null);
+    setRates({});
   }, [open]);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export default function VendorEmailDrawer({ open, requirementIds, onClose, onSen
   const emailable = useMemo(() => vendors.filter((v) => v.can_email), [vendors]);
   const allPicked = emailable.length > 0 && emailable.every((v) => picked.includes(v.id));
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const body = () => ({ requirement_ids: requirementIds, vendor_ids: picked, message: message.trim() || null });
+  const body = () => ({ requirement_ids: requirementIds, vendor_ids: picked, message: message.trim() || null, rates: Object.fromEntries(Object.entries(rates).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()])) });
 
   async function showPreview() {
     setBusy(true);
@@ -116,6 +118,15 @@ export default function VendorEmailDrawer({ open, requirementIds, onClose, onSen
             ))}
             {!vendors.length && <li className="px-3 py-4 text-sm text-tertiary-500">No active vendors match.</li>}
           </ul>
+          <div className="rounded-xl border border-tertiary-100 p-3">
+            <p className="text-xs font-medium text-tertiary-600">Rate for vendors (optional)</p>
+            <p className="text-xs text-tertiary-500">The client&apos;s budget is never sent. Type a rate only where you want vendors to see one.</p>
+            {requirements.map((r) => (
+              <label key={r.id} className={`${labelCls} mt-2`}>{r.title}
+                <input className={inputCls} value={rates[r.id] || ''} maxLength={120} onChange={(e) => setRates((c) => ({ ...c, [r.id]: e.target.value }))} placeholder="e.g. INR 80,000 per month" />
+              </label>
+            ))}
+          </div>
           <label className={labelCls}>Note at the top of the email (optional)<textarea rows={3} className={inputCls} value={message} onChange={(e) => setMessage(e.target.value)} /></label>
         </div>
       ) : (

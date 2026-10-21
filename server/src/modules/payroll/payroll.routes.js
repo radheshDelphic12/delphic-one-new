@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./payroll.service');
@@ -50,7 +51,7 @@ function failFor(res, error) {
 
 router.post(
   '/salary-structures',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createSalaryStructureSchema.parse(req.body);
     const result = await service.createSalaryStructure(req.user.org_id, req.user.id, body);
@@ -61,7 +62,7 @@ router.post(
 
 router.patch(
   '/salary-structures/:id',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = updateSalaryStructureSchema.parse(req.body);
     const result = await service.updateSalaryStructure(req.user.org_id, req.user.id, req.params.id, body);
@@ -75,7 +76,7 @@ router.patch(
 
 router.delete(
   '/salary-structures/:id',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.deleteSalaryStructure(req.user.org_id, req.user.id, req.params.id);
     if (result.error === 'not_found') return fail(res, 404, 'Salary structure not found');
@@ -85,7 +86,7 @@ router.delete(
 
 router.get(
   '/salary-structures',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listSalaryStructuresQuerySchema.parse(req.query);
     const rows = await service.listSalaryStructures(req.user.org_id, query);
@@ -103,20 +104,20 @@ router.get(
 
 router.get(
   '/attendance-salary',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await service.attendanceSalary(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
 );
 
 // What each person would be paid under each basis (timesheet vs attendance) for a month - check before switching.
 router.get(
   '/pay-basis',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await service.payBasisComparison(req.user.org_id, attendanceSalaryQuerySchema.parse(req.query))))
 );
 
 router.post(
   '/pay-basis',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = setPayBasisSchema.parse(req.body);
     // Salary is calculated from attendance for everyone; the timesheet option is switched off.
@@ -129,7 +130,7 @@ router.post(
 
 router.post(
   '/runs',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createRunSchema.parse(req.body);
     const result = await service.createRun(req.user.org_id, body);
@@ -140,7 +141,7 @@ router.post(
 
 router.get(
   '/runs',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listRunsQuerySchema.parse(req.query);
     const rows = await service.listRuns(req.user.org_id, query);
@@ -150,7 +151,7 @@ router.get(
 
 router.post(
   '/runs/:id/process',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.processRun(req.user.org_id, req.params.id, req.user.id);
     if (result.error) return failFor(res, result.error);
@@ -162,7 +163,7 @@ router.post(
 // (each change kept as a revision with the reason), new eligible employees get a payslip.
 router.post(
   '/runs/:id/refresh',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.refreshRun(req.user.org_id, req.params.id, req.user, refreshRunSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error);
@@ -172,7 +173,7 @@ router.post(
 
 router.get(
   '/runs/:id/payslips',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.listRunPayslips(req.user.org_id, req.params.id, payrollFiltersSchema.parse(req.query));
     if (result.error) return failFor(res, result.error);
@@ -205,12 +206,12 @@ router.get(
 // Admin only; each change is audited and flags a locked month for recalculation.
 router.get(
   '/adjustments',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await adjustmentsService.list(req.user.org_id, listSalaryAdjustmentsQuerySchema.parse(req.query))))
 );
 router.post(
   '/adjustments',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await adjustmentsService.create(req.user.org_id, req.user, salaryAdjustmentSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
@@ -219,7 +220,7 @@ router.post(
 );
 router.patch(
   '/adjustments/:id',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await adjustmentsService.update(req.user.org_id, req.user, req.params.id, updateSalaryAdjustmentSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
@@ -228,7 +229,7 @@ router.patch(
 );
 router.delete(
   '/adjustments/:id',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await adjustmentsService.remove(req.user.org_id, req.user, req.params.id, deleteSalaryAdjustmentSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error);
@@ -239,7 +240,7 @@ router.delete(
 // Salary payment status (paid or not, plus the transaction details) for every employee and month. Admin only.
 router.get(
   '/salary-payments',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await paymentsService.dashboard(req.user.org_id, salaryPaymentsQuerySchema.parse(req.query));
     if (result.error) return failFor(res, result.error);
@@ -248,7 +249,7 @@ router.get(
 );
 router.put(
   '/salary-payments',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await paymentsService.save(req.user.org_id, req.user, salaryPaymentSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
@@ -264,8 +265,8 @@ const fnfPatch = z.object({
   status: z.enum(['pending', 'in_progress', 'settled']).optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
 });
-router.get('/fnf', authorize('admin'), asyncHandler(async (req, res) => ok(res, await fnfService.list(req.user.org_id, { status: typeof req.query.status === 'string' ? req.query.status : undefined }))));
-router.patch('/fnf/:membershipId', authorize('admin'), asyncHandler(async (req, res) => {
+router.get('/fnf', canMethod('financials', 'admin'), asyncHandler(async (req, res) => ok(res, await fnfService.list(req.user.org_id, { status: typeof req.query.status === 'string' ? req.query.status : undefined }))));
+router.patch('/fnf/:membershipId', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
   const result = await fnfService.upsert(req.user.org_id, req.user.id, req.params.membershipId, fnfPatch.parse(req.body));
   if (result.error === 'not_found') return fail(res, 404, 'Employee not found');
   if (result.error === 'not_exited') return fail(res, 422, 'FnF applies to employees who have exited');
@@ -287,12 +288,12 @@ router.post('/increment-reminders/:id/decision', asyncHandler(async (req, res) =
 }));
 
 // --- Previous months' unpaid salary, offered when a month is prepared ---
-router.get('/runs/:id/previous-dues', authorize('admin'), asyncHandler(async (req, res) => {
+router.get('/runs/:id/previous-dues', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
   const result = await previousDues.forRun(req.user.org_id, req.params.id);
   if (result.error) return fail(res, 404, 'Payroll run not found');
   return ok(res, result.dues, { run: result.run });
 }));
-router.post('/runs/:id/previous-dues/add', authorize('admin'), asyncHandler(async (req, res) => {
+router.post('/runs/:id/previous-dues/add', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
   const body = z.object({ org_membership_id: z.string().uuid(), due_month: z.number().int().min(1).max(12), due_year: z.number().int().min(2000).max(2100) }).parse(req.body);
   const result = await previousDues.add(req.user.org_id, req.user, req.params.id, body);
   if (result.error === 'not_found') return fail(res, 404, 'Payroll run not found');

@@ -24,18 +24,22 @@ const STARTER_ROLES = [
   { name: 'Super Admin', base_role: 'admin', description: 'Everything Admin does, plus resource allocation, viewing financials and adding, updating and deleting financial records.', permissions: { ...ADMIN, 'allocations.manage': true, 'financials.view': true, 'financials.create': true, 'financials.update': true, 'financials.delete': true, 'increments.receive': true } },
 ];
 
-/** Who the owner named for each starter role. Matched on the person's name in the company; shown for confirmation before anything is applied. */
-const PEOPLE = [
-  { match: 'dheeraj', role: 'BDE' },
-  { match: 'chahak', role: 'Sales' },
-  { match: 'tanvi', role: 'Sales Admin' },
-  { match: 'biswajit', role: 'Sales Super Admin' },
-  { match: 'krupali', role: 'HR' },
-  { match: 'prashant', role: 'HR Admin' },
-  { match: 'diksha', role: 'HR Super Admin' },
-  { match: 'abhishek', role: 'IT Employee' },
-  { match: 'paras', role: 'Super Admin' },
+/**
+ * Who the owner named for each starter role, matched by EMPLOYEE CODE (never by first name). The name is only a cross-check:
+ * the preview shows the code, the email and whether the name on file agrees.
+ */
+const EXPECTED = [
+  { code: 'E0036', name: 'Dheeraj Kumar', role: 'BDE' },
+  { code: 'E0035', name: 'Chahak Pandya', role: 'Sales' },
+  { code: 'E0037', name: 'Tanvi Saxena', role: 'Sales Admin' },
+  { code: 'E0034', name: 'Biswajit Dey', role: 'Sales Super Admin' },
+  { code: 'E0003', name: 'Krupali Vala', role: 'HR' },
+  { code: 'E0005', name: 'Prashant Singh Hada', role: 'HR Admin' },
+  { code: 'E0001', name: 'Diksha Yadav', role: 'HR Super Admin' },
+  { code: 'E0008', name: 'Abhishek Jain', role: 'IT Employee' },
 ];
+const SUPER_ADMIN_NAME = 'paras gulati';
+const IT_DEPARTMENT = /\b(it|information technology|software|engineering|tech(nology)?)\b/i;
 
 const serialize = (r, count) => ({ id: r.id, name: r.name, description: r.description, base_role: r.base_role, permissions: r.permissions || {}, is_starter: r.is_starter, members: count ?? r._count?.members ?? 0, updated_at: r.updated_at });
 
@@ -123,30 +127,75 @@ async function installStarterRoles(orgId, actorId) {
   return { created };
 }
 
+const norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const sameName = (a, b) => norm(a) === norm(b);
+
 /**
- * What applying the starter roles would do to each named person: who matched, their current role, the role they would get and
- * whether their plain role changes. Nothing is written. Ambiguous or missing matches are reported, never guessed.
+ * The proposed mapping, written nowhere. Every working, non-contractor person of the company appears exactly once:
+ *  - `named`: the people the owner named, found by employee code, with code + email + whether the name agrees;
+ *  - `super_admin`: Paras Gulati's accounts and which one gets Super Admin (the company account, never the group account);
+ *  - `suggested`: everyone else by department and current role (IT employees -> IT Employee, recruiters -> HR, ...);
+ *  - `unmapped`: anyone who does not map cleanly. They keep their current access until the owner decides.
+ * Group Super Admin accounts keep Group Super Admin and are never given a company role.
  */
 async function mappingPreview(orgId) {
   const people = await prisma.orgMembership.findMany({
     where: { org_id: orgId, employment_status: { in: ['active', 'on_leave', 'notice_period'] }, worker_type: { not: 'contractor' } },
-    select: { id: true, role: true, custom_role: { select: { name: true } }, person: { select: { name: true, email: true } } },
+    select: { id: true, role: true, employee_code: true, custom_role: { select: { name: true } }, department: { select: { name: true } }, person: { select: { name: true, email: true, is_group_superadmin: true } } },
+    orderBy: { employee_code: 'asc' },
   });
   const baseOf = Object.fromEntries(STARTER_ROLES.map((r) => [r.name, r.base_role]));
-  return PEOPLE.map((p) => {
-    const hits = people.filter((m) => (m.person?.name || '').toLowerCase().split(/\s+/).includes(p.match) || (m.person?.name || '').toLowerCase().startsWith(p.match));
-    const base = { named: p.match, role: p.role, new_base_role: baseOf[p.role] };
-    if (hits.length === 0) return { ...base, status: 'not_found', candidates: [] };
-    const candidates = hits.map((m) => ({ org_membership_id: m.id, name: m.person.name, email: m.person.email, current_role: m.role, current_custom_role: m.custom_role?.name || null, base_role_changes: m.role !== baseOf[p.role] }));
-    return { ...base, status: hits.length === 1 ? 'match' : 'ambiguous', candidates };
+  const row = (m, extra = {}) => ({
+    org_membership_id: m.id, name: m.person?.name || null, email: m.person?.email || null, employee_code: m.employee_code || null,
+    department: m.department?.name || null, current_role: m.role, current_custom_role: m.custom_role?.name || null,
+    is_group_superadmin: m.person?.is_group_superadmin || false, ...extra,
   });
+  const taken = new Set();
+
+  const named = EXPECTED.map((e) => {
+    const m = people.find((x) => norm(x.employee_code) === norm(e.code));
+    const base = { expected_code: e.code, expected_name: e.name, role: e.role, new_base_role: baseOf[e.role] };
+    if (!m) return { ...base, status: 'not_found', person: null };
+    taken.add(m.id);
+    return { ...base, status: sameName(m.person?.name, e.name) ? 'match' : 'name_differs', person: row(m, { base_role_changes: m.role !== baseOf[e.role] }) };
+  });
+
+  const paras = people.filter((m) => norm(m.person?.name) === SUPER_ADMIN_NAME);
+  const company = paras.filter((m) => !m.person?.is_group_superadmin);
+  const superAdmin = {
+    role: 'Super Admin', new_base_role: baseOf['Super Admin'],
+    accounts: paras.map((m) => row(m)),
+    // the company account gets it; the group account keeps Group Super Admin. Only proposed when exactly one company account exists.
+    proposed: company.length === 1 ? row(company[0], { base_role_changes: company[0].role !== baseOf['Super Admin'] }) : null,
+    status: company.length === 1 ? 'match' : company.length === 0 ? 'not_found' : 'ambiguous',
+  };
+  paras.forEach((m) => taken.add(m.id));
+
+  const suggested = [];
+  const unmapped = [];
+  for (const m of people) {
+    if (taken.has(m.id)) continue;
+    if (m.person?.is_group_superadmin) { unmapped.push(row(m, { reason: 'Group Super Admin account: keeps Group Super Admin, no company role' })); continue; }
+    const dept = m.department?.name || '';
+    let role = null;
+    let reason = '';
+    if (m.role === 'employee' && IT_DEPARTMENT.test(dept)) { role = 'IT Employee'; reason = `IT department (${dept}), plain employee`; }
+    else if (m.role === 'recruiter') { role = 'HR'; reason = 'Recruiter'; }
+    else if (m.role === 'bda') { role = 'BDE'; reason = 'BDA'; }
+    else if (m.role === 'sales') { role = 'Sales'; reason = 'Sales'; }
+    if (role) suggested.push(row(m, { proposed_role: role, new_base_role: baseOf[role], reason, base_role_changes: m.role !== baseOf[role] }));
+    else unmapped.push(row(m, { reason: m.role === 'admin' ? 'Admin with no named role: keeps current admin access' : `${m.role === 'employee' ? 'Employee outside IT' : m.role}${dept ? ` (${dept})` : ''}: keeps current access` }));
+  }
+  return { named, super_admin: superAdmin, suggested, unmapped, summary: { named_found: named.filter((n) => n.person).length, named_total: named.length, suggested: suggested.length, unmapped: unmapped.length } };
 }
 
-/** Applies a confirmed mapping: [{ org_membership_id, role_name }]. Installs the starter roles first if they are missing. */
+/** Applies a confirmed mapping: [{ org_membership_id, role_name }]. Installs the starter roles first if they are missing. Group Super Admin accounts are refused. */
 async function applyMapping(orgId, actorId, assignments) {
   await installStarterRoles(orgId, actorId);
   const results = [];
   for (const a of assignments) {
+    const holder = await prisma.orgMembership.findFirst({ where: { id: a.org_membership_id, org_id: orgId }, select: { person: { select: { is_group_superadmin: true } } } });
+    if (holder?.person?.is_group_superadmin) { results.push({ ...a, error: 'group_super_admin' }); continue; }
     const role = await prisma.customRole.findFirst({ where: { org_id: orgId, name: { equals: a.role_name, mode: 'insensitive' } } });
     if (!role) { results.push({ ...a, error: 'role_not_found' }); continue; }
     const r = await assign(orgId, a.org_membership_id, role.id);

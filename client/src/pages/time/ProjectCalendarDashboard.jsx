@@ -3,6 +3,7 @@ import { CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { CONTRACT_FILTERS, FilterPills } from '../finance/projectFilters.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -60,6 +61,8 @@ export default function ProjectCalendarDashboard() {
   const [projectId, setProjectId] = useState('');
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [status, setStatus] = useState('all');
+  const visible = useMemo(() => (projects || []).filter((p) => status === 'all' || p.status === status), [projects, status]);
 
   useEffect(() => {
     let alive = true;
@@ -70,9 +73,10 @@ export default function ProjectCalendarDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month]);
 
+  // the open project follows the filter: when it drops out of the list, the first match opens
   useEffect(() => {
-    if (projects?.length && !projects.some((p) => p.id === projectId)) setProjectId(projects[0].id);
-  }, [projects, projectId]);
+    if (visible.length && !visible.some((p) => p.id === projectId)) setProjectId(visible[0].id);
+  }, [visible, projectId]);
 
   useEffect(() => {
     if (!projectId) return undefined;
@@ -112,14 +116,19 @@ export default function ProjectCalendarDashboard() {
         </div>
       </div>
 
+      {projects && projects.length > 0 && (
+        <FilterPills label="Status" options={CONTRACT_FILTERS} rows={projects} matches={(p, key) => key === 'all' || p.status === key} value={status} onChange={setStatus} />
+      )}
+
       {projects && !projects.length ? <p className="rounded-2xl border border-dashed border-tertiary-200 p-4 text-sm text-tertiary-500">No projects to show.</p> : (
         <div className="grid gap-4 lg:grid-cols-[14rem_1fr_21rem]">
           <nav className="max-h-[70vh] space-y-1 overflow-y-auto rounded-2xl border border-tertiary-100 bg-white p-2 shadow-card" aria-label="Projects">
-            {(projects || []).map((p) => (
+            {visible.map((p) => (
               <button key={p.id} type="button" onClick={() => setProjectId(p.id)} className={`block w-full truncate rounded-xl px-3 py-2 text-left text-sm ${p.id === projectId ? 'bg-primary-50 font-medium text-primary-700 ring-1 ring-primary-100' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{p.name}</button>
             ))}
+            {projects && !visible.length && <p className="px-3 py-2 text-xs text-tertiary-500">No projects with this status.</p>}
           </nav>
-          {!data ? <p className="text-sm text-tertiary-500">Loading...</p> : (
+          {!data || !visible.length ? <p className="text-sm text-tertiary-500">{visible.length || !projects ? 'Loading...' : ''}</p> : (
             <div>
               <h3 className="mb-2 font-heading text-base font-semibold text-tertiary-900">{data.project.name} · {MONTHS[month - 1]} {year} <span className="ml-2 text-xs font-normal text-tertiary-500">{hoursLabel(data.total_hours)} logged{data.project.calendar ? ` · ${data.project.calendar}` : ''}</span></h3>
               <div className="mb-1 grid grid-cols-7 gap-1 text-center text-xs font-medium text-tertiary-500">{WEEKDAYS.map((w) => <span key={w}>{w}</span>)}</div>

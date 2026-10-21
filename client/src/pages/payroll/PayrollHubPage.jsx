@@ -701,7 +701,8 @@ export default function PayrollHubPage() {
   const { user, isGroupSuperadmin } = useAuth();
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
-  const isAdmin = user?.role === 'admin';
+  // Salary amounts: a custom role (for example Admin) needs the financials permission even on the admin base role.
+  const isAdmin = user?.role === 'admin' && (!user?.permissions || Boolean(user.permissions['financials.view']));
   const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS, ...(user?.is_superadmin ? [INCREMENT_TAB] : [])] : BASE_TABS;
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'my-payslips';

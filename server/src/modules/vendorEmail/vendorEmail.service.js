@@ -4,7 +4,8 @@ const { enqueue } = require('../../lib/email/outbox');
 
 // Requirements -> vendors. From the Requirements page the team picks one or more requirements and the active vendors to send
 // them to (filterable by specialization). The vendor's internal account owner is CC'd, the exact email is previewed before it
-// goes, and every send is logged. The client's name is never put in the email.
+// goes, and every send is logged. The client's name is never put in the email, and neither is the client's budget: a rate for the
+// vendor goes in only when the sender types it for that requirement (`rates`).
 
 const MAX_REQUIREMENTS = 20;
 const MAX_VENDORS = 100;
@@ -13,6 +14,8 @@ const selection = z.object({
   requirement_ids: z.array(z.string().uuid()).min(1).max(MAX_REQUIREMENTS),
   vendor_ids: z.array(z.string().uuid()).min(1).max(MAX_VENDORS),
   message: z.string().trim().max(2000).optional().nullable(),
+  // optional vendor rate per requirement id, typed by the sender (for example "INR 80,000 per month"); blank = not mentioned
+  rates: z.record(z.string().uuid(), z.string().trim().max(120)).optional(),
   subject: z.string().trim().min(3).max(200).optional(),
 });
 
@@ -40,10 +43,9 @@ async function vendors(orgId, rawQuery) {
   };
 }
 
-const money = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const range = (a, b, unit) => (a != null && b != null ? `${Number(a)}-${Number(b)} ${unit}` : a != null ? `${Number(a)}+ ${unit}` : b != null ? `up to ${Number(b)} ${unit}` : null);
 
-function describe(r) {
+function describe(r, rate) {
   const lines = [`${r.title}${r.seats_total > 1 ? ` (${r.seats_total} openings)` : ''}`];
   const bits = [
     ['Experience', range(r.experience_min, r.experience_max, 'years')],
@@ -51,21 +53,21 @@ function describe(r) {
     ['Location', [r.work_location, r.work_mode].filter(Boolean).join(', ') || null],
     ['Engagement', [r.engagement_type, r.contract_duration_months ? `${r.contract_duration_months} months` : null].filter(Boolean).join(', ') || null],
     ['Notice period', r.notice_period_max_days != null ? `up to ${r.notice_period_max_days} days` : null],
-    ['Budget', r.budget_max != null ? `${r.budget_currency} ${r.budget_min != null ? `${money(r.budget_min)} - ` : 'up to '}${money(r.budget_max)}${r.budget_type ? ` (${String(r.budget_type).replace(/_/g, ' ')})` : ''}` : null],
+    ['Vendor rate', rate || null],
     ['Job description', r.jd_document_url || null],
   ];
   for (const [label, value] of bits) if (value) lines.push(`   ${label}: ${value}`);
   return lines.join('\n');
 }
 
-function compose(requirements, sender, message) {
+function compose(requirements, sender, message, rates = {}) {
   const subject = requirements.length === 1 ? `Requirement: ${requirements[0].title}` : `${requirements.length} open requirements from Delphic`;
   const body = [
     'Hello,',
     '',
     message || (requirements.length === 1 ? 'We have the following requirement and would like to know if you have suitable profiles.' : 'We have the following requirements and would like to know if you have suitable profiles.'),
     '',
-    ...requirements.map((r, i) => `${requirements.length > 1 ? `${i + 1}. ` : ''}${describe(r)}`).flatMap((t) => [t, '']),
+    ...requirements.map((r, i) => `${requirements.length > 1 ? `${i + 1}. ` : ''}${describe(r, rates[r.id])}`).flatMap((t) => [t, '']),
     'Please reply with profiles, expected rates and availability.',
     '',
     'Thanks,',
@@ -104,7 +106,7 @@ async function preview(orgId, user, rawInput) {
   const input = selection.parse(rawInput);
   const { requirements, accounts } = await load(orgId, input);
   if (requirements.length !== new Set(input.requirement_ids).size) return { error: 'requirement_not_found' };
-  const { subject, body } = compose(requirements, user, input.message);
+  const { subject, body } = compose(requirements, user, input.message, input.rates);
   const { ready, skipped } = plan(accounts, input.vendor_ids);
   return { subject: input.subject || subject, body_text: body, recipients: ready.map((r) => ({ account_id: r.account_id, vendor: r.vendor, to: r.to.email, cc: r.cc?.email || null })), skipped };
 }
@@ -114,7 +116,7 @@ async function send(orgId, user, rawInput) {
   const input = selection.parse(rawInput);
   const { requirements, accounts } = await load(orgId, input);
   if (requirements.length !== new Set(input.requirement_ids).size) return { error: 'requirement_not_found' };
-  const { subject: autoSubject, body } = compose(requirements, user, input.message);
+  const { subject: autoSubject, body } = compose(requirements, user, input.message, input.rates);
   const subject = input.subject || autoSubject;
   const { ready, skipped } = plan(accounts, input.vendor_ids);
   if (!ready.length) return { error: 'no_recipients', skipped };

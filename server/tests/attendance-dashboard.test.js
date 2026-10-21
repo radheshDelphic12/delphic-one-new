@@ -139,6 +139,13 @@ describe('attendance dashboard', () => {
 
     const list = await get('/projects?year=2026&month=11', ctx.admin);
     expect(list.body.data.map((p) => p.name)).toContain('Acme Portal');
+    // each project carries its contract status for the status filter (the same state Finance -> Projects shows)
+    await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Held Co', project_name: 'Held Portal', type: 'client', stage: 'active', is_project: true, owner_id: ctx.adminUser.id, origin_owner_id: ctx.adminUser.id, contract_status: 'on_hold', agreement_start_date: new Date('2026-01-01T00:00:00Z') } });
+    await prisma.account.update({ where: { id: project.id }, data: { agreement_start_date: new Date('2026-01-01T00:00:00Z') } });
+    const withStatus = await get('/projects?year=2026&month=11', ctx.admin);
+    const statusOf = (name) => withStatus.body.data.find((p) => p.name === name).status;
+    expect(statusOf('Acme Portal')).toBe('running');
+    expect(statusOf('Held Portal')).toBe('on_hold');
 
     const cal = await get(`/projects/${project.id}/calendar?year=2026&month=11`, dev.token);
     expect(cal.status).toBe(200);

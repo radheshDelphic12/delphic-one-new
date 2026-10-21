@@ -13,7 +13,7 @@ beforeAll(async () => {
   owner = await createUser({ role: 'bda', name: 'Vendor Owner' });
   const account = await createActiveClientAccount(sales.id);
   clientName = account.name;
-  req1 = await createRequirement(sToken, account.id, { title: 'Java Developer', seats_total: 2, primary_tech_stack: ['Java', 'Spring'], experience_min: 3, experience_max: 6 });
+  req1 = await createRequirement(sToken, account.id, { title: 'Java Developer', seats_total: 2, budget_min: 50000, budget_max: 90000, primary_tech_stack: ['Java', 'Spring'], experience_min: 3, experience_max: 6 });
   req2 = await createRequirement(sToken, account.id, { title: 'QA Engineer' });
   await vendor({ name: 'Alpha Staffing', poc_name: 'Asha', poc_email: 'asha@alpha.test', vendor_specializations: ['java', 'qa'] });
   await vendor({ name: 'Beta Resources', poc_name: 'Bala', poc_email: 'bala@beta.test', vendor_specializations: ['data'] });
@@ -46,6 +46,11 @@ describe('vendor email', () => {
     expect(res.body.data.body_text).toContain('Experience: 3-6 years');
     expect(res.body.data.body_text).toContain('Urgent hiring.');
     expect(res.body.data.body_text).not.toContain(clientName);
+    // the client's budget is never sent; a rate appears only when the sender types it
+    expect(res.body.data.body_text).not.toMatch(/budget|INR|Vendor rate/i);
+    const withRate = await post('/preview', { requirement_ids: [req1.id, req2.id], vendor_ids: ids, rates: { [req1.id]: 'INR 80,000 per month' } });
+    expect(withRate.body.data.body_text).toContain('Vendor rate: INR 80,000 per month');
+    expect(withRate.body.data.body_text.match(/Vendor rate/g)).toHaveLength(1);
     expect(res.body.data.recipients.map((r) => [r.vendor, r.to, r.cc])).toEqual([['Alpha Staffing', 'asha@alpha.test', owner.email], ['Beta Resources', 'bala@beta.test', owner.email]]);
     expect(res.body.data.skipped).toEqual([expect.objectContaining({ vendor: 'No Email Vendor' })]);
     expect(await prisma.emailOutbox.count({ where: { kind: 'vendor_requirements' } })).toBe(0);

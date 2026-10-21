@@ -137,21 +137,36 @@ function People({ role, people, onChanged }) {
   );
 }
 
-/** The starter roles' proposed people, for confirmation. Nothing changes until "Apply" is pressed. */
+const Person = ({ p }) => (
+  <span>
+    <span className="font-medium">{p.name}</span>
+    <span className="block text-xs text-tertiary-500">{p.employee_code || 'no code'} · {p.email}</span>
+  </span>
+);
+
+/**
+ * The proposed roles for everyone, for approval. Named people are matched by employee code (code and email shown, never first name);
+ * the rest are suggested by department and current role; whoever does not map cleanly keeps their access. Nothing changes until Apply.
+ */
 function Mapping({ onApplied }) {
   const { pushError, pushSuccess } = useAlerts();
-  const [rows, setRows] = useState(null);
-  const [chosen, setChosen] = useState({});
+  const [data, setData] = useState(null);
+  const [ticked, setTicked] = useState({}); // org_membership_id -> role name
   useEffect(() => {
-    apiClient.get('/roles/mapping-preview').then(({ data }) => {
-      setRows(data.data || []);
-      setChosen(Object.fromEntries((data.data || []).filter((r) => r.status === 'match').map((r) => [r.named, r.candidates[0].org_membership_id])));
+    apiClient.get('/roles/mapping-preview').then(({ data: body }) => {
+      const d = body.data;
+      setData(d);
+      const start = {};
+      d.named.filter((n) => n.status === 'match').forEach((n) => { start[n.person.org_membership_id] = n.role; });
+      if (d.super_admin.proposed) start[d.super_admin.proposed.org_membership_id] = 'Super Admin';
+      setTicked(start);
     }).catch((err) => pushError(apiErrorMessage(err, 'Could not load the mapping'), 'Something went wrong'));
   }, [pushError]);
-  if (!rows) return null;
-  const assignments = rows.filter((r) => chosen[r.named]).map((r) => ({ org_membership_id: chosen[r.named], role_name: r.role }));
+  if (!data) return null;
+  const toggle = (id, role) => setTicked((t) => { const n = { ...t }; if (n[id]) delete n[id]; else n[id] = role; return n; });
+  const assignments = Object.entries(ticked).map(([org_membership_id, role_name]) => ({ org_membership_id, role_name }));
   async function apply() {
-    if (!window.confirm(`Give ${assignments.length} people their new role? Their plain role may change as shown.`)) return;
+    if (!window.confirm(`Give ${assignments.length} people their new role? Everyone else keeps their current access.`)) return;
     try {
       await apiClient.post('/roles/mapping-apply', { assignments });
       pushSuccess('Roles applied');
@@ -160,34 +175,58 @@ function Mapping({ onApplied }) {
       pushError(apiErrorMessage(err, 'Could not apply'), 'Not applied');
     }
   }
+  const Row = ({ p, role, note }) => (
+    <tr className="border-t border-tertiary-100">
+      <td className="py-1.5"><input type="checkbox" checked={Boolean(ticked[p.org_membership_id])} onChange={() => toggle(p.org_membership_id, role)} aria-label={`Give ${p.name} ${role}`} /></td>
+      <td><Person p={p} /></td>
+      <td className="font-medium">{role}</td>
+      <td className="text-xs text-tertiary-500">{p.current_role}{p.department ? ` · ${p.department}` : ''}{p.base_role_changes && <Pill tone="amber">plain role changes</Pill>}{note && <span className="ml-1 text-warning-700">{note}</span>}</td>
+    </tr>
+  );
+  const head = (<thead><tr className="text-left text-xs text-tertiary-500"><th className="w-8" /><th>Person (code · email)</th><th>Role</th><th>Now</th></tr></thead>);
   return (
-    <div className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
-      <h3 className="font-heading text-sm font-semibold text-tertiary-900">Proposed people for the starting roles</h3>
-      <p className="text-xs text-tertiary-500">Review this first. Nobody changes until you press Apply. A person who is not listed here keeps exactly the access they have today.</p>
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-tertiary-500"><th className="py-1">Role</th><th>Person</th><th>Now</th><th /></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.named} className="border-t border-tertiary-100">
-              <td className="py-1.5 font-medium">{r.role}</td>
-              <td>
-                {r.status === 'not_found' && <span className="text-warning-700">No one named &quot;{r.named}&quot; found</span>}
-                {r.status !== 'not_found' && (
-                  <select className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" value={chosen[r.named] || ''} onChange={(e) => setChosen((c) => ({ ...c, [r.named]: e.target.value }))}>
-                    <option value="">{r.status === 'ambiguous' ? 'Pick the right person…' : 'Skip'}</option>
-                    {r.candidates.map((c) => <option key={c.org_membership_id} value={c.org_membership_id}>{c.name}</option>)}
-                  </select>
-                )}
-              </td>
-              <td className="text-xs text-tertiary-500">
-                {(r.candidates.find((c) => c.org_membership_id === chosen[r.named]) || {}).current_role || ''}
-                {r.candidates.find((c) => c.org_membership_id === chosen[r.named])?.base_role_changes && <Pill tone="amber">plain role changes to {r.new_base_role}</Pill>}
-              </td>
-              <td />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-4">
+      <div className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Roles for the people you named (matched by employee code)</h3>
+        <p className="text-xs text-tertiary-500">Review all four sections. Nothing changes until you press Apply. Anyone who is not ticked keeps exactly the access they have today.</p>
+        <table className="w-full text-sm">
+          {head}
+          <tbody>
+            {data.named.map((n) => (n.person
+              ? <Row key={n.expected_code} p={n.person} role={n.role} note={n.status === 'name_differs' ? `name on file differs from "${n.expected_name}"` : ''} />
+              : <tr key={n.expected_code} className="border-t border-tertiary-100"><td /><td className="py-1.5 text-warning-700">No one has code {n.expected_code} ({n.expected_name})</td><td className="font-medium">{n.role}</td><td /></tr>))}
+          </tbody>
+        </table>
+      </div>
+      <div className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Super Admin: Paras Gulati</h3>
+        <p className="text-xs text-tertiary-500">The company account gets Super Admin. The group account keeps Group Super Admin and is never given a company role.</p>
+        <table className="w-full text-sm">
+          {head}
+          <tbody>
+            {data.super_admin.accounts.map((a) => (a.is_group_superadmin
+              ? <tr key={a.org_membership_id} className="border-t border-tertiary-100"><td /><td className="py-1.5"><Person p={a} /></td><td className="text-xs">Group account</td><td className="text-xs text-tertiary-500">keeps Group Super Admin</td></tr>
+              : <Row key={a.org_membership_id} p={a} role="Super Admin" />))}
+            {data.super_admin.status !== 'match' && <tr><td colSpan={4} className="py-2 text-warning-700">{data.super_admin.status === 'ambiguous' ? 'More than one company account: not proposed, decide first.' : 'No company account found.'}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Suggested for everyone else ({data.suggested.length})</h3>
+        <p className="text-xs text-tertiary-500">By department and current role. Tick the ones you agree with.</p>
+        <table className="w-full text-sm">
+          {head}
+          <tbody>{data.suggested.map((p) => <Row key={p.org_membership_id} p={p} role={p.proposed_role} note={p.reason} />)}</tbody>
+        </table>
+      </div>
+      <div className="space-y-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <h3 className="font-heading text-sm font-semibold text-tertiary-900">Do not map cleanly ({data.unmapped.length})</h3>
+        <p className="text-xs text-tertiary-500">These keep their current access until you decide.</p>
+        <ul className="divide-y divide-tertiary-100 text-sm">
+          {data.unmapped.map((p) => <li key={p.org_membership_id} className="flex justify-between gap-3 py-1.5"><Person p={p} /><span className="text-xs text-tertiary-500">{p.current_role} · {p.reason}</span></li>)}
+          {!data.unmapped.length && <li className="py-2 text-tertiary-500">Everyone maps cleanly.</li>}
+        </ul>
+      </div>
       <div className="flex justify-end"><button type="button" className="btn-primary" disabled={!assignments.length} onClick={apply}>Apply to {assignments.length} {assignments.length === 1 ? 'person' : 'people'}</button></div>
     </div>
   );

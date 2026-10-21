@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -11,7 +12,7 @@ const { createCommissionSchema, decideCommissionSchema, listCommissionsQuerySche
 // VendorPayment model (server/prisma/schema.prisma) used by every company's
 // own contractor AP: see docs/progress/TODO.md for why those stay distinct.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, requireMasterWorkspace, authorize('admin'));
+router.use(authenticate, requireOrgMembership, requireMasterWorkspace, canMethod('financials', 'admin'));
 
 const ERRORS = {
   submission_not_found: [404, 'Submission not found'],

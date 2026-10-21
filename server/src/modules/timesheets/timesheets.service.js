@@ -7,6 +7,7 @@ const calendarsService = require('../calendars/calendars.service');
 const leaveService = require('../leave/leave.service');
 const { computeDayRevenue } = require('../billing/billing.service');
 const { projectListWhere } = require('../../lib/projectScope');
+const { contractState } = require('../../lib/contractState');
 const { notify } = require('../../lib/notifications');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
@@ -846,9 +847,11 @@ async function myProjects(orgId, orgMembershipId) {
 async function listTeamProjects(orgId, user, { year, month }) {
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
-  const label = (a) => ({ id: a.id, name: a.project_name || a.name });
+  // `status` is the contract state Finance → Projects shows (not_started / running / about_to_end / on_hold / completed).
+  const label = (a) => ({ id: a.id, name: a.project_name || a.name, status: contractState(a).state });
+  const SELECT = { id: true, name: true, project_name: true, contract_status: true, agreement_start_date: true, agreement_end_date: true };
   if (isApprover(user)) {
-    const accounts = await prisma.account.findMany({ where: projectListWhere(orgId), select: { id: true, name: true, project_name: true }, orderBy: { name: 'asc' } });
+    const accounts = await prisma.account.findMany({ where: projectListWhere(orgId), select: SELECT, orderBy: { name: 'asc' } });
     return accounts.map(label);
   }
   const rows = await prisma.projectMemberAssignment.findMany({
@@ -857,7 +860,7 @@ async function listTeamProjects(orgId, user, { year, month }) {
       org_membership_id: user.org_membership_id,
       AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }],
     },
-    select: { account: { select: { id: true, name: true, project_name: true } } },
+    select: { account: { select: SELECT } },
   });
   const byId = new Map(rows.map((r) => [r.account.id, label(r.account)]));
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));

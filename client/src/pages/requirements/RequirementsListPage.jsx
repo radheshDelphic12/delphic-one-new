@@ -587,7 +587,7 @@ export default function RequirementsListPage() {
         />
       </section>
 
-      <VendorEmailDrawer open={emailOpen} requirementIds={selectedIds} onClose={() => setEmailOpen(false)} onSent={() => setSelectedIds([])} />
+      <VendorEmailDrawer open={emailOpen} requirements={rows.filter((r) => selectedIds.includes(r.id)).map((r) => ({ id: r.id, title: r.title }))} onClose={() => setEmailOpen(false)} onSent={() => setSelectedIds([])} />
 
       <div className="flex items-center justify-between px-1 text-xs text-tertiary-500">
         <span>

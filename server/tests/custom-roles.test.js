@@ -17,7 +17,13 @@ afterAll(async () => { await prisma.$disconnect(); });
 
 async function personWith(roleName, name, plainRole = 'employee', extra = {}) {
   const user = await createUser({ role: plainRole, name, withOrg: false });
-  const m = await createOrgMembership(user.id, org.id, { role: plainRole });
+  if (extra.email) { await prisma.user.update({ where: { id: user.id }, data: { email: extra.email } }); user.email = extra.email; }
+  const m = await createOrgMembership(user.id, org.id, { role: plainRole, employee_code: extra.code });
+  if (extra.department) {
+    const dept = (await prisma.department.findFirst({ where: { org_id: org.id, name: extra.department } })) || (await prisma.department.create({ data: { org_id: org.id, name: extra.department } }));
+    await prisma.orgMembership.update({ where: { id: m.id }, data: { department_id: dept.id } });
+  }
+  if (extra.groupSuperadmin) await prisma.user.update({ where: { id: user.id }, data: { is_group_superadmin: true } });
   if (extra.manager_id) await prisma.orgMembership.update({ where: { id: m.id }, data: { manager_id: extra.manager_id } });
   if (roleName) {
     const role = await prisma.customRole.findFirst({ where: { org_id: org.id, name: roleName } });
@@ -56,22 +62,48 @@ describe('managing roles', () => {
     expect((await authed(request(app).delete(`/api/v1/roles/${res.body.data.id}`), superToken)).status).toBe(200);
   });
 
-  test('the mapping preview names who would get what and writes nothing; applying a confirmed mapping assigns', async () => {
-    const dheeraj = await personWith(null, 'Dheeraj Kumar', 'bda');
-    await personWith(null, 'Tanvi Shah', 'sales');
-    await personWith(null, 'Paras Gulati', 'admin');
-    await personWith(null, 'Paras Other', 'employee'); // makes "paras" ambiguous
+  test('the mapping preview matches by employee code (never by name), shows code + email, proposes the rest by department and role, lists who does not map cleanly, and writes nothing', async () => {
+    const dheeraj = await personWith(null, 'Dheeraj Kumar', 'bda', { code: 'E0036', email: 'dheeraj@example.com' });
+    const wrongName = await personWith(null, 'Someone Else', 'sales', { code: 'E0035' }); // code matches Chahak, name does not
+    await personWith(null, 'Chahak Pandya', 'sales', { code: 'E0099' }); // same name as expected, different code: must NOT be matched
+    const parasCompany = await personWith(null, 'Paras Gulati', 'admin', { code: 'E0002' });
+    await personWith(null, 'Paras Gulati', 'admin', { code: 'GI-1', groupSuperadmin: true });
+    await personWith(null, 'Nikhil Yadav', 'admin', { code: 'E0010' });
+    await personWith(null, 'Dev One', 'employee', { code: 'E0050', department: 'IT' });
+    await personWith(null, 'Garv Recruiter', 'recruiter', { code: 'E0060' });
+    await personWith(null, 'Accounts Person', 'employee', { code: 'E0070', department: 'Accounts' });
+
     const preview = (await authed(request(app).get('/api/v1/roles/mapping-preview'), superToken)).body.data;
-    const by = Object.fromEntries(preview.map((p) => [p.named, p]));
-    expect(by.dheeraj).toMatchObject({ status: 'match', role: 'BDE', new_base_role: 'bda' });
-    expect(by.dheeraj.candidates[0]).toMatchObject({ current_role: 'bda', base_role_changes: false });
-    expect(by.tanvi.candidates[0].base_role_changes).toBe(false);
-    expect(by.paras.status).toBe('ambiguous');
-    expect(by.krupali.status).toBe('not_found');
+    const named = Object.fromEntries(preview.named.map((n) => [n.expected_code, n]));
+    expect(named.E0036).toMatchObject({ status: 'match', role: 'BDE', new_base_role: 'bda' });
+    expect(named.E0036.person).toMatchObject({ employee_code: 'E0036', email: 'dheeraj@example.com', base_role_changes: false });
+    expect(named.E0035).toMatchObject({ status: 'name_differs', role: 'Sales' });
+    expect(named.E0035.person.name).toBe('Someone Else');
+    expect(named.E0037.status).toBe('not_found'); // nobody has that code, so nobody is guessed
+    // Paras: the company account gets Super Admin; the group account is listed but never proposed
+    expect(preview.super_admin.status).toBe('match');
+    expect(preview.super_admin.proposed.org_membership_id).toBe(parasCompany.m.id);
+    expect(preview.super_admin.accounts).toHaveLength(2);
+    // everyone else by department and role
+    const suggested = Object.fromEntries(preview.suggested.map((x) => [x.name, x.proposed_role]));
+    expect(suggested).toMatchObject({ 'Dev One': 'IT Employee', 'Garv Recruiter': 'HR', 'Chahak Pandya': 'Sales' });
+    // anyone who does not map cleanly is listed and keeps current access
+    const unmapped = Object.fromEntries(preview.unmapped.map((x) => [x.name, x.reason]));
+    expect(unmapped['Nikhil Yadav']).toMatch(/keeps current admin access/);
+    expect(unmapped['Accounts Person']).toMatch(/keeps current access/);
+    expect(preview.super_admin.accounts.find((x) => x.is_group_superadmin)).toBeTruthy(); // the group account is shown and keeps Group Super Admin
+    // nobody appears twice
+    const everyone = [...preview.named.filter((n) => n.person).map((n) => n.person.org_membership_id), ...preview.super_admin.accounts.map((a) => a.org_membership_id), ...preview.suggested.map((x) => x.org_membership_id), ...preview.unmapped.map((x) => x.org_membership_id)];
+    expect(new Set(everyone).size).toBe(everyone.length);
+    // preview wrote nothing
     expect(await prisma.orgMembership.count({ where: { custom_role_id: { not: null } } })).toBe(0);
-    const applied = (await post('/api/v1/roles/mapping-apply', superToken, { assignments: [{ org_membership_id: dheeraj.m.id, role_name: 'BDE' }] })).body.data;
+    // applying a confirmed mapping assigns; a group account is refused
+    const groupAccount = preview.super_admin.accounts.find((a) => a.is_group_superadmin);
+    const applied = (await post('/api/v1/roles/mapping-apply', superToken, { assignments: [{ org_membership_id: dheeraj.m.id, role_name: 'BDE' }, { org_membership_id: groupAccount.org_membership_id, role_name: 'Super Admin' }] })).body.data;
     expect(applied[0].ok).toBe(true);
+    expect(applied[1].error).toBe('group_super_admin');
     expect((await prisma.orgMembership.findUnique({ where: { id: dheeraj.m.id }, include: { custom_role: true } })).custom_role.name).toBe('BDE');
+    expect(wrongName.m.id).toBeTruthy();
   });
 });
 
@@ -168,5 +200,35 @@ describe('enforced on the API', () => {
     expect(del.status).toBe(401); // allowed through the permission gate, stopped by the password check
     const sales = await personWith('Sales', 'Chahak', 'sales');
     expect((await post(`/api/v1/admin/account/${acct.id}/delete`, sales.token, { password: 'x', reason: 'cleanup of test data' })).status).toBe(403);
+  });
+
+  test('Admin is gated on money screens even though its base role is admin; Super Admin and plain admins keep them', async () => {
+    const admin = await personWith('Admin', 'Check Only', 'admin');
+    const superAdmin = await personWith('Super Admin', 'Paras', 'admin');
+    const plainAdmin = await personWith(null, 'Plain Admin', 'admin');
+    const screens = ['/api/v1/analytics/live-sales', '/api/v1/payroll/runs', '/api/v1/profitability/rollup', '/api/v1/billing/projects-pnl', '/api/v1/financials/monthly'];
+    for (const path of screens) {
+      const denied = await authed(request(app).get(path), admin.token);
+      expect(denied.status).toBe(403);
+      const sa = await authed(request(app).get(path), superAdmin.token);
+      if (sa.status === 403) throw new Error(`Super Admin refused on ${path}: ${sa.body.message}`);
+      expect((await authed(request(app).get(path), plainAdmin.token)).status).not.toBe(403);
+    }
+    // oversight stays
+    expect((await authed(request(app).get('/api/v1/timesheets/entries'), admin.token)).status).toBe(200);
+    expect((await authed(request(app).get('/api/v1/attendance'), admin.token)).status).toBe(200);
+  });
+
+  test('HR: edit-own, HR Admin edits the team, HR Super Admin edits everyone; plain HR cannot delete', async () => {
+    const hr = await personWith('HR', 'Krupali', 'recruiter');
+    const made = await post('/api/v1/profiles', hr.token, { name: unique('Cand '), total_experience_years: 3, primary_skills: ['Node.js'], source: 'direct' });
+    const id = made.body.data.id;
+    const boss = await personWith('HR Super Admin', 'Diksha', 'recruiter');
+    expect((await patch(`/api/v1/profiles/${id}`, boss.token, { recruiter_notes: 'by boss' })).status).toBe(200);
+    const del = (t) => post(`/api/v1/admin/profile/${id}/delete`, t, { password: 'wrong-password', reason: 'cleanup of test data' });
+    expect((await del(hr.token)).status).toBe(403); // plain HR: no delete
+    const head = await personWith('HR Admin', 'Prashant', 'recruiter');
+    expect((await del(head.token)).status).toBe(403); // HR Admin: no delete either
+    expect((await del(boss.token)).status).toBe(401); // HR Super Admin passes the permission gate (stopped only by the password check)
   });
 });
