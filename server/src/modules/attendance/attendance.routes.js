@@ -3,8 +3,9 @@ const { authenticate, authorize, requireOrgMembership } = require('../../middlew
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
+const regularization = require('./attendanceRegularization.service');
 const autoAttendance = require('./autoAttendance.service');
-const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema } = require('./attendance.validation');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema, regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -26,6 +27,59 @@ router.get(
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
     return ok(res, result.data, { pagination: result.pagination });
+  })
+);
+
+// --- Regularization requests: an employee asks to correct a day, an admin decides. (Before the /:id routes.) ---
+const REQUEST_ERRORS = {
+  membership_not_found: [404, 'Employee not found'],
+  no_attendance: [422, 'Contractors and vendor resources have no attendance'],
+  future_date: [422, "You can't regularize a future date"],
+  before_joining: [422, 'That date is before the employee joined'],
+  checkout_without_checkin: [422, 'Give a check-in time along with the check-out time'],
+  month_locked: [409, 'That month is locked for this employee: ask an admin to reopen it first'],
+  duplicate_pending: [409, 'There is already a pending request for that date'],
+  not_found: [404, 'Request not found'],
+  already_decided: [409, 'This request was already decided'],
+  leave_day: [422, 'The employee is on approved leave that day: cancel the leave first, or ask for the day to be recorded as leave'],
+};
+const failRequest = (res, error) => {
+  const [code, message] = REQUEST_ERRORS[error] || [500, 'Unexpected error'];
+  return fail(res, code, message);
+};
+
+router.post(
+  '/regularization-requests',
+  asyncHandler(async (req, res) => {
+    const body = regularizationRequestSchema.parse(req.body);
+    const result = await regularization.create(req.user.org_id, req.user, body);
+    if (result.error) return failRequest(res, result.error);
+    return created(res, result.request);
+  })
+);
+
+router.get(
+  '/regularization-requests/mine',
+  asyncHandler(async (req, res) => ok(res, await regularization.listMine(req.user.org_id, req.user.org_membership_id)))
+);
+
+router.get(
+  '/regularization-requests',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { status } = regularizationListQuerySchema.parse(req.query);
+    return ok(res, await regularization.listAll(req.user.org_id, { status }), { pending: await regularization.pendingCount(req.user.org_id) });
+  })
+);
+
+router.post(
+  '/regularization-requests/:id/decision',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = regularizationDecisionSchema.parse(req.body);
+    const result = await regularization.decide(req.user.org_id, req.params.id, req.user, body);
+    if (result.error) return failRequest(res, result.error);
+    return ok(res, result.request);
   })
 );
 

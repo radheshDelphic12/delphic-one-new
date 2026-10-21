@@ -235,3 +235,61 @@ describe('drilldown: coverage reports + access', () => {
     expect((await drill(adminToken, { report: 'hr', table: 'nope' })).status).toBe(422);
   });
 });
+
+describe('drilldown: joinings follow the report period (regression: the list used the whole month, not the period)', () => {
+  // Joinings of one sales owner on 30 Sep, 12 Oct and 19 Oct 2026. "Today" for these periods is 21 Oct 2026 (a Wednesday).
+  const JOINED = ['2026-09-30', '2026-10-12', '2026-10-19'];
+  const PERIODS = {
+    today: ['2026-10-21', '2026-10-21', 0],
+    'this week': ['2026-10-19', '2026-10-25', 1],
+    'this month': ['2026-10-01', '2026-10-31', 2],
+    'last month': ['2026-09-01', '2026-09-30', 1],
+    'this quarter': ['2026-10-01', '2026-12-31', 2],
+    'last quarter': ['2026-07-01', '2026-09-30', 1],
+    ytd: ['2026-01-01', '2026-10-21', 3],
+    custom: ['2026-10-12', '2026-10-12', 1],
+  };
+
+  async function seedJoinings() {
+    const client = await mkAccount({ stage: 'active' });
+    const req = await createRequirement(salesToken, client.id);
+    const seats = await authed(request(app).get(`/api/v1/requirements/${req.id}/seats`), salesToken);
+    const seatId = seats.body.data[0].id;
+    for (const when of JOINED) {
+      const profile = await prisma.profile.create({
+        data: { name: unique('Cand '), total_experience_years: 4, primary_skills: ['Node.js'], source: 'direct', added_by: sales.id },
+      });
+      await prisma.submission.create({
+        data: { requirement_seat_id: seatId, profile_id: profile.id, submitted_by: sales.id, stage: 'closed', actual_joining_date: new Date(`${when}T06:00:00Z`) },
+      });
+    }
+  }
+
+  test.each(Object.entries(PERIODS))('%s: the summary count equals the number of records listed', async (_name, [date_from, date_to, expected]) => {
+    await seedJoinings();
+    const report = await authed(request(app).get('/api/v1/reports/joinings').query({ date_from, date_to }), adminToken);
+    const rows = report.body.data.tables.find((t) => t.key === 'by_sales_poc').rows.filter((r) => r.sales_poc_id === sales.id);
+    const summary = rows.reduce((n, r) => n + r.joinings, 0);
+    expect(summary).toBe(expected);
+
+    // every summary row opens the records behind it, with the same filters the report was run with
+    let listed = 0;
+    for (const row of rows) {
+      const res = await drill(adminToken, { report: 'joinings', table: 'by_sales_poc', metric: 'joinings', person_id: sales.id, month: row.sort, date_from, date_to });
+      expect(res.status).toBe(200);
+      expect(res.body.data.total).toBe(row.joinings);
+      listed += res.body.data.rows.length;
+    }
+    expect(listed).toBe(summary);
+  });
+
+  test('the same holds for the other Joinings tabs (sourcer, interviewer)', async () => {
+    await seedJoinings();
+    const [date_from, date_to] = PERIODS['this week'];
+    const report = await authed(request(app).get('/api/v1/reports/joinings').query({ date_from, date_to }), adminToken);
+    const sourcer = report.body.data.tables.find((t) => t.key === 'by_sourcer').rows.find((r) => r.sourcer_id === sales.id);
+    expect(sourcer.joinings).toBe(1);
+    const res = await drill(adminToken, { report: 'joinings', table: 'by_sourcer', metric: 'joinings', person_id: sales.id, month: sourcer.sort, date_from, date_to });
+    expect(res.body.data.rows).toHaveLength(1);
+  });
+});

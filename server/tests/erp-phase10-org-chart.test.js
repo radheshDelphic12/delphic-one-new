@@ -126,6 +126,10 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     const chartB = res.body.data.find((c) => c.org.id === orgB.id);
     expect(chartA.headcount).toBe(2);
     expect(chartB.headcount).toBe(2);
+    // under each company comes its own admin (the group chart shows Super Admin > company > its admin > its teams)
+    expect(chartA.admins.map((a) => a.id)).toEqual([adminAMembership.id]);
+    expect(chartB.admins.map((a) => a.id)).toEqual([adminBMembership.id]);
+    expect(chartA.admins[0]).toMatchObject({ name: expect.any(String) });
   });
 });
 

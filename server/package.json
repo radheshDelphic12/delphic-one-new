@@ -9,6 +9,7 @@
     "start": "node src/index.js",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "attendance:auto-dryrun": "node scripts/attendance-auto-dryrun.js",
     "generate": "prisma generate",
     "seed": "node prisma/seed.js",
     "seed:accounts": "node prisma/seed-accounts.js",

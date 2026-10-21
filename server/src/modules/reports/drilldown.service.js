@@ -1,5 +1,5 @@
 const prisma = require('../../config/db');
-const { dayKey, reportFrom, reportTo, optionalDateRange } = require('./reports.service');
+const { dayKey, reportFrom, reportTo, optionalDateRange, dateOnlyRange } = require('./reports.service');
 
 /**
  * Report drill-down: the individual records behind one count in a report table.
@@ -19,15 +19,36 @@ const titleCase = (value) => (value ? String(value).replace(/_/g, ' ') : '—');
 
 // ---- date helpers --------------------------------------------------------------
 
-/** One IST day (`date`), one IST month (`month` = YYYY-MM), else the report's own range. */
-function rangeOf(q) {
-  if (q.date) return { gte: reportFrom(q.date), lte: reportTo(q.date) };
+/** The overlap of two Prisma date filters ({ gte, lte }); a missing side leaves the other as is. An empty overlap matches nothing. */
+function intersectRange(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const out = {};
+  const gte = [a.gte, b.gte].filter(Boolean);
+  const lte = [a.lte, b.lte].filter(Boolean);
+  if (gte.length) out.gte = new Date(Math.max(...gte.map((d) => d.getTime())));
+  if (lte.length) out.lte = new Date(Math.min(...lte.map((d) => d.getTime())));
+  return out;
+}
+
+/**
+ * The window a drill-down row covers. One IST day (`date`) is already inside the report's range. A table grouped by
+ * month (Joinings) sends the row's month (`month` = YYYY-MM) as well as the report's own range, and the list must
+ * satisfy BOTH: a "This week" report with a row for October is October's joinings within this week, never the whole
+ * month. (Reading the month alone listed records the report had filtered out, so the list outgrew the count.)
+ */
+function rangeOf(q, { dateOnly = false } = {}) {
+  // `dateOnly`: the list filters a calendar-DATE column (see dateOnlyRange), so the bounds are plain days, not IST instants.
+  const lo = (v) => (dateOnly ? dateOnlyRange(v, null).gte : reportFrom(v));
+  const hi = (v) => (dateOnly ? dateOnlyRange(null, v).lte : reportTo(v));
+  if (q.date) return { gte: lo(q.date), lte: hi(q.date) };
+  const window = dateOnly ? dateOnlyRange(q.date_from, q.date_to) : optionalDateRange(q.date_from, q.date_to);
   if (q.month && /^\d{4}-\d{2}$/.test(q.month)) {
     const [y, m] = q.month.split('-').map(Number);
     const last = String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0');
-    return { gte: reportFrom(`${q.month}-01`), lte: reportTo(`${q.month}-${last}`) };
+    return intersectRange({ gte: lo(`${q.month}-01`), lte: hi(`${q.month}-${last}`) }, window);
   }
-  return optionalDateRange(q.date_from, q.date_to);
+  return window;
 }
 
 // ---- record shapes (every resolver returns one of these) -------------------------
@@ -445,7 +466,7 @@ function hrRounds(q, { by }) {
 function joinedSubmissions(q, title, extraWhere) {
   return submissions(
     title,
-    { stage: 'closed', actual_joining_date: rangeOf(q), ...extraWhere },
+    { stage: 'closed', actual_joining_date: rangeOf(q, { dateOnly: true }), ...extraWhere },
     { dateLabel: 'Joined on', dateOf: (s) => s.actual_joining_date }
   );
 }

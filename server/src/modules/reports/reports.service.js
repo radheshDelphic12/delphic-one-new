@@ -45,6 +45,20 @@ function reportTo(value) {
     : new Date(value);
 }
 
+/**
+ * The same filter for a calendar-DATE column (e.g. actual_joining_date, `@db.Date`). A DATE holds no time of day and
+ * Prisma compares it with the UTC day of the value it is given, so the IST instants of optionalDateRange would reach
+ * one day too far back: "1 Oct 00:00 IST" is 30 Sep in UTC, and a 30 Sep joining then counted in October. Plain
+ * YYYY-MM-DD input is used as that calendar day, both ends inclusive.
+ */
+function dateOnlyRange(date_from, date_to) {
+  const plain = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00.000Z`) : null);
+  const range = {};
+  if (date_from) range.gte = plain(date_from) || reportFrom(date_from);
+  if (date_to) range.lte = plain(date_to) || reportTo(date_to);
+  return Object.keys(range).length ? range : undefined;
+}
+
 /** Build a Prisma date filter from optional YYYY-MM-DD (or ISO) strings; IST, end day inclusive. */
 function optionalDateRange(date_from, date_to) {
   const range = {};
@@ -295,7 +309,7 @@ async function salesPerformance({ date_from, date_to, sales_id, department_id })
         ? await prisma.submission.findMany({
             where: {
               seat: { requirement_id: { in: allOwnedReqIds } },
-              actual_joining_date: { gte: from, lte: to },
+              actual_joining_date: dateOnlyRange(date_from, date_to),
             },
           })
         : [];
@@ -729,7 +743,7 @@ async function closure({ date_from, date_to, group_by = 'month', department_id }
   const rows = await prisma.submission.findMany({
     where: {
       stage: 'closed',
-      actual_joining_date: { gte: reportFrom(date_from), lte: reportTo(date_to) },
+      actual_joining_date: dateOnlyRange(date_from, date_to),
       ...(department_id ? { submitted_by_user: { department_id } } : {}),
     },
     include: {
@@ -1183,7 +1197,7 @@ const dur = (fromDate, toDate) => {
 
 // A joining = a submission that reached `closed` with a joining date in range.
 async function joinings({ date_from, date_to }) {
-  const range = optionalDateRange(date_from, date_to);
+  const range = dateOnlyRange(date_from, date_to);
   const rows = await prisma.submission.findMany({
     where: { stage: 'closed', actual_joining_date: range },
     select: {
@@ -1888,4 +1902,5 @@ module.exports = {
   reportFrom,
   reportTo,
   optionalDateRange,
+  dateOnlyRange,
 };

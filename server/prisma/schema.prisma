@@ -63,6 +63,8 @@ enum AttendanceSource {
   web
   mobile
   manual
+  // Filled in by the daily automatic "present" job (never by a person). A leave approved for the day replaces it.
+  auto
 }
 
 enum LeaveRequestStatus {
@@ -729,6 +731,32 @@ model EmployeeCalendar {
 // org_id is denormalized here (also reachable via org_membership_id ->
 // OrgMembership.org_id) so the (org_id, date) composite index the HLD calls
 // for on every time-series table (§8) is a real index, not a join.
+// An employee's request to correct one day of their attendance (forgot to punch, wrong status). An admin approves or
+// rejects it in Time & Attendance > Regularization; approving writes the day through the same path as an admin's manual entry.
+model AttendanceRegularizationRequest {
+  id                String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String                     @db.Uuid
+  org               Org                        @relation(fields: [org_id], references: [id])
+  org_membership_id String                     @db.Uuid
+  org_membership    OrgMembership              @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  date              DateTime                   @db.Date
+  requested_status  AttendanceStatus
+  check_in_time     String?
+  check_out_time    String?
+  reason            String
+  status            RegularizationTicketStatus @default(pending)
+  requested_by      String                     @db.Uuid
+  decided_by        String?                    @db.Uuid
+  decided_at        DateTime?
+  decision_reason   String?
+  created_at        DateTime                   @default(now())
+  updated_at        DateTime                   @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([org_membership_id, date])
+  @@map("attendance_regularization_requests")
+}
+
 model AttendanceRecord {
   id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id              String           @db.Uuid
@@ -2041,20 +2069,21 @@ model Org {
   audit_logs               AuditLog[]
 
   // Multi-company ERP (Phase 2) — new tables, org_id required from creation.
-  designations       Designation[]
-  teams              Team[]
-  calendars          Calendar[]
-  project_calendars  ProjectCalendar[]
-  attendance_records AttendanceRecord[]
-  leave_types        LeaveType[]
-  leave_requests     LeaveRequest[]
-  departments        Department[]
-  locations          Location[]
-  shifts             Shift[]
-  timesheet_entries  TimesheetEntry[]
-  timesheet_locks    TimesheetLock[]
-  timesheet_overtime TimesheetDayOvertime[]
-  overtime_tickets   OvertimeTicket[]
+  designations                       Designation[]
+  teams                              Team[]
+  calendars                          Calendar[]
+  project_calendars                  ProjectCalendar[]
+  attendance_records                 AttendanceRecord[]
+  attendance_regularization_requests AttendanceRegularizationRequest[]
+  leave_types                        LeaveType[]
+  leave_requests                     LeaveRequest[]
+  departments                        Department[]
+  locations                          Location[]
+  shifts                             Shift[]
+  timesheet_entries                  TimesheetEntry[]
+  timesheet_locks                    TimesheetLock[]
+  timesheet_overtime                 TimesheetDayOvertime[]
+  overtime_tickets                   OvertimeTicket[]
 
   // Multi-company ERP (Phase 4).
   salary_structures SalaryStructure[]
@@ -2189,29 +2218,30 @@ model OrgMembership {
   created_at                  DateTime         @default(now())
   updated_at                  DateTime         @default(now()) @updatedAt
 
-  employee_calendars      EmployeeCalendar[]
-  attendance_records      AttendanceRecord[]
-  office_assignments      EmployeeOfficeAssignment[]
-  work_place_days         WorkPlaceDay[]
-  leave_balances          LeaveBalance[]
-  leave_requests          LeaveRequest[]                  @relation("LeaveRequestOwner")
-  leave_requests_approved LeaveRequest[]                  @relation("LeaveRequestApprover")
-  timesheet_entries       TimesheetEntry[]
-  timesheet_overtime      TimesheetDayOvertime[]
-  overtime_tickets        OvertimeTicket[]
-  salary_adjustments      SalaryAdjustment[]
-  salary_payments         SalaryPayment[]
-  salary_structures       SalaryStructure[]
-  payslips                Payslip[]
-  daily_profitability     DailyEmployeeProfitability[]
-  expense_claims          ExpenseClaim[]
-  assigned_tasks          AssignedTask[]
-  project_cost_rates      ProjectMemberAssignment[]
-  regularization_requests TimesheetRegularizationTicket[] @relation("RegularizationMembership")
-  teams_led               Team[]                          @relation("TeamLead")
-  team_periods            TeamMembershipPeriod[]
-  teams_managed           Team[]                          @relation("TeamManager")
-  assets                  Asset[]
+  employee_calendars                 EmployeeCalendar[]
+  attendance_records                 AttendanceRecord[]
+  attendance_regularization_requests AttendanceRegularizationRequest[]
+  office_assignments                 EmployeeOfficeAssignment[]
+  work_place_days                    WorkPlaceDay[]
+  leave_balances                     LeaveBalance[]
+  leave_requests                     LeaveRequest[]                    @relation("LeaveRequestOwner")
+  leave_requests_approved            LeaveRequest[]                    @relation("LeaveRequestApprover")
+  timesheet_entries                  TimesheetEntry[]
+  timesheet_overtime                 TimesheetDayOvertime[]
+  overtime_tickets                   OvertimeTicket[]
+  salary_adjustments                 SalaryAdjustment[]
+  salary_payments                    SalaryPayment[]
+  salary_structures                  SalaryStructure[]
+  payslips                           Payslip[]
+  daily_profitability                DailyEmployeeProfitability[]
+  expense_claims                     ExpenseClaim[]
+  assigned_tasks                     AssignedTask[]
+  project_cost_rates                 ProjectMemberAssignment[]
+  regularization_requests            TimesheetRegularizationTicket[]   @relation("RegularizationMembership")
+  teams_led                          Team[]                            @relation("TeamLead")
+  team_periods                       TeamMembershipPeriod[]
+  teams_managed                      Team[]                            @relation("TeamManager")
+  assets                             Asset[]
 
   @@unique([person_id, org_id])
   // Employee codes are unique within a company (null = none yet).
