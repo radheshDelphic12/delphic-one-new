@@ -4,7 +4,8 @@ const screening = require('./screening');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
 // through the website module's career submissions), every recruiter sees the pool, and the first recruiter to claim an applicant
-// owns them. Claiming creates - or reuses - the candidate Profile, so one person applying to two requirements is one Profile.
+// owns them. Claiming does NOT create a Profile; the recruiter's "Create profile" does (it reuses the person's existing Profile, so
+// one person applying to two requirements is one Profile).
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
 const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'internal', 'other'];

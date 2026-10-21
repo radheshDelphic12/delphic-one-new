@@ -194,6 +194,24 @@ router.delete(
   })
 );
 
+// Soft delete of an employee (restorable from Group Dashboard > Logs). A person with locked attendance months or a processed
+// payroll cannot be deleted: reopen those first. Terminating someone (the normal way to let a person go) is a status, not this.
+router.delete(
+  '/memberships/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 3) return fail(res, 422, 'Give a reason of at least 3 characters');
+    if (req.params.id === req.user.org_membership_id) return fail(res, 422, 'You cannot delete your own membership');
+    const result = await require('../admin/admin.service').softDeleteRecord('employee', req.params.id, reason.slice(0, 500), req.user, { orgId: req.user.org_id });
+    if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
+    if (result.error === 'already_deleted') return fail(res, 409, 'Already deleted');
+    if (result.error) return fail(res, ...(require('../../lib/softDeleteErrors')[result.error] || [400, 'Cannot delete']));
+    return ok(res, { deleted: true, dependency: result.result.dependency });
+  })
+);
+
 router.patch(
   '/memberships/:id',
   requireOrgMembership,

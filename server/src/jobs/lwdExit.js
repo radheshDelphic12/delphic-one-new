@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const prisma = require('../config/db');
 const logger = require('../config/logger');
 const { todayIst } = require('../lib/istDate');
+const orgContext = require('../lib/orgContext');
 
 /**
  * Exits people whose notice has run out. A membership "Serving notice" (notice_period)
@@ -14,6 +15,10 @@ const { todayIst } = require('../lib/istDate');
  * working. Idempotent, so it also runs once at start-up to catch a missed night.
  */
 async function run(today = todayIst()) {
+  return orgContext.runAs('Nightly job: last working day', () => exitDue(today));
+}
+
+async function exitDue(today) {
   const due = await prisma.orgMembership.findMany({
     where: { employment_status: 'notice_period', notice_end_date: { lt: today } },
     select: { id: true, notice_end_date: true, left_at: true },

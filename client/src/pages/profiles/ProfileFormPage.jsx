@@ -43,13 +43,32 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
   const [resumeFile, setResumeFile] = useState(null);
 
   useEffect(() => {
-    apiClient
-      // No stage filter — a vendor account that is not in the `active` stage must
-      // still be selectable, or the profile ends up with no vendor link and the
-      // recruiter-vendor-gaps report can't count it.
-      .get('/accounts', { params: { type: 'vendor', limit: 100 } })
-      .then(({ data }) => setVendors(data.data || []))
-      .catch(() => setVendors([]));
+    // No stage filter — a vendor account that is not in the `active` stage must
+    // still be selectable, or the profile ends up with no vendor link and the
+    // recruiter-vendor-gaps report can't count it. The API caps a page at 100,
+    // so walk every page or vendors beyond the first 100 never show up.
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = [];
+        let page = 1;
+        let totalPages = 1;
+        do {
+          const { data } = await apiClient.get('/accounts', {
+            params: { type: 'vendor', limit: 100, page, sort_by: 'name', sort_order: 'asc' },
+          });
+          all.push(...(data.data || []));
+          totalPages = data.pagination?.totalPages || 1;
+          page += 1;
+        } while (page <= totalPages);
+        if (!cancelled) setVendors(all);
+      } catch {
+        if (!cancelled) setVendors([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

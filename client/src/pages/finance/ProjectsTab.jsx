@@ -9,6 +9,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
+import EntityHistory from '../../components/EntityHistory.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
@@ -365,6 +366,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 
         <div className="rounded-2xl border border-tertiary-100 p-4"><ProjectCostingSection accountId={project.id} /></div>
+
+        <EntityHistory entityType="account" entityId={project.id} title="Project history" />
       </div>
     </Drawer>
   );

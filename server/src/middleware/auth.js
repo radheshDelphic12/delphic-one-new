@@ -49,7 +49,7 @@ function authenticate(req, res, next) {
         // writes that forget to set it. Empty org_id (no membership, or a
         // pre-Phase-1 token) means the middleware no-ops — zero behavior
         // change for anything that stays oblivious to org context.
-        orgContext.run({ org_id: user.org_id, org_membership_id: user.org_membership_id }, next);
+        orgContext.run({ org_id: user.org_id, org_membership_id: user.org_membership_id, user_id: user.id, user_name: user.name }, next);
       })
       .catch(next);
   } catch (_err) {

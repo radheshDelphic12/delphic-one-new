@@ -19,6 +19,7 @@ const ERROR_STATUS = {
   already_deleted: [409, 'Record is already deleted'],
   is_project: [409, 'This is a project, not a client account — it can’t be deleted from Accounts'],
   not_deleted: [409, 'Record is not deleted'],
+  ...require('../../lib/softDeleteErrors'),
 };
 
 const unlock = asyncHandler(async (req, res) => {

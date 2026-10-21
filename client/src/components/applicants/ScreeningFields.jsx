@@ -24,6 +24,7 @@ export function screeningPayload(s) {
 /** First thing missing among the required answers, or '' when complete. */
 export function missingScreening(s) {
   if (!s.linkedin_url.trim()) return 'Please add your LinkedIn profile link';
+  if (!s.cv_url.trim()) return 'Please add the Google Drive link to your CV';
   if (!s.currently_working) return 'Please say whether you are working somewhere';
   if (!s.joiner_status) return 'Please choose a joiner status';
   if (!s.notice_choice || (s.notice_choice === 'other' && s.notice_other === '')) return 'Please choose your notice period';
@@ -44,7 +45,7 @@ export default function ScreeningFields({ value, onChange, required = false, inp
     <div className="space-y-3" data-testid="screening-fields">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className={labelCls}>LinkedIn profile link{star}<input className={inputCls} type="url" inputMode="url" placeholder="https://www.linkedin.com/in/…" required={required} maxLength={300} value={value.linkedin_url} onChange={set('linkedin_url')} /></label>
-        <label className={labelCls}>Link to your CV (Drive, Dropbox …)<input className={inputCls} type="url" inputMode="url" placeholder="https://…" maxLength={500} value={value.cv_url} onChange={set('cv_url')} /></label>
+        <label className={labelCls}>Google Drive link to your CV{star}<input className={inputCls} type="url" inputMode="url" placeholder="https://drive.google.com/…" required={required} maxLength={500} value={value.cv_url} onChange={set('cv_url')} /></label>
         <label className={labelCls}>Are you working somewhere?{star}
           <select className={inputCls} required={required} value={value.currently_working} onChange={set('currently_working')}>
             <option value="">Choose…</option><option value="yes">Yes</option><option value="no">No</option>

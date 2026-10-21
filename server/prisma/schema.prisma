@@ -737,6 +737,31 @@ model EmployeeCalendar {
 // org_id is denormalized here (also reachable via org_membership_id ->
 // OrgMembership.org_id) so the (org_id, date) composite index the HLD calls
 // for on every time-series table (§8) is a real index, not a join.
+// Group-wide change log (see config/changeCapture.js): who changed what, when, in which company, old -> new values.
+// Append-only. `context_id` ties a child record (an allocation, a finance entry, a vendor invoice...) to its project.
+model ChangeLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String?  @db.Uuid
+  actor_id       String?  @db.Uuid
+  actor_name     String?
+  action         String // create | update | delete | soft_delete | restore | bulk_create | bulk_update | bulk_delete
+  entity_type    String
+  entity_id      String?
+  entity_label   String?
+  context_id     String?
+  old_values     Json?
+  new_values     Json?
+  changed_fields String[] @default([])
+  created_at     DateTime @default(now())
+
+  @@index([org_id, created_at])
+  @@index([entity_type, entity_id])
+  @@index([context_id])
+  @@index([actor_id])
+  @@index([created_at])
+  @@map("change_logs")
+}
+
 // An employee's request to correct one day of their attendance (forgot to punch, wrong status). An admin approves or
 // rejects it in Time & Attendance > Regularization; approving writes the day through the same path as an admin's manual entry.
 model AttendanceRegularizationRequest {
@@ -1522,6 +1547,10 @@ model ClientInvoice {
   created_by             String              @db.Uuid
   creator                User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
   created_at             DateTime            @default(now())
+  // Soft delete (restorable from Group Dashboard > Logs)
+  deleted_at             DateTime?
+  deleted_by             String?             @db.Uuid
+  delete_reason          String?
 
   // One invoice per project and month is enforced in invoices.service for monthly
   // / hourly projects; a fixed-bid project may raise several (capped by its contract value).
@@ -1633,6 +1662,10 @@ model ExpenseClaim {
   // once decided). `approvals` logs each step: [{ stage, status, by, name, at, reason }].
   approval_stage    ExpenseApprovalStage?
   approvals         Json                  @default("[]")
+  // Soft delete (restorable from Group Dashboard > Logs)
+  deleted_at        DateTime?
+  deleted_by        String?               @db.Uuid
+  delete_reason     String?
 
   @@index([org_id])
   @@index([org_membership_id])
@@ -2248,6 +2281,10 @@ model OrgMembership {
   team_periods                       TeamMembershipPeriod[]
   teams_managed                      Team[]                            @relation("TeamManager")
   assets                             Asset[]
+  // Soft delete (restorable from Group Dashboard > Logs)
+  deleted_at                         DateTime?
+  deleted_by                         String?                           @db.Uuid
+  delete_reason                      String?
 
   @@unique([person_id, org_id])
   // Employee codes are unique within a company (null = none yet).

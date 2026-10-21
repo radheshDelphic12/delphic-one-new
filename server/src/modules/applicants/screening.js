@@ -70,6 +70,7 @@ const optionalShape = fields;
 function requireScreening(d, ctx) {
   const need = (key, message) => { if (d[key] === undefined || d[key] === null || d[key] === '') ctx.addIssue({ code: 'custom', path: [key], message }); };
   need('linkedin_url', 'LinkedIn profile link is required');
+  need('cv_url', 'Google Drive link to your CV is required');
   need('currently_working', 'Please say whether you are working somewhere');
   need('joiner_status', 'Please choose a joiner status');
   need('notice_period_days', 'Please choose your notice period');

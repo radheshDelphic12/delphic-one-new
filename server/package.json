@@ -11,6 +11,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "attendance:auto-dryrun": "node scripts/attendance-auto-dryrun.js",
     "applicants:duplicates": "node scripts/applicants-duplicates.js",
+    "projects:integrity": "node scripts/projects-integrity-check.js",
     "generate": "prisma generate",
     "seed": "node prisma/seed.js",
     "seed:accounts": "node prisma/seed-accounts.js",
