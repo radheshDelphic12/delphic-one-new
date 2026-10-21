@@ -7,7 +7,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { canMoveSubmissionBackward, canMoveSubmissionStage } from '../../lib/submissionStages.js';
-import { formatStageLabel, shortKey } from './pipelineBoardUtils.js';
+import { formatStageLabel, shortKey } from '../pipeline/pipelineBoardUtils.js';
 
 const PAGE_SIZE = 25;
 const INPUT_CLASS =
@@ -15,11 +15,11 @@ const INPUT_CLASS =
 const dateOf = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 
 /**
- * Every rejected candidate in one place. A rejected submission is not a column of the Candidate pipeline: it leaves the board
+ * Every rejected candidate in one place (sidebar > Rejected). A rejected submission is not on the Pipeline at all: it leaves the Candidates board
  * the moment it is rejected (from the ⋯ menu on that board) and is listed here with who, why and when.
  * An admin can reactivate one, which puts it back at "Sourced" on the Candidate pipeline.
  */
-export default function RejectedCandidatesBoard() {
+export default function RejectedCandidatesPage() {
   const { user } = useAuth();
   const { pushError, pushSuccess } = useAlerts();
   const [rows, setRows] = useState([]);

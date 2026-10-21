@@ -132,6 +132,7 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/requirements')) return 'Requirements';
   if (pathname.startsWith('/profiles')) return 'Candidates';
   if (pathname.startsWith('/submissions')) return 'Submissions';
+  if (pathname.startsWith('/rejected-candidates')) return 'Rejected candidates';
   if (pathname.startsWith('/calendar')) return 'Calendar';
   if (pathname.startsWith('/notifications')) return 'Notifications';
   if (pathname.startsWith('/settings')) return 'Settings';
@@ -173,6 +174,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/requirements')) return 'Open jobs, seats, and recruiter assignments.';
   if (pathname.startsWith('/profiles')) return 'Profiles with skills, CTC, and resume attachments.';
   if (pathname.startsWith('/submissions')) return 'Candidates put forward for jobs, by pipeline stage.';
+  if (pathname.startsWith('/rejected-candidates')) return 'Candidates who were rejected, with the reason. Reactivate one to put it back in the pipeline.';
   if (pathname.startsWith('/calendar')) return 'Your scheduled and upcoming interviews - month grid or agenda.';
   if (pathname.startsWith('/notifications')) return 'Assignments, interviews, and stage changes across your work.';
   if (pathname.startsWith('/settings')) return 'Your profile, password, notifications, and account history.';

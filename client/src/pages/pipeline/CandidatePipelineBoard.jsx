@@ -28,7 +28,7 @@ import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSen
 import { usePipelineBoard } from './usePipelineBoard.js';
 import PipelineFilters from './PipelineFilters.jsx';
 
-// Rejected candidates are not a column: they leave the board and are listed under Pipeline > Rejected.
+// Rejected candidates are not a column: they leave the board and are listed on the Rejected page (sidebar).
 const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout'];
 const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'recruiter_id', 'submission_stage'];
 
@@ -295,7 +295,7 @@ export default function CandidatePipelineBoard() {
           <h2 className="font-heading text-base font-semibold text-tertiary-900">Candidate pipeline</h2>
           <p className="mt-1 text-sm text-tertiary-500">
             Drag candidates between stages, or use the ⋯ menu on a card. Rejected candidates move to{' '}
-            <Link to="/pipeline?view=rejected" className="font-medium text-primary-700 hover:underline">Rejected</Link>.
+            <Link to="/rejected-candidates" className="font-medium text-primary-700 hover:underline">Rejected</Link>.
           </p>
         </div>
         {canCreate && (

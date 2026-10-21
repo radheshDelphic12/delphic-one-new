@@ -10,7 +10,6 @@ import CandidatePipelineBoard from './CandidatePipelineBoard.jsx';
 import RequirementMatrixBoard from './RequirementMatrixBoard.jsx';
 import WebsiteJobsBoard from './WebsiteJobsBoard.jsx';
 import ApplicantPoolBoard from './ApplicantPoolBoard.jsx';
-import RejectedCandidatesBoard from './RejectedCandidatesBoard.jsx';
 
 const VIEW_OPTIONS = [
   { key: 'matrix', label: 'Requirement map', capability: 'viewRequirementMatrix' },
@@ -19,7 +18,6 @@ const VIEW_OPTIONS = [
   { key: 'lead', label: 'Leads', capability: 'viewLeadPipeline' },
   { key: 'jobs', label: 'Jobs', capability: 'viewJobPipeline' },
   { key: 'candidates', label: 'Candidates', capability: 'viewCandidatePipeline' },
-  { key: 'rejected', label: 'Rejected', capability: 'viewCandidatePipeline' },
 ];
 
 /**
@@ -83,7 +81,6 @@ export default function PipelineShell() {
       {activeView === 'lead' && <LeadPipelineBoard />}
       {activeView === 'jobs' && <JobPipelineBoard />}
       {activeView === 'candidates' && <CandidatePipelineBoard />}
-      {activeView === 'rejected' && <RejectedCandidatesBoard />}
       {activeView === 'matrix' && <RequirementMatrixBoard />}
       {activeView === 'website' && <WebsiteJobsBoard />}
       {activeView === 'applicants' && <ApplicantPoolBoard />}
