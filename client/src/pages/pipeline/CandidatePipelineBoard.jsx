@@ -28,7 +28,8 @@ import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSen
 import { usePipelineBoard } from './usePipelineBoard.js';
 import PipelineFilters from './PipelineFilters.jsx';
 
-const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout', 'rejected'];
+// Rejected candidates are not a column: they leave the board and are listed under Pipeline > Rejected.
+const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout'];
 const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'recruiter_id', 'submission_stage'];
 
 const INPUT_CLASS =
@@ -186,10 +187,9 @@ export default function CandidatePipelineBoard() {
     if (filterParams.search) params.search = filterParams.search;
     if (filterParams.account_id) params.account_id = filterParams.account_id;
     if (filterParams.recruiter_id) params.submitted_by = filterParams.recruiter_id;
-    if (filterParams.submission_stage) {
-      const stages = String(filterParams.submission_stage).split(',').filter(Boolean);
-      if (stages.length) params.stage = stages.join(',');
-    }
+    // only the board's own stages are ever asked for, so rejected candidates neither show nor take up the page
+    const stages = String(filterParams.submission_stage || '').split(',').filter((stage) => CANDIDATE_COLUMNS.includes(stage));
+    params.stage = (stages.length ? stages : CANDIDATE_COLUMNS).join(',');
     return params;
   }, [filterParams]);
   const handleFiltersChange = useCallback((params) => setFilterParams(params), []);
@@ -294,7 +294,8 @@ export default function CandidatePipelineBoard() {
         <div>
           <h2 className="font-heading text-base font-semibold text-tertiary-900">Candidate pipeline</h2>
           <p className="mt-1 text-sm text-tertiary-500">
-            Drag candidates between stages, or use the ⋯ menu on a card.
+            Drag candidates between stages, or use the ⋯ menu on a card. Rejected candidates move to{' '}
+            <Link to="/pipeline?view=rejected" className="font-medium text-primary-700 hover:underline">Rejected</Link>.
           </p>
         </div>
         {canCreate && (
