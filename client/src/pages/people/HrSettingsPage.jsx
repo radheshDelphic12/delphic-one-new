@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Download, FolderPlus, MapPin, Pencil, Plus, Settings2, Trash2, UsersRound } from 'lucide-react';
+import { CalendarDays, Download, FolderPlus, MapPin, Pencil, Plus, Settings2, Share2, Trash2, UsersRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -203,15 +203,17 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
   const [date, setDate] = useState('');
   const [label, setLabel] = useState('');
   const [workingDay, setWorkingDay] = useState(false);
+  const [shareAll, setShareAll] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (!open) return;
+    setShareAll(false);
     setDate(holiday ? String(holiday.date).slice(0, 10) : '');
     setLabel(holiday?.label || '');
     setWorkingDay(Boolean(holiday?.is_working_day));
   }, [open, holiday]);
-  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label, is_working_day: workingDay }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={workingDay} onChange={(event) => setWorkingDay(event.target.checked)} /><span>Working day exception<span className="block text-xs text-tertiary-500">This date is a WORKING day on this calendar although it would normally be off — e.g. a client that works this Saturday / Sunday. Use it on client/project calendars; the employee&apos;s company calendar is unchanged, and their hours that day go to overtime / comp off.</span></span></label></form></Drawer>;
+  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label, is_working_day: workingDay, ...(!isEditing && shareAll && !workingDay ? { applies_to_all: true } : {}) }); onClose(); } finally { setSaving(false); } }
+  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={workingDay} onChange={(event) => setWorkingDay(event.target.checked)} /><span>Working day exception<span className="block text-xs text-tertiary-500">This date is a WORKING day on this calendar although it would normally be off — e.g. a client that works this Saturday / Sunday. Use it on client/project calendars; the employee&apos;s company calendar is unchanged, and their hours that day go to overtime / comp off.</span></span></label>{!isEditing && !workingDay && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={shareAll} onChange={(event) => setShareAll(event.target.checked)} /><span>Applies to all calendars<span className="block text-xs text-tertiary-500">Also put this holiday on every other holiday calendar of the company (every office), so it shows in attendance, leave and the project calendars alike.</span></span></label>}</form></Drawer>;
 }
 
 /**
@@ -220,7 +222,7 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
  * holiday. Replaces the old bottom-corner popup, which only ever showed a
  * bare list with no way to change anything once added.
  */
-export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
+export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport, onShare }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
 
@@ -267,8 +269,14 @@ export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, o
                         </span>
                         {' — '}{h.label}
                         {h.is_working_day && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Working day</span>}
+                        {h.applies_to_all && <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700" title={h.copy_of_id ? 'A copy of a holiday shared from another calendar' : 'Shared with every calendar'}>{h.copy_of_id ? 'Shared (copy)' : 'All calendars'}</span>}
                       </span>
                       <span className="flex shrink-0 gap-1">
+                        {onShare && !h.is_working_day && !h.copy_of_id && (
+                          <button type="button" aria-label={h.applies_to_all ? 'Stop sharing holiday' : 'Share holiday with all calendars'} title={h.applies_to_all ? 'Stop sharing with the other calendars' : 'Share with all calendars'} className={`rounded-lg p-1.5 hover:bg-tertiary-50 ${h.applies_to_all ? 'text-green-600' : 'text-tertiary-400 hover:text-tertiary-700'}`} onClick={() => onShare(h, !h.applies_to_all)}>
+                            <Share2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button type="button" aria-label="Edit holiday" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-tertiary-50 hover:text-tertiary-700" onClick={() => setEditingHoliday(h)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -396,9 +404,20 @@ export default function HrSettingsPage() {
     try { const { data } = await apiClient.get(`/calendars/${calendar.id}/holidays`); setHolidays(data.data || []); } catch (err) { pushError(apiErrorMessage(err, 'Failed to load holidays'), 'Something went wrong'); }
   }
 
+  async function shareHoliday(holiday, share) {
+    try {
+      const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays/${holiday.id}/share`, { share });
+      pushInfo(share ? `Shared with ${data.copied} other calendar${data.copied === 1 ? '' : 's'}${data.kept ? ` (${data.kept} already had something that day)` : ''}` : 'Not shared any more');
+      await openHolidays(holidayCalendar);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not change sharing'), 'Something went wrong');
+    }
+  }
+
   async function addHoliday(payload) {
     try {
       const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays`, payload);
+      if (payload.applies_to_all) await openHolidays(holidayCalendar);
       setHolidays((current) => [...current, data.data].sort((a, b) => (a.date < b.date ? -1 : 1)));
       setRows((current) => current.map((r) => (r.id === holidayCalendar.id ? { ...r, _count: { ...r._count, holidays: (r._count?.holidays || 0) + 1 } } : r)));
       pushInfo('Holiday added');
@@ -523,6 +542,7 @@ export default function HrSettingsPage() {
       onAdd={addHoliday}
       onUpdate={updateHoliday}
       onDelete={deleteHoliday}
+      onShare={shareHoliday}
       onExport={exportHolidays}
     />
   </div>;

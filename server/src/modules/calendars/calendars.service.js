@@ -40,10 +40,16 @@ async function create(orgId, { name, kind, is_default, location_id, department_i
   if (refError) return { error: refError };
   const calendar = await prisma.$transaction(async (tx) => {
     if (is_default) await tx.calendar.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
-    return tx.calendar.create({
+    const created = await tx.calendar.create({
       data: { org_id: orgId, name, kind, is_default, location_id: location_id || null, department_id: department_id || null },
       include: CALENDAR_INCLUDE,
     });
+    // a new calendar starts with the holidays the company shares across all of them
+    const shared = await tx.calendarHoliday.findMany({ where: { calendar: { org_id: orgId }, applies_to_all: true, copy_of_id: null } });
+    if (shared.length) {
+      await tx.calendarHoliday.createMany({ data: shared.map((h) => ({ calendar_id: created.id, date: h.date, label: h.label, is_working_day: false, applies_to_all: true, copy_of_id: h.id })) });
+    }
+    return created;
   });
   return { calendar };
 }
@@ -86,6 +92,18 @@ async function updateHoliday(orgId, calendarId, holidayId, patch) {
     if (clash && clash.id !== holidayId) return { error: 'already_exists' };
   }
   const updated = await prisma.calendarHoliday.update({ where: { id: holidayId }, data: patch });
+  // a shared holiday: its copies in the other calendars follow a change of label or date (a copy whose new date is taken is left as it was)
+  if (holiday.applies_to_all && !holiday.copy_of_id && (patch.label || patch.date)) {
+    const copies = await prisma.calendarHoliday.findMany({ where: { copy_of_id: holidayId } });
+    for (const copy of copies) {
+      const data = { ...(patch.label ? { label: patch.label } : {}) };
+      if (patch.date) {
+        const clash = await prisma.calendarHoliday.findUnique({ where: { calendar_id_date: { calendar_id: copy.calendar_id, date: patch.date } } });
+        if (!clash || clash.id === copy.id) data.date = patch.date;
+      }
+      if (Object.keys(data).length) await prisma.calendarHoliday.update({ where: { id: copy.id }, data });
+    }
+  }
   return { holiday: updated };
 }
 
@@ -94,8 +112,39 @@ async function removeHoliday(orgId, calendarId, holidayId) {
   if (!calendar) return { error: 'not_found' };
   const holiday = await prisma.calendarHoliday.findFirst({ where: { id: holidayId, calendar_id: calendarId } });
   if (!holiday) return { error: 'holiday_not_found' };
+  // deleting a shared holiday takes its copies out of the other calendars too
+  if (holiday.applies_to_all && !holiday.copy_of_id) await prisma.calendarHoliday.deleteMany({ where: { copy_of_id: holidayId } });
   await prisma.calendarHoliday.delete({ where: { id: holidayId } });
   return { deleted: true };
+}
+
+/**
+ * Share a holiday with every calendar of the company (or stop sharing it). Sharing puts a copy in each other calendar
+ * that has nothing on that date; a calendar that already has a holiday there keeps it, and a calendar where that date
+ * is a working-day exception keeps the exception. Un-sharing removes the copies and keeps the original.
+ */
+async function shareHoliday(orgId, calendarId, holidayId, share) {
+  const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, org_id: orgId } });
+  if (!calendar) return { error: 'not_found' };
+  const holiday = await prisma.calendarHoliday.findFirst({ where: { id: holidayId, calendar_id: calendarId } });
+  if (!holiday) return { error: 'holiday_not_found' };
+  if (holiday.is_working_day) return { error: 'working_day_not_shareable' };
+  if (holiday.copy_of_id) return { error: 'is_a_copy' };
+  if (!share) {
+    await prisma.$transaction([
+      prisma.calendarHoliday.deleteMany({ where: { copy_of_id: holidayId } }),
+      prisma.calendarHoliday.update({ where: { id: holidayId }, data: { applies_to_all: false } }),
+    ]);
+    return { holiday: { ...holiday, applies_to_all: false }, copied: 0 };
+  }
+  const others = await prisma.calendar.findMany({ where: { org_id: orgId, id: { not: calendarId } }, select: { id: true } });
+  const taken = new Set((await prisma.calendarHoliday.findMany({ where: { calendar_id: { in: others.map((o) => o.id) }, date: holiday.date }, select: { calendar_id: true } })).map((r) => r.calendar_id));
+  const targets = others.filter((o) => !taken.has(o.id));
+  await prisma.$transaction([
+    prisma.calendarHoliday.update({ where: { id: holidayId }, data: { applies_to_all: true } }),
+    ...(targets.length ? [prisma.calendarHoliday.createMany({ data: targets.map((o) => ({ calendar_id: o.id, date: holiday.date, label: holiday.label, is_working_day: false, applies_to_all: true, copy_of_id: holidayId })) })] : []),
+  ]);
+  return { holiday: { ...holiday, applies_to_all: true }, copied: targets.length, kept: others.length - targets.length };
 }
 
 // One calendar's holidays as a workbook (Date / Day / Holiday). Built here so the
@@ -285,7 +334,7 @@ async function listHolidays(orgId, calendarId) {
   return { holidays };
 }
 
-async function addHoliday(orgId, calendarId, { date, label, is_working_day = false }) {
+async function addHoliday(orgId, calendarId, { date, label, is_working_day = false, applies_to_all = false }) {
   const calendar = await prisma.calendar.findFirst({ where: { id: calendarId, org_id: orgId } });
   if (!calendar) return { error: 'not_found' };
   const existing = await prisma.calendarHoliday.findUnique({
@@ -293,6 +342,10 @@ async function addHoliday(orgId, calendarId, { date, label, is_working_day = fal
   });
   if (existing) return { error: 'already_exists' };
   const holiday = await prisma.calendarHoliday.create({ data: { calendar_id: calendarId, date, label, is_working_day } });
+  if (applies_to_all && !is_working_day) {
+    const shared = await shareHoliday(orgId, calendarId, holiday.id, true);
+    return { holiday: shared.holiday || holiday, copied: shared.copied };
+  }
   return { holiday };
 }
 
@@ -683,6 +736,7 @@ module.exports = {
   addHoliday,
   updateHoliday,
   removeHoliday,
+  shareHoliday,
   assign,
   unassign,
   listCalendarEmployees,

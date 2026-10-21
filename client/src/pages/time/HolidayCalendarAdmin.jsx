@@ -236,9 +236,21 @@ export default function HolidayCalendarAdmin({ onChanged }) {
     }
   }
 
+  async function shareHoliday(holiday, share) {
+    try {
+      const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays/${holiday.id}/share`, { share });
+      pushInfo(share ? `Shared with ${data.copied} other calendar${data.copied === 1 ? '' : 's'}${data.kept ? ` (${data.kept} already had something that day)` : ''}` : 'Not shared any more');
+      await openHolidays(holidayCalendar);
+      if (onChanged) onChanged();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not change sharing'), 'Something went wrong');
+    }
+  }
+
   async function addHoliday(payload) {
     try {
       const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays`, payload);
+      if (payload.applies_to_all) await openHolidays(holidayCalendar);
       setHolidays((current) => [...current, data.data].sort(byDate));
       pushInfo('Holiday added');
       changed();
@@ -342,6 +354,7 @@ export default function HolidayCalendarAdmin({ onChanged }) {
         onAdd={addHoliday}
         onUpdate={updateHoliday}
         onDelete={deleteHoliday}
+        onShare={shareHoliday}
         onExport={exportHolidays}
       />
       <CalendarEmployeesDrawer calendar={employeesCalendar} onClose={() => setEmployeesCalendar(null)} onChanged={changed} />

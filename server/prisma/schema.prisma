@@ -695,9 +695,15 @@ model CalendarHoliday {
   // calendar even though it would normally be off (e.g. a client that works
   // this Sunday). Used on project/client calendars; never a holiday.
   is_working_day Boolean  @default(false)
+  // A holiday shared with every calendar of the company (Diwali is the same on every office's calendar). The row an admin
+  // marked keeps applies_to_all; the copies it creates in the other calendars point back to it with copy_of_id, so an edit
+  // or a delete of the original follows through. Readers need no change: a copy is an ordinary holiday row.
+  applies_to_all Boolean  @default(false)
+  copy_of_id     String?  @db.Uuid
 
   @@unique([calendar_id, date])
   @@index([calendar_id])
+  @@index([copy_of_id])
   @@map("calendar_holidays")
 }
 

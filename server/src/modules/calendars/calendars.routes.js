@@ -7,6 +7,7 @@ const {
   createCalendarSchema,
   updateCalendarSchema,
   addHolidaySchema,
+  shareHolidaySchema,
   updateHolidaySchema,
   assignCalendarSchema,
   createProjectSchema,
@@ -175,6 +176,20 @@ router.patch(
     if (result.error === 'holiday_not_found') return fail(res, 404, 'Holiday not found');
     if (result.error === 'already_exists') return fail(res, 409, 'Another holiday already exists on that date');
     return ok(res, result.holiday);
+  })
+);
+
+router.post(
+  '/:id/holidays/:holidayId/share',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { share } = shareHolidaySchema.parse(req.body);
+    const result = await service.shareHoliday(req.user.org_id, req.params.id, req.params.holidayId, share);
+    if (result.error === 'not_found') return fail(res, 404, 'Calendar not found');
+    if (result.error === 'holiday_not_found') return fail(res, 404, 'Holiday not found');
+    if (result.error === 'working_day_not_shareable') return fail(res, 422, 'Only a holiday can be shared, not a working-day exception');
+    if (result.error === 'is_a_copy') return fail(res, 422, 'This holiday is a copy of a shared holiday: change it from the calendar it was shared from');
+    return ok(res, result.holiday, { copied: result.copied, kept: result.kept });
   })
 );
 
