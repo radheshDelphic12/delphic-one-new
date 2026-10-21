@@ -1,11 +1,12 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
+import { Banknote, CalendarCheck, CalendarClock, DoorOpen, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import SalaryAdjustmentsTab from './SalaryAdjustmentsTab.jsx';
 import SalaryPaymentsTab from './SalaryPaymentsTab.jsx';
 import RefreshRunModal from './RefreshRunModal.jsx';
+import { FnfTab, IncrementRemindersTab, PreviousDuesModal } from './PeopleExitTabs.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -578,6 +579,7 @@ function PayrollRunsTab({ filters }) {
   const [processingId, setProcessingId] = useState(null);
   const [viewingRun, setViewingRun] = useState(null);
   const [refreshingRun, setRefreshingRun] = useState(null);
+  const [duesRun, setDuesRun] = useState(null);
   const [selectedPayslip, setSelectedPayslip] = useState(null);
 
   function load() {
@@ -638,6 +640,7 @@ function PayrollRunsTab({ filters }) {
           {row.status === 'processed' && (
             <button type="button" className="btn-ghost text-xs" onClick={() => setViewingRun(row)}>View payslips</button>
           )}
+          <button type="button" className="btn-ghost text-xs" onClick={() => setDuesRun(row)}>Previous dues</button>
           {row.status === 'processed' && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setRefreshingRun(row)}><Pencil className="h-3.5 w-3.5" /> Update payroll</button>
           )}
@@ -659,6 +662,7 @@ function PayrollRunsTab({ filters }) {
       <NewRunDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onSubmit={create} />
       <RunPayslipsDrawer open={Boolean(viewingRun)} run={viewingRun} filters={filters} onClose={() => setViewingRun(null)} onOpenPayslip={openPayslip} />
       <PayslipDrawer open={Boolean(selectedPayslip)} payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} />
+      <PreviousDuesModal run={duesRun} onClose={() => setDuesRun(null)} />
       <RefreshRunModal open={Boolean(refreshingRun)} run={refreshingRun} periodText={refreshingRun ? periodLabel(refreshingRun.period_month, refreshingRun.period_year) : ''} onClose={() => setRefreshingRun(null)} onDone={load} />
     </div>
   );
@@ -683,7 +687,10 @@ const ADMIN_TABS = [
   // TDS, OT adjustment, variable pay, reimbursements and the final payable salary.
   { key: 'adjustments', label: 'Adjustments', icon: SlidersHorizontal },
   { key: 'runs', label: 'Payroll Runs', icon: Play },
+  // Full and final settlement of everyone who has left.
+  { key: 'fnf', label: 'FnF', icon: DoorOpen },
 ];
+const INCREMENT_TAB = { key: 'increments', label: 'Increment Reminders', icon: CalendarClock };
 
 /**
  * Payroll hub — Phase 4 frontend. Self-service payslips for every role;
@@ -695,7 +702,7 @@ export default function PayrollHubPage() {
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
   const isAdmin = user?.role === 'admin';
-  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS, ...(user?.is_superadmin ? [INCREMENT_TAB] : [])] : BASE_TABS;
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'my-payslips';
   const section = tabs.some((t) => t.key === requested) ? requested : 'my-payslips';
@@ -719,6 +726,8 @@ export default function PayrollHubPage() {
       {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
       {section === 'adjustments' && isAdmin && <SalaryAdjustmentsTab />}
       {section === 'runs' && isAdmin && <PayrollRunsTab filters={people} />}
+      {section === 'fnf' && isAdmin && <FnfTab />}
+      {section === 'increments' && isAdmin && <IncrementRemindersTab />}
     </div>
   );
 }
