@@ -650,6 +650,7 @@ model Location {
   name       String
   city       String?
   country    String?
+  address    String?
   is_default Boolean  @default(false)
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt

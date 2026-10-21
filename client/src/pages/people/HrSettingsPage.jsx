@@ -140,17 +140,17 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
 // location" is exclusive: ticking it moves the default here.
 function LocationDrawer({ open, location = null, onClose, onSubmit }) {
   const isEditing = Boolean(location);
-  const [fields, setFields] = useState({ name: '', city: '', country: '', is_default: false });
+  const [fields, setFields] = useState({ name: '', city: '', country: '', address: '', is_default: false });
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', is_default: location.is_default } : { name: '', city: '', country: '', is_default: false });
+    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', address: location.address || '', is_default: location.is_default } : { name: '', city: '', country: '', address: '', is_default: false });
   }, [open, location]);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
+      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), address: fields.address.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
       onClose();
     } finally { setSaving(false); }
   }
@@ -161,6 +161,7 @@ function LocationDrawer({ open, location = null, onClose, onSubmit }) {
         <label className="block text-xs font-medium text-tertiary-600">Location name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">City<input value={fields.city} onChange={(event) => set('city', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">Country<input value={fields.country} onChange={(event) => set('country', event.target.value)} className={input} /></label>
+        <label className="block text-xs font-medium text-tertiary-600">Complete address<textarea rows={3} maxLength={500} value={fields.address} onChange={(event) => set('address', event.target.value)} placeholder="Building, street, area, city, state, PIN code" className={input} /></label>
         <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default location <span className="text-xs text-tertiary-400">(only one — replaces the current default)</span></label>
       </form>
     </Drawer>
@@ -482,6 +483,7 @@ export default function HrSettingsPage() {
         { key: 'name', header: 'Location' },
         { key: 'city', header: 'City', render: (row) => row.city || 'Not set' },
         { key: 'country', header: 'Country', render: (row) => row.country || 'Not set' },
+        { key: 'address', header: 'Address', render: (row) => row.address || <span className="text-tertiary-400">Not set</span> },
         { key: 'default', header: 'Default', render: (row) => (row.is_default ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">Default</span> : <span className="text-tertiary-400">—</span>) },
         ...(canManage ? [{ key: 'actions', header: '', render: (row) => (
           <span className="flex justify-end gap-1">

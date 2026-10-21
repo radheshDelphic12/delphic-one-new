@@ -141,12 +141,12 @@ async function officesOverview(orgId) {
 
 // An org has ONE default location: marking a location as the default moves
 // the flag, so two defaults never coexist.
-async function createLocation(orgId, { name, city, country, is_default }) {
+async function createLocation(orgId, { name, city, country, address, is_default }) {
   const existing = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
   const location = await prisma.$transaction(async (tx) => {
     if (is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
-    return tx.location.create({ data: { org_id: orgId, name, city, country, is_default } });
+    return tx.location.create({ data: { org_id: orgId, name, city, country, address, is_default } });
   });
   return { location };
 }
