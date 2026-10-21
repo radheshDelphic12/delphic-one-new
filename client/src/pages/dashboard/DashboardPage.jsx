@@ -28,6 +28,8 @@ import { rangeForPreset } from '../../lib/datePresets.js';
 import { funnelChartData, stageFilterHref, statsForRole } from './dashboardWidgets.js';
 import LightweightDashboard from './LightweightDashboard.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
+import AnnouncementsCard from './AnnouncementsCard.jsx';
+import BenchCard from './BenchCard.jsx';
 
 const cardMotion = {
   initial: { opacity: 0, y: 12 },
@@ -420,6 +422,16 @@ export default function DashboardPage() {
             </div>
             <RecentActivityPanel rows={summary?.recent_activity} />
           </div>
+
+          <motion.div {...cardMotion}>
+            <AnnouncementsCard />
+          </motion.div>
+
+          {role === 'admin' && (
+            <motion.div {...cardMotion}>
+              <BenchCard />
+            </motion.div>
+          )}
 
           {role === 'admin' && (
             <motion.div {...cardMotion}>

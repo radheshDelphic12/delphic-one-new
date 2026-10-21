@@ -45,6 +45,7 @@ function localToday(offset = 0) {
 
 const formatDay = (ymd) => (ymd ? new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const num = (n) => (Number.isInteger(n) ? String(n) : Number(n).toFixed(1));
+const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const clean = (params) => Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined));
 
 function Filter({ label, children }) {
@@ -158,6 +159,9 @@ function TeamCapacityReport() {
       </ProjectsHover>
     ) },
     { key: 'can', header: 'Can allocate', render: (r) => (r.team ? <span className="font-semibold">{num(r.can_allocate)}</span> : '—') },
+    { key: 'billing', header: 'Total monthly billing', render: (r) => (r.team ? inr(r.monthly_billing) : '—') },
+    { key: 'salary', header: 'Total team salary', render: (r) => (r.team ? inr(r.team_salary) : '—') },
+    { key: 'vendor', header: 'Total vendor cost', render: (r) => (r.team ? inr(r.vendor_cost) : '—') },
     { key: 'status', header: 'Status', render: (r) => { const [label, tone] = CAPACITY_STATUS[r.status] || [r.status, 'gray']; return <Pill tone={tone}>{label}</Pill>; } },
   ];
 
@@ -180,7 +184,8 @@ function TeamCapacityReport() {
       {data && (
         <p className="text-xs text-tertiary-500">
           Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
-          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)}.
+          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)} · monthly billing {inr(data.totals.monthly_billing)} · team salary {inr(data.totals.team_salary)} · vendor cost {inr(data.totals.vendor_cost)}.
+          {' '}Monthly billing = the contract monthly value of the team&apos;s running Managed Services projects (Fixed cost and Recruitment projects count as 0). Team salary = monthly CTC of employees; vendor cost = monthly vendor rate of contractors.
         </p>
       )}
       <TeamDetailDrawer row={open} date={data?.date} onClose={() => setOpen(null)} />

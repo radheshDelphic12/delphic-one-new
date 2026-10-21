@@ -12,9 +12,10 @@ const round2 = (n) => Math.round(n * 100) / 100;
 const monthBounds = (year, month) => ({ from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) });
 
 // People whose timesheet the caller may open: an admin everyone, a manager their direct reports, anyone themselves.
-async function visibleMembers(orgId, user) {
+// Exited people are left out unless `includeExited` (the Attendance Dashboard's status filter asks for them).
+async function visibleMembers(orgId, user, { includeExited = false } = {}) {
   const own = user.org_membership_id;
-  const where = { org_id: orgId, employment_status: { not: 'terminated' } };
+  const where = { org_id: orgId, ...(includeExited ? {} : { employment_status: { not: 'terminated' } }) };
   if (user.role !== 'admin') where.OR = [{ id: own }, { manager_id: own }];
   return prisma.orgMembership.findMany({
     where,

@@ -349,6 +349,10 @@ const ACCOUNT_SELECT = {
   agreement_start_date: true,
   agreement_end_date: true,
   contract_status: true,
+  // for the monthly billing figure on Team Capacity
+  client_billing_currency: true,
+  minimum_monthly_hours: true,
+  benchmark_hours: true,
 };
 
 function describeProject(a) {
@@ -395,7 +399,7 @@ async function loadPeopleAndTeams(orgId) {
     prisma.teamMembershipPeriod.findMany({ where: { org_id: orgId }, select: { org_membership_id: true, team_id: true, start_date: true, end_date: true } }),
     prisma.orgMembership.findMany({
       where: { org_id: orgId },
-      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, employment_status: true, worker_type: true, person: { select: { name: true } } },
+      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, employment_status: true, worker_type: true, vendor_rate: true, vendor_rate_currency: true, person: { select: { name: true } } },
     }),
   ]);
   const periodsBy = A.byMembership(periods);
@@ -433,6 +437,32 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
     }),
   ]);
 
+  // Money for the month of `day`: monthly contract billing per running Managed Services project (Fixed cost / Recruitment count as 0),
+  // each employee's monthly salary (CTC) and each contractor's vendor rate, all in INR.
+  const accountsById = new Map(spans.map((s) => [s.account_id, s.account]));
+  const exchangeRates = require('../billing/exchangeRates.service');
+  const { monthContractByProject } = require('../billing/projectPnl.service');
+  const memberships = [...ctx.memberships];
+  const [fx, salaryRows] = await Promise.all([
+    exchangeRates.inrRates(orgId),
+    prisma.salaryStructure.findMany({
+      where: { org_id: orgId, org_membership_id: { in: memberships.filter((m) => m.worker_type !== 'contractor').map((m) => m.id) }, effective_from: { lte: day } },
+      select: { org_membership_id: true, ctc: true, effective_from: true, created_at: true },
+    }),
+  ]);
+  const contract = await monthContractByProject(orgId, [...accountsById.values()].filter((a) => a.service_category === 'managed_services'), { period_month: day.getUTCMonth() + 1, period_year: day.getUTCFullYear() }, fx);
+  const { toInr } = exchangeRates.inrConverter(fx);
+  const billingOf = (accountId) => {
+    const a = accountsById.get(accountId);
+    if (!a || a.service_category !== 'managed_services') return 0;
+    return contract.get(accountId)?.amount_inr || 0;
+  };
+  const salaryOf = new Map();
+  for (const s of salaryRows) {
+    const cur = salaryOf.get(s.org_membership_id);
+    if (!cur || s.effective_from > cur.effective_from || (+s.effective_from === +cur.effective_from && s.created_at > cur.created_at)) salaryOf.set(s.org_membership_id, s);
+  }
+
   const rows = new Map();
   const rowFor = (team) => {
     const key = team?.id || 'none';
@@ -453,7 +483,7 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
     if (!employedOn(m, day)) continue;
     const teamId = ctx.teamOf(m.id, day);
     if (!teamId) continue;
-    rowFor(ctx.teamsById.get(teamId)).members.push({ id: m.id, name: m.person.name });
+    rowFor(ctx.teamsById.get(teamId)).members.push({ id: m.id, name: m.person.name, contractor: m.worker_type === 'contractor' });
   }
   for (const s of spans) {
     const m = ctx.membershipsById.get(s.org_membership_id);
@@ -487,7 +517,18 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       // Projects are whole units: a fractional remainder (0.5, 2.5) counts as one more project, so capability is a whole number.
       const available = Math.ceil(round2(Math.max(0, total - current)));
       const endingSoon = projects.filter((p) => p.ending_soon).length;
+      const runningNow = projects.filter((p) => !p.not_started);
+      const monthlyBilling = round2(runningNow.reduce((s, p) => s + billingOf(p.id), 0));
+      const teamSalary = round2(r.members.reduce((s, mem) => s + (mem.contractor ? 0 : Number(salaryOf.get(mem.id)?.ctc || 0)), 0));
+      const vendorCost = round2(r.members.reduce((s, mem) => {
+        if (!mem.contractor) return s;
+        const m = ctx.membershipsById.get(mem.id);
+        return s + (m?.vendor_rate != null ? toInr(Number(m.vendor_rate), m.vendor_rate_currency) : 0);
+      }, 0));
       return {
+        monthly_billing: monthlyBilling,
+        team_salary: teamSalary,
+        vendor_cost: vendorCost,
         team: r.team,
         lead: r.lead,
         members,
@@ -505,6 +546,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       };
     });
   const sum = (key) => round2(out.filter((r) => r.team).reduce((s, r) => s + r[key], 0));
+  // a project shared by two teams is billed once in the grand total
+  const billedProjects = new Set(out.filter((r) => r.team).flatMap((r) => r.projects.filter((p) => !p.not_started).map((p) => p.id)));
   return {
     date: A.ymd(day),
     window_days,
@@ -517,6 +560,9 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       available_capability: sum('available_capability'),
       projects_ending_soon: sum('projects_ending_soon'),
       can_allocate: sum('can_allocate'),
+      monthly_billing: round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)),
+      team_salary: sum('team_salary'),
+      vendor_cost: sum('vendor_cost'),
     },
   };
 }

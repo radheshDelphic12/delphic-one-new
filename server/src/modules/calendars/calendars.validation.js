@@ -25,7 +25,10 @@ const addHolidaySchema = z.object({
   label: z.string().min(1).max(200),
   // A working-day exception instead of a holiday (e.g. a client working Sunday).
   is_working_day: z.boolean().optional(),
+  // Put the holiday on every calendar of the company, not only this one.
+  applies_to_all: z.boolean().optional(),
 });
+const shareHolidaySchema = z.object({ share: z.boolean() });
 
 const updateHolidaySchema = z
   .object({
@@ -61,6 +64,7 @@ module.exports = {
   createCalendarSchema,
   updateCalendarSchema,
   addHolidaySchema,
+  shareHolidaySchema,
   updateHolidaySchema,
   assignCalendarSchema,
   createProjectSchema,

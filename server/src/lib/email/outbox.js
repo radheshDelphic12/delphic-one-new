@@ -26,7 +26,7 @@ function defaultHtml(text) {
  * Queue one email. Never throws (like notify()) — a mail problem must not roll
  * back the business transaction that triggered it. `client` may be a `tx`.
  */
-async function enqueue(client, { orgId = null, kind, to, subject, text, html, ics }) {
+async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html, ics }) {
   try {
     if (!to?.email) return null;
     return await client.emailOutbox.create({
@@ -35,6 +35,7 @@ async function enqueue(client, { orgId = null, kind, to, subject, text, html, ic
         kind,
         to_email: to.email,
         to_name: to.name || null,
+        cc_email: cc?.email || null,
         subject,
         body_text: text,
         body_html: html || defaultHtml(text),
@@ -74,6 +75,7 @@ async function processQueue({ limit = 25, transport = getTransport() } = {}) {
       await transport.sendMail({
         from: env.notifications.email.from || 'Delphic One <no-reply@delphic.local>',
         to: row.to_name ? `"${row.to_name.replace(/"/g, '')}" <${row.to_email}>` : row.to_email,
+        cc: row.cc_email || undefined,
         subject: row.subject,
         text: row.body_text,
         html: row.body_html || undefined,

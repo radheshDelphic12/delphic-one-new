@@ -5,7 +5,7 @@ const websitePostings = require('../src/modules/website/postings.service');
 const careerRoutes = require('../src/modules/careerPages/careerPages.routes');
 
 let sToken; let rToken; let req; let slug; let orgSlug;
-const answers = { phone: '98765 11111', linkedin_url: 'https://www.linkedin.com/in/pages', currently_working: 'yes', joiner_status: 'no', notice_period_days: 30, current_ctc_lpa: 9, expected_ctc_lpa: 12, work_mode: 'hybrid' };
+const answers = { phone: '98765 11111', experience_years: 3, cv_url: 'https://drive.google.com/file/d/abc/view', linkedin_url: 'https://www.linkedin.com/in/pages', currently_working: 'yes', joiner_status: 'no', notice_period_days: 30, current_ctc_lpa: 9, expected_ctc_lpa: 12, work_mode: 'hybrid' };
 
 beforeAll(async () => {
   await cleanDatabase();
@@ -82,6 +82,7 @@ describe('careers pages', () => {
     }
     const job = (await page(`/${slug}`)).text;
     expect(job).toContain('data-action="' + slug + '/apply"');
+    expect(job).toContain('name="experience_years"'); // the Experience column of Applicants was empty because the form never asked for it
     expect(job).toContain('href="assets/career.css?v=');
     expect(job).toContain('src="assets/career.js?v=');
   });

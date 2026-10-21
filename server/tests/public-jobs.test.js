@@ -23,7 +23,7 @@ beforeAll(async () => {
 afterAll(async () => { await prisma.$disconnect(); });
 
 let seq = 0;
-const screening = { phone: '98765 43210', linkedin_url: 'https://www.linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'no', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid' };
+const screening = { phone: '98765 43210', experience_years: 2, cv_url: 'https://drive.google.com/file/d/abc/view', linkedin_url: 'https://www.linkedin.com/in/asha', currently_working: 'yes', joiner_status: 'no', notice_period_days: 30, current_ctc_lpa: 10, expected_ctc_lpa: 14, work_mode: 'hybrid' };
 const apply = (body) => request(app).post(`/api/v1/public/jobs/${slug}/apply`).send({ name: 'Asha Rao', email: 'asha@example.com', ...screening, phone: `98765 ${String(20000 + (seq += 1))}`, ...(seq > 1 && body?.email ? { linkedin_url: `https://www.linkedin.com/in/asha-${seq}` } : {}), ...body });
 
 describe('public job link', () => {
@@ -42,6 +42,7 @@ describe('public job link', () => {
     expect(r.status).toBe(201);
     const row = await prisma.jobApplicant.findFirst({ where: { requirement_id: req.id } });
     expect(row).toMatchObject({ name: 'Asha Rao', email: 'asha@example.com', source: 'website', channel: 'linkedin', status: 'new' });
+    expect(Number(row.experience_years)).toBe(3); // stored, so the Applicants list can show it
     expect((await apply({ channel: 'linkedin' })).status).toBe(409);
     const other = await apply({ name: 'Bhavna', email: 'b@example.com', channel: 'mystery' });
     expect(other.status).toBe(201);

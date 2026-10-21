@@ -20,15 +20,28 @@ const lastApplyDay = () => { const t = todayIst(); return new Date(Date.UTC(t.ge
 
 const workTypeOf = (membership) => (membership.work_mode === 'remote' ? 'remote' : 'onsite');
 
+// Where someone stands today: 'exited' (status terminated, or the last working day has passed), 'notice_period' (serving
+// notice, last working day not yet passed) or 'active' (everyone else who still works here).
+function employmentState(m, today) {
+  if (m.employment_status === 'terminated') return 'exited';
+  if (m.left_at && m.left_at < today) return 'exited';
+  if (m.employment_status === 'notice_period') return m.notice_end_date && m.notice_end_date < today ? 'exited' : 'notice_period';
+  return 'active';
+}
+
+// status: 'current' (default: everyone still working, incl. serving notice), 'active', 'notice_period', 'exited', 'all'.
+const matchesStatus = (state, status) => (status === 'all' ? true : status === 'current' ? state !== 'exited' : state === status);
+
 // Employees (IT and non-IT) the caller may open. Contractors and vendor resources have no attendance.
-async function people(orgId, user, { year, month }) {
+async function people(orgId, user, { year, month, status = 'current' }) {
   const { from, to } = monthBounds(year, month);
-  const visible = await dashboard.visibleMembers(orgId, user);
+  const today = todayIst();
+  const visible = await dashboard.visibleMembers(orgId, user, { includeExited: true });
   const ids = visible.filter((m) => m.worker_type !== 'contractor' && !m.vendor_account_id).map((m) => m.id);
-  const [members, records] = await Promise.all([
+  const [allMembers, records] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { id: { in: ids } },
-      select: { id: true, work_mode: true, location: { select: { id: true, name: true } }, person: { select: { name: true, department: { select: { name: true } } } } },
+      select: { id: true, work_mode: true, employment_status: true, left_at: true, notice_end_date: true, location: { select: { id: true, name: true } }, person: { select: { name: true, department: { select: { name: true } } } } },
       orderBy: { person: { name: 'asc' } },
     }),
     prisma.attendanceRecord.groupBy({ by: ['org_membership_id', 'status'], where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, _count: { _all: true } }),
@@ -39,12 +52,16 @@ async function people(orgId, user, { year, month }) {
     c[r.status] = r._count._all;
     counts.set(r.org_membership_id, c);
   }
+  const members = allMembers.filter((m) => matchesStatus(employmentState(m, today), status));
   return {
     year,
     month,
+    status,
     people: members.map((m) => ({
       org_membership_id: m.id,
       name: m.person?.name || 'Unknown',
+      status: employmentState(m, today),
+      last_working_day: m.left_at || m.notice_end_date ? ymd(m.left_at || m.notice_end_date) : null,
       department: m.person?.department?.name || null,
       reporting_office: m.location?.name || null,
       work_type: workTypeOf(m),

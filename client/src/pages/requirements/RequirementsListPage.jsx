@@ -15,6 +15,8 @@ import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
 import { canAssignRecruiters } from '../profiles/profileUtils.js';
 import AssignRecruiterDrawer from './AssignRecruiterDrawer.jsx';
 import RequirementFormPage from './RequirementFormPage.jsx';
+import VendorEmailDrawer from './VendorEmailDrawer.jsx';
+import { userCan } from '../../lib/permissions.js';
 
 function reqKey(id) {
   return `REQ-${String(id).slice(0, 8).toUpperCase()}`;
@@ -156,6 +158,10 @@ export default function RequirementsListPage() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [assignTarget, setAssignTarget] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [emailOpen, setEmailOpen] = useState(false);
+  // Emailing requirements to vendors: Sales and Admin, or a custom role that may edit requirements.
+  const canEmailVendors = ['sales', 'admin'].includes(user?.role) || userCan(user, 'requirements.update');
   const [peek, setPeek] = useState(null);
   const [createOpen, setCreateOpen] = useState(searchParams.get('create') === '1');
 
@@ -570,12 +576,18 @@ export default function RequirementsListPage() {
           loading={loading}
           emptyLabel="No requirements match these filters."
           onRowClick={setPeek}
+          selectable={canEmailVendors}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          actions={[{ key: 'email-vendors', label: 'Email to vendors', onClick: () => setEmailOpen(true) }]}
           headerClassName="bg-[#F9FAFB]"
           striped
           embedded
           maxHeight="max(22rem, calc(100dvh - 18rem))"
         />
       </section>
+
+      <VendorEmailDrawer open={emailOpen} requirements={rows.filter((r) => selectedIds.includes(r.id)).map((r) => ({ id: r.id, title: r.title }))} onClose={() => setEmailOpen(false)} onSent={() => setSelectedIds([])} />
 
       <div className="flex items-center justify-between px-1 text-xs text-tertiary-500">
         <span>

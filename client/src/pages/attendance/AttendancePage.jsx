@@ -11,6 +11,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
 import { AttendanceDays, AttendanceHeader } from './AttendanceModern.jsx';
+import AttendanceRegularizationRequests from './AttendanceRegularizationRequests.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -202,6 +203,7 @@ export default function AttendancePage() {
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
       {isAdmin && <BackfillMonthDrawer open={monthOpen} onClose={() => setMonthOpen(false)} onApplied={loadAttendance} />}
       {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}
+      {tab === 'mine' && <AttendanceRegularizationRequests />}
       <RegularizeDrawer row={regularize} open={Boolean(regularize)} onClose={() => setRegularize(null)} onSaved={handleRegularized} />
     </div>
   );

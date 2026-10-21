@@ -51,6 +51,13 @@ function readStoredView() {
   return 'day';
 }
 
+/** Distinct people (by id) for a filter list, sorted by name. */
+function uniquePeople(list) {
+  const map = new Map();
+  list.forEach((p) => { if (p?.id && !map.has(p.id)) map.set(p.id, { id: p.id, name: p.name || p.email || 'Unknown' }); });
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function CalendarPage() {
   const { user } = useAuth();
   const { pushError } = useAlerts();
@@ -63,7 +70,11 @@ export default function CalendarPage() {
   const [audience, setAudience] = useState('all');
   const [sortBy, setSortBy] = useState('time');
 
-  const [events, setEvents] = useState([]);
+  const [allEvents, setEvents] = useState([]);
+  // Meeting type / organiser / attendee: narrow what is already loaded, so they react instantly.
+  const [meetingType, setMeetingType] = useState('all');
+  const [organiser, setOrganiser] = useState('all');
+  const [attendee, setAttendee] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -96,6 +107,16 @@ export default function CalendarPage() {
     to.setHours(23, 59, 59, 999);
     return { from, to };
   }, [view, anchor]);
+
+  const organiserOptions = useMemo(() => uniquePeople(allEvents.map((e) => e.scheduled_by)), [allEvents]);
+  const attendeeOptions = useMemo(() => uniquePeople(allEvents.flatMap((e) => e.interviewers || [])), [allEvents]);
+  const events = useMemo(() => allEvents.filter((e) => {
+    if (meetingType === 'sales' && e.kind !== 'client_meeting') return false;
+    if (meetingType === 'interview' && e.kind === 'client_meeting') return false;
+    if (organiser !== 'all' && e.scheduled_by?.id !== organiser) return false;
+    if (attendee !== 'all' && !(e.interviewers || []).some((p) => p.id === attendee)) return false;
+    return true;
+  }), [allEvents, meetingType, organiser, attendee]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -242,6 +263,22 @@ export default function CalendarPage() {
                 {a.label}
               </option>
             ))}
+          </select>
+
+          <select value={meetingType} onChange={(e) => setMeetingType(e.target.value)} className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" aria-label="Meeting type">
+            <option value="all">All meeting types</option>
+            <option value="sales">Sales meetings</option>
+            <option value="interview">Interviews</option>
+          </select>
+
+          <select value={organiser} onChange={(e) => setOrganiser(e.target.value)} className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" aria-label="Organiser">
+            <option value="all">Any organiser</option>
+            {organiserOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+
+          <select value={attendee} onChange={(e) => setAttendee(e.target.value)} className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" aria-label="Attendee">
+            <option value="all">Any attendee</option>
+            {attendeeOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
 
           <select

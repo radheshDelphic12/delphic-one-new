@@ -134,6 +134,8 @@ const listQuerySchema = z.object({
   // (mirrors the dashboard "Stuck leads" tile so its click-through is exact).
   stuck: z.enum(['stuck', 'not_stuck']).optional(),
   industry: z.string().optional(),
+  // Location filter: matches the Location text, the city or the country.
+  location: z.string().trim().max(100).optional(),
   /** Exact vendor specialization tag (matches `vendor_specializations` array element). */
   specialization: z.string().min(1).max(120).optional(),
   search: z.string().optional(),

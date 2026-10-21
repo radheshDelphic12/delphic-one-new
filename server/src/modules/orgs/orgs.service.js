@@ -141,12 +141,12 @@ async function officesOverview(orgId) {
 
 // An org has ONE default location: marking a location as the default moves
 // the flag, so two defaults never coexist.
-async function createLocation(orgId, { name, city, country, is_default }) {
+async function createLocation(orgId, { name, city, country, address, is_default }) {
   const existing = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
   const location = await prisma.$transaction(async (tx) => {
     if (is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
-    return tx.location.create({ data: { org_id: orgId, name, city, country, is_default } });
+    return tx.location.create({ data: { org_id: orgId, name, city, country, address, is_default } });
   });
   return { location };
 }
@@ -188,6 +188,8 @@ const MEMBERSHIP_DETAIL_SELECT = {
   left_at: true,
   notice_start_date: true,
   notice_end_date: true,
+  bench_start_date: true,
+  bench_end_date: true,
   role: true,
   employment_status: true,
   person: { select: { id: true, name: true, email: true, phone: true, active: true } },
@@ -323,6 +325,8 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
   const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
   const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
   if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  const benchFix = require('../bench/bench.service').normalizeBench(membership, data);
+  if (benchFix.error) return benchFix;
   // Joining date: can't come after the person's last working day / exit date.
   const lastDay = lwd || membership.left_at;
   if (data.joined_at && lastDay && data.joined_at > lastDay) return { error: 'joined_after_exit' };
@@ -350,6 +354,10 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
     throw err;
   });
   if (updated.error) return updated;
+  // an employee marked exited by hand gets the same FnF record the nightly job creates
+  if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated') {
+    await require('../../lib/fnf').ensureFnf(prisma, orgId, membershipId, updated.left_at || data.left_at || null);
+  }
   return { membership: updated };
 }
 
@@ -369,6 +377,7 @@ const PERSONAL_SELECT = {
   emergency_contact_relation: true,
   emergency_contact_phone: true,
   emergency_contact_email: true,
+  date_of_birth: true,
   personal_details_updated_at: true,
 };
 

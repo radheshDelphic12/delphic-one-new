@@ -1,13 +1,11 @@
 const { z } = require('zod');
-const fs = require('fs');
-const path = require('path');
 const prisma = require('../../config/db');
-const env = require('../../config/env');
 const screening = require('./screening');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
 // through the website module's career submissions), every recruiter sees the pool, and the first recruiter to claim an applicant
-// owns them. Claiming creates - or reuses - the candidate Profile, so one person applying to two requirements is one Profile.
+// owns them. Claiming does NOT create a Profile; the recruiter's "Create profile" does (it reuses the person's existing Profile, so
+// one person applying to two requirements is one Profile).
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
 const CHANNELS = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri', 'internal', 'other'];
@@ -42,6 +40,10 @@ const listSchema = z.object({
   exp_max: z.coerce.number().min(0).optional(),
   lwd_before: z.coerce.date().optional(),
   skill: z.string().trim().max(60).optional(),
+  // who has them / whether a Profile exists (they work together with the screening filters)
+  assignment: z.enum(['unassigned', 'assigned']).optional(),
+  profile: z.enum(['created', 'not_created']).optional(),
+  recruiter_id: z.string().uuid().optional(),
 });
 const assignSchema = z.object({ user_id: z.string().uuid().optional() });
 
@@ -80,6 +82,8 @@ function serialize(a, userNames, reqs) {
     assigned_to: a.assigned_to ? { id: a.assigned_to, name: userNames.get(a.assigned_to) || null } : null,
     assigned_at: a.assigned_at,
     profile_id: a.profile_id,
+    profile_created: Boolean(a.profile_id),
+    unlinked_at: a.unlinked_at || null,
     notes: a.notes,
     applied_at: a.applied_at,
   };
@@ -152,21 +156,25 @@ async function list(user, rawQuery) {
     ...(q.requirement_id ? { requirement_id: q.requirement_id } : {}),
     requirement: liveRequirement,
     ...(q.view === 'pool' ? { status: 'new' } : q.view === 'mine' ? { assigned_to: user.id, status: 'assigned' } : {}),
+    ...(q.assignment ? { status: q.assignment === 'unassigned' ? 'new' : 'assigned' } : {}),
+    ...(q.profile ? { profile_id: q.profile === 'created' ? { not: null } : null } : {}),
+    ...(q.recruiter_id ? { assigned_to: q.recruiter_id } : {}),
     ...screeningWhere(q),
     ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { email: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] } : {}),
   };
-  const [total, rows, pool, mine] = await Promise.all([
+  const [total, rows, pool, mine, everyone] = await Promise.all([
     prisma.jobApplicant.count({ where }),
     prisma.jobApplicant.findMany({ where, orderBy: { applied_at: 'asc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
     prisma.jobApplicant.count({ where: { status: 'new', requirement: liveRequirement } }),
     prisma.jobApplicant.count({ where: { status: 'assigned', assigned_to: user.id, requirement: liveRequirement } }),
+    prisma.jobApplicant.count({ where: { requirement: liveRequirement } }),
   ]);
   const reqs = new Map((await prisma.requirement.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requirement_id))] } }, select: { id: true, title: true, account: { select: { name: true } } } })).map((r) => [r.id, r]));
   const userNames = await names(rows.map((r) => r.assigned_to));
   return {
     rows: rows.map((r) => serialize(r, userNames, reqs)),
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
-    counts: { pool, mine },
+    counts: { pool, mine, all: everyone },
   };
 }
 
@@ -180,7 +188,7 @@ async function addApplicant(user, body, { source = 'manual', cvFile = null } = {
   const phone = digits(d.phone);
   const profile = d.linkedin_url ? screening.linkedInKey(d.linkedin_url) : null;
   // The check and the insert run under one lock per requirement, so two quick clicks cannot both get in.
-  return prisma.$transaction(async (tx) => {
+  const done = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`applicant:${d.requirement_id}`}))`;
     if (email || phone || profile) {
       const existing = await tx.jobApplicant.findMany({ where: { requirement_id: d.requirement_id }, select: { email: true, phone: true, linkedin_url: true } });
@@ -191,10 +199,16 @@ async function addApplicant(user, body, { source = 'manual', cvFile = null } = {
       data: {
         requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null,
         ...screening.toColumns(d), cv_file: cvFile?.filename || null, cv_file_name: cvFile?.name || null, created_by: user?.id || null,
+        dedupe_key: email,
       },
     });
     return { applicant: serialize(row, new Map(), null) };
+  }).catch((err) => {
+    // the database allows one application per (email, requirement): two simultaneous ones end here, not as a 500
+    if (err?.code === 'P2002') return { error: 'duplicate_applicant' };
+    throw err;
   });
+  return done;
 }
 
 /** The stored CV of an applicant, for the authenticated download. */
@@ -258,8 +272,7 @@ async function assign(user, id, rawBody = {}) {
     // the conditional update is what makes it first come, first served even when two recruiters click together
     const claimed = await tx.jobApplicant.updateMany({ where: { id, status: 'new', assigned_to: null }, data: { status: 'assigned', assigned_to: target, assigned_at: new Date() } });
     if (claimed.count !== 1) return { error: 'already_assigned' };
-    const profileId = await findOrCreateProfile(tx, applicant, target);
-    await tx.jobApplicant.update({ where: { id }, data: { profile_id: profileId } });
+    // Claiming only moves the person from the Pool to the recruiter's candidates; the Profile is created by "Create profile".
     if (who.role === 'recruiter') {
       const on = await tx.requirementAssignment.findFirst({ where: { requirement_id: applicant.requirement_id, user_id: target, role_on_req: 'recruiter', unassigned_at: null } });
       if (!on) await tx.requirementAssignment.create({ data: { requirement_id: applicant.requirement_id, user_id: target, role_on_req: 'recruiter', assigned_by: user.id } });
@@ -309,19 +322,62 @@ async function updateApplicant(user, id, body) {
   const same = (e) => (email && norm(e.email) === email) || (phone && digits(e.phone) === phone) || (profile && e.linkedin_url && screening.linkedInKey(e.linkedin_url) === profile);
   if (others.some(same)) return { error: 'duplicate_applicant' };
 
-  const row = await prisma.jobApplicant.update({ where: { id }, data });
+  if ('email' in data) data.dedupe_key = data.email;
+  let row;
+  try {
+    row = await prisma.jobApplicant.update({ where: { id }, data });
+  } catch (err) {
+    if (err?.code === 'P2002') return { error: 'duplicate_applicant' };
+    throw err;
+  }
   await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_update', entity_type: 'job_applicant', entity_id: id, reason: row.name, snapshot: JSON.parse(JSON.stringify({ before: existing, after: row })) } });
   return { applicant: serialize(row, new Map(), null) };
 }
 
-async function remove(user, id) {
+/**
+ * "Create profile" - the second step after claiming. Only the recruiter who holds the applicant (or an admin) can do it;
+ * it creates the candidate Profile (or reuses the person's existing one, so one person applying twice is one Profile).
+ * Pressing it again changes nothing.
+ */
+async function createProfile(user, id) {
   const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
   if (!applicant) return { error: 'not_found' };
-  await prisma.jobApplicant.delete({ where: { id } });
-  // the CV file the candidate attached goes with the record
-  if (applicant.cv_file && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(applicant.cv_file)) fs.rm(path.join(path.resolve(env.uploadDir), applicant.cv_file), { force: true }, () => {});
-  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_delete', entity_type: 'job_applicant', entity_id: id, reason: applicant.name, snapshot: {} } });
+  if (applicant.status !== 'assigned') return { error: 'not_assigned' };
+  if (user.role !== 'admin' && applicant.assigned_to !== user.id) return { error: 'forbidden' };
+  if (applicant.profile_id) return { applicant: serialize(applicant, await names([applicant.assigned_to]), null), created: false };
+  const profileId = await prisma.$transaction(async (tx) => {
+    const pid = await findOrCreateProfile(tx, applicant, applicant.assigned_to);
+    await tx.jobApplicant.update({ where: { id }, data: { profile_id: pid } });
+    return pid;
+  });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_create_profile', entity_type: 'job_applicant', entity_id: id, reason: `Profile created for ${applicant.name}`, snapshot: { profile_id: profileId } } });
+  const row = await prisma.jobApplicant.findUnique({ where: { id } });
+  return { applicant: serialize(row, await names([row.assigned_to]), null), created: true };
+}
+
+/** "Unlink from job": the person leaves this requirement (no longer in anyone's candidates); their Profile is kept as it is. */
+async function unlink(user, id) {
+  const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
+  if (!applicant) return { error: 'not_found' };
+  if (applicant.status !== 'assigned') return { error: 'not_assigned' };
+  if (user.role !== 'admin' && applicant.assigned_to !== user.id) return { error: 'forbidden' };
+  const row = await prisma.jobApplicant.update({ where: { id }, data: { status: 'unlinked', unlinked_at: new Date() } });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_unlink', entity_type: 'job_applicant', entity_id: id, reason: `Unlinked from the job: ${applicant.name}`, snapshot: { profile_id: applicant.profile_id } } });
+  return { applicant: serialize(row, await names([row.assigned_to]), null) };
+}
+
+/**
+ * Soft delete (restorable by the group super admin from Group Dashboard > Logs). Anyone who handles applicants may delete a
+ * person from the pool; a claimed applicant only by whoever holds them, or an admin. The one-application-per-email key is
+ * freed so the same person can apply again; restoring takes it back. The CV file stays, since the record can come back.
+ */
+async function remove(user, id, reason) {
+  const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
+  if (!applicant) return { error: 'not_found' };
+  if (applicant.status !== 'new' && user.role !== 'admin' && applicant.assigned_to !== user.id) return { error: 'forbidden' };
+  await prisma.jobApplicant.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason || 'Deleted from the applicant pool', dedupe_key: null } });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_delete', entity_type: 'job_applicant', entity_id: id, reason: applicant.name, snapshot: { status: applicant.status } } });
   return { id };
 }
 
-module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, remove };
+module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, createProfile, unlink, remove };

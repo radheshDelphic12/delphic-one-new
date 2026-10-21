@@ -650,6 +650,7 @@ async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
 }
 
 module.exports = {
+  runLines,
   deleteSalaryStructure,
   createSalaryStructure,
   updateSalaryStructure,

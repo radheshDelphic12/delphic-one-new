@@ -17,6 +17,8 @@ const ERROR_STATUS = {
 
 const me = asyncHandler(async (req, res) => {
   const user = await usersService.getById(req.user.org_id, req.user.id);
+  // A custom role's permissions (and name) reach the app here; absent for everyone on a plain role.
+  if (user && req.user.custom_role) return ok(res, { ...user, role: req.user.role, custom_role: req.user.custom_role, permissions: req.user.custom_permissions });
   return ok(res, user);
 });
 

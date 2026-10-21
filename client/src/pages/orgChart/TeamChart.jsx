@@ -81,7 +81,7 @@ function sizeBox(unit) {
  * manager takes the lowest order among the teams under them), then by name.
  * Reporting cycles or a missing manager fall back to the company.
  */
-export function layoutTeamChart({ roots, teams = [] }, companyName) {
+export function layoutTeamChart({ roots, teams = [] }, companyName, { attachUnassigned = false } = {}) {
   const people = flatten(roots);
   const byId = new Map(people.map((p) => [p.id, p]));
   const units = [];
@@ -122,6 +122,7 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
   const reportsBoxes = new Map();
   const contractors = [];
   const unassigned = [];
+  let companyReports = null;
   for (const person of loose) {
     if (home.has(person.id)) continue;
     if (person.manager_id && byId.has(person.manager_id)) {
@@ -133,6 +134,14 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
       reportsBoxes.get(person.manager_id).members.push(person);
     } else if (person.worker_type === 'contractor') {
       contractors.push(person);
+    } else if (attachUnassigned) {
+      // A company with no teams and no reporting lines: its people report to the company itself (its admin), so they
+      // hang off the company node instead of floating loose.
+      if (!companyReports) {
+        companyReports = { id: 'reports:company', kind: 'reports', label: 'Direct reports', lead: null, members: [], managerId: null, order: LAST };
+        units.push(companyReports);
+      }
+      companyReports.members.push(person);
     } else {
       unassigned.push(person);
     }
@@ -299,7 +308,8 @@ function arrowLine(id, from, to) {
  */
 export function layoutGroupChart(companies, adminName) {
   const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon'));
-  const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name) }));
+  // A company with no teams has nothing to draw its people under, so they hang off the company (its admin is the group superadmin).
+  const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name, { attachUnassigned: !(c.teams || []).length }) }));
   const top = Math.max(...parts.map((p) => p.chart.height), ROOT_H + ROOT_STUB);
   const units = [];
   const floatBoxes = [];
@@ -391,7 +401,8 @@ const ZOOMS = [0.5, 0.65, 0.8, 1, 1.2];
  * positions and order come from People → HR Settings → Teams.
  */
 export default function TeamChart({ data, companyName, group, hint = 'Teams, leads, reports-to, open positions and order: People → HR Settings → Teams.' }) {
-  const [zoom, setZoom] = useState(group ? 2 : 3);
+  // The group chart puts every company side by side: with many companies start zoomed out so they all fit on screen.
+  const [zoom, setZoom] = useState(group ? (group.companies.length > 5 ? 0 : 2) : 3);
   const chart = useMemo(() => (group ? layoutGroupChart(group.companies, group.adminName) : layoutTeamChart(data, companyName)), [data, companyName, group]);
   const scale = ZOOMS[zoom];
   const boxes = [...chart.units.filter((u) => u.kind !== 'manager'), ...chart.floatBoxes];

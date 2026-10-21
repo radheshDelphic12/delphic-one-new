@@ -19,7 +19,7 @@ const applySchema = z.object({
       if (!p) ctx.addIssue({ code: 'custom', message: 'Enter a valid 10-digit mobile number' });
       return p || v;
     }),
-  experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional()),
+  experience_years: z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number({ required_error: 'Total years of experience is required', invalid_type_error: 'Total years of experience is required' }).min(0).max(70)),
   message: z.string().trim().max(2000).optional().nullable(),
   // Where the visitor came from (the ?src= of the link). Anything unknown is stored as "other".
   channel: z.string().trim().toLowerCase().max(40).optional().nullable(),

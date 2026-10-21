@@ -78,6 +78,8 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
         joined_at: row.joined_at ? String(row.joined_at).slice(0, 10) : '',
         notice_start_date: row.notice_start_date ? String(row.notice_start_date).slice(0, 10) : '',
         notice_end_date: row.notice_end_date ? String(row.notice_end_date).slice(0, 10) : '',
+        bench_start_date: row.bench_start_date ? String(row.bench_start_date).slice(0, 10) : '',
+        bench_end_date: row.bench_end_date ? String(row.bench_end_date).slice(0, 10) : '',
         department_id: row.department?.id || '',
         designation_id: row.designation?.id || '',
         team_id: row.team?.id || '',
@@ -93,6 +95,15 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       });
     }
   }, [open, row]);
+
+  // Bench: the end follows the start by 30 days until someone sets it by hand.
+  function setBenchStart(value) {
+    setFields((current) => {
+      const end = value ? new Date(`${value}T00:00:00Z`) : null;
+      if (end) end.setUTCDate(end.getUTCDate() + 30);
+      return { ...current, bench_start_date: value, bench_end_date: end ? end.toISOString().slice(0, 10) : '' };
+    });
+  }
 
   function setField(key, value) {
     setFields((current) => ({ ...current, [key]: value }));
@@ -199,6 +210,15 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
               </label>
             </>
           )}
+          <label className="text-xs font-medium text-tertiary-600">
+            Bench start date
+            <input type="date" value={fields.bench_start_date} onChange={(event) => setBenchStart(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">
+            Bench end date
+            <input type="date" min={fields.bench_start_date || undefined} disabled={!fields.bench_start_date} value={fields.bench_end_date} onChange={(event) => setField('bench_end_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-1 block font-normal text-tertiary-400">30 days from the start by default. Ends when the person is allocated to a project.</span>
+          </label>
           <label className="text-xs font-medium text-tertiary-600">
             User type
             <select value={fields.worker_type} onChange={(event) => setField('worker_type', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
@@ -433,6 +453,12 @@ export default function EmployeeProfilePage() {
                   <span className="ml-1.5 text-xs text-tertiary-500">· {noticeDays(row.notice_start_date, row.notice_end_date)}-day notice</span>
                 )}
               </PeekField>
+            </>
+          )}
+          {row.bench_start_date && (
+            <>
+              <PeekField label="Bench start">{formatDate(row.bench_start_date)}</PeekField>
+              <PeekField label="Bench end">{formatDate(row.bench_end_date)}</PeekField>
             </>
           )}
         </dl>

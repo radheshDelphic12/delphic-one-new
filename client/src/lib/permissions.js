@@ -149,6 +149,20 @@ export function can(role, capability) {
   return ROLE_CAPS[role]?.has(capability) === true;
 }
 
+// The older capability names the screens use, and the custom-role permission that now decides them.
+const CAP_TO_PERMISSION = {
+  editAccount: 'accounts.update',
+  editRequirement: 'requirements.update',
+  editProfile: 'profiles.update',
+  createProfile: 'profiles.create',
+  editSubmission: 'submissions.update',
+  viewFinancials: 'financials.view',
+  viewAnalytics: 'financials.view',
+  viewBillingRates: 'financials.view',
+  manageBillingRates: 'financials.view',
+  viewProjects: 'financials.view',
+};
+
 // Capabilities no ordinary role has — only a superadmin (is_superadmin flag).
 const SUPERADMIN_ONLY = new Set(['overrideStage', 'editAnyUser', 'deleteRecords']);
 
@@ -168,6 +182,11 @@ export function userCan(user, capability) {
   if (!capability) return false;
   if (user?.is_superadmin) return true;
   if (SUPERADMIN_ONLY.has(capability)) return false;
+  // A custom role (Settings > Roles & permissions) decides the actions it lists; everything else follows its plain base role.
+  if (user?.permissions) {
+    const key = capability.includes('.') ? capability : CAP_TO_PERMISSION[capability];
+    if (key) return Boolean(user.permissions[key]);
+  }
   return can(user?.role, capability);
 }
 

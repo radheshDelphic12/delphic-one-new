@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { todayIst } = require('../../lib/istDate');
 
 const MEMBER_SELECT = {
   id: true,
@@ -37,12 +38,37 @@ function buildTree(memberships) {
   return roots;
 }
 
+// The company admins in a built tree, as small cards (the group chart shows them between the company and its teams).
+function adminsOf(roots) {
+  const out = [];
+  const walk = (node) => {
+    if (node.role === 'admin') {
+      out.push({ id: node.id, name: node.person?.name || '', email: node.person?.email || null, designation: node.designation?.name || null, employee_code: node.employee_code || null });
+    }
+    node.direct_reports.forEach(walk);
+  };
+  roots.forEach(walk);
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
+// nightly job that flips serving-notice people to terminated may not have run yet). The last working day itself still counts.
+function exitedWhere(today) {
+  return {
+    AND: [
+      { employment_status: { not: 'terminated' } },
+      { OR: [{ left_at: null }, { left_at: { gte: today } }] },
+      { NOT: { employment_status: 'notice_period', notice_end_date: { lt: today } } },
+    ],
+  };
+}
+
 async function getOrgChart(orgId, { include_terminated, exclude_group_admins = false }) {
   const [memberships, teams] = await Promise.all([
     prisma.orgMembership.findMany({
       where: {
         org_id: orgId,
-        ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }),
+        ...(include_terminated ? {} : exitedWhere(todayIst())),
         ...(exclude_group_admins ? { person: { is_group_superadmin: false } } : {}),
       },
       select: MEMBER_SELECT,
@@ -73,8 +99,12 @@ async function getGroupOrgChart({ org_group_id, include_terminated }, allowedGro
     select: { id: true, name: true, slug: true, enabled_modules: true },
     orderBy: { name: 'asc' },
   });
-  // The group superadmin sits above every company in the group chart, not inside each one.
-  const charts = await Promise.all(orgs.map(async (org) => ({ org, ...(await getOrgChart(org.id, { include_terminated, exclude_group_admins: true })) })));
+  // The group superadmin sits above every company in the group chart, not inside each one. Under each company
+  // comes its own admin (the company's role 'admin' members), then the company's team chart.
+  const charts = await Promise.all(orgs.map(async (org) => {
+    const chart = await getOrgChart(org.id, { include_terminated, exclude_group_admins: true });
+    return { org, ...chart, admins: adminsOf(chart.roots) };
+  }));
   return charts;
 }
 

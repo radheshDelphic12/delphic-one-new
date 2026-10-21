@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -11,7 +12,7 @@ const records = require('../calculations/records.service');
 // money view (salaries, margins, vendor payables). Master-workspace only —
 // part of the recruitment/strategic layer other group companies don't use.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, requireMasterWorkspace, authorize('admin'));
+router.use(authenticate, requireOrgMembership, requireMasterWorkspace, canMethod('financials', 'admin'));
 
 const orgId = (req) => req.user.org_id;
 

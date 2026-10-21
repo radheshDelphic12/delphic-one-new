@@ -15,7 +15,8 @@ router.get('/jobs/:slug', asyncHandler(async (req, res) => {
   return r.error ? fail(res, 404, 'This job is no longer open') : ok(res, r.job);
 }));
 router.post('/jobs/:slug/apply', asyncHandler(async (req, res) => {
-  const r = await service.apply(req.params.slug, req.body);
+  // the visitor is not a user: their application is logged as coming from the website
+  const r = await require('../../lib/orgContext').runAs('Website applicant', () => service.apply(req.params.slug, req.body));
   if (r.error === 'already_applied') return fail(res, 409, 'You have already applied for this job');
   if (r.error) return fail(res, 404, 'This job is no longer open');
   return ok(res, { applied: true }, {}, 201);

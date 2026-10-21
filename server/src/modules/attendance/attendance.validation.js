@@ -78,6 +78,21 @@ const backfillMonthSchema = z.object({
   dry_run: z.boolean().optional().default(false),
 });
 
+// An employee's own request to correct one day (an admin reviews it). Same fields as an admin's manual entry.
+const regularizationRequestSchema = z.object({
+  date: requiredDate,
+  status: STATUS,
+  check_in_time: TIME.nullable().optional(),
+  check_out_time: TIME.nullable().optional(),
+  reason: z.string().trim().min(3).max(500),
+});
+const regularizationDecisionSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+  decision_reason: z.string().trim().max(500).optional(),
+});
+const regularizationListQuerySchema = z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional() });
+
 module.exports = {
   backfillMonthSchema, listQuerySchema, regularizeSchema,
-  deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };
+  deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS,
+  regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema };

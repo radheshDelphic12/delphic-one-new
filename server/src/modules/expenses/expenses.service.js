@@ -277,10 +277,10 @@ async function deleteClaim(orgId, claimId, actor = { isSuperadmin: true }) {
     if (actor.role !== 'admin' && claim.org_membership_id !== actor.orgMembershipId) return { error: 'not_found' };
     if (claim.status !== 'pending') return { error: 'not_deletable' };
   }
+  // Soft delete: the claim and its receipts stay (restorable from Group Dashboard > Logs). Its wallet entry is unlinked now.
   await prisma.$transaction(async (tx) => {
     await cashHooks.unlink(tx, actor.userId || null, 'expense', claimId);
-    await tx.document.deleteMany({ where: { entity_type: 'expense_claim', entity_id: claimId } });
-    await tx.expenseClaim.delete({ where: { id: claimId } });
+    await tx.expenseClaim.update({ where: { id: claimId }, data: { deleted_at: new Date(), deleted_by: actor.userId || null, delete_reason: 'Deleted by ' + (actor.isSuperadmin ? 'a superadmin' : 'the owner or an admin') } });
   });
   return { deleted: true };
 }

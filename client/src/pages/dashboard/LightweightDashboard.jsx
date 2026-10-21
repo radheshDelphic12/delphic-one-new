@@ -4,6 +4,8 @@ import { ArrowRight, Banknote, CalendarClock, Clock, Users, Wallet } from 'lucid
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
+import AnnouncementsCard from './AnnouncementsCard.jsx';
+import BenchCard from './BenchCard.jsx';
 
 const QUICK_LINKS = [
   { to: '/people', label: 'People', description: 'Directory, org chart, and HR settings.', icon: Users, tint: 'bg-[#EFF6FF] text-[#2563EB]' },
@@ -109,6 +111,8 @@ export default function LightweightDashboard({ orgName, isAdmin = false }) {
           </Link>
         ))}
       </div>
+      <AnnouncementsCard />
+      {isAdmin && <BenchCard />}
       {isAdmin && <LeaveBalancesPanel compact />}
     </div>
   );

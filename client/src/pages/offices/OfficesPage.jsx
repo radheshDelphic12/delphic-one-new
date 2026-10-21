@@ -33,6 +33,7 @@ export default function OfficesPage() {
               <div>
                 <h2 className="inline-flex items-center gap-1.5 text-base font-semibold text-tertiary-900"><MapPin className="h-4 w-4 text-primary-600" />{o.name}</h2>
                 <p className="text-xs text-tertiary-500">{[o.city, o.country].filter(Boolean).join(', ') || '—'}</p>
+                {o.address && <p className="mt-0.5 whitespace-pre-line text-xs text-tertiary-500">{o.address}</p>}
               </div>
               {o.is_default && <Pill tone="blue">Default</Pill>}
             </div>

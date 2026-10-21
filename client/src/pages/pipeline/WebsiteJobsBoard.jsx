@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Globe, Info, Link2, UserPlus } from 'lucide-react';
+import { Globe, Info, Link2, UserPlus, EyeOff } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -82,6 +82,18 @@ export default function WebsiteJobsBoard() {
     }
   }
 
+  // Unpublish takes the job off the public website but keeps the requirement and its applicants; Republish puts it back.
+  async function setLive(posting, live, title) {
+    if (!live && !window.confirm(`Unpublish "${title}" from the website? The job disappears from the public page. The requirement and its applicants stay, and you can publish it again later.`)) return;
+    try {
+      await apiClient.post(`/website/postings/${posting.id}/${live ? 'reopen' : 'unpublish'}`, {});
+      pushSuccess(live ? 'Published on the website again' : 'Removed from the website');
+      reqs.refresh();
+      postings.refresh();
+      links.refresh();
+    } catch (e) { pushError(apiErrorMessage(e, live ? 'Could not republish' : 'Could not unpublish'), 'Website'); }
+  }
+
   const rows = reqs.data || [];
   return (
     <div className="space-y-3">
@@ -121,6 +133,12 @@ export default function WebsiteJobsBoard() {
                           <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} title={configured ? undefined : 'Website control is not configured on this server'} onClick={() => openPublish(r)}>
                             <Globe className="h-3.5 w-3.5" />{posting ? 'Edit website listing' : 'Publish on website'}
                           </button>
+                        )}
+                        {canPublish && posting?.status === 'published' && (
+                          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} onClick={() => setLive(posting, false, r.title)}><EyeOff className="h-3.5 w-3.5" />Unpublish</button>
+                        )}
+                        {canPublish && posting?.status === 'closed' && (
+                          <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={!configured} onClick={() => setLive(posting, true, r.title)}><Globe className="h-3.5 w-3.5" />Republish</button>
                         )}
                       </div>
                     </td>

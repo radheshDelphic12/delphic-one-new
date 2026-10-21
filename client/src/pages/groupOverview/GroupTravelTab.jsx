@@ -111,7 +111,7 @@ export function MeetingsPanel({ trip, options, onChanged }) {
   const [mode, setMode] = useState('link');
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
-  const [m, setM] = useState({ account_id: '', title: '', scheduled_at: '', duration_minutes: 60, location: trip.destination || '', notes: '' });
+  const [m, setM] = useState({ org_id: '', account_id: '', title: '', scheduled_at: '', duration_minutes: 60, location: trip.destination || '', notes: '' });
   const linked = new Set(trip.meetings.map((x) => x.key));
   const [showAll, setShowAll] = useState(false);
   const ymd = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10); // IST calendar day
@@ -167,11 +167,17 @@ export function MeetingsPanel({ trip, options, onChanged }) {
             }, 'Could not add the meeting');
           }}
         >
-          <p className="text-xs text-tertiary-500">Creates an in-person meeting with an active Delphic Global client. It appears on the calendar and here; the travellers are added as attendees.</p>
+          <p className="text-xs text-tertiary-500">Pick the company, then one of its active clients. The meeting appears on that company&apos;s calendar and here; the travellers are added as attendees.</p>
+          <label className={labelCls}>Company
+            <select required className={inputCls} value={m.org_id} onChange={(e) => setM((c) => ({ ...c, org_id: e.target.value, account_id: '' }))}>
+              <option value="">Choose a company…</option>
+              {(options?.companies || []).filter((co) => (options?.clients || []).some((c) => c.org_id === co.id)).map((co) => <option key={co.id} value={co.id}>{co.name}</option>)}
+            </select>
+          </label>
           <label className={labelCls}>Client
-            <select required className={inputCls} value={m.account_id} onChange={(e) => setM((c) => ({ ...c, account_id: e.target.value }))}>
-              <option value="">Choose a client…</option>
-              {(options?.clients || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <select required disabled={!m.org_id} className={inputCls} value={m.account_id} onChange={(e) => setM((c) => ({ ...c, account_id: e.target.value }))}>
+              <option value="">{m.org_id ? 'Choose a client…' : 'Choose a company first'}</option>
+              {(options?.clients || []).filter((c) => c.org_id === m.org_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
           <label className={labelCls}>Meeting title<input required className={inputCls} value={m.title} onChange={(e) => setM((c) => ({ ...c, title: e.target.value }))} placeholder="e.g. Quarterly review" /></label>
@@ -180,7 +186,7 @@ export function MeetingsPanel({ trip, options, onChanged }) {
             <label className={labelCls}>Minutes<input type="number" min="5" max="1440" className={inputCls} value={m.duration_minutes} onChange={(e) => setM((c) => ({ ...c, duration_minutes: e.target.value }))} /></label>
           </div>
           <label className={labelCls}>Where<input className={inputCls} value={m.location} onChange={(e) => setM((c) => ({ ...c, location: e.target.value }))} /></label>
-          <button type="submit" className="btn-primary" disabled={busy || !m.account_id || !m.title.trim() || !m.scheduled_at}>Add meeting</button>
+          <button type="submit" className="btn-primary" disabled={busy || !m.org_id || !m.account_id || !m.title.trim() || !m.scheduled_at}>Add meeting</button>
         </form>
       )}
     </div>

@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
@@ -107,7 +108,7 @@ function failFor(res, error, result) {
 // Finance → Projects: monthly P&L (client billing - internal salary allocation
 // - vendor contractor cost) and per-project vendor invoices. See
 // projectPnl.service for the rules.
-const adminInOrg = [requireOrgMembership, authorize('admin')];
+const adminInOrg = [requireOrgMembership, canMethod('financials', 'admin')];
 
 router.get(
   '/vendors',
@@ -168,14 +169,14 @@ router.post(
 router.get(
   '/vendor-invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
 );
 
 router.get(
   '/vendor-invoices/preview',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { vendor_account_id, ...period } = vendorInvoicePeriodSchema.parse(req.query);
     const result = await invoices.previewVendorInvoice(req.user.org_id, vendor_account_id, period);
@@ -187,7 +188,7 @@ router.get(
 router.post(
   '/vendor-invoices/generate',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = generateVendorInvoiceSchema.parse(req.body);
     const result = await invoices.generateVendorInvoice(req.user.org_id, req.user, body);
@@ -301,14 +302,14 @@ router.delete(
 router.get(
   '/projects',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await service.listProjectProfiles(req.user.org_id)))
 );
 
 router.get(
   '/projects/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.getProjectProfile(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
@@ -319,7 +320,7 @@ router.get(
 router.patch(
   '/projects/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = updateProjectProfileSchema.parse(req.body);
     const result = await service.updateProjectProfile(req.user.org_id, req.user.id, req.params.id, body);
@@ -331,7 +332,7 @@ router.patch(
 router.post(
   '/rates',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createRateSchema.parse(req.body);
     const result = await service.createRate(req.user.org_id, req.user.id, body);
@@ -343,7 +344,7 @@ router.post(
 router.get(
   '/rates',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listRatesQuerySchema.parse(req.query);
     const rows = await service.listRates(req.user.org_id, query);
@@ -354,7 +355,7 @@ router.get(
 router.post(
   '/daily-revenue/compute',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { date_from, date_to } = computeDailyRevenueSchema.parse(req.body);
     const result = await service.computeRevenueRange(req.user.org_id, date_from, date_to);
@@ -365,7 +366,7 @@ router.post(
 router.get(
   '/daily-revenue',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listDailyRevenueQuerySchema.parse(req.query);
     const rows = await service.listDailyRevenue(req.user.org_id, query);
@@ -447,7 +448,7 @@ router.delete(
 router.post(
   '/invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { client_account_id, ...body } = createInvoiceSchema.parse(req.body);
     const result = await invoices.generateClientInvoice(req.user.org_id, req.user, { account_id: client_account_id, ...body });
@@ -459,7 +460,7 @@ router.post(
 router.get(
   '/invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listInvoicesQuerySchema.parse(req.query);
     return ok(res, await invoices.listClientInvoices(req.user.org_id, query));
@@ -470,7 +471,7 @@ router.get(
 router.get(
   '/invoices/preview',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id, currency, amount, ...period } = previewInvoiceQuerySchema.parse(req.query);
     const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
@@ -482,7 +483,7 @@ router.get(
 router.get(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
@@ -493,7 +494,7 @@ router.get(
 router.patch(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
     if (result.error) return failFor(res, result.error, result);
@@ -504,7 +505,7 @@ router.patch(
 router.delete(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error, result);
@@ -515,7 +516,7 @@ router.delete(
 router.post(
   '/invoices/:id/status',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { status } = transitionInvoiceSchema.parse(req.body);
     const walletPayment = cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment);
@@ -541,7 +542,7 @@ router.post(
 router.post(
   '/group-charges/mine',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createOwnGroupChargeSchema.parse(req.body);
     const result = await service.createGroupCharge(req.user.id, { ...body, org_id: req.user.org_id });
@@ -554,7 +555,7 @@ router.post(
 router.patch(
   '/group-charges/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = updateGroupChargeSchema.parse(req.body);
     const result = await service.updateGroupCharge(req.user.org_id, req.user.id, req.params.id, body);
@@ -578,7 +579,7 @@ router.delete(
 router.get(
   '/group-charges',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listMyGroupChargesQuerySchema.parse(req.query);
     const rows = await service.listMyGroupCharges(req.user.org_id, query);
@@ -605,7 +606,7 @@ router.get(
 router.post(
   '/cost-assignments',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = costAssignmentSchema.parse(req.body);
     const result = await allocationsService.assign(req.user.org_id, req.user.id, body);
@@ -617,7 +618,7 @@ router.post(
 router.delete(
   '/cost-assignments/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await allocationsService.deleteAllocation(req.user.org_id, req.user.id, req.params.id);
     if (result.error) return allocationsFailFor(res, result.error);
@@ -628,7 +629,7 @@ router.delete(
 router.get(
   '/cost-assignments',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id, include_ended } = listCostAssignmentsQuerySchema.parse(req.query);
     return ok(res, await allocationsService.listForProject(req.user.org_id, account_id, { include_ended }));
@@ -638,7 +639,7 @@ router.get(
 router.get(
   '/budget-summary',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id } = accountBudgetQuerySchema.parse(req.query);
     const result = await service.getAccountBudgetSummary(req.user.org_id, account_id);

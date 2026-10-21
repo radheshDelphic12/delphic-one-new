@@ -19,7 +19,7 @@ const prisma = new PrismaClient({
 // soft-deleted parent can still appear via an existing child's `include`. That
 // is acceptable here — deleted records are duplicates / terminal, and the
 // top-level lists + reports are what matter.
-const SOFT_DELETE_MODELS = new Set(['Account', 'Requirement', 'Submission', 'Profile', 'InterviewRound']);
+const SOFT_DELETE_MODELS = new Set(['Account', 'Requirement', 'Submission', 'Profile', 'InterviewRound', 'JobApplicant', 'OrgMembership', 'ExpenseClaim', 'ClientInvoice']);
 const READ_ACTIONS = new Set(['findFirst', 'findMany', 'count', 'aggregate', 'groupBy']);
 
 function mentionsDeletedAt(where) {
@@ -33,6 +33,21 @@ function mentionsDeletedAt(where) {
   return false;
 }
 
+// A findUnique "by compound unique key" (e.g. { person_id_org_id: { person_id, org_id } }) becomes a findFirst below, and
+// findFirst does not accept a compound key: spread its fields into the where instead.
+function flattenUniqueWhere(where) {
+  if (!where || typeof where !== 'object') return where;
+  const out = {};
+  for (const [key, value] of Object.entries(where)) {
+    const compound = value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && typeof value.toFixed !== 'function'
+      && !['equals', 'in', 'not', 'contains', 'startsWith', 'endsWith', 'lt', 'lte', 'gt', 'gte'].some((op) => op in value)
+      && !['AND', 'OR', 'NOT'].includes(key);
+    if (compound) Object.assign(out, value);
+    else out[key] = value;
+  }
+  return out;
+}
+
 prisma.$use(async (params, next) => {
   if (!SOFT_DELETE_MODELS.has(params.model)) return next(params);
 
@@ -40,6 +55,7 @@ prisma.$use(async (params, next) => {
   if (params.action === 'findUnique' || params.action === 'findUniqueOrThrow') {
     params.action = params.action === 'findUnique' ? 'findFirst' : 'findFirstOrThrow';
     params.args = params.args || {};
+    params.args.where = flattenUniqueWhere(params.args.where);
     if (!mentionsDeletedAt(params.args.where)) {
       params.args.where = { ...params.args.where, deleted_at: null };
     }
@@ -55,6 +71,9 @@ prisma.$use(async (params, next) => {
 
   return next(params);
 });
+
+// --- Group-wide change log (Phase 3): who changed what, old -> new, see config/changeCapture.js ---
+require('./changeCapture').attach(prisma);
 
 // --- Multi-company ERP: org_id auto-stamp on create (HLD §5, layer 1) ---
 // Write-side only, deliberately not read-side yet: auto-filtering every

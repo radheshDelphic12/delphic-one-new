@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
 const { notify, accountParticipants, admins } = require('../../lib/notifications');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 
@@ -32,7 +33,7 @@ const ACCOUNT_INCLUDE = {
   meeting_attendees: { include: { user: { select: { id: true, name: true } } } },
 };
 
-async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
+async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, location, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
   // Accumulate into an AND array so multiple OR-bearing clauses (type scope +
   // search) can coexist without one clobbering the other in the object literal.
   // Projects share this table (type 'client', is_project) but are managed in
@@ -51,6 +52,7 @@ async function list({ type, include_unclassified, stage, stuck, owner_id, origin
   if (owner_id) and.push({ owner_id });
   if (origin_owner_id) and.push({ origin_owner_id });
   if (industry) and.push({ industry: { contains: industry, mode: 'insensitive' } });
+  if (location) and.push({ OR: [{ location: { contains: location, mode: 'insensitive' } }, { location_city: { contains: location, mode: 'insensitive' } }, { location_country: { contains: location, mode: 'insensitive' } }] });
   if (specialization) and.push({ vendor_specializations: { has: specialization } });
   if (search) {
     and.push({
@@ -106,8 +108,14 @@ async function getById(id) {
   return serialize(row);
 }
 
-function canMutateAccount(account, user) {
+// `perms`: what a custom role needs for this action (any one of them); a plain role keeps the old rule.
+const CLASSIFY_PERMS = ['accounts.update', 'accounts.create', 'vendors.onboard'];
+const MEETING_PERMS = ['meetings.schedule', 'accounts.update'];
+
+function canMutateAccount(account, user, perms = ['accounts.update']) {
   if (!account || account.is_project) return false;
+  const decided = perms.map((key) => decide(user, key, account.owner_id));
+  if (decided[0] !== null) return decided.some(Boolean);
   // Admin and BDA may edit any account (clients, vendors, unclassified) and move stages / schedule meetings.
   return user.role === 'admin' || user.role === 'bda';
 }
@@ -192,14 +200,14 @@ async function update(id, patch, user) {
 }
 
 function canClassifyAccount(account, user) {
-  return canMutateAccount(account, user) && account?.type == null;
+  return canMutateAccount(account, user, CLASSIFY_PERMS) && account?.type == null;
 }
 
 async function classifyLead(id, { type }, user) {
   const account = await prisma.account.findUnique({ where: { id } });
   if (!account) return { error: 'not_found' };
   if (account.is_project) return { error: 'is_project' };
-  if (!canMutateAccount(account, user)) return { error: 'forbidden' };
+  if (!canMutateAccount(account, user, CLASSIFY_PERMS)) return { error: 'forbidden' };
   if (account.type != null) return { error: 'already_classified' };
 
   const [row] = await prisma.$transaction([
@@ -233,7 +241,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
     if (account.is_project) return { error: 'is_project' };
-    if (!canMutateAccount(account, user)) return { error: 'forbidden' };
+    if (!canMutateAccount(account, user, MEETING_PERMS)) return { error: 'forbidden' };
     if (account.is_locked) return { error: 'locked' };
     if (!canTransition(account.stage, to_stage)) return { error: 'invalid_transition' };
     if (to_stage === 'dropped' && !reason) return { error: 'reason_required' };
@@ -309,7 +317,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
     if (account.is_project) return { error: 'is_project' };
-    if (!canMutateAccount(account, user)) return { error: 'forbidden' };
+    if (!canMutateAccount(account, user, MEETING_PERMS)) return { error: 'forbidden' };
     if (account.is_locked) return { error: 'locked' };
     if (meeting_mode === 'offline' && !meeting_location) return { error: 'meeting_location_required' };
 

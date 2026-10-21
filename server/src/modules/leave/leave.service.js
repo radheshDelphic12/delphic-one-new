@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const logger = require('../../config/logger');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const { pickCalendarId } = require('../calendars/calendars.service');
 const workHours = require('../timesheets/workHours.service');
@@ -494,6 +495,8 @@ async function createRequest(
         org_membership_id: orgMembershipId,
         date: { gte: from_date, lte: to_date },
         status: { in: ['present', 'wfh', 'half_day'] },
+        // the automatic entry is only a default, not proof the person worked: it does not block a leave (approval replaces it)
+        source: { not: 'auto' },
       },
       orderBy: { date: 'asc' },
       select: { date: true },
@@ -763,6 +766,14 @@ async function decide(orgId, requestId, approverMembershipId, { status, reason }
   // No balance write: what an employee has used is computed live from their
   // approved requests (see summariseUsage), so approving is only the status change.
   if (status === 'approved') {
+    // The leave replaces the automatic "present" the daily job filled in, so it shows straight away.
+    try {
+      const attendance = require('../attendance/autoAttendance.service');
+      await attendance.resolveAutoForLeave(orgId, existing.org_membership_id, request.from_date, request.to_date, { actorUserId, requestId });
+      if (split?.unpaid) await attendance.resolveAutoForLeave(orgId, existing.org_membership_id, split.unpaid.from_date, split.unpaid.to_date, { actorUserId, requestId });
+    } catch (err) {
+      logger.error('leave_auto_attendance_cleanup_failed', { org_id: orgId, request_id: requestId, err }); // the approval itself stands
+    }
     await detectFinanceChange(orgId, {
       source_type: 'leave',
       source_id: requestId,

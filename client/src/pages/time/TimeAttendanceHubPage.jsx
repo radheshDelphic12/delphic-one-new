@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, LayoutDashboard, ListChecks, UserCheck, Lock, Users } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, LayoutDashboard, ListChecks, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -15,6 +15,7 @@ import TimesheetDashboard from './TimesheetDashboard.jsx';
 import ProjectCalendarDashboard from './ProjectCalendarDashboard.jsx';
 import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
+import RegularizationAdminTab from './RegularizationAdminTab.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
@@ -38,6 +39,8 @@ const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
 const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
 const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
+// Admin: every employee's attendance and project-timesheet correction requests, to approve or reject.
+const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock };
 // Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 
@@ -57,7 +60,7 @@ export default function TimeAttendanceHubPage() {
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB] : []),
+    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB] : []),
   ];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
@@ -99,6 +102,7 @@ export default function TimeAttendanceHubPage() {
       {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
       {section === 'locks' && isAdmin && <TimesheetLocksTab />}
+      {section === 'regularization' && isAdmin && <RegularizationAdminTab />}
     </div>
   );
 }

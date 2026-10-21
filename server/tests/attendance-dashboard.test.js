@@ -50,6 +50,47 @@ describe('attendance dashboard', () => {
     expect(Array.isArray(cal.body.data.leave_balances)).toBe(true);
   });
 
+  test('employee list can be filtered by where each person stands: active, serving notice period, exited', async () => {
+    const ctx = await seed();
+    await ctx.person('Active One');
+    const serving = await ctx.person('Serving Notice');
+    const exited = await ctx.person('Gone Person');
+    const lapsed = await ctx.person('Past Last Day'); // notice ended, the nightly exit job has not flipped the status yet
+    const contractor = await ctx.person('Exited Contractor', { workerType: 'contractor' });
+    const day = (offset) => new Date(Date.now() + offset * 86400000);
+    await prisma.orgMembership.update({ where: { id: serving.membership.id }, data: { employment_status: 'notice_period', notice_end_date: day(10) } });
+    await prisma.orgMembership.update({ where: { id: exited.membership.id }, data: { employment_status: 'terminated', left_at: day(-20) } });
+    await prisma.orgMembership.update({ where: { id: lapsed.membership.id }, data: { employment_status: 'notice_period', notice_end_date: day(-3) } });
+    await prisma.orgMembership.update({ where: { id: contractor.membership.id }, data: { employment_status: 'terminated', left_at: day(-20) } });
+    const names = async (status) => (await get(`/people?year=2026&month=11${status ? `&status=${status}` : ''}`, ctx.admin)).body.data.people.map((p) => p.name).sort();
+
+    // default: everyone still working, serving notice included, exited left out (as before)
+    expect(await names()).toEqual(expect.arrayContaining(['Active One', 'Serving Notice']));
+    expect(await names()).not.toContain('Gone Person');
+    const current = await names('current');
+    expect(current).not.toContain('Gone Person');
+    expect(current).not.toContain('Past Last Day');
+    expect(await names('active')).toContain('Active One');
+    expect(await names('active')).not.toContain('Serving Notice');
+    expect(await names('notice_period')).toEqual(['Serving Notice']);
+    expect(await names('exited')).toEqual(['Gone Person', 'Past Last Day']);
+    const everyone = await names('all');
+    expect(everyone).toEqual(expect.arrayContaining(['Active One', 'Serving Notice', 'Gone Person', 'Past Last Day']));
+    expect(everyone).not.toContain('Exited Contractor'); // contractors never appear
+
+    const rows = (await get('/people?year=2026&month=11&status=all', ctx.admin)).body.data.people;
+    const byName = Object.fromEntries(rows.map((p) => [p.name, p]));
+    expect(byName['Serving Notice']).toMatchObject({ status: 'notice_period' });
+    expect(byName['Serving Notice'].last_working_day).toBe(day(10).toISOString().slice(0, 10));
+    expect(byName['Gone Person']).toMatchObject({ status: 'exited' });
+    expect(byName['Active One']).toMatchObject({ status: 'active', last_working_day: null });
+    expect((await get('/people?year=2026&month=11&status=bogus', ctx.admin)).status).toBeGreaterThanOrEqual(400);
+
+    // an exited person's attendance can still be opened from the list
+    const cal = await get(`/calendar?year=2026&month=10&org_membership_id=${exited.membership.id}`, ctx.admin);
+    expect(cal.status).toBe(200);
+  });
+
   test('reporting office changes from a date, earlier days keep the old office', async () => {
     const ctx = await seed();
     const emp = await ctx.person('Mover');
@@ -139,6 +180,13 @@ describe('attendance dashboard', () => {
 
     const list = await get('/projects?year=2026&month=11', ctx.admin);
     expect(list.body.data.map((p) => p.name)).toContain('Acme Portal');
+    // each project carries its contract status for the status filter (the same state Finance -> Projects shows)
+    await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Held Co', project_name: 'Held Portal', type: 'client', stage: 'active', is_project: true, owner_id: ctx.adminUser.id, origin_owner_id: ctx.adminUser.id, contract_status: 'on_hold', agreement_start_date: new Date('2026-01-01T00:00:00Z') } });
+    await prisma.account.update({ where: { id: project.id }, data: { agreement_start_date: new Date('2026-01-01T00:00:00Z') } });
+    const withStatus = await get('/projects?year=2026&month=11', ctx.admin);
+    const statusOf = (name) => withStatus.body.data.find((p) => p.name === name).status;
+    expect(statusOf('Acme Portal')).toBe('running');
+    expect(statusOf('Held Portal')).toBe('on_hold');
 
     const cal = await get(`/projects/${project.id}/calendar?year=2026&month=11`, dev.token);
     expect(cal.status).toBe(200);

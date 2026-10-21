@@ -2,6 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const applicantsService = require('../applicants/applicants.service');
 const screening = require('../applicants/screening');
+const bench = require('../bench/bench.service');
 
 // Internal job board: every employee of the master workspace sees the jobs that are published on the website, can refer
 // someone (a friend, an ex-colleague) or apply for one themselves (for example from the bench). Both land in the same applicant
@@ -23,6 +24,7 @@ const applySchema = z.object({ phone: z.string().trim().max(40).optional().nulla
 const serialize = (p) => ({ slug: p.slug, title: p.title, department: p.department, location: p.location, employment_type: p.employment_type, description: p.public_description, posted_at: p.created_at });
 
 async function list(user) {
+  const canApply = await bench.canApplyInternally(user.org_id, user.org_membership_id);
   const rows = await prisma.websiteJobPosting.findMany({ where: { ...OPEN, slug: { not: null } }, orderBy: { created_at: 'desc' } });
   const mine = await prisma.jobApplicant.findMany({
     where: { requirement_id: { in: rows.map((r) => r.requirement_id) }, OR: [{ created_by: user.id }, ...(user.email ? [{ email: { equals: user.email, mode: 'insensitive' } }] : [])] },
@@ -33,6 +35,7 @@ async function list(user) {
     return {
       ...serialize(p),
       applied: mineHere.some((m) => m.source === 'internal'),
+      can_apply: canApply,
       referrals: mineHere.filter((m) => m.source === 'referral').length,
     };
   });
@@ -56,6 +59,8 @@ async function refer(user, slug, body) {
 
 async function applyMyself(user, slug, body) {
   const d = applySchema.parse(body || {});
+  // Applying for yourself is for people on the bench or serving notice; referring someone stays open to everyone.
+  if (!(await bench.canApplyInternally(user.org_id, user.org_membership_id))) return { error: 'not_eligible' };
   const p = await posting(slug);
   if (!p) return { error: 'not_found' };
   const r = await applicantsService.addApplicant(user, {

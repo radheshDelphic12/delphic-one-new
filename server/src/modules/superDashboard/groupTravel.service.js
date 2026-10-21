@@ -35,6 +35,7 @@ const listQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
 });
 const newMeetingSchema = z.object({
+  org_id: uuidOrNull, // the company the client belongs to (optional: the client alone identifies it)
   account_id: z.string().uuid(),
   title: z.string().trim().min(1).max(200),
   scheduled_at: z.string().min(8),
@@ -60,9 +61,6 @@ async function groupOrgs(groupIds) {
     orderBy: { name: 'asc' },
   });
 }
-/** Delphic Global is the company with no vertical marker (the others carry one in enabled_modules). */
-const MARKERS = ['gulati', 'zephyr', 'acconcy', 'foundation', 'zklyrera', 'valterra', 'novarex', 'coming_soon'];
-const isDelphic = (o) => !MARKERS.some((m) => o.enabled_modules?.includes(m));
 
 function stateOf(t, today) {
   if (t.status === 'cancelled') return 'cancelled';
@@ -144,18 +142,17 @@ async function list(groupIds, rawQuery) {
   };
 }
 
-/** Pick-lists for the trip form: companies, people of every company, active Delphic Global clients and meetings to link. */
+/** Pick-lists for the trip form: companies, people of every company, active clients of every company (company first, then its client) and meetings to link. */
 async function options(groupIds) {
   const orgs = await groupOrgs(groupIds);
-  const delphic = orgs.filter(isDelphic);
   const [members, accounts, meetings] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { org_id: { in: orgs.map((o) => o.id) }, left_at: null, employment_status: { not: 'terminated' } },
       select: { org_id: true, person: { select: { id: true, name: true, active: true } } },
     }),
     prisma.account.findMany({
-      where: { org_id: { in: delphic.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null },
-      select: { id: true, name: true },
+      where: { org_id: { in: orgs.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null },
+      select: { id: true, name: true, org_id: true },
       orderBy: { name: 'asc' },
     }),
     interviews.listClientMeetings({ from: new Date(Date.now() - 365 * DAY), to: new Date(Date.now() + 180 * DAY), mine: false, user: null, status: undefined }),
@@ -172,7 +169,7 @@ async function options(groupIds) {
   return {
     companies: orgs.map((o) => ({ id: o.id, name: o.name })),
     people,
-    clients: accounts,
+    clients: accounts.map((a) => ({ id: a.id, name: a.name, org_id: a.org_id, org_name: orgName.get(a.org_id) || null })),
     meetings: meetings
       .filter((e) => e.status !== 'cancelled' && e.scheduled_at)
       .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
@@ -253,13 +250,13 @@ async function unlinkMeeting(groupIds, userId, id, key) {
   return { trip: await one(groupIds, id) };
 }
 
-/** Creates a real in-person meeting with an active Delphic Global client (so it is on the calendar) and links it to the trip. */
+/** Creates a real in-person meeting with an active client of ANY group company (so it is on that company's calendar) and links it to the trip. */
 async function createMeeting(groupIds, userId, id, body) {
   const d = newMeetingSchema.parse(body);
   const existing = await load(groupIds, id);
   if (!existing) return { error: 'not_found' };
-  const orgs = (await groupOrgs(groupIds)).filter(isDelphic);
-  const account = await prisma.account.findFirst({ where: { id: d.account_id, org_id: { in: orgs.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null } });
+  const orgs = await groupOrgs(groupIds);
+  const account = await prisma.account.findFirst({ where: { id: d.account_id, org_id: d.org_id || { in: orgs.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null } });
   if (!account) return { error: 'client_not_found' };
   const when = new Date(d.scheduled_at);
   if (Number.isNaN(when.getTime())) return { error: 'bad_date' };

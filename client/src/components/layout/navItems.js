@@ -21,6 +21,7 @@ import {
   Globe,
   MapPin,
   UserPlus,
+  UserX,
 } from 'lucide-react';
 
 /**
@@ -42,6 +43,7 @@ export const NAV_ITEMS = [
   { to: '/requirements', label: 'Requirements', icon: Briefcase, capability: 'viewPipeline', masterOnly: true },
   { to: '/profiles', label: 'Profiles', icon: Users, capability: 'viewProfiles', masterOnly: true },
   { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', masterOnly: true },
+  { to: '/rejected-candidates', label: 'Rejected', icon: UserX, capability: 'viewPipeline', masterOnly: true },
   // Sales, HR and Management departments only (see lib/departments.js).
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true },
   { to: '/offices', label: 'Offices', icon: MapPin, capability: 'viewPeople', groupSuperadminOnly: true },

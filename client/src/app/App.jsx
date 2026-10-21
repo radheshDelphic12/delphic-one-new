@@ -16,6 +16,7 @@ import RequirementKanbanPage from '../pages/requirements/RequirementKanbanPage.j
 import ProfilesListPage from '../pages/profiles/ProfilesListPage.jsx';
 import ProfileDetailPage from '../pages/profiles/ProfileDetailPage.jsx';
 import SubmissionsListPage from '../pages/submissions/SubmissionsListPage.jsx';
+import RejectedCandidatesPage from '../pages/submissions/RejectedCandidatesPage.jsx';
 import SubmissionDetailPage from '../pages/submissions/SubmissionDetailPage.jsx';
 import ReportsPage from '../pages/reports/ReportsPage.jsx';
 import WebsitePage from '../pages/website/WebsitePage.jsx';
@@ -389,6 +390,7 @@ export default function App() {
         />
         <Route path="profiles/:id/edit" element={<RequireMasterWorkspace><EditRedirect base="profiles" /></RequireMasterWorkspace>} />
         <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="rejected-candidates" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RejectedCandidatesPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
         {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced

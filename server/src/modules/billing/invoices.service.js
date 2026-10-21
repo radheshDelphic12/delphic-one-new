@@ -361,7 +361,11 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   if (fixedBid.isFixedBid(account) && (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year }))) return { error: 'billing_locked' };
   await prisma.$transaction(async (tx) => {
     await require('../cashPosition/cash.hooks').unlink(tx, user.id, 'invoice', invoice.id);
-    await tx.clientInvoice.delete({ where: { id: invoice.id } });
+    // Soft delete: restorable from Group Dashboard > Logs. The number is released so a replacement can use it.
+    await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: why || 'Draft invoice deleted', ...(invoice.invoice_number ? { invoice_number: `${invoice.invoice_number}~deleted~${String(invoice.id).slice(0, 8)}` } : {}) },
+    });
   });
   await prisma.auditLog.create({
     data: {

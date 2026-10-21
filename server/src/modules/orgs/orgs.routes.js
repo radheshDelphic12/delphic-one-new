@@ -106,6 +106,24 @@ router.get(
   })
 );
 
+// Birthdays and work anniversaries in the next N days (default 14): People highlights and the dashboard's Announcements card.
+router.get(
+  '/announcements',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
+    return ok(res, await require('./announcements.service').upcoming(req.user.org_id, { days }));
+  })
+);
+
+// Employees currently on the bench (not allocated to any project today), with the days left: the dashboard section.
+router.get(
+  '/bench',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await require('../bench/bench.service').onBench(req.user.org_id)))
+);
+
 router.get(
   '/memberships/:id',
   requireOrgMembership,
@@ -194,6 +212,24 @@ router.delete(
   })
 );
 
+// Soft delete of an employee (restorable from Group Dashboard > Logs). A person with locked attendance months or a processed
+// payroll cannot be deleted: reopen those first. Terminating someone (the normal way to let a person go) is a status, not this.
+router.delete(
+  '/memberships/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 3) return fail(res, 422, 'Give a reason of at least 3 characters');
+    if (req.params.id === req.user.org_membership_id) return fail(res, 422, 'You cannot delete your own membership');
+    const result = await require('../admin/admin.service').softDeleteRecord('employee', req.params.id, reason.slice(0, 500), req.user, { orgId: req.user.org_id });
+    if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
+    if (result.error === 'already_deleted') return fail(res, 409, 'Already deleted');
+    if (result.error) return fail(res, ...(require('../../lib/softDeleteErrors')[result.error] || [400, 'Cannot delete']));
+    return ok(res, { deleted: true, dependency: result.result.dependency });
+  })
+);
+
 router.patch(
   '/memberships/:id',
   requireOrgMembership,
@@ -210,6 +246,8 @@ router.patch(
     if (result.error === 'lwd_before_notice') return fail(res, 422, 'The last working day cannot be before the notice date');
     if (result.error === 'employee_code_taken') return fail(res, 409, 'Another employee in this company already has that employee code');
     if (result.error === 'joined_after_exit') return fail(res, 422, JOINED_AFTER_EXIT);
+    if (result.error === 'bench_end_before_start') return fail(res, 422, 'The bench end date cannot be before the start date');
+    if (result.error === 'bench_end_without_start') return fail(res, 422, 'Set the bench start date first');
     return ok(res, { ...result.membership, can_edit_joining_date: true });
   })
 );

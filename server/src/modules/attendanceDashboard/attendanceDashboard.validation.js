@@ -4,6 +4,8 @@ const monthQuery = z.object({
   year: z.coerce.number().int().min(2000).max(2100),
   month: z.coerce.number().int().min(1).max(12),
 });
+// Employee list filter: current = everyone still working (incl. serving notice), or only active / notice_period / exited, or all.
+const peopleQuery = monthQuery.extend({ status: z.enum(['current', 'active', 'notice_period', 'exited', 'all']).default('current') });
 const calendarQuery = monthQuery.extend({ org_membership_id: z.string().uuid().optional() });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -22,4 +24,4 @@ const requestPlaceSchema = z.object({
 });
 const decidePlaceSchema = z.object({ approve: z.boolean(), reason: z.string().trim().max(500).optional() });
 
-module.exports = { monthQuery, calendarQuery, setOfficeSchema, requestPlaceSchema, decidePlaceSchema };
+module.exports = { monthQuery, peopleQuery, calendarQuery, setOfficeSchema, requestPlaceSchema, decidePlaceSchema };

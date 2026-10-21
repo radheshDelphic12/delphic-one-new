@@ -1,33 +1,36 @@
 {
   "default_branch": "main",
   "branches": [
-    "acconcy-finance-workspace",
     "delphic-one-bugFix-and-newImplementation",
     "dev",
-    "dev-deepanshu",
+    "dev-deep",
+    "feature/header-attendance",
+    "feature/simple-login",
+    "fix/ci-green",
     "main",
     "origin",
-    "staging",
-    "super_admin_branch"
+    "staging"
   ],
   "parent": {
-    "acconcy-finance-workspace": "main",
     "delphic-one-bugFix-and-newImplementation": "main",
     "dev": "main",
-    "dev-deepanshu": "dev",
+    "dev-deep": "dev",
+    "feature/header-attendance": "main",
+    "feature/simple-login": "main",
+    "fix/ci-green": "main",
     "main": null,
     "origin": "main",
-    "staging": "main",
-    "super_admin_branch": "main"
+    "staging": "main"
   },
   "order": [
     "main",
-    "acconcy-finance-workspace",
     "delphic-one-bugFix-and-newImplementation",
     "dev",
+    "feature/header-attendance",
+    "feature/simple-login",
+    "fix/ci-green",
     "origin",
     "staging",
-    "super_admin_branch",
-    "dev-deepanshu"
+    "dev-deep"
   ]
 }

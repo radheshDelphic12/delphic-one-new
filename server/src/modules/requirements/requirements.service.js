@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { notify, requirementParticipants, admins } = require('../../lib/notifications');
 const {
@@ -170,8 +171,10 @@ async function getById(id) {
   return serialize(row);
 }
 
-function canMutateRequirement(requirement, user) {
+function canMutateRequirement(requirement, user, perm = 'requirements.update') {
   if (!requirement) return false;
+  const decided = decide(user, perm, requirement.sales_owner_id);
+  if (decided !== null) return decided;
   if (user.role === 'admin') return true;
   // The whole Sales team manages every requirement (edit, status, assign, seats, delete); each action is tagged with who did it.
   return user.role === 'sales';
@@ -563,7 +566,7 @@ async function changeSeatStatus(seatId, { to_status, reason, joined_at }, userId
 async function remove(id, reason, user) {
   const existing = await prisma.requirement.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
-  if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  if (!canMutateRequirement(existing, user, 'requirements.delete')) return { error: 'forbidden' };
   await prisma.$transaction(async (tx) => {
     await tx.requirement.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason } });
     await tx.auditLog.create({ data: { actor_id: user.id, action: 'soft_delete', entity_type: 'requirement', entity_id: id, reason, snapshot: JSON.parse(JSON.stringify(existing)) } });

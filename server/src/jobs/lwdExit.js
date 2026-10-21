@@ -2,6 +2,8 @@ const cron = require('node-cron');
 const prisma = require('../config/db');
 const logger = require('../config/logger');
 const { todayIst } = require('../lib/istDate');
+const orgContext = require('../lib/orgContext');
+const { ensureFnf } = require('../lib/fnf');
 
 /**
  * Exits people whose notice has run out. A membership "Serving notice" (notice_period)
@@ -14,15 +16,22 @@ const { todayIst } = require('../lib/istDate');
  * working. Idempotent, so it also runs once at start-up to catch a missed night.
  */
 async function run(today = todayIst()) {
+  return orgContext.runAs('Nightly job: last working day', () => exitDue(today));
+}
+
+async function exitDue(today) {
   const due = await prisma.orgMembership.findMany({
     where: { employment_status: 'notice_period', notice_end_date: { lt: today } },
-    select: { id: true, notice_end_date: true, left_at: true },
+    select: { id: true, org_id: true, notice_end_date: true, left_at: true },
   });
   for (const m of due) {
+    const leftAt = m.left_at || m.notice_end_date;
     await prisma.orgMembership.update({
       where: { id: m.id },
-      data: { employment_status: 'terminated', left_at: m.left_at || m.notice_end_date },
+      data: { employment_status: 'terminated', left_at: leftAt },
     });
+    // the exit starts the full and final settlement (Pending)
+    await ensureFnf(prisma, m.org_id, m.id, leftAt);
   }
   if (due.length) logger.info('lwd_exit_done', { count: due.length });
   return { exited: due.length };

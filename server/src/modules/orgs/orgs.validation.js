@@ -21,6 +21,7 @@ const updateLocationSchema = z
     name: z.string().trim().min(1).max(100).optional(),
     city: z.string().max(100).nullable().optional(),
     country: z.string().max(100).nullable().optional(),
+    address: z.string().trim().max(500).nullable().optional(),
     is_default: z.boolean().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Change at least one field' });
@@ -29,6 +30,7 @@ const createLocationSchema = z.object({
   name: z.string().min(1).max(100),
   city: z.string().max(100).optional(),
   country: z.string().max(100).optional(),
+  address: z.string().trim().max(500).optional(),
   is_default: z.boolean().default(false),
 });
 
@@ -74,6 +76,9 @@ const updateMembershipSchema = z.object({
   employment_status: z.enum(['active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated']).optional(),
   notice_start_date: optionalDate.nullable(),
   notice_end_date: optionalDate.nullable(),
+  // Bench period (People): end defaults to start + 30 days; being allocated to a project takes the person off the bench.
+  bench_start_date: optionalDate.nullable(),
+  bench_end_date: optionalDate.nullable(),
   work_mode: z.enum(['remote', 'onsite', 'hybrid']).nullable().optional(),
   // People → user type. Contractor needs a vendor account and a monthly vendor rate.
   worker_type: z.enum(['full_time_employee', 'contractor']).optional(),
@@ -108,6 +113,8 @@ const personalDetailsSchema = z
     emergency_contact_name: optionalText(120),
     emergency_contact_relation: optionalText(60),
     emergency_contact_phone: optionalText(30).refine((v) => !v || /^[+0-9 ()-]{6,30}$/.test(v), 'Enter a valid phone number'),
+    // Birthday: the Announcements card shows day and month only
+    date_of_birth: z.preprocess((v) => (v === '' ? null : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable().optional()).transform((v) => (v ? new Date(`${v}T00:00:00.000Z`) : v)),
     emergency_contact_email: optionalText(160).refine((v) => !v || z.string().email().safeParse(v).success, 'Enter a valid email'),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });

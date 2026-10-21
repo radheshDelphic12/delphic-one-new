@@ -125,6 +125,8 @@ export default function AccountsListPage() {
   const [ownerId, setOwnerId] = useState(() => searchParams.get('owner_id') || '');
   const [broughtById, setBroughtById] = useState(() => searchParams.get('origin_owner_id') || '');
   const [specialization, setSpecialization] = useState(() => searchParams.get('specialization') || '');
+  const [location, setLocation] = useState(() => searchParams.get('location') || '');
+  const [appliedLocation, setAppliedLocation] = useState(() => searchParams.get('location') || '');
   const [people, setPeople] = useState([]);
   const [specializationOptions, setSpecializationOptions] = useState([]);
   const [page, setPage] = useState(1);
@@ -144,6 +146,7 @@ export default function AccountsListPage() {
     if (ownerId) params.owner_id = ownerId;
     if (broughtById) params.origin_owner_id = broughtById;
     if (specialization) params.specialization = specialization;
+    if (appliedLocation) params.location = appliedLocation;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
       .get('/accounts', { params })
@@ -158,7 +161,7 @@ export default function AccountsListPage() {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, specialization]);
+  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, specialization, appliedLocation]);
 
   useEffect(() => {
     // /users/directory is readable by every role and includes inactive users, so
@@ -294,6 +297,7 @@ export default function AccountsListPage() {
       },
       { key: 'type', header: 'Type', render: (row) => <span className="capitalize text-tertiary-700">{row.type || 'Unclassified'}</span> },
       { key: 'industry', header: 'Industry', render: (row) => row.industry || '—' },
+      { key: 'location', header: 'Location', render: (row) => [row.location, row.location_city, row.location_country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—' },
       {
         key: 'specialization',
         header: 'Specialization',
@@ -403,6 +407,21 @@ export default function AccountsListPage() {
                 <option value="vendor">Vendor</option>
                 <option value="unclassified">Unclassified</option>
               </select>
+              <input
+                type="search"
+                value={location}
+                onChange={(event) => {
+                  setLocation(event.target.value);
+                  if (!event.target.value) { setPage(1); setAppliedLocation(''); }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') { setPage(1); setAppliedLocation(location.trim()); }
+                }}
+                onBlur={() => { if (location.trim() !== appliedLocation) { setPage(1); setAppliedLocation(location.trim()); } }}
+                placeholder="Location: any"
+                aria-label="Filter by location"
+                className="w-40 rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              />
               <SearchableSelect
                 className="w-44"
                 allowClear
