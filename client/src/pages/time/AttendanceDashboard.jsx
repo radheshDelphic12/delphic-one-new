@@ -307,7 +307,7 @@ export default function AttendanceDashboard() {
       <PendingPlaces onDecided={refresh} />
 
       {view === 'register' && list && list.length > 1 ? (
-        <AttendanceRegister year={year} month={month} status={status} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
+        <AttendanceRegister year={year} month={month} status={status} canEdit={isAdmin} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
       ) : view === 'all' ? (
         <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <table className="min-w-full text-sm">

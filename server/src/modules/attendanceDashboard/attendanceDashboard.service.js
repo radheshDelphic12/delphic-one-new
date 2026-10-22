@@ -273,13 +273,14 @@ async function decidePlace(orgId, user, id, { approve, reason }) {
 // Short leave code from the leave type's name: Casual -> CL, Sick -> SL, Earned / Paid -> EL, Comp off -> CO, else initials.
 function leaveCode(name) {
   const n = String(name || '').toLowerCase();
+  // Unpaid first: "Unpaid Leave" also contains "paid" and must not be shown as Earned / paid leave. UL is the code the Leave module uses.
+  if (/unpaid|loss of pay|lop/.test(n)) return 'UL';
   if (/comp/.test(n)) return 'CO';
   if (/casual/.test(n)) return 'CL';
   if (/sick|medical/.test(n)) return 'SL';
   if (/earned|privilege|paid|annual/.test(n)) return 'EL';
   if (/maternity/.test(n)) return 'ML';
   if (/paternity/.test(n)) return 'PL';
-  if (/unpaid|loss of pay|lop/.test(n)) return 'LWP';
   const initials = String(name || '').split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('').slice(0, 3);
   return initials || 'L';
 }
@@ -320,14 +321,17 @@ async function register(orgId, user, { year, month, status = 'current' }) {
   const today = ymd(todayDate);
   const visible = await dashboard.visibleMembers(orgId, user, { includeExited: true });
   const ids = visible.filter((m) => m.worker_type !== 'contractor' && !m.vendor_account_id).map((m) => m.id);
-  const [members, homeRows] = await Promise.all([
+  const [members, homeRows, recordRows] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { id: { in: ids } },
       select: { id: true, work_mode: true, joined_at: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true, department: { select: { name: true } } } } },
       orderBy: { person: { name: 'asc' } },
     }),
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
+    // the recorded attendance rows themselves: the register's edit drawer changes or removes one
+    prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, select: { id: true, org_membership_id: true, date: true, status: true } }),
   ]);
+  const recordBy = new Map(recordRows.map((r) => [`${r.org_membership_id}|${ymd(r.date)}`, r]));
   const homeBy = new Map();
   for (const r of homeRows) {
     if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
@@ -354,7 +358,8 @@ async function register(orgId, user, { year, month, status = 'current' }) {
       else if (c.kind === 'weekly_off') totals.weekly_offs += 1;
       else if (c.kind === 'absent') totals.absent += 1;
       totals.hours += hours;
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, hours, projects: d.project_hours || [] };
+      const rec = recordBy.get(`${m.id}|${d.date}`);
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
     return {
