@@ -353,6 +353,8 @@ main() {
   # shellcheck source=/dev/null
   source "${ENV_FILE}"
   set +a
+  # commit id / message / dates for the page's <meta name="build-commit"> tags (the client image is built below)
+  eval "$(bash "${SCRIPT_DIR}/scripts/build-info.sh")"
   validate_prod_env
   assert_loopback_only
 

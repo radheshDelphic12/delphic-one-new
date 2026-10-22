@@ -225,3 +225,26 @@ This is the only path that drops the database, and it is a deliberate, manual re
 - To retry a failed Deploy, open it in GitHub Actions and use **Re-run failed jobs**; it deploys the same commit CI tested. The failing step's last lines (Actions log) give the exact cause.
 - Render staging runs with `ENABLE_JOBS=false` (free plan sleeps), so the email outbox job never runs there: queued mail stays `queued`. Production runs the jobs.
 - Mail: see [EMAIL-SMTP-PRODUCTION.md](EMAIL-SMTP-PRODUCTION.md) (Microsoft Graph or SMTP variables).
+- **Root-owned files break the deploy.** If a past deploy or fix was done with `sudo`, some files in `/opt/delphic` end up owned by root and the next `git reset --hard` fails with `unable to unlink ...: Permission denied` (Deploy to EC2 fails in ~20 s, containers stay on the old version). Find them with `find /opt/delphic -not -user ubuntu | head`, fix with `sudo chown -R ubuntu:ubuntu /opt/delphic`, then re-run the failed Deploy.
+- A Deploy cancelled midway can leave the server and client already rebuilt on the new commit (the production frontend bundle changed although the run showed "cancelled"). Check what really runs: the frontend bundle name matches staging, and `git log --oneline -1` on the box.
+- GitHub's API allows 60 unauthenticated calls per hour per IP: polling Actions runs from a script runs out quickly. Watch the production bundle name / health instead, or look at the Actions page.
+
+## Which commit is live? (build meta tags)
+
+Every build puts the commit it was built from in the page head. Open the site, right-click > **View page source** (or DevTools > Elements > `<head>`) and read:
+
+```html
+<meta name="build-commit" content="<full commit id>" />
+<meta name="build-commit-short" content="<7 characters>" />
+<meta name="build-commit-message" content="<first line of the commit message>" />
+<meta name="build-commit-date" content="<commit date, ISO>" />  <meta name="build-commit-date-ist" ... />
+<meta name="build-deployed-at" content="<when the build ran = when it went on the server, UTC>" />  <meta name="build-deployed-at-ist" ... />
+<meta name="build-branch" content="main" />
+```
+
+Compare `build-commit` with `git rev-parse origin/main` (production) or `origin/staging` (Render). `index.html` is served `no-store`, so a reload always shows the current build.
+
+- Code: `client/build-info.js` (Vite plugin, test: `node --test client/build-info.test.mjs`), `scripts/build-info.sh`.
+- Production: the Deploy workflow and `start-delphic.sh` run `eval "$(bash scripts/build-info.sh)"`, and `docker-compose.yml` passes `BUILD_COMMIT_*` into the client image build (the Docker context has no `.git`).
+- Render staging: the root `Dockerfile` reads Render's `RENDER_GIT_COMMIT` and asks the GitHub API for the message and date (any failure shows "unknown" for those two, never breaks the build).
+- A value of `unknown` means the build was made without that information (for example a manual `docker build` without the build args).
