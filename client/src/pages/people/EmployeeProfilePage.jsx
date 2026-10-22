@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -329,10 +330,10 @@ export default function EmployeeProfilePage() {
     const optional = (request) => request.catch(() => ({ data: { data: [] } }));
     Promise.all([
       apiClient.get(`/orgs/memberships/${id}`),
-      user?.role === 'admin' ? optional(apiClient.get('/departments')) : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? optional(apiClient.get('/designations')) : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? optional(apiClient.get('/teams')) : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? optional(apiClient.get('/billing/vendors')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/departments')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/designations')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/teams')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/billing/vendors')) : Promise.resolve({ data: { data: [] } }),
       optional(apiClient.get('/orgs/locations')),
       optional(apiClient.get('/attendance/shifts')),
       optional(apiClient.get('/orgs/memberships')),
@@ -375,7 +376,7 @@ export default function EmployeeProfilePage() {
   if (loading) return <div className="rounded-2xl border border-tertiary-100 bg-white p-8 text-sm text-tertiary-500">Loading employee profile...</div>;
   if (!row) return <div className="rounded-2xl border border-danger-100 bg-danger-50 p-6 text-sm text-danger-700">Employee profile could not be found.</div>;
 
-  const canEdit = user?.role === 'admin';
+  const canEdit = adminFor(user, 'people.update');
   // HR department members (not admins) can change the joining date only.
   const canEditJoining = !canEdit && Boolean(row.can_edit_joining_date);
   const selectOptions = {

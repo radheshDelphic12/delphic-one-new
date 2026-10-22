@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarDays, Check, CircleHelp, FilePlus2, Undo2, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -243,7 +244,7 @@ function WithdrawModal({ row, onClose, onDone }) {
 export default function LeavePage() {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, ['leave.update', 'leave.approve']);
   const [tab, setTab] = useState('mine');
   const [types, setTypes] = useState([]);
   const [balances, setBalances] = useState([]);

@@ -2,6 +2,7 @@ import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { FileText, Gauge, Laptop, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
+import { allowed, isAdminUser } from '../../lib/access.js';
 import PeopleListPage from './PeopleListPage.jsx';
 import OrgChartPage from '../orgChart/OrgChartPage.jsx';
 import UsersPage from '../users/UsersPage.jsx';
@@ -11,15 +12,15 @@ import CapacityPage from './CapacityPage.jsx';
 import PoliciesPage from './PoliciesPage.jsx';
 
 const BASE_TABS = [
-  { key: 'directory', label: 'Directory', icon: UsersRound },
-  { key: 'org-chart', label: 'Org Chart', icon: Network },
-  { key: 'policies', label: 'Policies', icon: FileText },
+  { key: 'directory', label: 'Directory', icon: UsersRound, need: 'basic.people_directory' },
+  { key: 'org-chart', label: 'Org Chart', icon: Network, need: 'basic.org_chart' },
+  { key: 'policies', label: 'Policies', icon: FileText, need: 'basic.policies' },
 ];
 const ADMIN_TABS = [
-  { key: 'capacity', label: 'Capacity & Allocation', icon: Gauge },
-  { key: 'users', label: 'Users', icon: UserCog },
-  { key: 'assets', label: 'Assets', icon: Laptop },
-  { key: 'hr-settings', label: 'HR Settings', icon: Settings2 },
+  { key: 'capacity', label: 'Capacity & Allocation', icon: Gauge, need: 'allocations.view' },
+  { key: 'users', label: 'Users', icon: UserCog, need: 'users.view' },
+  { key: 'assets', label: 'Assets', icon: Laptop, need: 'assets.view' },
+  { key: 'hr-settings', label: 'HR Settings', icon: Settings2, need: 'hr_settings.view' },
 ];
 
 /**
@@ -30,11 +31,12 @@ export default function PeopleHubPage() {
   const { user, isGroupSuperadmin } = useAuth();
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
-  const isAdmin = user?.role === 'admin';
-  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const isAdmin = isAdminUser(user);
+  // A tab shows only when the person has View on it (a company on permissions); elsewhere the admin role decides, as before.
+  const tabs = [...BASE_TABS.filter((t) => allowed(user, t.need, true)), ...ADMIN_TABS.filter((t) => allowed(user, t.need, isAdmin))];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'directory';
-  const section = tabs.some((t) => t.key === requested) ? requested : 'directory';
+  const section = tabs.some((t) => t.key === requested) ? requested : (tabs[0]?.key || 'directory');
 
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
@@ -42,10 +44,10 @@ export default function PeopleHubPage() {
       {section === 'directory' && <PeopleListPage />}
       {section === 'org-chart' && <OrgChartPage />}
       {section === 'policies' && <PoliciesPage />}
-      {section === 'capacity' && isAdmin && <CapacityPage />}
-      {section === 'users' && isAdmin && <UsersPage />}
-      {section === 'assets' && isAdmin && <AssetsPage />}
-      {section === 'hr-settings' && isAdmin && <HrSettingsPage />}
+      {section === 'capacity' && tabs.some((t) => t.key === 'capacity') && <CapacityPage />}
+      {section === 'users' && tabs.some((t) => t.key === 'users') && <UsersPage />}
+      {section === 'assets' && tabs.some((t) => t.key === 'assets') && <AssetsPage />}
+      {section === 'hr-settings' && tabs.some((t) => t.key === 'hr-settings') && <HrSettingsPage />}
     </div>
   );
 }

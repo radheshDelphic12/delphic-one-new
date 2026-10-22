@@ -4,6 +4,7 @@ import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import HolidayCalendarAdmin from './HolidayCalendarAdmin.jsx';
 
 const KIND_LABEL = { internal: 'Standard', client: 'Client calendar', custom: 'Custom' };
@@ -104,7 +105,7 @@ function CalendarCard({ title, subtitle, calendar, modern }) {
  */
 export default function MyHolidaysTab() {
   const { user, isGroupSuperadmin } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, 'holidays.update');
   const modern = !isGroupSuperadmin;
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);

@@ -1,7 +1,11 @@
 /**
  * Central role → capability map. All UI role checks go through can() / usePermissions / Can.
  * Backend authorize() remains the source of truth for API access.
+ *
+ * A company on the permission model (Settings > Permissions) does not use this map: userCan() answers from the person's
+ * default basic access + permission set + grants (lib/access.js), so the menu, tabs and buttons follow the same list the API checks.
  */
+import { capabilityAllowed, isPermissionMode } from './access.js';
 
 const ROLE_CAPS = {
   admin: new Set([
@@ -180,6 +184,7 @@ const SUPERADMIN_ONLY = new Set(['overrideStage', 'editAnyUser', 'deleteRecords'
  */
 export function userCan(user, capability) {
   if (!capability) return false;
+  if (isPermissionMode(user)) return capabilityAllowed(user, capability);
   if (user?.is_superadmin) return true;
   if (SUPERADMIN_ONLY.has(capability)) return false;
   // A custom role (Settings > Roles & permissions) decides the actions it lists; everything else follows its plain base role.

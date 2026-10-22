@@ -1,6 +1,7 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
 const usersService = require('./users.service');
+const accessService = require('../access/access.service');
 const { WORKER_ERRORS } = require('../../lib/workerType');
 const { listQuerySchema, directoryQuerySchema, createSchema, updateSchema } = require('./users.validation');
 
@@ -12,14 +13,19 @@ const ERROR_STATUS = {
   forbidden_password: [403, "Only a superadmin can set another user's password"],
   forbidden_edit_superadmin: [403, 'Only a superadmin can edit a superadmin'],
   last_superadmin: [409, 'Cannot remove the last superadmin'],
+  forbidden_edit_super_admin: [403, 'Only the Super Admin can edit the Super Admin account'],
+  managed_by_permissions: [409, 'Access is managed in Settings > Permissions for this company. The role field is read-only.'],
   ...WORKER_ERRORS,
 };
 
 const me = asyncHandler(async (req, res) => {
   const user = await usersService.getById(req.user.org_id, req.user.id);
+  if (!user) return ok(res, user);
+  // `access`: who they are (super_admin / admin / employee) and, in a company on permissions, exactly what they can open.
+  const access = accessService.me({ ...req.user, is_superadmin: user.is_superadmin, is_group_superadmin: user.is_group_superadmin });
   // A custom role's permissions (and name) reach the app here; absent for everyone on a plain role.
-  if (user && req.user.custom_role) return ok(res, { ...user, role: req.user.role, custom_role: req.user.custom_role, permissions: req.user.custom_permissions });
-  return ok(res, user);
+  if (req.user.custom_role || access.mode === 'permissions') return ok(res, { ...user, role: req.user.role, custom_role: req.user.custom_role, permissions: req.user.custom_permissions, access });
+  return ok(res, { ...user, access });
 });
 
 const myActivity = asyncHandler(async (req, res) => {

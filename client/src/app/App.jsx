@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useAuth } from '../lib/authContext.jsx';
-import { can } from '../lib/permissions.js';
+import { can, userCan } from '../lib/permissions.js';
+import { hasNeed, isAdminUser, isPermissionMode } from '../lib/access.js';
+import NoAccess from '../components/NoAccess.jsx';
 import AppLayout from '../components/layout/AppLayout.jsx';
 import HomePreloaderGate from '../components/HomePreloaderGate.jsx';
 import LoginPage from '../pages/auth/LoginPage.jsx';
@@ -192,7 +194,7 @@ function HomePage() {
   if (isValterraOrg(user)) return <Navigate to="/valterra" replace />;
   if (isNovarexOrg(user)) return <Navigate to="/novarex" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
-  if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
+  if (isAdminUser(user)) return <Navigate to={ADMIN_HOME} replace />;
   return (
     <HomePreloaderGate>
       <DashboardPage />
@@ -200,11 +202,22 @@ function HomePage() {
   );
 }
 
-function RequirePermission({ capability, children }) {
+function RequirePermission({ capability, need, children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
+  // A company on permissions: a short "no access" page, never an empty one. `need` names the exact permission for the page.
+  if (isPermissionMode(user)) return (need ? hasNeed(user, need) : userCan(user, capability)) ? children : <NoAccess />;
   if (!can(user.role, capability)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** Only acts in a company on permissions: the page needs one of these permissions (a basic item or a grant). */
+function RequireAccess({ need, children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (isPermissionMode(user) && !hasNeed(user, need)) return <NoAccess />;
   return children;
 }
 
@@ -337,16 +350,16 @@ export default function App() {
         {/* Recruitment pipeline — Delphic Global only (see RequireMasterWorkspace), and only
             for roles with pipeline access (RequirePermission) — keeps a self-service-only
             role (e.g. employee/IT) off these pages even via a typed URL, not just the sidebar. */}
-        <Route path="accounts" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/accounts?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountBoardRedirect /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountDetailPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><EditRedirect base="accounts" /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><Navigate to="/accounts?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountBoardRedirect /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><EditRedirect base="accounts" /></RequirePermission></RequireMasterWorkspace>} />
         <Route
           path="pipeline"
           element={
             <RequireMasterWorkspace>
-              <RequirePermission capability="viewPipeline">
+              <RequirePermission capability="viewPipeline" need="pipeline.view">
                 <PipelineShell />
               </RequirePermission>
             </RequireMasterWorkspace>
@@ -356,17 +369,17 @@ export default function App() {
           path="pipeline/:accountId"
           element={
             <RequireMasterWorkspace>
-              <RequirePermission capability="viewPipeline">
+              <RequirePermission capability="viewPipeline" need="pipeline.view">
                 <AccountPipelineBoardPage />
               </RequirePermission>
             </RequireMasterWorkspace>
           }
         />
-        <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementDetailPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route
           path="profiles"
           element={
@@ -389,10 +402,10 @@ export default function App() {
           }
         />
         <Route path="profiles/:id/edit" element={<RequireMasterWorkspace><EditRedirect base="profiles" /></RequireMasterWorkspace>} />
-        <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="rejected-candidates" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RejectedCandidatesPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="rejected-candidates" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="rejected.view"><RejectedCandidatesPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
         {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced
             by the server; AppLayout keeps Zephyr users off every Delphic page. */}
         <Route path="zephyr" element={<RequireZephyr><ZephyrHomePage /></RequireZephyr>} />
@@ -498,24 +511,24 @@ export default function App() {
         <Route path="novarex/settings" element={<RequireNovarex><NovarexSettingsPage /></RequireNovarex>} />
         <Route path="valterra/*" element={<Navigate to="/valterra" replace />} />
         <Route path="novarex/*" element={<Navigate to="/novarex" replace />} />
-        <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
+        <Route path="calendar" element={<RequireMeetingsCalendar><RequireAccess need="basic.calendar"><CalendarPage /></RequireAccess></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
           path="notifications/preferences"
           element={<Navigate to="/settings?tab=notifications" replace />}
         />
         <Route path="settings" element={<SettingsPage />} />
-        <Route path="people" element={<PeopleHubPage />} />
+        <Route path="people" element={<RequireAccess need={['basic.people_directory', 'basic.org_chart', 'basic.policies', 'people.view', 'users.view', 'allocations.view', 'assets.view', 'hr_settings.view']}><PeopleHubPage /></RequireAccess>} />
         <Route path="offices" element={<RequireGroupSuperadmin><OfficesPage /></RequireGroupSuperadmin>} />
-        <Route path="internal-jobs" element={<RequireMasterWorkspace><InternalJobsPage /></RequireMasterWorkspace>} />
-        <Route path="people/:id" element={<EmployeeProfilePage />} />
+        <Route path="internal-jobs" element={<RequireMasterWorkspace><RequireAccess need="basic.internal_jobs"><InternalJobsPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="people/:id" element={<RequireAccess need="basic.people_directory"><EmployeeProfilePage /></RequireAccess>} />
         {/* Merged into the People / Time & Attendance hubs — keep old links working. */}
         <Route path="people/settings" element={<Navigate to="/people?section=hr-settings" replace />} />
         <Route path="users" element={<Navigate to="/people?section=users" replace />} />
-        <Route path="attendance" element={<TimeAttendanceHubPage />} />
+        <Route path="attendance" element={<RequireAccess need={['basic.attendance', 'basic.leave', 'basic.timesheet']}><TimeAttendanceHubPage /></RequireAccess>} />
         <Route path="leave" element={<Navigate to="/attendance?section=leave" replace />} />
-        <Route path="finance" element={<FinanceHubPage />} />
-        <Route path="payroll" element={<PayrollHubPage />} />
+        <Route path="finance" element={<RequireAccess need={['basic.expenses', 'finance.view', 'billing.view', 'analytics.view']}><FinanceHubPage /></RequireAccess>} />
+        <Route path="payroll" element={<RequireAccess need={['basic.payslips', 'payroll.view']}><PayrollHubPage /></RequireAccess>} />
         <Route path="analytics" element={<RequireMasterWorkspace><RequirePermission capability="viewAnalytics"><AnalyticsPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="financials" element={<RequireMasterWorkspace><RequirePermission capability="viewFinancials"><FinancialsPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="trading" element={<RequireModule module="trading" capability="viewTrading"><TradingHubPage /></RequireModule>} />

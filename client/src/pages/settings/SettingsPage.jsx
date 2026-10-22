@@ -10,6 +10,8 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
 import RolesPermissionsPanel from '../../components/admin/RolesPermissionsPanel.jsx';
+import PermissionsPanel from '../../components/admin/PermissionsPanel.jsx';
+import { isPermissionMode, isAdminUser, LEVEL_LABEL } from '../../lib/access.js';
 import { userCan } from '../../lib/permissions.js';
 import { isZephyrOrg } from '../../lib/zephyr/useZephyr.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
@@ -27,6 +29,7 @@ const BASE_TABS = [
 
 const DELETED_TAB = { key: 'deleted', label: 'Deleted records', icon: Trash2 };
 const ROLES_TAB = { key: 'roles', label: 'Roles & permissions', icon: KeyRound };
+const PERMISSIONS_TAB = { key: 'permissions', label: 'Permissions', icon: KeyRound };
 
 const ENTITY_PATH = {
   account: (id) => `/accounts/${id}`,
@@ -94,9 +97,9 @@ function AccountTab({ user, onLogout }) {
     ['Name', user?.name || '—'],
     ['Email', user?.email || '—'],
     ['Phone', user?.phone || '—'],
-    ['Role', user?.role ? user.role.toUpperCase() : '—'],
+    isPermissionMode(user) ? ['Job title', user?.designation?.name || user?.custom_role?.name || '—'] : ['Role', user?.role ? user.role.toUpperCase() : '—'],
     ['Department', user?.department?.name || '—'],
-    ['Access', user?.is_superadmin ? 'Superadmin' : 'Standard'],
+    isPermissionMode(user) ? ['Access', `${LEVEL_LABEL[user.access.level] || 'Employee'}${user.access.set ? ` · ${user.access.set.name}` : ''}`] : ['Access', user?.is_superadmin ? 'Superadmin' : 'Standard'],
   ];
 
   return (
@@ -246,12 +249,16 @@ export default function SettingsPage() {
   // Zephyr has no HR profile (reporting line, bank, emergency contact, documents), so "My details" is hidden there.
   const hideDetails = isZephyrOrg(user);
   // Roles & permissions: the Super Admin (and the Group Super Admin, in the company they have open).
-  const canManageRoles = user?.role === 'admin' && Boolean(user?.is_superadmin || user?.is_group_superadmin);
+  const onPermissions = isPermissionMode(user);
+  const canManageRoles = !onPermissions && user?.role === 'admin' && Boolean(user?.is_superadmin || user?.is_group_superadmin);
+  // Permissions: the Super Admin and the company Admin (in a company that moved); the Super Admin also in a company that has not yet (Migration).
+  const canManagePermissions = onPermissions ? isAdminUser(user) : Boolean(user?.access?.level === 'super_admin');
   const TABS = useMemo(() => {
     const base = hideDetails ? BASE_TABS.filter((t) => t.key !== 'details') : BASE_TABS;
     const withDeleted = canSeeDeleted ? [...base, DELETED_TAB] : base;
-    return canManageRoles ? [...withDeleted, ROLES_TAB] : withDeleted;
-  }, [canSeeDeleted, canManageRoles, hideDetails]
+    const withRoles = canManageRoles ? [...withDeleted, ROLES_TAB] : withDeleted;
+    return canManagePermissions ? [...withRoles, PERMISSIONS_TAB] : withRoles;
+  }, [canSeeDeleted, canManageRoles, canManagePermissions, hideDetails]
   );
   const active = useMemo(
     () => (TABS.some((t) => t.key === requested) ? requested : 'account'),
@@ -298,6 +305,7 @@ export default function SettingsPage() {
       {active === 'activity' && <ActivityTab />}
       {active === 'deleted' && canSeeDeleted && <DeletedRecordsPanel />}
       {active === 'roles' && canManageRoles && <RolesPermissionsPanel />}
+      {active === 'permissions' && canManagePermissions && <PermissionsPanel />}
     </div>
   );
 }

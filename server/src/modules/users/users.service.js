@@ -3,6 +3,7 @@ const prisma = require('../../config/db');
 const { WORKING_STATUSES } = require('../../lib/employmentStatus');
 const { resolveWorkerFields } = require('../../lib/workerType');
 const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
+const { isPermissionMode } = require('../../lib/access/mode');
 
 const PUBLIC_SELECT = {
   id: true,
@@ -88,6 +89,8 @@ async function create(orgId, { name, email, password, role, phone, department_id
     const department = await prisma.department.findFirst({ where: { id: department_id, org_id: orgId } });
     if (!department) return { error: 'department_not_found' };
   }
+  // A company on permissions has no Admin / Sales / Recruiter value to choose: a new joiner has basic access from day one.
+  if (await isPermissionMode(orgId)) role = 'employee';
   const worker = await resolveWorkerFields(orgId, {}, workerPatch);
   if (worker.error) return worker;
   const { role: workerRole, ...workerData } = worker.data;
@@ -129,6 +132,11 @@ async function update(orgId, id, patch, actor = {}) {
     if (!department) return { error: 'department_not_found' };
   }
 
+  if (target.is_group_superadmin && target.id !== actor.id) {
+    const caller = await prisma.user.findUnique({ where: { id: actor.id }, select: { is_group_superadmin: true } });
+    if (!caller?.is_group_superadmin) return { error: 'forbidden_edit_super_admin' };
+  }
+  if (await isPermissionMode(orgId) && (patch.role !== undefined || 'is_superadmin' in patch)) return { error: 'managed_by_permissions' };
   if ('is_superadmin' in patch && !actor.is_superadmin) return { error: 'forbidden_superadmin_field' };
   if (patch.password !== undefined && !actor.is_superadmin) return { error: 'forbidden_password' };
   if (target.is_superadmin && !actor.is_superadmin) return { error: 'forbidden_edit_superadmin' };

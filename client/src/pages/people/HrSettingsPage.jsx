@@ -3,6 +3,7 @@ import { CalendarDays, Download, FolderPlus, MapPin, Pencil, Plus, Settings2, Sh
 import { useSearchParams } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
@@ -462,7 +463,7 @@ export default function HrSettingsPage() {
     }
   }
 
-  const canManage = user?.role === 'admin';
+  const canManage = adminFor(user, 'hr_settings.update');
   const names = { departments: 'department', designations: 'designation' };
   const columns = tab === 'departments' || tab === 'designations'
     ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }]

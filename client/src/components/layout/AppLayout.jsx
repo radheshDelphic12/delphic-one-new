@@ -8,6 +8,7 @@ import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
 import { orgLogo } from '../../lib/orgLogo.js';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
 import { usePermissions } from '../../lib/permissions.js';
+import { hasNeed, isAdminUser, isPermissionMode } from '../../lib/access.js';
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
@@ -163,16 +164,18 @@ export default function AppLayout() {
         return [...zephyrNavFor(zxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
       }
       return isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
-        if (item.hiddenForAdmin && user?.role === 'admin') return false;
+        if (item.hiddenForAdmin && isAdminUser(user)) return false;
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
         if (item.meetingsCalendar && !canSeeMeetingsCalendar(user)) return false;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
+        // A company on permissions: a menu item shows only when the person holds View on that module (no empty pages).
+        if (isPermissionMode(user) && item.need) return hasNeed(user, item.need);
         return !item.capability || can(item.capability);
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
+    [user?.role, user?.access, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
