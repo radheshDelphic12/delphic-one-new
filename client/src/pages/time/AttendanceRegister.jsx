@@ -24,6 +24,7 @@ const LEGEND = [
   ['H', 'holiday', 'Holiday'], ['WO', 'weekly_off', 'Weekly off'], ['A', 'absent', 'Absent (working day, nothing recorded)'],
 ];
 const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
+const NO_PROJECT = 'No project';
 const hoursLabel = (h) => (h ? Number(h).toFixed(h % 1 ? 1 : 0) : '');
 const dayLabel = (d) => `${d.date.slice(8)} ${WEEKDAYS[d.weekday]}`;
 
@@ -37,6 +38,8 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
   const [mode, setMode] = useState('attendance');
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(() => new Set());
+  const [group, setGroup] = useState('employee');
+  const [openProjects, setOpenProjects] = useState(() => new Set());
 
   useEffect(() => {
     let alive = true;
@@ -58,6 +61,33 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
     return map;
   }, [data]);
 
+  // One block per project: each person's own hours on that project per day, with project and person totals. Hours with no project fall under NO_PROJECT.
+  const projectGroups = useMemo(() => {
+    const groups = new Map();
+    const round = (n) => Math.round(n * 100) / 100;
+    for (const p of data?.people || []) {
+      const mine = new Map();
+      p.days.forEach((d, i) => {
+        for (const pr of d.projects) {
+          const name = pr.project || NO_PROJECT;
+          if (!mine.has(name)) mine.set(name, { person: p, perDay: data.days.map(() => 0), total: 0 });
+          const row = mine.get(name);
+          row.perDay[i] = round(row.perDay[i] + pr.hours);
+          row.total = round(row.total + pr.hours);
+        }
+      });
+      for (const [name, row] of mine) {
+        if (!groups.has(name)) groups.set(name, { name, rows: [], total: 0 });
+        const g = groups.get(name);
+        g.rows.push(row);
+        g.total = round(g.total + row.total);
+      }
+    }
+    for (const g of groups.values()) g.rows.sort((a, b) => b.total - a.total);
+    return [...groups.values()].sort((a, b) => (a.name === NO_PROJECT) - (b.name === NO_PROJECT) || b.total - a.total);
+  }, [data]);
+
+  const toggleProject = (name) => setOpenProjects((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
   const toggle = (id) => setOpen((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
   function exportCsv() {
@@ -67,6 +97,9 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
     if (mode === 'attendance') {
       downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Present', 'WFH', 'Leave', 'Holidays', 'Weekly offs', 'Absent'],
         data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => d.code), p.totals.present, p.totals.wfh, p.totals.leave, p.totals.holidays, p.totals.weekly_offs, p.totals.absent]));
+    } else if (group === 'project') {
+      downloadCsv(file, ['Project', 'Employee', 'Code', 'Department', ...dayHeads, 'Total hours'],
+        projectGroups.flatMap((g) => g.rows.map((r) => [g.name, r.person.name, r.person.employee_code || '', r.person.department || '', ...r.perDay.map(hoursLabel), r.total])));
     } else {
       downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Total hours'],
         data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => hoursLabel(d.hours)), p.totals.hours]));
@@ -84,6 +117,13 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
             <button key={k} type="button" onClick={() => setMode(k)} className={`rounded-lg px-3 py-1.5 font-medium ${mode === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500 hover:text-tertiary-800'}`}>{label}</button>
           ))}
         </div>
+        {mode === 'hours' && (
+          <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5 text-sm" data-testid="group-toggle">
+            {[['employee', 'By employee'], ['project', 'By project']].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setGroup(k)} className={`rounded-lg px-3 py-1.5 font-medium ${group === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500 hover:text-tertiary-800'}`}>{label}</button>
+            ))}
+          </div>
+        )}
         <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={!data?.people.length} onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export CSV</button>
       </div>
 
@@ -95,7 +135,7 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
           <span className="inline-flex items-center gap-1"><span className="inline-block min-w-[1.75rem] rounded border border-dashed border-tertiary-300 px-1 text-center">&nbsp;</span>Blank = future day / not employed</span>
         </p>
       ) : (
-        <p className="text-xs text-tertiary-500">Hours logged per day (approved and waiting for approval; rejected entries are left out). Hover a cell for the project breakdown, or open a row with the arrow. A blank cell means no hours.</p>
+        <p className="text-xs text-tertiary-500">Hours logged per day (approved and waiting for approval; rejected entries are left out). {group === 'project' ? 'Each block is one project: open it with the arrow to see who worked on it and their hours on that project only.' : 'Hover a cell for the project breakdown, or open a row with the arrow.'} A blank cell means no hours.</p>
       )}
 
       {!data ? <p className="text-sm text-tertiary-500">Loading the register...</p> : !data.people.length ? (
@@ -115,6 +155,39 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
                 {mode === 'attendance' ? ['Present', 'Leave', 'Holidays', 'Absent'].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
               </tr>
             </thead>
+            {mode === 'hours' && group === 'project' ? (
+              <tbody data-testid="project-groups">
+                {!projectGroups.length && <tr><td colSpan={cols + 2} className="p-4 text-sm text-tertiary-500">No hours logged this month.</td></tr>}
+                {projectGroups.map((g) => {
+                  const expanded = openProjects.has(g.name);
+                  return (
+                    <FragmentRow key={g.name}>
+                      <tr className="bg-tertiary-50">
+                        <td colSpan={cols + 2} className="sticky left-0 border-t border-tertiary-100 p-2">
+                          <button type="button" className="flex items-center gap-1 text-left font-semibold text-tertiary-800" aria-label={expanded ? `Collapse ${g.name}` : `Expand ${g.name}`} onClick={() => toggleProject(g.name)}>
+                            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            {g.name}
+                            <span className="font-normal text-tertiary-500">· {hoursLabel(g.total)} h · {g.rows.length} {g.rows.length === 1 ? 'person' : 'people'}</span>
+                          </button>
+                        </td>
+                      </tr>
+                      {expanded && g.rows.map((r) => (
+                        <tr key={r.person.org_membership_id} className="hover:bg-tertiary-50/60">
+                          <td className="sticky left-0 z-10 border-t border-tertiary-100 bg-white p-2 pl-6">
+                            <button type="button" className="text-left font-medium text-primary-700 hover:underline" title="Open this person's calendar" onClick={() => onOpenPerson(r.person.org_membership_id)}>{r.person.name}</button>
+                            {r.person.employee_code && <span className="block pl-0.5 text-[10px] text-tertiary-400">{r.person.employee_code}</span>}
+                          </td>
+                          {r.perDay.map((h, i) => (
+                            <td key={data.days[i].date} title={`${dayLabel(data.days[i])}: ${h ? `${hoursLabel(h)} h on ${g.name}` : 'No hours'}`} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${h ? 'bg-primary-50 font-semibold text-primary-800' : 'text-tertiary-300'}`}>{hoursLabel(h)}</td>
+                          ))}
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums">{hoursLabel(r.total)}</td>
+                        </tr>
+                      ))}
+                    </FragmentRow>
+                  );
+                })}
+              </tbody>
+            ) : (
             <tbody>
               {data.people.map((p) => {
                 const expanded = mode === 'hours' && open.has(p.org_membership_id);
@@ -166,6 +239,7 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
                 );
               })}
             </tbody>
+            )}
           </table>
         </div>
       )}

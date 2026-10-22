@@ -69,6 +69,8 @@ function ModernDashboard() {
           ))}
         </div>
       </div>
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }
