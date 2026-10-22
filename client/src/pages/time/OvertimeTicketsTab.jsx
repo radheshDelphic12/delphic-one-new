@@ -21,7 +21,7 @@ const labelCls = 'text-xs font-medium text-tertiary-600';
  */
 function AdminTicketModal({ mode, ticket, onClose, onDone }) {
   const { pushError, pushSuccess } = useAlerts();
-  const members = useOrgMembershipOptions(mode === 'apply');
+  const members = useOrgMembershipOptions(mode === 'apply', { includeExited: true }); // overtime worked before someone left can still be recorded
   const editing = mode === 'edit';
   const [projects, setProjects] = useState([]);
   const [f, setF] = useState(() => ({
