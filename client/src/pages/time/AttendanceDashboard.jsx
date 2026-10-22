@@ -212,6 +212,8 @@ export default function AttendanceDashboard() {
   const { user } = useAuth();
   const { pushError, pushSuccess } = useAlerts();
   const isAdmin = adminFor(user, ['attendance_dashboard.view', 'attendance.view']);
+  // Editing a day needs attendance.approve (the API enforces it); viewing the dashboard alone must not offer the edit controls.
+  const canEditDays = adminFor(user, 'attendance.approve');
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -307,7 +309,7 @@ export default function AttendanceDashboard() {
       <PendingPlaces onDecided={refresh} />
 
       {view === 'register' && list && list.length > 1 ? (
-        <AttendanceRegister year={year} month={month} status={status} canEdit={isAdmin} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
+        <AttendanceRegister year={year} month={month} status={status} canEdit={canEditDays} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
       ) : view === 'all' ? (
         <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <table className="min-w-full text-sm">
