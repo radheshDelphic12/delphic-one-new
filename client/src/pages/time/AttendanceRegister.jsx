@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Download } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { downloadCsv } from '../../lib/groupExport.js';
+import Drawer from '../../components/ui/Drawer.jsx';
+import { AddTimesheetEntryDrawer } from './TimesheetBackfill.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -25,6 +27,9 @@ const LEGEND = [
 ];
 const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
 const NO_PROJECT = 'No project';
+const STATUS_OPTIONS = [['present', 'Present'], ['wfh', 'Work from home'], ['half_day', 'Half day'], ['absent', 'Absent'], ['leave', 'Leave'], ['holiday', 'Holiday']];
+const STATUS_LABEL = Object.fromEntries(STATUS_OPTIONS);
+const inputClass = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 const hoursLabel = (h) => (h ? Number(h).toFixed(h % 1 ? 1 : 0) : '');
 const dayLabel = (d) => `${d.date.slice(8)} ${WEEKDAYS[d.weekday]}`;
 
@@ -33,23 +38,28 @@ const dayLabel = (d) => `${d.date.slice(8)} ${WEEKDAYS[d.weekday]}`;
  * "Attendance" shows a short code per day with per-person totals; "Project hours" shows the hours logged per day (project
  * breakdown on hover and in the expandable row) with a monthly total. Click a name to open that person's calendar.
  */
-export default function AttendanceRegister({ year, month, status, onOpenPerson }) {
-  const { pushError } = useAlerts();
+export default function AttendanceRegister({ year, month, status, onOpenPerson, canEdit = false }) {
+  const { pushError, pushSuccess } = useAlerts();
   const [mode, setMode] = useState('attendance');
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(() => new Set());
   const [group, setGroup] = useState('employee');
   const [openProjects, setOpenProjects] = useState(() => new Set());
+  const [editing, setEditing] = useState(null); // { kind: 'attendance' | 'hours', person, day }
+  const [reloadKey, setReloadKey] = useState(0);
+  const lastParams = useRef('');
 
   useEffect(() => {
     let alive = true;
-    setData(null);
+    // a change of month / status shows the loading state; a reload after an edit keeps the table (and its scroll position) in place
+    const key = `${year}-${month}-${status}`;
+    if (lastParams.current !== key) { setData(null); lastParams.current = key; }
     apiClient.get('/attendance-dashboard/register', { params: { year, month, status } })
       .then(({ data: res }) => { if (alive) setData(res.data); })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the register'), 'Something went wrong'));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month, status]);
+  }, [year, month, status, reloadKey]);
 
   const projectTotals = useMemo(() => {
     const map = new Map();
@@ -111,6 +121,7 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
 
   return (
     <div className="space-y-3">
+      {canEdit && <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800" data-testid="register-edit-hint">{mode === 'attendance' ? 'Admin: click a day to change or remove that person\'s attendance (a reason is kept in the audit log).' : 'Admin: click a day to add hours for that person. To change or delete entries already logged, use Project Timesheets.'}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5 text-sm">
           {[['attendance', 'Attendance register'], ['hours', 'Project hours register']].map(([k, label]) => (
@@ -212,9 +223,9 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
                           ? `${dayLabel(d)}: ${d.label || d.code || 'No record'}`
                           : `${dayLabel(d)}: ${d.hours ? `${hoursLabel(d.hours)} h${d.projects.length ? ` — ${d.projects.map((x) => `${x.project} ${hoursLabel(x.hours)}h`).join(', ')}` : ''}` : 'No hours'}`;
                         return mode === 'attendance' ? (
-                          <td key={d.date} title={tip} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] font-semibold ${TONE[d.kind] || ''}`}>{d.code}</td>
+                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to edit)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'attendance', person: p, day: d }) : undefined} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] font-semibold ${TONE[d.kind] || ''} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`} data-editable={canEdit && d.date <= data.today ? 'true' : undefined}>{d.code}</td>
                         ) : (
-                          <td key={d.date} title={tip} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${d.hours ? 'bg-primary-50 font-semibold text-primary-800' : d.kind === 'weekly_off' || d.kind === 'holiday' ? 'bg-tertiary-50 text-tertiary-300' : 'text-tertiary-300'}`}>{hoursLabel(d.hours)}</td>
+                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to add hours)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'hours', person: p, day: d }) : undefined} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${d.hours ? 'bg-primary-50 font-semibold text-primary-800' : d.kind === 'weekly_off' || d.kind === 'holiday' ? 'bg-tertiary-50 text-tertiary-300' : 'text-tertiary-300'} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`}>{hoursLabel(d.hours)}</td>
                         );
                       })}
                       {mode === 'attendance' ? (
@@ -243,7 +254,77 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson }
           </table>
         </div>
       )}
+      <DayEditor editing={editing?.kind === 'attendance' ? editing : null} onClose={() => setEditing(null)} onSaved={(msg) => { pushSuccess(msg); setEditing(null); setReloadKey((k) => k + 1); }} />
+      <AddTimesheetEntryDrawer
+        open={editing?.kind === 'hours'}
+        initial={editing?.kind === 'hours' ? { org_membership_id: editing.person.org_membership_id, date: editing.day.date } : null}
+        onClose={() => setEditing(null)}
+        onSaved={() => setReloadKey((k) => k + 1)}
+      />
     </div>
+  );
+}
+
+/** Admin: set one person's attendance for one day (status + reason), or remove the day's record. Both are audit-logged. */
+function DayEditor({ editing, onClose, onSaved }) {
+  const { pushError } = useAlerts();
+  const [form, setForm] = useState({ status: 'present', reason: '' });
+  const [busy, setBusy] = useState(false);
+  const day = editing?.day;
+  const person = editing?.person;
+  useEffect(() => {
+    if (editing) setForm({ status: day.recorded_status || (day.kind === 'leave' ? 'leave' : 'present'), reason: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await apiClient.post('/attendance/manual', { org_membership_id: person.org_membership_id, date: day.date, status: form.status, reason: form.reason.trim() });
+      onSaved(`${person.name}: ${day.date} set to ${STATUS_LABEL[form.status] || form.status}`);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved'); } finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!day.record_id || form.reason.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await apiClient.delete(`/attendance/${day.record_id}`, { data: { reason: form.reason.trim() } });
+      onSaved(`${person.name}: the attendance record for ${day.date} was removed`);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not remove the record'), 'Not removed'); } finally { setBusy(false); }
+  }
+
+  const reasonOk = form.reason.trim().length >= 3;
+  return (
+    <Drawer
+      open={Boolean(editing)}
+      title={editing ? `${person.name} · ${day.date}` : 'Edit attendance'}
+      onClose={() => !busy && onClose()}
+      size="sm"
+      tone="edit"
+      footer={(
+        <>
+          {day?.record_id && <button type="button" className="btn-ghost mr-auto text-danger-600" disabled={busy || !reasonOk} onClick={remove} title={reasonOk ? 'Delete the recorded attendance for this day' : 'Give a reason first'}>Remove record</button>}
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" form="register-day-editor" className="btn-primary" disabled={busy || !reasonOk}>{busy ? 'Saving…' : 'Save'}</button>
+        </>
+      )}
+    >
+      {editing && (
+        <form id="register-day-editor" onSubmit={save} className="space-y-3">
+          <p className="text-sm text-tertiary-600">Now shown as <b>{day.code || 'blank'}</b>{day.label ? ` (${day.label})` : ''}{day.recorded_status ? ` · recorded as ${STATUS_LABEL[day.recorded_status] || day.recorded_status}` : ' · nothing recorded for this day'}.</p>
+          <label className="block text-xs font-medium text-tertiary-600">Status
+            <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className={inputClass}>
+              {STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">Reason (kept in the audit log)
+            <input value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Marked present after checking with the manager" className={inputClass} maxLength={500} />
+          </label>
+          <p className="text-xs text-tertiary-500">Replaces anything already recorded for that day. A day with approved leave can only be set to Leave (change the leave first). If the month is locked, the change is flagged for review instead of altering locked salary.</p>
+        </form>
+      )}
+    </Drawer>
   );
 }
 

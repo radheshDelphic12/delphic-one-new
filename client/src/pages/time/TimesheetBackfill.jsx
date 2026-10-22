@@ -42,7 +42,7 @@ function sheetRows(text) {
 }
 
 /** Admin: log hours for any employee on a past date (goes in approved). */
-export function AddTimesheetEntryDrawer({ open, onClose, onSaved }) {
+export function AddTimesheetEntryDrawer({ open, onClose, onSaved, initial = null }) {
   const { pushError, pushSuccess } = useAlerts();
   const members = useOrgMembershipOptions(open, { includeExited: true }); // an exited employee's past hours can still be entered
   const projects = useProjectOptions(open);
@@ -52,7 +52,7 @@ export function AddTimesheetEntryDrawer({ open, onClose, onSaved }) {
   const set = (key, value) => setFields((current) => ({ ...current, [key]: value }));
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) setFields(empty); }, [open]);
+  useEffect(() => { if (open) setFields({ ...empty, ...(initial || {}) }); }, [open]);
 
   async function submit(event) {
     event.preventDefault();

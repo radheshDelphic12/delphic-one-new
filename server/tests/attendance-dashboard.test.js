@@ -232,6 +232,20 @@ describe('monthly register', () => {
     expect(row.totals).toMatchObject({ present: 2.5, wfh: 1, half_day: 1, leave: 1, absent: expect.any(Number), hours: 6 });
     expect(row.days.find((d) => d.date === '2026-09-01').hours).toBe(6);
 
+    // an admin can change or remove a day from the register: each day carries its attendance record id
+    const dayOf = (date) => row.days.find((d) => d.date === date);
+    expect(dayOf('2026-09-01')).toMatchObject({ recorded_status: 'present' });
+    expect(typeof dayOf('2026-09-01').record_id).toBe('string');
+    expect(dayOf('2026-09-08').record_id).toBeNull();
+    const codeOn = async (date) => (await get('/register?year=2026&month=9', ctx.admin)).body.data.people.find((p) => p.name === 'Reg Employee').days.find((d) => d.date === date);
+    const marked = await authed(request(app).post('/api/v1/attendance/manual'), ctx.admin).send({ org_membership_id: emp.membership.id, date: '2026-09-08', status: 'present', reason: 'Edited from the register' });
+    expect([200, 201]).toContain(marked.status);
+    const after = await codeOn('2026-09-08');
+    expect(after).toMatchObject({ code: 'P', recorded_status: 'present' });
+    const removed = await authed(request(app).delete(`/api/v1/attendance/${after.record_id}`), ctx.admin).send({ reason: 'Wrong day, removing' });
+    expect(removed.status).toBe(200);
+    expect(await codeOn('2026-09-08')).toMatchObject({ code: 'A', record_id: null });
+
     const future = await get('/register?year=2026&month=12', ctx.admin);
     expect(future.body.data.people[0].days.find((d) => d.date === '2026-12-02').code).toBe(''); // future working day stays blank
     expect(future.body.data.people[0].totals.absent).toBe(0);
