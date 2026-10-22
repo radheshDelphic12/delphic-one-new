@@ -69,6 +69,8 @@ const env = {
       smtpUrl: process.env.NOTIFICATIONS_SMTP_URL || null,
       // transport options built from the separate NOTIFICATIONS_SMTP_* values (null when none are set)
       smtp: require('../lib/email/smtpConfig').smtpOptionsFromEnv(process.env),
+      // Microsoft Graph app-only send (lib/email/graphMail.js); wins over SMTP when set. null when the three app values are not all set.
+      graph: require('../lib/email/graphMail').graphOptionsFromEnv(process.env),
     },
     msGraph: {
       tenantId: process.env.MS_GRAPH_TENANT_ID || null,

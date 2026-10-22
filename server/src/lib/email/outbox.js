@@ -3,14 +3,16 @@ const env = require('../../config/env');
 const logger = require('../../config/logger');
 const prisma = require('../../config/db');
 const { methodOf } = require('./ics');
+const { createGraphTransport } = require('./graphMail');
 
 const MAX_ATTEMPTS = 5;
 
 let cachedTransport;
 function getTransport() {
-  const options = env.notifications.email.smtp;
-  if (!options) return null;
-  if (!cachedTransport) cachedTransport = nodemailer.createTransport(options);
+  // Microsoft Graph (works with SMTP AUTH disabled) wins over SMTP; neither configured -> null (mail is marked `skipped`).
+  const { graph, smtp } = env.notifications.email;
+  if (!graph && !smtp) return null;
+  if (!cachedTransport) cachedTransport = graph ? createGraphTransport(graph) : nodemailer.createTransport(smtp);
   return cachedTransport;
 }
 
