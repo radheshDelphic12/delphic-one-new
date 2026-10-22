@@ -44,7 +44,7 @@ function sheetRows(text) {
 /** Admin: log hours for any employee on a past date (goes in approved). */
 export function AddTimesheetEntryDrawer({ open, onClose, onSaved }) {
   const { pushError, pushSuccess } = useAlerts();
-  const members = useOrgMembershipOptions(open);
+  const members = useOrgMembershipOptions(open, { includeExited: true }); // an exited employee's past hours can still be entered
   const projects = useProjectOptions(open);
   const empty = { org_membership_id: '', date: '', account_id: '', hours: '', overtime_hours: '', billable: true, notes: '', reason: '' };
   const [fields, setFields] = useState(empty);

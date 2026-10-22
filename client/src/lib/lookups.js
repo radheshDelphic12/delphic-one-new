@@ -153,14 +153,20 @@ export function useRequirementOptions(enabled = true) {
 
 /**
  * Active org-membership options (id is `org_membership_id`, not `user.id`) —
+ * `includeExited` adds people who have left, tagged "(exited)": for an admin recording past time, attendance or overtime
+ * on someone's behalf (a person's last month is often entered after their last working day). Everything else stays active-only. —
  * needed anywhere the API keys off the membership rather than the person
  * (salary structures, payroll runs). `/orgs/memberships` is admin-visible
  * only (requireOrgMembership, no role gate today, but only rendered from
  * admin-only screens), unlike the `/users/directory` roster used elsewhere.
  */
-export function useOrgMembershipOptions(enabled = true) {
-  const rows = useLookup('/orgs/memberships', {}, enabled);
-  return rows.map((row) => ({ value: row.id, label: row.person?.name || 'Unknown', hint: row.employee_code || undefined }));
+export function useOrgMembershipOptions(enabled = true, { includeExited = false } = {}) {
+  const rows = useLookup('/orgs/memberships', includeExited ? { include_terminated: 'true' } : {}, enabled);
+  return rows.map((row) => ({
+    value: row.id,
+    label: `${row.person?.name || 'Unknown'}${row.employment_status === 'terminated' ? ' (exited)' : ''}`,
+    hint: row.employee_code || undefined,
+  }));
 }
 
 export function useDepartmentOptions(enabled = true) {

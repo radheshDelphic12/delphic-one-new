@@ -923,7 +923,8 @@ async function teamOverview(orgId, { department_id, exclude_department_id, date,
   const members = await prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
-      employment_status: { not: 'terminated' },
+      // someone who left still shows for the months they worked (their last month is often entered after the last working day)
+      OR: [{ employment_status: { not: 'terminated' } }, { left_at: { gte: from } }],
       ...(person ? { person } : {}),
     },
     select: { id: true, person: { select: { id: true, name: true, department: { select: { name: true } } } } },
