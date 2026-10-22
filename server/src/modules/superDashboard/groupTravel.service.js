@@ -1,10 +1,9 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
-const interviews = require('../interviews/interviews.service');
 
 // Group Dashboard > Travel. A trip is somebody (IT or non-IT, any company) going somewhere for meetings, with one total
-// budget. The meetings themselves stay on the Delphic Global calendar; a trip only links to their calendar event ids
-// ("cm-<uuid>" for a follow-up meeting, "meeting-<uuid>" for an account's meeting), and the calendar shows a Travel tag.
+// budget. The meetings themselves stay on their own company's calendar (any company of the group); a trip only links to their
+// calendar event ids ("cm-<uuid>" for a follow-up meeting, "meeting-<uuid>" for an account's meeting), and the calendar shows a Travel tag.
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
@@ -72,25 +71,29 @@ function stateOf(t, today) {
   return 'planned';
 }
 
-/** Calendar event details for linked meeting keys, so the trip can say who it is meeting and when. */
-async function resolveMeetings(keys) {
+/** Calendar event details for linked meeting keys, so the trip can say who it is meeting and when. `orgIds` limits it to those companies. */
+async function resolveMeetings(keys, orgIds) {
+  const scope = orgIds ? { org_id: { in: orgIds } } : {};
   const follow = keys.filter((k) => k.startsWith('cm-')).map((k) => k.slice(3));
   const acct = keys.filter((k) => k.startsWith('meeting-')).map((k) => k.slice(8));
   const [fu, ac] = await Promise.all([
-    follow.length ? prisma.clientMeeting.findMany({ where: { id: { in: follow } }, include: { account: { select: { name: true } } } }) : [],
-    acct.length ? prisma.account.findMany({ where: { id: { in: acct } }, select: { id: true, name: true, meeting_date: true, meeting_mode: true, meeting_location: true, stage: true } }) : [],
+    follow.length ? prisma.clientMeeting.findMany({ where: { id: { in: follow }, ...scope }, include: { account: { select: { name: true } } } }) : [],
+    acct.length ? prisma.account.findMany({ where: { id: { in: acct }, ...scope }, select: { id: true, org_id: true, name: true, meeting_date: true, meeting_mode: true, meeting_location: true, stage: true } }) : [],
   ]);
   const out = new Map();
-  for (const m of fu) out.set(`cm-${m.id}`, { key: `cm-${m.id}`, title: m.title, account_name: m.account?.name || null, scheduled_at: m.scheduled_at, mode: m.mode, location: m.location, status: m.status });
-  for (const a of ac) out.set(`meeting-${a.id}`, { key: `meeting-${a.id}`, title: 'Client meeting', account_name: a.name, scheduled_at: a.meeting_date, mode: a.meeting_mode, location: a.meeting_location, status: a.stage === 'dropped' ? 'cancelled' : 'scheduled' });
+  for (const m of fu) out.set(`cm-${m.id}`, { key: `cm-${m.id}`, org_id: m.org_id || null, title: m.title, account_name: m.account?.name || null, scheduled_at: m.scheduled_at, mode: m.mode, location: m.location, status: m.status });
+  for (const a of ac) out.set(`meeting-${a.id}`, { key: `meeting-${a.id}`, org_id: a.org_id || null, title: 'Client meeting', account_name: a.name, scheduled_at: a.meeting_date, mode: a.meeting_mode, location: a.meeting_location, status: a.stage === 'dropped' ? 'cancelled' : 'scheduled' });
   return out;
 }
 
 async function shape(rows, today) {
   const keys = [...new Set(rows.flatMap((r) => r.meetings.map((m) => m.meeting_key)))];
   const resolved = await resolveMeetings(keys);
+  const orgIds = [...new Set([...resolved.values()].map((m) => m.org_id).filter(Boolean))];
+  const orgNames = new Map((orgIds.length ? await prisma.org.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }) : []).map((o) => [o.id, o.name]));
+  for (const m of resolved.values()) m.org_name = m.org_id ? orgNames.get(m.org_id) || null : null;
   return rows.map((t) => {
-    const meetings = t.meetings.map((m) => resolved.get(m.meeting_key) || { key: m.meeting_key, title: 'Meeting no longer available', account_name: null, scheduled_at: null, mode: null, location: null, status: 'missing' })
+    const meetings = t.meetings.map((m) => resolved.get(m.meeting_key) || { key: m.meeting_key, org_id: null, org_name: null, title: 'Meeting no longer available', account_name: null, scheduled_at: null, mode: null, location: null, status: 'missing' })
       .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
     const budget = num(t.budget) || 0;
     const spent = num(t.actual_spent);
@@ -145,7 +148,8 @@ async function list(groupIds, rawQuery) {
 /** Pick-lists for the trip form: companies, people of every company, active clients of every company (company first, then its client) and meetings to link. */
 async function options(groupIds) {
   const orgs = await groupOrgs(groupIds);
-  const [members, accounts, meetings] = await Promise.all([
+  const orgIds = orgs.map((o) => o.id);
+  const [members, accounts, accountMeetings, followUps] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { org_id: { in: orgs.map((o) => o.id) }, left_at: null, employment_status: { not: 'terminated' } },
       select: { org_id: true, person: { select: { id: true, name: true, active: true } } },
@@ -155,9 +159,21 @@ async function options(groupIds) {
       select: { id: true, name: true, org_id: true },
       orderBy: { name: 'asc' },
     }),
-    interviews.listClientMeetings({ from: new Date(Date.now() - 365 * DAY), to: new Date(Date.now() + 180 * DAY), mine: false, user: null, status: undefined }),
+    // Meetings of EVERY company of the group (not just the Delphic Global calendar), each tagged with its company.
+    prisma.account.findMany({
+      where: { org_id: { in: orgIds }, meeting_date: { gte: new Date(Date.now() - 365 * DAY), lte: new Date(Date.now() + 180 * DAY) } },
+      select: { id: true, org_id: true, name: true, meeting_date: true, meeting_mode: true, meeting_location: true, stage: true },
+    }),
+    prisma.clientMeeting.findMany({
+      where: { org_id: { in: orgIds }, scheduled_at: { gte: new Date(Date.now() - 365 * DAY), lte: new Date(Date.now() + 180 * DAY) }, account: { deleted_at: null } },
+      select: { id: true, org_id: true, title: true, scheduled_at: true, mode: true, location: true, status: true, account: { select: { name: true } } },
+    }),
   ]);
   const orgName = new Map(orgs.map((o) => [o.id, o.name]));
+  const meetings = [
+    ...accountMeetings.filter((a) => a.stage !== 'dropped').map((a) => ({ key: `meeting-${a.id}`, org_id: a.org_id, title: `Client meeting · ${a.meeting_mode === 'offline' ? 'In person' : 'Online'}`, account_name: a.name, scheduled_at: a.meeting_date, mode: a.meeting_mode === 'offline' ? 'offline' : 'online', location: a.meeting_location })),
+    ...followUps.filter((m) => m.status !== 'cancelled').map((m) => ({ key: `cm-${m.id}`, org_id: m.org_id, title: m.title, account_name: m.account?.name || null, scheduled_at: m.scheduled_at, mode: m.mode === 'offline' ? 'offline' : 'online', location: m.location })),
+  ];
   const seen = new Set();
   const people = [];
   for (const m of members) {
@@ -171,9 +187,9 @@ async function options(groupIds) {
     people,
     clients: accounts.map((a) => ({ id: a.id, name: a.name, org_id: a.org_id, org_name: orgName.get(a.org_id) || null })),
     meetings: meetings
-      .filter((e) => e.status !== 'cancelled' && e.scheduled_at)
+      .filter((e) => e.scheduled_at)
       .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
-      .map((e) => ({ key: e.id, title: e.round_name || e.round_type_label, account_name: e.account_name, scheduled_at: e.scheduled_at, mode: e.meeting_mode, location: e.meeting_location })),
+      .map((e) => ({ ...e, org_name: orgName.get(e.org_id) || null })),
   };
 }
 
@@ -236,7 +252,8 @@ async function linkMeeting(groupIds, userId, id, key) {
   if (!/^(cm|meeting)-[0-9a-f-]{36}$/.test(String(key))) return { error: 'bad_meeting' };
   const existing = await load(groupIds, id);
   if (!existing) return { error: 'not_found' };
-  if (!(await resolveMeetings([key])).has(key)) return { error: 'meeting_not_found' };
+  const orgIds = (await groupOrgs(groupIds)).map((o) => o.id);
+  if (!(await resolveMeetings([key], orgIds)).has(key)) return { error: 'meeting_not_found' };
   await prisma.groupTravelMeeting.upsert({ where: { travel_id_meeting_key: { travel_id: id, meeting_key: key } }, create: { travel_id: id, meeting_key: key }, update: {} });
   await audit(userId, 'link_meeting', id, `Linked ${key}`, { key });
   return { trip: await one(groupIds, id) };

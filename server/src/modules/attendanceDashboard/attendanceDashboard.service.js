@@ -268,4 +268,109 @@ async function decidePlace(orgId, user, id, { approve, reason }) {
   return { row: updated };
 }
 
-module.exports = { people, calendar, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };
+// ---- Monthly register: every employee x every day, in one response -------------------------------------------------------
+
+// Short leave code from the leave type's name: Casual -> CL, Sick -> SL, Earned / Paid -> EL, Comp off -> CO, else initials.
+function leaveCode(name) {
+  const n = String(name || '').toLowerCase();
+  if (/comp/.test(n)) return 'CO';
+  if (/casual/.test(n)) return 'CL';
+  if (/sick|medical/.test(n)) return 'SL';
+  if (/earned|privilege|paid|annual/.test(n)) return 'EL';
+  if (/maternity/.test(n)) return 'ML';
+  if (/paternity/.test(n)) return 'PL';
+  if (/unpaid|loss of pay|lop/.test(n)) return 'LWP';
+  const initials = String(name || '').split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('').slice(0, 3);
+  return initials || 'L';
+}
+
+// One day's register code. Future days stay blank except what is already known (holiday, weekly off, approved leave).
+// P = present (in the office), WFH = worked from home, HD = half day, A = absent (a working day with nothing recorded, past days only).
+function registerCode(d, { today, inEmployment, workType, homeByDay }) {
+  if (!inEmployment) return { code: '', kind: 'none' };
+  const future = d.date > today;
+  const leaves = d.leaves || [];
+  const fullLeave = leaves.find((l) => !l.is_half_day);
+  if (d.day_type === 'company_holiday') return { code: 'H', kind: 'holiday', label: d.day_label };
+  if (d.day_type === 'weekend') return { code: 'WO', kind: 'weekly_off', label: d.day_label };
+  if (fullLeave) return { code: leaveCode(fullLeave.name), kind: 'leave', label: fullLeave.name, days: 1 };
+  const half = leaves.find((l) => l.is_half_day);
+  const status = d.attendance_status;
+  if (half) {
+    const worked = status === 'present' || status === 'wfh' || status === 'half_day';
+    return { code: `${leaveCode(half.name)}½`, kind: 'leave', label: `${half.name} (half day)`, days: 0.5, worked: worked ? 0.5 : 0 };
+  }
+  if (status === 'present') return { code: homeByDay.has(d.date) || workType === 'remote' ? 'WFH' : 'P', kind: 'present', days: 1 };
+  if (status === 'wfh') return { code: 'WFH', kind: 'present', days: 1 };
+  if (status === 'half_day') return { code: 'HD', kind: 'half_day', days: 0.5 };
+  if (status === 'leave') return { code: 'L', kind: 'leave', label: d.attendance_label || 'Leave', days: 1 };
+  if (status === 'holiday') return { code: 'H', kind: 'holiday' };
+  if (status === 'absent') return { code: 'A', kind: 'absent' };
+  if (future || d.date === today) return { code: '', kind: 'none' };
+  return { code: 'A', kind: 'absent', label: 'Nothing recorded' };
+}
+
+const REGISTER_CONCURRENCY = 6;
+
+// Monthly register of everyone the caller may see (same visibility and status filter as the employee list; no contractors).
+// `days` per person carries both the attendance code and the project hours of the day, so one load serves both register views.
+async function register(orgId, user, { year, month, status = 'current' }) {
+  const { from, to } = monthBounds(year, month);
+  const todayDate = todayIst();
+  const today = ymd(todayDate);
+  const visible = await dashboard.visibleMembers(orgId, user, { includeExited: true });
+  const ids = visible.filter((m) => m.worker_type !== 'contractor' && !m.vendor_account_id).map((m) => m.id);
+  const [members, homeRows] = await Promise.all([
+    prisma.orgMembership.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, work_mode: true, joined_at: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true, department: { select: { name: true } } } } },
+      orderBy: { person: { name: 'asc' } },
+    }),
+    prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
+  ]);
+  const homeBy = new Map();
+  for (const r of homeRows) {
+    if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
+    homeBy.get(r.org_membership_id).add(ymd(r.date));
+  }
+  const shown = members.filter((m) => matchesStatus(employmentState(m, todayDate), status));
+
+  const build = async (m) => {
+    const cal = await dashboard.monthCalendar(orgId, m.id, { year, month });
+    const start = m.joined_at ? ymd(m.joined_at) : null;
+    const lastDay = m.left_at || (['terminated', 'notice_period'].includes(m.employment_status) ? m.notice_end_date : null);
+    const end = lastDay ? ymd(lastDay) : null;
+    const workType = workTypeOf(m);
+    const homeByDay = homeBy.get(m.id) || new Set();
+    const totals = { present: 0, wfh: 0, half_day: 0, leave: 0, holidays: 0, weekly_offs: 0, absent: 0, hours: 0 };
+    const days = cal.days.map((d) => {
+      const inEmployment = (!start || d.date >= start) && (!end || d.date <= end);
+      const c = registerCode(d, { today, inEmployment, workType, homeByDay });
+      const hours = Math.round((d.project_hours || []).reduce((s, p) => s + p.hours, 0) * 100) / 100;
+      if (c.kind === 'present') { totals.present += 1; if (c.code === 'WFH') totals.wfh += 1; }
+      else if (c.kind === 'half_day') { totals.present += 0.5; totals.half_day += 1; }
+      else if (c.kind === 'leave') { totals.leave += c.days; totals.present += c.worked || 0; }
+      else if (c.kind === 'holiday') totals.holidays += 1;
+      else if (c.kind === 'weekly_off') totals.weekly_offs += 1;
+      else if (c.kind === 'absent') totals.absent += 1;
+      totals.hours += hours;
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, hours, projects: d.project_hours || [] };
+    });
+    totals.hours = Math.round(totals.hours * 100) / 100;
+    return {
+      org_membership_id: m.id,
+      name: m.person?.name || 'Unknown',
+      employee_code: m.employee_code || null,
+      department: m.person?.department?.name || null,
+      status: employmentState(m, todayDate),
+      days,
+      totals,
+    };
+  };
+  const people = [];
+  for (let i = 0; i < shown.length; i += REGISTER_CONCURRENCY) people.push(...(await Promise.all(shown.slice(i, i + REGISTER_CONCURRENCY).map(build))));
+  const dayList = [...Array(to.getUTCDate())].map((_, i) => { const dt = new Date(Date.UTC(year, month - 1, i + 1)); return { date: ymd(dt), weekday: dt.getUTCDay() }; });
+  return { year, month, status, today, days: dayList, people };
+}
+
+module.exports = { people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };

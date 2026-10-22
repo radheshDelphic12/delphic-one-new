@@ -13,6 +13,7 @@ import VendorInvoicesTab from './VendorInvoicesTab.jsx';
 // settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
 // and add { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp }.
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt }];
 const ADMIN_TABS = [
@@ -52,6 +53,8 @@ export default function FinanceHubPage() {
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
       <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
+      {/* Admins land here (their dashboard is hidden), so birthdays and work anniversaries of the next 14 days show on this landing tab. */}
+      {isAdmin && section === 'expenses' && <AnnouncementsCard />}
       {section === 'expenses' && <ExpensesTab />}
       {section === 'projects' && isAdmin && <ProjectsTab />}
       {section === 'month-view' && isAdmin && <MonthProjectsTab />}

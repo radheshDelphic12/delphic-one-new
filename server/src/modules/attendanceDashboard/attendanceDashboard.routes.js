@@ -34,6 +34,7 @@ async function canOpen(req, orgMembershipId) {
   return Boolean(member && member.manager_id === own);
 }
 
+router.get('/register', asyncHandler(async (req, res) => ok(res, await service.register(req.user.org_id, req.user, v.peopleQuery.parse(req.query)))));
 router.get('/people', asyncHandler(async (req, res) => ok(res, await service.people(req.user.org_id, req.user, v.peopleQuery.parse(req.query)))));
 
 router.get(

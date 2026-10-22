@@ -76,6 +76,26 @@ describe('vendor email', () => {
     expect(log[0].recipients[0]).toMatchObject({ vendor: 'Alpha Staffing', status: 'sent' });
   });
 
+  test('with no SMTP configured the send is still logged, and the mail is marked skipped (nothing leaves)', async () => {
+    const ids = (await get('/vendors?specialization=java')).body.data.vendors.map((v) => v.id);
+    expect((await post('/send', { requirement_ids: [req1.id], vendor_ids: ids })).status).toBe(201);
+    expect(await outbox.processQueue({ transport: null })).toMatchObject({ sent: 0, skipped: 1 });
+    const row = await prisma.emailOutbox.findFirst({ where: { kind: 'vendor_requirements' }, orderBy: { created_at: 'desc' } });
+    expect(row).toMatchObject({ status: 'skipped', last_error: 'smtp_not_configured' });
+    const log = (await get('/log')).body.data;
+    expect(log[0].recipients[0]).toMatchObject({ status: 'skipped' }); // the newest entry first
+  });
+
+  test('SMTP settings come from the environment: one URL, or separate host / port / TLS / user / password; none = off', () => {
+    const { smtpOptionsFromEnv } = require('../src/lib/email/smtpConfig');
+    expect(smtpOptionsFromEnv({})).toBeNull();
+    expect(smtpOptionsFromEnv({ NOTIFICATIONS_SMTP_URL: 'smtps://u:p@h:465', NOTIFICATIONS_SMTP_HOST: 'ignored' })).toBe('smtps://u:p@h:465');
+    expect(smtpOptionsFromEnv({ NOTIFICATIONS_SMTP_HOST: 'smtp.x.com', NOTIFICATIONS_SMTP_PORT: '465', NOTIFICATIONS_SMTP_USER: 'a@x.com', NOTIFICATIONS_SMTP_PASS: 'p@ss/w#rd' }))
+      .toEqual({ host: 'smtp.x.com', port: 465, secure: true, auth: { user: 'a@x.com', pass: 'p@ss/w#rd' } });
+    expect(smtpOptionsFromEnv({ NOTIFICATIONS_SMTP_HOST: 'smtp.x.com' })).toEqual({ host: 'smtp.x.com', port: 587, secure: false });
+    expect(smtpOptionsFromEnv({ NOTIFICATIONS_SMTP_HOST: 'smtp.x.com', NOTIFICATIONS_SMTP_PORT: '587', NOTIFICATIONS_SMTP_SECURE: 'true' }).secure).toBe(true);
+  });
+
   test('a send with nobody to email is refused and logs nothing; other roles and missing requirements are refused', async () => {
     const noEmail = (await get('/vendors?search=no email')).body.data.vendors.map((v) => v.id);
     const before = await prisma.vendorEmailLog.count();
