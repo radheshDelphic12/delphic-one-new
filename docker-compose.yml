@@ -59,6 +59,10 @@ services:
       NOTIFICATIONS_SMTP_SECURE: ${NOTIFICATIONS_SMTP_SECURE:-}
       NOTIFICATIONS_SMTP_USER: ${NOTIFICATIONS_SMTP_USER:-}
       NOTIFICATIONS_SMTP_PASS: ${NOTIFICATIONS_SMTP_PASS:-}
+      # Microsoft Graph sender (Microsoft 365, works with SMTP AUTH disabled); wins over SMTP when all three are set.
+      MS_GRAPH_TENANT_ID: ${MS_GRAPH_TENANT_ID:-}
+      MS_GRAPH_CLIENT_ID: ${MS_GRAPH_CLIENT_ID:-}
+      MS_GRAPH_CLIENT_SECRET: ${MS_GRAPH_CLIENT_SECRET:-}
       # Address candidates see for the careers pages, e.g. https://delphic.in/career. Leave empty until the website rewrite is live.
       PUBLIC_CAREERS_BASE: ${PUBLIC_CAREERS_BASE:-}
     volumes:

@@ -33,6 +33,32 @@ Use **either** option A **or** option B (A wins if both are set).
 * After changing the `.env` on the box, recreate the server container so it picks the values up:
   `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d server` (a restart alone does not re-read `.env`).
 
+## Microsoft 365 with Microsoft Graph (recommended; works when SMTP AUTH is disabled)
+
+If the tenant has basic SMTP login disabled (or you do not want a mailbox password on the server), send through the
+Microsoft Graph API with an Azure app instead. It is plain HTTPS (no SMTP ports) and **wins over SMTP** when all three
+app values are set (`MAIL_GRAPH_*` are accepted as aliases for the same names).
+
+| Variable | Meaning |
+|---|---|
+| `MS_GRAPH_TENANT_ID` | Directory (tenant) ID of the Azure app |
+| `MS_GRAPH_CLIENT_ID` | Application (client) ID |
+| `MS_GRAPH_CLIENT_SECRET` | Client secret **value** (replace before it expires) |
+| `NOTIFICATIONS_EMAIL_FROM` | The sending mailbox, e.g. `Delphic One <noreply.secure@delphic.in>`. It **must be a mailbox the app may send as** (see below) |
+
+One-time Azure setup: App registration (single tenant) -> API permissions -> Microsoft Graph -> **Application** permission
+`Mail.Send` -> grant admin consent. Then limit the app to the sending mailbox only (otherwise it can send as anyone), in Exchange Online PowerShell:
+
+```powershell
+New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId <mail-enabled security group holding the mailbox> -AccessRight RestrictAccess -Description "Delphic One mailer"
+Test-ApplicationAccessPolicy -AppId <client-id> -Identity <mailbox>   # must say Granted (can take a few minutes to apply)
+```
+
+Errors in `email_outbox.last_error`: `graph_token_failed` = wrong tenant / client / secret (or the secret expired);
+`graph_send_failed 403 ErrorAccessDenied` = the app is not allowed to send as that mailbox (consent missing or the access
+policy does not include `NOTIFICATIONS_EMAIL_FROM`); `404 ... mailbox` = the From address is not a mailbox in the tenant.
+Calendar invites are attached as `invite.ics`.
+
 ## How it behaves
 
 1. *Send* on Email to vendors queues one row per vendor in `email_outbox` and writes the log entry (who, subject, recipients,
@@ -47,7 +73,7 @@ Use **either** option A **or** option B (A wins if both are set).
 
 ```sh
 # 1. is SMTP configured inside the running container? (prints true / false, never the password)
-docker compose exec server node -e "const e=require('./src/config/env');console.log('smtp configured:',Boolean(e.notifications.email.smtp),'from:',e.notifications.email.from)"
+docker compose exec server node -e "const e=require('./src/config/env');console.log('graph:',Boolean(e.notifications.email.graph),'smtp:',Boolean(e.notifications.email.smtp),'from:',e.notifications.email.from)"
 
 # 2. send one real vendor email from the UI, wait a minute, then look at the outbox
 docker compose exec db psql -U postgres -d requirement_dashboard -c "select status,to_email,last_error,sent_at from email_outbox order by created_at desc limit 5;"
