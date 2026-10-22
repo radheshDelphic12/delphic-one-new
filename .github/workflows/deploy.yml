@@ -45,6 +45,8 @@ jobs:
             git reset --hard "${DEPLOY_SHA}"
             git log --oneline -1
             chmod +x start-delphic.sh setup-vm.sh scripts/db-backup.sh
+            # the commit id, message and dates go into the page head (<meta name="build-commit">) so a deploy can be checked by inspecting the site
+            eval "$(bash scripts/build-info.sh)"
             # start-delphic.sh --prod takes a verified pre-deploy backup, then
             # rehearses the migrations on a copy of it before touching the live DB.
             ./start-delphic.sh --prod --no-boot

@@ -74,6 +74,12 @@ services:
     build:
       context: .
       dockerfile: client/Dockerfile
+      # which commit is live: shown in the page head as <meta name="build-commit"> (values come from scripts/build-info.sh)
+      args:
+        BUILD_COMMIT_SHA: ${BUILD_COMMIT_SHA:-}
+        BUILD_COMMIT_DATE: ${BUILD_COMMIT_DATE:-}
+        BUILD_COMMIT_MESSAGE: ${BUILD_COMMIT_MESSAGE:-}
+        BUILD_BRANCH: ${BUILD_BRANCH:-}
     restart: unless-stopped
     depends_on:
       - server
