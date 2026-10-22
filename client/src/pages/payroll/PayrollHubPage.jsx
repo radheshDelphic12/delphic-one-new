@@ -9,6 +9,7 @@ import RefreshRunModal from './RefreshRunModal.jsx';
 import { FnfTab, IncrementRemindersTab, PreviousDuesModal } from './PeopleExitTabs.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { hasNeed, isPermissionMode } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
@@ -702,11 +703,14 @@ export default function PayrollHubPage() {
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
   // Salary amounts: a custom role (for example Admin) needs the financials permission even on the admin base role.
-  const isAdmin = user?.role === 'admin' && (!user?.permissions || Boolean(user.permissions['financials.view']));
-  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS, ...(user?.is_superadmin ? [INCREMENT_TAB] : [])] : BASE_TABS;
+  // A company on permissions: the admin tabs need Payroll View, the payslips tab needs the basic payslips item, increments need Increments.
+  const onPermissions = isPermissionMode(user);
+  const isAdmin = onPermissions ? hasNeed(user, 'payroll.view') : user?.role === 'admin' && (!user?.permissions || Boolean(user.permissions['financials.view']));
+  const showIncrements = onPermissions ? hasNeed(user, 'increments.receive') : Boolean(user?.is_superadmin);
+  const tabs = [...(onPermissions && !hasNeed(user, 'basic.payslips') ? [] : BASE_TABS), ...(isAdmin ? [...ADMIN_TABS, ...(showIncrements ? [INCREMENT_TAB] : [])] : [])];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'my-payslips';
-  const section = tabs.some((t) => t.key === requested) ? requested : 'my-payslips';
+  const section = tabs.some((t) => t.key === requested) ? requested : (tabs[0]?.key || 'my-payslips');
   // Employee / Department / Team — one filter bar for every admin tab.
   const [people, setPeople] = useState(EMPTY_PEOPLE_FILTERS);
 

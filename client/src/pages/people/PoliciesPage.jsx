@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileText, Plus, Save, Search, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
@@ -20,7 +21,7 @@ const formatDay = (v) => (v ? new Date(v).toLocaleDateString(undefined, { day: '
 export default function PoliciesPage() {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, 'hr_settings.update');
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // policy id | 'new' | null

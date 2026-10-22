@@ -2023,6 +2023,13 @@ model Org {
   resource_billing_rates  ResourceBillingRate[]
   memberships             OrgMembership[]
   custom_roles            CustomRole[]
+  permission_grants       PermissionGrant[]
+  access_backups          AccessBackup[]
+  // 'legacy' = the plain role on each membership decides (as before); 'permissions' = default basic access + permission set + grants.
+  // Flipped company by company by the Super Admin (Settings > Permissions > Migration), never by a deploy.
+  access_mode             String            @default("legacy")
+  access_applied_at       DateTime?
+  access_applied_by       String?           @db.Uuid
   vendor_email_logs       VendorEmailLog[]
   team_membership_periods TeamMembershipPeriod[]
 
@@ -2374,6 +2381,13 @@ model OrgMembership {
   delete_reason                      String?
   // Birthday (day and month are shown on the Announcements card; the year is never shown to others)
   date_of_birth                      DateTime?                         @db.Date
+  // Roles & permissions restructure: the access this person had before their company moved to the permission model, kept
+  // read-only until legacy_locked_until so it can be restored if something was missed.
+  legacy_role                        UserRole?
+  legacy_custom_role_id              String?                           @db.Uuid
+  legacy_was_superadmin              Boolean?
+  legacy_locked_until                DateTime?
+  permission_grants                  PermissionGrant[]
 
   @@unique([person_id, org_id])
   // Employee codes are unique within a company (null = none yet).
@@ -2408,6 +2422,42 @@ model CustomRole {
   @@unique([org_id, name])
   @@index([org_id])
   @@map("custom_roles")
+}
+
+// One permission given to (or taken away from) one person, on top of their permission set. `key` is `<module>.<action>` from
+// the catalogue in lib/permissions.js; `scope` is 'true' or own / team / all. effect 'deny' removes a default basic-access item
+// (or a set item) from this person. Every change is written to the change log.
+model PermissionGrant {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String        @db.Uuid
+  org               Org           @relation(fields: [org_id], references: [id])
+  org_membership_id String        @db.Uuid
+  membership        OrgMembership @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  key               String
+  scope             String        @default("true")
+  effect            String        @default("grant")
+  label             String?
+  granted_by        String?       @db.Uuid
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
+
+  @@unique([org_membership_id, key])
+  @@index([org_id])
+  @@map("permission_grants")
+}
+
+// The export of everyone's access in a company, taken before it moves to the permission model (and restorable from).
+model AccessBackup {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  org        Org      @relation(fields: [org_id], references: [id])
+  taken_by   String?  @db.Uuid
+  note       String?
+  snapshot   Json
+  created_at DateTime @default(now())
+
+  @@index([org_id])
+  @@map("access_backups")
 }
 
 model Account {

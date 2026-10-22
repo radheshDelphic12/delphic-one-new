@@ -207,7 +207,7 @@ function Mapping({ onApplied }) {
             {data.super_admin.accounts.map((a) => (a.is_group_superadmin
               ? <tr key={a.org_membership_id} className="border-t border-tertiary-100"><td /><td className="py-1.5"><Person p={a} /></td><td className="text-xs">Group account</td><td className="text-xs text-tertiary-500">keeps Group Super Admin</td></tr>
               : <Row key={a.org_membership_id} p={a} role="Super Admin" />))}
-            {data.super_admin.status !== 'match' && <tr><td colSpan={4} className="py-2 text-warning-700">{data.super_admin.status === 'ambiguous' ? 'More than one company account: not proposed, decide first.' : 'No company account found.'}</td></tr>}
+            {data.super_admin.status !== 'match' && <tr><td colSpan={4} className="py-2 text-warning-700">{data.super_admin.status === 'ambiguous' ? 'More than one company account: not proposed, decide first.' : data.super_admin.accounts.some((a) => a.is_group_superadmin) ? 'Only the group account exists here, and it already is the Super Admin. This company needs its own Admin account (People > Users) before it can move to permissions; Settings > Permissions > Migration shows the Admin of every company.' : 'No company account found. Add the company Admin in People > Users, then move this company in Settings > Permissions > Migration.'}</td></tr>}
           </tbody>
         </table>
       </div>

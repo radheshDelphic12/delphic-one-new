@@ -14,6 +14,7 @@ import VtFilterBar, { useVtFilters } from '../../components/valterra/VtFilters.j
 import SitesOverview from '../../components/valterra/SitesOverview.jsx';
 import { CategoryChart, ExpenseTrendChart, IncomeChart, InvestmentFlowChart, InvestmentReturnsChart, NetTrendChart, ProjectedActualChart, VT_PIE } from '../../components/valterra/VtCharts.jsx';
 import { Delta, Empty, Kpi, Money, card } from '../../components/valterra/ui.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const KPI_HINT = (text, change, inverse) => (<><span className="block">{text}</span>{change && <Delta pct={change.pct} inverse={inverse} />}</>);
 
@@ -175,6 +176,8 @@ export default function ValterraHomePage() {
           {data.investments.length === 0 && <Empty>No investments yet. Add the first one to start tracking capital and returns.</Empty>}
         </div>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

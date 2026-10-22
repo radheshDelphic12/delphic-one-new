@@ -7,6 +7,8 @@ const orgContext = require('../lib/orgContext');
 const { fail } = require('../utils/response');
 const { contractorMayAccess } = require('./contractorScope');
 const { teamUserIds } = require('../lib/permissions');
+const { loadAccess } = require('../lib/access/load');
+const accessGuard = require('../lib/access/guard');
 
 // Multi-company ERP (Phase 1): the JWT carries an `org_id` for users who have
 // an OrgMembership (everyone, post Phase-0 backfill). Tokens issued before
@@ -21,11 +23,21 @@ async function resolveOrgContext(user, orgId) {
   if (!orgId) return user;
   const membership = await prisma.orgMembership.findUnique({
     where: { person_id_org_id: { person_id: user.id, org_id: orgId } },
-    select: { id: true, role: true, employment_status: true, worker_type: true, custom_role: { select: { id: true, name: true, base_role: true, permissions: true } } },
+    select: {
+      id: true, role: true, employment_status: true, worker_type: true, is_leave_manager: true,
+      custom_role: { select: { id: true, name: true, base_role: true, permissions: true } },
+      org: { select: { access_mode: true } },
+      person: { select: { is_superadmin: true, is_group_superadmin: true } },
+    },
   });
   if (!membership || !isWorking(membership.employment_status)) return null;
   // A contractor is always self-service, whatever role is on the row.
   const isContractor = membership.worker_type === 'contractor';
+  // A company on the permission model: default basic access + permission set + grants (lib/access). Everyone else is as before.
+  if (!isContractor && membership.org?.access_mode === 'permissions') {
+    const loaded = await loadAccess(orgId, membership);
+    return { ...user, ...loaded, org_id: orgId, org_membership_id: membership.id, worker_type: membership.worker_type };
+  }
   const custom = !isContractor ? membership.custom_role : null;
   // A custom role keeps its plain base role for everything its permissions do not cover; its permissions decide the gated endpoints.
   const role = isContractor ? 'employee' : custom ? custom.base_role : membership.role;
@@ -52,6 +64,10 @@ function authenticate(req, res, next) {
         if (user.worker_type === 'contractor' && !contractorMayAccess(req.method, req.originalUrl)) {
           return fail(res, 403, 'Not available in the contractor portal');
         }
+        // The central access check: one table (lib/access/routeRules.js) decides every route for a company on the permission model.
+        const allowed = accessGuard.check(user, req.method, req.originalUrl);
+        if (!allowed.ok) return fail(res, 403, "You don't have access to this");
+        user.role = allowed.role;
         req.user = user;
         // Multi-company ERP (HLD §5, layer 1): the rest of this request runs
         // inside an AsyncLocalStorage context carrying the resolved org_id,

@@ -2,6 +2,7 @@ import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarRange, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
+import { allowed, isAdminUser } from '../../lib/access.js';
 import ExpensesTab from './ExpensesTab.jsx';
 import ProjectsTab from './ProjectsTab.jsx';
 import GroupChargesTab from './GroupChargesTab.jsx';
@@ -15,18 +16,18 @@ import VendorInvoicesTab from './VendorInvoicesTab.jsx';
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
 import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
-const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt }];
+const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt, need: ['basic.expenses', 'finance.view'] }];
 const ADMIN_TABS = [
-  { key: 'projects', label: 'Projects', icon: FolderKanban },
+  { key: 'projects', label: 'Projects', icon: FolderKanban, need: 'billing.view' },
   // Month-wise: running projects -> timesheet -> billing -> invoice -> payment -> financial status, plus the Sales / Salary exports.
-  { key: 'month-view', label: 'Month View', icon: CalendarRange },
+  { key: 'month-view', label: 'Month View', icon: CalendarRange, need: ['analytics.view', 'financials.view', 'finance.view'] },
   // Per-resource billing rates and the client billing status rules (PL / NPL / comp off / FH / SH ...).
-  { key: 'billing-setup', label: 'Billing Setup', icon: SlidersHorizontal },
+  { key: 'billing-setup', label: 'Billing Setup', icon: SlidersHorizontal, need: 'billing.view' },
   // Vendor invoices: TDS, adjustment, sent / unsent, paid / unpaid, trace, Excel export.
-  { key: 'vendor-invoices', label: 'Vendor Invoices', icon: Truck },
-  { key: 'group-charges', label: 'Group Charges', icon: Users2 },
+  { key: 'vendor-invoices', label: 'Vendor Invoices', icon: Truck, need: 'billing.view' },
+  { key: 'group-charges', label: 'Group Charges', icon: Users2, need: 'billing.view' },
   // Admin-managed Group Charge + Expense categories (next to Group Charges).
-  { key: 'categories', label: 'Categories', icon: Tags },
+  { key: 'categories', label: 'Categories', icon: Tags, need: 'finance.view' },
 ];
 
 /**
@@ -44,24 +45,25 @@ export default function FinanceHubPage() {
   const { user, isGroupSuperadmin } = useAuth();
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
-  const isAdmin = user?.role === 'admin';
-  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const isAdmin = isAdminUser(user);
+  const tabs = [...BASE_TABS.filter((t) => allowed(user, t.need, true)), ...ADMIN_TABS.filter((t) => allowed(user, t.need, isAdmin))];
+  const has = (key) => tabs.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'expenses';
-  const section = tabs.some((t) => t.key === requested) ? requested : 'expenses';
+  const section = tabs.some((t) => t.key === requested) ? requested : (tabs[0]?.key || 'expenses');
 
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
       <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
       {/* Admins land here (their dashboard is hidden), so birthdays and work anniversaries of the next 14 days show on this landing tab. */}
       {isAdmin && section === 'expenses' && <AnnouncementsCard />}
-      {section === 'expenses' && <ExpensesTab />}
-      {section === 'projects' && isAdmin && <ProjectsTab />}
-      {section === 'month-view' && isAdmin && <MonthProjectsTab />}
-      {section === 'billing-setup' && isAdmin && <BillingSetupTab />}
-      {section === 'vendor-invoices' && isAdmin && <VendorInvoicesTab />}
-      {section === 'group-charges' && isAdmin && <GroupChargesTab />}
-      {section === 'categories' && isAdmin && <FinanceCategoriesTab />}
+      {section === 'expenses' && has('expenses') && <ExpensesTab />}
+      {section === 'projects' && has('projects') && <ProjectsTab />}
+      {section === 'month-view' && has('month-view') && <MonthProjectsTab />}
+      {section === 'billing-setup' && has('billing-setup') && <BillingSetupTab />}
+      {section === 'vendor-invoices' && has('vendor-invoices') && <VendorInvoicesTab />}
+      {section === 'group-charges' && has('group-charges') && <GroupChargesTab />}
+      {section === 'categories' && has('categories') && <FinanceCategoriesTab />}
     </div>
   );
 }

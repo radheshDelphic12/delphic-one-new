@@ -3,6 +3,7 @@ import { CalendarClock, CalendarPlus, History, Trash2, Upload, Wrench } from 'lu
 import apiClient from '../../lib/apiClient.js';
 import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -98,7 +99,7 @@ function RegularizeDrawer({ row, open, onClose, onSaved }) {
 export default function AttendancePage() {
   const { user, isGroupSuperadmin } = useAuth();
   const { pushError, pushInfo } = useAlerts();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, ['attendance.view', 'attendance.update']);
   // everyone except the group superadmin gets the refreshed screen; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
   const [tab, setTab] = useState('mine');

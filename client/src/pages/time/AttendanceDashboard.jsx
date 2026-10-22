@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, CalendarCheck, ChevronLeft, ChevronRight, Grid3x3, Home, User } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import AttendanceRegister from './AttendanceRegister.jsx';
@@ -210,7 +211,7 @@ const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
 export default function AttendanceDashboard() {
   const { user } = useAuth();
   const { pushError, pushSuccess } = useAlerts();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, ['attendance_dashboard.view', 'attendance.view']);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);

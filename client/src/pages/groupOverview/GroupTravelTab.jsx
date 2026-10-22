@@ -179,12 +179,12 @@ export function MeetingsPanel({ trip, options, onChanged }) {
           <label className={labelCls}>Company
             <select required className={inputCls} value={m.org_id} onChange={(e) => setM((c) => ({ ...c, org_id: e.target.value, account_id: '' }))}>
               <option value="">Choose a company…</option>
-              {(options?.companies || []).filter((co) => (options?.clients || []).some((c) => c.org_id === co.id)).map((co) => <option key={co.id} value={co.id}>{co.name}</option>)}
+              {(options?.companies || []).map((co) => <option key={co.id} value={co.id}>{co.name}</option>)}
             </select>
           </label>
           <label className={labelCls}>Client
             <select required disabled={!m.org_id} className={inputCls} value={m.account_id} onChange={(e) => setM((c) => ({ ...c, account_id: e.target.value }))}>
-              <option value="">{m.org_id ? 'Choose a client…' : 'Choose a company first'}</option>
+              <option value="">{!m.org_id ? 'Choose a company first' : (options?.clients || []).some((c) => c.org_id === m.org_id) ? 'Choose a client…' : 'No active clients in this company'}</option>
               {(options?.clients || []).filter((c) => c.org_id === m.org_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>

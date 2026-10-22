@@ -216,3 +216,12 @@ This is the only path that drops the database, and it is a deliberate, manual re
 - **`ENABLE_JOBS`** (default `true`): the API runs an in-process `node-cron` job every 15 min for interview reminders (T-24h / T-1h in-app notifications). Leave it on for the single prod container. **If the API is ever scaled to more than one instance, set `ENABLE_JOBS=false` on every instance but one** — otherwise each instance sends duplicate reminders. Always off under `NODE_ENV=test`. Reserved (unused) `NOTIFICATIONS_*` / `MS_GRAPH_*` vars are placeholders for the future email + MS Teams channels.
 - Loopback binds in prod: API `127.0.0.1:4000`, client `127.0.0.1:8081` (nginx fronts them).
 - Rehearse risky migrations first: restore the latest `auto-*.dump` into a scratch DB, run `prisma migrate deploy`, smoke-test.
+
+## `.env` quoting and failed deploys (2026-10-22)
+
+- `start-delphic.sh` loads `/opt/delphic/.env` with **bash** (`set -a; source .env`, under `set -e`), while `docker compose` reads the same file with its own parser. A value containing spaces or `< > & ; ( ) $` must be in **double quotes**, e.g. `NOTIFICATIONS_EMAIL_FROM="Delphic One <noreply.secure@delphic.in>"`. Never leave placeholder text in a value (`<your secret>`). One unquoted line made the Deploy workflow fail at the "Deploy to EC2" step in about 22 seconds while the running containers (read by compose) looked healthy.
+- Check before a deploy: `bash -c 'set -a; source /opt/delphic/.env; set +a; echo env ok'`.
+- A change to `.env` reaches a container only when it is recreated: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d server`.
+- To retry a failed Deploy, open it in GitHub Actions and use **Re-run failed jobs**; it deploys the same commit CI tested. The failing step's last lines (Actions log) give the exact cause.
+- Render staging runs with `ENABLE_JOBS=false` (free plan sleeps), so the email outbox job never runs there: queued mail stays `queued`. Production runs the jobs.
+- Mail: see [EMAIL-SMTP-PRODUCTION.md](EMAIL-SMTP-PRODUCTION.md) (Microsoft Graph or SMTP variables).

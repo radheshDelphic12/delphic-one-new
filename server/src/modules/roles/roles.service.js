@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { CATALOG, normalizePermissions } = require('../../lib/permissions');
+const { deriveLegacyRole } = require('../../lib/access/effective');
 
 // Custom roles (Settings > Roles & permissions). Per company; the permission catalogue is the same for every company.
 
@@ -58,10 +59,13 @@ async function members(orgId, roleId) {
 }
 
 async function create(orgId, actorId, { name, description, base_role, permissions }) {
-  if (!BASE_ROLES.includes(base_role || 'employee')) return { error: 'bad_base_role' };
+  if (base_role && !BASE_ROLES.includes(base_role)) return { error: 'bad_base_role' };
   const clash = await prisma.customRole.findFirst({ where: { org_id: orgId, name: { equals: name, mode: 'insensitive' } } });
   if (clash) return { error: 'name_taken' };
-  const row = await prisma.customRole.create({ data: { org_id: orgId, name, description: description || null, base_role: base_role || 'employee', permissions: normalizePermissions(permissions), created_by: actorId } });
+  const perms = normalizePermissions(permissions);
+  // The plain role is a compatibility detail now: unless one is given, it follows from what the set allows.
+  const base = base_role || deriveLegacyRole({ level: 'employee', setBaseRole: null, permissions: perms });
+  const row = await prisma.customRole.create({ data: { org_id: orgId, name, description: description || null, base_role: base, permissions: perms, created_by: actorId } });
   return { role: serialize(row, 0) };
 }
 
@@ -204,4 +208,4 @@ async function applyMapping(orgId, actorId, assignments) {
   return results;
 }
 
-module.exports = { BASE_ROLES, STARTER_ROLES, catalog, list, members, create, update, remove, assign, installStarterRoles, mappingPreview, applyMapping };
+module.exports = { BASE_ROLES, STARTER_ROLES, EXPECTED, catalog, list, members, create, update, remove, assign, installStarterRoles, mappingPreview, applyMapping };

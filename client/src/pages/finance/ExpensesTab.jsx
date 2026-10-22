@@ -3,6 +3,7 @@ import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
 import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useFinanceCategories, useLocationOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
@@ -180,7 +181,7 @@ const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimburse
  */
 export default function ExpensesTab() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, 'finance.view');
   // A superadmin may correct or remove a claim in any status (approved, reimbursed…).
   const isSuperadmin = Boolean(user?.is_superadmin);
   const { pushError, pushInfo } = useAlerts();

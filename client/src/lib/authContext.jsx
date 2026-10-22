@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import apiClient from './apiClient';
+import { uiRole } from './access.js';
 
 const AuthContext = createContext(null);
 
@@ -27,7 +28,10 @@ function withOrgContext(user, memberships, activeOrg) {
 async function withPermissions(user) {
   try {
     const { data } = await apiClient.get('/users/me');
-    return data.data?.permissions ? { ...user, permissions: data.data.permissions, custom_role: data.data.custom_role } : { ...user, permissions: undefined, custom_role: undefined };
+    const me = data.data || {};
+    // `access` tells the app whether this company is on the permission model and what the person holds in it.
+    const base = me.access?.mode === 'permissions' ? { role: uiRole(me) } : {};
+    return me.permissions ? { ...user, ...base, permissions: me.permissions, custom_role: me.custom_role, access: me.access } : { ...user, ...base, permissions: undefined, custom_role: undefined, access: me.access };
   } catch {
     return user;
   }
@@ -73,9 +77,10 @@ export function AuthProvider({ children }) {
         setUser((prev) => {
           if (!prev || prev.id !== me.id) return prev;
           const sameRole = (prev.custom_role?.id || null) === (me.custom_role?.id || null);
-          if (sameRole && JSON.stringify(prev.permissions || null) === JSON.stringify(me.permissions || null)) return prev;
-          // a custom role's base role is the plain role, so the screens follow it too
-          return { ...prev, permissions: me.permissions, custom_role: me.custom_role, role: me.custom_role || prev.custom_role ? me.role : prev.role };
+          if (sameRole && JSON.stringify(prev.permissions || null) === JSON.stringify(me.permissions || null) && JSON.stringify(prev.access || null) === JSON.stringify(me.access || null)) return prev;
+          // a custom role's base role is the plain role, so the screens follow it too; in a company on permissions the role is derived
+          const follows = me.custom_role || prev.custom_role || me.access?.mode === 'permissions';
+          return { ...prev, permissions: me.permissions, custom_role: me.custom_role, access: me.access, role: follows ? uiRole(me) : prev.role };
         });
       }).catch(() => {});
     };

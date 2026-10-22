@@ -23,7 +23,7 @@ async function authorizeRoleManager(req, res, next) {
 
 const permissions = z.record(z.union([z.boolean(), z.enum(['own', 'team', 'all'])])).default({});
 const baseRole = z.enum(service.BASE_ROLES);
-const createBody = z.object({ name: z.string().trim().min(2).max(60), description: z.string().trim().max(300).nullable().optional(), base_role: baseRole.default('employee'), permissions });
+const createBody = z.object({ name: z.string().trim().min(2).max(60), description: z.string().trim().max(300).nullable().optional(), base_role: baseRole.optional(), permissions });
 const updateBody = z.object({ name: z.string().trim().min(2).max(60).optional(), description: z.string().trim().max(300).nullable().optional(), base_role: baseRole.optional(), permissions: permissions.optional() });
 const assignBody = z.object({ org_membership_id: z.string().uuid().optional(), user_id: z.string().uuid().optional(), role_id: z.string().uuid().nullable() }).refine((v) => v.org_membership_id || v.user_id, { message: 'org_membership_id or user_id is required' });
 const mappingBody = z.object({ assignments: z.array(z.object({ org_membership_id: z.string().uuid(), role_name: z.string().trim().min(1).max(60) })).min(1).max(50) });

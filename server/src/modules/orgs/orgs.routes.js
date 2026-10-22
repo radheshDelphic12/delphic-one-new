@@ -5,6 +5,10 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./orgs.service');
 const { WORKER_ERRORS } = require('../../lib/workerType');
 const { approverScope } = require('../../lib/claimApprovers');
+const prisma = require('../../config/db');
+const { adminPower } = require('../../lib/access/guard');
+const { restrictMembership } = require('../../lib/access/fields');
+const accessService = require('../access/access.service');
 const {
   createOrgSchema,
   createLocationSchema,
@@ -23,7 +27,7 @@ const JOINED_AFTER_EXIT = 'The joining date cannot be after the last working day
 
 // Admins, and members of the HR department (same rule as HR claim approval).
 async function canEditJoiningDate(user) {
-  if (user.role === 'admin') return true;
+  if (adminPower(user, 'people.update')) return true;
   return (await approverScope(user)).hr;
 }
 router.use(authenticate);
@@ -38,7 +42,15 @@ router.get(
 
 // --- Bank + emergency contact: the employee's own (portal), or anyone's for an admin. ---
 
-const canSeePersonal = (req, membershipId) => req.user.role === 'admin' || membershipId === req.user.org_membership_id;
+// Bank, identity numbers and emergency contact: the employee, or someone holding the People permission (the Admin always).
+const canSeePersonal = (req, membershipId, key = 'people.view') => adminPower(req.user, key) || membershipId === req.user.org_membership_id;
+
+// Nobody but the Super Admin edits or removes the Super Admin's membership.
+async function superAdminTargetBlocked(req) {
+  const m = await prisma.orgMembership.findFirst({ where: { id: req.params.id, org_id: req.user.org_id }, select: { person: { select: { is_group_superadmin: true } } } });
+  if (!m?.person?.is_group_superadmin) return false;
+  return (await accessService.actorLevel(req.user.id, req.user.role)) !== 'super_admin';
+}
 
 router.get(
   '/me/details',
@@ -70,7 +82,7 @@ router.put(
   '/memberships/:id/details',
   requireOrgMembership,
   asyncHandler(async (req, res) => {
-    if (!canSeePersonal(req, req.params.id)) return fail(res, 403, 'Only an admin or the employee can change these details');
+    if (!canSeePersonal(req, req.params.id, 'people.update')) return fail(res, 403, 'Only an admin or the employee can change these details');
     const body = personalDetailsSchema.parse(req.body);
     const row = await service.updatePersonalDetails(req.user.org_id, req.params.id, body);
     if (!row) return fail(res, 404, 'Org membership not found');
@@ -84,7 +96,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = membershipListQuerySchema.parse(req.query);
     const rows = await service.listMemberships(req.user.org_id, query);
-    return ok(res, rows);
+    return ok(res, rows.map((r) => restrictMembership(req.user, r)));
   })
 );
 
@@ -130,7 +142,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const row = await service.getMembership(req.user.org_id, req.params.id);
     if (!row) return fail(res, 404, 'Org membership not found');
-    return ok(res, { ...row, can_edit_joining_date: await canEditJoiningDate(req.user) });
+    return ok(res, { ...restrictMembership(req.user, row), can_edit_joining_date: await canEditJoiningDate(req.user) });
   })
 );
 
@@ -222,6 +234,7 @@ router.delete(
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
     if (reason.length < 3) return fail(res, 422, 'Give a reason of at least 3 characters');
     if (req.params.id === req.user.org_membership_id) return fail(res, 422, 'You cannot delete your own membership');
+    if (await superAdminTargetBlocked(req)) return fail(res, 403, 'Only the Super Admin can change the Super Admin');
     const result = await require('../admin/admin.service').softDeleteRecord('employee', req.params.id, reason.slice(0, 500), req.user, { orgId: req.user.org_id });
     if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'already_deleted') return fail(res, 409, 'Already deleted');
@@ -236,6 +249,7 @@ router.patch(
   authorize('admin'),
   asyncHandler(async (req, res) => {
     const body = updateMembershipSchema.parse(req.body);
+    if (await superAdminTargetBlocked(req)) return fail(res, 403, 'Only the Super Admin can change the Super Admin');
     const result = await service.updateMembership(req.user.org_id, req.params.id, body, req.user.id);
     if (result.error === 'not_found') return fail(res, 404, 'Org membership not found');
     if (result.error === 'future_team_change') return fail(res, 422, 'A team change can be effective today or earlier, not in the future');

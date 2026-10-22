@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { allowed, isAdminUser } from '../../lib/access.js';
 import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
@@ -19,36 +20,36 @@ import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 import RegularizationAdminTab from './RegularizationAdminTab.jsx';
 
 const BASE_TABS = [
-  { key: 'attendance', label: 'Attendance', icon: CalendarClock },
-  { key: 'leave', label: 'Leave', icon: CalendarCheck },
+  { key: 'attendance', label: 'Attendance', icon: CalendarClock, need: 'basic.attendance' },
+  { key: 'leave', label: 'Leave', icon: CalendarCheck, need: 'basic.leave' },
   // Hidden on request – may be re-enabled later. Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
   // { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
   // Attendance only (no project hours): status, reporting office and office / home per day, plus leave balance.
-  { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck },
+  { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck, need: ['basic.attendance', 'attendance_dashboard.view'] },
   // Every project as a month calendar: hours, tasks, leave, holidays.
-  { key: 'project-calendar', label: 'Project Calendar', icon: CalendarRange },
+  { key: 'project-calendar', label: 'Project Calendar', icon: CalendarRange, need: ['basic.timesheet', 'project_calendar.view'] },
   // Hours logged by everyone on a project you are assigned to (visibility only, no cap).
-  { key: 'project-team', label: 'Project Team', icon: Users },
+  { key: 'project-team', label: 'Project Team', icon: Users, need: ['basic.timesheet', 'project_team.view'] },
   // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
-  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
+  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays, need: ['basic.attendance', 'holidays.view'] },
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
-  { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
+  { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
 const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
 // Admin: the client project timesheet (IT and contractors).
-const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList };
+const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList, need: 'timesheets.view' };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
-const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
+const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock, need: 'timesheets.lock' };
 // Admin: every employee's attendance and project-timesheet correction requests, to approve or reject.
-const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock };
+const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock, need: ['regularization.view', 'regularization.approve'] };
 // Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
 
 /** Time & Attendance hub: Attendance + Leave + Timesheets (+ IT Timesheet — logging for IT staff, records view for admins — + Team Monitoring for admins) under one sidebar entry. */
 export default function TimeAttendanceHubPage() {
   const { user, isGroupSuperadmin } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isAdminUser(user);
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
   const isIt = user?.department?.name?.toLowerCase() === 'it';
@@ -56,13 +57,15 @@ export default function TimeAttendanceHubPage() {
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
+  // A tab shows only when the person has View on it (a company on permissions); elsewhere the admin role decides, as before.
   const TABS = [
     ...BASE_TABS.slice(0, 2),
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB] : []),
-  ];
+    ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
+  ].filter((t) => allowed(user, t.need, true));
+  const has = (key) => TABS.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
   const section = TABS.some((t) => t.key === requested) ? requested : 'attendance';
@@ -94,17 +97,17 @@ export default function TimeAttendanceHubPage() {
           <ItTimesheetPage />
         </div>
       )}
-      {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
+      {section === 'project-timesheets' && has('project-timesheets') && <ItTimesheetAdminView scope="it" />}
       {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
       {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}
       {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}
-      {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
+      {section === 'overtime' && <OvertimeTicketsTab isAdmin={allowed(user, 'overtime.update', isAdmin)} />}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
-      {section === 'locks' && isAdmin && <TimesheetLocksTab />}
-      {section === 'regularization' && isAdmin && <RegularizationAdminTab />}
+      {section === 'locks' && has('locks') && <TimesheetLocksTab />}
+      {section === 'regularization' && has('regularization') && <RegularizationAdminTab />}
     </div>
   );
 }
