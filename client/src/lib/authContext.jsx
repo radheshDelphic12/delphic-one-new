@@ -60,6 +60,32 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // An admin's change to a role or its permissions reaches an open session without a new login or deployment: the server reads the
+  // role live on every request, and the app re-reads /users/me when the tab is used again and every 5 minutes.
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId) return undefined;
+    let last = Date.now();
+    const refresh = () => {
+      last = Date.now();
+      apiClient.get('/users/me').then(({ data }) => {
+        const me = data.data || {};
+        setUser((prev) => {
+          if (!prev || prev.id !== me.id) return prev;
+          const sameRole = (prev.custom_role?.id || null) === (me.custom_role?.id || null);
+          if (sameRole && JSON.stringify(prev.permissions || null) === JSON.stringify(me.permissions || null)) return prev;
+          // a custom role's base role is the plain role, so the screens follow it too
+          return { ...prev, permissions: me.permissions, custom_role: me.custom_role, role: me.custom_role || prev.custom_role ? me.role : prev.role };
+        });
+      }).catch(() => {});
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible' && Date.now() - last > 30000) refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    const timer = setInterval(refresh, 5 * 60 * 1000);
+    return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); clearInterval(timer); };
+  }, [userId]);
+
   async function login(email, password, orgSlug) {
     const { data } = await apiClient.post('/auth/login', { email, password, ...(orgSlug ? { org_slug: orgSlug } : {}) });
     localStorage.setItem('access_token', data.data.access_token);

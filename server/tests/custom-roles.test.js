@@ -234,3 +234,38 @@ describe('enforced on the API', () => {
     expect((await del(boss.token)).status).toBe(401); // HR Super Admin passes the permission gate (stopped only by the password check)
   });
 });
+
+describe('permissions survive deployments and apply without a new login', () => {
+  test('a role built on Admin ("VP - HR"): editing its permissions applies on the holder very next request with the same token; /users/me follows', async () => {
+    const created = await post('/api/v1/roles', superToken, { name: 'VP - HR', base_role: 'admin', permissions: { 'timesheets.approve': true, 'attendance.approve': true } });
+    expect(created.status).toBe(201);
+    const vp = await personWith('VP - HR', 'Diksha VP', 'admin');
+    const money = '/api/v1/payroll/runs';
+    expect((await authed(request(app).get(money), vp.token)).status).toBe(403); // no financials permission yet
+    expect((await authed(request(app).get('/api/v1/timesheets/entries'), vp.token)).status).toBe(200); // admin oversight
+
+    const edited = await patch(`/api/v1/roles/${created.body.data.id}`, superToken, { permissions: { 'timesheets.approve': true, 'attendance.approve': true, 'financials.view': true } });
+    expect(edited.status).toBe(200);
+    // the SAME token, no re-login, no restart: allowed straight away, and the app's /users/me shows it
+    expect((await authed(request(app).get(money), vp.token)).status).not.toBe(403);
+    expect((await authed(request(app).get('/api/v1/users/me'), vp.token)).body.data.permissions['financials.view']).toBe(true);
+
+    await patch(`/api/v1/roles/${created.body.data.id}`, superToken, { permissions: { 'timesheets.approve': true, 'attendance.approve': true } });
+    expect((await authed(request(app).get(money), vp.token)).status).toBe(403); // and taken away just as fast
+  });
+
+  test('what start-up and a deployment run never rewrites a saved role: starter roles are only added when missing, and base roles of holders stay as saved', async () => {
+    const created = await post('/api/v1/roles', superToken, { name: 'VP - HR', base_role: 'admin', permissions: { 'financials.view': true, 'timesheets.approve': true } });
+    const vp = await personWith('VP - HR', 'Diksha VP', 'admin');
+    const hr = await prisma.customRole.findFirst({ where: { org_id: org.id, name: 'HR' } });
+    await patch(`/api/v1/roles/${hr.id}`, superToken, { permissions: { 'profiles.view': true } }); // an owner's edit of a starter role
+    const before = JSON.stringify((await prisma.customRole.findMany({ where: { org_id: org.id }, orderBy: { name: 'asc' } })).map((r) => [r.name, r.base_role, r.permissions]));
+
+    for (let i = 0; i < 3; i += 1) expect((await rolesService.installStarterRoles(org.id, superUser.id)).created).toEqual([]); // "deploy" again and again
+    const after = JSON.stringify((await prisma.customRole.findMany({ where: { org_id: org.id }, orderBy: { name: 'asc' } })).map((r) => [r.name, r.base_role, r.permissions]));
+    expect(after).toBe(before);
+    const holder = await prisma.orgMembership.findUnique({ where: { id: vp.m.id } });
+    expect(holder).toMatchObject({ custom_role_id: created.body.data.id, role: 'admin' });
+    expect((await authed(request(app).get('/api/v1/payroll/runs'), vp.token)).status).not.toBe(403);
+  });
+});
