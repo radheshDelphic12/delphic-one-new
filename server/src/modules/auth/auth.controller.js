@@ -7,6 +7,7 @@ const login = asyncHandler(async (req, res) => {
   const { email, password, org_slug } = loginSchema.parse(req.body);
   const result = await authService.login(email, password, org_slug);
   if (!result) return fail(res, 401, 'Invalid credentials');
+  if (result.error === 'exited') return fail(res, 403, 'Your employment has ended, so this account can no longer sign in. Please contact HR.');
   if (result.error === 'no_workspace_access') return fail(res, 403, 'Your account does not have access to that workspace');
   return ok(res, result);
 });
