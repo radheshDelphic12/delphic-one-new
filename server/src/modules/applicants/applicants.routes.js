@@ -18,6 +18,9 @@ const ERRORS = {
   duplicate_applicant: [409, 'This person (email or phone) has already applied to this requirement'],
   already_assigned: [409, 'Someone has already taken this applicant'],
   not_assigned: [409, 'This applicant is not assigned'],
+  already_rejected: [409, 'This applicant is already rejected'],
+  not_rejected: [409, 'This applicant is not rejected'],
+  cannot_reject: [409, 'This applicant cannot be rejected from here'],
   not_a_recruiter: [422, 'Applicants can only be given to a recruiter'],
   forbidden: [403, 'You cannot do that'],
 };
@@ -60,6 +63,8 @@ router.patch('/:id', authorize('admin', 'sales', 'recruiter'), asyncHandler(asyn
 router.post('/:id/assign', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.assign(req.user, req.params.id, req.body), 'applicant')));
 router.post('/:id/release', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.release(req.user, req.params.id), 'applicant')));
 router.post('/:id/create-profile', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.createProfile(req.user, req.params.id), 'applicant')));
+router.post('/:id/reject', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.reject(req.user, req.params.id, req.body), 'applicant')));
+router.post('/:id/unreject', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.unreject(req.user, req.params.id), 'applicant')));
 router.post('/:id/unlink', authorize('admin', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.unlink(req.user, req.params.id), 'applicant')));
 router.delete('/:id', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => result(res, await service.remove(req.user, req.params.id, typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : undefined))));
 

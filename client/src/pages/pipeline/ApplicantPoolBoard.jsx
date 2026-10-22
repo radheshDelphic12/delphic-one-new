@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
+import { Ban, FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import useLiveData from '../../lib/useLiveData.js';
@@ -149,6 +149,8 @@ export default function ApplicantPoolBoard() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState('');
+  const [rejecting, setRejecting] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [filters, setFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const canClaim = ['recruiter', 'admin'].includes(user?.role);
@@ -175,6 +177,20 @@ export default function ApplicantPoolBoard() {
     if (!window.confirm(`Unlink ${a.name} from "${a.requirement_title}"? They leave your candidates for this job; their Profile is kept.`)) return;
     act(a.id, 'unlink', `${a.name} is unlinked from the job`);
   }
+  // "Reject" only categorises: the person leaves Pool / My candidates / All and is listed under Rejected (nothing else is touched).
+  async function rejectApplicant(event) {
+    event.preventDefault();
+    const a = rejecting;
+    setBusy(a.id);
+    try {
+      await apiClient.post(`/applicants/${a.id}/reject`, { reason: rejectReason.trim() });
+      pushSuccess(`${a.name} is rejected and moved to Rejected`);
+      setRejecting(null);
+      setRejectReason('');
+    } catch (e) { pushError(apiErrorMessage(e, 'Could not reject'), 'Not saved'); } finally { setBusy(''); refresh(); }
+  }
+  const canReject = (a) => ['new', 'assigned'].includes(a.status) && (a.status === 'new' ? ['admin', 'sales', 'recruiter'].includes(user?.role) : (user?.role === 'admin' || a.assigned_to?.id === user?.id));
+  const canRestore = (a) => a.status === 'rejected' && (user?.role === 'admin' || a.rejected_by?.id === user?.id);
   async function deleteApplicant(a) {
     if (!window.confirm(`Delete ${a.name} from "${a.requirement_title}"? They disappear from the lists. A group super admin can restore them from Group Dashboard > Logs.`)) return;
     setBusy(a.id);
@@ -182,14 +198,14 @@ export default function ApplicantPoolBoard() {
   }
 
   const rows = list.data?.rows || [];
-  const counts = list.data?.counts || { pool: 0, mine: 0, all: 0 };
+  const counts = list.data?.counts || { pool: 0, mine: 0, all: 0, rejected: 0 };
   // before the first answer arrives (and while a new view loads) show a loading row, not "nobody is waiting"
   const loadingRows = list.loading && !rows.length;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5" role="tablist" aria-label="Applicant view">
-          {[['pool', `Pool (${counts.pool})`], ['mine', `My candidates (${counts.mine})`], ['all', `All (${counts.all})`]].map(([k, label]) => (
+          {[['pool', `Pool (${counts.pool})`], ['mine', `My candidates (${counts.mine})`], ['all', `All (${counts.all})`], ['rejected', `Rejected (${counts.rejected ?? 0})`]].map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === k ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
           ))}
         </div>
@@ -266,7 +282,7 @@ export default function ApplicantPoolBoard() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[58rem] text-sm">
             <thead className="bg-[#F9FAFB] text-left text-xs uppercase tracking-wide text-tertiary-500">
-              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Requirement</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Screening</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
+              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Requirement</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Screening</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : view === 'rejected' ? 'Rejected' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
             </thead>
             <tbody>
               {rows.map((a) => (
@@ -279,7 +295,14 @@ export default function ApplicantPoolBoard() {
                   <td className="px-3">
                     {a.status === 'new' ? <Pill tone="blue">In pool</Pill>
                       : a.status === 'unlinked' ? <Pill tone="gray">Unlinked</Pill>
-                        : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
+                        : a.status === 'rejected' ? <Pill tone="red">Rejected</Pill>
+                          : <Pill tone="green">With {a.assigned_to?.name || 'a recruiter'}</Pill>}
+                    {a.status === 'rejected' && (
+                      <div className="mt-1 text-xs text-tertiary-600" data-testid="reject-info">
+                        <p>{a.reject_reason || <span className="text-tertiary-400">No reason given</span>}</p>
+                        <p className="text-tertiary-500">{[a.rejected_by?.name ? `by ${a.rejected_by.name}` : null, a.rejected_at ? ago(a.rejected_at) : null].filter(Boolean).join(' · ')}</p>
+                      </div>
+                    )}
                     {a.status === 'assigned' && (a.profile_id
                       ? <p className="mt-1 text-xs"><Link className="text-primary-700 hover:underline" to={`/profiles/${a.profile_id}`}>Open profile</Link></p>
                       : <p className="mt-1 text-xs text-tertiary-500">Profile not created</p>)}
@@ -300,6 +323,12 @@ export default function ApplicantPoolBoard() {
                     {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
                       <button type="button" className="btn-secondary mr-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
                     )}
+                    {canReject(a) && (
+                      <button type="button" title="Reject this applicant (moves to Rejected)" className="btn-secondary ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-danger-700" disabled={busy === a.id} onClick={() => { setRejecting(a); setRejectReason(''); }}><Ban className="h-3.5 w-3.5" />Reject</button>
+                    )}
+                    {canRestore(a) && (
+                      <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'unreject', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Restore to pool</button>
+                    )}
                     {(a.status === 'new' ? ['admin', 'sales', 'recruiter'].includes(user?.role) : (user?.role === 'admin' || a.assigned_to?.id === user?.id)) && (
                       <button type="button" title="Delete applicant" className="ml-1 rounded p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy === a.id} onClick={() => deleteApplicant(a)}><Trash2 className="h-4 w-4" /></button>
                     )}
@@ -312,7 +341,7 @@ export default function ApplicantPoolBoard() {
               {!rows.length && !loadingRows && (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500">
                   <UserPlus className="mx-auto mb-2 h-6 w-6 text-tertiary-300" />
-                  {view === 'mine' ? 'You have not claimed anyone yet. Open the Pool and press "Assign to me".' : 'Nobody is waiting in the pool. Applicants appear here as they apply (or add one by hand).'}
+                  {view === 'mine' ? 'You have not claimed anyone yet. Open the Pool and press "Assign to me".' : view === 'rejected' ? 'Nobody is rejected. Use "Reject" on an applicant to move them here.' : 'Nobody is waiting in the pool. Applicants appear here as they apply (or add one by hand).'}
                 </td></tr>
               )}
             </tbody>
@@ -322,6 +351,24 @@ export default function ApplicantPoolBoard() {
       {list.data?.pagination && <p className="px-1 text-xs text-tertiary-500">{rows.length} of {list.data.pagination.total}</p>}
       <AddApplicantDrawer open={addOpen} requirements={reqs.data} requirementId={requirementId} onClose={() => setAddOpen(false)} onSaved={refresh} />
       <AddApplicantDrawer open={Boolean(editing)} applicant={editing} requirements={reqs.data} onClose={() => setEditing(null)} onSaved={refresh} />
+      <Drawer
+        open={Boolean(rejecting)}
+        title="Reject applicant"
+        onClose={() => !busy && setRejecting(null)}
+        size="sm"
+        tone="edit"
+        footer={(
+          <>
+            <button type="button" className="btn-secondary" onClick={() => setRejecting(null)} disabled={Boolean(busy)}>Cancel</button>
+            <button type="submit" form="reject-applicant-form" className="btn-primary" disabled={Boolean(busy)}>{busy ? 'Rejecting…' : 'Reject applicant'}</button>
+          </>
+        )}
+      >
+        <form id="reject-applicant-form" onSubmit={rejectApplicant} className="space-y-3">
+          <p className="text-sm text-tertiary-600"><span className="font-medium">{rejecting?.name}</span> moves to <b>Rejected</b> for &quot;{rejecting?.requirement_title}&quot;. Nothing else changes, and you can restore them later.</p>
+          <label className={labelCls}>Reason (optional)<textarea rows={3} maxLength={300} className={inputCls} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="For example: notice period too long, expected CTC too high" /></label>
+        </form>
+      </Drawer>
     </div>
   );
 }
