@@ -227,6 +227,7 @@ describe('Team capacity', () => {
       team_salary: 168000, // 4 x 42,000 CTC
       vendor_cost: 0,
       monthly_billing: 420000, // two Managed Services projects at 210,000 a month
+      profit: 252000, // 420,000 billing - 168,000 salary - 0 vendor
     });
 
     // Capability is a whole number, rounded up: capacity 4.52 - allocation 2 = 2.52 shows as 3; can allocate follows it.

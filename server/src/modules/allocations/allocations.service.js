@@ -529,6 +529,7 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
         monthly_billing: monthlyBilling,
         team_salary: teamSalary,
         vendor_cost: vendorCost,
+        profit: round2(monthlyBilling - teamSalary - vendorCost),
         team: r.team,
         lead: r.lead,
         members,
@@ -563,6 +564,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       monthly_billing: round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)),
       team_salary: sum('team_salary'),
       vendor_cost: sum('vendor_cost'),
+      // Profit = Total monthly billing - Total team salary - Total vendor cost (same formula as each team row)
+      profit: round2(round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)) - sum('team_salary') - sum('vendor_cost')),
     },
   };
 }
