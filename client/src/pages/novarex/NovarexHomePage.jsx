@@ -15,6 +15,7 @@ import NxFilterBar, { useNxFilters } from '../../components/novarex/NxFilters.js
 import OutletsOverview from '../../components/novarex/OutletsOverview.jsx';
 import { CategoryChart, ExpenseTrendChart, IncomeChart, InvestmentFlowChart, InvestmentReturnsChart, NetTrendChart, ProjectedActualChart, VT_PIE } from '../../components/novarex/NxCharts.jsx';
 import { Delta, Empty, Kpi, Money, card } from '../../components/novarex/ui.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const KPI_HINT = (text, change, inverse) => (<><span className="block">{text}</span>{change && <Delta pct={change.pct} inverse={inverse} />}</>);
 
@@ -183,6 +184,8 @@ export default function NovarexHomePage() {
           {data.investments.length === 0 && <Empty>No investments yet. Add the first one to start tracking capital and returns.</Empty>}
         </div>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

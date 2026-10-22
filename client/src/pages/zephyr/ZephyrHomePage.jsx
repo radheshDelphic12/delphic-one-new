@@ -10,6 +10,7 @@ import { UNIT_STATUSES } from '../../lib/zephyr/propertyMeta.js';
 import { SERVICE_META, useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
 import { compact, dateLabel } from '../../lib/format.js';
 import ZephyrTrendChart from '../../components/zephyr/ZephyrTrendChart.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const card = 'rounded-2xl border bg-white p-4 shadow-soft md:p-5';
 const STAGE_ROWS = [
@@ -263,6 +264,8 @@ function Dashboard({ me, user }) {
           </div>
         </Panel>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }
@@ -288,6 +291,7 @@ export default function ZephyrHomePage() {
           <p className="mt-1 text-sm text-tertiary-600">Your assigned projects, salary slips and tasks are in one place.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{mine.map((s) => <SectionCard key={s.key} section={s} />)}</div>
+        <AnnouncementsCard />
       </div>
     );
   }

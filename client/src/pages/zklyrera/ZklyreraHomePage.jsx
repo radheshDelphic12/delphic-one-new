@@ -13,6 +13,7 @@ import ChartCard from '../../components/ui/ChartCard.jsx';
 import ZkFilterBar, { useZkFilters } from '../../components/zklyrera/ZkFilters.jsx';
 import { CategoryChart, ExpenseTrendChart, IncomeChart, InvestmentFlowChart, InvestmentReturnsChart, NetTrendChart, ProjectedActualChart, ZK_PIE } from '../../components/zklyrera/ZkCharts.jsx';
 import { Delta, Empty, Kpi, Money, card } from '../../components/zklyrera/ui.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const KPI_HINT = (text, change, inverse) => (<><span className="block">{text}</span>{change && <Delta pct={change.pct} inverse={inverse} />}</>);
 
@@ -153,6 +154,8 @@ export default function ZklyreraHomePage() {
           {data.investments.length === 0 && <Empty>No investments yet. Add the first one to start tracking capital and returns.</Empty>}
         </div>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

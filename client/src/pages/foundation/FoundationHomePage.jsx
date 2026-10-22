@@ -15,6 +15,7 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import { Empty, Kpi, Money, card } from '../../components/foundation/ui.jsx';
 import { FX_COLORS, MonthlyChart } from '../../components/foundation/FxCharts.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const BLANK = { from: '', to: '', category_id: '', status: '', state: '', city: '', q: '' };
 const ATTENTION_ORDER = ['over_budget', 'projected_overrun', 'delayed', 'no_budget', 'ending_with_funds', 'behind_plan', 'completed_unspent'];
@@ -135,6 +136,8 @@ export default function FoundationHomePage() {
           </section>
         </div>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }
