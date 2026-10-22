@@ -1,6 +1,6 @@
 const express = require('express');
 const { canMethod } = require('../../lib/permissions');
-const { authenticate, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
@@ -110,9 +110,12 @@ function failFor(res, error, result) {
 // projectPnl.service for the rules.
 const adminInOrg = [requireOrgMembership, canMethod('financials', 'admin')];
 
+// The vendor account list is a pick-list (People profile, Assets, Users: assigning a contractor's vendor), not a money screen,
+// so it stays open to every admin, including a custom role that has no financials permission.
 router.get(
   '/vendors',
-  ...adminInOrg,
+  requireOrgMembership,
+  authorize('admin'),
   asyncHandler(async (req, res) => ok(res, await pnlService.listVendors(req.user.org_id)))
 );
 

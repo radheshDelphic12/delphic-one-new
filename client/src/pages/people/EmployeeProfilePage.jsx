@@ -324,15 +324,18 @@ export default function EmployeeProfilePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // Only the profile itself is essential. The pick-lists (departments, vendors, shifts...) must never stop the page from opening:
+    // if one of them is refused for this role the list is simply empty.
+    const optional = (request) => request.catch(() => ({ data: { data: [] } }));
     Promise.all([
       apiClient.get(`/orgs/memberships/${id}`),
-      user?.role === 'admin' ? apiClient.get('/departments') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/designations') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/teams') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/billing/vendors') : Promise.resolve({ data: { data: [] } }),
-      apiClient.get('/orgs/locations'),
-      apiClient.get('/attendance/shifts'),
-      apiClient.get('/orgs/memberships'),
+      user?.role === 'admin' ? optional(apiClient.get('/departments')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/designations')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/teams')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/billing/vendors')) : Promise.resolve({ data: { data: [] } }),
+      optional(apiClient.get('/orgs/locations')),
+      optional(apiClient.get('/attendance/shifts')),
+      optional(apiClient.get('/orgs/memberships')),
     ])
       .then(([profile, departments, designations, teams, vendors, locations, shifts, people]) => {
         if (cancelled) return;
