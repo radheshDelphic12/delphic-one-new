@@ -9,6 +9,7 @@ const prisma = require('../../config/db');
 const dashboard = require('../timesheets/dashboard.service');
 const leave = require('../leave/leave.service');
 const { todayIst } = require('../../lib/istDate');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 const monthBounds = (year, month) => ({ from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) });
@@ -33,7 +34,10 @@ function employmentState(m, today) {
 const matchesStatus = (state, status) => (status === 'all' ? true : status === 'current' ? state !== 'exited' : state === status);
 
 // Employees (IT and non-IT) the caller may open. Contractors and vendor resources have no attendance.
-async function people(orgId, user, { year, month, status = 'current' }) {
+// Work type (no work mode set counts as on-site) and reporting office filters shared by the list and the register.
+const matchesWorkplace = (m, { work_mode: mode, location_id: locationId }) => (!mode || (m.work_mode || 'onsite') === mode) && (!locationId || m.location_id === locationId);
+
+async function people(orgId, user, { year, month, status = 'current', work_mode, location_id }) {
   const { from, to } = monthBounds(year, month);
   const today = todayIst();
   const visible = await dashboard.visibleMembers(orgId, user, { includeExited: true });
@@ -41,7 +45,7 @@ async function people(orgId, user, { year, month, status = 'current' }) {
   const [allMembers, records] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { id: { in: ids } },
-      select: { id: true, work_mode: true, employment_status: true, left_at: true, notice_end_date: true, location: { select: { id: true, name: true } }, person: { select: { name: true, department: { select: { name: true } } } } },
+      select: { id: true, work_mode: true, location_id: true, employment_status: true, left_at: true, notice_end_date: true, location: { select: { id: true, name: true } }, person: { select: { name: true, department: { select: { name: true } } } } },
       orderBy: { person: { name: 'asc' } },
     }),
     prisma.attendanceRecord.groupBy({ by: ['org_membership_id', 'status'], where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, _count: { _all: true } }),
@@ -52,7 +56,7 @@ async function people(orgId, user, { year, month, status = 'current' }) {
     c[r.status] = r._count._all;
     counts.set(r.org_membership_id, c);
   }
-  const members = allMembers.filter((m) => matchesStatus(employmentState(m, today), status));
+  const members = allMembers.filter((m) => matchesStatus(employmentState(m, today), status) && matchesWorkplace(m, { work_mode, location_id }));
   return {
     year,
     month,
@@ -65,6 +69,7 @@ async function people(orgId, user, { year, month, status = 'current' }) {
       department: m.person?.department?.name || null,
       reporting_office: m.location?.name || null,
       work_type: workTypeOf(m),
+      work_mode: m.work_mode || 'onsite',
       counts: counts.get(m.id) || {},
     })),
   };
@@ -307,7 +312,8 @@ function registerCode(d, { today, inEmployment, workType, homeByDay }) {
   if (status === 'leave') return { code: 'L', kind: 'leave', label: d.attendance_label || 'Leave', days: 1 };
   if (status === 'holiday') return { code: 'H', kind: 'holiday' };
   if (status === 'absent') return { code: 'A', kind: 'absent' };
-  if (future || d.date === today) return { code: '', kind: 'none' };
+  // an approved work-from-home day that is still to come (or today, before check-in) shows as WFH, but is not counted until it is worked
+  if (future || d.date === today) return homeByDay.has(d.date) ? { code: 'WFH', kind: 'planned', label: 'Work from home (approved)' } : { code: '', kind: 'none' };
   return { code: 'A', kind: 'absent', label: 'Nothing recorded' };
 }
 
@@ -315,7 +321,7 @@ const REGISTER_CONCURRENCY = 6;
 
 // Monthly register of everyone the caller may see (same visibility and status filter as the employee list; no contractors).
 // `days` per person carries both the attendance code and the project hours of the day, so one load serves both register views.
-async function register(orgId, user, { year, month, status = 'current' }) {
+async function register(orgId, user, { year, month, status = 'current', work_mode, location_id }) {
   const { from, to } = monthBounds(year, month);
   const todayDate = todayIst();
   const today = ymd(todayDate);
@@ -324,7 +330,7 @@ async function register(orgId, user, { year, month, status = 'current' }) {
   const [members, homeRows, recordRows] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { id: { in: ids } },
-      select: { id: true, work_mode: true, joined_at: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true, department: { select: { name: true } } } } },
+      select: { id: true, work_mode: true, location_id: true, joined_at: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true, department: { select: { name: true } } } } },
       orderBy: { person: { name: 'asc' } },
     }),
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
@@ -337,7 +343,7 @@ async function register(orgId, user, { year, month, status = 'current' }) {
     if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
     homeBy.get(r.org_membership_id).add(ymd(r.date));
   }
-  const shown = members.filter((m) => matchesStatus(employmentState(m, todayDate), status));
+  const shown = members.filter((m) => matchesStatus(employmentState(m, todayDate), status) && matchesWorkplace(m, { work_mode, location_id }));
 
   const build = async (m) => {
     const cal = await dashboard.monthCalendar(orgId, m.id, { year, month });
@@ -375,7 +381,14 @@ async function register(orgId, user, { year, month, status = 'current' }) {
   const people = [];
   for (let i = 0; i < shown.length; i += REGISTER_CONCURRENCY) people.push(...(await Promise.all(shown.slice(i, i + REGISTER_CONCURRENCY).map(build))));
   const dayList = [...Array(to.getUTCDate())].map((_, i) => { const dt = new Date(Date.UTC(year, month - 1, i + 1)); return { date: ymd(dt), weekday: dt.getUTCDay() }; });
-  return { year, month, status, today, days: dayList, people };
+  // every active project whose agreement overlaps the month, so the project view lists them even where nobody logged hours
+  const accounts = await prisma.account.findMany({
+    where: { AND: [projectListWhere(orgId), { OR: [{ agreement_start_date: null }, { agreement_start_date: { lte: to } }] }, { OR: [{ agreement_end_date: null }, { agreement_end_date: { gte: from } }] }] },
+    select: { name: true, project_name: true },
+    orderBy: { name: 'asc' },
+  });
+  const projects = accounts.map((a) => a.project_name || a.name);
+  return { year, month, status, today, days: dayList, people, projects };
 }
 
 module.exports = { people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };

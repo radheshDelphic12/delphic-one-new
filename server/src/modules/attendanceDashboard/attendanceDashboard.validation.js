@@ -5,7 +5,11 @@ const monthQuery = z.object({
   month: z.coerce.number().int().min(1).max(12),
 });
 // Employee list filter: current = everyone still working (incl. serving notice), or only active / notice_period / exited, or all.
-const peopleQuery = monthQuery.extend({ status: z.enum(['current', 'active', 'notice_period', 'exited', 'all']).default('current') });
+const peopleQuery = monthQuery.extend({ status: z.enum(['current', 'active', 'notice_period', 'exited', 'all']).default('current'),
+  // optional: only Remote / Hybrid / On-site people, and only people reporting to one office
+  work_mode: z.enum(['remote', 'hybrid', 'onsite']).optional(),
+  location_id: z.string().uuid().optional(),
+});
 const calendarQuery = monthQuery.extend({ org_membership_id: z.string().uuid().optional() });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 

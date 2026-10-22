@@ -220,7 +220,12 @@ export default function AttendanceDashboard() {
   // 'register' = the whole month for everyone (admins land here), 'all' = the summary table, 'person' = one calendar
   const [view, setView] = useState(isAdmin ? 'register' : 'person');
   const [status, setStatus] = useState('current');
+  const [workMode, setWorkMode] = useState('');
+  const [locationId, setLocationId] = useState('');
+  const [officeList, setOfficeList] = useState([]);
   const [list, setList] = useState(null);
+
+  useEffect(() => { apiClient.get('/orgs/locations').then(({ data }) => setOfficeList(data.data || [])).catch(() => setOfficeList([])); }, []);
   const [memberId, setMemberId] = useState(user?.org_membership_id || '');
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -229,7 +234,7 @@ export default function AttendanceDashboard() {
 
   useEffect(() => {
     let alive = true;
-    apiClient.get('/attendance-dashboard/people', { params: { year, month, status } })
+    apiClient.get('/attendance-dashboard/people', { params: { year, month, status, work_mode: workMode || undefined, location_id: locationId || undefined } })
       .then(({ data: res }) => {
         if (!alive) return;
         setList(res.data.people);
@@ -239,7 +244,7 @@ export default function AttendanceDashboard() {
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load employees'), 'Something went wrong'));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month, status, reloadKey]);
+  }, [year, month, status, workMode, locationId, reloadKey]);
 
   useEffect(() => {
     if (!memberId) return undefined;
@@ -291,6 +296,20 @@ export default function AttendanceDashboard() {
               <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by status">{STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
             </label>
           )}
+          {list && (
+            <>
+              <label className="text-xs font-medium text-tertiary-600">Work type
+                <select value={workMode} onChange={(e) => setWorkMode(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by work type">
+                  <option value="">All</option><option value="onsite">On-site</option><option value="hybrid">Hybrid</option><option value="remote">Remote</option>
+                </select>
+              </label>
+              <label className="text-xs font-medium text-tertiary-600">Office location
+                <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by office location">
+                  <option value="">All locations</option>{officeList.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </label>
+            </>
+          )}
           {list && list.length > 1 && (
             <label className="text-xs font-medium text-tertiary-600">Employee
               <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setView('person'); }} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{list.map((p) => <option key={p.org_membership_id} value={p.org_membership_id}>{p.name}{STATE_TAG[p.status] ? ` (${STATE_TAG[p.status]})` : ''}</option>)}</select>
@@ -309,7 +328,7 @@ export default function AttendanceDashboard() {
       <PendingPlaces onDecided={refresh} />
 
       {view === 'register' && list && list.length > 1 ? (
-        <AttendanceRegister year={year} month={month} status={status} canEdit={canEditDays} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
+        <AttendanceRegister year={year} month={month} status={status} workMode={workMode} locationId={locationId} canEdit={canEditDays} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
       ) : view === 'all' ? (
         <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <table className="min-w-full text-sm">

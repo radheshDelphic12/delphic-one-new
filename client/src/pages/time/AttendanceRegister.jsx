@@ -13,6 +13,7 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 // Cell tone per kind of day. Leave codes (CL, SL, EL, CO ...) all share the leave tone.
 const TONE = {
   present: 'bg-green-50 text-green-700',
+  planned: 'bg-green-50/60 text-green-600',
   half_day: 'bg-amber-50 text-amber-700',
   leave: 'bg-blue-50 text-blue-700',
   absent: 'bg-red-50 text-red-700',
@@ -38,7 +39,7 @@ const dayLabel = (d) => `${d.date.slice(8)} ${WEEKDAYS[d.weekday]}`;
  * "Attendance" shows a short code per day with per-person totals; "Project hours" shows the hours logged per day (project
  * breakdown on hover and in the expandable row) with a monthly total. Click a name to open that person's calendar.
  */
-export default function AttendanceRegister({ year, month, status, onOpenPerson, canEdit = false }) {
+export default function AttendanceRegister({ year, month, status, workMode = '', locationId = '', onOpenPerson, canEdit = false }) {
   const { pushError, pushSuccess } = useAlerts();
   const [mode, setMode] = useState('attendance');
   const [data, setData] = useState(null);
@@ -52,14 +53,14 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson, 
   useEffect(() => {
     let alive = true;
     // a change of month / status shows the loading state; a reload after an edit keeps the table (and its scroll position) in place
-    const key = `${year}-${month}-${status}`;
+    const key = `${year}-${month}-${status}-${workMode}-${locationId}`;
     if (lastParams.current !== key) { setData(null); lastParams.current = key; }
-    apiClient.get('/attendance-dashboard/register', { params: { year, month, status } })
+    apiClient.get('/attendance-dashboard/register', { params: { year, month, status, work_mode: workMode || undefined, location_id: locationId || undefined } })
       .then(({ data: res }) => { if (alive) setData(res.data); })
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the register'), 'Something went wrong'));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month, status, reloadKey]);
+  }, [year, month, status, workMode, locationId, reloadKey]);
 
   const projectTotals = useMemo(() => {
     const map = new Map();
@@ -93,6 +94,8 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson, 
         g.total = round(g.total + row.total);
       }
     }
+    // every project active in the month is listed, also where nobody logged hours
+    for (const name of data?.projects || []) if (!groups.has(name)) groups.set(name, { name, rows: [], total: 0 });
     for (const g of groups.values()) g.rows.sort((a, b) => b.total - a.total);
     return [...groups.values()].sort((a, b) => (a.name === NO_PROJECT) - (b.name === NO_PROJECT) || b.total - a.total);
   }, [data]);
@@ -163,12 +166,12 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson, 
                     <span className="block font-normal">{WEEKDAYS[d.weekday]}</span>
                   </th>
                 ))}
-                {mode === 'attendance' ? ['Present', 'Leave', 'Holidays', 'Absent'].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
+                {mode === 'attendance' ? ['Present', 'WFH', 'Leave', 'Holidays', 'Absent'].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
               </tr>
             </thead>
             {mode === 'hours' && group === 'project' ? (
               <tbody data-testid="project-groups">
-                {!projectGroups.length && <tr><td colSpan={cols + 2} className="p-4 text-sm text-tertiary-500">No hours logged this month.</td></tr>}
+                {!projectGroups.length && <tr><td colSpan={cols + 2} className="p-4 text-sm text-tertiary-500">No active projects this month.</td></tr>}
                 {projectGroups.map((g) => {
                   const expanded = openProjects.has(g.name);
                   return (
@@ -178,7 +181,7 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson, 
                           <button type="button" className="flex items-center gap-1 text-left font-semibold text-tertiary-800" aria-label={expanded ? `Collapse ${g.name}` : `Expand ${g.name}`} onClick={() => toggleProject(g.name)}>
                             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             {g.name}
-                            <span className="font-normal text-tertiary-500">· {hoursLabel(g.total)} h · {g.rows.length} {g.rows.length === 1 ? 'person' : 'people'}</span>
+                            <span className="font-normal text-tertiary-500">· {hoursLabel(g.total) || 0} h · {g.rows.length ? `${g.rows.length} ${g.rows.length === 1 ? 'person' : 'people'}` : 'no hours logged'}</span>
                           </button>
                         </td>
                       </tr>
@@ -231,6 +234,7 @@ export default function AttendanceRegister({ year, month, status, onOpenPerson, 
                       {mode === 'attendance' ? (
                         <>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700" title={`${p.totals.wfh} of these from home`}>{p.totals.present}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.totals.wfh}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-blue-700">{p.totals.leave}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-violet-700">{p.totals.holidays}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-red-700">{p.totals.absent}</td>
