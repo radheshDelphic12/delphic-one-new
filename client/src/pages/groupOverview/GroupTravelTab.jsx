@@ -114,10 +114,12 @@ export function MeetingsPanel({ trip, options, onChanged }) {
   const [m, setM] = useState({ org_id: '', account_id: '', title: '', scheduled_at: '', duration_minutes: 60, location: trip.destination || '', notes: '' });
   const linked = new Set(trip.meetings.map((x) => x.key));
   const [showAll, setShowAll] = useState(false);
+  const [companyId, setCompanyId] = useState('');
   const ymd = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10); // IST calendar day
   const unlinked = (options?.meetings || []).filter((x) => !linked.has(x.key));
   const onTripDates = unlinked.filter((x) => ymd(x.scheduled_at) >= trip.start_date && ymd(x.scheduled_at) <= trip.end_date);
-  const choices = showAll ? unlinked : onTripDates;
+  const byCompany = (list) => (companyId ? list.filter((x) => x.org_id === companyId) : list);
+  const choices = byCompany(showAll ? unlinked : onTripDates);
   async function run(fn, fail) {
     setBusy(true);
     try { await fn(); await onChanged(); } catch (e) { pushError(apiErrorMessage(e, fail), 'Not saved'); } finally { setBusy(false); }
@@ -131,7 +133,7 @@ export function MeetingsPanel({ trip, options, onChanged }) {
             <li key={x.key} className="flex items-start gap-2 px-3 py-2">
               <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" />
               <div className="min-w-0 flex-1 text-sm">
-                <p className="font-medium text-tertiary-900">{x.title}{x.account_name ? ` · ${x.account_name}` : ''}</p>
+                <p className="font-medium text-tertiary-900">{x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.org_name ? <span className="ml-2 rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] font-normal text-tertiary-600">{x.org_name}</span> : null}</p>
                 <p className="text-xs text-tertiary-500">{when(x.scheduled_at)}{x.location ? ` · ${x.location}` : ''}{x.mode === 'online' ? ' · online' : ''}</p>
               </div>
               <button type="button" title="Unlink (the meeting stays on the calendar)" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy} onClick={() => run(() => apiClient.delete(`/super-dashboard/group/travel/${trip.id}/meetings/${x.key}`), 'Could not unlink')}><Unlink className="h-4 w-4" /></button>
@@ -147,12 +149,18 @@ export function MeetingsPanel({ trip, options, onChanged }) {
       </div>
       {mode === 'link' ? (
         <div className="space-y-2">
-          <p className="text-xs text-tertiary-500">Meetings on the Delphic Global calendar{showAll ? ' (past year to next 6 months)' : ' during the trip dates'}. Linking does not move or change them.</p>
-          <label className="flex items-center gap-2 text-xs text-tertiary-600"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show meetings outside the trip dates</label>
+          <p className="text-xs text-tertiary-500">Meetings from the calendars of every company in the group{showAll ? ' (past year to next 6 months)' : ' during the trip dates'}. Linking does not move or change them.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-tertiary-600"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show meetings outside the trip dates</label>
+            <select className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" value={companyId} onChange={(e) => { setCompanyId(e.target.value); setKey(''); }} aria-label="Company">
+              <option value="">All companies</option>
+              {(options?.companies || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
           {!choices.length && <p className="text-xs text-warning-700">No meetings found {showAll ? '' : 'on the trip dates '}- use &ldquo;Add a new meeting&rdquo; if it is not on the calendar yet.</p>}
           <select className={inputCls} value={key} onChange={(e) => setKey(e.target.value)} aria-label="Calendar meeting">
             <option value="">Choose a meeting…</option>
-            {choices.map((x) => <option key={x.key} value={x.key}>{when(x.scheduled_at)} · {x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.mode === 'offline' ? ' (in person)' : ''}</option>)}
+            {choices.map((x) => <option key={x.key} value={x.key}>{x.org_name ? `[${x.org_name}] ` : ''}{when(x.scheduled_at)} · {x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.mode === 'offline' ? ' (in person)' : ''}</option>)}
           </select>
           <button type="button" className="btn-primary" disabled={!key || busy} onClick={() => run(async () => { await apiClient.post(`/super-dashboard/group/travel/${trip.id}/meetings`, { meeting_key: key }); setKey(''); }, 'Could not link the meeting')}>Link meeting</button>
         </div>
@@ -299,7 +307,7 @@ export default function GroupTravelTab() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard label="Trips" value={s?.trips ?? 0} hint={`${s?.ongoing ?? 0} on the road now`} icon={Plane} theme="blue" />
             <KpiCard label="People travelling" value={s?.travellers ?? 0} hint="Across all companies" icon={Users} theme="purple" />
-            <KpiCard label="Meetings linked" value={s?.meetings ?? 0} hint="From the Delphic Global calendar" icon={CalendarClock} theme="cyan" />
+            <KpiCard label="Meetings linked" value={s?.meetings ?? 0} hint="From all group companies' calendars" icon={CalendarClock} theme="cyan" />
             <KpiCard label="Budget" value={inr(s?.budget)} hint={`Spent ${inr(s?.spent)}${s?.needs_closing ? ` · ${s.needs_closing} to close` : ''}`} icon={Wallet} theme={s?.spent > s?.budget ? 'red' : 'green'} />
           </div>
           <ul className="space-y-3" aria-label="Trips">

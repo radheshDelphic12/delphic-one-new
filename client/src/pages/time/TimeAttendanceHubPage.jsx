@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, LayoutDashboard, ListChecks, UserCheck, Lock, Users, FileClock } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import AttendancePage from '../attendance/AttendancePage.jsx';
@@ -11,7 +11,8 @@ import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
 import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
-import TimesheetDashboard from './TimesheetDashboard.jsx';
+// Hidden on request – may be re-enabled later (see the 'dashboard' tab below).
+// import TimesheetDashboard from './TimesheetDashboard.jsx';
 import ProjectCalendarDashboard from './ProjectCalendarDashboard.jsx';
 import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
@@ -20,8 +21,8 @@ import RegularizationAdminTab from './RegularizationAdminTab.jsx';
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock },
   { key: 'leave', label: 'Leave', icon: CalendarCheck },
-  // Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
-  { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
+  // Hidden on request – may be re-enabled later. Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
+  // { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
   // Attendance only (no project hours): status, reporting office and office / home per day, plus leave balance.
   { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck },
   // Every project as a month calendar: hours, tasks, leave, holidays.
@@ -94,7 +95,8 @@ export default function TimeAttendanceHubPage() {
         </div>
       )}
       {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
-      {section === 'dashboard' && <TimesheetDashboard />}
+      {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
+      {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}
       {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}

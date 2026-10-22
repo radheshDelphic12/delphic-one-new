@@ -28,6 +28,18 @@ async function defaultMembershipFor(userId) {
   });
 }
 
+// An exited employee (every membership is Exited, none still working) can no longer sign in. Their access ends by itself
+// when the last working day passes (the nightly job flips the membership to Exited), with no one having to disable the user.
+// A group superadmin is never blocked this way, and people with no membership at all (or only not-yet-started ones) are unaffected.
+async function hasExited(user) {
+  if (user.is_group_superadmin) return false;
+  const [working, exited] = await Promise.all([
+    prisma.orgMembership.count({ where: { person_id: user.id, employment_status: { in: WORKING_STATUSES } } }),
+    prisma.orgMembership.count({ where: { person_id: user.id, employment_status: 'terminated' } }),
+  ]);
+  return working === 0 && exited > 0;
+}
+
 function signAccessToken(user, orgId, role) {
   return jwt.sign(
     { sub: user.id, role: role || user.role, name: user.name, email: user.email, org_id: orgId || null },
@@ -60,6 +72,7 @@ async function login(email, password, orgSlug) {
 
   const matches = await bcrypt.compare(password, user.password_hash);
   if (!matches) return null;
+  if (await hasExited(user)) return { error: 'exited' };
 
   // A group superadmin gets an admin membership in every company of the group on sign-in, so a company added since the
   // last visit (such as Gulati Foundation) is in the company list straight away.
@@ -112,6 +125,7 @@ async function refresh(refreshToken) {
 
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user || !user.active) return null;
+  if (await hasExited(user)) return null;
 
   // Re-verify the membership carried on the refresh token is still active
   // (offboarding takes effect on next refresh, not just next login) — if

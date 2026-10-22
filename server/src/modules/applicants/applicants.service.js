@@ -24,7 +24,7 @@ const addSchema = addBase.superRefine(screening.checkScreening);
 const updateSchema = addBase.omit({ requirement_id: true }).partial().superRefine(screening.checkScreening);
 const listSchema = z.object({
   requirement_id: z.string().uuid().optional(),
-  view: z.enum(['pool', 'mine', 'all']).default('pool'),
+  view: z.enum(['pool', 'mine', 'all', 'rejected']).default('pool'),
   search: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
@@ -46,6 +46,7 @@ const listSchema = z.object({
   recruiter_id: z.string().uuid().optional(),
 });
 const assignSchema = z.object({ user_id: z.string().uuid().optional() });
+const rejectSchema = z.object({ reason: text(300) });
 
 const LIVE_STATUSES = ['in_progress'];
 const liveRequirement = { status: { in: LIVE_STATUSES }, deleted_at: null };
@@ -84,6 +85,9 @@ function serialize(a, userNames, reqs) {
     profile_id: a.profile_id,
     profile_created: Boolean(a.profile_id),
     unlinked_at: a.unlinked_at || null,
+    rejected_at: a.rejected_at || null,
+    reject_reason: a.reject_reason || null,
+    rejected_by: a.rejected_by ? { id: a.rejected_by, name: userNames.get(a.rejected_by) || null } : null,
     notes: a.notes,
     applied_at: a.applied_at,
   };
@@ -152,29 +156,36 @@ function screeningWhere(q) {
 
 async function list(user, rawQuery) {
   const q = listSchema.parse(rawQuery);
+  // Rejected applicants are their own list: the Pool, My candidates and All never show them.
+  const statusWhere = q.view === 'rejected' ? { status: 'rejected' }
+    : q.assignment ? { status: q.assignment === 'unassigned' ? 'new' : 'assigned' }
+      : q.view === 'pool' ? { status: 'new' }
+        : q.view === 'mine' ? { status: 'assigned' }
+          : { status: { not: 'rejected' } };
   const where = {
     ...(q.requirement_id ? { requirement_id: q.requirement_id } : {}),
     requirement: liveRequirement,
-    ...(q.view === 'pool' ? { status: 'new' } : q.view === 'mine' ? { assigned_to: user.id, status: 'assigned' } : {}),
-    ...(q.assignment ? { status: q.assignment === 'unassigned' ? 'new' : 'assigned' } : {}),
+    ...statusWhere,
+    ...(q.view === 'mine' ? { assigned_to: user.id } : {}),
     ...(q.profile ? { profile_id: q.profile === 'created' ? { not: null } : null } : {}),
     ...(q.recruiter_id ? { assigned_to: q.recruiter_id } : {}),
     ...screeningWhere(q),
     ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { email: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] } : {}),
   };
-  const [total, rows, pool, mine, everyone] = await Promise.all([
+  const [total, rows, pool, mine, everyone, rejected] = await Promise.all([
     prisma.jobApplicant.count({ where }),
     prisma.jobApplicant.findMany({ where, orderBy: { applied_at: 'asc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
     prisma.jobApplicant.count({ where: { status: 'new', requirement: liveRequirement } }),
     prisma.jobApplicant.count({ where: { status: 'assigned', assigned_to: user.id, requirement: liveRequirement } }),
-    prisma.jobApplicant.count({ where: { requirement: liveRequirement } }),
+    prisma.jobApplicant.count({ where: { requirement: liveRequirement, status: { not: 'rejected' } } }),
+    prisma.jobApplicant.count({ where: { requirement: liveRequirement, status: 'rejected' } }),
   ]);
   const reqs = new Map((await prisma.requirement.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requirement_id))] } }, select: { id: true, title: true, account: { select: { name: true } } } })).map((r) => [r.id, r]));
-  const userNames = await names(rows.map((r) => r.assigned_to));
+  const userNames = await names(rows.flatMap((r) => [r.assigned_to, r.rejected_by]));
   return {
     rows: rows.map((r) => serialize(r, userNames, reqs)),
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
-    counts: { pool, mine, all: everyone },
+    counts: { pool, mine, all: everyone, rejected },
   };
 }
 
@@ -367,6 +378,34 @@ async function unlink(user, id) {
 }
 
 /**
+ * "Reject" at screening: the person is not taken forward. Only a categorisation: no Profile or submission is touched (a Profile
+ * already created stays). Anyone who handles applicants may reject someone from the pool; a claimed applicant only by whoever
+ * holds them, or an admin. The reason is optional. The person leaves the Pool / My candidates / All lists and shows under Rejected.
+ */
+async function reject(user, id, rawBody = {}) {
+  const { reason } = rejectSchema.parse(rawBody || {});
+  const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
+  if (!applicant) return { error: 'not_found' };
+  if (applicant.status === 'rejected') return { error: 'already_rejected' };
+  if (!['new', 'assigned'].includes(applicant.status)) return { error: 'cannot_reject' };
+  if (applicant.status === 'assigned' && user.role !== 'admin' && applicant.assigned_to !== user.id) return { error: 'forbidden' };
+  const row = await prisma.jobApplicant.update({ where: { id }, data: { status: 'rejected', rejected_at: new Date(), rejected_by: user.id, reject_reason: reason || null } });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_reject', entity_type: 'job_applicant', entity_id: id, reason: reason || `Rejected at screening: ${applicant.name}`, snapshot: { was: applicant.status, assigned_to: applicant.assigned_to, profile_id: applicant.profile_id } } });
+  return { applicant: serialize(row, await names([row.assigned_to, row.rejected_by]), null) };
+}
+
+/** Takes a rejected applicant back to the Pool (an admin, or whoever rejected them). Their earlier claim is not restored. */
+async function unreject(user, id) {
+  const applicant = await prisma.jobApplicant.findUnique({ where: { id } });
+  if (!applicant) return { error: 'not_found' };
+  if (applicant.status !== 'rejected') return { error: 'not_rejected' };
+  if (user.role !== 'admin' && applicant.rejected_by !== user.id) return { error: 'forbidden' };
+  const row = await prisma.jobApplicant.update({ where: { id }, data: { status: 'new', assigned_to: null, assigned_at: null, rejected_at: null, rejected_by: null, reject_reason: null } });
+  await prisma.auditLog.create({ data: { actor_id: user.id, action: 'applicant_unreject', entity_type: 'job_applicant', entity_id: id, reason: `Back in the pool: ${applicant.name}`, snapshot: { reject_reason: applicant.reject_reason } } });
+  return { applicant: serialize(row, new Map(), null) };
+}
+
+/**
  * Soft delete (restorable by the group super admin from Group Dashboard > Logs). Anyone who handles applicants may delete a
  * person from the pool; a claimed applicant only by whoever holds them, or an admin. The one-application-per-email key is
  * freed so the same person can apply again; restoring takes it back. The CV file stays, since the record can come back.
@@ -380,4 +419,4 @@ async function remove(user, id, reason) {
   return { id };
 }
 
-module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, createProfile, unlink, remove };
+module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, createProfile, unlink, reject, unreject, remove };

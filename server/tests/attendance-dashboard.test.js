@@ -200,3 +200,40 @@ describe('attendance dashboard', () => {
     expect((await get(`/projects/${project.id}/calendar?year=2026&month=11`, ctx.admin)).status).toBe(200);
   });
 });
+
+describe('monthly register', () => {
+  test('one response holds every employee x every day with codes, per-person totals and project hours; contractors and future absences stay out', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Reg Employee');
+    await ctx.person('Reg Contractor', { workerType: 'contractor' });
+    const day = (s) => new Date(`${s}T00:00:00Z`);
+    const att = (date, status) => prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: day(date), status } });
+    await att('2026-09-01', 'present');
+    await att('2026-09-02', 'wfh');
+    await att('2026-09-03', 'half_day');
+    await att('2026-09-04', 'absent');
+    const type = await prisma.leaveType.create({ data: { org_id: ctx.org.id, name: 'Casual Leave' } });
+    await prisma.leaveRequest.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, leave_type_id: type.id, from_date: day('2026-09-07'), to_date: day('2026-09-07'), status: 'approved' } });
+    await prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: day('2026-09-01'), hours: 6, status: 'approved' } });
+
+    const res = await get('/register?year=2026&month=9', ctx.admin);
+    expect(res.status).toBe(200);
+    expect(res.body.data.days).toHaveLength(30);
+    expect(res.body.data.people.map((p) => p.name)).not.toContain('Reg Contractor');
+    const row = res.body.data.people.find((p) => p.name === 'Reg Employee');
+    const code = (d) => row.days.find((x) => x.date === `2026-09-${d}`).code;
+    expect(code('01')).toBe('P');
+    expect(code('02')).toBe('WFH');
+    expect(code('03')).toBe('HD');
+    expect(code('04')).toBe('A');
+    expect(code('05')).toBe('WO'); // Saturday
+    expect(code('07')).toBe('CL');
+    expect(code('08')).toBe('A'); // a past working day with nothing recorded
+    expect(row.totals).toMatchObject({ present: 2.5, wfh: 1, half_day: 1, leave: 1, absent: expect.any(Number), hours: 6 });
+    expect(row.days.find((d) => d.date === '2026-09-01').hours).toBe(6);
+
+    const future = await get('/register?year=2026&month=12', ctx.admin);
+    expect(future.body.data.people[0].days.find((d) => d.date === '2026-12-02').code).toBe(''); // future working day stays blank
+    expect(future.body.data.people[0].totals.absent).toBe(0);
+  });
+});

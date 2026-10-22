@@ -125,6 +125,16 @@ describe('group travel', () => {
     const forBeta = await post(`/group/travel/${trip.id}/meetings/new`, { org_id: b.id, account_id: betaClient.id, title: 'Beta visit', scheduled_at: new Date(Date.now() + 86400000).toISOString() });
     expect(forBeta.status).toBe(201);
     expect(await prisma.clientMeeting.findFirst({ where: { title: 'Beta visit' } })).toMatchObject({ org_id: b.id, account_id: betaClient.id });
+    // the link list holds the meetings of EVERY group company, each tagged with its company; another group's meetings are not offered or linkable
+    const stray = await createOrg({ name: 'Other Group Co' });
+    const strayClient = await prisma.account.create({ data: { type: 'client', name: 'Stray client', stage: 'active', owner_id: (await createUser({ role: 'admin', withOrg: false })).id, origin_owner_id: (await createUser({ role: 'admin', withOrg: false })).id, org_id: stray.id } });
+    const strayMeeting = await prisma.clientMeeting.create({ data: { account_id: strayClient.id, org_id: stray.id, title: 'Stray meeting', mode: 'offline', scheduled_at: new Date(Date.now() + 86400000), duration_minutes: 60, created_by: strayClient.owner_id } });
+    const listed = (await get('/group/travel/options')).body.data.meetings;
+    expect(listed.find((m) => m.title === 'Beta visit')).toMatchObject({ org_id: b.id, org_name: 'Beta Trading', account_name: 'Beta client' });
+    expect(listed.map((m) => m.title)).not.toContain('Stray meeting');
+    expect((await post(`/group/travel/${trip.id}/meetings`, { meeting_key: `cm-${strayMeeting.id}` })).status).toBe(404);
+    const linkedBeta = await post(`/group/travel/${trip.id}/meetings`, { meeting_key: listed.find((m) => m.title === 'Beta visit').key });
+    expect(linkedBeta.body.data.meetings.find((m) => m.title === 'Beta visit')).toMatchObject({ org_name: 'Beta Trading' });
     // the company has to match the client
     expect((await post(`/group/travel/${trip.id}/meetings/new`, { org_id: a.id, account_id: betaClient.id, title: 'x', scheduled_at: new Date(Date.now() + 86400000).toISOString() })).status).toBe(422);
     // a client of a company outside the group

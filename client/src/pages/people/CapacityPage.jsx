@@ -162,6 +162,7 @@ function TeamCapacityReport() {
     { key: 'billing', header: 'Total monthly billing', render: (r) => (r.team ? inr(r.monthly_billing) : '—') },
     { key: 'salary', header: 'Total team salary', render: (r) => (r.team ? inr(r.team_salary) : '—') },
     { key: 'vendor', header: 'Total vendor cost', render: (r) => (r.team ? inr(r.vendor_cost) : '—') },
+    { key: 'profit', header: 'Profit', render: (r) => (r.team ? <span className={`font-semibold ${r.profit < 0 ? 'text-danger-700' : 'text-success-700'}`}>{inr(r.profit)}</span> : '—') },
     { key: 'status', header: 'Status', render: (r) => { const [label, tone] = CAPACITY_STATUS[r.status] || [r.status, 'gray']; return <Pill tone={tone}>{label}</Pill>; } },
   ];
 
@@ -184,8 +185,8 @@ function TeamCapacityReport() {
       {data && (
         <p className="text-xs text-tertiary-500">
           Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
-          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)} · monthly billing {inr(data.totals.monthly_billing)} · team salary {inr(data.totals.team_salary)} · vendor cost {inr(data.totals.vendor_cost)}.
-          {' '}Monthly billing = the contract monthly value of the team&apos;s running Managed Services projects (Fixed cost and Recruitment projects count as 0). Team salary = monthly CTC of employees; vendor cost = monthly vendor rate of contractors.
+          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)} · monthly billing {inr(data.totals.monthly_billing)} · team salary {inr(data.totals.team_salary)} · vendor cost {inr(data.totals.vendor_cost)} · profit {inr(data.totals.profit)}.
+          {' '}Monthly billing = the contract monthly value of the team&apos;s running Managed Services projects (Fixed cost and Recruitment projects count as 0). Team salary = monthly CTC of employees; vendor cost = monthly vendor rate of contractors. Profit = total monthly billing − total team salary − total vendor cost.
         </p>
       )}
       <TeamDetailDrawer row={open} date={data?.date} onClose={() => setOpen(null)} />

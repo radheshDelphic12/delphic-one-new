@@ -2741,7 +2741,7 @@ model JobApplicant {
   expected_ctc_lpa   Decimal?    @db.Decimal(7, 2)
   work_mode          String? // remote | onsite | hybrid
   extra_skills       String[]    @default([])
-  status             String      @default("new") // new | assigned | rejected
+  status             String      @default("new") // new | assigned | unlinked | rejected
   assigned_to        String?     @db.Uuid
   assigned_at        DateTime?
   profile_id         String?     @db.Uuid
@@ -2756,6 +2756,10 @@ model JobApplicant {
   delete_reason      String?
   // "Unlink from job": the recruiter detached this person from the job; the Profile stays.
   unlinked_at        DateTime?
+  // "Reject" at screening: who, when and why. Status 'rejected' takes the person out of the Pool / My candidates / All lists.
+  rejected_at        DateTime?
+  rejected_by        String?     @db.Uuid
+  reject_reason      String?
   // Lower-cased email: one person applies once to a requirement (unique with requirement_id). Empty for a person
   // with no email, for a deleted applicant, and for older duplicate rows (kept, not merged).
   dedupe_key         String?

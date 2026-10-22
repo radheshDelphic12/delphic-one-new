@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, CalendarCheck, ChevronLeft, ChevronRight, Home, Users } from 'lucide-react';
+import { Building2, CalendarCheck, ChevronLeft, ChevronRight, Grid3x3, Home, User } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import AttendanceRegister from './AttendanceRegister.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -213,7 +214,8 @@ export default function AttendanceDashboard() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [view, setView] = useState('person');
+  // 'register' = the whole month for everyone (admins land here), 'all' = the summary table, 'person' = one calendar
+  const [view, setView] = useState(isAdmin ? 'register' : 'person');
   const [status, setStatus] = useState('current');
   const [list, setList] = useState(null);
   const [memberId, setMemberId] = useState(user?.org_membership_id || '');
@@ -283,7 +285,7 @@ export default function AttendanceDashboard() {
           <button type="button" className="btn-ghost" aria-label="Next month" onClick={() => step(1)}><ChevronRight className="h-4 w-4" /></button>
           {list && (
             <label className="text-xs font-medium text-tertiary-600">Status
-              <select value={status} onChange={(e) => { setStatus(e.target.value); setView('person'); }} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by status">{STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm" aria-label="Filter employees by status">{STATUS_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
             </label>
           )}
           {list && list.length > 1 && (
@@ -292,14 +294,20 @@ export default function AttendanceDashboard() {
             </label>
           )}
           {list && list.length > 1 && (
-            <button type="button" className="btn-secondary inline-flex items-center gap-1" onClick={() => setView(view === 'all' ? 'person' : 'all')}><Users className="h-4 w-4" /> {view === 'all' ? 'One employee' : 'All employees'}</button>
+            <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5 text-sm" role="group" aria-label="View">
+              {[['register', 'Register', Grid3x3], ['all', 'Summary', CalendarCheck], ['person', 'One employee', User]].map(([k, label, Icon]) => (
+                <button key={k} type="button" onClick={() => setView(k)} className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-medium ${view === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500 hover:text-tertiary-800'}`}><Icon className="h-3.5 w-3.5" /> {label}</button>
+              ))}
+            </div>
           )}
         </div>
       </div>
 
       <PendingPlaces onDecided={refresh} />
 
-      {view === 'all' ? (
+      {view === 'register' && list && list.length > 1 ? (
+        <AttendanceRegister year={year} month={month} status={status} onOpenPerson={(id) => { setMemberId(id); setView('person'); }} />
+      ) : view === 'all' ? (
         <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <table className="min-w-full text-sm">
             <thead><tr className="text-left text-xs text-tertiary-500"><th className="p-3">Employee</th><th>Status</th><th>Department</th><th>Reporting office</th><th>Work type</th><th className="text-right">Present</th><th className="text-right">WFH</th><th className="text-right">Half</th><th className="text-right">Leave</th><th className="pr-3 text-right">Absent</th></tr></thead>

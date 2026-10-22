@@ -8,9 +8,9 @@ const MAX_ATTEMPTS = 5;
 
 let cachedTransport;
 function getTransport() {
-  const url = env.notifications.email.smtpUrl;
-  if (!url) return null;
-  if (!cachedTransport) cachedTransport = nodemailer.createTransport(url);
+  const options = env.notifications.email.smtp;
+  if (!options) return null;
+  if (!cachedTransport) cachedTransport = nodemailer.createTransport(options);
   return cachedTransport;
 }
 

@@ -60,13 +60,15 @@ const env = {
   jobs: {
     enabled: process.env.NODE_ENV !== 'test' && process.env.ENABLE_JOBS !== 'false',
   },
-  // Email: NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465) turns on
-  // real delivery from the email_outbox queue (lib/email/outbox.js); unset, queued mail is
-  // marked `skipped`. msGraph (Teams meeting creation) is still reserved: nothing reads it yet.
+  // Email: NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465), or NOTIFICATIONS_SMTP_HOST/_PORT/_SECURE/_USER/_PASS
+  // (lib/email/smtpConfig.js), turns on real delivery from the email_outbox queue (lib/email/outbox.js); unset, queued mail is
+  // marked `skipped`. docs/guides/EMAIL-SMTP-PRODUCTION.md lists what production needs. msGraph (Teams meeting creation) is still reserved: nothing reads it yet.
   notifications: {
     email: {
       from: process.env.NOTIFICATIONS_EMAIL_FROM || null,
       smtpUrl: process.env.NOTIFICATIONS_SMTP_URL || null,
+      // transport options built from the separate NOTIFICATIONS_SMTP_* values (null when none are set)
+      smtp: require('../lib/email/smtpConfig').smtpOptionsFromEnv(process.env),
     },
     msGraph: {
       tenantId: process.env.MS_GRAPH_TENANT_ID || null,

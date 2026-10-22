@@ -12,7 +12,7 @@ import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
-import { EMPLOYMENT_STATUS_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
+import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -24,11 +24,6 @@ const EMPTY_OPTIONS = {
   managerOptions: [],
   personOptions: [],
 };
-
-const WORKER_TYPE_OPTIONS = [
-  { value: 'full_time_employee', label: 'Full-Time Employee' },
-  { value: 'contractor', label: 'Contractor' },
-];
 
 function formatMoney(value, currency) {
   if (value === null || value === undefined) return 'Not set';
@@ -329,15 +324,18 @@ export default function EmployeeProfilePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // Only the profile itself is essential. The pick-lists (departments, vendors, shifts...) must never stop the page from opening:
+    // if one of them is refused for this role the list is simply empty.
+    const optional = (request) => request.catch(() => ({ data: { data: [] } }));
     Promise.all([
       apiClient.get(`/orgs/memberships/${id}`),
-      user?.role === 'admin' ? apiClient.get('/departments') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/designations') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/teams') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/billing/vendors') : Promise.resolve({ data: { data: [] } }),
-      apiClient.get('/orgs/locations'),
-      apiClient.get('/attendance/shifts'),
-      apiClient.get('/orgs/memberships'),
+      user?.role === 'admin' ? optional(apiClient.get('/departments')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/designations')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/teams')) : Promise.resolve({ data: { data: [] } }),
+      user?.role === 'admin' ? optional(apiClient.get('/billing/vendors')) : Promise.resolve({ data: { data: [] } }),
+      optional(apiClient.get('/orgs/locations')),
+      optional(apiClient.get('/attendance/shifts')),
+      optional(apiClient.get('/orgs/memberships')),
     ])
       .then(([profile, departments, designations, teams, vendors, locations, shifts, people]) => {
         if (cancelled) return;

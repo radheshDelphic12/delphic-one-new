@@ -214,6 +214,8 @@ describe('enforced on the API', () => {
       if (sa.status === 403) throw new Error(`Super Admin refused on ${path}: ${sa.body.message}`);
       expect((await authed(request(app).get(path), plainAdmin.token)).status).not.toBe(403);
     }
+    // the vendor pick-list (used by the People profile to assign a contractor) is not a money screen: Admin keeps it
+    expect((await authed(request(app).get('/api/v1/billing/vendors'), admin.token)).status).toBe(200);
     // oversight stays
     expect((await authed(request(app).get('/api/v1/timesheets/entries'), admin.token)).status).toBe(200);
     expect((await authed(request(app).get('/api/v1/attendance'), admin.token)).status).toBe(200);
