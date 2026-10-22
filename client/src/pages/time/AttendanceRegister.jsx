@@ -20,7 +20,7 @@ const TONE = {
 };
 const LEGEND = [
   ['P', 'present', 'Present (office)'], ['WFH', 'present', 'Work from home'], ['HD', 'half_day', 'Half day'],
-  ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Other leave'],
+  ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['UL', 'leave', 'Unpaid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Other leave'],
   ['H', 'holiday', 'Holiday'], ['WO', 'weekly_off', 'Weekly off'], ['A', 'absent', 'Absent (working day, nothing recorded)'],
 ];
 const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };

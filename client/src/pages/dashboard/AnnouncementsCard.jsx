@@ -19,14 +19,17 @@ function Row({ icon: Icon, tone, item, text }) {
 }
 
 /** Birthdays and work anniversaries in the next 14 days (day and month only; no birth year). Hidden when there are none. */
-export default function AnnouncementsCard({ days = 14 }) {
+export default function AnnouncementsCard({ days = 14, showEmpty = false }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     let live = true;
     apiClient.get('/orgs/announcements', { params: { days } }).then(({ data: body }) => { if (live) setData(body.data); }).catch(() => {});
     return () => { live = false; };
   }, [days]);
-  if (!data || (data.birthdays.length === 0 && data.anniversaries.length === 0)) return null;
+  if (!data) return null;
+  if (data.birthdays.length === 0 && data.anniversaries.length === 0) {
+    return showEmpty ? <p className="rounded-2xl border border-tertiary-100 bg-white px-4 py-6 text-center text-sm text-tertiary-500 shadow-card">No birthdays or work anniversaries in the next {data.days} days.</p> : null;
+  }
   return (
     <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
       <h2 className="border-b border-tertiary-100 px-4 py-3 font-heading text-sm font-semibold text-tertiary-900">

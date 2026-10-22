@@ -273,13 +273,14 @@ async function decidePlace(orgId, user, id, { approve, reason }) {
 // Short leave code from the leave type's name: Casual -> CL, Sick -> SL, Earned / Paid -> EL, Comp off -> CO, else initials.
 function leaveCode(name) {
   const n = String(name || '').toLowerCase();
+  // Unpaid first: "Unpaid Leave" also contains "paid" and must not be shown as Earned / paid leave. UL is the code the Leave module uses.
+  if (/unpaid|loss of pay|lop/.test(n)) return 'UL';
   if (/comp/.test(n)) return 'CO';
   if (/casual/.test(n)) return 'CL';
   if (/sick|medical/.test(n)) return 'SL';
   if (/earned|privilege|paid|annual/.test(n)) return 'EL';
   if (/maternity/.test(n)) return 'ML';
   if (/paternity/.test(n)) return 'PL';
-  if (/unpaid|loss of pay|lop/.test(n)) return 'LWP';
   const initials = String(name || '').split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('').slice(0, 3);
   return initials || 'L';
 }
