@@ -201,8 +201,11 @@ async function list(user, rawQuery) {
   ]);
   const reqs = new Map((await prisma.requirement.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requirement_id))] } }, select: { id: true, title: true, account: { select: { name: true } }, website_posting: { select: { job_code: true } } } })).map((r) => [r.id, r]));
   const userNames = await names(rows.flatMap((r) => [r.assigned_to, r.rejected_by]));
+  // A linked Profile that was deleted afterwards no longer counts: the row shows "Create profile" again instead of a dead "Open profile".
+  const linked = rows.map((r) => r.profile_id).filter(Boolean);
+  const live = new Set(linked.length ? (await prisma.profile.findMany({ where: { id: { in: linked } }, select: { id: true } })).map((p) => p.id) : []);
   return {
-    rows: rows.map((r) => serialize(r, userNames, reqs)),
+    rows: rows.map((r) => serialize(r.profile_id && !live.has(r.profile_id) ? { ...r, profile_id: null } : r, userNames, reqs)),
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
     counts: { pool, mine, all: everyone, rejected },
   };
@@ -381,7 +384,8 @@ async function createProfile(user, id) {
   if (!applicant) return { error: 'not_found' };
   if (applicant.status !== 'assigned') return { error: 'not_assigned' };
   if (user.role !== 'admin' && applicant.assigned_to !== user.id) return { error: 'forbidden' };
-  if (applicant.profile_id) return { applicant: serialize(applicant, await names([applicant.assigned_to]), null), created: false };
+  // A link to a Profile that has since been deleted is replaced: the person's live Profile is reused, else a new one is made.
+  if (applicant.profile_id && (await prisma.profile.findUnique({ where: { id: applicant.profile_id }, select: { id: true } }))) return { applicant: serialize(applicant, await names([applicant.assigned_to]), null), created: false };
   const profileId = await prisma.$transaction(async (tx) => {
     const pid = await findOrCreateProfile(tx, applicant, applicant.assigned_to);
     await tx.jobApplicant.update({ where: { id }, data: { profile_id: pid } });
