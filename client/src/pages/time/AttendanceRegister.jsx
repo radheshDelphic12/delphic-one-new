@@ -76,7 +76,8 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
   const projectGroups = useMemo(() => {
     const groups = new Map();
     const round = (n) => Math.round(n * 100) / 100;
-    for (const p of data?.people || []) {
+    // the attendance people, plus contractors / exited people / others the filters hide, who still logged hours on a project
+    for (const p of [...(data?.people || []), ...(data?.project_people || [])]) {
       const mine = new Map();
       p.days.forEach((d, i) => {
         for (const pr of d.projects) {

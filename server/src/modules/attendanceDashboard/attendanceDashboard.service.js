@@ -388,7 +388,33 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
     orderBy: { name: 'asc' },
   });
   const projects = accounts.map((a) => a.project_name || a.name);
-  return { year, month, status, today, days: dayList, people, projects };
+
+  // Hours logged on projects by people the attendance register leaves out (contractors, vendor staff, exited people, anyone the status /
+  // work-mode filter hides): the project view adds them, so a project's hours match its Project Calendar. Rejected entries stay out.
+  const shownIds = new Set(shown.map((m) => m.id));
+  const otherIds = visible.map((m) => m.id).filter((id) => !shownIds.has(id));
+  const otherEntries = otherIds.length ? await prisma.timesheetEntry.findMany({
+    where: { org_id: orgId, org_membership_id: { in: otherIds }, date: { gte: from, lte: to }, status: { not: 'rejected' } },
+    select: { org_membership_id: true, date: true, hours: true, account: { select: { name: true, project_name: true } } },
+  }) : [];
+  const otherMembers = otherEntries.length ? await prisma.orgMembership.findMany({
+    where: { id: { in: [...new Set(otherEntries.map((e) => e.org_membership_id))] } },
+    select: { id: true, worker_type: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true } } },
+  }) : [];
+  const project_people = otherMembers.map((m) => {
+    const mine = otherEntries.filter((e) => e.org_membership_id === m.id);
+    const days = dayList.map((d) => {
+      const by = new Map();
+      for (const e of mine) {
+        if (ymd(e.date) !== d.date) continue;
+        const name = e.account ? e.account.project_name || e.account.name : null;
+        by.set(name, Math.round(((by.get(name) || 0) + Number(e.hours)) * 100) / 100);
+      }
+      return { date: d.date, projects: [...by.entries()].map(([project, hours]) => ({ project, hours })) };
+    });
+    return { org_membership_id: m.id, name: m.person?.name || 'Unknown', employee_code: m.employee_code || null, worker_type: m.worker_type, status: employmentState(m, todayDate), days };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  return { year, month, status, today, days: dayList, people, projects, project_people };
 }
 
 module.exports = { people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };
