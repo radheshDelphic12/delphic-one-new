@@ -1,6 +1,7 @@
 /** Job IDs, search on the public and internal job lists, referral tracking and the data rules of a job posting. */
 const { app, prisma, request, cleanDatabase, createUser, loginAs, createRequirement, createActiveClientAccount, authed } = require('./helpers');
 const { cleanTitle, normalizeEmployment } = require('../src/modules/jobs/jobFields');
+const websiteClient = require('../src/modules/website/appsScriptClient');
 
 let sToken; let adminToken; let empToken; let emp; let orgSlug; let orgId; let sales;
 const CV = 'https://drive.google.com/file/d/abc/view';
@@ -190,9 +191,15 @@ describe('job data rules', () => {
     const r = await createRequirement(sToken, account.id, { title: 'Tester' });
     await prisma.requirement.update({ where: { id: r.id }, data: { status: 'in_progress' } });
     const post = (body) => authed(request(app).post('/api/v1/website/postings'), adminToken).send({ requirement_id: r.id, ...body });
-    // the website sheet is not configured in tests: a missing department is refused before anything else
-    expect((await post({ title: 'QA TESTER.' })).status).toBe(422);
-    expect((await post({ title: 'QA TESTER.', department: 'Engineering', employment_type: 'moon' })).status).toBe(422);
+    // The website routes answer 503 before reading the body when the Apps Script is not configured (CI has no website secrets,
+    // a developer's .env has them), so the two refusals are checked as if it were configured: they are refused before any call is made.
+    const configured = jest.spyOn(websiteClient, 'isConfigured').mockReturnValue(true);
+    try {
+      expect((await post({ title: 'QA TESTER.' })).status).toBe(422);
+      expect((await post({ title: 'QA TESTER.', department: 'Engineering', employment_type: 'moon' })).status).toBe(422);
+    } finally {
+      configured.mockRestore();
+    }
     const res = await post({ title: 'QA TESTER.', department: 'Engineering', employment_type: 'Full Time' });
     if (res.status === 201) {
       expect(res.body.data.title).toBe('QA Tester');
