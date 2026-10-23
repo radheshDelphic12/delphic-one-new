@@ -202,6 +202,34 @@ describe('attendance dashboard', () => {
 });
 
 describe('monthly register', () => {
+  test('hours logged on a project by a contractor or an exited person still show in the project view, so a project matches its Project Calendar', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Reg Employee');
+    const contractor = await ctx.person('Reg Contractor', { workerType: 'contractor' });
+    const project = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Circle', is_project: true, stage: 'active', type: 'client', owner_id: ctx.adminUser.id, origin_owner_id: ctx.adminUser.id } });
+    const day = (s) => new Date(`${s}T00:00:00Z`);
+    const log = (m, date, hours) => prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: m.membership.id, account_id: project.id, date: day(date), hours, billable: true, status: 'approved' } });
+    await log(emp, '2026-09-01', 6);
+    await log(contractor, '2026-09-01', 8);
+    await log(contractor, '2026-09-02', 8);
+    await prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: contractor.membership.id, account_id: project.id, date: day('2026-09-03'), hours: 5, billable: true, status: 'rejected' } });
+
+    const res = await get('/register?year=2026&month=9', ctx.admin);
+    expect(res.status).toBe(200);
+    // the attendance table still leaves the contractor out
+    const names = res.body.data.people.map((p) => p.name);
+    expect(names).toContain('Reg Employee');
+    expect(names).not.toContain('Reg Contractor');
+    // the project view gets the contractor's hours too (rejected ones stay out)
+    const extra = res.body.data.project_people.find((p) => p.name === 'Reg Contractor');
+    expect(extra).toBeTruthy();
+    const hoursOf = (d) => extra.days.find((x) => x.date === d).projects.map((x) => `${x.project}:${x.hours}`);
+    expect(hoursOf('2026-09-01')).toEqual(['Circle:8']);
+    expect(hoursOf('2026-09-02')).toEqual(['Circle:8']);
+    expect(hoursOf('2026-09-03')).toEqual([]);
+    expect(res.body.data.project_people.find((p) => p.name === 'Reg Employee')).toBeUndefined();
+  });
+
   test('one response holds every employee x every day with codes, per-person totals and project hours; contractors and future absences stay out', async () => {
     const ctx = await seed();
     const emp = await ctx.person('Reg Employee');
