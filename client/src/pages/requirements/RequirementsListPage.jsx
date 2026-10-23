@@ -160,8 +160,8 @@ export default function RequirementsListPage() {
   const [assignTarget, setAssignTarget] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [emailOpen, setEmailOpen] = useState(false);
-  // Emailing requirements to vendors: Sales and Admin, or a custom role that may edit requirements.
-  const canEmailVendors = ['sales', 'admin'].includes(user?.role) || userCan(user, 'requirements.update');
+  // Emailing requirements to vendors: Sales and Admin, or anyone with Email > Send, or a custom role that may edit requirements.
+  const canEmailVendors = ['sales', 'admin'].includes(user?.role) || userCan(user, 'email.send') || userCan(user, 'requirements.update');
   const [peek, setPeek] = useState(null);
   const [createOpen, setCreateOpen] = useState(searchParams.get('create') === '1');
 

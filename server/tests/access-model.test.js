@@ -248,6 +248,15 @@ describe('granting permissions (Settings > Permissions)', () => {
     expect(await prisma.permissionGrant.count()).toBe(0);
   });
 
+  test('Email > Send alone opens the vendor email screens, and removing it closes them', async () => {
+    const e = await person('Mailer');
+    expect((await get('/vendor-email/log', e.token)).status).toBe(403);
+    expect((await put(`/access/people/${e.m.id}`, adminToken, { grants: { 'email.send': true } })).status).toBe(200);
+    expect((await get('/vendor-email/log', e.token)).status).toBe(200);
+    expect((await put(`/access/people/${e.m.id}`, adminToken, { grants: {} })).status).toBe(200);
+    expect((await get('/vendor-email/log', e.token)).status).toBe(403);
+  });
+
   test('a default basic item can be taken from one person, and given back', async () => {
     const e = await person('Joiner');
     const other = await person('Other');

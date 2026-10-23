@@ -33,6 +33,7 @@ const CATALOG = [
   { module: 'accounts', category: 'recruitment', label: 'Accounts (clients and vendors)', actions: [A('accounts', 'view', 'View'), A('accounts', 'create', 'Add'), A('accounts', 'update', 'Edit', true), A('accounts', 'delete', 'Delete', true)] },
   { module: 'meetings', category: 'recruitment', label: 'Meetings', actions: [A('meetings', 'schedule', 'Schedule meetings and interviews')] },
   { module: 'vendors', category: 'recruitment', label: 'Vendors', actions: [A('vendors', 'onboard', 'Onboard vendors')] },
+  { module: 'email', category: 'recruitment', label: 'Email', actions: [A('email', 'send', 'Send emails (requirements to vendors)')] },
   { module: 'requirements', category: 'recruitment', label: 'Requirements', actions: [A('requirements', 'view', 'View'), A('requirements', 'create', 'Add'), A('requirements', 'update', 'Edit', true), A('requirements', 'delete', 'Delete', true)] },
   { module: 'pipeline', category: 'recruitment', label: 'Pipeline', actions: [A('pipeline', 'view', 'View')] },
   { module: 'profiles', category: 'recruitment', label: 'Profiles (candidates)', actions: [A('profiles', 'view', 'View'), A('profiles', 'create', 'Add'), A('profiles', 'update', 'Edit', true), A('profiles', 'delete', 'Delete', true)] },

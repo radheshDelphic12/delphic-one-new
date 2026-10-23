@@ -157,6 +157,32 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     expect(chartB.admins.map((a) => a.id)).toEqual([adminBMembership.id]);
     expect(chartA.admins[0]).toMatchObject({ name: expect.any(String) });
   });
+
+  test('the group superadmin is left out of a company chart, unless they lead or sit in one of its teams', async () => {
+    const { org, membership: adminMembership } = await seedOrgAdmin();
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    const { access_token } = await loginAs(groupSuper);
+    const superMembership = await prisma.orgMembership.upsert({
+      where: { person_id_org_id: { person_id: groupSuper.id, org_id: org.id } },
+      update: {},
+      create: { person_id: groupSuper.id, org_id: org.id, role: 'admin', employee_code: 'GS1' },
+    });
+    const ids = async () => {
+      const res = await authed(request(app).get('/api/v1/org-chart/group'), access_token);
+      expect(res.status).toBe(200);
+      return res.body.data.find((c) => c.org.id === org.id);
+    };
+    const flat = (nodes) => nodes.flatMap((n) => [n.id, ...flat(n.direct_reports)]);
+    expect(flat((await ids()).roots)).not.toContain(superMembership.id);
+
+    // a new, still empty team is in the payload too, and the superadmin leading it keeps them in the chart
+    const team = await prisma.team.create({ data: { org_id: org.id, name: 'Board of Directors', lead_membership_id: superMembership.id } });
+    const after = await ids();
+    expect(after.teams.map((t) => t.id)).toContain(team.id);
+    expect(flat(after.roots)).toContain(superMembership.id);
+    expect(flat(after.roots)).toContain(adminMembership.id);
+  });
 });
 
 describe('Team view data', () => {

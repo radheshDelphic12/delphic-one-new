@@ -16,7 +16,7 @@ const ROLE_EQUIVALENT = {
   sales: full([
     'accounts.view', 'requirements.view', 'requirements.create', 'requirements.update', 'requirements.delete', 'pipeline.view',
     'profiles.view', 'submissions.view', 'submissions.create', 'submissions.update', 'rejected.view', 'applicants.view',
-    'applicants.update', 'reports.view', 'reports.export', 'meetings.schedule', 'business.view',
+    'applicants.update', 'reports.view', 'reports.export', 'meetings.schedule', 'business.view', 'email.send',
   ]),
   recruiter: full([
     'accounts.view', 'requirements.view', 'pipeline.view', 'profiles.view', 'profiles.create', 'profiles.update', 'submissions.view',
@@ -31,7 +31,7 @@ const ROLE_EQUIVALENT = {
 
 // Keys a custom role decided ENTIRELY by its own ticks (the gates call can() / canOn() / canMethod()): the plain base role did not
 // add to them. Everything else came from the base role.
-const GATED_MODULES = new Set(['meetings', 'vendors', 'finance', 'payroll', 'billing', 'analytics', 'financials', 'business', 'increments', 'allocations']);
+const GATED_MODULES = new Set(['meetings', 'vendors', 'email', 'finance', 'payroll', 'billing', 'analytics', 'financials', 'business', 'increments', 'allocations']);
 const GATED_KEYS = new Set([
   'accounts.create', 'accounts.update', 'accounts.delete', 'requirements.create', 'requirements.update', 'requirements.delete',
   'profiles.create', 'profiles.update', 'profiles.delete', 'submissions.create', 'submissions.update', 'timesheets.approve', 'attendance.approve',
@@ -54,6 +54,7 @@ function expandLegacyTicks(ticks) {
   }
   if (ticks?.['timesheets.approve']) set('timesheets.view', 'all');
   if (ticks?.['allocations.manage']) set('allocations.view');
+  if (ticks?.['requirements.update']) set('email.send'); // editing requirements used to be what allowed emailing them to vendors
   return out;
 }
 
