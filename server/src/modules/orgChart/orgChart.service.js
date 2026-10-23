@@ -51,6 +51,23 @@ function adminsOf(roots) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The one company admin the group chart puts between the company and its teams. Among the company's own Admin accounts
+// (flagged is_superadmin, never the group account), or failing that among all its admins: the one who leads the first team
+// (lowest display order, the "Board of Directors" box), else the one who joined first. Null when the company has no admin.
+function companyAdminId({ roots, teams }, admins, accountAdminIds = new Set()) {
+  if (!admins.length) return null;
+  const leadOrder = new Map();
+  teams.forEach((t, i) => { if (t.lead_membership_id && !leadOrder.has(t.lead_membership_id)) leadOrder.set(t.lead_membership_id, i); });
+  const joined = new Map();
+  const walk = (n) => { joined.set(n.id, n.joined_at ? new Date(n.joined_at).getTime() : Infinity); n.direct_reports.forEach(walk); };
+  roots.forEach(walk);
+  const own = admins.filter((a) => accountAdminIds.has(a.id));
+  const pool = own.length ? own : admins;
+  const key = (a) => [leadOrder.has(a.id) ? leadOrder.get(a.id) : Infinity, joined.get(a.id) ?? Infinity];
+  const cmp = (p, q) => (p < q ? -1 : p > q ? 1 : 0); // Infinity - Infinity is NaN, so compare, do not subtract
+  return [...pool].sort((x, y) => cmp(key(x)[0], key(y)[0]) || cmp(key(x)[1], key(y)[1]) || x.name.localeCompare(y.name))[0].id;
+}
+
 // Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
 // nightly job that flips serving-notice people to terminated may not have run yet). The last working day itself still counts.
 function exitedWhere(today) {
@@ -71,8 +88,9 @@ async function getOrgChart(orgId, { include_terminated, exclude_group_admins = f
     orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
   });
   // The group chart draws the group superadmin once, at the bottom. But when that person was put in a team of this company
-  // (as its lead, its reports-to manager, or a member) they stay in the company's chart, or the team would lose its head.
-  const inTeamRole = teams.flatMap((t) => [t.lead_membership_id, t.manager_membership_id]).filter(Boolean);
+  // as its lead (or a member) they stay in the company's chart, or the team would lose its head. Being only the
+  // "reports-to" of a team does not keep them: the company's own admin heads the company, not the group account again.
+  const inTeamRole = teams.map((t) => t.lead_membership_id).filter(Boolean);
   const memberships = await prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
@@ -106,7 +124,9 @@ async function getGroupOrgChart({ org_group_id, include_terminated }, allowedGro
   // comes its own admin (the company's role 'admin' members), then the company's team chart.
   const charts = await Promise.all(orgs.map(async (org) => {
     const chart = await getOrgChart(org.id, { include_terminated, exclude_group_admins: true });
-    return { org, ...chart, admins: adminsOf(chart.roots) };
+    const admins = adminsOf(chart.roots);
+    const accountAdmins = await prisma.orgMembership.findMany({ where: { org_id: org.id, role: 'admin', person: { is_superadmin: true, is_group_superadmin: false } }, select: { id: true } });
+    return { org, ...chart, admins, company_admin_id: companyAdminId(chart, admins, new Set(accountAdmins.map((a) => a.id))) };
   }));
   return charts;
 }

@@ -130,7 +130,7 @@ describe('job postings', () => {
 
   it('publishes only public fields to the Jobs sheet, keyed by requirement id', async () => {
     const req = await openRequirement();
-    const res = await api('post', '/postings').send({ requirement_id: req.id, title: 'Node Engineer', location: 'Remote', public_description: 'Ship things.' });
+    const res = await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'Node Engineer', location: 'Remote', public_description: 'Ship things.' });
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('published');
     expect(res.body.data.last_synced_at).toBeTruthy();
@@ -138,7 +138,7 @@ describe('job postings', () => {
 
     const [script, action, payload] = client.call.mock.calls[0];
     expect([script, action]).toEqual(['jobs', 'upsertJob']);
-    expect(Object.keys(payload).sort()).toEqual(['department', 'description', 'jobId', 'location', 'status', 'title', 'type']);
+    expect(Object.keys(payload).sort()).toEqual(['department', 'description', 'jobCode', 'jobId', 'location', 'status', 'title', 'type']);
     expect(payload).toMatchObject({ jobId: req.id, title: 'Node Engineer', status: 'Open' });
     expect(JSON.stringify(payload)).not.toMatch(/1500000|2500000|margin/);
   });
@@ -146,7 +146,7 @@ describe('job postings', () => {
   it('keeps the posting and records the error when Apps Script fails, and retry clears it', async () => {
     const req = await openRequirement();
     client.call.mockResolvedValueOnce({ error: 'apps_script_failed', message: 'jobs script: timed out' });
-    const res = await api('post', '/postings').send({ requirement_id: req.id, title: 'Node Engineer' });
+    const res = await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'Node Engineer' });
     expect(res.status).toBe(201);
     expect(res.body.data.sync_error).toBe('jobs script: timed out');
 
@@ -158,7 +158,7 @@ describe('job postings', () => {
 
   it('closes and reopens on the website', async () => {
     const req = await openRequirement();
-    const { body } = await api('post', '/postings').send({ requirement_id: req.id, title: 'Node Engineer' });
+    const { body } = await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'Node Engineer' });
     expect((await api('post', `/postings/${body.data.id}/close`)).body.data.status).toBe('closed');
     expect(jobs[req.id].status).toBe('Closed');
     expect((await api('post', `/postings/${body.data.id}/reopen`)).body.data.status).toBe('published');
@@ -167,7 +167,7 @@ describe('job postings', () => {
 
   it('takes the posting off the website when the requirement is dropped, and refuses to republish it', async () => {
     const req = await openRequirement();
-    const { body } = await api('post', '/postings').send({ requirement_id: req.id, title: 'Node Engineer' });
+    const { body } = await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'Node Engineer' });
 
     const dropped = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'dropped', reason: 'Client paused hiring' });
     expect(dropped.status).toBe(200);
@@ -179,7 +179,7 @@ describe('job postings', () => {
     expect(jobs[req.id].status).toBe('Closed');
 
     expect((await api('post', `/postings/${body.data.id}/reopen`)).status).toBe(409);
-    expect((await api('post', '/postings').send({ requirement_id: req.id, title: 'Again' })).status).toBe(409);
+    expect((await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'Again' })).status).toBe(409);
   });
 });
 
@@ -191,7 +191,7 @@ describe('pipeline: in-progress jobs board', () => {
     const { body } = await api('get', `/postings/requirement/${req.id}`);
     expect(body.data.defaults.public_description).toBe('Experience: 3–6 years\n\nBuild APIs.');
 
-    await api('post', '/postings').send({ requirement_id: req.id, ...body.data.defaults });
+    await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', ...body.data.defaults });
     expect(jobs[req.id].description).toBe('Experience: 3–6 years\n\nBuild APIs.');
     expect(JSON.stringify(jobs[req.id])).not.toMatch(/1500000|2500000|margin/);
 
@@ -282,7 +282,7 @@ describe('form submissions', () => {
   it('routes a career application for a live job straight into that requirement applicant pool', async () => {
     const req = await openRequirement();
     await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), adminToken).send({ to_status: 'in_progress' });
-    await api('post', '/postings').send({ requirement_id: req.id, title: 'node engineer' });
+    await api('post', '/postings').send({ requirement_id: req.id, department: 'Engineering', title: 'node engineer' });
 
     const res = await api('post', '/submissions/sync');
     expect(res.body.data.routed).toBe(1);

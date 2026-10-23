@@ -602,8 +602,33 @@ function SetupView({ options, position, onChanged }) {
 
 // ---------------------------------------------------------------------------------------------------------------- the tab
 
+/** Cash in hand only: the accounts of type "Cash in hand", totalled per currency, by company and entity (the Bank view mixes them with bank accounts). */
+function CashView({ filters, selected, toggle, setOpenWallet, setOpenAccount }) {
+  const { pushError } = useAlerts();
+  const params = Object.fromEntries(Object.entries({ legal_entity_id: filters.legal_entity_id, workspace_id: filters.workspace_id, currency: filters.currency, type: 'cash' }).filter(([, v]) => v));
+  const cash = useLiveData(() => api('/position', params), { intervalMs: 60000, deps: [filters.legal_entity_id, filters.workspace_id, filters.currency] });
+  useEffect(() => { if (cash.error) pushError(apiErrorMessage(cash.error, 'Could not load the cash position'), 'Load failed'); }, [cash.error]); // eslint-disable-line react-hooks/exhaustive-deps
+  const p = cash.data;
+  if (!p) return <Skeleton className="h-48" />;
+  const accounts = p.entities.flatMap((e) => e.accounts);
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[['Cash in hand, INR', p.totals.INR, 'INR'], ['Cash in hand, USD', p.totals.USD, 'USD']].map(([l, x, c]) => (
+          <div key={l} className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="cash-total"><p className="text-xs text-tertiary-500">{l}</p><p className="font-heading text-xl font-semibold"><Money value={x} currency={c} /></p></div>
+        ))}
+        <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card"><p className="text-xs text-tertiary-500">Cash accounts</p><p className="font-heading text-xl font-semibold">{accounts.length}</p></div>
+      </div>
+      {accounts.length === 0
+        ? <EmptyState icon={Banknote} title="No cash in hand yet" description="Add an account of type Cash in hand (Setup > Bank accounts), then record cash in and out against its wallet. It is totalled here, apart from the bank balances." />
+        : <BankView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} setOpenAccount={setOpenAccount} />}
+    </div>
+  );
+}
+
 const SECTIONS = [
   { key: 'bank', label: 'Bank view', icon: Landmark },
+  { key: 'cash', label: 'Cash', icon: Banknote },
   { key: 'fund', label: 'Fund view', icon: WalletIcon },
   { key: 'invoices', label: 'Invoices', icon: FileText },
   { key: 'receipts', label: 'Receipts', icon: Receipt },
@@ -657,10 +682,11 @@ export default function GroupCashTab() {
         </div>
       )}
       <SectionTabs tabs={SECTIONS} value={section} onChange={setSection} />
-      {['bank', 'fund'].includes(section) && <Filters options={options.data} filters={filters} setFilters={setFilters} />}
+      {['bank', 'fund', 'cash'].includes(section) && <Filters options={options.data} filters={filters} setFilters={setFilters} />}
       {!p ? <Skeleton className="h-48" /> : (
         <>
           {section === 'bank' && <BankView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} setOpenAccount={setOpenAccount} />}
+          {section === 'cash' && <CashView filters={filters} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} setOpenAccount={setOpenAccount} />}
           {section === 'fund' && <FundView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} />}
           {section === 'invoices' && <GroupInvoicesView options={options.data} onWalletsChanged={refresh} />}
           {section === 'receipts' && <ReceiptsView options={options.data} />}

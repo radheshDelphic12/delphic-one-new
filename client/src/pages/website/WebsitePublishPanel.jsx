@@ -10,8 +10,8 @@ import Pill from '../../components/ui/Pill.jsx';
 
 export const POSTING_FIELDS = [
   { name: 'title', label: 'Job title on the website', required: true },
-  { name: 'department', label: 'Department', half: true },
-  { name: 'employment_type', label: 'Employment type', half: true, hint: 'e.g. Full-time, Contract' },
+  { name: 'department', label: 'Department', half: true, required: true },
+  { name: 'employment_type', label: 'Employment type', half: true, type: 'select', options: [{ value: 'Full-time', label: 'Full-time' }, { value: 'Part-time', label: 'Part-time' }, { value: 'Contract', label: 'Contract' }, { value: 'Internship', label: 'Internship' }] },
   { name: 'location', label: 'Location', hint: 'e.g. Gurugram · Hybrid' },
   { name: 'public_description', label: 'Public description', type: 'textarea', hint: 'Shown on /career. Never include client names, budget or billing.' },
 ];
@@ -21,6 +21,7 @@ const CLOSED = ['closed', 'dropped'];
 export function PostingStatus({ posting }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
+      {posting.job_code && <span className="rounded bg-primary-50 px-1.5 py-0.5 text-xs font-bold text-primary-800" data-testid="posting-job-code">{posting.job_code}</span>}
       <Pill tone={posting.status === 'published' ? 'green' : 'gray'}>{posting.status === 'published' ? 'Live on website' : 'Closed on website'}</Pill>
       {posting.sync_error ? <Pill tone="red">Sync failed</Pill> : null}
     </span>

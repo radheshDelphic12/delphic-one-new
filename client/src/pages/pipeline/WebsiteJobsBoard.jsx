@@ -113,6 +113,7 @@ export default function WebsiteJobsBoard() {
                 return (
                   <tr key={r.id} className="border-t border-tertiary-100" data-testid="website-job-row">
                     <td className="px-4 py-2">
+                      {r.website?.job_code && <span className="mr-1.5 rounded bg-primary-50 px-1.5 py-0.5 text-xs font-bold text-primary-800" data-testid="board-job-code">{r.website.job_code}</span>}
                       <Link to={`/requirements/${r.id}`} className="font-medium text-primary-700 hover:underline">{r.title}</Link>
                       <p className="text-xs text-tertiary-500">{r.client}{r.tech_stack?.length ? ` · ${r.tech_stack.slice(0, 3).join(', ')}` : ''}</p>
                       <span className="inline-flex flex-wrap items-center gap-1.5">

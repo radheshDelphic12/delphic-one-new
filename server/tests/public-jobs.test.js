@@ -32,7 +32,7 @@ describe('public job link', () => {
     const r = await request(app).get(`/api/v1/public/jobs/${slug}`);
     expect(r.status).toBe(200);
     expect(r.body.data).toMatchObject({ slug, title: 'Senior React Developer', location: 'Indore', description: 'Build things.' });
-    expect(Object.keys(r.body.data).sort()).toEqual(['department', 'description', 'employment_type', 'location', 'posted_at', 'slug', 'title']);
+    expect(Object.keys(r.body.data).sort()).toEqual(['department', 'description', 'employment_type', 'job_code', 'location', 'posted_at', 'slug', 'title']);
     expect((await request(app).get('/api/v1/public/jobs')).body.data.map((j) => j.slug)).toEqual([slug]);
     expect((await request(app).get('/api/v1/public/jobs/nope-0000')).status).toBe(404);
   });

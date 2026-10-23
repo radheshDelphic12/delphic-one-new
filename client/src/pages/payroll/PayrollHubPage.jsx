@@ -294,7 +294,7 @@ function emptyComponent(label = '') { return { label, amount: '' }; }
 // negative lines) and the effective date.
 function StructureDrawer({ open, structure, onClose, onSubmit }) {
   const isEditing = Boolean(structure);
-  const membershipOptions = useOrgMembershipOptions(open);
+  const membershipOptions = useOrgMembershipOptions(open, { includeExited: true }); // an admin can set a salary structure under any status
   const [orgMembershipId, setOrgMembershipId] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [ctc, setCtc] = useState('');

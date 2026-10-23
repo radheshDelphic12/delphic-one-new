@@ -305,12 +305,15 @@ export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, o
   );
 }
 
-export default function HrSettingsPage() {
+/** `only` (optional): show just these tabs and keep the tab in local state, so the page can sit inside another screen (a company's own settings). */
+export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [params, setParams] = useSearchParams();
-  const requestedTab = params.get('tab') || 'departments';
-  const tab = TABS.some((item) => item.key === requestedTab) ? requestedTab : 'departments';
+  const tabList = only ? only.map((key) => TABS.find((item) => item.key === key)).filter(Boolean) : TABS;
+  const [localTab, setLocalTab] = useState(tabList[0]?.key || 'departments');
+  const requestedTab = only ? localTab : params.get('tab') || 'departments';
+  const tab = tabList.some((item) => item.key === requestedTab) ? requestedTab : tabList[0]?.key || 'departments';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState(null);
@@ -331,6 +334,8 @@ export default function HrSettingsPage() {
   }
 
   useEffect(() => { load(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // lets a screen that embeds this page (a company's Teams & reporting) refresh what depends on the list
+  useEffect(() => { onChanged?.(); }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [editingTeam, setEditingTeam] = useState(null);
   async function updateTeam(payload) {
@@ -525,7 +530,7 @@ export default function HrSettingsPage() {
       ];
 
   return <div className="space-y-4">
-    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">{TABS.map(({ key, label, icon: Icon }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tab === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setParams({ section: 'hr-settings', tab: key })}><Icon className="h-4 w-4" />{label}</button>)}</div>
+    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">{tabList.map(({ key, label, icon: Icon }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tab === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => (only ? setLocalTab(key) : setParams({ section: 'hr-settings', tab: key }))}><Icon className="h-4 w-4" />{label}</button>)}</div>
     <div className="flex flex-wrap justify-end gap-2">{canManage && <button type="button" className={tab === 'calendars' ? 'btn-secondary inline-flex items-center gap-2' : 'btn-primary inline-flex items-center gap-2'} onClick={() => setDrawer(tab)}><Plus className="h-4 w-4" /> Add {names[tab] || tab.slice(0, -1)}</button>}{canManage && tab === 'calendars' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddProjectOpen(true)}><FolderPlus className="h-4 w-4" /> Add Project</button>}</div>
     {!loading && rows.length === 0 ? <EmptyState icon={Settings2} title={`No ${tab} configured`} description="Create the first setting when your organization is ready." action={canManage ? <button type="button" className="btn-secondary" onClick={() => setDrawer(tab)}>Add {names[tab] || tab.slice(0, -1)}</button> : null} /> : <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No ${tab} configured`} />}
     <NameDrawer open={drawer === 'departments' || drawer === 'designations'} title={`Add ${names[tab] || 'setting'}`} onClose={() => setDrawer(null)} value="" onSubmit={(name) => createResource({ name })} />

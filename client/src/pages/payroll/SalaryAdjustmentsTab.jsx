@@ -33,7 +33,7 @@ export default function SalaryAdjustmentsTab() {
   const [salary, setSalary] = useState(null);
   const [form, setForm] = useState({ org_membership_id: '', kind: 'variable_pay', amount: '', note: '' });
   const [saving, setSaving] = useState(false);
-  const members = useOrgMembershipOptions(true);
+  const members = useOrgMembershipOptions(true, { includeExited: true }); // adjustments (TDS, dues, reimbursements) can still be needed after someone leaves
 
   const load = useCallback(() => {
     apiClient.get('/payroll/adjustments', { params: { period_month: month, period_year: year } }).then(({ data }) => setAdjustments(data.data || [])).catch(() => setAdjustments([]));
