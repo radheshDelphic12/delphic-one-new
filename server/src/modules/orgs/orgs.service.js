@@ -192,7 +192,7 @@ const MEMBERSHIP_DETAIL_SELECT = {
   bench_end_date: true,
   role: true,
   employment_status: true,
-  person: { select: { id: true, name: true, email: true, phone: true, active: true } },
+  person: { select: { id: true, name: true, email: true, phone: true, active: true, is_group_superadmin: true } },
   location: { select: { id: true, name: true } },
   shift: { select: { id: true, name: true, start_minutes: true, end_minutes: true, grace_minutes: true } },
   manager: { select: { id: true, person: { select: { id: true, name: true } } } },

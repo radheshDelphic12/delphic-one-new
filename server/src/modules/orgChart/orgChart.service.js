@@ -51,6 +51,14 @@ function adminsOf(roots) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The one company admin the group chart puts between the company and its teams: an admin who leads a team (the
+// "Board of Directors" style box) first, else the first admin on file. Null when the company has no admin.
+function companyAdminId({ teams }, admins) {
+  if (!admins.length) return null;
+  const leads = new Set(teams.map((t) => t.lead_membership_id).filter(Boolean));
+  return (admins.find((a) => leads.has(a.id)) || admins[0]).id;
+}
+
 // Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
 // nightly job that flips serving-notice people to terminated may not have run yet). The last working day itself still counts.
 function exitedWhere(today) {
@@ -71,8 +79,9 @@ async function getOrgChart(orgId, { include_terminated, exclude_group_admins = f
     orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
   });
   // The group chart draws the group superadmin once, at the bottom. But when that person was put in a team of this company
-  // (as its lead, its reports-to manager, or a member) they stay in the company's chart, or the team would lose its head.
-  const inTeamRole = teams.flatMap((t) => [t.lead_membership_id, t.manager_membership_id]).filter(Boolean);
+  // as its lead (or a member) they stay in the company's chart, or the team would lose its head. Being only the
+  // "reports-to" of a team does not keep them: the company's own admin heads the company, not the group account again.
+  const inTeamRole = teams.map((t) => t.lead_membership_id).filter(Boolean);
   const memberships = await prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
@@ -106,7 +115,8 @@ async function getGroupOrgChart({ org_group_id, include_terminated }, allowedGro
   // comes its own admin (the company's role 'admin' members), then the company's team chart.
   const charts = await Promise.all(orgs.map(async (org) => {
     const chart = await getOrgChart(org.id, { include_terminated, exclude_group_admins: true });
-    return { org, ...chart, admins: adminsOf(chart.roots) };
+    const admins = adminsOf(chart.roots);
+    return { org, ...chart, admins, company_admin_id: companyAdminId(chart, admins) };
   }));
   return charts;
 }

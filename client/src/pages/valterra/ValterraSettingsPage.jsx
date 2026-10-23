@@ -6,6 +6,7 @@ import { vtApi, valterraError } from '../../lib/valterra/api.js';
 import { vtCan, useValterra } from '../../lib/valterra/useValterra.js';
 import { dateLabel, titleCase } from '../../lib/format.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import CategoriesManager from '../../components/valterra/CategoriesManager.jsx';
 import { DateInput, Empty, Num, Select, Text, card } from '../../components/valterra/ui.jsx';
 
@@ -85,12 +86,13 @@ export default function ValterraSettingsPage() {
   const [tab, setTab] = useState('general');
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (me && !vtCan(me, 'settings')) return <Navigate to="/valterra" replace />;
-  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, ...(vtCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
+  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, { key: 'teams', label: 'Teams & reporting' }, ...(vtCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'general' && <General />}
       {tab === 'categories' && <CategoriesManager canEdit={vtCan(me, 'categories')} />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <Audit />}
     </div>
   );

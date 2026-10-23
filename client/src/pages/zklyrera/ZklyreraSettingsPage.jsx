@@ -6,6 +6,7 @@ import { zkApi, zklyreraError } from '../../lib/zklyrera/api.js';
 import { zkCan, useZklyrera } from '../../lib/zklyrera/useZklyrera.js';
 import { dateLabel, titleCase } from '../../lib/format.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import CategoriesManager from '../../components/zklyrera/CategoriesManager.jsx';
 import { DateInput, Empty, Num, Select, Text, card } from '../../components/zklyrera/ui.jsx';
 
@@ -84,12 +85,13 @@ export default function ZklyreraSettingsPage() {
   const [tab, setTab] = useState('general');
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (me && !zkCan(me, 'settings')) return <Navigate to="/zklyrera" replace />;
-  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, ...(zkCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
+  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, { key: 'teams', label: 'Teams & reporting' }, ...(zkCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'general' && <General />}
       {tab === 'categories' && <CategoriesManager canEdit={zkCan(me, 'categories')} />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <Audit />}
     </div>
   );

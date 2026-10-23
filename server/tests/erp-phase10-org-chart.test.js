@@ -183,6 +183,26 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     expect(flat(after.roots)).toContain(superMembership.id);
     expect(flat(after.roots)).toContain(adminMembership.id);
   });
+
+  test('the group superadmin as only the "reports-to" of a team is not drawn again inside the company; the company admin is named for the chart', async () => {
+    const { org, membership: adminMembership } = await seedOrgAdmin();
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    const { access_token } = await loginAs(groupSuper);
+    const superMembership = await prisma.orgMembership.upsert({
+      where: { person_id_org_id: { person_id: groupSuper.id, org_id: org.id } },
+      update: {},
+      create: { person_id: groupSuper.id, org_id: org.id, role: 'admin', employee_code: 'GS2' },
+    });
+    await prisma.team.create({ data: { org_id: org.id, name: 'Board of Directors', lead_membership_id: adminMembership.id, manager_membership_id: superMembership.id } });
+    const res = await authed(request(app).get('/api/v1/org-chart/group'), access_token);
+    expect(res.status).toBe(200);
+    const chart = res.body.data.find((c) => c.org.id === org.id);
+    const flat = (nodes) => nodes.flatMap((n) => [n.id, ...flat(n.direct_reports)]);
+    expect(flat(chart.roots)).not.toContain(superMembership.id);
+    expect(flat(chart.roots)).toContain(adminMembership.id);
+    expect(chart.company_admin_id).toBe(adminMembership.id);
+  });
 });
 
 describe('Team view data', () => {

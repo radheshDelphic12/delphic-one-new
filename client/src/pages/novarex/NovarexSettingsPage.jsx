@@ -6,6 +6,7 @@ import { nxApi, novarexError } from '../../lib/novarex/api.js';
 import { nxCan, useNovarex } from '../../lib/novarex/useNovarex.js';
 import { dateLabel, titleCase } from '../../lib/format.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import CategoriesManager from '../../components/novarex/CategoriesManager.jsx';
 import { DateInput, Empty, Num, Select, Text, card } from '../../components/novarex/ui.jsx';
 
@@ -95,12 +96,13 @@ export default function NovarexSettingsPage() {
   const [tab, setTab] = useState('general');
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (me && !nxCan(me, 'settings')) return <Navigate to="/novarex" replace />;
-  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, ...(nxCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
+  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, { key: 'teams', label: 'Teams & reporting' }, ...(nxCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'general' && <General />}
       {tab === 'categories' && <CategoriesManager canEdit={nxCan(me, 'categories')} />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <Audit />}
     </div>
   );

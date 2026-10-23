@@ -7,9 +7,10 @@ import { fxCan, useFoundation } from '../../lib/foundation/useFoundation.js';
 import { FORECAST_METHODS } from '../../lib/foundation/meta.js';
 import { dateLabel, titleCase } from '../../lib/format.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import { Empty, Num, Select, Text, card } from '../../components/foundation/ui.jsx';
 
-const TABS = [{ key: 'general', label: 'Rules and projections' }, { key: 'audit', label: 'Audit log' }];
+const TABS = [{ key: 'general', label: 'Rules and projections' }, { key: 'teams', label: 'Teams & reporting' }, { key: 'audit', label: 'Audit log' }];
 
 function General() {
   const { pushError, pushSuccess } = useAlerts();
@@ -92,6 +93,7 @@ export default function FoundationSettingsPage() {
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'general' && <General />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && fxCan(me, 'audit') && <Audit />}
     </div>
   );
