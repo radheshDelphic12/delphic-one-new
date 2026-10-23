@@ -1,4 +1,5 @@
 import { userCan } from '../../lib/permissions.js';
+import { allowed } from '../../lib/access.js';
 
 export const ACCOUNT_TRANSITIONS = {
   lead: ['meeting_scheduled'],
@@ -29,13 +30,13 @@ export function accountKey(id) {
 }
 
 export function canCreateAccount(user) {
-  return user?.role === 'bda' || user?.role === 'admin';
+  return allowed(user, ['accounts.create'], user?.role === 'bda' || user?.role === 'admin');
 }
 
 export function canMutateAccount(account, user) {
   if (!account || !user) return false;
   // Admin and BDA may edit any account and schedule / move meeting stages.
-  return user.role === 'admin' || user.role === 'bda';
+  return allowed(user, ['accounts.update', 'meetings.schedule', 'vendors.onboard'], user.role === 'admin' || user.role === 'bda');
 }
 
 export function canClassifyAccount(account, user) {

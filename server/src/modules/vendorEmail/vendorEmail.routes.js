@@ -6,9 +6,9 @@ const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./vendorEmail.service');
 
-// Emailing requirements to vendors: anyone holding Email > Send, or who manages requirements (Sales, Admin, or a custom role that may edit them).
+// Emailing requirements to vendors: Email > Send is the one permission (Sales and Admin keep it in a company that has not moved to permissions).
 const router = express.Router();
-router.use(authenticate, requireMasterWorkspace, canAny(['email.send', 'requirements.update'], 'sales', 'admin'));
+router.use(authenticate, requireMasterWorkspace, canAny(['email.send'], 'sales', 'admin'));
 
 const failFor = (res, result) => {
   if (result.error === 'requirement_not_found') return fail(res, 404, 'One of the selected requirements was not found');

@@ -1,7 +1,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
-const { authenticate, authorize } = require('../../middleware/auth');
+const { authenticate, authorize: authorizeRole } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -19,6 +19,18 @@ const {
   joiningsSchema,
   timeToSubmitSchema,
 } = require('./reports.validation');
+
+// In a company on the permission model the central guard has already checked `reports.view` / `reports.export`, and a person
+// holding only that permission has the derived role 'employee', which the role lists below would turn away. So they pass every
+// report that is open to more than admins; the admin-only ones (HR, sales/BDA performance) stay admin-only.
+function authorize(...roles) {
+  const roleGate = authorizeRole(...roles);
+  const adminOnly = roles.length === 1 && roles[0] === 'admin';
+  return (req, res, next) => {
+    if (!adminOnly && req.user?.access?.mode === 'permissions' && req.user.access.level === 'employee') return next();
+    return roleGate(req, res, next);
+  };
+}
 
 const router = express.Router();
 router.use(authenticate, requireMasterWorkspace);

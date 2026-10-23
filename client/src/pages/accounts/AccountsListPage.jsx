@@ -358,7 +358,7 @@ export default function AccountsListPage() {
       {canCreateAccount(user) && (
         <div className="flex justify-end">
           <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> Create account
+            <Plus className="h-4 w-4" /> Create client / vendor account
           </button>
         </div>
       )}

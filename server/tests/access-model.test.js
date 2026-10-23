@@ -254,6 +254,11 @@ describe('granting permissions (Settings > Permissions)', () => {
     expect((await put(`/access/people/${e.m.id}`, adminToken, { grants: { 'email.send': true } })).status).toBe(200);
     expect((await get('/vendor-email/log', e.token)).status).toBe(200);
     expect((await put(`/access/people/${e.m.id}`, adminToken, { grants: {} })).status).toBe(200);
+    const denied = await get('/vendor-email/log', e.token);
+    expect(denied.status).toBe(403);
+    expect(denied.body.message).toMatch(/permission to send emails/i);
+    // vendors.onboard / accounts.update no longer open it by the side
+    expect((await put(`/access/people/${e.m.id}`, adminToken, { grants: { 'vendors.onboard': true, 'accounts.update': true } })).status).toBe(200);
     expect((await get('/vendor-email/log', e.token)).status).toBe(403);
   });
 

@@ -17,6 +17,7 @@ import AssignRecruiterDrawer from './AssignRecruiterDrawer.jsx';
 import RequirementFormPage from './RequirementFormPage.jsx';
 import VendorEmailDrawer from './VendorEmailDrawer.jsx';
 import { userCan } from '../../lib/permissions.js';
+import { allowed } from '../../lib/access.js';
 
 function reqKey(id) {
   return `REQ-${String(id).slice(0, 8).toUpperCase()}`;
@@ -161,7 +162,7 @@ export default function RequirementsListPage() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [emailOpen, setEmailOpen] = useState(false);
   // Emailing requirements to vendors: Sales and Admin, or anyone with Email > Send, or a custom role that may edit requirements.
-  const canEmailVendors = ['sales', 'admin'].includes(user?.role) || userCan(user, 'email.send') || userCan(user, 'requirements.update');
+  const canEmailVendors = allowed(user, ['email.send'], ['sales', 'admin'].includes(user?.role) || userCan(user, 'email.send') || userCan(user, 'requirements.update'));
   const [peek, setPeek] = useState(null);
   const [createOpen, setCreateOpen] = useState(searchParams.get('create') === '1');
 

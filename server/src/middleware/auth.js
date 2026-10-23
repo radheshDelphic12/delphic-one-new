@@ -66,7 +66,10 @@ function authenticate(req, res, next) {
         }
         // The central access check: one table (lib/access/routeRules.js) decides every route for a company on the permission model.
         const allowed = accessGuard.check(user, req.method, req.originalUrl);
-        if (!allowed.ok) return fail(res, 403, "You don't have access to this");
+        if (!allowed.ok) {
+          const mail = /^\/api\/v1\/vendor-email(\/|\?|$)/.test(req.originalUrl);
+          return fail(res, 403, mail ? "You don't have permission to send emails. Ask an admin to give you Email > Send emails." : "You don't have access to this");
+        }
         user.role = allowed.role;
         req.user = user;
         // Multi-company ERP (HLD §5, layer 1): the rest of this request runs

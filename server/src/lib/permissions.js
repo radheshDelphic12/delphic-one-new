@@ -93,7 +93,6 @@ const BASIC_ITEMS = [
   { key: 'basic.timesheet', label: 'Log and view own timesheet' },
   { key: 'basic.payslips', label: 'View own payslips' },
   { key: 'basic.expenses', label: 'File and track own expense claims' },
-  { key: 'basic.expenses', label: 'File and track own expense claims' },
   { key: 'basic.settings', label: 'Own account (my details, security, notifications)' },
 ];
 const BASIC_KEYS = BASIC_ITEMS.map((b) => b.key);
