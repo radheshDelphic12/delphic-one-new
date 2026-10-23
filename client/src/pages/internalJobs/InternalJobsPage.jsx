@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Briefcase, MapPin, UserPlus } from 'lucide-react';
+import { Briefcase, FileText, MapPin, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../../components/ui/Pill.jsx';
+import Drawer from '../../components/ui/Drawer.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
 import ScreeningFields, { emptyScreening, screeningPayload } from '../../components/applicants/ScreeningFields.jsx';
 
@@ -42,6 +43,44 @@ function ReferForm({ job, onDone }) {
   );
 }
 
+const chip = 'rounded-full border border-primary-100 bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-800';
+
+/** Everything known about one job, so nobody has to ask the recruiter for the JD. */
+function JobDetails({ job }) {
+  const facts = [
+    ['Experience', job.experience],
+    ['Department', job.department],
+    ['Location', job.location],
+    ['Work mode', job.work_mode],
+    ['Employment type', job.employment_type],
+    ['Openings', job.openings],
+    ['Contract length', job.contract_months ? `${job.contract_months} months` : null],
+    ['Max notice period', job.notice_days != null ? `${job.notice_days} days` : null],
+    ['Time zone', job.time_zone],
+    ['Target start', job.start_date],
+    ['Domain', job.domain],
+    ['Posted', job.posted_at ? String(job.posted_at).slice(0, 10) : null],
+  ].filter(([, v]) => v);
+  const skillBlock = (label, list) => list?.length > 0 && (
+    <div><h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">{label}</h3><div className="mt-1.5 flex flex-wrap gap-1.5">{list.map((x) => <span key={x} className={chip}>{x}</span>)}</div></div>
+  );
+  return (
+    <div className="space-y-4" data-testid="job-details">
+      <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {facts.map(([k, v]) => <div key={k}><dt className="text-xs text-tertiary-500">{k}</dt><dd className="text-sm font-medium text-tertiary-900">{v}</dd></div>)}
+      </dl>
+      {skillBlock('Primary skills', job.primary_skills)}
+      {skillBlock('Good to have', job.secondary_skills)}
+      {skillBlock('Certifications', job.certifications)}
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Job description</h3>
+        <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-tertiary-800">{job.full_description || job.description || 'No description has been added for this job yet.'}</p>
+      </div>
+      {job.jd_url && <a href={job.jd_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-700 hover:underline"><FileText className="h-4 w-4" />Open the JD document</a>}
+    </div>
+  );
+}
+
 /**
  * Internal jobs: the jobs that are open on the website, shown to every employee. Anyone can refer a person, and an employee
  * whose project is ending (on the bench) can apply for a job themselves. Both go to the recruiters' applicant pool.
@@ -54,6 +93,8 @@ export default function InternalJobsPage() {
   const jobs = useLiveData(() => apiClient.get('/internal-jobs').then((r) => r.data.data), { intervalMs: 60000, deps: [] });
   const rows = jobs.data || [];
   const [referring, setReferring] = useState(null);
+  const [viewing, setViewing] = useState(null); // slug of the job whose details are open
+  const viewed = rows.find((j) => j.slug === viewing) || null;
   async function applyMyself(job) {
     try {
       await apiClient.post(`/internal-jobs/${job.slug}/apply`, {});
@@ -85,7 +126,7 @@ export default function InternalJobsPage() {
               <div className="flex items-start gap-3">
                 {modern && <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Briefcase className="h-5 w-5" /></span>}
                 <div>
-                <h2 className="text-base font-semibold text-tertiary-900">{j.title}</h2>
+                <h2 className="text-base font-semibold text-tertiary-900"><button type="button" className="text-left hover:text-primary-700 hover:underline" onClick={() => setViewing(j.slug)}>{j.title}</button></h2>
                 <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-tertiary-500">
                   {j.department && <span className="inline-flex items-center gap-1"><Briefcase className="h-3.5 w-3.5" />{j.department}</span>}
                   {j.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{j.location}</span>}
@@ -96,6 +137,7 @@ export default function InternalJobsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {j.referrals > 0 && <Pill tone="blue">{j.referrals} referred by you</Pill>}
                 {j.applied && <Pill tone="green">You applied</Pill>}
+                <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => setViewing(j.slug)}>View details</button>
                 <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => setReferring(referring === j.slug ? null : j.slug)}><UserPlus className="h-3.5 w-3.5" />Refer someone</button>
                 {!j.applied && (j.can_apply
                   ? <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={() => applyMyself(j)}>Apply myself</button>
@@ -103,11 +145,28 @@ export default function InternalJobsPage() {
               </div>
             </div>
             {j.description && <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm text-tertiary-700">{j.description}</p>}
+            <button type="button" className="mt-1 text-xs font-medium text-primary-700 hover:underline" onClick={() => setViewing(j.slug)}>Read the full job details</button>
             {referring === j.slug && <ReferForm job={j} onDone={() => { setReferring(null); jobs.refresh(); }} />}
           </article>
         ))}
         {!rows.length && <p className="rounded-xl border border-tertiary-100 bg-white p-8 text-center text-sm text-tertiary-500">{jobs.loading ? 'Loading…' : 'There are no open positions right now.'}</p>}
       </div>
+      <Drawer
+        open={Boolean(viewed)}
+        title={viewed?.title || 'Job details'}
+        onClose={() => setViewing(null)}
+        size="xl"
+        tone="info"
+        footer={viewed && (
+          <>
+            <button type="button" className="btn-secondary" onClick={() => setViewing(null)}>Close</button>
+            <button type="button" className="btn-secondary" onClick={() => { setReferring(viewed.slug); setViewing(null); }}>Refer someone</button>
+            {!viewed.applied && viewed.can_apply && <button type="button" className="btn-primary" onClick={() => { applyMyself(viewed); setViewing(null); }}>Apply myself</button>}
+          </>
+        )}
+      >
+        {viewed && <JobDetails job={viewed} />}
+      </Drawer>
     </div>
   );
 }

@@ -65,7 +65,8 @@ export default function CalendarPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [view, setView] = useState(readStoredView);
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
-  const [scope, setScope] = useState(user?.role === 'recruiter' ? 'mine' : 'all');
+  const seesEveryone = ['admin', 'recruiter', 'sales', 'bda'].includes(user?.role);
+  const [scope, setScope] = useState(user?.role === 'recruiter' || !seesEveryone ? 'mine' : 'all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [audience, setAudience] = useState('all');
   const [sortBy, setSortBy] = useState('time');
@@ -242,14 +243,14 @@ export default function CalendarPage() {
             >
               My interviews
             </button>
-            <button
+            {seesEveryone && <button
               type="button"
               onClick={() => setScope('all')}
               className={`rounded px-2 py-1 text-xs ${scope === 'all' ? 'bg-primary-600 text-white' : 'text-tertiary-600'}`}
               title="Every interview and meeting, across all users"
             >
               All
-            </button>
+            </button>}
           </div>
 
           <select
