@@ -46,6 +46,19 @@ function EmployeePeek({ row, onClose }) {
 }
 
 // Department A→Z, then name A→Z within it; people with no department last.
+/** The permission set a person holds now; the plain role they had before the move stays only as a read-only note while the restore window is open. */
+function RoleCell({ row }) {
+  const set = row.custom_role?.name;
+  if (!set) return <span className="capitalize">{row.role}</span>;
+  const until = row.legacy_locked_until && new Date(row.legacy_locked_until) > new Date() ? formatDate(row.legacy_locked_until) : null;
+  return (
+    <div>
+      <span>{set}</span>
+      {row.legacy_role && until && <div className="text-[11px] text-tertiary-400">Earlier role: <span className="capitalize">{row.legacy_role}</span> (kept read-only until {until})</div>}
+    </div>
+  );
+}
+
 function sortByDepartment(rows) {
   return [...rows].sort((a, b) => {
     const da = a.department?.name;
@@ -157,7 +170,7 @@ export default function PeopleListPage() {
       ),
     },
     { key: 'code', header: 'Employee code', render: (row) => row.employee_code || <span className="text-tertiary-400">—</span> },
-    { key: 'role', header: 'Role', render: (row) => <span className="capitalize">{row.role}</span> },
+    { key: 'role', header: 'Role', render: (row) => <RoleCell row={row} /> },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not assigned' },
     { key: 'userType', header: 'User type', render: (row) => workerTypeLabel(row.worker_type) },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },

@@ -503,7 +503,7 @@ function SetupView({ options, position, onChanged }) {
           </div>
           {account.type !== 'cash' && <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Bank<input className={inputCls} value={account.bank_name} onChange={(e) => setAccount((c) => ({ ...c, bank_name: e.target.value }))} /></label><label className={labelCls}>Last 4 digits<input className={inputCls} maxLength={4} value={account.account_last4} onChange={(e) => setAccount((c) => ({ ...c, account_last4: e.target.value }))} /></label></div>}
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={account.declared_opening_balance} onChange={(e) => setAccount((c) => ({ ...c, declared_opening_balance: e.target.value }))} /></label><label className={labelCls}>As on<input type="date" className={inputCls} value={account.opening_date} onChange={(e) => setAccount((c) => ({ ...c, opening_date: e.target.value }))} /></label></div>
-          <button type="submit" className="btn-primary" disabled={!account.name.trim()}>Add account</button>
+          <button type="submit" className="btn-primary" disabled={!account.name.trim()}>Add bank account</button>
         </form>
         <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => {
           e.preventDefault();

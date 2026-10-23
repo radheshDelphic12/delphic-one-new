@@ -29,6 +29,11 @@ export const ALL_REPORTS = [
   { key: 'recruiter-reports', label: 'Recruiter reports', roles: ['admin', 'recruiter'], hidden: true },
 ];
 
+/** Reports open to more than admins, for a person on the permission model who holds `reports.view` (their derived role may be 'employee'). */
+export function reportsForPermissions() {
+  return ALL_REPORTS.filter((r) => !r.hidden && r.roles.length > 1);
+}
+
 export function reportsForRole(role) {
   return ALL_REPORTS.filter((r) => !r.hidden && r.roles.includes(role));
 }
