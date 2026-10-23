@@ -63,6 +63,25 @@ describe('claim, then create the profile', () => {
   });
 });
 
+describe('a linked Profile that was deleted afterwards', () => {
+  test('the row offers "Create profile" again, and pressing it links a live Profile', async () => {
+    const a = (await add({ requirement_id: reqA.id, name: 'Gone Profile', email: 'gone@example.com' })).body.data;
+    await post(`/${a.id}/assign`, r1Token);
+    const made = (await post(`/${a.id}/create-profile`, r1Token)).body.data;
+    await prisma.profile.updateMany({ where: { id: made.profile_id, deleted_at: null }, data: { deleted_at: new Date() } });
+
+    const row = (await list({ view: 'mine' }, r1Token)).data[0];
+    expect(row).toMatchObject({ profile_id: null, profile_created: false });
+
+    const again = await post(`/${a.id}/create-profile`, r1Token);
+    expect(again.status).toBe(200);
+    expect(again.body.data.created).toBeUndefined();
+    expect(again.body.data.profile_id).toBeTruthy();
+    expect(again.body.data.profile_id).not.toBe(made.profile_id);
+    expect((await list({ view: 'mine' }, r1Token)).data[0].profile_created).toBe(true);
+  });
+});
+
 describe('unlink from the job', () => {
   test('the holder unlinks: they leave My candidates, the Profile is kept, an outsider cannot', async () => {
     const a = (await add({ requirement_id: reqA.id, name: 'Asha Rao', email: 'asha@example.com' })).body.data;
