@@ -81,7 +81,7 @@ const brief = (m) => ({ org_membership_id: m.id, name: m.person.name, email: m.p
  */
 async function preview(orgId) {
   const org = await prisma.org.findUnique({ where: { id: orgId }, select: { id: true, name: true, access_mode: true, org_group_id: true } });
-  const people = await prisma.orgMembership.findMany({ where: { org_id: orgId, employment_status: { in: WORKING }, worker_type: { not: 'contractor' } }, select: memberSelect, orderBy: { employee_code: 'asc' } });
+  const people = await prisma.orgMembership.findMany({ where: { org_id: orgId, employment_status: { in: WORKING }, worker_type: { not: 'contractor' } }, select: memberSelect, orderBy: [{ employee_code: 'asc' }, { id: 'asc' }] });
   const admin = adminCandidates(people);
   const groupAccounts = await prisma.user.count({ where: { is_group_superadmin: true, active: true } });
 
