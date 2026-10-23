@@ -1,3 +1,5 @@
+import { allowed, isPermissionMode } from './access.js';
+
 /** Keep in sync with server/src/modules/submissions/stageMachines.js */
 
 export const SUBMISSION_STAGE_TRANSITIONS = {
@@ -77,6 +79,8 @@ export function isInternalRoundType(roundType) {
 
 export function canManageInterviewRound(submission, roundType, user) {
   if (!user) return false;
+  // In a permission-mode company the server decides by the Meetings > Schedule permission alone (not the derived role).
+  if (isPermissionMode(user)) return allowed(user, ['meetings.schedule'], false);
   if (user.role === 'admin') return true;
   if (user.role === 'recruiter') return submission?.submitted_by?.id === user.id;
   if (user.role === 'sales') {

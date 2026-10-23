@@ -7,16 +7,17 @@ const { deriveLegacyRole } = require('../../lib/access/effective');
 const BASE_ROLES = ['admin', 'sales', 'recruiter', 'bda', 'employee'];
 
 const BDE = { 'accounts.view': true, 'accounts.create': true, 'meetings.schedule': true };
-const SALES = { 'accounts.view': true, 'requirements.view': true, 'requirements.create': true, 'requirements.update': 'own' };
+// Sales also works the candidate ticket: opens it (Pipeline, Submissions), adds interview rounds (Meetings > Schedule) and moves its own tickets' stages.
+const SALES = { 'accounts.view': true, 'requirements.view': true, 'requirements.create': true, 'requirements.update': 'own', 'pipeline.view': true, 'submissions.view': true, 'meetings.schedule': true, 'submissions.update': 'own' };
 const HR = { 'profiles.view': true, 'profiles.create': true, 'profiles.update': 'own', 'submissions.create': true, 'submissions.update': 'own', 'vendors.onboard': true, 'meetings.schedule': true };
 const ADMIN = { 'timesheets.approve': true, 'attendance.approve': true };
 
 /** The starting roles the owner asked for. Created only when missing; later edits to them are never overwritten. */
 const STARTER_ROLES = [
   { name: 'BDE', base_role: 'bda', description: 'Adds accounts (clients and vendors) and schedules meetings.', permissions: BDE },
-  { name: 'Sales', base_role: 'sales', description: 'Adds requirements for their assigned clients.', permissions: SALES },
-  { name: 'Sales Admin', base_role: 'sales', description: 'BDE and Sales permissions, plus create and update for their team members.', permissions: { ...BDE, ...SALES, 'accounts.update': 'team', 'requirements.update': 'team' } },
-  { name: 'Sales Super Admin', base_role: 'sales', description: 'BDE and Sales permissions, plus create, update and delete for everyone.', permissions: { ...BDE, ...SALES, 'accounts.update': 'all', 'accounts.delete': 'all', 'requirements.update': 'all', 'requirements.delete': 'all' } },
+  { name: 'Sales', base_role: 'sales', description: 'Adds requirements for their assigned clients and works their candidate tickets (view, interview rounds, stages).', permissions: SALES },
+  { name: 'Sales Admin', base_role: 'sales', description: 'BDE and Sales permissions, plus create and update for their team members.', permissions: { ...BDE, ...SALES, 'accounts.update': 'team', 'requirements.update': 'team', 'submissions.update': 'team' } },
+  { name: 'Sales Super Admin', base_role: 'sales', description: 'BDE and Sales permissions, plus create, update and delete for everyone.', permissions: { ...BDE, ...SALES, 'accounts.update': 'all', 'accounts.delete': 'all', 'requirements.update': 'all', 'requirements.delete': 'all', 'submissions.update': 'all' } },
   { name: 'HR', base_role: 'recruiter', description: 'Adds profiles, does submissions, onboards vendors and schedules meetings.', permissions: HR },
   { name: 'HR Admin', base_role: 'recruiter', description: 'HR permissions, plus create and update for their team members.', permissions: { ...HR, 'profiles.update': 'team', 'submissions.update': 'team' } },
   { name: 'HR Super Admin', base_role: 'recruiter', description: 'HR permissions, plus create, update and delete for everyone.', permissions: { ...HR, 'profiles.update': 'all', 'profiles.delete': 'all', 'submissions.update': 'all' } },
