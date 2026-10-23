@@ -24,7 +24,7 @@ export function hasNeed(user, need) {
   if (!a || a.mode !== 'permissions') return true;
   if (a.level !== 'employee') return true;
   const keys = Array.isArray(need) ? need : [need];
-  return keys.some((k) => (k.startsWith('basic.') ? (a.basic || []).includes(k) : Boolean(a.permissions?.[k])));
+  return keys.some((k) => typeof k === 'string' && (k.startsWith('basic.') ? (a.basic || []).includes(k) : Boolean(a.permissions?.[k])));
 }
 
 /** `need` in a company on permissions, the old rule (`legacy`) everywhere else. For tabs and buttons that were `isAdmin`. */

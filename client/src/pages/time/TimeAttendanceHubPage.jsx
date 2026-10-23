@@ -36,7 +36,7 @@ const BASE_TABS = [
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
-const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
+const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.timesheet' };
 // Admin: the client project timesheet (IT and contractors).
 const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList, need: 'timesheets.view' };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
@@ -57,14 +57,14 @@ export default function TimeAttendanceHubPage() {
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
-  // A tab shows only when the person has View on it (a company on permissions); elsewhere the admin role decides, as before.
+  // Tabs with a permission need are filtered by it; the approvals tab is gated by the API's reporting scope.
   const TABS = [
     ...BASE_TABS.slice(0, 2),
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
     ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
-  ].filter((t) => allowed(user, t.need, true));
+  ].filter((t) => t.need == null || allowed(user, t.need, true));
   const has = (key) => TABS.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
