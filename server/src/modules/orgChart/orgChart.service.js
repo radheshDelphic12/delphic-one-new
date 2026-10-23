@@ -51,12 +51,15 @@ function adminsOf(roots) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// The one company admin the group chart puts between the company and its teams: an admin who leads a team (the
-// "Board of Directors" style box) first, else the first admin on file. Null when the company has no admin.
-function companyAdminId({ teams }, admins) {
+// The one company admin the group chart puts between the company and its teams: the company's own Admin account (flagged
+// is_superadmin, not the group account) first; among them, or failing that among all admins, one who leads a team (the
+// "Board of Directors" style box) first, else the first on file. Null when the company has no admin.
+function companyAdminId({ teams }, admins, accountAdminIds = new Set()) {
   if (!admins.length) return null;
   const leads = new Set(teams.map((t) => t.lead_membership_id).filter(Boolean));
-  return (admins.find((a) => leads.has(a.id)) || admins[0]).id;
+  const own = admins.filter((a) => accountAdminIds.has(a.id));
+  const pool = own.length ? own : admins;
+  return (pool.find((a) => leads.has(a.id)) || pool[0]).id;
 }
 
 // Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
@@ -116,7 +119,8 @@ async function getGroupOrgChart({ org_group_id, include_terminated }, allowedGro
   const charts = await Promise.all(orgs.map(async (org) => {
     const chart = await getOrgChart(org.id, { include_terminated, exclude_group_admins: true });
     const admins = adminsOf(chart.roots);
-    return { org, ...chart, admins, company_admin_id: companyAdminId(chart, admins) };
+    const accountAdmins = await prisma.orgMembership.findMany({ where: { org_id: org.id, role: 'admin', person: { is_superadmin: true, is_group_superadmin: false } }, select: { id: true } });
+    return { org, ...chart, admins, company_admin_id: companyAdminId(chart, admins, new Set(accountAdmins.map((a) => a.id))) };
   }));
   return charts;
 }
