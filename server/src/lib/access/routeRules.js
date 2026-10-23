@@ -133,7 +133,7 @@ const RULES = [
   [/^\/interview-rounds(\/|$)/, ['submissions.update', 'meetings.schedule']],
   [/^\/applicants(\/|$)/, { GET: ['applicants.view', 'pipeline.view'], '*': 'applicants.update' }],
   [/^\/website(\/|$)/, { GET: 'website.view', '*': 'website.update' }],
-  [/^\/vendor-email(\/|$)/, ['vendors.onboard', 'accounts.update']],
+  [/^\/vendor-email(\/|$)/, ['email.send', 'vendors.onboard', 'accounts.update']],
 
   // ---- Administration
   [/^\/admin\/(deleted|audit)$/, 'deleted_records.view'],

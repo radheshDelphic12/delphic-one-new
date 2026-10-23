@@ -1,14 +1,14 @@
 const express = require('express');
 const { authenticate } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
-const { can } = require('../../lib/permissions');
+const { canAny } = require('../../lib/permissions');
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./vendorEmail.service');
 
-// Emailing requirements to vendors: the people who manage requirements (Sales, Admin, or a custom role that may edit them).
+// Emailing requirements to vendors: anyone holding Email > Send, or who manages requirements (Sales, Admin, or a custom role that may edit them).
 const router = express.Router();
-router.use(authenticate, requireMasterWorkspace, can('requirements.update', 'sales', 'admin'));
+router.use(authenticate, requireMasterWorkspace, canAny(['email.send', 'requirements.update'], 'sales', 'admin'));
 
 const failFor = (res, result) => {
   if (result.error === 'requirement_not_found') return fail(res, 404, 'One of the selected requirements was not found');

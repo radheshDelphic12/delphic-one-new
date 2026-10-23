@@ -30,7 +30,7 @@ const SALES_TEAM = {
   name: 'Sales Team', base_role: 'sales',
   description: 'Sales work: accounts, requirements, the pipeline and sales reports.',
   permissions: full(['accounts.view', 'accounts.create', 'accounts.update', 'accounts.delete', 'requirements.view', 'requirements.create', 'requirements.update', 'requirements.delete',
-    'pipeline.view', 'profiles.view', 'submissions.view', 'rejected.view', 'applicants.view', 'meetings.schedule', 'vendors.onboard', 'reports.view', 'reports.export', 'business.view']),
+    'pipeline.view', 'profiles.view', 'submissions.view', 'rejected.view', 'applicants.view', 'meetings.schedule', 'vendors.onboard', 'email.send', 'reports.view', 'reports.export', 'business.view']),
 };
 const CURATED = { 'E0001': HR_LEAD, 'E0034': SALES_TEAM }; // Diksha Yadav, Biswajit Dey (employee codes, as the owner named them)
 

@@ -95,7 +95,7 @@ export function layoutTeamChart({ roots, teams = [] }, companyName, { attachUnas
     const leadSeat = lead || (vacancies > 0 ? { vacant: true } : null);
     if (!lead && vacancies > 0) vacancies -= 1;
     const seats = [...members, ...Array.from({ length: vacancies }, () => ({ vacant: true }))];
-    if (!lead && seats.length === 0 && !leadSeat) continue;
+    // A team with nobody in it yet (a new "Board of Directors") is still drawn, as an empty box, so planning can start from it.
     const managerId = team.manager_membership_id && byId.has(team.manager_membership_id) ? team.manager_membership_id : lead?.manager_id;
     const unit = { id: `team:${team.id}`, kind: 'team', label: team.name, lead: leadSeat, members: seats, managerId, order: team.sort_order ?? 0 };
     if (!managerId || !byId.has(managerId)) {
@@ -204,7 +204,7 @@ export function layoutTeamChart({ roots, teams = [] }, companyName, { attachUnas
     ...floatTeams,
     { id: 'float:contractors', kind: 'floating', contractor: true, label: 'Contractor', lead: null, members: contractors },
     { id: 'float:unassigned', kind: 'floating', label: 'Not in a team', lead: null, members: unassigned },
-  ].filter((b) => b.members.length > 0 || b.lead);
+  ].filter((b) => b.members.length > 0 || b.lead || b.id.startsWith('team:'));
   floatBoxes.forEach(sizeBox);
   const floatH = floatBoxes.reduce((m, b) => Math.max(m, b.height), 0);
 
@@ -307,7 +307,8 @@ function arrowLine(id, from, to) {
  * "Coming soon" node with nobody under it.
  */
 export function layoutGroupChart(companies, adminName) {
-  const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon'));
+  // "Coming soon" only while the company has nothing in it: once teams or people are added they must show, flag or not.
+  const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon')) && !(c.roots || []).length && !(c.teams || []).length;
   // A company with no teams has nothing to draw its people under, so they hang off the company (its admin is the group superadmin).
   const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name, { attachUnassigned: !(c.teams || []).length }) }));
   const top = Math.max(...parts.map((p) => p.chart.height), ROOT_H + ROOT_STUB);

@@ -64,23 +64,26 @@ function exitedWhere(today) {
 }
 
 async function getOrgChart(orgId, { include_terminated, exclude_group_admins = false }) {
-  const [memberships, teams] = await Promise.all([
-    prisma.orgMembership.findMany({
-      where: {
-        org_id: orgId,
-        ...(include_terminated ? {} : exitedWhere(todayIst())),
-        ...(exclude_group_admins ? { person: { is_group_superadmin: false } } : {}),
-      },
-      select: MEMBER_SELECT,
-      orderBy: { joined_at: 'asc' },
-    }),
-    // HR Settings → Teams, for the team view (a box per team around its lead).
-    prisma.team.findMany({
-      where: { org_id: orgId },
-      select: { id: true, name: true, lead_membership_id: true, manager_membership_id: true, open_positions: true, sort_order: true },
-      orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
-    }),
-  ]);
+  // HR Settings → Teams, for the team view (a box per team around its lead).
+  const teams = await prisma.team.findMany({
+    where: { org_id: orgId },
+    select: { id: true, name: true, lead_membership_id: true, manager_membership_id: true, open_positions: true, sort_order: true },
+    orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
+  });
+  // The group chart draws the group superadmin once, at the bottom. But when that person was put in a team of this company
+  // (as its lead, its reports-to manager, or a member) they stay in the company's chart, or the team would lose its head.
+  const inTeamRole = teams.flatMap((t) => [t.lead_membership_id, t.manager_membership_id]).filter(Boolean);
+  const memberships = await prisma.orgMembership.findMany({
+    where: {
+      org_id: orgId,
+      ...(include_terminated ? {} : exitedWhere(todayIst())),
+      ...(exclude_group_admins
+        ? { OR: [{ person: { is_group_superadmin: false } }, { id: { in: inTeamRole } }, { team_id: { not: null } }] }
+        : {}),
+    },
+    select: MEMBER_SELECT,
+    orderBy: { joined_at: 'asc' },
+  });
   return { headcount: memberships.length, roots: buildTree(memberships), teams };
 }
 
