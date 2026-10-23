@@ -1,15 +1,21 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
+const env = require('../../config/env');
 const applicantsService = require('../applicants/applicants.service');
 const screening = require('../applicants/screening');
 const bench = require('../bench/bench.service');
+const jobSearch = require('../jobs/jobSearch');
+const referrals = require('../jobs/referrals');
 
 // Internal job board: every employee of the master workspace sees the jobs that are published on the website, can refer
 // someone (a friend, an ex-colleague) or apply for one themselves (for example from the bench). Both land in the same applicant
-// pool as website applications - source "referral" or "internal" - so recruiters work one list. No new table.
+// pool as website applications - source "referral" or "internal" - so recruiters work one list. Both need the CV as a Google Drive link.
+// The search itself (Job ID, title, skills, department, location) is shared with the public careers pages: modules/jobs.
 
-const OPEN = { status: 'published', requirement: { status: 'in_progress', deleted_at: null } };
 const years = z.preprocess((v) => (v === '' || v === null || v === undefined ? undefined : v), z.coerce.number().min(0).max(70).optional());
+// the CV is a mandatory Google Drive link, here too
+const cvLink = z.string({ required_error: 'Google Drive link to the CV is required' }).trim().min(1, 'Google Drive link to the CV is required').max(500)
+  .refine((v) => screening.isDriveUrl(v), 'Enter a Google Drive link to the CV (drive.google.com/...)');
 const referSchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(200),
@@ -18,15 +24,26 @@ const referSchema = z.object({
   message: z.string().trim().max(2000).optional().nullable(),
   // what the referrer knows about the person; all optional
   ...screening.optionalShape,
+  cv_url: cvLink,
 }).superRefine(screening.checkScreening);
-const applySchema = z.object({ phone: z.string().trim().max(40).optional().nullable(), experience_years: years, message: z.string().trim().max(2000).optional().nullable() });
+const applySchema = z.object({ cv_url: cvLink, phone: z.string().trim().max(40).optional().nullable(), experience_years: years, message: z.string().trim().max(2000).optional().nullable() });
 
-const serialize = (p) => ({ slug: p.slug, title: p.title, department: p.department, location: p.location, employment_type: p.employment_type, description: p.public_description, posted_at: p.created_at });
+const serialize = (p, orgSlug) => ({
+  slug: p.slug,
+  job_code: p.job_code,
+  // the public page of this job; the client adds ?ref=<employee id> for the employee's personal referral link
+  public_path: `/${orgSlug || 'delphic'}/career/${p.slug}`,
+  public_base: env.publicCareersBase || null,
+  title: p.title,
+  department: p.department,
+  location: p.location,
+  employment_type: p.employment_type,
+  description: p.public_description,
+  posted_at: p.created_at,
+});
 
 const WORK_MODE = { remote: 'Remote', onsite: 'On-site', hybrid: 'Hybrid' };
 const num = (v) => (v == null ? null : Number(v));
-// Everything an employee needs to judge a job, from the requirement. Never the budget, billing, client or owner.
-const REQUIREMENT_SELECT = { id: true, job_description: true, description: true, designation: true, seats_total: true, primary_tech_stack: true, secondary_tech_stack: true, domain_experience: true, experience_min: true, experience_max: true, certifications_required: true, work_mode: true, work_location: true, time_zone_preference: true, contract_duration_months: true, notice_period_max_days: true, start_date_target: true, jd_document_url: true };
 function jobDetails(r, p) {
   if (!r) return {};
   const body = String(r.job_description || r.description || '').trim();
@@ -52,39 +69,72 @@ function jobDetails(r, p) {
   };
 }
 
-async function list(user) {
+/**
+ * One page of the open jobs: q (Job ID, title, skills, department, location), dept, loc, sort, page, limit.
+ * Returns { rows, pagination, facets }; every row carries the Job ID and what this employee already did on the job.
+ */
+async function list(user, query = {}) {
   const canApply = await bench.canApplyInternally(user.org_id, user.org_membership_id);
-  const rows = await prisma.websiteJobPosting.findMany({ where: { ...OPEN, slug: { not: null } }, include: { requirement: { select: REQUIREMENT_SELECT } }, orderBy: { created_at: 'desc' } });
-  const mine = await prisma.jobApplicant.findMany({
-    where: { requirement_id: { in: rows.map((r) => r.requirement_id) }, OR: [{ created_by: user.id }, ...(user.email ? [{ email: { equals: user.email, mode: 'insensitive' } }] : [])] },
-    select: { requirement_id: true, source: true, email: true },
+  const found = await jobSearch.search({ q: String(query.q || '').slice(0, 100), dept: query.dept, loc: query.loc, sort: query.sort, page: query.page, limit: query.limit });
+  const ids = found.rows.map((r) => r.posting.requirement_id);
+  const mine = ids.length ? await prisma.jobApplicant.findMany({
+    where: { requirement_id: { in: ids }, OR: [{ created_by: user.id }, { referrer_id: user.id }, ...(user.email ? [{ email: { equals: user.email, mode: 'insensitive' } }] : [])] },
+    select: { requirement_id: true, source: true, referrer_id: true },
+  }) : [];
+  return {
+    rows: found.rows.map((r) => {
+      const p = r.posting;
+      const mineHere = mine.filter((m) => m.requirement_id === p.requirement_id);
+      return {
+        ...serialize(p, r.org_slug),
+        ...jobDetails(p.requirement, p),
+        applied: mineHere.some((m) => m.source === 'internal'),
+        can_apply: canApply,
+        referrals: mineHere.filter((m) => m.referrer_id === user.id).length,
+      };
+    }),
+    pagination: found.pagination,
+    facets: found.facets,
+  };
+}
+
+/** The people this employee referred, newest first, with how far each one got (no recruiter notes, no reject reasons). */
+async function myReferrals(user) {
+  const rows = await prisma.jobApplicant.findMany({
+    where: { referrer_id: user.id, requirement: { deleted_at: null } },
+    orderBy: { applied_at: 'desc' },
+    take: 200,
+    select: { id: true, name: true, status: true, profile_id: true, applied_at: true, requirement: { select: { title: true, website_posting: { select: { job_code: true, slug: true } } } } },
   });
-  return rows.map((p) => {
-    const mineHere = mine.filter((m) => m.requirement_id === p.requirement_id);
-    return {
-      ...serialize(p),
-      ...jobDetails(p.requirement, p),
-      applied: mineHere.some((m) => m.source === 'internal'),
-      can_apply: canApply,
-      referrals: mineHere.filter((m) => m.source === 'referral').length,
-    };
-  });
+  return rows.map((a) => ({
+    id: a.id,
+    candidate: a.name,
+    job_code: a.requirement?.website_posting?.job_code || null,
+    job_title: a.requirement?.title || null,
+    slug: a.requirement?.website_posting?.slug || null,
+    referred_at: a.applied_at,
+    status: referrals.referralStatus(a),
+  }));
 }
 
 async function posting(slug) {
-  return prisma.websiteJobPosting.findFirst({ where: { slug: String(slug).toLowerCase(), ...OPEN }, select: { requirement_id: true, title: true } });
+  const row = await jobSearch.findOpen({ slug });
+  return row ? { requirement_id: row.posting.requirement_id, title: row.posting.title, org_id: row.posting.org_id, job_code: row.posting.job_code } : null;
 }
 
 async function refer(user, slug, body) {
   const d = referSchema.parse(body);
   const p = await posting(slug);
   if (!p) return { error: 'not_found' };
-  const r = await applicantsService.addApplicant(user, {
-    requirement_id: p.requirement_id, name: d.name, email: d.email, phone: d.phone || '', experience_years: d.experience_years,
-    notes: `Referred by ${user.name || user.email}${d.message ? `: ${d.message}` : ''}`, channel: 'referral',
-    ...Object.fromEntries(Object.keys(screening.fields).map((k) => [k, d[k]])),
-  }, { source: 'referral' });
-  return r.error === 'duplicate_applicant' ? { error: 'already_applied' } : r.error ? { error: 'not_found' } : { ok: true };
+  {
+    const referrer = await referrals.snapshot(user, p.org_id);
+    const r = await applicantsService.addApplicant(user, {
+      requirement_id: p.requirement_id, name: d.name, email: d.email, phone: d.phone || '', experience_years: d.experience_years,
+      notes: `Referred by ${user.name || user.email}${d.message ? `: ${d.message}` : ''}`, channel: 'referral',
+      ...Object.fromEntries(Object.keys(screening.fields).map((k) => [k, d[k]])),
+    }, { source: 'referral', referrer });
+    return r.error === 'duplicate_applicant' ? { error: 'already_applied' } : r.error ? { error: 'not_found' } : { ok: true, job_code: p.job_code };
+  }
 }
 
 async function applyMyself(user, slug, body) {
@@ -93,11 +143,13 @@ async function applyMyself(user, slug, body) {
   if (!(await bench.canApplyInternally(user.org_id, user.org_membership_id))) return { error: 'not_eligible' };
   const p = await posting(slug);
   if (!p) return { error: 'not_found' };
-  const r = await applicantsService.addApplicant(user, {
-    requirement_id: p.requirement_id, name: user.name || user.email, email: user.email, phone: d.phone || '', experience_years: d.experience_years,
-    notes: `Internal application${d.message ? `: ${d.message}` : ''}`, channel: 'internal',
-  }, { source: 'internal' });
-  return r.error === 'duplicate_applicant' ? { error: 'already_applied' } : r.error ? { error: 'not_found' } : { ok: true };
+  {
+    const r = await applicantsService.addApplicant(user, {
+      requirement_id: p.requirement_id, name: user.name || user.email, email: user.email, phone: d.phone || '', experience_years: d.experience_years,
+      notes: `Internal application${d.message ? `: ${d.message}` : ''}`, channel: 'internal', cv_url: d.cv_url,
+    }, { source: 'internal' });
+    return r.error === 'duplicate_applicant' ? { error: 'already_applied' } : r.error ? { error: 'not_found' } : { ok: true, job_code: p.job_code };
+  }
 }
 
-module.exports = { list, refer, applyMyself };
+module.exports = { list, myReferrals, refer, applyMyself };

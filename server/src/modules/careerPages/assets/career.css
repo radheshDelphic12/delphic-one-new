@@ -106,3 +106,12 @@ button[disabled] { opacity: 0.6; cursor: default; }
 button.link { background: none; color: var(--blue); padding: 0; font-weight: 500; font-size: 0.85rem; text-decoration: underline; }
 button.link:hover { background: none; color: var(--blue-dark); }
 @media (max-width: 600px) { .hero { padding: 20px; } .hero h1 { font-size: 1.5rem; } .job { flex-direction: column; align-items: flex-start; } }
+/* Job ID, sort box and "Load more" */
+.jid { display: inline-block; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.04em; color: var(--blue-dark); background: #e8f1fb; border-radius: 6px; padding: 1px 8px; margin: 0 0 6px; width: fit-content; }
+.job .jid { display: block; }
+.sortby { margin: 0 0 0 auto; }
+.sortby select { margin: 0; padding: 6px 10px; font-size: 0.85rem; }
+.more-wrap { text-align: center; margin: 8px 0 0; }
+button.more { background: #fff; color: var(--blue); border: 1px solid var(--blue); }
+button.more:hover { background: #e8f1fb; }
+input[type=file] { padding: 8px 10px; background: #f9fafb; }

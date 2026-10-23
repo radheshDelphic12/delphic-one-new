@@ -2,19 +2,31 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const logger = require('../../config/logger');
 const client = require('./appsScriptClient');
+const { cleanTitle, normalizeEmployment } = require('../jobs/jobFields');
 
 // A Requirement published to the website's /career page. Only the public copy
 // below ever reaches the Jobs sheet — budget, billing, client and owner fields
 // stay on the Requirement. The sheet row is keyed by requirement_id ("Job ID").
 
 const optStr = (max) => z.string().trim().max(max).optional().nullable();
+// The employment type is one of a fixed set ("Full Time" and "Full-time" are the same thing) and is stored as an enum too.
+const employment = optStr(60).transform((v, ctx) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  const n = normalizeEmployment(v);
+  if (!n) { ctx.addIssue({ code: 'custom', message: 'Choose Full-time, Part-time, Contract or Internship' }); return z.NEVER; }
+  return n.label;
+});
 const publicFieldsSchema = z.object({
-  title: z.string().trim().min(1).max(200),
-  department: optStr(120),
+  // no trailing punctuation, never ALL CAPS
+  title: z.string().trim().min(1).max(200).transform(cleanTitle).refine((v) => v.length > 0, 'Job title is required'),
+  department: z.string({ required_error: 'Department is required', invalid_type_error: 'Department is required' }).trim().min(1, 'Department is required').max(120),
   location: optStr(200),
-  employment_type: optStr(60),
+  employment_type: employment,
   public_description: optStr(10000),
 });
+/** The columns for validated public fields: the label plus the enum behind it. */
+const withKind = (fields) => (fields.employment_type === undefined ? fields : { ...fields, employment_kind: fields.employment_type ? normalizeEmployment(fields.employment_type).kind : null });
 const updateSchema = publicFieldsSchema.partial();
 
 /** A readable, unique public slug: the title plus 4 random hex characters ("senior-react-developer-3fa9"). */
@@ -69,6 +81,7 @@ async function audit(actorId, posting, action, reason) {
 async function push(posting) {
   const result = await client.call('jobs', 'upsertJob', {
     jobId: posting.requirement_id,
+    jobCode: posting.job_code,
     title: posting.title,
     department: posting.department || '',
     location: posting.location || '',
@@ -110,7 +123,7 @@ async function publish(orgId, userId, requirementId, fields) {
   if (!requirement) return { error: 'requirement_not_found' };
   if (CLOSED_REQUIREMENT.includes(requirement.status)) return { error: 'requirement_closed' };
 
-  const data = { ...fields, status: 'published', updated_by: userId };
+  const data = { ...withKind(fields), status: 'published', updated_by: userId };
   const saved = await prisma.websiteJobPosting.upsert({
     where: { requirement_id: requirementId },
     create: { ...data, org_id: orgId, requirement_id: requirementId, created_by: userId, slug: await newSlug(fields.title) },
@@ -129,7 +142,7 @@ async function getOwned(orgId, id) {
 async function update(orgId, userId, id, patch) {
   const existing = await getOwned(orgId, id);
   if (!existing) return { error: 'not_found' };
-  const saved = await prisma.websiteJobPosting.update({ where: { id }, data: { ...patch, updated_by: userId } });
+  const saved = await prisma.websiteJobPosting.update({ where: { id }, data: { ...withKind(patch), updated_by: userId } });
   const posting = await push(saved);
   await audit(userId, posting, 'website_update', 'Edited the website job posting');
   return { posting };

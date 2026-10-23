@@ -2813,10 +2813,18 @@ model JobApplicant {
   // Lower-cased email: one person applies once to a requirement (unique with requirement_id). Empty for a person
   // with no email, for a deleted applicant, and for older duplicate rows (kept, not merged).
   dedupe_key         String?
+  // Referral: the employee who referred this person (an employee's "Refer someone", or their personal job link ?ref=<id>).
+  // The name and employee code are kept as they were on the day. referrer_text is what a candidate typed in "Referred by"
+  // when no employee matched. Applications with none of these are "Direct".
+  referrer_id        String?     @db.Uuid
+  referrer_name      String?
+  referrer_code      String?
+  referrer_text      String?
 
   @@unique([requirement_id, dedupe_key])
   @@index([requirement_id, status])
   @@index([assigned_to])
+  @@index([referrer_id])
   @@index([channel])
   @@index([joiner_status])
   @@map("job_applicants")
@@ -7308,10 +7316,14 @@ model WebsiteJobPosting {
   requirement_id     String      @unique @db.Uuid
   requirement        Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
   slug               String?     @unique // public link: /careers/<slug>
+  // Human-readable Job ID ("DLP-0001"): drawn from a sequence by the database, never changes (a trigger refuses an update),
+  // shown on the public, internal and admin screens and searchable everywhere.
+  job_code           String      @unique @default(dbgenerated("(('DLP-'::text || lpad((nextval('website_job_code_seq'::regclass))::text, 4, '0'::text)))"))
   title              String
   department         String?
   location           String?
-  employment_type    String?
+  employment_type    String? // the display label of employment_kind ("Full-time"); older rows may hold anything
+  employment_kind    JobEmploymentKind?
   public_description String?
   status             String      @default("published") // published | closed
   last_synced_at     DateTime?
@@ -7322,7 +7334,15 @@ model WebsiteJobPosting {
   updated_at         DateTime    @default(now()) @updatedAt
 
   @@index([org_id, status])
+  @@index([org_id, status, created_at])
   @@map("website_job_postings")
+}
+
+enum JobEmploymentKind {
+  full_time
+  part_time
+  contract
+  internship
 }
 
 // One row from a website form sheet (contact / career / secure), pulled in by

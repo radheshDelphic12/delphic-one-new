@@ -155,6 +155,7 @@ export default function ApplicantPoolBoard() {
   const [showFilters, setShowFilters] = useState(false);
   const canClaim = ['recruiter', 'admin'].includes(user?.role);
   const recruiterOptions = useUserOptions('recruiter');
+  const referrers = useLiveData(() => apiClient.get('/applicants/referrers').then((r) => r.data.data), { deps: [] });
   const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v !== undefined));
   const filterKey = JSON.stringify(activeFilters);
   const setFilter = (k) => (e) => setFilters((c) => ({ ...c, [k]: e.target.value }));
@@ -214,7 +215,7 @@ export default function ApplicantPoolBoard() {
           {(reqs.data || []).map((r) => <option key={r.id} value={r.id}>{r.title} ({r.applicants.new} waiting)</option>)}
         </select>
         <form className="flex" onSubmit={(e) => { e.preventDefault(); setApplied(search.trim()); }}>
-          <input className="w-56 rounded-l-xl border border-tertiary-200 bg-white px-3 py-1.5 text-sm" placeholder="Search name, email, phone" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="w-56 rounded-l-xl border border-tertiary-200 bg-white px-3 py-1.5 text-sm" placeholder="Search name, email, phone, Job ID" value={search} onChange={(e) => setSearch(e.target.value)} />
           <button type="submit" className="rounded-r-xl border border-l-0 border-tertiary-200 bg-[#EEF5FC] px-3 py-1.5 text-xs font-semibold text-[#105AA9]">Search</button>
         </form>
         <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
@@ -238,6 +239,17 @@ export default function ApplicantPoolBoard() {
           <label className={labelCls}>Recruiter
             <select className={inputCls} value={filters.recruiter_id || ''} onChange={setFilter('recruiter_id')}>
               <option value="">Any</option>{recruiterOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+          <label className={labelCls}>Job ID<input className={inputCls} placeholder="e.g. DLP-0001" value={filters.job_code || ''} onChange={setFilter('job_code')} /></label>
+          <label className={labelCls}>Referred by
+            <select className={inputCls} value={filters.referrer_id || ''} onChange={setFilter('referrer_id')}>
+              <option value="">Anyone</option>{(referrers.data || []).map((r) => <option key={r.id} value={r.id}>{r.name} ({r.count})</option>)}
+            </select>
+          </label>
+          <label className={labelCls}>Source
+            <select className={inputCls} value={filters.origin || ''} onChange={setFilter('origin')}>
+              <option value="">Any</option><option value="referral">Referral</option><option value="direct">Direct</option><option value="internal">Internal</option>
             </select>
           </label>
           <label className={labelCls}>Immediate joiner
@@ -282,16 +294,17 @@ export default function ApplicantPoolBoard() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[58rem] text-sm">
             <thead className="bg-[#F9FAFB] text-left text-xs uppercase tracking-wide text-tertiary-500">
-              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Requirement</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Screening</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : view === 'rejected' ? 'Rejected' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
+              <tr><th className="px-4 py-2 font-medium">Applicant</th><th className="px-3 font-medium">Job</th><th className="px-3 font-medium">Experience</th><th className="px-3 font-medium">Screening</th><th className="px-3 font-medium">Applied</th><th className="px-3 font-medium">Referred by</th><th className="px-3 font-medium">{view === 'mine' ? 'Profile' : view === 'rejected' ? 'Rejected' : 'Status'}</th><th className="px-3 text-right font-medium">Action</th></tr>
             </thead>
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id} className="border-t border-tertiary-100" data-testid="applicant-row">
                   <td className="px-4 py-2"><p className="font-medium text-tertiary-900">{a.name}</p><p className="text-xs text-tertiary-500">{[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact details'}</p></td>
-                  <td className="px-3"><p className="text-tertiary-800">{a.requirement_title}</p><p className="text-xs text-tertiary-500">{a.client}</p></td>
+                  <td className="px-3">{a.job_code && <span className="mr-1.5 rounded bg-primary-50 px-1.5 py-0.5 text-xs font-bold text-primary-800" data-testid="applicant-job-code">{a.job_code}</span>}<span className="text-tertiary-800">{a.requirement_title}</span><p className="text-xs text-tertiary-500">{a.client}</p></td>
                   <td className="px-3 tabular-nums">{a.experience_years != null ? `${a.experience_years} yrs` : '—'}</td>
                   <td className="px-3 text-xs text-tertiary-700" data-testid="screening-cell"><ScreeningSummary a={a} /></td>
                   <td className="px-3 text-xs text-tertiary-500">{ago(a.applied_at)} · <span className="capitalize">{a.channel || a.source}</span></td>
+                  <td className="px-3 text-xs" data-testid="referred-by">{a.referred_by ? <Pill tone="blue">{a.referred_by.name}{a.referred_by.employee_code ? ` (${a.referred_by.employee_code})` : ''}{a.referred_by.typed ? ' · typed' : ''}</Pill> : <span className="text-tertiary-500">{a.origin === 'internal' ? 'Internal' : a.origin === 'manual' ? 'Added by recruiter' : 'Direct'}</span>}</td>
                   <td className="px-3">
                     {a.status === 'new' ? <Pill tone="blue">In pool</Pill>
                       : a.status === 'unlinked' ? <Pill tone="gray">Unlinked</Pill>
@@ -336,10 +349,10 @@ export default function ApplicantPoolBoard() {
                 </tr>
               ))}
               {loadingRows && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500" data-testid="applicants-loading">Loading applicants…</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-tertiary-500" data-testid="applicants-loading">Loading applicants…</td></tr>
               )}
               {!rows.length && !loadingRows && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-tertiary-500">
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-tertiary-500">
                   <UserPlus className="mx-auto mb-2 h-6 w-6 text-tertiary-300" />
                   {view === 'mine' ? 'You have not claimed anyone yet. Open the Pool and press "Assign to me".' : view === 'rejected' ? 'Nobody is rejected. Use "Reject" on an applicant to move them here.' : 'Nobody is waiting in the pool. Applicants appear here as they apply (or add one by hand).'}
                 </td></tr>

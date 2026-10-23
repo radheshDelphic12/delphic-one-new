@@ -40,6 +40,7 @@ router.get('/published-links', authorize('admin', 'sales', 'recruiter'), asyncHa
   const rows = await require('../website/postings.service').list(req.user.org_id, { status: 'published' });
   return ok(res, rows.filter((p) => p.slug).map((p) => ({ requirement_id: p.requirement_id, slug: p.slug })));
 }));
+router.get('/referrers', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, await service.referrers())));
 router.get('/requirements', authorize('admin', 'sales', 'recruiter'), asyncHandler(async (req, res) => ok(res, await service.inProgressRequirements())));
 router.get(
   '/',

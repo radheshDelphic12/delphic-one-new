@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const screening = require('./screening');
+const referrals = require('../jobs/referrals');
 
 // The applicant pool of in-progress requirements. People enter the pool (added by hand today; the website will feed it
 // through the website module's career submissions), every recruiter sees the pool, and the first recruiter to claim an applicant
@@ -44,6 +45,10 @@ const listSchema = z.object({
   assignment: z.enum(['unassigned', 'assigned']).optional(),
   profile: z.enum(['created', 'not_created']).optional(),
   recruiter_id: z.string().uuid().optional(),
+  // Job ID (partial, any case) and who referred; origin = referral | direct | internal | manual
+  job_code: z.string().trim().max(30).optional(),
+  referrer_id: z.string().uuid().optional(),
+  origin: z.enum(['referral', 'direct', 'internal', 'manual']).optional(),
 });
 const assignSchema = z.object({ user_id: z.string().uuid().optional() });
 const rejectSchema = z.object({ reason: text(300) });
@@ -60,6 +65,7 @@ function serialize(a, userNames, reqs) {
     id: a.id,
     requirement_id: a.requirement_id,
     requirement_title: r?.title || null,
+    job_code: r?.website_posting?.job_code || null,
     client: r?.account?.name || null,
     name: a.name,
     email: a.email,
@@ -79,6 +85,8 @@ function serialize(a, userNames, reqs) {
     extra_skills: a.extra_skills || [],
     source: a.source,
     channel: a.channel,
+    origin: referrals.originOf(a),
+    referred_by: a.referrer_id || a.referrer_text ? { id: a.referrer_id || null, name: a.referrer_name || a.referrer_text || null, employee_code: a.referrer_code || null, typed: !a.referrer_id } : null,
     status: a.status,
     assigned_to: a.assigned_to ? { id: a.assigned_to, name: userNames.get(a.assigned_to) || null } : null,
     assigned_at: a.assigned_at,
@@ -111,7 +119,7 @@ async function inProgressRequirements() {
       account: { select: { id: true, name: true } },
       assignments: { where: { role_on_req: 'recruiter', unassigned_at: null }, select: { user: { select: { id: true, name: true } } } },
       applicants: { select: { status: true, channel: true } },
-      website_posting: { select: { status: true, slug: true } },
+      website_posting: { select: { status: true, slug: true, job_code: true } },
     },
   });
   return rows.map((r) => ({
@@ -133,10 +141,18 @@ async function inProgressRequirements() {
     updated_at: r.updated_at,
     applicants: { new: r.applicants.filter((a) => a.status === 'new').length, assigned: r.applicants.filter((a) => a.status === 'assigned').length },
     // Publishing itself lives in modules/website (Apps Script); this is only the listing's state.
-    website: { published: r.website_posting?.status === 'published', closed: r.website_posting?.status === 'closed', slug: r.website_posting?.slug || null },
+    website: { published: r.website_posting?.status === 'published', closed: r.website_posting?.status === 'closed', slug: r.website_posting?.slug || null, job_code: r.website_posting?.job_code || null },
     // How many applicants came from each channel (linkedin, website, ...).
     channels: r.applicants.reduce((acc, a) => { const k = a.channel || 'unknown'; acc[k] = (acc[k] || 0) + 1; return acc; }, {}),
   }));
+}
+
+/** "Referral" = somebody referred the person (an employee, or a name typed on the form); "Direct" = a plain website application. */
+function originWhere(origin) {
+  if (origin === 'referral') return { OR: [{ referrer_id: { not: null } }, { referrer_text: { not: null } }, { source: 'referral' }] };
+  if (origin === 'direct') return { source: 'website', referrer_id: null, referrer_text: null };
+  if (origin === 'internal' || origin === 'manual') return { source: origin };
+  return null;
 }
 
 /** The screening filters of the Applicants list; a person with no answer for a filtered question never matches it. */
@@ -162,15 +178,18 @@ async function list(user, rawQuery) {
       : q.view === 'pool' ? { status: 'new' }
         : q.view === 'mine' ? { status: 'assigned' }
           : { status: { not: 'rejected' } };
+  const origin = originWhere(q.origin);
+  const extraAnd = [...(screeningWhere(q).AND || []), ...(origin ? [origin] : [])];
   const where = {
     ...(q.requirement_id ? { requirement_id: q.requirement_id } : {}),
-    requirement: liveRequirement,
+    requirement: { ...liveRequirement, ...(q.job_code ? { website_posting: { job_code: { contains: q.job_code, mode: 'insensitive' } } } : {}) },
     ...statusWhere,
+    ...(q.referrer_id ? { referrer_id: q.referrer_id } : {}),
     ...(q.view === 'mine' ? { assigned_to: user.id } : {}),
     ...(q.profile ? { profile_id: q.profile === 'created' ? { not: null } : null } : {}),
     ...(q.recruiter_id ? { assigned_to: q.recruiter_id } : {}),
-    ...screeningWhere(q),
-    ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { email: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }] } : {}),
+    ...(extraAnd.length ? { AND: extraAnd } : {}),
+    ...(q.search ? { OR: [{ name: { contains: q.search, mode: 'insensitive' } }, { email: { contains: q.search, mode: 'insensitive' } }, { phone: { contains: q.search } }, { referrer_name: { contains: q.search, mode: 'insensitive' } }, { requirement: { website_posting: { job_code: { contains: q.search, mode: 'insensitive' } } } }] } : {}),
   };
   const [total, rows, pool, mine, everyone, rejected] = await Promise.all([
     prisma.jobApplicant.count({ where }),
@@ -180,7 +199,7 @@ async function list(user, rawQuery) {
     prisma.jobApplicant.count({ where: { requirement: liveRequirement, status: { not: 'rejected' } } }),
     prisma.jobApplicant.count({ where: { requirement: liveRequirement, status: 'rejected' } }),
   ]);
-  const reqs = new Map((await prisma.requirement.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requirement_id))] } }, select: { id: true, title: true, account: { select: { name: true } } } })).map((r) => [r.id, r]));
+  const reqs = new Map((await prisma.requirement.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.requirement_id))] } }, select: { id: true, title: true, account: { select: { name: true } }, website_posting: { select: { job_code: true } } } })).map((r) => [r.id, r]));
   const userNames = await names(rows.flatMap((r) => [r.assigned_to, r.rejected_by]));
   return {
     rows: rows.map((r) => serialize(r, userNames, reqs)),
@@ -190,7 +209,7 @@ async function list(user, rawQuery) {
 }
 
 /** Adds one applicant to a requirement's pool. The same person (email or phone) is never added twice to one requirement. */
-async function addApplicant(user, body, { source = 'manual', cvFile = null } = {}) {
+async function addApplicant(user, body, { source = 'manual', cvFile = null, referrer = null } = {}) {
   const d = addSchema.parse(body);
   const requirement = await prisma.requirement.findFirst({ where: { id: d.requirement_id, deleted_at: null }, select: { id: true, status: true } });
   if (!requirement) return { error: 'requirement_not_found' };
@@ -210,6 +229,7 @@ async function addApplicant(user, body, { source = 'manual', cvFile = null } = {
       data: {
         requirement_id: d.requirement_id, name: d.name, email, phone: d.phone || null, experience_years: d.experience_years ?? null, notes: d.notes || null, source, channel: d.channel || null,
         ...screening.toColumns(d), cv_file: cvFile?.filename || null, cv_file_name: cvFile?.name || null, created_by: user?.id || null,
+        referrer_id: referrer?.referrer_id || null, referrer_name: referrer?.referrer_name || null, referrer_code: referrer?.referrer_code || null, referrer_text: referrer?.referrer_text || null,
         dedupe_key: email,
       },
     });
@@ -220,6 +240,12 @@ async function addApplicant(user, body, { source = 'manual', cvFile = null } = {
     throw err;
   });
   return done;
+}
+
+/** The people who referred at least one applicant (for the Referred by filter). */
+async function referrers() {
+  const rows = await prisma.jobApplicant.groupBy({ by: ['referrer_id', 'referrer_name'], where: { referrer_id: { not: null }, requirement: liveRequirement }, _count: { _all: true } });
+  return rows.map((r) => ({ id: r.referrer_id, name: r.referrer_name, count: r._count._all })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 /** The stored CV of an applicant, for the authenticated download. */
@@ -419,4 +445,4 @@ async function remove(user, id, reason) {
   return { id };
 }
 
-module.exports = { inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, createProfile, unlink, reject, unreject, remove };
+module.exports = { referrers, inProgressRequirements, list, addApplicant, updateApplicant, cvFileOf, assign, release, createProfile, unlink, reject, unreject, remove };

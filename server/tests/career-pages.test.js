@@ -46,19 +46,20 @@ describe('careers pages', () => {
     expect(html).toContain('id="job-filters"');
     expect(html).toContain('data-filter="dept" value="engineering"');
     expect(html).toContain('data-filter="loc" value="indore"');
-    expect(html).toContain('data-dept="engineering"');
-    expect(html).toContain('data-loc="indore"');
     expect(html).toContain('src="assets/career.js?v=');
     const { listPage } = require('../src/modules/careerPages/careerPages.views');
+    const { placesOf } = require('../src/modules/jobs/jobSearch');
     const jobs = [
-      { slug: 'a', title: 'A', department: 'Sales', location: 'Gurgaon, Haryana & Ahmedabad' },
-      { slug: 'b', title: 'B', department: 'IT', location: 'Indore · On-site' },
-      { slug: 'c', title: 'C', department: 'IT', location: 'Remote · Remote' },
-      { slug: 'd', title: 'D', department: 'IT', location: 'Ahmedabad' },
+      { slug: 'a', job_code: 'DLP-0001', title: 'A', department: 'Sales', location: 'Gurgaon, Haryana & Ahmedabad' },
+      { slug: 'b', job_code: 'DLP-0002', title: 'B', department: 'IT', location: 'Indore · On-site' },
+      { slug: 'c', job_code: 'DLP-0003', title: 'C', department: 'IT', location: 'Remote · Remote' },
+      { slug: 'd', job_code: 'DLP-0004', title: 'D', department: 'IT', location: 'Ahmedabad' },
     ];
-    const two = listPage({ jobs, canonical: '' });
+    const count = (values) => [...values.reduce((m, v) => m.set(v, (m.get(v) || 0) + 1), new Map())].sort().map(([value, n]) => ({ value, count: n }));
+    const facets = { departments: count(jobs.map((j) => j.department)), locations: count(jobs.flatMap((j) => placesOf(j))) };
+    const two = listPage({ jobs, facets, query: {}, pagination: { page: 1, limit: 20, total: 4, totalPages: 1, open_total: 4 }, canonical: '' });
     // several places in one location are listed separately, a state name is not a place, the "· On-site" part is a work mode, not a place
-    expect(two).toContain('data-loc="gurgaon|ahmedabad"');
+    expect(two).toContain('data-filter="loc" value="ahmedabad"');
     expect(two).not.toContain('value="haryana"');
     expect(two).toContain('data-filter="loc" value="indore" data-label="Indore"><span>Indore</span><em>1</em>');
     expect(two).toContain('data-filter="loc" value="ahmedabad" data-label="Ahmedabad"><span>Ahmedabad</span><em>2</em>'); // "Ahmedabad" + "Ahmedabad" in job A
