@@ -51,15 +51,21 @@ function adminsOf(roots) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// The one company admin the group chart puts between the company and its teams: the company's own Admin account (flagged
-// is_superadmin, not the group account) first; among them, or failing that among all admins, one who leads a team (the
-// "Board of Directors" style box) first, else the first on file. Null when the company has no admin.
-function companyAdminId({ teams }, admins, accountAdminIds = new Set()) {
+// The one company admin the group chart puts between the company and its teams. Among the company's own Admin accounts
+// (flagged is_superadmin, never the group account), or failing that among all its admins: the one who leads the first team
+// (lowest display order, the "Board of Directors" box), else the one who joined first. Null when the company has no admin.
+function companyAdminId({ roots, teams }, admins, accountAdminIds = new Set()) {
   if (!admins.length) return null;
-  const leads = new Set(teams.map((t) => t.lead_membership_id).filter(Boolean));
+  const leadOrder = new Map();
+  teams.forEach((t, i) => { if (t.lead_membership_id && !leadOrder.has(t.lead_membership_id)) leadOrder.set(t.lead_membership_id, i); });
+  const joined = new Map();
+  const walk = (n) => { joined.set(n.id, n.joined_at ? new Date(n.joined_at).getTime() : Infinity); n.direct_reports.forEach(walk); };
+  roots.forEach(walk);
   const own = admins.filter((a) => accountAdminIds.has(a.id));
   const pool = own.length ? own : admins;
-  return (pool.find((a) => leads.has(a.id)) || pool[0]).id;
+  const key = (a) => [leadOrder.has(a.id) ? leadOrder.get(a.id) : Infinity, joined.get(a.id) ?? Infinity];
+  const cmp = (p, q) => (p < q ? -1 : p > q ? 1 : 0); // Infinity - Infinity is NaN, so compare, do not subtract
+  return [...pool].sort((x, y) => cmp(key(x)[0], key(y)[0]) || cmp(key(x)[1], key(y)[1]) || x.name.localeCompare(y.name))[0].id;
 }
 
 // Someone who has exited is not in the chart: status "terminated", or a last working day that has already passed (the
