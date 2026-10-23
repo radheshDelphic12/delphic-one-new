@@ -225,7 +225,8 @@ async function listForCalendar(user, opts = {}) {
   const def = monthRange();
   const from = opts.from ? new Date(opts.from) : def.from;
   const to = opts.to ? new Date(opts.to) : def.to;
-  const mine = opts.mine === '1';
+  // A plain employee only ever sees the interviews / meetings they are part of, whatever the request says.
+  const mine = opts.mine === '1' || !['admin', 'recruiter', 'sales', 'bda'].includes(user?.role);
   const audience = opts.audience || 'all';
   const sort = opts.sort || 'time';
 
