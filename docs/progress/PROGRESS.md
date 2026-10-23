@@ -2,6 +2,12 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-23 — Time & Attendance crash for permission-mode users
+
+- Fixed the hub crash caused by a tab without a permission key reaching `hasNeed()` and calling `startsWith` on `undefined`. Missing/invalid permission needs now fail closed; the IT Log time tab explicitly requires `basic.timesheet`.
+- Kept manager Approvals visible when the API confirms the user's reporting scope; that tab is conditional on server-provided approval scope, not a global `timesheets.approve` permission.
+- Added a focused permission-helper regression test.
+
 ## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, pushed to `staging` and `main` as 5101ada, test fix 4e74524 on `staging`)
 
 - Special case: an admin can apply a **full-day** leave for an employee on dates they were already marked present (previously refused with `present_on_date`). `POST /leave/requests/admin` takes `override_attendance: true`, which requires `auto_approve: true` and a reason (min 3 chars). Leave Managers who are not admins get 403. Half-day leave never needed it.
