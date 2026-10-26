@@ -23,11 +23,12 @@ function canManage(user) {
   return user.role === 'admin' || user.role === 'bda';
 }
 
-// Only active, non-project accounts (clients or vendors) can have tracked meetings.
+// Any account (client or vendor) at any stage can have any number of tracked meetings, so a lead can be met again and again before it
+// turns Active. A project (an account that is run as a project) has none.
 async function loadActiveAccount(accountId) {
   const account = await prisma.account.findUnique({ where: { id: accountId } });
   if (!account || account.deleted_at) return { error: 'not_found' };
-  if (account.is_project || account.stage !== 'active') return { error: 'not_active' };
+  if (account.is_project) return { error: 'not_active' };
   return { account };
 }
 

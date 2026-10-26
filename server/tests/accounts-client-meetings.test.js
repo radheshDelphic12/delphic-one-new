@@ -60,10 +60,16 @@ describe('client / vendor follow-up meetings', () => {
     expect((await authed(request(app).get(`/api/v1/accounts/${client.id}/meetings`), bdaToken)).body.data).toEqual([]);
   });
 
-  test('works for active vendors; only active accounts; offline needs a location; validation', async () => {
+  test('works for active vendors; any stage but not a project; offline needs a location; validation', async () => {
     expect((await post(adminToken, vendor, { title: 'Rate card', scheduled_at: at(1) })).status).toBe(201);
-    const notActive = await post(adminToken, lead, { title: 'Too early', scheduled_at: at(1) });
-    expect(notActive.status).toBe(409);
+    // a lead can be met more than once before it turns Active, and the stage stays as it is
+    const first = await post(adminToken, lead, { title: 'Intro call', scheduled_at: at(1) });
+    const second = await post(adminToken, lead, { title: 'Follow-up demo', scheduled_at: at(4) });
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect((await authed(request(app).get(`/api/v1/accounts/${lead.id}/meetings`), adminToken)).body.data).toHaveLength(2);
+    expect((await prisma.account.findUnique({ where: { id: lead.id } })).stage).toBe('lead');
+    const project = await prisma.account.create({ data: { type: 'client', name: unique('Project '), stage: 'active', is_project: true, owner_id: admin.id, origin_owner_id: admin.id } });
+    expect((await post(adminToken, project, { title: 'Not here', scheduled_at: at(1) })).status).toBe(409);
     expect((await post(adminToken, client, { title: 'Site visit', mode: 'offline', scheduled_at: at(1) })).status).toBe(400);
     expect((await post(adminToken, client, { title: '', scheduled_at: at(1) })).status).toBe(422);
     expect((await post(adminToken, { id: '00000000-0000-4000-8000-000000000000' }, { title: 'x', scheduled_at: at(1) })).status).toBe(404);

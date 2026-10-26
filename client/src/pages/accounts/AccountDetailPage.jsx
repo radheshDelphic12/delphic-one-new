@@ -296,7 +296,7 @@ export default function AccountDetailPage() {
             </DetailField>
           </DetailSection>
 
-          {account.stage === 'active' && !account.is_project && <AccountClientMeetings account={account} canMutate={canMutate} />}
+          {!account.is_project && <AccountClientMeetings account={account} canMutate={canMutate} />}
 
           {account.type && (
           <DetailSection title={account.type === 'vendor' ? 'Vendor details' : 'Client details'}>

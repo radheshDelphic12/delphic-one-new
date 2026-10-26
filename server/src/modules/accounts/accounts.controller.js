@@ -26,7 +26,7 @@ const ERROR_STATUS = {
   forbidden_type_change: [403, 'Only an admin can change the account type'],
   forbidden_brought_by: [403, 'Only an admin can change "Brought by"'],
   user_not_found: [400, 'Selected owner was not found or is inactive'],
-  not_active: [409, 'Meetings can only be tracked for active clients and vendors'],
+  not_active: [409, 'Meetings cannot be scheduled on a project; schedule them on its client'],
   location_required: [400, 'location is required for offline meetings'],
   is_project: [409, 'This is a project, not a client account — manage it under Finance → Projects'],
 };
