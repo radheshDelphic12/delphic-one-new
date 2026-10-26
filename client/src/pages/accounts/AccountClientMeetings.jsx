@@ -111,8 +111,8 @@ function ClientMeetingDrawer({ meeting, open, saving, onClose, onSave }) {
 }
 
 /**
- * Extra meetings with an active client / vendor. Tracking only: they never change the account
- * stage, and they show on the Calendar. Shown for active accounts; `canMutate` gates the actions.
+ * Any number of meetings with a client / vendor, at any stage (lead, meeting scheduled, active ...). Tracking only: they never change
+ * the account stage, and they show on the Calendar. Shown for every account that is not a project; `canMutate` gates the actions.
  */
 export default function AccountClientMeetings({ account, canMutate }) {
   const { pushError, pushSuccess } = useAlerts();
