@@ -24,3 +24,6 @@ Built 2026-10-26 (local, not pushed). Three additive migrations: `20261026100000
 
 ## Assumptions (user did not answer the open questions)
 Portal: same apply form as Delphic, applications seen by company admins and the group superadmin. Debt: ratio against group valuation, limit 30%, editable. Investments: returns come from dividends and sales (realisations); valuation changes stay unrealised.
+
+## 4. Group Dashboard > Headcount & Hiring (2026-10-26)
+One table for the whole group, next to Org Chart: every company with its teams, columns Current, New hires, Open positions, Target (current + open), a total row per company and a "Complete group" total, four KPI tiles, a company filter and a CSV export. It reads the group org chart data (`/org-chart/group`) and the same `teamCounts` the Org Chart's team table uses (exported from OrgChartPage.jsx), so the numbers match each company's Org Chart > Team View. Current and New hires include people in no team and contractors; Open and Target come from the teams. Client only: client/src/pages/groupOverview/GroupHeadcountTab.jsx.

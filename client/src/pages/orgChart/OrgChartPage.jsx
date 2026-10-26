@@ -37,7 +37,7 @@ function tierIndexFor(node) {
   return ROLE_FALLBACK_TIER_INDEX[node.role] ?? DEFAULT_TIER_INDEX;
 }
 
-function flattenTree(roots) {
+export function flattenTree(roots) {
   const flat = [];
   const walk = (node) => {
     flat.push(node);
@@ -107,12 +107,12 @@ function categoryCounts(roots, viewMode, teams = []) {
  *   target    — current + open, the team's size once hiring is done
  * Contractors and people in no team are listed with current / new hires only.
  */
-function teamCounts(people, teams) {
+export function teamCounts(people, teams) {
   const teamById = new Map(teams.map((t) => [t.id, t]));
   const leadTeam = new Map(teams.filter((t) => t.lead_membership_id).map((t) => [t.lead_membership_id, t]));
-  const tally = new Map(teams.map((t) => [t.id, { key: t.id, label: t.name, order: t.sort_order ?? 0, current: 0, new_hires: 0, open: t.open_positions || 0, isTeam: true }]));
+  const tally = new Map(teams.map((t) => [t.id, { key: t.id, label: t.name, order: t.sort_order ?? 0, current: 0, new_hires: 0, open: t.open_positions || 0, isTeam: true, people: [] }]));
   const row = (key, label, order) => {
-    if (!tally.has(key)) tally.set(key, { key, label, order, current: 0, new_hires: 0, open: 0, isTeam: false });
+    if (!tally.has(key)) tally.set(key, { key, label, order, current: 0, new_hires: 0, open: 0, isTeam: false, people: [] });
     return tally.get(key);
   };
   for (const p of people) {
@@ -120,6 +120,7 @@ function teamCounts(people, teams) {
     const team = teamById.get(p.team_id) || leadTeam.get(p.id);
     const r = team ? tally.get(team.id) : p.worker_type === 'contractor' ? row('__contractor__', 'Contractors', 1e6) : row('__none__', 'Not in a team', 1e6 + 1);
     r.current += 1;
+    r.people.push(p);
     if (p.employment_status === 'pending_onboarding') r.new_hires += 1;
   }
   return [...tally.values()]
