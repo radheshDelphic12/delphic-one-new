@@ -27,6 +27,7 @@ const baseFields = {
   additional_contacts: z.array(contactSchema).optional(),
 
   source: z.string().optional(),
+  is_premium: z.boolean().optional(),
 
   vendor_specializations: z.array(z.string()).optional(),
   vendor_rate_range: z.object({ min: z.number(), max: z.number(), currency: z.string() }).optional(),
@@ -139,6 +140,8 @@ const listQuerySchema = z.object({
   /** Exact vendor specialization tag (matches `vendor_specializations` array element). */
   specialization: z.string().min(1).max(120).optional(),
   search: z.string().optional(),
+  // Premium accounts only (yes) or the rest (no).
+  premium: z.enum(['yes', 'no']).optional(),
   created_from: z.string().optional(),
   created_to: z.string().optional(),
   sort_by: z.enum(['name', 'created_at', 'updated_at']).default('created_at'),

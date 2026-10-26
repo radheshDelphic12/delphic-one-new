@@ -66,6 +66,7 @@ export const EMPTY_FORM = {
   poc_designation: '',
   additional_contacts: [{ ...EMPTY_CONTACT }],
   source: '',
+  is_premium: false,
   vendor_specializations: '',
   vendor_rate_min: '',
   vendor_rate_max: '',
@@ -117,6 +118,7 @@ export function formFromAccount(account) {
     vendor_rate_currency: rateRange.currency || 'INR',
     client_billing_currency: account.client_billing_currency || 'INR',
     budget_amount: account.budget_amount != null ? String(account.budget_amount) : '',
+    is_premium: Boolean(account.is_premium),
   };
   Object.keys(EMPTY_FORM).forEach((key) => {
     if (typeof EMPTY_FORM[key] === 'string' && typeof merged[key] !== 'string') {
@@ -146,6 +148,7 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
       .map((contact) => Object.fromEntries(Object.entries(contact).map(([key, value]) => [key, str(value)])))
       .filter((contact) => contact.name),
     source: str(form.source),
+    is_premium: Boolean(form.is_premium),
   };
 
   if (form.type && (!isEditing || canEditType)) body.type = form.type;

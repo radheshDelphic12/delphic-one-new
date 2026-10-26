@@ -124,6 +124,7 @@ export default function AccountsListPage() {
   const [stuck, setStuck] = useState(() => searchParams.get('stuck') || '');
   const [ownerId, setOwnerId] = useState(() => searchParams.get('owner_id') || '');
   const [broughtById, setBroughtById] = useState(() => searchParams.get('origin_owner_id') || '');
+  const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
   const [specialization, setSpecialization] = useState(() => searchParams.get('specialization') || '');
   const [location, setLocation] = useState(() => searchParams.get('location') || '');
   const [appliedLocation, setAppliedLocation] = useState(() => searchParams.get('location') || '');
@@ -145,6 +146,7 @@ export default function AccountsListPage() {
     if (stuck) params.stuck = stuck;
     if (ownerId) params.owner_id = ownerId;
     if (broughtById) params.origin_owner_id = broughtById;
+    if (premium) params.premium = premium;
     if (specialization) params.specialization = specialization;
     if (appliedLocation) params.location = appliedLocation;
     if (appliedSearch) params.search = appliedSearch;
@@ -161,7 +163,7 @@ export default function AccountsListPage() {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, specialization, appliedLocation]);
+  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, premium, specialization, appliedLocation]);
 
   useEffect(() => {
     // /users/directory is readable by every role and includes inactive users, so
@@ -198,6 +200,7 @@ export default function AccountsListPage() {
     setOwnerId(searchParams.get('owner_id') || '');
     setBroughtById(searchParams.get('origin_owner_id') || '');
     setSpecialization(searchParams.get('specialization') || '');
+    setPremium(searchParams.get('premium') || '');
   }, [searchParams]);
 
   // Keep the active filters shareable via the URL.
@@ -213,13 +216,14 @@ export default function AccountsListPage() {
     sync('owner_id', ownerId);
     sync('origin_owner_id', broughtById);
     sync('specialization', specialization);
+    sync('premium', premium);
     if (searchParams.get('create') === '1') next.set('create', '1');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, stage, stuck, ownerId, broughtById, specialization]);
+  }, [type, stage, stuck, ownerId, broughtById, premium, specialization]);
 
   const hasActiveFilters = Boolean(
-    type || stage || stuck || ownerId || broughtById || specialization || appliedSearch
+    type || stage || stuck || ownerId || broughtById || premium || specialization || appliedSearch
   );
 
   function clearAllFilters() {
@@ -230,6 +234,7 @@ export default function AccountsListPage() {
     setOwnerId('');
     setBroughtById('');
     setSpecialization('');
+    setPremium('');
     setSearch('');
     setAppliedSearch('');
     const kept = new URLSearchParams();
@@ -317,6 +322,7 @@ export default function AccountsListPage() {
         },
       },
       { key: 'stage', header: 'Stage', render: (row) => <Badge value={row.stage} /> },
+      { key: 'premium', header: 'Premium', render: (row) => (row.is_premium ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Yes</span> : <span className="text-tertiary-400">No</span>) },
       {
         key: 'owner',
         header: 'Owner',
@@ -478,6 +484,22 @@ export default function AccountsListPage() {
                 placeholder="Brought by: All"
                 searchPlaceholder="Search people…"
                 options={people}
+              />
+              <SearchableSelect
+                className="w-40"
+                allowClear
+                ariaLabel="Filter by premium"
+                value={premium}
+                onChange={(next) => {
+                  setPage(1);
+                  setPremium(next);
+                }}
+                placeholder="Premium: All"
+                searchPlaceholder="Search…"
+                options={[
+                  { value: 'yes', label: 'Premium: Yes' },
+                  { value: 'no', label: 'Premium: No' },
+                ]}
               />
               {hasActiveFilters && (
                 <button type="button" className="btn-secondary px-2.5 py-1.5 text-xs" onClick={clearAllFilters}>
