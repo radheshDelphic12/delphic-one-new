@@ -33,6 +33,18 @@ function authorize(...roles) {
   };
 }
 
+// The HR report is admin-only, unless the person is on the permission model and holds Reports > HR reports (the central guard
+// has already checked that key for /reports/hr; the export checks it here).
+// On the permission model the permission alone decides (a person holding Reports > View and Export is derived the admin role for
+// other reports, which must not open HR); elsewhere it is the admin role.
+const canOpenHr = (user) => (user?.access?.mode === 'permissions'
+  ? user.access.level !== 'employee' || Boolean(user.access.permissions?.['reports.hr'])
+  : user?.role === 'admin');
+const authorizeHr = (req, res, next) => {
+  if (req.user?.access?.mode === 'permissions') return canOpenHr(req.user) ? next() : fail(res, 403, "You don't have access to this");
+  return authorizeRole('admin')(req, res, next);
+};
+
 const router = express.Router();
 router.use(authenticate, requireMasterWorkspace);
 
@@ -206,7 +218,7 @@ router.get(
 
 router.get(
   '/hr',
-  authorize('admin'),
+  authorizeHr,
   asyncHandler(async (req, res) => {
     const query = hrSchema.parse(req.query);
     const data = await service.hrReport(query);
@@ -315,8 +327,8 @@ router.get(
     const fn = REPORTS[report];
     if (!fn) return fail(res, 422, 'Unknown report');
     if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
-    // HR is admin-only for the GET; keep its export admin-only too.
-    if (report === 'hr' && req.user.role !== 'admin') return fail(res, 403, 'Admin only');
+    // HR is admin-only for the GET (or Reports > HR reports); keep its export the same.
+    if (report === 'hr' && !canOpenHr(req.user)) return fail(res, 403, 'Admin only');
 
     let query = { ...req.query };
     if (report === 'aging') query = agingSchema.parse(req.query);

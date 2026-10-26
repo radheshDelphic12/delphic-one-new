@@ -70,7 +70,7 @@ const CATALOG = [
   { module: 'billing', category: 'finance', label: 'Billing', actions: [A('billing', 'view', 'View'), A('billing', 'create', 'Add'), A('billing', 'update', 'Edit'), A('billing', 'delete', 'Delete')] },
 
   // ---- Reports
-  { module: 'reports', category: 'reports', label: 'Reports and exports', actions: [A('reports', 'view', 'View'), A('reports', 'export', 'Export')] },
+  { module: 'reports', category: 'reports', label: 'Reports and exports', actions: [A('reports', 'view', 'View'), A('reports', 'export', 'Export'), A('reports', 'hr', 'HR reports (sourcing, submissions, rounds, joinings by person)')] },
 
   // ---- Administration (Super Admin and Admin only unless someone is granted it)
   { module: 'settings', category: 'administration', label: 'Settings (company)', adminDefault: true, actions: [A('settings', 'view', 'View'), A('settings', 'update', 'Edit')] },

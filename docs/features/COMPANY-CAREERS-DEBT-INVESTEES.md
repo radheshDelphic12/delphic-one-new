@@ -27,3 +27,6 @@ Portal: same apply form as Delphic, applications seen by company admins and the 
 
 ## 4. Group Dashboard > Headcount & Hiring (2026-10-26)
 One table for the whole group, next to Org Chart: every company with its teams, columns Current, New hires, Open positions, Target (current + open), a total row per company and a "Complete group" total, four KPI tiles, a company filter and a CSV export. It reads the group org chart data (`/org-chart/group`) and the same `teamCounts` the Org Chart's team table uses (exported from OrgChartPage.jsx), so the numbers match each company's Org Chart > Team View. Current and New hires include people in no team and contractors; Open and Target come from the teams. Client only: client/src/pages/groupOverview/GroupHeadcountTab.jsx.
+
+## 5. Offices: headcount filters (2026-10-26)
+The Offices page (`/offices`, group superadmin) has filters for Work mode (on-site / remote / hybrid / not set), Employee status (working now by default, active, serving notice, on leave, new hire, exited, all), User type (employee / contractor) and Department; the "people" count on every office card and a total follow them. API: `GET /orgs/locations/overview?work_mode=&status=&user_type=&department_id=` (orgs.service.js `officePeopleWhere`; the department is the membership's, else the person's). Test: internal-jobs-offices.test.js.

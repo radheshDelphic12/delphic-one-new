@@ -64,6 +64,7 @@ function MonthRow({ person, m, open }) {
   );
 }
 
+const FLAG_PILL = { on_hold: ['amber', 'On hold'], completed_no_end_date: ['red', 'Marked completed, no end date'] };
 const STATE_PILL = { ended_this_month: ['amber', 'Ended this month'], started_this_month: ['green', 'Started this month'], ongoing: ['blue', 'Ongoing'] };
 
 /** The projects of a month with the dates entered on the allocation (Finance > Project costing). */
@@ -78,7 +79,7 @@ function ProjectList({ items }) {
           const [tone, text] = STATE_PILL[it.state] || STATE_PILL.ongoing;
           return (
             <li key={`${it.title}-${i}`} className="px-3 py-2.5 text-sm">
-              <div className="flex items-start justify-between gap-2"><p className="font-medium text-tertiary-900">{it.title}</p><Pill tone={tone}>{text}</Pill></div>
+              <div className="flex items-start justify-between gap-2"><p className="font-medium text-tertiary-900">{it.title}</p><span className="flex flex-wrap justify-end gap-1">{it.flag && FLAG_PILL[it.flag] && <Pill tone={FLAG_PILL[it.flag][0]}>{FLAG_PILL[it.flag][1]}</Pill>}<Pill tone={tone}>{text}</Pill></span></div>
               <p className="mt-0.5 text-xs text-tertiary-500">{it.sub} · Started {it.start_date ? formatReportDate(it.start_date) : 'before this month'} · {it.end_date ? `Ended ${formatReportDate(it.end_date)}` : 'No end date'}</p>
             </li>
           );

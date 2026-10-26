@@ -1,5 +1,5 @@
 /** Internal job board (refer / apply from the bench) and the Offices overview. */
-const { app, prisma, request, cleanDatabase, createUser, loginAs, createRequirement, createActiveClientAccount, authed } = require('./helpers');
+const { app, prisma, request, cleanDatabase, createUser, createOrgMembership, loginAs, createRequirement, createActiveClientAccount, authed } = require('./helpers');
 
 const { todayIst } = require('../src/lib/istDate');
 
@@ -68,5 +68,32 @@ describe('offices overview', () => {
     expect(r.body.data.map((l) => l.name)).toEqual(['Indore', 'Gurgaon']);
     expect(r.body.data[0]).toMatchObject({ people_count: 1, cctv: { status: 'not_connected' }, biometric: { status: 'not_connected' } });
     expect(r.body.data[1].people_count).toBe(0);
+  });
+
+  test('the headcount follows the filters: work mode, employee status, user type and department', async () => {
+    const office = await prisma.location.create({ data: { org_id: org.id, name: 'Ahmedabad', city: 'Ahmedabad', country: 'India' } });
+    const dept = await prisma.department.create({ data: { org_id: org.id, name: 'Engineering' } });
+    const person = async (data) => {
+      const u = await createUser({ role: 'employee', withOrg: false });
+      const m = await createOrgMembership(u.id, org.id, { role: 'employee' });
+      await prisma.orgMembership.update({ where: { id: m.id }, data: { location_id: office.id, ...data } });
+    };
+    await person({ work_mode: 'remote', department_id: dept.id });
+    await person({ work_mode: 'onsite', worker_type: 'contractor' });
+    await person({ work_mode: 'hybrid', employment_status: 'notice_period' });
+    await person({ employment_status: 'terminated' });
+    await person({ employment_status: 'pending_onboarding' });
+    const count = async (qs) => (await authed(request(app).get(`/api/v1/orgs/locations/overview${qs}`), adminToken)).body.data.find((l) => l.name === 'Ahmedabad').people_count;
+    expect(await count('')).toBe(3); // still working: the remote one, the contractor and the one serving notice
+    expect(await count('?work_mode=remote')).toBe(1);
+    expect(await count('?work_mode=not_set')).toBe(0);
+    expect(await count('?user_type=contractor')).toBe(1);
+    expect(await count('?user_type=full_time_employee')).toBe(2);
+    expect(await count('?department_id=' + dept.id)).toBe(1);
+    expect(await count('?status=notice_period')).toBe(1);
+    expect(await count('?status=terminated')).toBe(1);
+    expect(await count('?status=pending_onboarding')).toBe(1);
+    expect(await count('?status=all')).toBe(5);
+    expect(await count('?status=all&work_mode=onsite&user_type=contractor')).toBe(1);
   });
 });

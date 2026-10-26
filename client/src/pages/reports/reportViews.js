@@ -20,7 +20,7 @@ export const ALL_REPORTS = [
   { key: 'closure', label: 'Closure report', roles: ['admin', 'sales'], hidden: true },
   { key: 'clients-without-requirements', label: 'Clients w/o requirements', roles: ['admin', 'sales', 'bda'] },
   { key: 'recruiter-vendor-gaps', label: 'Recruiter-vendor gaps', roles: ['admin', 'recruiter'] },
-  { key: 'hr', label: 'HR reports', roles: ['admin'] },
+  { key: 'hr', label: 'HR reports', roles: ['admin'], permission: 'reports.hr' },
   { key: 'monthly-review', label: 'Monthly performance review', roles: ['admin'] },
   { key: 'joinings', label: 'Joinings', roles: ['admin', 'sales'] },
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },
@@ -31,8 +31,9 @@ export const ALL_REPORTS = [
 ];
 
 /** Reports open to more than admins, for a person on the permission model who holds `reports.view` (their derived role may be 'employee'). */
-export function reportsForPermissions() {
-  return ALL_REPORTS.filter((r) => !r.hidden && r.roles.length > 1);
+export function reportsForPermissions(holds) {
+  // plus the admin-only reports that have their own permission (HR reports) for a person who holds it
+  return ALL_REPORTS.filter((r) => !r.hidden && (r.roles.length > 1 || (r.permission && holds?.(r.permission))));
 }
 
 export function reportsForRole(role) {

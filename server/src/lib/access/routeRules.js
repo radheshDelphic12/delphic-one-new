@@ -119,6 +119,7 @@ const RULES = [
   [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
 
   // ---- Reports
+  [/^\/reports\/hr(\/|$)/, ['reports.hr']],
   [/^\/reports\/export$/, 'reports.export'],
   [/^\/reports(\/|$)/, 'reports.view'],
 

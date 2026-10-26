@@ -98,6 +98,33 @@ describe('monthly performance review', () => {
     expect(jo.body.data.items[0].title).toBe('Candidate One');
   });
 
+  test('a requirement is won in the month its candidate was closed, even with no joining date or one in a later month', async () => {
+    const ctx = await seed();
+    const sales = await ctx.dept('Sales');
+    const tanvi = await ctx.person('Tanvi Saxena', sales);
+    const hr = await ctx.dept('HR');
+    const hira = await ctx.person('Hira HR', hr);
+    const hiraToken = (await loginAs(hira.user)).access_token;
+    const client = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Acme', type: 'client', stage: 'active', owner_id: tanvi.user.id, origin_owner_id: tanvi.user.id } });
+    const closedIn = (day) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 6));
+    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 12));
+    // 1) closed this month, no joining date entered; 2) closed this month, joining planned for next month; 3) closed this month, joined this month
+    for (const [title, joining] of [['No joining date', null], ['Joining next month', nextMonth], ['Joined this month', closedIn(20)]]) {
+      const req = await prisma.requirement.create({ data: { account_id: client.id, title, req_type: 'recruitment', sales_owner_id: tanvi.user.id, created_at: closedIn(1) } });
+      const seat = await prisma.requirementSeat.create({ data: { requirement_id: req.id, seat_status: 'closed', closed_at: closedIn(15) } });
+      const profile = await createProfile(hiraToken, { name: `Candidate ${title}` });
+      await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: profile.id, stage: 'closed', submitted_by: hira.user.id, actual_joining_date: joining } });
+    }
+    const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
+    const counts = (name) => Object.fromEntries(res.body.data.people.find((x) => x.name === name).months.find((m) => m.key === key).metrics.map((m) => [m.key, m.count]));
+    expect(counts('Tanvi Saxena')).toMatchObject({ req_owned_won: 3, req_brought_won: 3, joinings_owned: 2 });
+    // joinings follow the joining date (else the closing day): two this month, the one planned for next month waits
+    expect(counts('Hira HR').joinings).toBe(2);
+    const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
+    const det = await get(`/monthly-review/details?org_membership_id=${tanvi.m.id}&metric=req_owned_won&${ym}`, ctx.admin);
+    expect(det.body.data.items.map((i) => i.title).sort()).toEqual(['Joined this month', 'Joining next month', 'No joining date']);
+  });
+
   test('attendance: working days and present days per month, and "data not available" for a past month with nothing recorded', async () => {
     const ctx = await seed();
     const hr = await ctx.dept('HR');
@@ -210,6 +237,77 @@ describe('monthly performance review', () => {
     const ym = `year=${prev.getUTCFullYear()}&month=${prev.getUTCMonth() + 1}`;
     const det = await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_active&${ym}`, ctx.admin);
     expect(det.body.data.items.map((i) => i.title).sort()).toEqual(['Glut Network (P0001)', 'Glut Network (P0003)']);
+  });
+
+  test('a project that was deleted and entered again counts once: the deleted record and non-project accounts are left out', async () => {
+    const ctx = await seed();
+    const it = await ctx.dept('IT');
+    const dev = await ctx.person('Arunim IT', it, new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)));
+    const base = { org_id: ctx.org.id, name: 'Dish Network', project_name: 'Dish Network', type: 'client', stage: 'active', owner_id: ctx.adminUser.id, is_project: true };
+    const rate = (id) => prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: id, rate_type: 'monthly', rate: 210000, effective_from: new Date('2020-01-01'), created_by: ctx.adminUser.id } });
+    const assign = (id) => prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: id, org_membership_id: dev.m.id, created_by: ctx.adminUser.id, start_date: new Date('2020-01-01') } });
+    const oldOne = await prisma.account.create({ data: { ...base, project_code: 'P0007', deleted_at: new Date() } }); // deleted earlier, assignment left behind
+    const current = await prisma.account.create({ data: { ...base, project_code: 'P0123' } });
+    const notAProject = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Plain client', type: 'client', stage: 'dropped', owner_id: ctx.adminUser.id } });
+    for (const a of [oldOne, current, notAProject]) { await rate(a.id); await assign(a.id); }
+
+    const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&function=it`, ctx.admin);
+    const counts = Object.fromEntries(res.body.data.people[0].months[0].metrics.map((m) => [m.key, m.count]));
+    expect(counts).toMatchObject({ projects_active: 1, projects_billable: 1 });
+    const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
+    const det = await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_billable&${ym}`, ctx.admin);
+    expect(det.body.data.items.map((i) => i.title)).toEqual(['Dish Network (P0123)']);
+  });
+
+  test('a deleted requirement or client is not counted as brought, owned or won', async () => {
+    const ctx = await seed();
+    const sales = await ctx.dept('Sales');
+    const tanvi = await ctx.person('Tanvi Saxena', sales);
+    const hr = await ctx.dept('HR');
+    const hira = await ctx.person('Hira HR', hr);
+    const hiraToken = (await loginAs(hira.user)).access_token;
+    const client = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Acme', type: 'client', stage: 'active', owner_id: tanvi.user.id, origin_owner_id: tanvi.user.id } });
+    const at = (day) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 6));
+    const make = async (title, deleted) => {
+      const req = await prisma.requirement.create({ data: { account_id: client.id, title, req_type: 'recruitment', sales_owner_id: tanvi.user.id, created_at: at(1), ...(deleted ? { deleted_at: new Date() } : {}) } });
+      const seat = await prisma.requirementSeat.create({ data: { requirement_id: req.id, seat_status: 'closed', closed_at: at(10) } });
+      const profile = await createProfile(hiraToken, { name: `Candidate ${title}` });
+      await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: profile.id, stage: 'closed', submitted_by: hira.user.id } });
+    };
+    await make('Live requirement', false);
+    await make('Deleted requirement', true);
+    const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
+    const counts = Object.fromEntries(res.body.data.people.find((x) => x.name === 'Tanvi Saxena').months[0].metrics.map((m) => [m.key, m.count]));
+    expect(counts).toMatchObject({ req_brought: 1, req_owned: 1, req_owned_won: 1, req_brought_won: 1, joinings_owned: 1 });
+    const hiraCounts = Object.fromEntries(res.body.data.people.find((x) => x.name === 'Hira HR').months[0].metrics.map((m) => [m.key, m.count]));
+    expect(hiraCounts.joinings).toBe(1);
+  });
+
+  test('manual project status: on hold still counts, tagged; completed ends on its end date, or keeps counting and is flagged when it has none', async () => {
+    const ctx = await seed();
+    const it = await ctx.dept('IT');
+    const dev = await ctx.person('Sujal IT', it, new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)));
+    const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const prevKey = prev.toISOString().slice(0, 7);
+    const mk = async (code, extra) => {
+      const a = await prisma.account.create({ data: { org_id: ctx.org.id, name: `Project ${code}`, project_name: `Project ${code}`, project_code: code, type: 'client', stage: 'active', owner_id: ctx.adminUser.id, is_project: true, agreement_start_date: new Date('2020-01-01'), ...extra } });
+      await prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: a.id, rate_type: 'monthly', rate: 1000, effective_from: new Date('2020-01-01'), created_by: ctx.adminUser.id } });
+      await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: a.id, org_membership_id: dev.m.id, created_by: ctx.adminUser.id, start_date: new Date('2020-01-01') } });
+    };
+    await mk('P1', { contract_status: 'on_hold' });
+    await mk('P2', { contract_status: 'completed' }); // completed, no end date
+    await mk('P3', { contract_status: 'completed', agreement_end_date: new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth(), 5)) }); // completed, ended last month
+
+    const month = async (y, m, k) => (await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_active&year=${y}&month=${m}`, ctx.admin)).body.data.items.find((i) => i.title === `Project ${k} (${k})`) || (await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_active&year=${y}&month=${m}`, ctx.admin)).body.data.items.find((i) => i.title.includes(k));
+    const now1 = await month(now.getUTCFullYear(), now.getUTCMonth() + 1, 'P1');
+    expect(now1.flag).toBe('on_hold');
+    expect((await month(now.getUTCFullYear(), now.getUTCMonth() + 1, 'P2')).flag).toBe('completed_no_end_date');
+    expect(await month(now.getUTCFullYear(), now.getUTCMonth() + 1, 'P3')).toBeUndefined(); // ended last month: no longer counted
+    expect(await month(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 'P3')).toBeDefined(); // counted in its last month
+    const res = await get(`/monthly-review?from_month=${prevKey}&to_month=${key}&function=it`, ctx.admin);
+    const by = Object.fromEntries(res.body.data.people[0].months.map((m) => [m.key, Object.fromEntries(m.metrics.map((x) => [x.key, x.count]))]));
+    expect(by[prevKey].projects_active).toBe(3);
+    expect(by[key].projects_active).toBe(2);
   });
 
   test('export: Excel and PDF carry every employee and month of the filtered review', async () => {

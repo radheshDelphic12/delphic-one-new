@@ -171,7 +171,7 @@ router.post(
 router.get(
   '/locations/overview',
   requireOrgMembership,
-  asyncHandler(async (req, res) => ok(res, await service.officesOverview(req.user.org_id)))
+  asyncHandler(async (req, res) => ok(res, await service.officesOverview(req.user.org_id, { work_mode: req.query.work_mode, status: req.query.status, user_type: req.query.user_type, department_id: req.query.department_id })))
 );
 
 router.get(
