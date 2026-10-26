@@ -323,7 +323,9 @@ async function review(orgId, user, q = {}) {
       ...base,
       months: months.map((mo, i) => {
         const { days, ...a } = att[i];
-        return { key: mo.key, year: mo.year, month: mo.month, ...a, metrics: metricKeys.map((k) => ({ key: k, label: METRICS[k].label, count: counts.get(`${mo.key}|${k}`) || 0 })) };
+        // the export asks for each month's day rows in the same pass, so nothing is loaded twice
+        const day_rows = q.with_days ? buildDays(mo.key, days, items, ymd(todayIst())) : undefined;
+        return { key: mo.key, year: mo.year, month: mo.month, ...a, ...(day_rows ? { day_rows } : {}), metrics: metricKeys.map((k) => ({ key: k, label: METRICS[k].label, count: counts.get(`${mo.key}|${k}`) || 0 })) };
       }).reverse(),
     };
   });
@@ -391,43 +393,19 @@ function dayActivity(d) {
   return parts.join(' | ');
 }
 
-// Day by day for the filtered review (Excel second sheet, PDF second section): one row per employee and day that has attendance or activity.
-// Stops at MAX_DAY_ROWS rows; `truncated` says so.
+// Every employee and month of the filtered review (all pages, at most 500 employees) for the Excel / PDF export, in one pass:
+//   rows    : one row per employee and month
+//   dayRows : one row per employee and day that has attendance or activity (Excel second sheet, PDF second section); stops at MAX_DAY_ROWS, `truncated` says so
 const MAX_DAY_ROWS = 20000;
-async function exportDayRows(orgId, user, q = {}) {
-  const todayKey = monthKey(todayIst());
-  const today = ymd(todayIst());
-  const all = (await eligibleMembers(orgId, user, q)).slice(0, 500);
-  const opts = { billable: parseBool(q.include_billable, true), nonBillable: parseBool(q.include_non_billable, false) };
-  const perPerson = await inBatches(all, async (m) => {
-    const months = monthsFor(m, q, todayKey);
-    if (!months.length) return [];
-    const items = await loadItems(orgId, m, m.fn, bounds(months[0].key, months[months.length - 1].key), opts);
-    const out = [];
-    for (const mo of months) {
-      const att = await attendance.memberMonth(orgId, m, mo);
-      for (const d of buildDays(mo.key, att.days, items, today)) {
-        out.push({
-          'Employee code': m.employee_code || '', Employee: m.person?.name || 'Unknown', Team: m.team?.name || '', Function: m.fn.toUpperCase(),
-          Month: mo.key, Date: d.date, Attendance: d.attendance ? d.attendance.label : '', 'Projects that day': d.projects ? d.projects.count : '', Activity: dayActivity(d),
-        });
-      }
-    }
-    return out;
-  });
-  const rows = perPerson.flat().filter((r) => r.Attendance || r.Activity);
-  return { rows: rows.slice(0, MAX_DAY_ROWS), truncated: rows.length > MAX_DAY_ROWS };
-}
-
-// Every employee and month of the filtered review as flat rows, for the Excel / PDF export (all pages, at most 500 employees).
-async function exportRows(orgId, user, q = {}) {
+async function exportBundle(orgId, user, q = {}) {
   const people = [];
   for (let page = 1; page <= 10; page += 1) {
-    const r = await review(orgId, user, { ...q, page, limit: 50 });
+    const r = await review(orgId, user, { ...q, page, limit: 50, with_days: true });
     people.push(...r.people);
     if (page >= r.pages) break;
   }
   const rows = [];
+  const dayRows = [];
   for (const p of people) {
     for (const m of p.months) {
       const row = {
@@ -437,11 +415,22 @@ async function exportRows(orgId, user, q = {}) {
       };
       for (const x of m.metrics) row[x.label] = x.count;
       rows.push(row);
+      for (const d of m.day_rows || []) {
+        if (!d.attendance && !d.measures.length && !d.projects) continue;
+        dayRows.push({
+          'Employee code': p.employee_code || '', Employee: p.name, Team: p.team || '', Function: p.function.toUpperCase(),
+          Month: m.key, Date: d.date, Attendance: d.attendance ? d.attendance.label : '', 'Projects that day': d.projects ? d.projects.count : '', Activity: dayActivity(d),
+        });
+      }
     }
   }
   // one shape for every row, so the sheet columns line up
   const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  return rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c] ?? ''])));
+  return {
+    rows: rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c] ?? '']))),
+    dayRows: dayRows.slice(0, MAX_DAY_ROWS),
+    truncated: dayRows.length > MAX_DAY_ROWS,
+  };
 }
 
-module.exports = { review, details, exportRows, exportDayRows, functionOf, METRICS };
+module.exports = { review, details, exportBundle, functionOf, METRICS };

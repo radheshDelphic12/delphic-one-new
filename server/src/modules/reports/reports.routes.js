@@ -139,8 +139,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const type = req.query.type;
     if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
-    const rows = await monthlyReview.exportRows(req.user.org_id, req.user, req.query);
-    const day = await monthlyReview.exportDayRows(req.user.org_id, req.user, req.query);
+    const { rows, dayRows, truncated } = await monthlyReview.exportBundle(req.user.org_id, req.user, req.query);
+    const day = { rows: dayRows, truncated };
     const filename = `monthly-performance-review-${new Date().toISOString().slice(0, 7)}`;
     if (type === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
