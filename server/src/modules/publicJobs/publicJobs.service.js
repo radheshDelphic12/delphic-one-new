@@ -4,6 +4,7 @@ const screening = require('../applicants/screening');
 const jobSearch = require('../jobs/jobSearch');
 const referrals = require('../jobs/referrals');
 const { JOB_CODE } = require('../jobs/jobFields');
+const hiring = require('../hiring/hiring.service');
 
 // The public side of a published job: the pages behind /<org>/career. Only the public copy of the posting is ever returned
 // (Job ID, title, department, location, type, description) - no client, budget or owner fields.
@@ -69,6 +70,8 @@ async function apply(slug, body, orgSlug) {
   if (!row) return { error: 'not_found' };
   if (d.company_website) return { ok: true, stored: false }; // a bot: pretend it worked, store nothing
   const p = row.posting;
+  // a company's own job (Hiring) keeps its applications in that company's table
+  if (p.company_job) return hiring.recordApplication(p, d, screening);
   const known = ['linkedin', 'website', 'whatsapp', 'referral', 'naukri'];
   const referrer = await referrals.resolve({ ref: d.ref, referredBy: d.referred_by, orgId: p.org_id, applicantEmail: d.email });
   const referred = Boolean(referrer.referrer_id || referrer.referrer_text);

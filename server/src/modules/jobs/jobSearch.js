@@ -69,6 +69,13 @@ async function loadOpen(orgSlug) {
     include: { requirement: { select: REQUIREMENT_SELECT }, org: { select: { slug: true } } },
     orderBy: { created_at: 'desc' },
   })).map(indexRow);
+  // A company without recruitment requirements publishes plain jobs of its own (Hiring in its workspace); they are listed, searched
+  // and opened by the same pages. `company_job` marks them so an application goes to that company's own table.
+  if (orgSlug) {
+    const own = await prisma.companyJob.findMany({ where: { status: 'published', deleted_at: null, org: { slug: orgSlug } }, include: { org: { select: { slug: true } } }, orderBy: { created_at: 'desc' } });
+    rows.push(...own.map((j) => indexRow({ ...j, company_job: true, public_description: j.description, requirement: null })));
+    rows.sort((a, b) => b.created - a.created);
+  }
   cache.set(key, { at: Date.now(), rows });
   return rows;
 }

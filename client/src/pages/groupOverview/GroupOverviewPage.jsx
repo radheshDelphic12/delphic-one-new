@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, Building2, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
+import { Banknote, Building2, Landmark, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -19,6 +19,7 @@ import GroupTasksTab from './GroupTasksTab.jsx';
 import GroupTravelTab from './GroupTravelTab.jsx';
 import GroupCashTab from './GroupCashTab.jsx';
 import GroupLogsTab from './GroupLogsTab.jsx';
+import GroupDebtTab from './GroupDebtTab.jsx';
 import { GroupHero, GroupTabs } from './groupUi.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -156,6 +157,7 @@ const TABS = [
   { key: 'org-chart', label: 'Org Chart', icon: Network },
   { key: 'group-charges', label: 'Billing Charges', icon: Receipt },
   { key: 'logs', label: 'Logs', icon: ScrollText },
+  { key: 'debt', label: 'Debt Management', icon: Landmark },
   { key: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -180,6 +182,7 @@ export default function GroupOverviewPage() {
       {section === 'org-chart' && <GroupOrgChartTab />}
       {section === 'group-charges' && <GroupChargesTab />}
       {section === 'logs' && <GroupLogsTab />}
+      {section === 'debt' && <GroupDebtTab />}
       {section === 'settings' && <GroupSettingsTab />}
     </div>
   );

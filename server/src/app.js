@@ -72,6 +72,7 @@ const uploadsRoutes = require('./modules/uploads/uploads.routes');
 const websiteRoutes = require('./modules/website/website.routes');
 const publicJobsRoutes = require('./modules/publicJobs/publicJobs.routes');
 const careerPagesRoutes = require('./modules/careerPages/careerPages.routes');
+const hiringRoutes = require('./modules/hiring/hiring.routes');
 const internalJobsRoutes = require('./modules/internalJobs/internalJobs.routes');
 
 const app = express();
@@ -147,6 +148,7 @@ app.use('/api/v1/payroll', payrollRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/profitability', profitabilityRoutes);
 app.use('/api/v1/super-dashboard', superDashboardRoutes);
+app.use('/api/v1/hiring', hiringRoutes);
 // Group cash: bank accounts + wallets (group superadmin), and a read-only view of a workspace's own wallets.
 app.use('/api/v1/group-cash', groupCashRoutes.group);
 app.use('/api/v1/wallets', groupCashRoutes.company);

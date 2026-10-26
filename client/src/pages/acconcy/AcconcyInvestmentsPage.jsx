@@ -10,6 +10,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
+import AcconcyInvesteesTab from './AcconcyInvesteesTab.jsx';
 import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import { Area, DateInput, Detail, Empty, Kpi, Money, Num, Section, Select, Text, dayOf, today, toBody, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
@@ -409,8 +410,8 @@ export default function AcconcyInvestmentsPage() {
   if (!axCan(me, 'investments')) return <Navigate to="/acconcy" replace />;
   return (
     <div className="mt-4 space-y-4">
-      <SectionTabs tabs={[{ key: 'investments', label: 'Investments' }, { key: 'assets', label: 'Assets' }]} value={tab} onChange={setTab} />
-      {tab === 'investments' ? <InvestmentsTab me={me} /> : <AssetsTab me={me} />}
+      <SectionTabs tabs={[{ key: 'investments', label: 'Investments' }, { key: 'companies', label: 'Portfolio companies' }, { key: 'assets', label: 'Assets' }]} value={tab} onChange={setTab} />
+      {tab === 'investments' ? <InvestmentsTab me={me} /> : tab === 'companies' ? <AcconcyInvesteesTab me={me} /> : <AssetsTab me={me} />}
     </div>
   );
 }

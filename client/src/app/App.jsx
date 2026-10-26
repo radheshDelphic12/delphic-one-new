@@ -25,6 +25,7 @@ import WebsitePage from '../pages/website/WebsitePage.jsx';
 import CalendarPage from '../pages/calendar/CalendarPage.jsx';
 import NotificationsPage from '../pages/notifications/NotificationsPage.jsx';
 import SettingsPage from '../pages/settings/SettingsPage.jsx';
+import HiringPage from '../pages/hiring/HiringPage.jsx';
 import PeopleHubPage from '../pages/people/PeopleHubPage.jsx';
 import EmployeeProfilePage from '../pages/people/EmployeeProfilePage.jsx';
 import TimeAttendanceHubPage from '../pages/time/TimeAttendanceHubPage.jsx';
@@ -518,6 +519,7 @@ export default function App() {
           element={<Navigate to="/settings?tab=notifications" replace />}
         />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="hiring" element={<HiringPage />} />
         <Route path="people" element={<RequireAccess need={['basic.people_directory', 'basic.org_chart', 'basic.policies', 'people.view', 'users.view', 'allocations.view', 'assets.view', 'hr_settings.view']}><PeopleHubPage /></RequireAccess>} />
         <Route path="offices" element={<RequireGroupSuperadmin><OfficesPage /></RequireGroupSuperadmin>} />
         <Route path="internal-jobs" element={<RequireMasterWorkspace><RequireAccess need="basic.internal_jobs"><InternalJobsPage /></RequireAccess></RequireMasterWorkspace>} />

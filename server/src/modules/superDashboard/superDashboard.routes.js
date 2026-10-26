@@ -9,6 +9,7 @@ const financialsService = require('../financials/financials.service');
 const groupFinance = require('./groupFinance.service');
 const groupTasks = require('./groupTasks.service');
 const groupTravel = require('./groupTravel.service');
+const groupDebt = require('./groupDebt.service');
 const { fail } = require('../../utils/response');
 
 // HLD §7: a single cross-org read API, org_id-agnostic by design, gated to
@@ -105,6 +106,24 @@ const taskResult = (res, r, key, status = 200) => {
   if (r.error) { const m = TASK_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
   return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
 };
+// --- Group debt management: loans and credit limits with their repayment schedules, and the loan ratio against the group's size ---
+const DEBT_ERRORS = {
+  not_found: [404, 'Loan not found'],
+  installment_not_found: [404, 'That instalment does not exist'],
+  company_not_in_group: [422, 'That company is not in this group'],
+};
+const debtResult = (res, r, key, status = 200) => {
+  if (r.error === 'invalid') return fail(res, 422, r.message || 'Invalid request');
+  if (r.error) { const m = DEBT_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+router.get('/group/debt', asyncHandler(async (req, res) => ok(res, await groupDebt.overview(req.user.org_group_ids, req.query))));
+router.get('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.get(req.user.org_group_ids, req.params.id), 'loan')));
+router.post('/group/debt/loans', asyncHandler(async (req, res) => debtResult(res, await groupDebt.create(req.user.org_group_ids, req.user.id, groupDebt.createSchema.parse(req.body)), 'loan', 201)));
+router.patch('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.update(req.user.org_group_ids, req.user.id, req.params.id, groupDebt.updateSchema.parse(req.body)), 'loan')));
+router.delete('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.remove(req.user.org_group_ids, req.params.id))));
+router.put('/group/debt/loans/:id/installments/:seq', asyncHandler(async (req, res) => debtResult(res, await groupDebt.setInstallment(req.user.org_group_ids, req.params.id, Number(req.params.seq), groupDebt.installmentSchema.parse(req.body)), 'loan')));
+router.put('/group/debt/settings', asyncHandler(async (req, res) => ok(res, await groupDebt.saveSettings(req.user.org_group_ids, req.user.id, groupDebt.settingsSchema.parse(req.body)))));
 // --- Group travel: trips by anyone in the group, one total budget, linked to Delphic Global meetings ---
 const TRAVEL_ERRORS = {
   not_found: [404, 'Trip not found'],

@@ -83,6 +83,12 @@ export const acconcyApi = {
   reopenMonth: (month, body) => post(`/finance/periods/${month}/reopen`, body),
 
   investments: (params) => apiClient.get('/acconcy/investments', { params }).then((res) => res.data),
+  investees: (params) => apiClient.get('/acconcy/investees', { params }).then((res) => res.data),
+  investee: (id) => get(`/investees/${id}`),
+  createInvestee: (body) => post('/investees', body),
+  updateInvestee: (id, body) => patch(`/investees/${id}`, body),
+  deleteInvestee: (id, reason) => del(`/investees/${id}`, reason ? { reason } : {}),
+  fundInvestee: (id, body) => post(`/investees/${id}/fund`, body),
   investment: (id) => get(`/investments/${id}`),
   createInvestment: (body) => post('/investments', body),
   updateInvestment: (id, body) => patch(`/investments/${id}`, body),
