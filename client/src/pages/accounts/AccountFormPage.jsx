@@ -275,6 +275,12 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
             <Field label="Lead source">
               <input value={form.source} onChange={(event) => updateField('source', event.target.value)} className={INPUT_CLASS} />
             </Field>
+            <Field label="Premium">
+              <select value={form.is_premium ? 'yes' : 'no'} onChange={(event) => updateField('is_premium', event.target.value === 'yes')} className={INPUT_CLASS}>
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+              </select>
+            </Field>
             <Field label="Location">
               <input value={form.location} onChange={(event) => updateField('location', event.target.value)} className={INPUT_CLASS} placeholder="e.g. Pune, India" />
             </Field>

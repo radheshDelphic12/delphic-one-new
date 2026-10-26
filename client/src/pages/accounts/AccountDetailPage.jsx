@@ -250,6 +250,7 @@ export default function AccountDetailPage() {
             <DetailField label="Location" value={[account.location_city, account.location_country].filter(Boolean).join(', ')} />
             <DetailField label="GST / Tax ID" value={account.gst_or_tax_id} />
             <DetailField label="Source" value={account.source} />
+            <DetailField label="Premium" value={account.is_premium ? 'Yes' : 'No'} />
             <DetailField label="Owner (POC)" value={account.owner?.name} />
             <DetailField label="Brought by" value={account.origin_owner?.name} />
             <DetailField label="Lead location" value={account.location} />
