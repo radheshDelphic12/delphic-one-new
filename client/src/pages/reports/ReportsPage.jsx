@@ -43,6 +43,7 @@ import FilterBar from '../../components/ui/FilterBar.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
 import DrilldownDrawer from './DrilldownDrawer.jsx';
+import MonthlyReview from './MonthlyReview.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -662,6 +663,7 @@ export default function ReportsPage() {
 
   // silent = a background refresh: no spinner, and a failed refresh keeps what is on screen instead of blanking it.
   async function runReport({ silent = false } = {}) {
+    if (active === 'monthly-review') return; // its own screen loads its own data
     const requestId = ++reportRequestId.current;
     if (!silent) setLoading(true);
     try {
@@ -943,12 +945,31 @@ export default function ReportsPage() {
     drawerRow?.group_label ||
     'Row details';
 
+  if (active === 'monthly-review') {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchableSelect
+            className="w-56"
+            ariaLabel="Report type"
+            value={active}
+            onChange={(v) => { setActive(v); setPayload(null); setDrawerRow(null); setDrill(null); }}
+            searchPlaceholder="Search reports…"
+            options={available.map((r) => ({ value: r.key, label: r.label }))}
+          />
+        </div>
+        <MonthlyReview />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
           <SearchableSelect
             className="w-56"
             ariaLabel="Report type"
+
             value={active}
             onChange={(v) => {
               setActive(v);

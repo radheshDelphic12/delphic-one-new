@@ -8,6 +8,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./reports.service');
 const explorerService = require('./explorer.service');
 const drilldownService = require('./drilldown.service');
+const monthlyReview = require('./monthlyReview.service');
 const {
   drilldownSchema,
   dateRangeSchema,
@@ -121,6 +122,65 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = closureSchema.parse(req.query);
     const data = await service.closure(query);
+    return ok(res, data);
+  })
+);
+
+// Monthly performance review: per employee and month, attendance plus the measures of the person's function. Admin only (it is about people).
+router.get(
+  '/monthly-review',
+  authorize('admin'),
+  asyncHandler(async (req, res) => ok(res, await monthlyReview.review(req.user.org_id, req.user, req.query)))
+);
+
+router.get(
+  '/monthly-review/export',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const type = req.query.type;
+    if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
+    const rows = await monthlyReview.exportRows(req.user.org_id, req.user, req.query);
+    const filename = `monthly-performance-review-${new Date().toISOString().slice(0, 7)}`;
+    if (type === 'xlsx') {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Monthly review');
+      if (rows.length) {
+        sheet.columns = Object.keys(rows[0]).map((key) => ({ header: key, key, width: 18 }));
+        rows.forEach((r) => sheet.addRow(r));
+        sheet.getRow(1).font = { bold: true };
+        sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      } else sheet.addRow(['(no rows)']);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+      await workbook.xlsx.write(res);
+      return res.end();
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
+    doc.pipe(res);
+    doc.fontSize(15).text('Monthly performance review', { underline: true });
+    doc.fontSize(9).text(`Generated ${new Date().toISOString().slice(0, 10)}`);
+    doc.moveDown();
+    if (!rows.length) doc.fontSize(10).text('(no rows)');
+    else {
+      const headers = Object.keys(rows[0]);
+      doc.fontSize(7).font('Helvetica-Bold').text(headers.join(' | '));
+      doc.font('Helvetica');
+      rows.slice(0, 400).forEach((row) => doc.text(headers.map((h) => String(row[h] ?? '')).join(' | ')));
+      if (rows.length > 400) doc.text(`... and ${rows.length - 400} more rows (use the Excel export for everything)`);
+    }
+    doc.end();
+    return undefined;
+  })
+);
+
+router.get(
+  '/monthly-review/details',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const data = await monthlyReview.details(req.user.org_id, req.user, req.query);
+    if (data.error) return fail(res, data.error === 'not_found' ? 404 : 400, data.error === 'not_found' ? 'Employee not found' : 'Unknown measure');
     return ok(res, data);
   })
 );
