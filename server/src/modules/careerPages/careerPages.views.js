@@ -28,7 +28,17 @@ const esc = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-function layout({ title, description, canonical, body, wide = false }) {
+// Whose careers pages these are. Delphic Global keeps its own logo; any other company shows its name (and its logo, when it has one
+// that can be reached from the public pages).
+const DELPHIC_BRAND = { name: 'Delphic Global', short: 'Delphic', logo: 'assets/logo.svg' };
+const safeLogo = (url) => (/^https?:\/\//i.test(String(url || '')) ? url : null);
+function brandOf(org) {
+  if (!org || org.slug === 'delphic') return DELPHIC_BRAND;
+  return { name: org.name, short: org.name, logo: safeLogo(org.logo_url) };
+}
+const barOf = (brand) => `<header class="bar"><div class="bar-in">${brand.logo ? `<img src="${esc(brand.logo)}" alt="${esc(brand.name)}">` : `<strong class="brand-name">${esc(brand.name)}</strong>`}<span>Careers</span></div></header>`;
+
+function layout({ title, description, canonical, body, wide = false, brand = DELPHIC_BRAND }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -41,7 +51,7 @@ ${canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
 <link rel="stylesheet" href="assets/career.css?v=${ASSET_VERSION}">
 </head>
 <body>
-<header class="bar"><div class="bar-in"><img src="assets/logo.svg" alt="Delphic Global"><span>Careers</span></div></header>
+${barOf(brand)}
 <main${wide ? ' class="wide"' : ''}>
 ${body}
 </main>
@@ -82,12 +92,12 @@ const SORT_LABEL = [['', 'Best match / newest'], ['newest', 'Newest first'], ['o
 const csvSet = (v) => new Set(String(v || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 
 /** The first page of the (searched) list is in the HTML; career.js asks jobs.json for the rest. */
-function listPage({ jobs, pagination, facets, query, src, ref, canonical }) {
+function listPage({ jobs, pagination, facets, query, src, ref, canonical, brand = DELPHIC_BRAND }) {
   const link = carry({ src, ref });
   const filtered = Boolean(query.q || query.dept || query.loc);
   const count = filtered ? `Showing ${pagination.total} of ${pagination.open_total} roles` : `${pagination.total} open ${pagination.total === 1 ? 'role' : 'roles'}`;
   const body = pagination.open_total
-    ? `<section class="hero"><div><p class="eyebrow">Careers at Delphic</p><h1>Open positions</h1><p class="lead">Pick a role and apply in a few minutes.</p></div><div class="stat"><span class="num">${pagination.open_total}</span><span>open ${pagination.open_total === 1 ? 'role' : 'roles'}</span></div></section>
+    ? `<section class="hero"><div><p class="eyebrow">Careers at ${esc(brand.short)}</p><h1>Open positions</h1><p class="lead">Pick a role and apply in a few minutes.</p></div><div class="stat"><span class="num">${pagination.open_total}</span><span>open ${pagination.open_total === 1 ? 'role' : 'roles'}</span></div></section>
 <div class="list-layout">
 <aside class="filters" id="job-filters" aria-label="Filter jobs">
 <div class="fhead"><h2>Filters</h2><button type="button" class="link" id="filters-clear">Clear all</button></div>
@@ -104,19 +114,21 @@ ${jobs.map((j) => jobCard(j, link)).join('\n')}
 </section>
 </div>
 <script src="assets/career.js?v=${ASSET_VERSION}" defer></script>`
-    : '<section class="hero"><div><p class="eyebrow">Careers at Delphic</p><h1>Open positions</h1></div></section>\n<div class="card empty">There are no open positions right now. Please check back soon.</div>';
+    : '<section class="hero"><div><p class="eyebrow">Careers at ${esc(brand.short)}</p><h1>Open positions</h1></div></section>\n<div class="card empty">There are no open positions right now. Please check back soon.</div>';
   return layout({
-    title: 'Careers | Delphic Global',
-    description: 'Open positions at Delphic Global.',
+    title: `Careers | ${brand.name}`,
+    description: `Open positions at ${brand.name}.`,
+    brand,
     canonical,
     wide: true,
     body,
   });
 }
 
-function notFoundPage() {
+function notFoundPage(brand = DELPHIC_BRAND) {
   return layout({
-    title: 'Job not found | Delphic Global',
+    brand,
+    title: `Job not found | ${brand.name}`,
     description: 'This job is no longer open.',
     body: '<div class="card empty"><p><strong>This job is no longer open.</strong></p><p><a href="./">See other open positions</a></p></div>',
   });
@@ -145,7 +157,7 @@ function applyForm(job) {
 <label>Current CTC (LPA) *<input name="current_ctc_lpa" type="number" min="0" step="0.1" required placeholder="e.g. 8.5"></label>
 <label>Expected CTC (LPA) *<input name="expected_ctc_lpa" type="number" min="0" step="0.1" required placeholder="e.g. 12"></label>
 <label>How can you join? *<select name="work_mode" required><option value="">Choose...</option><option value="remote">Remote</option><option value="onsite">On-site</option><option value="hybrid">Hybrid</option></select></label>
-<label class="wide">Referred by (employee name or email, optional)<input name="referred_by" maxlength="200" placeholder="Did a Delphic employee refer you?"></label>
+<label class="wide">Referred by (employee name or email, optional)<input name="referred_by" maxlength="200" placeholder="Did an employee refer you?"></label>
 <label class="wide">Other skills you have experience in, apart from this job<input name="extra_skills" maxlength="500" placeholder="e.g. React, Node.js, AWS"></label>
 <label class="wide">Why you are fit for this role<textarea name="message" rows="3" maxlength="2000"></textarea></label>
 <div class="hp" aria-hidden="true"><label>Company website<input name="company_website" tabindex="-1" autocomplete="off"></label></div>
@@ -156,10 +168,11 @@ function applyForm(job) {
 <div id="apply-done" class="done hidden" data-testid="apply-done"><div class="tick">&#10003;</div><p><strong>Thank you, your application has been received.</strong></p><p class="note" data-testid="apply-done-ref">Job ID <strong>${esc(job.job_code)}</strong> &middot; ${esc(job.title)}</p><p class="note">Our recruitment team will contact you if your profile matches.</p></div>`;
 }
 
-function jobPage({ job, canonical }) {
+function jobPage({ job, canonical, brand = DELPHIC_BRAND }) {
   return layout({
-    title: `${job.title} | Delphic Global Careers`,
-    description: job.description ? String(job.description).replace(/\s+/g, ' ').slice(0, 160) : `Apply for ${job.title} at Delphic Global.`,
+    brand,
+    title: `${job.title} | ${brand.name} Careers`,
+    description: job.description ? String(job.description).replace(/\s+/g, ' ').slice(0, 160) : `Apply for ${job.title} at ${brand.name}.`,
     canonical,
     body: `<article class="card"><p class="jid" data-testid="job-code">Job ID: ${esc(job.job_code)}</p><h1>${esc(job.title)}</h1>${meta(job)}${job.description ? `<div class="desc">${esc(job.description)}</div>` : ''}<p class="note"><a href="./">&larr; All open positions</a></p></article>
 <section class="card">${applyForm(job)}</section>
@@ -167,4 +180,4 @@ function jobPage({ job, canonical }) {
   });
 }
 
-module.exports = { esc, listPage, jobPage, notFoundPage };
+module.exports = { esc, listPage, jobPage, notFoundPage, brandOf };

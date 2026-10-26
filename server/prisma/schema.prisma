@@ -1946,6 +1946,8 @@ model OrgGroup {
   memberships           OrgGroupMembership[]
   group_billing_charges GroupBillingCharge[]
   group_tasks           GroupTask[]
+  group_loans           GroupLoan[]
+  group_debt_setting    GroupDebtSetting?
   group_company_days    GroupCompanyDay[]
   group_travel          GroupTravel[]
   legal_entities        LegalEntity[]
@@ -2094,6 +2096,9 @@ model Org {
   ax_deals                   AxDeal[]
   ax_ledger_entries          AxLedgerEntry[]
   ax_investments             AxInvestment[]
+  ax_investees               AxInvestee[]
+  company_jobs               CompanyJob[]
+  company_job_applications   CompanyJobApplication[]
   ax_investment_realisations AxInvestmentRealisation[]
   ax_assets                  AxAsset[]
   ax_tasks                   AxTask[]
@@ -5410,6 +5415,9 @@ model AxInvestment {
   storage_location String?
   startup_name     String?
   equity_pct       Decimal?                  @db.Decimal(7, 3)
+  // The company this money went into (a round of funding for an investee); null for gold, silver and other holdings.
+  investee_id      String?                   @db.Uuid
+  investee         AxInvestee?               @relation(fields: [investee_id], references: [id], onDelete: SetNull)
   status           String                    @default("active")
   description      String?
   notes            String?
@@ -5421,7 +5429,41 @@ model AxInvestment {
 
   @@index([org_id, type])
   @@index([org_id, status])
+  @@index([investee_id])
   @@map("ax_investments")
+}
+
+// A company Acconcy funds or takes over (a startup, a business). stage: discussion -> committed -> funded | taken_over -> exited
+// (or dropped). Each tranche of money put in is an AxInvestment (type venture) linked by investee_id, so cost, current value and
+// the cash coming back (sale or dividend, through a realisation) use the existing investment arithmetic and ledger posting.
+model AxInvestee {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String         @db.Uuid
+  org                Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name               String
+  sector             String?
+  website            String?
+  contact_name       String?
+  contact_email      String?
+  stage              String         @default("discussion")
+  proposed_amount    Decimal?       @db.Decimal(16, 2)
+  proposed_stake_pct Decimal?       @db.Decimal(7, 3)
+  expected_return_pct Decimal?      @db.Decimal(7, 2)
+  stake_pct          Decimal?       @db.Decimal(7, 3)
+  valuation          Decimal?       @db.Decimal(16, 2)
+  lead_id            String?        @db.Uuid
+  deal_id            String?        @db.Uuid
+  decided_at         DateTime?      @db.Date
+  discussion_notes   String?
+  notes              String?
+  created_by         String?        @db.Uuid
+  created_at         DateTime       @default(now())
+  updated_at         DateTime       @default(now()) @updatedAt
+  deleted_at         DateTime?
+  investments        AxInvestment[]
+
+  @@index([org_id, stage])
+  @@map("ax_investees")
 }
 
 // Cash actually received from selling / redeeming (part of) an investment. gain = amount_received - cost_released
@@ -7677,4 +7719,126 @@ model WorkPlaceDay {
   @@unique([org_membership_id, date])
   @@index([org_id, date])
   @@map("work_place_days")
+}
+
+// ===================== Group debt management (Super Admin / Group Dashboard) =====================
+// Loans and credit limits of the holding group and its companies, with the repayment schedule (one row per EMI) so that paid and
+// pending EMIs, outstanding principal and interest are always worked out from rows, never typed. The loan ratio limit is a setting.
+model GroupLoan {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id     String                 @db.Uuid
+  org_group        OrgGroup               @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id           String?                @db.Uuid // the borrowing company; null = the group itself
+  name             String
+  lender           String
+  loan_type        String                 @default("bank_loan") // bank_loan | business_loan | property_loan | vehicle_loan | credit_limit | other
+  collateral       String?
+  principal        Decimal                @db.Decimal(16, 2)
+  interest_rate    Decimal                @default(0) @db.Decimal(7, 3) // per year, %
+  rate_type        String                 @default("fixed") // fixed | floating
+  start_date       DateTime               @db.Date
+  tenure_months    Int?
+  emi_amount       Decimal?               @db.Decimal(16, 2)
+  emi_frequency    String                 @default("monthly") // monthly | quarterly | yearly
+  sanctioned_limit Decimal?               @db.Decimal(16, 2) // credit limits: what the bank allows; principal is then what is drawn
+  status           String                 @default("active") // active | closed
+  notes            String?
+  created_by       String?                @db.Uuid
+  created_at       DateTime               @default(now())
+  updated_at       DateTime               @default(now()) @updatedAt
+  deleted_at       DateTime?
+  installments     GroupLoanInstallment[]
+
+  @@index([org_group_id, status])
+  @@map("group_loans")
+}
+
+model GroupLoanInstallment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loan_id        String    @db.Uuid
+  loan           GroupLoan @relation(fields: [loan_id], references: [id], onDelete: Cascade)
+  seq            Int
+  due_date       DateTime  @db.Date
+  amount         Decimal   @db.Decimal(16, 2)
+  principal_part Decimal   @db.Decimal(16, 2)
+  interest_part  Decimal   @db.Decimal(16, 2)
+  balance_after  Decimal   @db.Decimal(16, 2)
+  status         String    @default("pending") // pending | paid
+  paid_on        DateTime? @db.Date
+  paid_amount    Decimal?  @db.Decimal(16, 2)
+  note           String?
+
+  @@unique([loan_id, seq])
+  @@index([loan_id, status])
+  @@map("group_loan_installments")
+}
+
+model GroupDebtSetting {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id     String   @unique @db.Uuid
+  org_group        OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  max_debt_ratio_pct Decimal @default(30) @db.Decimal(6, 2)
+  ratio_basis      String   @default("valuation") // valuation | assets | revenue
+  updated_by       String?  @db.Uuid
+  updated_at       DateTime @default(now()) @updatedAt
+
+  @@map("group_debt_settings")
+}
+
+// ===================== Company career portals (every company except Delphic Global) =====================
+// Delphic Global publishes jobs from recruitment requirements (WebsiteJobPosting). Every other company has no requirements, so its
+// jobs are plain postings of its own, published at /<org-slug>/career/ by the same public pages, and the applications land here.
+model CompanyJob {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String                  @db.Uuid
+  org             Org                     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  job_code        String // "ZEP-0001": the company's prefix and its own counter; unique inside the company
+  slug            String                  @unique
+  title           String
+  department      String?
+  location        String?
+  employment_kind JobEmploymentKind?
+  employment_type String? // the display label of employment_kind
+  openings        Int?
+  description     String?
+  status          String                  @default("draft") // draft | published | closed
+  published_at    DateTime?
+  closed_at       DateTime?
+  created_by      String?                 @db.Uuid
+  created_at      DateTime                @default(now())
+  updated_at      DateTime                @default(now()) @updatedAt
+  deleted_at      DateTime?
+  applications    CompanyJobApplication[]
+
+  @@unique([org_id, job_code])
+  @@index([org_id, status])
+  @@map("company_jobs")
+}
+
+model CompanyJobApplication {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id           String     @db.Uuid
+  org              Org        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  job_id           String     @db.Uuid
+  job              CompanyJob @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  name             String
+  email            String
+  phone            String?
+  experience_years Decimal?   @db.Decimal(4, 1)
+  cv_url           String?
+  linkedin_url     String?
+  message          String?
+  channel          String?
+  referred_by      String?
+  answers          Json? // the screening answers (joiner status, notice, CTC, work mode, skills)
+  status           String     @default("new") // new | shortlisted | interview | offered | hired | rejected
+  notes            String?
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @default(now()) @updatedAt
+  deleted_at       DateTime?
+
+  @@index([org_id, job_id, status])
+  @@index([org_id, created_at])
+  @@index([job_id, email])
+  @@map("company_job_applications")
 }

@@ -74,7 +74,7 @@ server {
         proxy_pass http://127.0.0.1:4000;
     }
 
-    location /delphic/career {
+    location ~ ^/[a-z0-9-]+/career(/|$) {
         client_max_body_size 3m;
         proxy_pass http://127.0.0.1:4000;
         proxy_http_version 1.1;

@@ -4,7 +4,8 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const env = require('../../config/env');
 const asyncHandler = require('../../utils/asyncHandler');
-const { listPage, jobPage, notFoundPage } = require('./careerPages.views');
+const prisma = require('../../config/db');
+const { listPage, jobPage, notFoundPage, brandOf } = require('./careerPages.views');
 const publicJobs = require('../publicJobs/publicJobs.service');
 const { JOB_CODE } = require('../jobs/jobFields');
 
@@ -39,6 +40,16 @@ function visitorIp(req) {
   return /^[0-9a-fA-F:.]{3,45}$/.test(first) ? first : req.ip;
 }
 
+// The company behind /<org-slug>/career: its name and logo head the pages. An unknown or closed company is a plain 404.
+const orgCache = new Map();
+async function orgFor(slug) {
+  const hit = orgCache.get(slug);
+  if (hit && env.nodeEnv !== 'test' && Date.now() - hit.at < 60000) return hit.org;
+  const org = await prisma.org.findFirst({ where: { slug, status: 'active' }, select: { slug: true, name: true, logo_url: true } });
+  orgCache.set(slug, { at: Date.now(), org });
+  return org;
+}
+
 const canonicalFor = (suffix) => (env.publicCareersBase ? `${env.publicCareersBase}${suffix}` : '');
 const search = (req) => {
   const i = req.originalUrl.indexOf('?');
@@ -69,11 +80,13 @@ const listQuery = (req) => ({ q: req.query.q, dept: req.query.dept, loc: req.que
 // The first page of results is part of the HTML (search engines, no-JavaScript); the script loads more through jobs.json.
 router.get('/', asyncHandler(async (req, res) => {
   if (!pathOf(req).endsWith('/')) return res.redirect(301, `career/${search(req)}`);
+  const org = await orgFor(req.params.orgSlug);
+  if (!org) return html(res, 404, notFoundPage());
   const src = String(req.query.src || '').slice(0, 40);
   const ref = String(req.query.ref || '').slice(0, 80);
   const query = listQuery(req);
   const r = await publicJobs.search(req.params.orgSlug, query);
-  return html(res, 200, listPage({ ...r, query: { ...query, sort: String(req.query.sort || '') }, src, ref, canonical: canonicalFor('/') }));
+  return html(res, 200, listPage({ ...r, query: { ...query, sort: String(req.query.sort || '') }, src, ref, canonical: canonicalFor('/'), brand: brandOf(org) }));
 }));
 
 router.get('/jobs.json', asyncHandler(async (req, res) => {
@@ -90,9 +103,10 @@ router.get('/:slug', asyncHandler(async (req, res) => {
     const target = await publicJobs.slugForCode(req.params.slug, req.params.orgSlug);
     if (target) return res.redirect(302, `${encodeURIComponent(target)}${search(req)}`);
   }
-  const r = await publicJobs.get(req.params.slug, req.params.orgSlug);
-  if (r.error) return html(res, 404, notFoundPage());
-  return html(res, 200, jobPage({ job: r.job, canonical: canonicalFor(`/${r.job.slug}`) }));
+  const org = await orgFor(req.params.orgSlug);
+  const r = org ? await publicJobs.get(req.params.slug, req.params.orgSlug) : { error: 'not_found' };
+  if (r.error) return html(res, 404, notFoundPage(brandOf(org)));
+  return html(res, 200, jobPage({ job: r.job, canonical: canonicalFor(`/${r.job.slug}`), brand: brandOf(org) }));
 }));
 
 // The CV is a mandatory Google Drive link (cv_url), validated with the rest of the answers. No files are stored on the server.

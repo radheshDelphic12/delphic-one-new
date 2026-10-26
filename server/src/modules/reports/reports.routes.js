@@ -140,6 +140,7 @@ router.get(
     const type = req.query.type;
     if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
     const rows = await monthlyReview.exportRows(req.user.org_id, req.user, req.query);
+    const day = await monthlyReview.exportDayRows(req.user.org_id, req.user, req.query);
     const filename = `monthly-performance-review-${new Date().toISOString().slice(0, 7)}`;
     if (type === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
@@ -150,6 +151,14 @@ router.get(
         sheet.getRow(1).font = { bold: true };
         sheet.views = [{ state: 'frozen', ySplit: 1 }];
       } else sheet.addRow(['(no rows)']);
+      const daySheet = workbook.addWorksheet('Day-wise');
+      if (day.rows.length) {
+        daySheet.columns = Object.keys(day.rows[0]).map((key) => ({ header: key, key, width: key === 'Activity' ? 70 : 18 }));
+        day.rows.forEach((r) => daySheet.addRow(r));
+        daySheet.getRow(1).font = { bold: true };
+        daySheet.views = [{ state: 'frozen', ySplit: 1 }];
+        if (day.truncated) daySheet.addRow(['(the sheet stops at the first 20000 rows; narrow the filters for the rest)']);
+      } else daySheet.addRow(['(no rows)']);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
       await workbook.xlsx.write(res);
@@ -169,6 +178,16 @@ router.get(
       doc.font('Helvetica');
       rows.slice(0, 400).forEach((row) => doc.text(headers.map((h) => String(row[h] ?? '')).join(' | ')));
       if (rows.length > 400) doc.text(`... and ${rows.length - 400} more rows (use the Excel export for everything)`);
+    }
+    doc.addPage();
+    doc.fontSize(15).font('Helvetica').text('Day-wise', { underline: true });
+    doc.moveDown(0.5);
+    if (!day.rows.length) doc.fontSize(10).text('(no rows)');
+    else {
+      doc.fontSize(7).font('Helvetica-Bold').text('Employee | Date | Attendance | Projects | Activity');
+      doc.font('Helvetica');
+      day.rows.slice(0, 600).forEach((r) => doc.text([r.Employee, r.Date, r.Attendance, r['Projects that day'], r.Activity].filter((x) => x !== '').join(' | ')));
+      if (day.rows.length > 600) doc.text(`... and ${day.rows.length - 600} more days (use the Excel export for everything)`);
     }
     doc.end();
     return undefined;

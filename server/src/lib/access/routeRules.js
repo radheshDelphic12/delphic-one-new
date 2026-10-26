@@ -116,7 +116,7 @@ const RULES = [
   [/^\/(vendor-commissions|accounting|external-access|wallets)(\/|$)/, { GET: 'finance.view', POST: 'finance.create', DELETE: 'finance.delete', '*': 'finance.update' }],
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
-  [/^\/(group-cash|super-dashboard)(\/|$)/, 'admin'],
+  [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
 
   // ---- Reports
   [/^\/reports\/export$/, 'reports.export'],

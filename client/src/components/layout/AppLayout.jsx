@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
@@ -93,19 +93,22 @@ const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
 // Zephyr Infrastructure is a standalone workspace: its users see only the
 // Zephyr sections plus their own notifications and personal settings.
 const ZEPHYR_EXTRA_NAV = [{ to: '/settings', label: 'Settings', icon: Settings }];
-const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings', '/notifications'].includes(pathname);
+// Paths every company workspace shares: its own settings and notifications, and Hiring (the company's career page).
+const SHARED_PATHS = ['/settings', '/notifications', '/hiring'];
+const HIRING_NAV = [{ to: '/hiring', label: 'Hiring', icon: UserPlus }];
+const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || SHARED_PATHS.includes(pathname);
 // Gulati Industries is standalone in the same way.
-const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
+const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || SHARED_PATHS.includes(pathname);
 // Acconcy Finance as well.
-const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settings', '/notifications'].includes(pathname);
+const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || SHARED_PATHS.includes(pathname);
 // Zklyrera Spirits as well.
-const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || ['/settings', '/notifications'].includes(pathname);
+const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || SHARED_PATHS.includes(pathname);
 // Valterra Resources as well.
-const isValterraPath = (pathname) => pathname.startsWith('/valterra') || ['/settings', '/notifications'].includes(pathname);
+const isValterraPath = (pathname) => pathname.startsWith('/valterra') || SHARED_PATHS.includes(pathname);
 // Novarex Pharmaceuticals as well.
-const isNovarexPath = (pathname) => pathname.startsWith('/novarex') || ['/settings', '/notifications'].includes(pathname);
+const isNovarexPath = (pathname) => pathname.startsWith('/novarex') || SHARED_PATHS.includes(pathname);
 // Gulati Foundation as well.
-const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || ['/settings', '/notifications'].includes(pathname);
+const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || SHARED_PATHS.includes(pathname);
 
 const GROUP_NAV_ITEM = { to: '/group-overview', label: 'Group Dashboard', icon: Network, end: true };
 
@@ -137,31 +140,31 @@ export default function AppLayout() {
     () => {
       if (isNovarex) {
         const setup = nxCan(nxMe, 'settings') ? [{ to: '/novarex/settings', label: 'Novarex setup', icon: Settings }] : [];
-        return [...novarexNavFor(nxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...novarexNavFor(nxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isValterra) {
         const setup = vtCan(vtMe, 'settings') ? [{ to: '/valterra/settings', label: 'Valterra setup', icon: Settings }] : [];
-        return [...valterraNavFor(vtMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...valterraNavFor(vtMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isZklyrera) {
         const setup = zkCan(zkMe, 'settings') ? [{ to: '/zklyrera/settings', label: 'Zklyrera setup', icon: Settings }] : [];
-        return [...zklyreraNavFor(zkMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...zklyreraNavFor(zkMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isFoundation) {
         const setup = fxCan(fxMe, 'settings') ? [{ to: '/foundation/settings', label: 'Foundation setup', icon: Settings }] : [];
-        return [...foundationNavFor(fxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...foundationNavFor(fxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isAcconcy) {
         const setup = axCan(axMe, 'settings') ? [{ to: '/acconcy/settings', label: 'Acconcy setup', icon: Settings }] : [];
-        return [...acconcyNavFor(axMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...acconcyNavFor(axMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isGulati) {
         const setup = gxCan(gxMe, 'settings') ? [{ to: '/gulati/settings', label: 'Gulati setup', icon: Settings }] : [];
-        return [...gulatiNavFor(gxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...gulatiNavFor(gxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isZephyr) {
         const setup = zxCan(zxMe, 'settings') ? [{ to: '/zephyr/settings', label: 'Zephyr setup', icon: Settings }] : [];
-        return [...zephyrNavFor(zxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...zephyrNavFor(zxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       return isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
         if (item.hiddenForAdmin && isAdminUser(user)) return false;

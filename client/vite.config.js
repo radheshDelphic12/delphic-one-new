@@ -10,7 +10,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:4000',
       '/uploads': 'http://localhost:4000',
-      '/delphic/career': 'http://localhost:4000',
+      '^/[a-z0-9-]+/career': 'http://localhost:4000',
     },
   },
 });

@@ -29,7 +29,10 @@ function MonthRow({ person, m, open }) {
   const attendance = (key) => open({ person, m, metric: 'attendance', title: key });
   return (
     <tr className="border-t border-tertiary-100 align-top" data-testid="review-month-row">
-      <td className="whitespace-nowrap px-3 py-2 font-medium text-tertiary-900">{monthTitle(m)}</td>
+      <td className="whitespace-nowrap px-3 py-2 font-medium text-tertiary-900">
+        {monthTitle(m)}
+        <button type="button" data-testid="open-daywise" onClick={() => open({ person, m, metric: 'daywise', title: 'Day-wise' })} className="mt-0.5 block text-xs font-normal text-primary-700 hover:underline">Day-wise</button>
+      </td>
       {m.no_data ? (
         <td colSpan={4} className="px-3 py-2"><Pill tone="amber">Data not available</Pill> <span className="text-xs text-tertiary-500">No attendance was recorded for this month ({m.working_days} working days).</span></td>
       ) : (
@@ -48,7 +51,7 @@ function MonthRow({ person, m, open }) {
                 key={x.key}
                 type="button"
                 data-testid={`metric-${x.key}`}
-                onClick={() => open({ person, m, metric: x.key, title: x.label })}
+                onClick={() => open(x.key === 'projects_daily' ? { person, m, metric: 'daywise', title: 'Day-wise' } : { person, m, metric: x.key, title: x.label })}
                 className="inline-flex items-center gap-1.5 rounded-full border border-tertiary-200 bg-white px-2.5 py-1 text-xs text-tertiary-700 hover:border-primary-300 hover:bg-primary-50"
               >
                 {x.label}<b className="tabular-nums text-primary-700">{x.count}</b>
@@ -58,6 +61,63 @@ function MonthRow({ person, m, open }) {
         )}
       </td>
     </tr>
+  );
+}
+
+const STATE_PILL = { ended_this_month: ['amber', 'Ended this month'], started_this_month: ['green', 'Started this month'], ongoing: ['blue', 'Ongoing'] };
+
+/** The projects of a month with the dates entered on the allocation (Finance > Project costing). */
+function ProjectList({ items }) {
+  const ended = items.filter((it) => it.state === 'ended_this_month').length;
+  const started = items.filter((it) => it.state === 'started_this_month').length;
+  return (
+    <div className="space-y-3" data-testid="review-projects">
+      <p className="text-xs text-tertiary-500">{items.length} project{items.length === 1 ? '' : 's'} · {started} started · {ended} ended this month</p>
+      <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
+        {items.map((it, i) => {
+          const [tone, text] = STATE_PILL[it.state] || STATE_PILL.ongoing;
+          return (
+            <li key={`${it.title}-${i}`} className="px-3 py-2.5 text-sm">
+              <div className="flex items-start justify-between gap-2"><p className="font-medium text-tertiary-900">{it.title}</p><Pill tone={tone}>{text}</Pill></div>
+              <p className="mt-0.5 text-xs text-tertiary-500">{it.sub} · Started {it.start_date ? formatReportDate(it.start_date) : 'before this month'} · {it.end_date ? `Ended ${formatReportDate(it.end_date)}` : 'No end date'}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+const ATTENDANCE_TONE = { present: 'green', half_day: 'amber', leave: 'blue', absent: 'red' };
+
+/** Day by day inside the month: the attendance of the day, and what the person did (their function's records; the projects for IT). */
+function DayWise({ items }) {
+  const withProjects = items.some((d) => d.projects);
+  const active = items.filter((d) => d.measures.length || d.projects?.count).length;
+  return (
+    <div className="space-y-3" data-testid="review-daywise">
+      <p className="text-xs text-tertiary-500">{items.length} day{items.length === 1 ? '' : 's'} listed · {active} with activity</p>
+      <div className="overflow-hidden rounded-xl border border-tertiary-100">
+        <table className="w-full text-sm">
+          <thead className="bg-tertiary-50 text-left text-xs uppercase tracking-wide text-tertiary-500"><tr><th className="px-3 py-2 font-medium">Day</th><th className="px-3 py-2 font-medium">Attendance</th><th className="px-3 py-2 font-medium">{withProjects ? 'Projects' : 'Activity'}</th></tr></thead>
+          <tbody>
+            {items.map((d) => (
+              <tr key={d.date} className="border-t border-tertiary-100 align-top">
+                <td className="whitespace-nowrap px-3 py-1.5 text-tertiary-700">{formatReportDate(d.date)}</td>
+                <td className="px-3 py-1.5">{d.attendance ? <Pill tone={ATTENDANCE_TONE[d.attendance.kind] || 'gray'}>{d.attendance.label}</Pill> : <span className="text-xs text-tertiary-400">—</span>}</td>
+                <td className="px-3 py-1.5 text-xs text-tertiary-600">
+                  {d.projects && <span className="block"><b className="tabular-nums text-primary-700">{d.projects.count}</b> · {d.projects.names.join(', ') || '—'}</span>}
+                  {d.projects?.ended.length > 0 && <span className="mt-0.5 block font-medium text-amber-700">Last day: {d.projects.ended.join(', ')}</span>}
+                  {d.projects?.started.length > 0 && <span className="mt-0.5 block font-medium text-green-700">Started: {d.projects.started.join(', ')}</span>}
+                  {d.measures.map((x) => <span key={x.key} className="block"><b className="text-tertiary-700">{x.label}</b> ({x.count}): {x.titles.join(', ')}</span>)}
+                  {!d.projects && d.measures.length === 0 && '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -141,14 +201,14 @@ export default function MonthlyReview() {
   }
 
   async function open({ person, m, metric, title }) {
-    setDrill({ person, m, title, loading: true, items: [] });
+    setDrill({ person, m, title, metric, loading: true, items: [] });
     try {
       const params = { org_membership_id: person.org_membership_id, metric, year: m.year, month: m.month, include_billable: filters.include_billable ? '1' : '0', include_non_billable: filters.include_non_billable ? '1' : '0' };
       const res = await apiClient.get('/reports/monthly-review/details', { params });
       const KINDS = { 'Working days': ['present', 'half_day', 'leave', 'absent', 'planned'], 'Present days': ['present', 'half_day'], 'Leave days': ['leave'], 'Absent days': ['absent'] };
       const keep = metric === 'attendance' ? KINDS[title] : null;
       const items = keep ? res.data.data.items.filter((it) => keep.includes(it.kind)) : res.data.data.items;
-      setDrill({ person, m, title, loading: false, items, summary: res.data.data.summary });
+      setDrill({ person, m, title, metric, loading: false, items, summary: res.data.data.summary });
     } catch (err) {
       setDrill(null);
       pushError(apiErrorMessage(err, 'Could not load the details'), 'Something went wrong');
@@ -213,7 +273,7 @@ export default function MonthlyReview() {
         {drill && (
           <div className="space-y-3" data-testid="review-details">
             <p className="text-sm text-tertiary-600"><b>{drill.person.name}</b>{drill.summary ? ` · ${drill.summary.working_days} working days, ${drill.summary.present} present` : ''}</p>
-            {drill.loading ? <p className="text-sm text-tertiary-500">Loading…</p> : drill.items.length === 0 ? <p className="text-sm text-tertiary-500">Nothing recorded for this month.</p> : (
+            {drill.loading ? <p className="text-sm text-tertiary-500">Loading…</p> : drill.items.length === 0 ? <p className="text-sm text-tertiary-500">Nothing recorded for this month.</p> : drill.metric === 'daywise' ? <DayWise items={drill.items} /> : drill.items.some((it) => it.state) ? <ProjectList items={drill.items} /> : (
               <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
                 {drill.items.map((it, i) => (
                   <li key={`${it.date}-${i}`} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">

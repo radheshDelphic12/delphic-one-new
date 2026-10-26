@@ -114,7 +114,8 @@ describe('careers pages', () => {
     expect(unknown.status).toBe(404);
     expect(unknown.text).toContain('no longer open');
     expect((await request(app).get(`/another-company/career/${slug}`)).status).toBe(404);
-    expect((await request(app).get('/another-company/career/')).text).toContain('There are no open positions');
+    // a company that does not exist has no careers page at all (it used to show an empty list)
+    expect((await request(app).get('/another-company/career/')).status).toBe(404);
     await prisma.websiteJobPosting.update({ where: { requirement_id: req.id }, data: { status: 'closed' } });
     expect((await page(`/${slug}`)).status).toBe(404);
     expect((await page('/')).text).toContain('There are no open positions');

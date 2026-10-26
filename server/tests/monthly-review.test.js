@@ -1,6 +1,7 @@
 // Monthly performance review (Reports): per employee and month, attendance plus the measures of the person's function; every count has
 // the records behind it. Admin only.
-const { prisma, request, app, cleanDatabase, createUser, loginAs, createOrg, createOrgMembership, authed } = require('./helpers');
+const ExcelJS = require('exceljs');
+const { prisma, request, app, cleanDatabase, createUser, loginAs, createOrg, createOrgMembership, createProfile, authed } = require('./helpers');
 
 beforeEach(async () => { await cleanDatabase(); });
 afterAll(async () => { await prisma.$disconnect(); });
@@ -55,6 +56,48 @@ describe('monthly performance review', () => {
     expect(det2.body.data.items[0]).toMatchObject({ title: 'Java Dev', sub: 'Acme' });
   });
 
+  test('Sales and HR see every measure of the brief, in order: meetings, requirements, closures, joinings, submissions, vendors', async () => {
+    const ctx = await seed();
+    const sales = await ctx.dept('Sales');
+    const hr = await ctx.dept('HR');
+    const dheeraj = await ctx.person('Dheeraj Kumar', sales);
+    const hira = await ctx.person('Hira HR', hr);
+    const hiraToken = (await loginAs(hira.user)).access_token;
+    const client = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Acme', type: 'client', stage: 'active', owner_id: dheeraj.user.id, origin_owner_id: dheeraj.user.id } });
+    const req = await prisma.requirement.create({ data: { account_id: client.id, title: 'Java Dev', req_type: 'recruitment', sales_owner_id: dheeraj.user.id, created_at: inMonth(2) } });
+    const seat = await prisma.requirementSeat.create({ data: { requirement_id: req.id } });
+    const profile = await createProfile(hiraToken, { name: 'Candidate One' });
+    const sub = await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: profile.id, stage: 'closed', submitted_by: hira.user.id, actual_joining_date: inMonth(9) } });
+    await prisma.stageHistory.create({ data: { entity_type: 'submission', entity_id: sub.id, to_stage: 'submitted_to_client', changed_by: hira.user.id, changed_at: inMonth(4) } });
+    // a first meeting with the client (Dheeraj and Hira tagged) and an extra client meeting (Hira tagged)
+    await prisma.account.update({ where: { id: client.id }, data: { meeting_date: inMonth(3) } });
+    for (const u of [dheeraj, hira]) await prisma.accountMeetingAttendee.create({ data: { account_id: client.id, user_id: u.user.id } });
+    const meeting = await prisma.clientMeeting.create({ data: { org_id: ctx.org.id, account_id: client.id, title: 'Review call', scheduled_at: inMonth(6), created_by: dheeraj.user.id } });
+    await prisma.clientMeetingAttendee.create({ data: { meeting_id: meeting.id, user_id: hira.user.id } });
+    // Hira took two interviews of this candidate earlier in the month (one passed); the candidate joined, so the shortlist ends in a joining
+    const early = (day) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 3));
+    for (const [n, day, result] of [[1, 1, 'fail'], [2, 1, 'pass']]) {
+      const round = await prisma.interviewRound.create({ data: { submission_id: sub.id, round_number: n, round_type: 'internal_r1', scheduled_at: early(day), result } });
+      await prisma.interviewRoundInterviewer.create({ data: { interview_round_id: round.id, user_id: hira.user.id } });
+    }
+    // a vendor Hira brought in
+    await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Vendor Co', type: 'vendor', stage: 'active', owner_id: hira.user.id, origin_owner_id: hira.user.id } });
+
+    const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
+    const rowOf = (name) => res.body.data.people.find((x) => x.name === name).months.find((m) => m.key === key).metrics;
+    const asMap = (metrics) => Object.fromEntries(metrics.map((m) => [m.key, m.count]));
+    expect(rowOf('Dheeraj Kumar').map((m) => m.key)).toEqual(['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned_live', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned', 'joinings_owned']);
+    expect(asMap(rowOf('Dheeraj Kumar'))).toMatchObject({ req_brought: 1, req_brought_won: 1, req_owned_live: 1, req_owned: 1, req_owned_won: 1, meetings_attended: 1, submitted_on_owned: 1, joinings_owned: 1 });
+    expect(rowOf('Hira HR').map((m) => m.key)).toEqual(['profiles_submitted', 'interviews_taken', 'interviews_shortlisted', 'interviews_joined', 'joinings', 'vendors_onboarded', 'meetings_attended']);
+    expect(asMap(rowOf('Hira HR'))).toEqual({ profiles_submitted: 1, interviews_taken: 2, interviews_shortlisted: 1, interviews_joined: 1, joinings: 1, vendors_onboarded: 1, meetings_attended: 2 });
+
+    const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
+    const att = await get(`/monthly-review/details?org_membership_id=${hira.m.id}&metric=meetings_attended&${ym}`, ctx.admin);
+    expect(att.body.data.items.map((i) => i.sub).sort()).toEqual(['Client meeting', 'Review call']);
+    const jo = await get(`/monthly-review/details?org_membership_id=${dheeraj.m.id}&metric=joinings_owned&${ym}`, ctx.admin);
+    expect(jo.body.data.items[0].title).toBe('Candidate One');
+  });
+
   test('attendance: working days and present days per month, and "data not available" for a past month with nothing recorded', async () => {
     const ctx = await seed();
     const hr = await ctx.dept('HR');
@@ -70,7 +113,7 @@ describe('monthly performance review', () => {
     expect(by['2026-03'].present).toBe(1);
     expect(by['2026-03'].no_data).toBe(false);
     expect(p.months[0].key).toBe('2026-03'); // newest first
-    expect(by['2026-03'].metrics.map((m) => m.key)).toEqual(['profiles_submitted', 'joinings', 'vendors_onboarded']);
+    expect(by['2026-03'].metrics.map((m) => m.key)).toEqual(['profiles_submitted', 'interviews_taken', 'interviews_shortlisted', 'interviews_joined', 'joinings', 'vendors_onboarded', 'meetings_attended']);
   });
 
   test('IT: active projects split into billable and non-billable, narrowed by the checkboxes', async () => {
@@ -98,6 +141,75 @@ describe('monthly performance review', () => {
     expect(daily.status).toBe(200);
     expect(daily.body.data.items.length).toBeGreaterThan(0);
     expect(daily.body.data.items.every((i) => i.title === '2 projects')).toBe(true);
+  });
+
+  test('IT: a project that ended on 15 March shows its dates, and the day-wise view stops counting it after the 15th', async () => {
+    const ctx = await seed();
+    const it = await ctx.dept('IT');
+    const dev = await ctx.person('Esha IT', it, new Date(Date.UTC(2026, 0, 1)));
+    const owner = ctx.adminUser;
+    const acc = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Neuromind', type: 'client', stage: 'active', owner_id: owner.id, is_project: true } });
+    await prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: acc.id, rate_type: 'monthly', rate: 50000, effective_from: new Date('2020-01-01'), created_by: owner.id } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: acc.id, org_membership_id: dev.m.id, created_by: owner.id, start_date: new Date('2026-01-10'), end_date: new Date('2026-03-15') } });
+
+    const base = `/monthly-review/details?org_membership_id=${dev.m.id}&year=2026&month=3`;
+    const list = await get(`${base}&metric=projects_billable`, ctx.admin);
+    expect(list.body.data.items).toEqual([expect.objectContaining({ title: 'Neuromind', start_date: '2026-01-10', end_date: '2026-03-15', state: 'ended_this_month' })]);
+
+    const daily = (await get(`${base}&metric=projects_daily`, ctx.admin)).body.data.items;
+    const on = (d) => daily.find((x) => x.date === `2026-03-${d}`);
+    expect(on('15').value).toBe(1);
+    expect(on('15').ended).toEqual(['Neuromind']);
+    expect(on('16').value).toBe(0);
+
+    // the day-wise view (every function): attendance of the day plus the projects, with the last day marked
+    const dw = (await get(`${base}&metric=daywise`, ctx.admin)).body.data;
+    const dwDay = (d) => dw.items.find((x) => x.date === `2026-03-${d}`);
+    expect(dw.function).toBe('it');
+    expect(dwDay('15').projects).toEqual({ count: 1, names: ['Neuromind'], ended: ['Neuromind'], started: [] });
+    expect(dwDay('16').projects.count).toBe(0);
+    expect(dw.items.every((x) => 'attendance' in x && Array.isArray(x.measures))).toBe(true);
+  });
+
+  test('day-wise view for HR lists the day of each record, and the export carries a Day-wise sheet', async () => {
+    const ctx = await seed();
+    const hr = await ctx.dept('HR');
+    const e = await ctx.person('Hira HR', hr, new Date(Date.UTC(2026, 0, 1)));
+    await prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: e.m.id, date: new Date('2026-03-03T00:00:00Z'), status: 'present' } });
+    const dw = (await get(`/monthly-review/details?org_membership_id=${e.m.id}&metric=daywise&year=2026&month=3`, ctx.admin)).body.data;
+    expect(dw.function).toBe('hr');
+    expect(dw.items.find((x) => x.date === '2026-03-03').attendance.kind).toBe('present');
+    const bad = await get(`/monthly-review/details?org_membership_id=${e.m.id}&metric=nope&year=2026&month=3`, ctx.admin);
+    expect(bad.status).toBe(400);
+
+    const xlsx = await authed(request(app).get('/api/v1/reports/monthly-review/export?type=xlsx&function=hr'), ctx.admin).buffer(true).parse((res, cb) => { const c = []; res.on('data', (d) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(xlsx.body);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Monthly review', 'Day-wise']);
+    expect(wb.getWorksheet('Day-wise').rowCount).toBeGreaterThan(1);
+  });
+
+  test("IT: the project's own agreement dates count too, and two contracts with one name are told apart by their code", async () => {
+    const ctx = await seed();
+    const it = await ctx.dept('IT');
+    const dev = await ctx.person('Ravi IT', it, new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)));
+    const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const prevKey = prev.toISOString().slice(0, 7);
+    const rate = (id) => prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: id, rate_type: 'monthly', rate: 1000, effective_from: new Date('2020-01-01'), created_by: ctx.adminUser.id } });
+    const proj = (code, extra) => prisma.account.create({ data: { org_id: ctx.org.id, name: 'Glut Network', project_name: 'Glut Network', project_code: code, type: 'client', stage: 'active', owner_id: ctx.adminUser.id, is_project: true, ...extra } });
+    // P0001: the agreement ended on the 10th of last month; P0002: the agreement starts next month. The allocations themselves are open-ended.
+    const ended = await proj('P0001', { agreement_start_date: new Date('2020-01-01'), agreement_end_date: new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth(), 10)) });
+    const future = await proj('P0002', { agreement_start_date: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) });
+    const live = await proj('P0003', { agreement_start_date: new Date('2020-01-01') });
+    for (const a of [ended, future, live]) { await rate(a.id); await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: a.id, org_membership_id: dev.m.id, created_by: ctx.adminUser.id, start_date: new Date('2020-01-01') } }); }
+
+    const res = await get(`/monthly-review?from_month=${prevKey}&to_month=${key}&function=it`, ctx.admin);
+    const months = Object.fromEntries(res.body.data.people[0].months.map((m) => [m.key, Object.fromEntries(m.metrics.map((x) => [x.key, x.count]))]));
+    expect(months[prevKey].projects_active).toBe(2); // P0001 (until the 10th) and P0003
+    expect(months[key].projects_active).toBe(1); // only P0003: P0001 ended, P0002 has not started
+    const ym = `year=${prev.getUTCFullYear()}&month=${prev.getUTCMonth() + 1}`;
+    const det = await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_active&${ym}`, ctx.admin);
+    expect(det.body.data.items.map((i) => i.title).sort()).toEqual(['Glut Network (P0001)', 'Glut Network (P0003)']);
   });
 
   test('export: Excel and PDF carry every employee and month of the filtered review', async () => {

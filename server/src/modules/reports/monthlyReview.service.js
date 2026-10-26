@@ -26,20 +26,33 @@ function functionOf(departmentName) {
 
 const METRICS = {
   meetings_scheduled: { label: 'Client meetings scheduled', fn: 'sales' },
-  clients_active: { label: 'Clients now Active', fn: 'sales' },
-  req_brought: { label: 'Requirements brought', fn: 'sales' },
-  req_brought_won: { label: 'Won (brought)', fn: 'sales' },
-  req_owned: { label: 'Requirements owned', fn: 'sales' },
-  req_owned_won: { label: 'Won (owned)', fn: 'sales' },
-  meetings_attended: { label: 'Meetings attended', fn: 'sales' },
-  submitted_on_owned: { label: 'Profiles submitted on owned requirements', fn: 'sales' },
+  clients_active: { label: 'Meetings that became Active clients', fn: 'sales' },
+  req_brought: { label: 'Requirements (brought by them)', fn: 'sales' },
+  req_brought_won: { label: 'Closures on their clients (requirements won)', fn: 'sales' },
+  req_owned_live: { label: 'Requirements owned (running)', fn: 'sales' },
+  req_owned: { label: 'Requirements created (as owner)', fn: 'sales' },
+  req_owned_won: { label: 'Won (as owner)', fn: 'sales' },
+  meetings_attended: { label: 'Meetings attended', fn: ['sales', 'hr'] },
+  submitted_on_owned: { label: 'Profiles submitted to client (their requirements)', fn: 'sales' },
+  joinings_owned: { label: 'Joinings (their requirements)', fn: 'sales' },
   profiles_submitted: { label: 'Profiles submitted to client', fn: 'hr' },
+  interviews_taken: { label: 'Interviews taken', fn: 'hr' },
+  interviews_shortlisted: { label: 'Shortlisted in interviews', fn: 'hr' },
+  interviews_joined: { label: 'Shortlisted who joined finally', fn: 'hr' },
   joinings: { label: 'Joinings', fn: 'hr' },
   vendors_onboarded: { label: 'Vendors onboarded', fn: 'hr' },
   projects_active: { label: 'Active projects', fn: 'it' },
   projects_billable: { label: 'Billable projects', fn: 'it' },
   projects_non_billable: { label: 'Non-billable projects', fn: 'it' },
   projects_daily: { label: 'Avg projects per day', fn: 'it' },
+};
+
+// What each function sees, in this order.
+const ORDER = {
+  sales: ['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned_live', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned', 'joinings_owned'],
+  hr: ['profiles_submitted', 'interviews_taken', 'interviews_shortlisted', 'interviews_joined', 'joinings', 'vendors_onboarded', 'meetings_attended'],
+  it: ['projects_active', 'projects_billable', 'projects_non_billable', 'projects_daily'],
+  other: [],
 };
 
 function monthsBetween(fromKey, toKey) {
@@ -70,6 +83,14 @@ async function activationDates(accounts) {
   return new Map(accounts.map((a) => [a.id, first.get(a.id) || a.created_at]));
 }
 
+// Meetings the person was tagged on: a client's first meeting (account meeting) and the extra client meetings on the calendar.
+async function meetingItems(orgId, userId, dateRange, push) {
+  const attended = await prisma.accountMeetingAttendee.findMany({ where: { user_id: userId, account: { org_id: orgId, meeting_date: dateRange } }, select: { account: { select: { name: true, meeting_date: true } } } });
+  for (const a of attended) push('meetings_attended', a.account.meeting_date, a.account.name, 'Client meeting');
+  const extra = await prisma.clientMeetingAttendee.findMany({ where: { user_id: userId, meeting: { scheduled_at: dateRange, status: { not: 'cancelled' }, account: { org_id: orgId } } }, select: { meeting: { select: { title: true, scheduled_at: true, account: { select: { name: true } } } } } });
+  for (const x of extra) push('meetings_attended', x.meeting.scheduled_at, x.meeting.account?.name || 'Client', x.meeting.title);
+}
+
 // "Submitted to client" events of the given submissions inside the range.
 async function submittedEvents(submissionWhere, range) {
   const subs = await prisma.submission.findMany({ where: submissionWhere, select: { id: true, profile: { select: { name: true } }, seat: { select: { requirement: { select: { title: true, account: { select: { name: true } } } } } } } });
@@ -87,7 +108,7 @@ async function submittedEvents(submissionWhere, range) {
 async function loadItems(orgId, member, fn, range, opts) {
   const userId = member.user_id;
   const items = [];
-  const push = (metric, date, title, sub, value) => items.push({ metric, month: monthKey(date), date: ymd(date), title, sub: sub || '', value });
+  const push = (metric, date, title, sub, value, extra) => items.push({ metric, month: monthKey(date), date: ymd(date), title, sub: sub || '', value, extra });
   const dateRange = { gte: range.from, lte: range.to };
 
   if (fn === 'sales') {
@@ -119,12 +140,39 @@ async function loadItems(orgId, member, fn, range, opts) {
         push(metric, s.actual_joining_date, r.title, r.account?.name);
       }
     }
-    const attended = await prisma.accountMeetingAttendee.findMany({ where: { user_id: userId, account: { org_id: orgId, meeting_date: dateRange } }, select: { account: { select: { name: true, meeting_date: true } } } });
-    for (const a of attended) push('meetings_attended', a.account.meeting_date, a.account.name, 'Client meeting');
+    await meetingItems(orgId, userId, dateRange, push);
+    // requirements they own that were running during each month (created on or before it, not yet closed at its start)
+    const live = await prisma.requirement.findMany({ where: { sales_owner_id: userId, account: { org_id: orgId }, created_at: { lte: range.to }, OR: [{ closed_at: null }, { closed_at: { gte: range.from } }] }, select: { ...REQ_SELECT, created_at: true, closed_at: true } });
+    for (const mo of monthsBetween(monthKey(range.from), monthKey(range.to))) {
+      const start = new Date(Date.UTC(mo.year, mo.month - 1, 1));
+      const end = new Date(Date.UTC(mo.year, mo.month, 0, 23, 59, 59));
+      for (const r of live) if (r.created_at <= end && (!r.closed_at || r.closed_at >= start)) push('req_owned_live', start, r.title, r.account?.name);
+    }
+    const joinedOwned = await prisma.submission.findMany({ where: wonWhere({ sales_owner_id: userId }), select: { actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { requirement: { select: REQ_SELECT } } } } });
+    for (const s of joinedOwned) push('joinings_owned', s.actual_joining_date, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' · '));
     for (const e of await submittedEvents({ seat: { requirement: { sales_owner_id: userId, account: { org_id: orgId } } } }, range)) push('submitted_on_owned', e.date, e.title, e.sub);
   }
 
   if (fn === 'hr') {
+    await meetingItems(orgId, userId, dateRange, push);
+    // Interviews the person took (tagged as an interviewer, held and not cancelled), those that ended in a shortlist (result pass), and
+    // the shortlisted candidates who finally joined: each candidate is counted once per month, whatever the date of the joining.
+    const rounds = await prisma.interviewRound.findMany({
+      where: { deleted_at: null, status: { not: 'cancelled' }, scheduled_at: { gte: range.from, lte: new Date(Math.min(range.to.getTime(), Date.now())) }, interviewers: { some: { user_id: userId } }, submission: { seat: { requirement: { account: { org_id: orgId } } } } },
+      select: { scheduled_at: true, result: true, round_name: true, round_type: true, submission: { select: { id: true, stage: true, actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { requirement: { select: { title: true } } } } } } },
+      orderBy: { scheduled_at: 'asc' },
+    });
+    const joinedSeen = new Set();
+    for (const r of rounds) {
+      const cand = r.submission?.profile?.name || 'Candidate';
+      const sub = [r.round_name || String(r.round_type).replace(/_/g, ' '), r.submission?.seat?.requirement?.title].filter(Boolean).join(' · ');
+      push('interviews_taken', r.scheduled_at, cand, sub);
+      if (r.result === 'pass') {
+        push('interviews_shortlisted', r.scheduled_at, cand, sub);
+        const key = `${r.submission?.id}|${monthKey(r.scheduled_at)}`;
+        if (r.submission?.stage === 'closed' && r.submission.actual_joining_date && !joinedSeen.has(key)) { joinedSeen.add(key); push('interviews_joined', r.scheduled_at, cand, `Joined ${ymd(r.submission.actual_joining_date)} · ${sub}`); }
+      }
+    }
     for (const e of await submittedEvents({ submitted_by: userId, seat: { requirement: { account: { org_id: orgId } } } }, range)) push('profiles_submitted', e.date, e.title, e.sub);
     const joined = await prisma.submission.findMany({ where: { submitted_by: userId, stage: 'closed', actual_joining_date: dateRange, seat: { requirement: { account: { org_id: orgId } } } }, select: { actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { requirement: { select: REQ_SELECT } } } } });
     for (const s of joined) push('joinings', s.actual_joining_date, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' Â· '));
@@ -139,24 +187,44 @@ async function loadItems(orgId, member, fn, range, opts) {
   if (fn === 'it') {
     const rows = await prisma.projectMemberAssignment.findMany({
       where: { org_id: orgId, org_membership_id: member.id },
-      select: { start_date: true, end_date: true, account: { select: { id: true, name: true, project_name: true, billing_rates: { select: { rate: true, effective_from: true } } } } },
+      select: { start_date: true, end_date: true, account: { select: { id: true, name: true, project_name: true, project_code: true, agreement_start_date: true, agreement_end_date: true, billing_rates: { select: { rate: true, effective_from: true } } } } },
     });
+    // A person is on a project only inside the project's own agreement dates too (Finance > Projects): from the later of the two starts to
+    // the earlier of the two ends. Two contracts with the same name are told apart by their project code.
+    const later = (a, b) => (a && b ? (a > b ? a : b) : a || b || null);
+    const earlier = (a, b) => (a && b ? (a < b ? a : b) : a || b || null);
+    for (const r of rows) {
+      r.start_date = later(r.start_date, r.account.agreement_start_date);
+      r.end_date = earlier(r.end_date, r.account.agreement_end_date);
+    }
     const months = monthsBetween(monthKey(range.from), monthKey(range.to));
     for (const m of months) {
       const mFrom = new Date(Date.UTC(m.year, m.month - 1, 1));
       const mTo = new Date(Date.UTC(m.year, m.month, 0));
-      const seen = new Set();
       const counted = [];
+      const byProject = new Map();
       for (const r of rows) {
         if ((r.start_date && r.start_date > mTo) || (r.end_date && r.end_date < mFrom)) continue;
         const billable = r.account.billing_rates.some((b) => Number(b.rate) > 0 && b.effective_from <= mTo);
         if (billable ? !opts.billable : !opts.nonBillable) continue;
-        counted.push({ r, name: r.account.project_name || r.account.name });
-        if (seen.has(r.account.id)) continue;
-        seen.add(r.account.id);
-        const name = r.account.project_name || r.account.name;
-        push('projects_active', mFrom, name, billable ? 'Billable' : 'Non-billable');
-        push(billable ? 'projects_billable' : 'projects_non_billable', mFrom, name, billable ? 'Billable' : 'Non-billable');
+        const base = r.account.project_name || r.account.name;
+        const name = r.account.project_code ? `${base} (${r.account.project_code})` : base;
+        counted.push({ r, name });
+        const p = byProject.get(r.account.id) || { name, billable, starts: [], ends: [], open: false };
+        if (r.start_date) p.starts.push(r.start_date);
+        if (r.end_date) p.ends.push(r.end_date); else p.open = true;
+        byProject.set(r.account.id, p);
+      }
+      // one record per project for the month, with the dates the admin entered on the allocation (Finance > Project costing)
+      for (const p of byProject.values()) {
+        const start = p.starts.length ? new Date(Math.min(...p.starts)) : null;
+        const end = p.open || !p.ends.length ? null : new Date(Math.max(...p.ends));
+        const startedNow = Boolean(start && start >= mFrom);
+        const endedNow = Boolean(end && end <= mTo);
+        const extra = { start_date: start ? ymd(start) : null, end_date: end ? ymd(end) : null, state: endedNow ? 'ended_this_month' : startedNow ? 'started_this_month' : 'ongoing' };
+        const kind = p.billable ? 'Billable' : 'Non-billable';
+        push('projects_active', mFrom, p.name, kind, undefined, extra);
+        push(p.billable ? 'projects_billable' : 'projects_non_billable', mFrom, p.name, kind, undefined, extra);
       }
       // every day from joining (or the 1st) to today (or month end): how many of those projects the person was on that day
       const today = todayIst();
@@ -165,7 +233,10 @@ async function loadItems(orgId, member, fn, range, opts) {
       for (let t = dayFrom.getTime(); t <= dayTo.getTime(); t += 86400000) {
         const day = new Date(t);
         const names = [...new Set(counted.filter(({ r }) => (!r.start_date || r.start_date <= day) && (!r.end_date || r.end_date >= day)).map((c) => c.name))];
-        push('projects_daily', day, `${names.length} project${names.length === 1 ? '' : 's'}`, names.join(', '), names.length);
+        // projects whose last day is this day, or that began on it
+        const ended = [...new Set(counted.filter(({ r }) => r.end_date && ymd(r.end_date) === ymd(day)).map((c) => c.name))];
+        const started = [...new Set(counted.filter(({ r }) => r.start_date && ymd(r.start_date) === ymd(day)).map((c) => c.name))];
+        push('projects_daily', day, `${names.length} project${names.length === 1 ? '' : 's'}`, names.join(', '), names.length, { names, ended, started });
       }
     }
   }
@@ -247,7 +318,7 @@ async function review(orgId, user, q = {}) {
       const days = items.filter((it) => it.metric === 'projects_daily' && it.month === mo.key);
       if (days.length) counts.set(`${mo.key}|projects_daily`, Math.round((days.reduce((a, d) => a + d.value, 0) / days.length) * 10) / 10);
     }
-    const metricKeys = Object.keys(METRICS).filter((k) => METRICS[k].fn === m.fn).filter((k) => !(k === 'projects_billable' && !opts.billable) && !(k === 'projects_non_billable' && !opts.nonBillable));
+    const metricKeys = (ORDER[m.fn] || []).filter((k) => !(k === 'projects_billable' && !opts.billable) && !(k === 'projects_non_billable' && !opts.nonBillable));
     return {
       ...base,
       months: months.map((mo, i) => {
@@ -271,10 +342,81 @@ async function details(orgId, user, { org_membership_id: id, metric, year, month
     const a = await attendance.memberMonth(orgId, m, { year: Number(year), month: Number(month) });
     return { metric, label: 'Attendance', month: key, items: a.days.map((d) => ({ date: d.date, title: d.code || d.kind, sub: d.label || d.kind.replace(/_/g, ' '), kind: d.kind })), summary: { working_days: a.working_days, present: a.present, leave: a.leave, absent: a.absent } };
   }
+  if (metric === 'daywise') {
+    const opts = { billable: parseBool(include_billable, true), nonBillable: parseBool(include_non_billable, false) };
+    const [items, a] = await Promise.all([loadItems(orgId, m, m.fn, bounds(key, key), opts), attendance.memberMonth(orgId, m, { year: Number(year), month: Number(month) })]);
+    return { metric, label: 'Day-wise', month: key, function: m.fn, items: buildDays(key, a.days, items, ymd(todayIst())), summary: { working_days: a.working_days, present: a.present, leave: a.leave, absent: a.absent } };
+  }
   if (!METRICS[metric]) return { error: 'bad_metric' };
   const range = bounds(key, key);
   const items = await loadItems(orgId, m, m.fn, range, { billable: parseBool(include_billable, true), nonBillable: parseBool(include_non_billable, false) });
-  return { metric, label: METRICS[metric].label, month: key, items: items.filter((i) => i.metric === metric && i.month === key).map(({ date, title, sub }) => ({ date, title, sub })) };
+  return { metric, label: METRICS[metric].label, month: key, items: items.filter((i) => i.metric === metric && i.month === key).map(({ date, title, sub, value, extra }) => ({ date, title, sub, ...(value !== undefined ? { value } : {}), ...(extra || {}) })) };
+}
+
+// Measures that sit on the first of the month (not on a day), so they have no place in the day-wise view.
+const MONTH_LEVEL = new Set(['projects_active', 'projects_billable', 'projects_non_billable']);
+
+// One month, day by day: the attendance of the day and what the person did that day (their function's records, or the projects for IT).
+function buildDays(key, attDays, items, today) {
+  const byDate = new Map();
+  const day = (date) => {
+    if (!byDate.has(date)) byDate.set(date, { date, attendance: null, projects: null, measures: new Map() });
+    return byDate.get(date);
+  };
+  for (const d of attDays || []) {
+    const date = String(d.date).slice(0, 10);
+    if (monthKey(new Date(`${date}T00:00:00Z`)) === key) day(date).attendance = { kind: d.kind, label: d.label || String(d.kind).replace(/_/g, ' '), code: d.code || null };
+  }
+  for (const it of items) {
+    if (it.month !== key || MONTH_LEVEL.has(it.metric)) continue;
+    const d = day(it.date);
+    if (it.metric === 'projects_daily') { d.projects = { count: it.value || 0, names: it.extra?.names || [], ended: it.extra?.ended || [], started: it.extra?.started || [] }; continue; }
+    if (!d.measures.has(it.metric)) d.measures.set(it.metric, { key: it.metric, label: METRICS[it.metric].label, titles: [] });
+    d.measures.get(it.metric).titles.push(it.title);
+  }
+  return [...byDate.values()]
+    .filter((d) => d.date <= today)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .map((d) => ({ ...d, measures: [...d.measures.values()].map((x) => ({ ...x, count: x.titles.length })) }));
+}
+
+// The one-line text of a day's activity, for the exports.
+function dayActivity(d) {
+  const parts = d.measures.map((x) => `${x.label}: ${x.titles.join(', ')}`);
+  if (d.projects) {
+    parts.push(`Projects (${d.projects.count}): ${d.projects.names.join(', ') || '-'}`);
+    if (d.projects.ended.length) parts.push(`Last day: ${d.projects.ended.join(', ')}`);
+    if (d.projects.started.length) parts.push(`Started: ${d.projects.started.join(', ')}`);
+  }
+  return parts.join(' | ');
+}
+
+// Day by day for the filtered review (Excel second sheet, PDF second section): one row per employee and day that has attendance or activity.
+// Stops at MAX_DAY_ROWS rows; `truncated` says so.
+const MAX_DAY_ROWS = 20000;
+async function exportDayRows(orgId, user, q = {}) {
+  const todayKey = monthKey(todayIst());
+  const today = ymd(todayIst());
+  const all = (await eligibleMembers(orgId, user, q)).slice(0, 500);
+  const opts = { billable: parseBool(q.include_billable, true), nonBillable: parseBool(q.include_non_billable, false) };
+  const perPerson = await inBatches(all, async (m) => {
+    const months = monthsFor(m, q, todayKey);
+    if (!months.length) return [];
+    const items = await loadItems(orgId, m, m.fn, bounds(months[0].key, months[months.length - 1].key), opts);
+    const out = [];
+    for (const mo of months) {
+      const att = await attendance.memberMonth(orgId, m, mo);
+      for (const d of buildDays(mo.key, att.days, items, today)) {
+        out.push({
+          'Employee code': m.employee_code || '', Employee: m.person?.name || 'Unknown', Team: m.team?.name || '', Function: m.fn.toUpperCase(),
+          Month: mo.key, Date: d.date, Attendance: d.attendance ? d.attendance.label : '', 'Projects that day': d.projects ? d.projects.count : '', Activity: dayActivity(d),
+        });
+      }
+    }
+    return out;
+  });
+  const rows = perPerson.flat().filter((r) => r.Attendance || r.Activity);
+  return { rows: rows.slice(0, MAX_DAY_ROWS), truncated: rows.length > MAX_DAY_ROWS };
 }
 
 // Every employee and month of the filtered review as flat rows, for the Excel / PDF export (all pages, at most 500 employees).
@@ -302,4 +444,4 @@ async function exportRows(orgId, user, q = {}) {
   return rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c] ?? ''])));
 }
 
-module.exports = { review, details, exportRows, functionOf, METRICS };
+module.exports = { review, details, exportRows, exportDayRows, functionOf, METRICS };
