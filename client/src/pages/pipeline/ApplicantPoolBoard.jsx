@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
+import { Ban, Eye, FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import useLiveData from '../../lib/useLiveData.js';
@@ -115,6 +115,46 @@ async function downloadCv(a) {
   URL.revokeObjectURL(url);
 }
 
+const dash = (v) => (v == null || v === '' ? '—' : v);
+
+/** A read-only look at everything the candidate told us, so a recruiter can judge the application before creating a Profile. */
+function ApplicantDetailsDrawer({ applicant: a, onClose }) {
+  const rows = a ? [
+    ['Email', a.email], ['Phone', a.phone], ['Experience', a.experience_years != null ? `${a.experience_years} yrs` : null],
+    ['Applied for', [a.job_code, a.requirement_title, a.client].filter(Boolean).join(' · ')],
+    ['Applied', `${ago(a.applied_at)} · ${a.channel || a.source || ''}`],
+    ['Joiner status', a.joiner_status ? JOINER_LABEL[a.joiner_status] : null],
+    ['Notice period', a.notice_period_days == null ? null : a.notice_period_days === 0 ? 'No notice' : `${a.notice_period_days} days`],
+    ['Last working day', a.last_working_day ? String(a.last_working_day).slice(0, 10) : null],
+    ['Working now', a.currently_working == null ? null : a.currently_working ? 'Yes' : 'No'],
+    ['Current CTC', a.current_ctc_lpa == null ? null : `${a.current_ctc_lpa} LPA`],
+    ['Expected CTC', a.expected_ctc_lpa == null ? null : `${a.expected_ctc_lpa} LPA`],
+    ['Work mode', a.work_mode ? WORK_MODE_LABEL[a.work_mode] : null],
+    ['Skills', a.extra_skills?.length ? a.extra_skills.join(', ') : null],
+    ['Notes', a.notes],
+  ] : [];
+  return (
+    <Drawer open={Boolean(a)} onClose={onClose} size="md" tone="info" title={a ? `Application: ${a.name}` : 'Application'}>
+      {a && (
+        <div className="space-y-3" data-testid="applicant-details">
+          <dl className="divide-y divide-tertiary-100 text-sm">
+            {rows.map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[8rem_1fr] gap-2 py-2"><dt className="text-xs font-medium text-tertiary-500">{k}</dt><dd className="break-words text-tertiary-900">{dash(v)}</dd></div>
+            ))}
+          </dl>
+          <p className="flex flex-wrap gap-3 text-sm">
+            {a.linkedin_url && <a className="text-primary-700 hover:underline" href={a.linkedin_url} target="_blank" rel="noreferrer">Open LinkedIn</a>}
+            {a.has_cv_file && <button type="button" className="text-primary-700 hover:underline" onClick={() => downloadCv(a)}>Download CV (file)</button>}
+            {a.cv_url && <a className="text-primary-700 hover:underline" href={a.cv_url} target="_blank" rel="noreferrer">Open CV link</a>}
+            {!a.linkedin_url && !a.has_cv_file && !a.cv_url && <span className="text-tertiary-400">No LinkedIn or CV attached</span>}
+          </p>
+          <p className="text-xs text-tertiary-500">Create a Profile from the table once the initial screening looks good.</p>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
 /** What the candidate said when applying: joiner status, notice, CTC, work mode, links. Older applicants have none of it. */
 function ScreeningSummary({ a }) {
   if (!a.joiner_status && a.current_ctc_lpa == null && a.expected_ctc_lpa == null && !a.work_mode && !a.linkedin_url && !a.cv_url && !a.has_cv_file) return <span className="text-tertiary-400">Not answered</span>;
@@ -148,6 +188,7 @@ export default function ApplicantPoolBoard() {
   const [applied, setApplied] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [busy, setBusy] = useState('');
   const [rejecting, setRejecting] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -321,6 +362,7 @@ export default function ApplicantPoolBoard() {
                       : <p className="mt-1 text-xs text-tertiary-500">Profile not created</p>)}
                   </td>
                   <td className="px-3 py-2 text-right">
+                    <button type="button" title="View application" aria-label={`View application of ${a.name}`} data-testid="view-applicant" className="mr-1 rounded p-1.5 text-tertiary-400 hover:bg-tertiary-100 hover:text-primary-700" onClick={() => setViewing(a)}><Eye className="h-4 w-4" /></button>
                     {(user?.role === 'admin' || user?.role === 'sales' || a.assigned_to?.id === user?.id) && (
                       <button type="button" title="Edit applicant" className="mr-1 rounded p-1.5 text-tertiary-400 hover:bg-tertiary-100 hover:text-primary-700" onClick={() => setEditing(a)}><Pencil className="h-4 w-4" /></button>
                     )}
@@ -363,6 +405,7 @@ export default function ApplicantPoolBoard() {
       </section>
       {list.data?.pagination && <p className="px-1 text-xs text-tertiary-500">{rows.length} of {list.data.pagination.total}</p>}
       <AddApplicantDrawer open={addOpen} requirements={reqs.data} requirementId={requirementId} onClose={() => setAddOpen(false)} onSaved={refresh} />
+      <ApplicantDetailsDrawer applicant={viewing} onClose={() => setViewing(null)} />
       <AddApplicantDrawer open={Boolean(editing)} applicant={editing} requirements={reqs.data} onClose={() => setEditing(null)} onSaved={refresh} />
       <Drawer
         open={Boolean(rejecting)}
