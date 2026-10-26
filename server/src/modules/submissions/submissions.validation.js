@@ -98,6 +98,10 @@ const interviewRoundCreateSchema = z.object({
 });
 
 const interviewRoundUpdateSchema = z.object({
+  // the name was missing here, so an edited name was silently dropped
+  round_name: z.string().optional(),
+  // put a cancelled round back on the calendar
+  reopen: z.boolean().optional(),
   scheduled_at: z.string().optional(),
   duration_minutes: z.number().int().optional(),
   interviewer_name: z.string().optional(),

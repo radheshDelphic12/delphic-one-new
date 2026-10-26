@@ -417,4 +417,41 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
   return { year, month, status, today, days: dayList, people, projects, project_people };
 }
 
-module.exports = { people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };
+// One person's month for the Monthly performance review: working days (not a holiday or weekly off, inside the employment span),
+// present / leave / absent days and the day-by-day codes. `noData` is true for a past month with no attendance row and no leave at all
+// (the person was already employed but the system holds nothing for them), so the review can say "data not available" instead of 0.
+async function memberMonth(orgId, m, { year, month }) {
+  const { from, to } = monthBounds(year, month);
+  const todayDate = todayIst();
+  const today = ymd(todayDate);
+  const [cal, homeRows, recorded] = await Promise.all([
+    dashboard.monthCalendar(orgId, m.id, { year, month }),
+    prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: m.id, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { date: true } }),
+    prisma.attendanceRecord.count({ where: { org_id: orgId, org_membership_id: m.id, date: { gte: from, lte: to } } }),
+  ]);
+  const homeByDay = new Set(homeRows.map((r) => ymd(r.date)));
+  const start = m.joined_at ? ymd(m.joined_at) : null;
+  const lastDay = m.left_at || (['terminated', 'notice_period'].includes(m.employment_status) ? m.notice_end_date : null);
+  const end = lastDay ? ymd(lastDay) : null;
+  const workType = workTypeOf(m);
+  const t = { working_days: 0, present: 0, wfh: 0, half_day: 0, leave: 0, absent: 0, holidays: 0, weekly_offs: 0 };
+  let anyLeave = false;
+  const days = [];
+  for (const d of cal.days) {
+    const inEmployment = (!start || d.date >= start) && (!end || d.date <= end);
+    const c = registerCode(d, { today, inEmployment, workType, homeByDay });
+    if (inEmployment && d.day_type !== 'company_holiday' && d.day_type !== 'weekend') t.working_days += 1;
+    if (c.kind === 'present') { t.present += 1; if (c.code === 'WFH') t.wfh += 1; }
+    else if (c.kind === 'half_day') { t.present += 0.5; t.half_day += 1; }
+    else if (c.kind === 'leave') { t.leave += c.days; t.present += c.worked || 0; anyLeave = true; }
+    else if (c.kind === 'holiday') t.holidays += 1;
+    else if (c.kind === 'weekly_off') t.weekly_offs += 1;
+    else if (c.kind === 'absent') t.absent += 1;
+    if (c.kind !== 'none') days.push({ date: d.date, code: c.code, kind: c.kind, label: c.label || null });
+  }
+  const monthEnd = ymd(to);
+  const noData = t.working_days > 0 && monthEnd < today && recorded === 0 && !anyLeave;
+  return { ...t, no_data: noData, days };
+}
+
+module.exports = { memberMonth, employmentState, people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };

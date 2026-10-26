@@ -490,6 +490,17 @@ async function updateInterviewRound(id, patch, user) {
     if (isManager && ['pass', 'fail', 'no_show'].includes(patch.result) && !patch.completed_at) {
       finalPatch.completed_at = new Date();
     }
+    // A cancelled round comes back to life when it is given a new date/time or the editor asks to reopen it;
+    // otherwise an edit would leave it struck through on the calendar.
+    const reopen = finalPatch.reopen === true;
+    delete finalPatch.reopen;
+    const timeMoved = finalPatch.scheduled_at
+      && (!existing.scheduled_at || finalPatch.scheduled_at.getTime() !== new Date(existing.scheduled_at).getTime());
+    if (existing.status === 'cancelled' && (reopen || timeMoved)) {
+      finalPatch.status = 'scheduled';
+      finalPatch.cancelled_at = null;
+      finalPatch.cancellation_reason = null;
+    }
 
     if (isManager && INTERNAL_ROUND_TYPES.includes(existing.round_type) && interviewer_ids !== undefined) {
       const check = await validateActiveInterviewers(tx, interviewer_ids);
