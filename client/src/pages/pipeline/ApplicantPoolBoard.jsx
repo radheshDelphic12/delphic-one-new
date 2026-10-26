@@ -372,7 +372,7 @@ export default function ApplicantPoolBoard() {
                             <button type="button" title="Delete applicant" className="rounded-lg p-2 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy === a.id} onClick={() => deleteApplicant(a)}><Trash2 className="h-4 w-4" /></button>
                           )}
                       </div>
-                      <div className="grid min-w-[17rem] grid-cols-2 gap-2">
+                      <div className="grid w-40 grid-cols-1 gap-2">
                           {a.status === 'new' && canClaim && (
                             <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
                           )}
