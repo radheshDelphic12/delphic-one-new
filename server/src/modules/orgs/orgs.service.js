@@ -113,7 +113,26 @@ async function listLocations(orgId) {
 
 // The Offices page: every location with how many working people sit there and how many expense claims and calendars point at it.
 // CCTV and biometric devices are not connected yet: each office reports them as "not_connected" until the integration exists.
-async function officesOverview(orgId) {
+// The people counted on an office card can be narrowed: work mode (remote / onsite / hybrid / not set), employee status (the default is
+// everyone still working; 'working' | 'active' | 'on_leave' | 'pending_onboarding' | 'notice_period' | 'terminated' | 'all'), user type
+// (full_time_employee | contractor) and department.
+const OFFICE_STATUSES = ['working', 'active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated', 'all'];
+const OFFICE_WORK_MODES = ['remote', 'onsite', 'hybrid', 'not_set'];
+const OFFICE_USER_TYPES = ['full_time_employee', 'contractor'];
+function officePeopleWhere(orgId, f = {}) {
+  const status = OFFICE_STATUSES.includes(f.status) ? f.status : 'working';
+  return {
+    org_id: orgId,
+    location_id: { not: null },
+    ...(status === 'all' ? {} : { employment_status: status === 'working' ? { in: WORKING_STATUSES } : status }),
+    ...(OFFICE_WORK_MODES.includes(f.work_mode) ? { work_mode: f.work_mode === 'not_set' ? null : f.work_mode } : {}),
+    ...(OFFICE_USER_TYPES.includes(f.user_type) ? { worker_type: f.user_type } : {}),
+    // the department of the membership, or (when the membership has none) the person's own
+    ...(f.department_id ? { OR: [{ department_id: f.department_id }, { department_id: null, person: { department_id: f.department_id } }] } : {}),
+  };
+}
+
+async function officesOverview(orgId, filters = {}) {
   const rows = await prisma.location.findMany({
     where: { org_id: orgId },
     orderBy: [{ is_default: 'desc' }, { name: 'asc' }],
@@ -121,7 +140,7 @@ async function officesOverview(orgId) {
   });
   const people = await prisma.orgMembership.groupBy({
     by: ['location_id'],
-    where: { org_id: orgId, location_id: { not: null }, employment_status: { in: WORKING_STATUSES } },
+    where: officePeopleWhere(orgId, filters),
     _count: { _all: true },
   });
   const headcount = new Map(people.map((p) => [p.location_id, p._count._all]));
