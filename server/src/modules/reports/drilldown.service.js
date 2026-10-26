@@ -485,7 +485,10 @@ const REPORT_ROLES = {
 async function drilldown(user, query) {
   const roles = REPORT_ROLES[query.report];
   if (!roles) return { error: 'unknown_report' };
-  if (!roles.includes(user.role)) return { error: 'forbidden' };
+  // HR: on the permission model Reports > HR reports decides (the derived role of a Reports-only person may read 'admin'); elsewhere the role
+  if (query.report === 'hr' && user.access?.mode === 'permissions') {
+    if (user.access.level === 'employee' && !user.access.permissions?.['reports.hr']) return { error: 'forbidden' };
+  } else if (!roles.includes(user.role)) return { error: 'forbidden' };
   const resolver = RESOLVERS[`${query.report}:${query.table}`];
   if (!resolver) return { error: 'unknown_table' };
 

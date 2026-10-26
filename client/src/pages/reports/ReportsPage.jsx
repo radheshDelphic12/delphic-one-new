@@ -33,7 +33,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { usePermissions, userCan, Can } from '../../lib/permissions.js';
-import { isPermissionMode } from '../../lib/access.js';
+import { hasNeed, isPermissionMode } from '../../lib/access.js';
 import { CHART_COLORS, CHART_PALETTE, chartTooltipStyle } from '../../lib/chartTheme.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import { rangeForPreset } from '../../lib/datePresets.js';
@@ -317,7 +317,7 @@ export default function ReportsPage() {
   const available = useMemo(() => {
     const byRole = reportsForRole(user?.role || 'recruiter');
     if (!isPermissionMode(user) || user.access.level !== 'employee') return byRole;
-    const byPermission = reportsForPermissions();
+    const byPermission = reportsForPermissions((key) => hasNeed(user, key));
     return [...byPermission, ...byRole.filter((r) => !byPermission.some((p) => p.key === r.key))];
   }, [user]);
   const defaults = useMemo(() => defaultDateRange(), []);
