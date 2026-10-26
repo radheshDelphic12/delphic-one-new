@@ -372,24 +372,24 @@ export default function ApplicantPoolBoard() {
                             <button type="button" title="Delete applicant" className="rounded-lg p-2 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy === a.id} onClick={() => deleteApplicant(a)}><Trash2 className="h-4 w-4" /></button>
                           )}
                       </div>
-                      <div className="flex min-w-[9rem] flex-wrap items-center justify-end gap-2">
+                      <div className="grid min-w-[17rem] grid-cols-2 gap-2">
                           {a.status === 'new' && canClaim && (
-                            <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
+                            <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
                           )}
                           {a.status === 'assigned' && !a.profile_id && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
-                            <button type="button" className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'create-profile', `Profile created for ${a.name}`)}><FilePlus className="h-3.5 w-3.5" />Create profile</button>
+                            <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'create-profile', `Profile created for ${a.name}`)}><FilePlus className="h-3.5 w-3.5" />Create profile</button>
                           )}
                           {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
-                            <button type="button" title="Unlink from this job (the Profile is kept)" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => unlinkFromJob(a)}><Unlink className="h-3.5 w-3.5" />Unlink from job</button>
+                            <button type="button" title="Unlink from this job (the Profile is kept)" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => unlinkFromJob(a)}><Unlink className="h-3.5 w-3.5" />Unlink from job</button>
                           )}
                           {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
-                            <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
+                            <button type="button" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
                           )}
                           {canReject(a) && (
-                            <button type="button" title="Reject this applicant (moves to Rejected)" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs text-danger-700" disabled={busy === a.id} onClick={() => { setRejecting(a); setRejectReason(''); }}><Ban className="h-3.5 w-3.5" />Reject</button>
+                            <button type="button" title="Reject this applicant (moves to Rejected)" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs text-danger-700" disabled={busy === a.id} onClick={() => { setRejecting(a); setRejectReason(''); }}><Ban className="h-3.5 w-3.5" />Reject</button>
                           )}
                           {canRestore(a) && (
-                            <button type="button" className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'unreject', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Restore to pool</button>
+                            <button type="button" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'unreject', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Restore to pool</button>
                           )}
                       </div>
                     </div>
