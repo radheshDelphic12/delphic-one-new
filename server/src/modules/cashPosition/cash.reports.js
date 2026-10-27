@@ -11,7 +11,7 @@ const cell = (v) => {
 const csv = (rows) => `${rows.map((r) => r.map(cell).join(',')).join('\r\n')}\r\n`;
 
 function entriesCsv(data) {
-  const head = [['Wallet', data.wallet.name], ['Owner', data.wallet.owner_name], ['Bank account', `${data.wallet.bank_account_name} (${data.wallet.legal_entity_name})`], ['Currency', data.wallet.currency], ['Period', `${data.from || 'start'} to ${data.to || 'today'}`], ['Opening balance', data.opening_balance], []];
+  const head = [['Wallet', data.wallet.name], ['Owner', data.wallet.owner_name], ['Bank account', [data.wallet.bank_account_name, data.wallet.legal_entity_name && `(${data.wallet.legal_entity_name})`].filter(Boolean).join(' ')], ['Currency', data.wallet.currency], ['Period', `${data.from || 'start'} to ${data.to || 'today'}`], ['Opening balance', data.opening_balance], []];
   const table = [['Date', 'Direction', 'Amount', 'Mode', 'Category', 'Party', 'Reference', 'Notes', 'Balance after'],
     ...data.rows.map((r) => [r.date, r.direction, r.amount, r.mode, r.category, r.party, r.reference_type, r.notes, r.balance_after])];
   const modes = [[], ['Mode', 'In', 'Out', 'Entries'], ...Object.entries(data.by_mode).map(([m, v]) => [m, v.in, v.out, v.count])];
@@ -36,7 +36,7 @@ function toBuffer(doc) {
 function entriesPdf(data) {
   const doc = new PDFDocument({ size: 'A4', margin: 36, layout: 'landscape' });
   doc.fontSize(15).text(`${data.wallet.name} - ${data.wallet.owner_name}`);
-  doc.fontSize(9).fillColor('#555').text(`${data.wallet.bank_account_name} (${data.wallet.legal_entity_name}) - ${data.wallet.currency} - ${data.from || 'start'} to ${data.to || 'today'}`).fillColor('#000').moveDown(0.5);
+  doc.fontSize(9).fillColor('#555').text(`${[data.wallet.bank_account_name, data.wallet.legal_entity_name && `(${data.wallet.legal_entity_name})`].filter(Boolean).join(' ')} - ${data.wallet.currency} - ${data.from || 'start'} to ${data.to || 'today'}`).fillColor('#000').moveDown(0.5);
   doc.fontSize(10).text(`Opening ${data.opening_balance}   In ${data.total_in}   Out ${data.total_out}   Closing ${data.closing_balance}`).moveDown(0.5);
   const cols = [['Date', 62], ['In/Out', 38], ['Amount', 80], ['Mode', 48], ['Category', 90], ['Party', 130], ['Notes', 200], ['Balance', 80]];
   const row = (values, bold) => {

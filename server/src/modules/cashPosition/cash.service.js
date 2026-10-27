@@ -629,6 +629,55 @@ async function accountEntries(groupIds, accountId, { from, to } = {}) {
   };
 }
 
+/**
+ * One statement for any scope the Statements screen can pick: a bank account, a wallet, a company (the wallets it owns) or a legal
+ * entity (the wallets in its bank accounts, plus the ones it owns). A company / entity can hold INR and USD wallets, which are never
+ * added together, so those need `currency` (error `currency_required` when it is missing and the wallets span both).
+ */
+async function statement(groupIds, { scope, id, currency, from, to }) {
+  if (scope === 'account') return accountEntries(groupIds, id, { from, to }).then((d) => (d ? { data: d } : { error: 'not_found' }));
+  if (scope === 'wallet') return walletEntries(groupIds, id, { from, to }).then((d) => (d ? { data: d } : { error: 'not_found' }));
+
+  let label;
+  let where;
+  if (scope === 'company') {
+    const org = await prisma.org.findFirst({ where: { id, org_group_id: { in: groupIds } }, select: { id: true, name: true } });
+    if (!org) return { error: 'not_found' };
+    label = { name: org.name, owner: 'Company statement', entity: '' };
+    where = { owner_org_id: id };
+  } else {
+    const entity = await prisma.legalEntity.findFirst({ where: { id, org_group_id: { in: groupIds } }, select: { id: true, name: true } });
+    if (!entity) return { error: 'not_found' };
+    label = { name: entity.name, owner: 'Legal entity statement', entity: entity.name };
+    where = { OR: [{ owner_legal_entity_id: id }, { bank_account: { legal_entity_id: id } }] };
+  }
+  const found = await prisma.wallet.findMany({ where: { ...grp(groupIds), ...where }, include: walletInclude, orderBy: { name: 'asc' } });
+  const currencies = [...new Set(found.map((w) => w.currency))];
+  if (!currency && currencies.length > 1) return { error: 'currency_required' };
+  const cur = currency || currencies[0] || 'INR';
+  const wallets = found.filter((w) => w.currency === cur);
+  const ids = wallets.map((w) => w.id);
+  const names = new Map(wallets.map((w) => [w.id, w.name]));
+  const openingTotal = calc.sum(wallets.map((w) => w.opening_balance));
+  const before = from && ids.length ? await netByWallet(prisma, ids, { to: ymd(new Date(toDate(from).getTime() - 86400000)) }) : null;
+  const opening = before ? [...before.values()].reduce((acc, v) => acc.plus(v), openingTotal) : openingTotal;
+  const date = {};
+  if (from) date.gte = toDate(from);
+  if (to) date.lte = toDate(to);
+  const rows = ids.length ? await prisma.walletTransaction.findMany({ where: { wallet_id: { in: ids }, deleted_at: null, ...(from || to ? { date } : {}) }, orderBy: [{ date: 'asc' }, { created_at: 'asc' }] }) : [];
+  const withBalance = calc.withRunningBalance(opening, rows).map((r) => ({ ...txView(r), wallet: names.get(r.wallet_id), balance_after: r.balance_after }));
+  const totalIn = calc.sum(rows.filter((r) => r.direction === 'in').map((r) => r.amount));
+  const totalOut = calc.sum(rows.filter((r) => r.direction === 'out').map((r) => r.amount));
+  return {
+    data: {
+      wallet: { id, name: label.name, owner_name: `${label.owner}: ${wallets.length} wallet${wallets.length === 1 ? '' : 's'} in ${cur}`, bank_account_name: label.owner, legal_entity_name: label.entity, currency: cur },
+      currencies, from: from || null, to: to || null,
+      opening_balance: money(opening), total_in: money(totalIn), total_out: money(totalOut), closing_balance: money(opening.plus(totalIn).minus(totalOut)),
+      by_mode: calc.modeBreakdown(rows), rows: withBalance,
+    },
+  };
+}
+
 /** Everything the Setup screen lists, switched-off accounts and wallets included, so nothing can get stuck switched off. */
 async function setupLists(groupIds) {
   const [entities, accounts, wallets] = await Promise.all([
@@ -685,5 +734,4 @@ module.exports = {
   createTransfer, updateTransfer, removeTransfer,
   updateReconciliation, removeReconciliation, setupLists, removeEntity, removeAccount, removeWallet, accountEntries,
   position, options, walletEntries, receipts, previewReconciliation, createReconciliation, listReconciliations, listAudit,
-  myWallets, myWalletEntries, canReadAttachment,
-};
+  myWallets, myWalletEntries, canReadAttachment, statement };

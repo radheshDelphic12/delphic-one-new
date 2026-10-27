@@ -13,6 +13,7 @@ import {
   buildAccountBody,
   canCreateAccount,
   canEditAccountDetails,
+  VENDOR_TYPES,
   canEditBroughtBy,
   formFromAccount,
 } from './accountUtils.js';
@@ -388,6 +389,12 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
             </div>
           ) : (
             <div className={`grid gap-4 p-4 sm:grid-cols-2`}>
+              <Field label="Vendor type">
+                <select value={form.vendor_type} onChange={(event) => updateField('vendor_type', event.target.value)} className={INPUT_CLASS}>
+                  <option value="">Select…</option>
+                  {VENDOR_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </Field>
               <div className="sm:col-span-2">
                 <Field label="Specializations (comma separated)">
                   <input

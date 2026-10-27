@@ -28,6 +28,8 @@ const baseFields = {
 
   source: z.string().optional(),
   is_premium: z.boolean().optional(),
+  // Vendor type: assets or bgv; empty clears it.
+  vendor_type: z.preprocess((v) => (v === '' ? null : v), z.enum(['assets', 'bgv']).nullable().optional()),
 
   vendor_specializations: z.array(z.string()).optional(),
   vendor_rate_range: z.object({ min: z.number(), max: z.number(), currency: z.string() }).optional(),
@@ -142,6 +144,7 @@ const listQuerySchema = z.object({
   search: z.string().optional(),
   // Premium accounts only (yes) or the rest (no).
   premium: z.enum(['yes', 'no']).optional(),
+  vendor_type: z.enum(['assets', 'bgv']).optional(),
   created_from: z.string().optional(),
   created_to: z.string().optional(),
   sort_by: z.enum(['name', 'created_at', 'updated_at']).default('created_at'),

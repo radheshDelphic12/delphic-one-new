@@ -53,6 +53,7 @@ const ERRORS = {
   has_payments_locked: [409, 'Payments are recorded on this invoice: its currency and receiving wallet cannot change'],
   total_below_paid: [422, 'The new total is less than what has already been received on this invoice'],
   overpayment: [422, 'That is more than what is still due on this invoice'],
+  currency_required: [422, 'This holds both INR and USD wallets: choose a currency'],
 };
 const result = (res, r, status = 200) => {
   if (r.error) { const m = ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
@@ -107,6 +108,14 @@ group.delete('/accounts/:id', A(async (req, res) => result(res, await service.re
 group.get('/accounts/:id/entries', A(async (req, res) => {
   const q = v.entriesQuery.parse(req.query);
   return sendEntries(res, await service.accountEntries(gids(req), req.params.id, q), q.format);
+}));
+
+// a statement for any scope: bank account, wallet, company or legal entity (JSON, CSV or PDF)
+group.get('/statement', A(async (req, res) => {
+  const q = v.statementQuery.parse(req.query);
+  const r = await service.statement(gids(req), q);
+  if (r.error) return r.error === 'not_found' ? fail(res, 404, 'Nothing found for that selection') : result(res, r);
+  return sendEntries(res, r.data, q.format);
 }));
 
 group.post('/wallets', A(async (req, res) => result(res, await service.createWallet(gids(req), req.user.id, v.walletBody.parse(req.body)), 201)));

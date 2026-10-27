@@ -10,6 +10,12 @@ export const ACCOUNT_TRANSITIONS = {
 };
 
 // Every stage, for the superadmin override drawer (backward moves + straight to lead).
+export const VENDOR_TYPES = [
+  { value: 'assets', label: 'Assets' },
+  { value: 'bgv', label: 'BGV' },
+];
+export const vendorTypeLabel = (value) => VENDOR_TYPES.find((t) => t.value === value)?.label || '';
+
 export const ACCOUNT_ALL_STAGES = ['lead', 'meeting_scheduled', 'active', 'rescheduled', 'dropped'];
 
 export function canOverrideStage(user) {
@@ -74,6 +80,7 @@ export const EMPTY_FORM = {
   additional_contacts: [{ ...EMPTY_CONTACT }],
   source: '',
   is_premium: false,
+  vendor_type: '',
   vendor_specializations: '',
   vendor_rate_min: '',
   vendor_rate_max: '',
@@ -163,6 +170,7 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
   if (isEditing && canEditOriginOwner && form.origin_owner_id) body.origin_owner_id = form.origin_owner_id;
 
   if (form.type === 'vendor') {
+    body.vendor_type = form.vendor_type || null;
     body.vendor_specializations = str(form.vendor_specializations).split(',').map((value) => value.trim()).filter(Boolean);
     body.vendor_payment_terms = str(form.vendor_payment_terms);
     body.vendor_agreement_url = str(form.vendor_agreement_url);
