@@ -2491,6 +2491,8 @@ model Account {
   source           String?
   // Premium account (yes/no), set by hand on the Accounts form. Accounts is a Delphic Global (master workspace) module.
   is_premium       Boolean      @default(false)
+  // Vendor type (vendor accounts only), picked on the Accounts form: assets | bgv. Empty = not set.
+  vendor_type      String?
   meeting_mode     MeetingMode?
   meeting_date     DateTime?
   meeting_location String?

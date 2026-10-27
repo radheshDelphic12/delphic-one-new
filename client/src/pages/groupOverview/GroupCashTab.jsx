@@ -442,6 +442,86 @@ function ReconcileView({ position, onSaved }) {
 // ---------------------------------------------------------------------------------------------------------------- setup
 
 /** The date from which payments of new records must name a wallet (invoices, vendor payments, expenses, salaries). */
+const STATEMENT_SCOPES = [['account', 'Bank account'], ['wallet', 'Wallet'], ['company', 'Company'], ['entity', 'Legal entity']];
+
+/** A statement (opening, entries with a running balance, closing) for one bank account, wallet, company or legal entity, with CSV / PDF. */
+function StatementsView({ options, filters }) {
+  const saved = useSaved();
+  const [scope, setScope] = useState(filters.workspace_id ? 'company' : filters.legal_entity_id ? 'entity' : 'account');
+  const [id, setId] = useState(filters.workspace_id || filters.legal_entity_id || '');
+  const [currency, setCurrency] = useState(filters.currency || '');
+  const [range, setRange] = useState({ from: '', to: '' });
+  const targets = useMemo(() => {
+    if (!options) return [];
+    if (scope === 'account') { const labels = accountLabels(options.accounts); return options.accounts.map((a) => ({ value: a.id, label: `${labels.get(a.id)} · ${a.currency}` })); }
+    if (scope === 'wallet') return options.wallets.map((w) => ({ value: w.id, label: `${w.name} · ${w.owner_name} · ${w.currency}` }));
+    if (scope === 'company') return options.workspaces.map((o) => ({ value: o.id, label: o.name }));
+    return options.entities.map((e) => ({ value: e.id, label: e.name }));
+  }, [options, scope]);
+  const params = { scope, id, ...(currency && ['company', 'entity'].includes(scope) ? { currency } : {}), ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) };
+  const data = useLiveData(() => api('/statement', params), { deps: [scope, id, currency, range.from, range.to], enabled: Boolean(id) });
+  const d = id ? data.data : null;
+  const cur = d?.wallet.currency;
+  const pick = (next) => { setScope(next); setId(''); };
+  const file = (format) => downloadFile('/group-cash/statement', { ...params, format }, `${d.wallet.name}.${format}`).catch((err) => saved.fail(err, 'Could not download'));
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4">
+        <h3 className="font-heading font-semibold text-tertiary-900">Statement</h3>
+        <p className="text-xs text-tertiary-500">Pick what to see: every entry in the period with a running balance, ready to download.</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <label className={labelCls}>Statement of<select className={inputCls} value={scope} onChange={(e) => pick(e.target.value)}>{STATEMENT_SCOPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          <label className={`${labelCls} lg:col-span-2`}>{STATEMENT_SCOPES.find(([k]) => k === scope)[1]}<select className={inputCls} value={id} onChange={(e) => setId(e.target.value)}><option value="">Choose…</option>{targets.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></label>
+          <label className={labelCls}>From<input type="date" className={inputCls} value={range.from} onChange={(e) => setRange((c) => ({ ...c, from: e.target.value }))} /></label>
+          <label className={labelCls}>To<input type="date" className={inputCls} value={range.to} onChange={(e) => setRange((c) => ({ ...c, to: e.target.value }))} /></label>
+          {['company', 'entity'].includes(scope) && (
+            <label className={labelCls}>Currency<select className={inputCls} value={currency} onChange={(e) => setCurrency(e.target.value)}><option value="">Automatic</option>{(options?.currencies || ['INR', 'USD']).map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+          )}
+        </div>
+      </div>
+      {!id ? <EmptyState icon={FileText} title="Choose what to show" description="Pick a bank account, wallet, company or legal entity above." />
+        : data.error ? <p className="rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700">{apiErrorMessage(data.error, 'Could not load the statement')}</p>
+        : !d ? <Skeleton className="h-40" /> : (
+          <div className="space-y-4 rounded-2xl border border-tertiary-100 bg-white p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-heading font-semibold text-tertiary-900">{d.wallet.name}</p>
+                <p className="text-xs text-tertiary-500">{[d.wallet.owner_name, d.wallet.legal_entity_name && scope === 'wallet' ? d.wallet.legal_entity_name : '', `${d.from || 'start'} to ${d.to || 'today'}`].filter(Boolean).join(' · ')}</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary inline-flex items-center gap-1" onClick={() => file('csv')}><Download className="h-4 w-4" />CSV</button>
+                <button type="button" className="btn-secondary inline-flex items-center gap-1" onClick={() => file('pdf')}><Download className="h-4 w-4" />PDF</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              {[['Opening', d.opening_balance], ['In', d.total_in], ['Out', d.total_out], ['Closing', d.closing_balance]].map(([l, x]) => (
+                <div key={l} className="rounded-xl border border-tertiary-100 p-2"><p className="text-xs text-tertiary-500">{l}</p><Money value={x} currency={cur} className="font-semibold" /></div>
+              ))}
+            </div>
+            <div className="overflow-x-auto rounded-xl border border-tertiary-100">
+              <table className="min-w-full text-sm">
+                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Details</th><th className="p-2">Mode</th><th className="p-2 text-right">In</th><th className="p-2 text-right">Out</th><th className="p-2 text-right">Balance</th></tr></thead>
+                <tbody>
+                  {d.rows.map((r) => (
+                    <tr key={r.id} className="border-t border-tertiary-100">
+                      <td className="whitespace-nowrap p-2">{r.date}</td>
+                      <td className="p-2">{r.party || r.category || '—'}{r.wallet && <span className="text-xs text-tertiary-500"> · {r.wallet}</span>}{r.transfer_id && <Pill tone="blue">Transfer</Pill>}{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
+                      <td className="p-2">{MODE_LABEL[r.mode] || r.mode}</td>
+                      <td className="p-2 text-right">{r.direction === 'in' ? <Money value={r.amount} currency={cur} /> : ''}</td>
+                      <td className="p-2 text-right">{r.direction === 'out' ? <Money value={r.amount} currency={cur} /> : ''}</td>
+                      <td className="p-2 text-right"><Money value={r.balance_after} currency={cur} /></td>
+                    </tr>
+                  ))}
+                  {!d.rows.length && <tr><td colSpan={6} className="p-4 text-center text-tertiary-500">No entries in this period.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+    </div>
+  );
+}
+
 function GoLiveCard() {
   const saved = useSaved();
   const setting = useLiveData(() => api('/settings'), { deps: [] });
@@ -641,6 +721,7 @@ const SECTIONS = [
   { key: 'fund', label: 'Fund view', icon: WalletIcon },
   { key: 'invoices', label: 'Invoices', icon: FileText },
   { key: 'receipts', label: 'Receipts', icon: Receipt },
+  { key: 'statements', label: 'Statements', icon: FileText },
   { key: 'reconcile', label: 'Reconciliation', icon: Scale },
   { key: 'setup', label: 'Setup', icon: Banknote },
 ];
@@ -699,6 +780,7 @@ export default function GroupCashTab() {
           {section === 'fund' && <FundView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} />}
           {section === 'invoices' && <GroupInvoicesView options={options.data} onWalletsChanged={refresh} />}
           {section === 'receipts' && <ReceiptsView options={options.data} />}
+          {section === 'statements' && <StatementsView options={options.data} filters={filters} />}
           {section === 'reconcile' && <ReconcileView position={p} onSaved={refresh} />}
           {section === 'setup' && <SetupView options={options.data} position={p} onChanged={refresh} />}
         </>

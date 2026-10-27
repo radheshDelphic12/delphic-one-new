@@ -112,7 +112,9 @@ const positionQuery = z.object({
   currency: z.enum(CURRENCIES).optional(),
 });
 const entriesQuery = z.object({ ...range, format: z.enum(['json', 'csv', 'pdf']).default('json') });
+// A statement of one bank account, wallet, company or legal entity; company / entity need a currency when they hold both.
+const statementQuery = z.object({ ...range, scope: z.enum(['account', 'wallet', 'company', 'entity']), id: uuid, currency: z.enum(CURRENCIES).optional(), format: z.enum(['json', 'csv', 'pdf']).default('json') });
 const receiptsQuery = z.object({ ...range, workspace_id: uuid.optional(), wallet_id: uuid.optional(), format: z.enum(['json', 'csv']).default('json') });
 const auditQuery = z.object({ entity_type: z.string().max(40).optional(), entity_id: uuid.optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
 
-module.exports = { reconciliationUpdate, settingsBody, entityBody, accountBody, accountUpdate, walletBody, walletUpdate, txBody, txUpdate, transferBody, transferUpdate, reconciliationBody, positionQuery, entriesQuery, receiptsQuery, auditQuery };
+module.exports = { reconciliationUpdate, settingsBody, entityBody, accountBody, accountUpdate, walletBody, walletUpdate, txBody, txUpdate, transferBody, transferUpdate, reconciliationBody, positionQuery, entriesQuery, statementQuery, receiptsQuery, auditQuery };

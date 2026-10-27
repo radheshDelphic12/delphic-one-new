@@ -18,7 +18,7 @@ import AccountStageOverrideDrawer from './AccountStageOverrideDrawer.jsx';
 import AccountMeetingEditDrawer from './AccountMeetingEditDrawer.jsx';
 import AccountClientMeetings from './AccountClientMeetings.jsx';
 import { accountAccent } from '../../lib/accountAccent.js';
-import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canEditAccountDetails, canMutateAccount, formatAccountValue } from './accountUtils.js';
+import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canEditAccountDetails, canMutateAccount, formatAccountValue, vendorTypeLabel } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
 
 function DetailField({ label, value, children }) {
@@ -306,6 +306,7 @@ export default function AccountDetailPage() {
           <DetailSection title={account.type === 'vendor' ? 'Vendor details' : 'Client details'}>
             {account.type === 'vendor' ? (
               <>
+                <DetailField label="Vendor type" value={vendorTypeLabel(account.vendor_type)} />
                 <DetailField label="Specializations" value={(account.vendor_specializations || []).join(', ')} />
                 <DetailField
                   label="Rate range"
