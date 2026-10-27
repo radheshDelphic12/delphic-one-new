@@ -86,16 +86,19 @@ describe('monthly performance review', () => {
     const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
     const rowOf = (name) => res.body.data.people.find((x) => x.name === name).months.find((m) => m.key === key).metrics;
     const asMap = (metrics) => Object.fromEntries(metrics.map((m) => [m.key, m.count]));
-    expect(rowOf('Dheeraj Kumar').map((m) => m.key)).toEqual(['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned_live', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned', 'joinings_owned']);
-    expect(asMap(rowOf('Dheeraj Kumar'))).toMatchObject({ req_brought: 1, req_brought_won: 1, req_owned_live: 1, req_owned: 1, req_owned_won: 1, meetings_attended: 1, submitted_on_owned: 1, joinings_owned: 1 });
+    expect(rowOf('Dheeraj Kumar').map((m) => m.key)).toEqual(['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned']); // Requirements owned (running) and Joinings (their requirements) are hidden for now
+    expect(asMap(rowOf('Dheeraj Kumar'))).toMatchObject({ req_brought: 1, req_brought_won: 1, req_owned: 1, req_owned_won: 1, meetings_attended: 1, submitted_on_owned: 1 });
+    expect(asMap(rowOf('Dheeraj Kumar'))).not.toHaveProperty('joinings_owned');
+    expect(asMap(rowOf('Dheeraj Kumar'))).not.toHaveProperty('req_owned_live');
     expect(rowOf('Hira HR').map((m) => m.key)).toEqual(['profiles_submitted', 'interviews_taken', 'interviews_shortlisted', 'interviews_joined', 'joinings', 'vendors_onboarded', 'meetings_attended']);
     expect(asMap(rowOf('Hira HR'))).toEqual({ profiles_submitted: 1, interviews_taken: 2, interviews_shortlisted: 1, interviews_joined: 1, joinings: 1, vendors_onboarded: 1, meetings_attended: 2 });
 
     const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
     const att = await get(`/monthly-review/details?org_membership_id=${hira.m.id}&metric=meetings_attended&${ym}`, ctx.admin);
     expect(att.body.data.items.map((i) => i.sub).sort()).toEqual(['Client meeting', 'Review call']);
+    // a hidden measure lists nothing (it is not even loaded)
     const jo = await get(`/monthly-review/details?org_membership_id=${dheeraj.m.id}&metric=joinings_owned&${ym}`, ctx.admin);
-    expect(jo.body.data.items[0].title).toBe('Candidate One');
+    expect(jo.body.data.items).toEqual([]);
   });
 
   test('a requirement is won in the month its candidate was closed, even with no joining date or one in a later month', async () => {
@@ -117,9 +120,9 @@ describe('monthly performance review', () => {
     }
     const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
     const counts = (name) => Object.fromEntries(res.body.data.people.find((x) => x.name === name).months.find((m) => m.key === key).metrics.map((m) => [m.key, m.count]));
-    expect(counts('Tanvi Saxena')).toMatchObject({ req_owned_won: 3, req_brought_won: 3, joinings_owned: 2 });
-    // joinings follow the joining date (else the closing day): two this month, the one planned for next month waits
-    expect(counts('Hira HR').joinings).toBe(2);
+    expect(counts('Tanvi Saxena')).toMatchObject({ req_owned_won: 3, req_brought_won: 3 }); // Sales: every closure counts, on the closing day
+    // HR joinings need the actual joining date, in that month: only the one that joined this month (no date yet = "joining date pending"; planned for next month waits)
+    expect(counts('Hira HR').joinings).toBe(1);
     const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
     const det = await get(`/monthly-review/details?org_membership_id=${tanvi.m.id}&metric=req_owned_won&${ym}`, ctx.admin);
     expect(det.body.data.items.map((i) => i.title).sort()).toEqual(['Joined this month', 'Joining next month', 'No joining date']);
@@ -278,9 +281,9 @@ describe('monthly performance review', () => {
     await make('Deleted requirement', true);
     const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&limit=50`, ctx.admin);
     const counts = Object.fromEntries(res.body.data.people.find((x) => x.name === 'Tanvi Saxena').months[0].metrics.map((m) => [m.key, m.count]));
-    expect(counts).toMatchObject({ req_brought: 1, req_owned: 1, req_owned_won: 1, req_brought_won: 1, joinings_owned: 1 });
+    expect(counts).toMatchObject({ req_brought: 1, req_owned: 1, req_owned_won: 1, req_brought_won: 1 });
     const hiraCounts = Object.fromEntries(res.body.data.people.find((x) => x.name === 'Hira HR').months[0].metrics.map((m) => [m.key, m.count]));
-    expect(hiraCounts.joinings).toBe(1);
+    expect(hiraCounts.joinings).toBe(0); // closed, but no joining date entered yet
   });
 
   test('manual project status: on hold still counts, tagged; completed ends on its end date, or keeps counting and is flagged when it has none', async () => {

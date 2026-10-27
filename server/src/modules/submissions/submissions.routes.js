@@ -15,7 +15,7 @@ router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
 
 router.post('/', can('submissions.create', 'recruiter', 'sales', 'admin'), controller.create);
-router.patch('/:id', canOn('submissions.update', async (req) => (await prisma.submission.findUnique({ where: { id: req.params.id }, select: { submitted_by: true } }))?.submitted_by, 'recruiter', 'admin'), lockCheck('submissions'), controller.update);
+router.patch('/:id', canOn('submissions.update', async (req) => (await prisma.submission.findUnique({ where: { id: req.params.id }, select: { submitted_by: true } }))?.submitted_by, 'recruiter', 'admin'), lockCheck('submissions', { allowFields: ['actual_joining_date'] }), controller.update);
 router.post('/:id/stage', canOn('submissions.update', async (req) => (await prisma.submission.findUnique({ where: { id: req.params.id }, select: { submitted_by: true } }))?.submitted_by, 'recruiter', 'sales', 'admin'), loadSuperadminFlag, lockCheck('submissions'), controller.changeStage);
 router.post('/:id/stage/override', authorizeSuperadmin, controller.changeStageOverride);
 router.post('/:id/interview-rounds', can('meetings.schedule', 'recruiter', 'sales', 'admin'), controller.addRound);

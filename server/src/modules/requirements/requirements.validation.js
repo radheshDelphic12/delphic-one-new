@@ -90,6 +90,8 @@ const listQuerySchema = z.object({
   status: z.enum(['open', 'in_progress', 'on_hold', 'closed', 'dropped']).optional(),
   req_type: z.enum(['managed_services', 'recruitment', 'project']).optional(),
   account_id: z.string().uuid().optional(),
+  // Premium customers only (yes) or the rest (no): decided by the client account the requirement belongs to.
+  premium: z.enum(['yes', 'no']).optional(),
   sales_owner_id: z.string().uuid().optional(),
   // Sales only: default lists every sales person's requirements (read-only for the others); 'mine' narrows to their own.
   scope: z.enum(['mine', 'all']).optional(),

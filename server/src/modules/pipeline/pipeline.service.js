@@ -8,6 +8,7 @@ const REQUIREMENT_INCLUDE = {
     select: {
       id: true,
       name: true,
+      is_premium: true,
       owner: { select: { id: true, name: true } },
     },
   },
@@ -42,6 +43,7 @@ function serializeRequirement(row, cutoff) {
       ? {
           id: row.account.id,
           name: row.account.name,
+          is_premium: Boolean(row.account.is_premium),
           owner: row.account.owner || null,
         }
       : null,
@@ -82,6 +84,7 @@ async function getBoard(user, filters = {}) {
     submission_stage,
     profile_source,
     req_type,
+    premium,
     date_from,
     date_to,
   } = filters;
@@ -109,6 +112,7 @@ async function getBoard(user, filters = {}) {
     };
   }  if (statuses.length) where.status = { in: statuses };
   if (priorities.length) where.priority = { in: priorities };
+  if (premium) where.account = { ...(where.account || {}), is_premium: premium === 'yes' };
   const reqTypes = parseCsvList(req_type).filter((t) => REQ_TYPES.includes(t));
   if (reqTypes.length) where.req_type = { in: reqTypes };
   if (date_from || date_to) {

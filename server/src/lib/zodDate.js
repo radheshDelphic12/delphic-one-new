@@ -29,4 +29,21 @@ const requiredDate = z.string().min(1).transform((v, ctx) => {
   return d;
 });
 
-module.exports = { optionalDate, requiredDate };
+// For an edit form: a date can be CLEARED. A missing field leaves the value alone (undefined); null or an empty string clears it (null);
+// anything else is a date. optionalDate turns '' into "leave it alone", so a cleared date field could never be saved.
+const nullableDate = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v, ctx) => {
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return null;
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid date' });
+      return z.NEVER;
+    }
+    return d;
+  });
+
+module.exports = { optionalDate, requiredDate, nullableDate };

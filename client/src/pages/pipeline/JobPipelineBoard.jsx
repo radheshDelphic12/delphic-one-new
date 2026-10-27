@@ -22,9 +22,10 @@ import RequirementStatusOverrideDrawer from '../requirements/RequirementStatusOv
 import { JOB_COLUMNS, formatStageLabel, shortKey } from './pipelineBoardUtils.js';
 import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSensors } from './pipelineDnd.jsx';
 import { usePipelineBoard } from './usePipelineBoard.js';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import PipelineFilters from './PipelineFilters.jsx';
 
-const JOB_FILTER_FIELDS = ['search', 'account_id', 'sales_id', 'recruiter_id', 'status', 'priority'];
+const JOB_FILTER_FIELDS = ['search', 'account_id', 'premium', 'sales_id', 'recruiter_id', 'status', 'priority'];
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-tertiary-200 px-2.5 py-1.5 text-sm focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -156,6 +157,7 @@ function JobCard({
             {requirement.account?.name || '—'}
             {` · ${requirement.seats_closed ?? 0}/${requirement.seats_total ?? 0} seats`}
           </div>
+          {requirement.account?.is_premium && <div className="mt-0.5"><PremiumBadge /></div>}
         </Link>
         <CardActionsMenu items={actions} label={`Actions for ${requirement.title}`} />
       </div>

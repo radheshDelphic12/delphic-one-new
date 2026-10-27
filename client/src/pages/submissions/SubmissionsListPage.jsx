@@ -9,6 +9,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { JoiningPendingBadge, PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import ProgressRing from '../../components/ui/ProgressRing.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
@@ -109,6 +110,8 @@ export default function SubmissionsListPage() {
   const [salesOwnerId, setSalesOwnerId] = useState(() => searchParams.get('sales_owner_id') || '');
   const [joinedFrom, setJoinedFrom] = useState(() => searchParams.get('joined_from') || '');
   const [joinedTo, setJoinedTo] = useState(() => searchParams.get('joined_to') || '');
+  const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
+  const [joining, setJoining] = useState(() => searchParams.get('joining') || '');
   const [sortBy, setSortBy] = useState(() => searchParams.get('sort_by') || 'created_at');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sort_order') || 'desc');
   const [search, setSearch] = useState('');
@@ -136,11 +139,13 @@ export default function SubmissionsListPage() {
     sync('sales_owner_id', salesOwnerId);
     sync('joined_from', joinedFrom);
     sync('joined_to', joinedTo);
+    sync('premium', premium);
+    sync('joining', joining);
     sync('sort_by', sortBy, 'created_at');
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, sortBy, sortOrder]);
+  }, [stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, joining, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   useEffect(() => {
@@ -156,12 +161,14 @@ export default function SubmissionsListPage() {
     set(setSalesOwnerId, g('sales_owner_id'));
     set(setJoinedFrom, g('joined_from'));
     set(setJoinedTo, g('joined_to'));
+    set(setPremium, g('premium'));
+    set(setJoining, g('joining'));
     set(setSortBy, g('sort_by', 'created_at'));
     set(setSortOrder, g('sort_order', 'desc'));
   }, [searchParams]);
 
   const hasActiveFilters = Boolean(
-    stageCsv || submittedBy || accountId || requirementId || salesOwnerId || joinedFrom || joinedTo ||
+    stageCsv || submittedBy || accountId || requirementId || salesOwnerId || joinedFrom || joinedTo || premium || joining ||
       appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
   );
 
@@ -174,6 +181,8 @@ export default function SubmissionsListPage() {
     setSalesOwnerId('');
     setJoinedFrom('');
     setJoinedTo('');
+    setPremium('');
+    setJoining('');
     setSortBy('created_at');
     setSortOrder('desc');
     setSearch('');
@@ -195,6 +204,8 @@ export default function SubmissionsListPage() {
     if (salesOwnerId) params.sales_owner_id = salesOwnerId;
     if (joinedFrom) params.joined_from = joinedFrom;
     if (joinedTo) params.joined_to = joinedTo;
+    if (premium) params.premium = premium;
+    if (joining) params.joining = joining;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
       .get('/submissions', { params })
@@ -208,7 +219,7 @@ export default function SubmissionsListPage() {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, page, stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, sortBy, sortOrder]);
+  }, [appliedSearch, page, stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, joining, sortBy, sortOrder]);
 
   useEffect(() => {
     if (searchParams.get('create') === '1') setCreateOpen(true);
@@ -244,8 +255,8 @@ export default function SubmissionsListPage() {
           </div>
         ),
       },
-      { key: 'job', header: 'Job', render: (row) => row.requirement?.title || '—' },
-      { key: 'stage', header: 'Stage', render: (row) => <Badge value={row.stage} /> },
+      { key: 'job', header: 'Job', render: (row) => (<span className="inline-flex flex-wrap items-center gap-1.5">{row.requirement?.title || '—'}{row.requirement?.account_is_premium && <PremiumBadge />}</span>) },
+      { key: 'stage', header: 'Stage', render: (row) => (<div className="flex flex-wrap items-center gap-1"><Badge value={row.stage} />{row.joining_status === 'pending' && <JoiningPendingBadge />}</div>) },
       {
         key: 'closure',
         header: 'Closure %',
@@ -365,6 +376,26 @@ export default function SubmissionsListPage() {
               searchPlaceholder="Search requirements…"
               options={requirementOptions}
             />
+            <select
+              value={premium}
+              onChange={(event) => resetToFirstPage(setPremium)(event.target.value)}
+              className="rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              aria-label="Premium customer"
+            >
+              <option value="">Premium: All</option>
+              <option value="yes">Premium: Yes</option>
+              <option value="no">Premium: No</option>
+            </select>
+            <select
+              value={joining}
+              onChange={(event) => resetToFirstPage(setJoining)(event.target.value)}
+              className="rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              aria-label="Joining date"
+            >
+              <option value="">Joining: All</option>
+              <option value="pending">Joining date pending</option>
+              <option value="set">Joining date set</option>
+            </select>
             <div className="ml-auto flex items-center gap-1.5">
               <span className="text-xs text-tertiary-500">Sort</span>
               <select

@@ -20,6 +20,7 @@ const boardQuerySchema = z.object({
   account_ids: z.string().optional(),
   profile_source: z.string().optional(),
   req_type: z.string().optional(),
+  premium: z.enum(['yes', 'no']).optional(),
   bda_id: optionalUuid,
   sales_id: optionalUuid,
   admin_id: optionalUuid,

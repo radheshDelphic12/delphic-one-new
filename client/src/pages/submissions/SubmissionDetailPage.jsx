@@ -101,8 +101,11 @@ export default function SubmissionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { pushError } = useAlerts();
+  const { pushError, pushSuccess } = useAlerts();
   const [submission, setSubmission] = useState(null);
+  // a closed (locked) candidate: only the actual joining date can still be entered, on its own
+  const [joinDate, setJoinDate] = useState('');
+  const [joinSaving, setJoinSaving] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyError, setHistoryError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -115,6 +118,21 @@ export default function SubmissionDetailPage() {
   const canOverrideStage = canOverrideSubmissionStage(user);
 
   const canEdit = canMutateSubmission(user) && submission && !submission.is_locked;
+  const canSetJoining = Boolean(submission && submission.stage === 'closed' && submission.is_locked && canMutateSubmission(user));
+  useEffect(() => { setJoinDate(dateInputValue(submission?.actual_joining_date)); }, [submission]);
+
+  async function saveJoinDate() {
+    setJoinSaving(true);
+    try {
+      await apiClient.patch(`/submissions/${id}`, { actual_joining_date: joinDate || null });
+      pushSuccess(joinDate ? 'Joining date saved' : 'Joining date cleared');
+      await load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to save the joining date'), 'Something went wrong');
+    } finally {
+      setJoinSaving(false);
+    }
+  }
 
   // Stage moves: sales, recruiter and admin do forward transitions on any
   // submission (backward moves stay admin-only via canMoveSubmissionBackward).
@@ -204,14 +222,14 @@ export default function SubmissionDetailPage() {
         relevancy_score: toOptionalNumber(form.relevancy_score),
         submission_notes: form.submission_notes.trim() || undefined,
         client_feedback: form.client_feedback.trim() || undefined,
-        offer_date: form.offer_date || undefined,
+        offer_date: form.offer_date || null,
         offer_ctc: toOptionalNumber(form.offer_ctc),
         offer_ctc_currency: form.offer_ctc_currency || undefined,
-        expected_joining_date: form.expected_joining_date || undefined,
-        actual_joining_date: form.actual_joining_date || undefined,
-        bgv_initiated_date: form.bgv_initiated_date || undefined,
+        expected_joining_date: form.expected_joining_date || null,
+        actual_joining_date: form.actual_joining_date || null,
+        bgv_initiated_date: form.bgv_initiated_date || null,
         bgv_status: form.bgv_status || undefined,
-        bgv_completed_date: form.bgv_completed_date || undefined,
+        bgv_completed_date: form.bgv_completed_date || null,
         bgv_notes: form.bgv_notes.trim() || undefined,
       };
       await apiClient.patch(`/submissions/${id}`, payload);
@@ -300,6 +318,12 @@ export default function SubmissionDetailPage() {
             {submission.is_locked && (
               <span className="rounded bg-tertiary-100 px-2 py-0.5 text-xs text-tertiary-600">Locked</span>
             )}
+            {submission.joining_status === 'pending' && (
+              <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700" data-testid="joining-status">Joining date pending</span>
+            )}
+            {submission.joining_status === 'set' && (
+              <span className="rounded bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700" data-testid="joining-status">Joining date set</span>
+            )}
           </div>
           <p className="mt-1 text-sm text-tertiary-500">
             {submission.requirement?.title || '—'}
@@ -343,6 +367,21 @@ export default function SubmissionDetailPage() {
           This submission is locked. It remains available for viewing.
           {user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
         </div>
+      )}
+
+      {canSetJoining && (
+        <section className="rounded-lg border bg-white p-4" data-testid="joining-date-panel">
+          <h2 className="text-sm font-semibold text-tertiary-800">Joining date</h2>
+          <p className="mt-1 text-sm text-tertiary-500">
+            This ticket is closed. Enter the actual joining date once the candidate joins; the recruiter&apos;s joinings count from this date. Leave it empty while it is still to come.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <input type="date" aria-label="Actual joining date" value={joinDate} onChange={(e) => setJoinDate(e.target.value)} className="rounded-md border px-3 py-2 text-sm" />
+            <button type="button" className="btn-primary" disabled={joinSaving || joinDate === dateInputValue(submission.actual_joining_date)} onClick={saveJoinDate}>
+              {joinSaving ? 'Saving…' : 'Save joining date'}
+            </button>
+          </div>
+        </section>
       )}
 
       <section className="rounded-lg border bg-white p-4">

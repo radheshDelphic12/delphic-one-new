@@ -15,9 +15,10 @@ import { apiErrorMessage, canCreateAccount, canMutateAccount, canOverrideStage, 
 import { LEAD_COLUMNS, formatStageLabel, shortKey } from './pipelineBoardUtils.js';
 import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSensors } from './pipelineDnd.jsx';
 import { usePipelineBoard } from './usePipelineBoard.js';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import PipelineFilters from './PipelineFilters.jsx';
 
-const LEAD_FILTER_FIELDS = ['search', 'bda_id'];
+const LEAD_FILTER_FIELDS = ['search', 'bda_id', 'premium'];
 
 function needsAccountStageForm(toStage) {
   return toStage === 'meeting_scheduled' || toStage === 'dropped';
@@ -57,6 +58,7 @@ function LeadCard({ account, user, isDragging, onRequestMove }) {
             <div className="min-w-0">
               <div className="font-mono text-[10px] text-primary-600">{shortKey('ACC', account.id)}</div>
               <div className="truncate text-sm font-semibold text-tertiary-900">{account.name}</div>
+              {account.is_premium && <div className="mt-0.5"><PremiumBadge /></div>}
               <div className="mt-0.5 text-xs text-tertiary-500">
                 {account.owner?.name || '—'}
                 {account.industry ? ` · ${account.industry}` : ''}

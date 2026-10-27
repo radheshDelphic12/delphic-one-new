@@ -116,9 +116,9 @@ function TeamDetailDrawer({ row, date, onClose }) {
 function TeamCapacityReport() {
   const { pushError, pushInfo } = useAlerts();
   const teams = useTeamOptions(true);
-  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [], window_days: 30 }));
+  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [], window_days: 30, billable: true, non_billable: true }));
   // Several teams at once — sent as one comma-separated team_ids.
-  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(','), billable: filters.billable ? '1' : '0', non_billable: filters.non_billable ? '1' : '0' }), [filters]);
   const { data, loading, reload } = useReport('/allocations/reports/team-capacity', query);
   const [perResource, setPerResource] = useState('');
   const [open, setOpen] = useState(null);
@@ -168,8 +168,14 @@ function TeamCapacityReport() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
         <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
+        <Filter label="Projects counted">
+          <div className="flex items-center gap-4 pt-2 text-sm text-tertiary-700" data-testid="capacity-billing-filter">
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={filters.billable} onChange={(e) => set('billable', e.target.checked)} />Billable</label>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={filters.non_billable} onChange={(e) => set('non_billable', e.target.checked)} />Non-billable</label>
+          </div>
+        </Filter>
         <Filter label="Teams">
           <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
         </Filter>
