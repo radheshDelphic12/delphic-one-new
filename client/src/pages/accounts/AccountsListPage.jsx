@@ -60,6 +60,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
         <PeekField label="Industry">{detail.industry || '—'}</PeekField>
         {detail.type === 'vendor' && (
           <>
+            <PeekField label="Vendor type">{vendorTypeLabel(detail.vendor_type) || '—'}</PeekField>
             <PeekField label="Specializations">
               {(detail.vendor_specializations || []).join(', ') || '—'}
             </PeekField>
