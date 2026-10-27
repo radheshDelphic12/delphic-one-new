@@ -225,6 +225,7 @@ export default function InvoicingSection() {
   const anyFilter = Object.values(filters).some(Boolean);
 
   const columns = [
+    { key: 'number', header: 'Invoice no.', render: (row) => <span className="font-mono text-xs font-medium text-tertiary-900">{row.invoice_number || '—'}</span> },
     { key: 'client', header: 'Project', render: (row) => <span>{row.line_items?.project?.name || row.client_account?.name || '—'}{row.line_items?.project?.code && <span className="block text-xs text-tertiary-500">{row.line_items.project.code}{row.line_items.project.client_name ? ` · ${row.line_items.project.client_name}` : ''}</span>}</span> },
     { key: 'period', header: 'Period', render: (row) => `${row.period_month}/${row.period_year}` },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
