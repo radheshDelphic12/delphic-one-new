@@ -8,6 +8,8 @@ const FILTER_KEYS = [
   'account_ids',
   'profile_source',
   'req_type',
+  'premium',
+  'joining',
   'bda_id',
   'sales_id',
   'admin_id',
@@ -30,6 +32,8 @@ export function emptyPipelineFilters() {
     account_ids: [],
     profile_source: [],
     req_type: [],
+    premium: '',
+    joining: '',
     bda_id: '',
     sales_id: '',
     admin_id: '',
@@ -53,6 +57,8 @@ export function filtersFromSearchParams(searchParams) {
   next.account_ids = csvToList(searchParams.get('account_ids'));
   next.profile_source = csvToList(searchParams.get('profile_source'));
   next.req_type = csvToList(searchParams.get('req_type'));
+  next.premium = searchParams.get('premium') || '';
+  next.joining = searchParams.get('joining') || '';
   next.bda_id = searchParams.get('bda_id') || '';
   next.sales_id = searchParams.get('sales_id') || '';
   next.admin_id = searchParams.get('admin_id') || '';
@@ -104,6 +110,8 @@ export function filtersToApiParams(filters, fields = null) {
   if (include('account_ids') && filters.account_ids?.length) params.account_ids = filters.account_ids.join(',');
   if (include('profile_source') && filters.profile_source?.length) params.profile_source = filters.profile_source.join(',');
   if (include('req_type') && filters.req_type?.length) params.req_type = filters.req_type.join(',');
+  if (include('premium') && filters.premium) params.premium = filters.premium;
+  if (include('joining') && filters.joining) params.joining = filters.joining;
   if (include('bda_id') && filters.bda_id) params.bda_id = filters.bda_id;
   if (include('sales_id') && filters.sales_id) params.sales_id = filters.sales_id;
   if (include('admin_id') && filters.admin_id) params.admin_id = filters.admin_id;

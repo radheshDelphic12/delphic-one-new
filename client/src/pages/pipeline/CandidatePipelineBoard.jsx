@@ -26,11 +26,12 @@ import SubmissionStageOverrideDrawer from '../submissions/SubmissionStageOverrid
 import { formatStageLabel, shortKey } from './pipelineBoardUtils.js';
 import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSensors } from './pipelineDnd.jsx';
 import { usePipelineBoard } from './usePipelineBoard.js';
+import { JoiningPendingBadge, PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import PipelineFilters from './PipelineFilters.jsx';
 
 // Rejected candidates are not a column: they leave the board and are listed on the Rejected page (sidebar).
 const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout'];
-const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'recruiter_id', 'submission_stage'];
+const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'premium', 'recruiter_id', 'submission_stage', 'joining'];
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-tertiary-200 px-2.5 py-1.5 text-sm focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -157,6 +158,12 @@ function CandidateCard({ submission, canMove, canMoveBackward, isDragging, onReq
             {submission.requirement?.title || '—'}
             {submission.requirement?.account_name ? ` · ${submission.requirement.account_name}` : ''}
           </div>
+          {(submission.requirement?.account_is_premium || submission.joining_status === 'pending') && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {submission.requirement?.account_is_premium && <PremiumBadge />}
+              {submission.joining_status === 'pending' && <JoiningPendingBadge />}
+            </div>
+          )}
           {submission.profile?.source === 'vendor' && submission.profile?.vendor_account?.name && (
             <div className="mt-0.5 truncate text-[11px] text-tertiary-500">
               via {submission.profile.vendor_account.name}

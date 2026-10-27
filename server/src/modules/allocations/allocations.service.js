@@ -424,18 +424,22 @@ function capacityStatus(members, total, current) {
  * Available = max(0, capacity − allocation); Can allocate = available +
  * projects ending within `window_days` (their people free up).
  */
-async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFAULT_ENDING_WINDOW } = {}) {
+async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFAULT_ENDING_WINDOW, billable = true, non_billable: nonBillable = true } = {}) {
   const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
   const day = A.toDate(date) || todayIst();
   const windowEnd = A.addDays(day, window_days);
-  const [{ projects_per_resource: orgDefault }, ctx, spans] = await Promise.all([
+  const [{ projects_per_resource: orgDefault }, ctx, allSpans] = await Promise.all([
     getSettings(orgId),
     loadPeopleAndTeams(orgId),
     prisma.projectMemberAssignment.findMany({
       where: { org_id: orgId, OR: [{ end_date: null }, { end_date: { gte: day } }] },
-      select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, account: { select: ACCOUNT_SELECT } },
+      select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, account: { select: { ...ACCOUNT_SELECT, billing_rates: { select: { rate: true, effective_from: true } } } } },
     }),
   ]);
+
+  // Billable = a billing rate above 0 in force on the date; the two checkboxes narrow which running projects are counted.
+  const isBillable = (a) => (a.billing_rates || []).some((b) => Number(b.rate) > 0 && b.effective_from <= day);
+  const spans = allSpans.filter((s) => (isBillable(s.account) ? billable : nonBillable));
 
   // Money for the month of `day`: monthly contract billing per running Managed Services project (Fixed cost / Recruitment count as 0),
   // each employee's monthly salary (CTC) and each contractor's vendor rate, all in INR.

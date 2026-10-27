@@ -91,3 +91,14 @@ const roundTripped = filtersFromSearchParams(applyFiltersToSearchParams(new URLS
 assert.deepEqual(roundTripped, full);
 
 console.log('usePipelineFilters.test.mjs: ok');
+
+// Premium customer (yes / no) and joining date (pending / set): URL round trip, API params, and only for the boards that list them.
+const premiumParsed = filtersFromSearchParams(new URLSearchParams('premium=yes&joining=pending'));
+assert.equal(premiumParsed.premium, 'yes');
+assert.equal(premiumParsed.joining, 'pending');
+assert.deepEqual(filtersToApiParams(premiumParsed, ['premium', 'joining']), { premium: 'yes', joining: 'pending' });
+assert.deepEqual(filtersToApiParams(premiumParsed, ['search']), {}); // a board that does not list the filter never sends it
+assert.deepEqual(filtersToApiParams(emptyPipelineFilters(), ['premium', 'joining']), {});
+const premiumWritten = applyFiltersToSearchParams(new URLSearchParams(), { ...emptyPipelineFilters(), premium: 'no' });
+assert.equal(premiumWritten.get('premium'), 'no');
+assert.equal(applyFiltersToSearchParams(new URLSearchParams('premium=no'), emptyPipelineFilters()).get('premium'), null);

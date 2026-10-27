@@ -230,6 +230,12 @@ describe('Team capacity', () => {
       profit: 252000, // 420,000 billing - 168,000 salary - 0 vendor
     });
 
+    // Billable / non-billable checkboxes (both on by default): every running project is one or the other, so the two halves add up to the whole
+    const only = async (billable, non_billable) => (await row({ billable, non_billable })).current_allocation;
+    expect(await only('1', '1')).toBe(2);
+    expect(await only('0', '0')).toBe(0);
+    expect((await only('1', '0')) + (await only('0', '1'))).toBe(2);
+
     // Capability is a whole number, rounded up: capacity 4.52 - allocation 2 = 2.52 shows as 3; can allocate follows it.
     await authed(request(app).put('/api/v1/allocations/settings'), ctx.adminToken).send({ projects_per_resource: 1.13 });
     expect(await row()).toMatchObject({ total_capacity: 4.52, current_allocation: 2, available_capability: 3, projects_ending_soon: 1, can_allocate: 4 });

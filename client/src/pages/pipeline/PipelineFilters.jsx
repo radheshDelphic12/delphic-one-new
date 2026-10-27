@@ -314,6 +314,38 @@ export default function PipelineFilters({
         </div>
       )}
 
+      {fieldSet.has('premium') && (
+        <SearchableSelect
+          className="w-40"
+          allowClear
+          ariaLabel="Premium customer"
+          value={filters.premium}
+          onChange={(premium) => patchFilters({ premium: premium || '' })}
+          placeholder="Premium: All"
+          searchPlaceholder="Search…"
+          options={[
+            { value: 'yes', label: 'Premium: Yes' },
+            { value: 'no', label: 'Premium: No' },
+          ]}
+        />
+      )}
+
+      {fieldSet.has('joining') && (
+        <SearchableSelect
+          className="w-48"
+          allowClear
+          ariaLabel="Joining date"
+          value={filters.joining}
+          onChange={(joining) => patchFilters({ joining: joining || '' })}
+          placeholder="Joining: All"
+          searchPlaceholder="Search…"
+          options={[
+            { value: 'pending', label: 'Joining date pending' },
+            { value: 'set', label: 'Joining date set' },
+          ]}
+        />
+      )}
+
       {fieldSet.has('status') && (
         <div className="min-w-[180px]">
           <MultiSelectDropdown

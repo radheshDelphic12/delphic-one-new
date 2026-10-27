@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { optionalDate } = require('../../lib/zodDate');
+const { optionalDate, nullableDate } = require('../../lib/zodDate');
 
 const rateType = z.enum(['monthly', 'hourly', 'annual']);
 const currency = z.enum(['INR', 'USD', 'AED', 'SAR']);
@@ -29,14 +29,14 @@ const updateSchema = z.object({
   submission_notes: z.string().optional(),
   client_feedback: z.string().optional(),
   relevancy_score: z.number().int().min(1).max(10).optional(),
-  offer_date: optionalDate,
+  offer_date: nullableDate,
   offer_ctc: z.number().optional(),
   offer_ctc_currency: currency.optional(),
-  expected_joining_date: optionalDate,
-  actual_joining_date: optionalDate,
-  bgv_initiated_date: optionalDate,
+  expected_joining_date: nullableDate,
+  actual_joining_date: nullableDate,
+  bgv_initiated_date: nullableDate,
   bgv_status: z.enum(['pending', 'in_progress', 'cleared', 'failed']).optional(),
-  bgv_completed_date: optionalDate,
+  bgv_completed_date: nullableDate,
   bgv_notes: z.string().optional(),
 });
 
@@ -74,6 +74,10 @@ const listQuerySchema = z.object({
   // actual_joining_date window (ISO strings) — used by the dashboard "Closures this month" tile.
   joined_from: z.string().optional(),
   joined_to: z.string().optional(),
+  // Closed candidates only: whether the actual joining date is still to come (pending) or has been entered (set).
+  joining: z.enum(['pending', 'set']).optional(),
+  // Premium customers only (yes) or the rest (no): decided by the client account the requirement belongs to.
+  premium: z.enum(['yes', 'no']).optional(),
   search: z.string().optional(),
   sort_by: z.enum(['created_at', 'stage', 'margin']).default('created_at'),
   sort_order: z.enum(['asc', 'desc']).default('desc'),

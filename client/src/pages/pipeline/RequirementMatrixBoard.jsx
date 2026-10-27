@@ -7,6 +7,7 @@ import ScreeningRoundChips from './ScreeningRoundChips.jsx';
 import { groupBoard, stageColumnStats, BOARD_COLUMNS } from '../../lib/accountBoard.js';
 import { shortKey } from './pipelineBoardUtils.js';
 import PipelineFilters from './PipelineFilters.jsx';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 
 const STAGE_HEADER_COLORS = {
   sourced: 'bg-slate-100 text-slate-700',
@@ -24,6 +25,7 @@ const STAGE_HEADER_COLORS = {
 const MATRIX_FIELDS = [
   'search',
   'account_ids',
+  'premium',
   'profile_source',
   'req_type',
   'bda_id',
@@ -172,6 +174,7 @@ export default function RequirementMatrixBoard() {
                       )}
                     </div>
                     <p className="mt-1.5 truncate text-[11px] text-tertiary-500">{req.account?.name || '—'}</p>
+                    {req.account?.is_premium && <div className="mt-0.5"><PremiumBadge /></div>}
                     <p className="truncate text-[11px] text-tertiary-500">
                       BDA: {req.account?.owner?.name || '—'}
                     </p>

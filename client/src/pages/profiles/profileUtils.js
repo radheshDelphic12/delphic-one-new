@@ -1,3 +1,5 @@
+import { allowed } from '../../lib/access.js';
+
 export function profileKey(id) {
   return `PRF-${String(id || '').slice(0, 8).toUpperCase()}`;
 }
@@ -8,16 +10,18 @@ export function formatProfileValue(value) {
   return String(value).replace(/_/g, ' ');
 }
 
+// In a company on the permission model the permission decides (a person with Profiles > Add has the derived role 'employee', which the
+// role check below would turn away); elsewhere the role decides, as before.
 export function canCreateProfile(user) {
-  return user?.role === 'recruiter' || user?.role === 'admin';
+  return allowed(user, 'profiles.create', user?.role === 'recruiter' || user?.role === 'admin');
 }
 
 export function canViewProfiles(user) {
-  return user?.role === 'recruiter' || user?.role === 'sales' || user?.role === 'admin';
+  return allowed(user, 'profiles.view', user?.role === 'recruiter' || user?.role === 'sales' || user?.role === 'admin');
 }
 
 export function canEditProfile(user) {
-  return user?.role === 'recruiter' || user?.role === 'admin';
+  return allowed(user, 'profiles.update', user?.role === 'recruiter' || user?.role === 'admin');
 }
 
 /**

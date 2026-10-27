@@ -46,7 +46,7 @@ const INTERVIEWER_INCLUDE = {
 };
 
 const INCLUDE = {
-  seat: { include: { requirement: { include: { account: { select: { id: true, name: true } } } } } },
+  seat: { include: { requirement: { include: { account: { select: { id: true, name: true, is_premium: true } } } } } },
   profile: {
     select: {
       id: true, name: true, current_company: true, total_experience_years: true,
@@ -79,9 +79,11 @@ function serialize(row) {
   return {
     ...rest,
     profile_id,
+    // A closed candidate is "joining date pending" until the actual joining date is entered; derived, so it can never disagree with the date.
+    joining_status: row.stage === 'closed' ? (row.actual_joining_date ? 'set' : 'pending') : null,
     seat: seat ? { id: seat.id, seat_label: seat.seat_label, requirement_id: seat.requirement_id } : null,
     requirement: seat
-      ? { id: seat.requirement.id, title: seat.requirement.title, account_name: seat.requirement.account.name, sales_owner_id: seat.requirement.sales_owner_id }
+      ? { id: seat.requirement.id, title: seat.requirement.title, account_name: seat.requirement.account.name, account_is_premium: Boolean(seat.requirement.account.is_premium), sales_owner_id: seat.requirement.sales_owner_id }
       : null,
     profile,
     submitted_by: submitted_by_user,
@@ -94,13 +96,14 @@ function serialize(row) {
 async function list(filters) {
   const {
     account_id, requirement_id, seat_id, profile_id, sales_owner_id, stage, submitted_by,
-    joined_from, joined_to, search, sort_by, sort_order, page, limit,
+    joined_from, joined_to, joining, premium, search, sort_by, sort_order, page, limit,
   } = filters;
 
   const seatFilter = {};
   if (requirement_id) seatFilter.requirement_id = requirement_id;
   if (account_id) seatFilter.requirement = { ...(seatFilter.requirement || {}), account_id };
   if (sales_owner_id) seatFilter.requirement = { ...(seatFilter.requirement || {}), sales_owner_id };
+  if (premium) seatFilter.requirement = { ...(seatFilter.requirement || {}), account: { is_premium: premium === 'yes' } };
 
   const stages = stage
     ? String(stage).split(',').map((s) => s.trim()).filter(Boolean)
@@ -117,6 +120,7 @@ async function list(filters) {
     ...(stages.length ? { stage: { in: stages } } : {}),
     ...(submitted_by ? { submitted_by } : {}),
     ...(Object.keys(joinedRange).length ? { actual_joining_date: joinedRange } : {}),
+    ...(joining ? { stage: 'closed', actual_joining_date: joining === 'pending' ? null : { not: null } } : {}),
     ...(search
       ? {
           OR: [
@@ -188,6 +192,9 @@ async function update(id, patch) {
     data: { ...patch, margin, margin_percentage },
     include: INCLUDE,
   });
+  if (existing.stage === 'closed' && 'actual_joining_date' in patch) {
+    await prisma.requirementSeat.update({ where: { id: existing.requirement_seat_id }, data: { joined_at: row.actual_joining_date } });
+  }
   return serialize(row);
 }
 
@@ -257,7 +264,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
           seat_status: 'closed',
           is_locked: true,
           closed_at: new Date(),
-          joined_at: updated.actual_joining_date || new Date(),
+          joined_at: updated.actual_joining_date || null,
         },
       });
     }

@@ -48,9 +48,12 @@ const METRICS = {
   projects_daily: { label: 'Avg projects per day', fn: 'it' },
 };
 
+// Hidden for now (2026-10-27, owner's request): not shown, not counted, not loaded. To bring one back, take it out of this set and add it to ORDER.sales.
+const HIDDEN_METRICS = new Set(['req_owned_live', 'joinings_owned']);
+
 // What each function sees, in this order.
 const ORDER = {
-  sales: ['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned_live', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned', 'joinings_owned'],
+  sales: ['meetings_scheduled', 'clients_active', 'req_brought', 'req_brought_won', 'req_owned', 'req_owned_won', 'meetings_attended', 'submitted_on_owned'],
   hr: ['profiles_submitted', 'interviews_taken', 'interviews_shortlisted', 'interviews_joined', 'joinings', 'vendors_onboarded', 'meetings_attended'],
   it: ['projects_active', 'projects_billable', 'projects_non_billable', 'projects_daily'],
   other: [],
@@ -109,8 +112,8 @@ async function submittedEvents(submissionWhere, range) {
 async function loadItems(orgId, member, fn, range, opts) {
   const userId = member.user_id;
   const items = [];
-  // closed candidates whose joining date (else the day they were closed) falls in the range; `extra` narrows who
-  const joinedWhere = (extra) => ({ stage: 'closed', ...extra, OR: [{ actual_joining_date: { gte: range.from, lte: range.to } }, { actual_joining_date: null, seat: { closed_at: { gte: range.from, lte: range.to } } }] });
+  // closed candidates whose actual joining date falls in the range; a closed candidate with no joining date yet is not a joining ("joining date pending")
+  const joinedWhere = (extra) => ({ stage: 'closed', ...extra, actual_joining_date: { gte: range.from, lte: range.to } });
   const push = (metric, date, title, sub, value, extra) => items.push({ metric, month: monthKey(date), date: ymd(date), title, sub: sub || '', value, extra });
   const dateRange = { gte: range.from, lte: range.to };
 
@@ -147,15 +150,19 @@ async function loadItems(orgId, member, fn, range, opts) {
       }
     }
     await meetingItems(orgId, userId, dateRange, push);
-    // requirements they own that were running during each month (created on or before it, not yet closed at its start)
-    const live = await prisma.requirement.findMany({ where: { sales_owner_id: userId, account: { deleted_at: null, org_id: orgId }, created_at: { lte: range.to }, OR: [{ closed_at: null }, { closed_at: { gte: range.from } }] }, select: { ...REQ_SELECT, created_at: true, closed_at: true } });
-    for (const mo of monthsBetween(monthKey(range.from), monthKey(range.to))) {
-      const start = new Date(Date.UTC(mo.year, mo.month - 1, 1));
-      const end = new Date(Date.UTC(mo.year, mo.month, 0, 23, 59, 59));
-      for (const r of live) if (r.created_at <= end && (!r.closed_at || r.closed_at >= start)) push('req_owned_live', start, r.title, r.account?.name);
+    if (!HIDDEN_METRICS.has('req_owned_live')) {
+      // requirements they own that were running during each month (created on or before it, not yet closed at its start)
+      const live = await prisma.requirement.findMany({ where: { sales_owner_id: userId, account: { deleted_at: null, org_id: orgId }, created_at: { lte: range.to }, OR: [{ closed_at: null }, { closed_at: { gte: range.from } }] }, select: { ...REQ_SELECT, created_at: true, closed_at: true } });
+      for (const mo of monthsBetween(monthKey(range.from), monthKey(range.to))) {
+        const start = new Date(Date.UTC(mo.year, mo.month - 1, 1));
+        const end = new Date(Date.UTC(mo.year, mo.month, 0, 23, 59, 59));
+        for (const r of live) if (r.created_at <= end && (!r.closed_at || r.closed_at >= start)) push('req_owned_live', start, r.title, r.account?.name);
+      }
     }
-    const joinedOwned = await prisma.submission.findMany({ where: joinedWhere({ seat: { requirement: { deleted_at: null, sales_owner_id: userId, account: { deleted_at: null, org_id: orgId } } } }), select: { actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { closed_at: true, requirement: { select: REQ_SELECT } } } } });
-    for (const s of joinedOwned) push('joinings_owned', s.actual_joining_date || s.seat.closed_at, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' · '));
+    if (!HIDDEN_METRICS.has('joinings_owned')) {
+      const joinedOwned = await prisma.submission.findMany({ where: joinedWhere({ seat: { requirement: { deleted_at: null, sales_owner_id: userId, account: { deleted_at: null, org_id: orgId } } } }), select: { actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { closed_at: true, requirement: { select: REQ_SELECT } } } } });
+      for (const s of joinedOwned) push('joinings_owned', s.actual_joining_date || s.seat.closed_at, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' · '));
+    }
     for (const e of await submittedEvents({ seat: { requirement: { deleted_at: null, sales_owner_id: userId, account: { deleted_at: null, org_id: orgId } } } }, range)) push('submitted_on_owned', e.date, e.title, e.sub);
   }
 
@@ -176,12 +183,12 @@ async function loadItems(orgId, member, fn, range, opts) {
       if (r.result === 'pass') {
         push('interviews_shortlisted', r.scheduled_at, cand, sub);
         const key = `${r.submission?.id}|${monthKey(r.scheduled_at)}`;
-        if (r.submission?.stage === 'closed' && !joinedSeen.has(key)) { joinedSeen.add(key); push('interviews_joined', r.scheduled_at, cand, `${r.submission.actual_joining_date ? `Joined ${ymd(r.submission.actual_joining_date)}` : 'Closed'} · ${sub}`); }
+        if (r.submission?.stage === 'closed' && r.submission.actual_joining_date && !joinedSeen.has(key)) { joinedSeen.add(key); push('interviews_joined', r.scheduled_at, cand, `${r.submission.actual_joining_date ? `Joined ${ymd(r.submission.actual_joining_date)}` : 'Closed'} · ${sub}`); }
       }
     }
     for (const e of await submittedEvents({ submitted_by: userId, seat: { requirement: { deleted_at: null, account: { deleted_at: null, org_id: orgId } } } }, range)) push('profiles_submitted', e.date, e.title, e.sub);
     const joined = await prisma.submission.findMany({ where: joinedWhere({ submitted_by: userId, seat: { requirement: { deleted_at: null, account: { deleted_at: null, org_id: orgId } } } }), select: { actual_joining_date: true, profile: { select: { name: true } }, seat: { select: { closed_at: true, requirement: { select: REQ_SELECT } } } } });
-    for (const s of joined) push('joinings', s.actual_joining_date || s.seat.closed_at, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' · '));
+    for (const s of joined) push('joinings', s.actual_joining_date, s.profile?.name || 'Candidate', [s.seat?.requirement?.title, s.seat?.requirement?.account?.name].filter(Boolean).join(' · '));
     const vendors = await prisma.account.findMany({ where: { org_id: orgId, type: 'vendor', stage: 'active', origin_owner_id: userId }, select: { id: true, name: true, created_at: true } });
     const when = await activationDates(vendors);
     for (const v of vendors) {

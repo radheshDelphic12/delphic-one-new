@@ -77,7 +77,7 @@ function serialize(row) {
     ...rest,
     is_stuck: isStuck(row),
     tat: tatInfo(row),
-    account: account ? { id: account.id, name: account.name, type: account.type } : undefined,
+    account: account ? { id: account.id, name: account.name, type: account.type, is_premium: Boolean(account.is_premium) } : undefined,
     sales_owner: sales_owner ? { id: sales_owner.id, name: sales_owner.name } : undefined,
     assigned_recruiters: assignments
       ? assignments
@@ -96,7 +96,7 @@ function serialize(row) {
 }
 
 const DECORATE_INCLUDE = {
-  account: { select: { id: true, name: true, type: true } },
+  account: { select: { id: true, name: true, type: true, is_premium: true } },
   sales_owner: { select: { id: true, name: true } },
   assignments: {
     where: { role_on_req: { in: ['recruiter', 'vendor_team'] }, unassigned_at: null },
@@ -111,7 +111,7 @@ const DECORATE_INCLUDE = {
 };
 
 async function list(filters) {
-  const { status, req_type, account_id, sales_owner_id, recruiter_id, priority, work_mode, stuck, tat, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
+  const { status, req_type, account_id, premium, sales_owner_id, recruiter_id, priority, work_mode, stuck, tat, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
 
   const stuckClause = { status: { in: STUCK_STATUSES }, updated_at: { lte: stuckCutoff() } };
 
@@ -127,6 +127,7 @@ async function list(filters) {
     ...(Object.keys(closedRange).length ? { closed_at: closedRange } : {}),
     ...(req_type ? { req_type } : {}),
     ...(account_id ? { account_id } : {}),
+    ...(premium ? { account: { is_premium: premium === 'yes' } } : {}),
     ...(sales_owner_id ? { sales_owner_id } : {}),
     ...(priority ? { priority } : {}),
     ...(work_mode ? { work_mode } : {}),

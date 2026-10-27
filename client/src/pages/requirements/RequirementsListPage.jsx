@@ -18,6 +18,7 @@ import RequirementFormPage from './RequirementFormPage.jsx';
 import VendorEmailDrawer from './VendorEmailDrawer.jsx';
 import { userCan } from '../../lib/permissions.js';
 import { allowed } from '../../lib/access.js';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 
 function reqKey(id) {
   return `REQ-${String(id).slice(0, 8).toUpperCase()}`;
@@ -143,6 +144,7 @@ export default function RequirementsListPage() {
   const [closedFrom, setClosedFrom] = useState(() => searchParams.get('closed_from') || '');
   const [closedTo, setClosedTo] = useState(() => searchParams.get('closed_to') || '');
   const [reqType, setReqType] = useState(() => searchParams.get('req_type') || '');
+  const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
   const [accountId, setAccountId] = useState(() => searchParams.get('account_id') || '');
   const [salesOwnerId, setSalesOwnerId] = useState(() => searchParams.get('sales_owner_id') || '');
   const isSales = user?.role === 'sales';
@@ -188,6 +190,7 @@ export default function RequirementsListPage() {
     sync('closed_from', closedFrom);
     sync('closed_to', closedTo);
     sync('req_type', reqType);
+    sync('premium', premium);
     sync('account_id', accountId);
     sync('sales_owner_id', salesOwnerId);
     sync('scope', isSales ? scope : '', 'all');
@@ -199,7 +202,7 @@ export default function RequirementsListPage() {
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder]);
+  }, [status, priority, stuck, closedFrom, closedTo, reqType, premium, accountId, salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   // Guarded so it converges with the mirror effect above instead of looping.
@@ -212,6 +215,7 @@ export default function RequirementsListPage() {
     set(setClosedFrom, g('closed_from'));
     set(setClosedTo, g('closed_to'));
     set(setReqType, g('req_type'));
+    set(setPremium, g('premium'));
     set(setAccountId, g('account_id'));
     set(setSalesOwnerId, g('sales_owner_id'));
     set(setScope, g('scope') === 'mine' ? 'mine' : 'all');
@@ -225,7 +229,7 @@ export default function RequirementsListPage() {
   }, [searchParams]);
 
   const hasActiveFilters = Boolean(
-    status || priority || stuck || closedFrom || closedTo || reqType || accountId || salesOwnerId ||
+    status || priority || stuck || closedFrom || closedTo || reqType || premium || accountId || salesOwnerId ||
       recruiterId || workMode || tat || appliedTechStack || appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
   );
 
@@ -237,6 +241,7 @@ export default function RequirementsListPage() {
     setClosedFrom('');
     setClosedTo('');
     setReqType('');
+    setPremium('');
     setAccountId('');
     setSalesOwnerId('');
     setRecruiterId('');
@@ -262,6 +267,7 @@ export default function RequirementsListPage() {
     if (closedFrom) params.closed_from = closedFrom;
     if (closedTo) params.closed_to = closedTo;
     if (reqType) params.req_type = reqType;
+    if (premium) params.premium = premium;
     if (accountId) params.account_id = accountId;
     if (salesOwnerId) params.sales_owner_id = salesOwnerId;
     if (isSales && scope === 'mine') params.scope = 'mine';
@@ -283,7 +289,7 @@ export default function RequirementsListPage() {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, accountId,
+    appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, premium, accountId,
     salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder,
   ]);
 
@@ -324,7 +330,7 @@ export default function RequirementsListPage() {
           </div>
         ),
       },
-      { key: 'client', header: 'Client', render: (row) => row.account?.name || '—' },
+      { key: 'client', header: 'Client', render: (row) => (<span className="inline-flex flex-wrap items-center gap-1.5">{row.account?.name || '—'}{row.account?.is_premium && <PremiumBadge />}</span>) },
       {
         key: 'status',
         header: 'Status',
@@ -453,6 +459,16 @@ export default function RequirementsListPage() {
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low</option>
+            </select>
+            <select
+              value={premium}
+              onChange={(event) => resetToFirstPage(setPremium)(event.target.value)}
+              className="rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              aria-label="Premium customer"
+            >
+              <option value="">Premium: All</option>
+              <option value="yes">Premium: Yes</option>
+              <option value="no">Premium: No</option>
             </select>
             <select
               value={reqType}
