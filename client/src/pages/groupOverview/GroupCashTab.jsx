@@ -373,7 +373,7 @@ function ReceiptsView({ options }) {
   );
 }
 
-function ReconcileView({ position, onSaved }) {
+function ReconcileView({ position, onSaved, onOpenStatement }) {
   const saved = useSaved();
   const [editRec, setEditRec] = useState(null);
   const accounts = position.entities.flatMap((e) => e.accounts);
@@ -400,7 +400,10 @@ function ReconcileView({ position, onSaved }) {
           <label className={labelCls}>Balance on the statement<input inputMode="decimal" className={inputCls} value={v.statement_balance} onChange={set('statement_balance')} /></label>
         </div>
         <label className={labelCls}>Notes<input className={inputCls} value={v.notes} onChange={set('notes')} maxLength={2000} /></label>
-        <button type="button" className="btn-secondary" disabled={!ready} onClick={check}>Compare with the system</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-secondary" disabled={!ready} onClick={check}>Compare with the system</button>
+          {v.bank_account_id && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-sm" onClick={() => onOpenStatement(v.bank_account_id)}><FileText className="h-4 w-4" />View statement of this account</button>}
+        </div>
         {preview && (
           <div className="rounded-xl bg-tertiary-50 p-3 text-sm">
             <p>System balance: <Money value={preview.system_balance} currency={preview.currency} className="font-semibold" /></p>
@@ -445,12 +448,14 @@ function ReconcileView({ position, onSaved }) {
 const STATEMENT_SCOPES = [['account', 'Bank account'], ['wallet', 'Wallet'], ['company', 'Company'], ['entity', 'Legal entity']];
 
 /** A statement (opening, entries with a running balance, closing) for one bank account, wallet, company or legal entity, with CSV / PDF. */
-function StatementsView({ options, filters }) {
+function StatementsView({ options, filters, seed }) {
   const saved = useSaved();
   const [scope, setScope] = useState(filters.workspace_id ? 'company' : filters.legal_entity_id ? 'entity' : 'account');
   const [id, setId] = useState(filters.workspace_id || filters.legal_entity_id || '');
   const [currency, setCurrency] = useState(filters.currency || '');
   const [range, setRange] = useState({ from: '', to: '' });
+  // opened from Reconciliation for one bank account
+  useEffect(() => { if (seed) { setScope(seed.scope); setId(seed.id); } }, [seed]);
   const targets = useMemo(() => {
     if (!options) return [];
     if (scope === 'account') { const labels = accountLabels(options.accounts); return options.accounts.map((a) => ({ value: a.id, label: `${labels.get(a.id)} · ${a.currency}` })); }
@@ -494,25 +499,32 @@ function StatementsView({ options, filters }) {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-              {[['Opening', d.opening_balance], ['In', d.total_in], ['Out', d.total_out], ['Closing', d.closing_balance]].map(([l, x]) => (
+              {[['Opening balance', d.opening_balance], ['Credits (in)', d.total_in], ['Debits (out)', d.total_out], ['Closing balance', d.closing_balance]].map(([l, x]) => (
                 <div key={l} className="rounded-xl border border-tertiary-100 p-2"><p className="text-xs text-tertiary-500">{l}</p><Money value={x} currency={cur} className="font-semibold" /></div>
               ))}
             </div>
             <div className="overflow-x-auto rounded-xl border border-tertiary-100">
               <table className="min-w-full text-sm">
-                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Details</th><th className="p-2">Mode</th><th className="p-2 text-right">In</th><th className="p-2 text-right">Out</th><th className="p-2 text-right">Balance</th></tr></thead>
+                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Particulars</th><th className="p-2">Mode</th><th className="p-2 text-right">Debit (out)</th><th className="p-2 text-right">Credit (in)</th><th className="p-2 text-right">Balance</th></tr></thead>
                 <tbody>
+                  <tr className="border-t border-tertiary-100 bg-tertiary-50/50 font-medium" data-testid="stmt-opening">
+                    <td className="whitespace-nowrap p-2">{d.from || ''}</td><td className="p-2" colSpan={4}>Opening balance</td><td className="p-2 text-right"><Money value={d.opening_balance} currency={cur} /></td>
+                  </tr>
                   {d.rows.map((r) => (
                     <tr key={r.id} className="border-t border-tertiary-100">
                       <td className="whitespace-nowrap p-2">{r.date}</td>
-                      <td className="p-2">{r.party || r.category || '—'}{r.wallet && <span className="text-xs text-tertiary-500"> · {r.wallet}</span>}{r.transfer_id && <Pill tone="blue">Transfer</Pill>}{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
+                      <td className="p-2">{r.party || r.category || (r.transfer_id ? 'Transfer' : '—')}{r.wallet && <span className="text-xs text-tertiary-500"> · {r.wallet}</span>}{r.transfer_id && <Pill tone="blue">Transfer</Pill>}{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
                       <td className="p-2">{MODE_LABEL[r.mode] || r.mode}</td>
-                      <td className="p-2 text-right">{r.direction === 'in' ? <Money value={r.amount} currency={cur} /> : ''}</td>
                       <td className="p-2 text-right">{r.direction === 'out' ? <Money value={r.amount} currency={cur} /> : ''}</td>
+                      <td className="p-2 text-right">{r.direction === 'in' ? <Money value={r.amount} currency={cur} /> : ''}</td>
                       <td className="p-2 text-right"><Money value={r.balance_after} currency={cur} /></td>
                     </tr>
                   ))}
                   {!d.rows.length && <tr><td colSpan={6} className="p-4 text-center text-tertiary-500">No entries in this period.</td></tr>}
+                  <tr className="border-t-2 border-tertiary-200 bg-tertiary-50/50 font-semibold" data-testid="stmt-closing">
+                    <td className="whitespace-nowrap p-2">{d.to || ''}</td><td className="p-2" colSpan={2}>Closing balance · totals</td>
+                    <td className="p-2 text-right"><Money value={d.total_out} currency={cur} /></td><td className="p-2 text-right"><Money value={d.total_in} currency={cur} /></td><td className="p-2 text-right"><Money value={d.closing_balance} currency={cur} /></td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -734,6 +746,7 @@ export default function GroupCashTab() {
   const [selected, setSelected] = useState(() => new Set());
   const [openWallet, setOpenWallet] = useState(null);
   const [openAccount, setOpenAccount] = useState(null);
+  const [stmtSeed, setStmtSeed] = useState(null);
   const [txOpen, setTxOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
@@ -780,8 +793,8 @@ export default function GroupCashTab() {
           {section === 'fund' && <FundView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} />}
           {section === 'invoices' && <GroupInvoicesView options={options.data} onWalletsChanged={refresh} />}
           {section === 'receipts' && <ReceiptsView options={options.data} />}
-          {section === 'statements' && <StatementsView options={options.data} filters={filters} />}
-          {section === 'reconcile' && <ReconcileView position={p} onSaved={refresh} />}
+          {section === 'statements' && <StatementsView options={options.data} filters={filters} seed={stmtSeed} />}
+          {section === 'reconcile' && <ReconcileView position={p} onSaved={refresh} onOpenStatement={(accountId) => { setStmtSeed({ scope: 'account', id: accountId }); setSection('statements'); }} />}
           {section === 'setup' && <SetupView options={options.data} position={p} onChanged={refresh} />}
         </>
       )}

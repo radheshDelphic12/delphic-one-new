@@ -78,6 +78,11 @@ describe('group cash statements', () => {
     expect(csv.headers['content-type']).toMatch(/text\/csv/);
     expect(csv.text).toContain('Delphic Global');
     expect(csv.text).toContain('Closing balance,1200.00');
+    // laid out like a bank statement: debit / credit columns, opening and closing rows
+    expect(csv.text).toContain('Debit (out),Credit (in),Balance');
+    expect(csv.text).toMatch(/Opening balance,.*1000\.00/);
+    expect(csv.text).toMatch(/Vendor B.*,100\.00,,1200\.00/);
+    expect(csv.text).toMatch(/Client A.*,,300\.00,1300\.00/);
     expect(csv.text).not.toContain('()');
 
     const pdf = await stmt({ scope: 'entity', id: entity.id, currency: 'INR', format: 'pdf' });
