@@ -49,6 +49,13 @@ function renderMarkup(value) {
   });
 }
 
+/** The markup rendered in full (no "Show more"): used for the live preview while typing. */
+export function MarkupPreview({ text, className = '' }) {
+  const value = normalise(text);
+  if (!value.trim()) return null;
+  return <span className={`block whitespace-pre-wrap break-words text-left leading-snug ${className}`}>{renderMarkup(value)}</span>;
+}
+
 /**
  * A timesheet description (or any free-text note) exactly as it was typed:
  * line breaks, indentation, bullets and spacing kept (pre-wrap; pre-line used
