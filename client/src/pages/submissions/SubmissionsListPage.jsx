@@ -4,7 +4,7 @@ import { Filter, MoreVertical, Plus, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { canCreateSubmission } from '../../lib/submissionStages.js';
-import { useClientAccountOptions, useRequirementOptions, useUserOptions } from '../../lib/lookups.js';
+import { useClientAccountOptions, useRequirementOptions, useUserOptions, useVendorAccountOptions } from '../../lib/lookups.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
@@ -111,6 +111,7 @@ export default function SubmissionsListPage() {
   const [joinedFrom, setJoinedFrom] = useState(() => searchParams.get('joined_from') || '');
   const [joinedTo, setJoinedTo] = useState(() => searchParams.get('joined_to') || '');
   const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
+  const [vendorId, setVendorId] = useState(() => searchParams.get('vendor_id') || '');
   const [joining, setJoining] = useState(() => searchParams.get('joining') || '');
   const [sortBy, setSortBy] = useState(() => searchParams.get('sort_by') || 'created_at');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sort_order') || 'desc');
@@ -123,6 +124,7 @@ export default function SubmissionsListPage() {
   const recruiterOptions = useUserOptions('recruiter');
   const clientOptions = useClientAccountOptions();
   const requirementOptions = useRequirementOptions();
+  const vendorOptions = useVendorAccountOptions();
 
   const stageCsv = stages.join(',');
 
@@ -140,12 +142,13 @@ export default function SubmissionsListPage() {
     sync('joined_from', joinedFrom);
     sync('joined_to', joinedTo);
     sync('premium', premium);
+    sync('vendor_id', vendorId);
     sync('joining', joining);
     sync('sort_by', sortBy, 'created_at');
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, joining, sortBy, sortOrder]);
+  }, [stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, vendorId, joining, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   useEffect(() => {
@@ -162,13 +165,14 @@ export default function SubmissionsListPage() {
     set(setJoinedFrom, g('joined_from'));
     set(setJoinedTo, g('joined_to'));
     set(setPremium, g('premium'));
+    set(setVendorId, g('vendor_id'));
     set(setJoining, g('joining'));
     set(setSortBy, g('sort_by', 'created_at'));
     set(setSortOrder, g('sort_order', 'desc'));
   }, [searchParams]);
 
   const hasActiveFilters = Boolean(
-    stageCsv || submittedBy || accountId || requirementId || salesOwnerId || joinedFrom || joinedTo || premium || joining ||
+    stageCsv || submittedBy || accountId || requirementId || salesOwnerId || joinedFrom || joinedTo || premium || vendorId || joining ||
       appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
   );
 
@@ -182,6 +186,7 @@ export default function SubmissionsListPage() {
     setJoinedFrom('');
     setJoinedTo('');
     setPremium('');
+    setVendorId('');
     setJoining('');
     setSortBy('created_at');
     setSortOrder('desc');
@@ -205,6 +210,7 @@ export default function SubmissionsListPage() {
     if (joinedFrom) params.joined_from = joinedFrom;
     if (joinedTo) params.joined_to = joinedTo;
     if (premium) params.premium = premium;
+    if (vendorId) params.vendor_id = vendorId;
     if (joining) params.joining = joining;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
@@ -219,7 +225,7 @@ export default function SubmissionsListPage() {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, page, stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, joining, sortBy, sortOrder]);
+  }, [appliedSearch, page, stageCsv, submittedBy, accountId, requirementId, salesOwnerId, joinedFrom, joinedTo, premium, vendorId, joining, sortBy, sortOrder]);
 
   useEffect(() => {
     if (searchParams.get('create') === '1') setCreateOpen(true);
@@ -375,6 +381,16 @@ export default function SubmissionsListPage() {
               placeholder="Any requirement"
               searchPlaceholder="Search requirements…"
               options={requirementOptions}
+            />
+            <SearchableSelect
+              className="w-48"
+              allowClear
+              ariaLabel="Vendor"
+              value={vendorId}
+              onChange={resetToFirstPage(setVendorId)}
+              placeholder="All vendors"
+              searchPlaceholder="Search vendors…"
+              options={vendorOptions}
             />
             <select
               value={premium}

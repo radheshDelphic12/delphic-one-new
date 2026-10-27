@@ -117,6 +117,8 @@ const RULES = [
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
   [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
+  // Tracking a company payment in a wallet (POST /payments/track): the company Admin or the Super Admin; the wallet check is inside.
+  [/^\/payments(\/|$)/, 'admin'],
 
   // ---- Reports
   [/^\/reports\/hr(\/|$)/, ['reports.hr']],

@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the Acconcy API (/api/v1/acconcy). Every call returns the unwrapped `data` payload.
@@ -60,7 +61,14 @@ export const acconcyApi = {
   setDealStatus: (id, body) => post(`/deals/${id}/status`, body),
 
   ledger: (params) => apiClient.get('/acconcy/ledger', { params }).then((res) => res.data),
-  createEntry: (body) => post('/ledger', body),
+  createEntry: async (body) => {
+    const r = await post('/ledger', body);
+    // a hand-typed ledger entry is money in or out: ask whether to track it in a wallet
+    const money = Number(body?.amount || 0) + Number(body?.tax || 0);
+    const incoming = ['revenue', 'income'].includes(body?.type);
+    await trackInWallet({ kind: incoming ? 'ledger_income' : 'ledger_expense', reference_id: r?.id, amount: money, title: incoming ? 'Income received' : 'Expense paid', party: body?.description, category: body?.category });
+    return r;
+  },
   updateEntry: (id, body) => patch(`/ledger/${id}`, body),
   deleteEntry: (id, reason) => del(`/ledger/${id}`, reason ? { reason } : {}),
 
@@ -88,7 +96,11 @@ export const acconcyApi = {
   createInvestee: (body) => post('/investees', body),
   updateInvestee: (id, body) => patch(`/investees/${id}`, body),
   deleteInvestee: (id, reason) => del(`/investees/${id}`, reason ? { reason } : {}),
-  fundInvestee: (id, body) => post(`/investees/${id}/fund`, body),
+  fundInvestee: async (id, body) => {
+    const r = await post(`/investees/${id}/fund`, body);
+    await trackInWallet({ kind: 'investee_funding', reference_id: id, amount: body.amount, title: 'Investee funding', category: 'Investee funding' });
+    return r;
+  },
   investment: (id) => get(`/investments/${id}`),
   createInvestment: (body) => post('/investments', body),
   updateInvestment: (id, body) => patch(`/investments/${id}`, body),
@@ -105,7 +117,11 @@ export const acconcyApi = {
   updateSalary: (id, body) => patch(`/salaries/${id}`, body),
   approveSalary: (id) => post(`/salaries/${id}/approve`),
   unapproveSalary: (id, body) => post(`/salaries/${id}/unapprove`, body),
-  paySalary: (id, body) => post(`/salaries/${id}/pay`, body),
+  paySalary: async (id, body) => {
+    const r = await post(`/salaries/${id}/pay`, body);
+    await trackInWallet({ kind: 'salary', reference_id: id, amount: (r?.data || r)?.net, title: 'Salary paid', category: 'Salary' });
+    return r;
+  },
   deleteSalary: (id, reason) => del(`/salaries/${id}`, reason ? { reason } : {}),
 
   leadReport: (params) => get('/reports/leads', params),

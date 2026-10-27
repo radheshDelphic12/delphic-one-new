@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the standalone Zephyr API (/api/v1/zephyr). Every call
@@ -31,7 +32,11 @@ export const zephyrApi = {
   updateSalary: (id, body) => apiClient.patch(`/zephyr/salaries/${id}`, body).then(unwrap),
   approveSalary: (id) => apiClient.post(`/zephyr/salaries/${id}/approve`).then(unwrap),
   unapproveSalary: (id, reason) => apiClient.post(`/zephyr/salaries/${id}/unapprove`, { reason }).then(unwrap),
-  paySalary: (id, paid_on) => apiClient.post(`/zephyr/salaries/${id}/pay`, paid_on ? { paid_on } : {}).then(unwrap),
+  paySalary: async (id, paid_on) => {
+    const r = await apiClient.post(`/zephyr/salaries/${id}/pay`, paid_on ? { paid_on } : {}).then(unwrap);
+    await trackInWallet({ kind: 'salary', reference_id: id, amount: r?.record?.net, title: 'Salary paid', category: 'Salary' });
+    return r;
+  },
   deleteSalary: (id) => apiClient.delete(`/zephyr/salaries/${id}`).then(unwrap),
   myWork: () => apiClient.get('/zephyr/my-work').then(unwrap),
   createPerson: (body) => apiClient.post('/zephyr/people', body).then(unwrap),
@@ -73,7 +78,14 @@ export const zephyrApi = {
   deleteWorkOrder: (id, wid) => apiClient.delete(`/zephyr/projects/${id}/work-orders/${wid}`).then(unwrap),
   ledger: (params) => apiClient.get('/zephyr/ledger', { params }).then((res) => res.data),
   ledgerEntry: (id) => apiClient.get(`/zephyr/ledger/${id}`).then(unwrap),
-  createEntry: (body) => apiClient.post('/zephyr/ledger', body).then(unwrap),
+  createEntry: async (body) => {
+    const r = await apiClient.post('/zephyr/ledger', body).then(unwrap);
+    // a hand-typed ledger entry is money in or out: ask whether to track it in a wallet
+    const money = Number(body?.amount || 0) + Number(body?.tax || 0);
+    const incoming = ['revenue', 'income'].includes(body?.type);
+    await trackInWallet({ kind: incoming ? 'ledger_income' : 'ledger_expense', reference_id: r?.id, amount: money, title: incoming ? 'Income received' : 'Expense paid', party: body?.description, category: body?.category });
+    return r;
+  },
   updateEntry: (id, body) => apiClient.patch(`/zephyr/ledger/${id}`, body).then(unwrap),
   deleteEntry: (id) => apiClient.delete(`/zephyr/ledger/${id}`).then(unwrap),
   importEntries: (rows) => apiClient.post('/zephyr/ledger/import', { rows }).then(unwrap),
@@ -134,7 +146,11 @@ export const zephyrApi = {
   rentDues: (params) => apiClient.get('/zephyr/rent/dues', { params }).then(unwrap),
   rentPayments: (params) => apiClient.get('/zephyr/rent/payments', { params }).then(unwrap),
   updateRentDue: (id, body) => apiClient.patch(`/zephyr/rent/dues/${id}`, body).then(unwrap),
-  payRent: (id, body) => apiClient.post(`/zephyr/rent/dues/${id}/payments`, body).then(unwrap),
+  payRent: async (id, body) => {
+    const r = await apiClient.post(`/zephyr/rent/dues/${id}/payments`, body).then(unwrap);
+    await trackInWallet({ kind: 'rent_payment', reference_id: r?.payment_id, amount: body.amount, title: 'Rent received', category: 'Rent received' });
+    return r;
+  },
   updateRentPayment: (id, body) => apiClient.patch(`/zephyr/rent/payments/${id}`, body).then(unwrap),
   deleteRentPayment: (id) => apiClient.delete(`/zephyr/rent/payments/${id}`).then(unwrap),
   tasks: (params) => apiClient.get('/zephyr/tasks', { params }).then(unwrap),
@@ -146,7 +162,12 @@ export const zephyrApi = {
   reopenTask: (id, reason) => apiClient.post(`/zephyr/tasks/${id}/reopen`, { reason }).then(unwrap),
   deleteTask: (id) => apiClient.delete(`/zephyr/tasks/${id}`).then(unwrap),
   groupExpenses: () => apiClient.get('/zephyr/ledger/group-expenses').then(unwrap),
-  createGroupExpense: (body) => apiClient.post('/zephyr/ledger/group-expenses', body).then(unwrap),
+  createGroupExpense: async (body) => {
+    const r = await apiClient.post('/zephyr/ledger/group-expenses', body).then(unwrap);
+    // one cost split over several projects / properties: one deduction for the whole amount
+    await trackInWallet({ kind: 'group_expense', reference_id: r?.group_id, amount: Number(body.amount) + Number(body.tax || 0), title: 'Group expense paid', category: 'Group expense' });
+    return r;
+  },
   updateGroupExpense: (gid, body) => apiClient.put(`/zephyr/ledger/group-expenses/${gid}`, body).then(unwrap),
   deleteGroupExpense: (gid) => apiClient.delete(`/zephyr/ledger/group-expenses/${gid}`).then(unwrap),
   bookCommission: (projectId) => apiClient.post(`/zephyr/projects/${projectId}/book-commission`).then(unwrap),

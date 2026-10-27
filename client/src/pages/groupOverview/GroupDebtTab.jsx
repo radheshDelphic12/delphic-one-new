@@ -1,3 +1,4 @@
+import { trackInWallet } from '../../lib/payments/trackInWallet.js';
 import { useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CalendarClock, Landmark, Percent, Plus, Settings2, Wallet } from 'lucide-react';
@@ -113,7 +114,11 @@ function LoanDrawer({ loan, onClose, onEdit, onChanged, onDelete }) {
   const s = loan.summary;
   async function mark(seq, paid) {
     setBusy(true);
-    try { await apiClient.put(`/super-dashboard/group/debt/loans/${loan.id}/installments/${seq}`, { paid }); await onChanged(loan.id); } catch (err) { pushError(apiErrorMessage(err, 'Could not update the instalment'), 'Something went wrong'); } finally { setBusy(false); }
+    try {
+      await apiClient.put(`/super-dashboard/group/debt/loans/${loan.id}/installments/${seq}`, { paid });
+      if (paid) await trackInWallet({ kind: 'debt_emi', reference_id: loan.id, amount: (loan.installments || []).find((i) => i.seq === seq)?.amount, title: `EMI ${seq} paid`, party: loan.lender || loan.name, category: 'Debt EMI' });
+      await onChanged(loan.id);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not update the instalment'), 'Something went wrong'); } finally { setBusy(false); }
   }
   return (
     <div className="space-y-4" data-testid="loan-detail">

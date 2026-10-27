@@ -7,6 +7,7 @@ const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const env = require('../../config/env');
 const { ALLOWED_EXT } = require('../documents/documents.validation');
+const prisma = require('../../config/db');
 const service = require('./cash.service');
 const reports = require('./cash.reports');
 const v = require('./cash.validation');
@@ -142,6 +143,18 @@ group.delete('/transactions/:id', A(async (req, res) => result(res, await servic
 group.post('/transfers', A(async (req, res) => result(res, await service.createTransfer(gids(req), req.user.id, v.transferBody.parse(req.body)), 201)));
 group.patch('/transfers/:id', A(async (req, res) => result(res, await service.updateTransfer(gids(req), req.user.id, req.params.id, v.transferUpdate.parse(req.body)))));
 group.delete('/transfers/:id', A(async (req, res) => result(res, await service.removeTransfer(gids(req), req.user.id, req.params.id))));
+
+// every company's payments (payment popup / wallet tracking), INR value, bank charges and deductions
+group.get('/payments', A(async (req, res) => {
+  const q = v.paymentsReportQuery.parse(req.query);
+  const orgs = await prisma.org.findMany({ where: { org_group_id: { in: gids(req) } }, select: { id: true } });
+  const data = await require('../payments/payments.service').report(orgs.map((o) => o.id), q);
+  if (q.format === 'csv') {
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="payments.csv"', 'Cache-Control': 'private, no-store' });
+    return res.send(reports.paymentsCsv(data));
+  }
+  return ok(res, data);
+}));
 
 group.get('/receipts', A(async (req, res) => {
   const q = v.receiptsQuery.parse(req.query);

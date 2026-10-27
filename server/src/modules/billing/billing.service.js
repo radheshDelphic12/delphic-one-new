@@ -5,7 +5,6 @@ const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
 const exchangeRates = require('./exchangeRates.service');
 const fixedBid = require('./fixedBid.service');
-const cashHooks = require('../cashPosition/cash.hooks');
 
 const { activeOn } = allocations;
 
@@ -209,24 +208,14 @@ async function transitionInvoice(orgId, invoiceId, status, ctx = {}) {
   const frozen = await require('../calculations/financialLock').assertOpen(orgId, invoice.period_month, invoice.period_year);
   if (frozen) return frozen;
 
+  // Marking an invoice paid is a payment of what is still pending (part payments: POST /invoices/:id/payments). The wallet is optional.
+  if (status === 'paid') {
+    const paidRow = await require('./invoicePayments.service').record(orgId, ctx.user, invoiceId, { bank_charges: '0', other_deductions: '0', ...(ctx.walletPayment ? { wallet_payment: ctx.walletPayment } : {}) });
+    return paidRow.error ? { error: paidRow.error } : { invoice: paidRow.invoice };
+  }
   const data = { status };
   if (status === 'sent') data.sent_at = new Date();
-  if (status === 'paid') data.paid_at = new Date();
-  // After the group's go-live date a paid invoice names the wallet the money came into (see cashPosition/cash.hooks).
-  let hook = null;
-  if (status === 'paid') {
-    const client = await prisma.account.findFirst({ where: { id: invoice.client_account_id }, select: { name: true } });
-    hook = await cashHooks.prepare({
-      orgId, user: ctx.user, kind: 'invoice', walletPayment: ctx.walletPayment,
-      record: { id: invoice.id, created_at: invoice.created_at, currency: invoice.currency, amount: invoice.amount, date: new Date().toISOString().slice(0, 10), party: client?.name, category: `Invoice ${invoice.invoice_number || ''}`.trim() },
-    });
-    if (hook.error) return { error: hook.error };
-  }
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.clientInvoice.update({ where: { id: invoiceId }, data });
-    if (hook) await hook.post(tx);
-    return row;
-  });
+  const updated = await prisma.clientInvoice.update({ where: { id: invoiceId }, data });
   return { invoice: updated };
 }
 

@@ -99,6 +99,7 @@ async function save(orgId, admin, input, now = new Date()) {
     if (!before) return { payment: null };
     await prisma.$transaction(async (tx) => {
       await cashHooks.unlink(tx, admin.id, 'salary_run', before.id);
+      await require('../payments/payments.service').undoWithin(tx, { orgId, user: admin, kind: 'salary', referenceId: before.id, reason: input.notes || 'Marked not paid' });
       await tx.salaryPayment.delete({ where: { id: before.id } });
     });
     await audit('salary_payment_clear', { period: `${input.period_year}-${input.period_month}`, before: paymentOut(before) }, input.notes || 'Marked not paid');

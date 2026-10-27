@@ -15,6 +15,8 @@ const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
 const { WORKER_ERRORS } = require('../../lib/workerType');
 const cashHooks = require('../cashPosition/cash.hooks');
+const invoicePaymentsService = require('./invoicePayments.service');
+const paymentsService = require('../payments/payments.service');
 const {
   exchangeRatesSchema,
   createRateSchema,
@@ -60,6 +62,7 @@ router.use(authenticate);
 
 const ERRORS = {
   ...cashHooks.HOOK_ERRORS,
+  ...require('../payments/payments.service').PAYMENT_ERRORS,
   account_not_found: [404, 'Account not found'],
   requirement_not_found: [404, 'Requirement not found for that account'],
   not_found: [404, 'Not found'],
@@ -513,6 +516,41 @@ router.delete(
     const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error, result);
     return ok(res, { deleted: true });
+  })
+);
+
+// Part payments on a client invoice. Recording is for Finance; undoing one is for the group admin only (with a reason).
+router.get(
+  '/invoices/:id/payments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoicePaymentsService.list(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.payments);
+  })
+);
+
+router.post(
+  '/invoices/:id/payments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoicePaymentsService.record(req.user.org_id, req.user, req.params.id, paymentsService.paymentInputSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result);
+  })
+);
+
+router.delete(
+  '/invoices/:id/payments/:paymentId',
+  authorizeGroupSuperadmin,
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await invoicePaymentsService.undo(req.user.org_id, req.user, req.params.id, req.params.paymentId, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
   })
 );
 

@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, authorize, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
@@ -18,8 +18,13 @@ const cashHooks = require('../cashPosition/cash.hooks');
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
 
+const paymentsService = require('../payments/payments.service');
+
 const ERRORS = {
   ...cashHooks.HOOK_ERRORS,
+  ...paymentsService.PAYMENT_ERRORS,
+  not_reimbursed: [409, 'Only a reimbursed claim can be undone'],
+  not_paid: [409, 'Only a payment marked paid can be undone'],
   location_not_found: [404, 'Location not found'],
   not_found: [404, 'Not found'],
   already_decided: [409, 'Already decided'],
@@ -126,7 +131,7 @@ router.post(
   '/claims/:id/reimburse',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.reimburseClaim(req.user.org_id, req.params.id, { user: req.user, walletPayment: cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment) });
+    const result = await service.reimburseClaim(req.user.org_id, req.params.id, { user: req.user, input: paymentsService.paymentInputSchema.parse(req.body || {}) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
   })
@@ -176,11 +181,34 @@ router.post(
   })
 );
 
+// A reimbursement marked by mistake: undone by the group admin only, with a reason (the wallet entry goes, the claim is approved again).
+router.post(
+  '/claims/:id/undo-reimbursement',
+  authorizeGroupSuperadmin,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await service.undoReimbursement(req.user.org_id, req.params.id, req.user, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.claim);
+  })
+);
+
+router.post(
+  '/vendor-payments/:id/undo-paid',
+  authorizeGroupSuperadmin,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await service.undoVendorPaymentPaid(req.user.org_id, req.params.id, req.user, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.payment);
+  })
+);
+
 router.post(
   '/vendor-payments/:id/pay',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id, { user: req.user, walletPayment: cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment) });
+    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id, { user: req.user, input: paymentsService.paymentInputSchema.parse(req.body || {}) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.payment);
   })

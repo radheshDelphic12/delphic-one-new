@@ -96,7 +96,7 @@ function serialize(row) {
 async function list(filters) {
   const {
     account_id, requirement_id, seat_id, profile_id, sales_owner_id, stage, submitted_by,
-    joined_from, joined_to, joining, premium, search, sort_by, sort_order, page, limit,
+    joined_from, joined_to, joining, premium, vendor_id, search, sort_by, sort_order, page, limit,
   } = filters;
 
   const seatFilter = {};
@@ -117,6 +117,7 @@ async function list(filters) {
     ...(Object.keys(seatFilter).length ? { seat: seatFilter } : {}),
     ...(seat_id ? { requirement_seat_id: seat_id } : {}),
     ...(profile_id ? { profile_id } : {}),
+    ...(vendor_id ? { profile: { vendor_account_id: vendor_id } } : {}),
     ...(stages.length ? { stage: { in: stages } } : {}),
     ...(submitted_by ? { submitted_by } : {}),
     ...(Object.keys(joinedRange).length ? { actual_joining_date: joinedRange } : {}),

@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the Zklyrera Spirits API (/api/v1/zklyrera). Every call returns the unwrapped `data` payload.
@@ -38,7 +39,13 @@ export const zkApi = {
   deleteReturn: (id, reason) => del(`/returns/${id}`, reason ? { reason } : {}),
 
   entries: (params) => getPage('/entries', params),
-  createEntry: (body) => post('/entries', body),
+  createEntry: async (body) => {
+    const r = await post('/entries', body);
+    if (['income', 'expense', 'salary'].includes(body?.kind) && (body.payment_status || 'paid') === 'paid') {
+      await trackInWallet({ kind: body.kind === 'income' ? 'ledger_income' : 'ledger_expense', reference_id: r?.id, amount: r?.amount ?? body.amount, title: body.kind === 'income' ? 'Income received' : 'Payment made', category: body.kind === 'salary' ? 'Salary' : undefined });
+    }
+    return r;
+  },
   updateEntry: (id, body) => patch(`/entries/${id}`, body),
   deleteEntry: (id, reason) => del(`/entries/${id}`, reason ? { reason } : {}),
 

@@ -83,6 +83,7 @@ async function getBoard(user, filters = {}) {
     priority,
     submission_stage,
     profile_source,
+    vendor_ids,
     req_type,
     premium,
     date_from,
@@ -98,6 +99,7 @@ async function getBoard(user, filters = {}) {
   if (recruiter_id) recruiterIds.push(recruiter_id);
   const submittedByIds = parseCsvList(submitted_by_ids);
   const profileSources = parseCsvList(profile_source).filter((s) => PROFILE_SOURCES.includes(s));
+  const vendorIds = parseCsvList(vendor_ids).filter((id) => UUID_RE.test(id));
   const accountIds = parseCsvList(account_ids).filter((id) => UUID_RE.test(id));
   if (account_id) accountIds.push(account_id);
 
@@ -168,7 +170,9 @@ async function getBoard(user, filters = {}) {
           requirement_seat_id: { in: seatIds },
           ...(stages.length ? { stage: { in: stages } } : {}),
           ...(submittedByIds.length ? { submitted_by: { in: submittedByIds } } : {}),
-          ...(profileSources.length ? { profile: { source: { in: profileSources } } } : {}),
+          ...(profileSources.length || vendorIds.length
+            ? { profile: { ...(profileSources.length ? { source: { in: profileSources } } : {}), ...(vendorIds.length ? { vendor_account_id: { in: vendorIds } } : {}) } }
+            : {}),
         },
         include: {
           profile: {
@@ -187,9 +191,9 @@ async function getBoard(user, filters = {}) {
       })
     : [];
 
-  // Candidate filters (stage / submitted-by / source): only keep requirements that
+  // Candidate filters (stage / submitted-by / source / vendor): only keep requirements that
   // actually have a matching candidate (submissionRows is already filtered above).
-  if (stages.length || submittedByIds.length || profileSources.length) {
+  if (stages.length || submittedByIds.length || profileSources.length || vendorIds.length) {
     const reqIdsWithMatch = new Set(submissionRows.map((row) => row.seat.requirement_id));
     requirements = requirements.filter((r) => reqIdsWithMatch.has(r.id));
   }

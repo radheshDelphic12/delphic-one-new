@@ -76,6 +76,8 @@ const listQuerySchema = z.object({
   joined_to: z.string().optional(),
   // Closed candidates only: whether the actual joining date is still to come (pending) or has been entered (set).
   joining: z.enum(['pending', 'set']).optional(),
+  // Candidates that came through this vendor account (the candidate's vendor).
+  vendor_id: z.string().uuid().optional(),
   // Premium customers only (yes) or the rest (no): decided by the client account the requirement belongs to.
   premium: z.enum(['yes', 'no']).optional(),
   search: z.string().optional(),

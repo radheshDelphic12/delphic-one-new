@@ -1,7 +1,7 @@
 jest.setTimeout(120000);
 const { app, prisma, request, cleanDatabase, createUser, createOrg, createOrgMembership, loginAs, authed } = require('./helpers');
 
-// Group cash, Phase 2: after the go-live date a paid invoice / vendor payment / expense / salary goes through a wallet.
+// Group cash: a paid invoice / vendor payment / expense / salary can be tracked in a wallet (optional, default no).
 
 let org; let group; let superToken; let adminToken; let su; let adminUser; let membershipId; let wallet; let usdWallet; let client; let location;
 const G = '/api/v1/group-cash';
@@ -46,28 +46,28 @@ describe('group cash: payment hooks', () => {
     expect((await goLive('not a date')).status).toBe(422);
   });
 
-  test('before go-live, or for older records, nothing changes: no wallet needed, nothing posted', async () => {
+  test('with no wallet chosen nothing is posted, whatever the go-live date or the age of the record', async () => {
     const inv = await invoice();
     expect((await payInvoice(inv.id)).status).toBe(200); // no go-live date at all
     await goLive('2026-05-01');
     const old = await invoice({ invoice_number: 'INV-OLD', created_at: past });
-    expect((await payInvoice(old.id)).status).toBe(200); // created before go-live
-    expect((await payInvoice((await invoice({ invoice_number: 'INV-OLD2', created_at: past })).id, { wallet_payment: wp() })).status).toBe(200);
-    expect(await walletTx({ reference_type: 'invoice' })).toHaveLength(0); // an old record's payment is entered by hand
+    expect((await payInvoice(old.id)).status).toBe(200);
+    expect((await payInvoice((await invoice({ invoice_number: 'INV-NEW' })).id)).status).toBe(200); // after go-live: the wallet is a choice now
+    expect(await walletTx()).toHaveLength(0);
+    expect(await prisma.paymentRecord.count()).toBe(3); // each was still recorded as a payment
   });
 
-  test('a client invoice created after go-live needs a wallet, then the receipt is posted with its reference', async () => {
+  test('a client invoice paid with a wallet posts the receipt to it, with its reference', async () => {
     await goLive('2020-01-01');
     const inv = await invoice();
-    const missing = await payInvoice(inv.id);
-    expect(missing.status).toBe(422);
-    expect((await prisma.clientInvoice.findUnique({ where: { id: inv.id } })).status).toBe('sent'); // not paid without it
     const ok = await payInvoice(inv.id, { wallet_payment: wp({ date: '2026-05-20' }) });
     expect(ok.status).toBe(200);
-    const [row] = await walletTx({ reference_id: inv.id });
-    expect(row).toMatchObject({ wallet_id: wallet.id, direction: 'in', mode: 'neft', reference_type: 'invoice', party: 'Acme Client' });
+    const payment = await prisma.paymentRecord.findFirst({ where: { reference_id: inv.id } });
+    const [row] = await walletTx({ reference_id: payment.id });
+    expect(row).toMatchObject({ wallet_id: wallet.id, direction: 'in', mode: 'neft', reference_type: 'payment', party: 'Acme Client' });
     expect(row.amount.toFixed(2)).toBe('1180.00');
     expect(row.date.toISOString().slice(0, 10)).toBe('2026-05-20');
+    expect(payment.wallet_transaction_id).toBe(row.id);
     expect(await prisma.clientInvoice.findUnique({ where: { id: inv.id } })).toMatchObject({ status: 'paid' });
   });
 
@@ -88,24 +88,25 @@ describe('group cash: payment hooks', () => {
     expect((await payInvoice(inv.id, { wallet_payment: wp({ wallet_id: foreign.id }) }, superToken)).status).toBe(200);
   });
 
-  test('vendor payments and expenses go out of the wallet; deleting an expense removes its entry', async () => {
+  test('vendor payments and expenses can go out of a wallet; deleting an expense removes its entry', async () => {
     await goLive('2020-01-01');
     const vp = await vendorPayment();
     const pay = (id, body, t = adminToken) => authed(request(app).post(`/api/v1/expenses/vendor-payments/${id}/pay`), t).send(body);
-    expect((await pay(vp.id, {})).status).toBe(422);
+    expect((await pay((await vendorPayment()).id, {})).status).toBe(200); // no wallet: just paid
+    expect(await walletTx()).toHaveLength(0);
     expect((await pay(vp.id, { wallet_payment: wp({ mode: 'cheque' }) })).status).toBe(200);
-    const [out] = await walletTx({ reference_type: 'vendor_payment' });
-    expect(out).toMatchObject({ direction: 'out', mode: 'cheque', party: 'Pixel Studio', reference_id: vp.id });
+    const [out] = await walletTx({ reference_type: 'payment' });
+    expect(out).toMatchObject({ direction: 'out', mode: 'cheque', party: 'Pixel Studio' });
+    expect((await prisma.paymentRecord.findFirst({ where: { reference_id: vp.id } })).wallet_transaction_id).toBe(out.id);
     const c = await claim();
     const reimburse = (id, body) => authed(request(app).post(`/api/v1/expenses/claims/${id}/reimburse`), adminToken).send(body);
-    expect((await reimburse(c.id, {})).status).toBe(422);
     expect((await reimburse(c.id, { wallet_payment: wp({ mode: 'upi' }) })).status).toBe(200);
-    expect(await walletTx({ reference_type: 'expense' })).toHaveLength(1);
+    expect(await walletTx({ reference_type: 'payment' })).toHaveLength(2);
     await prisma.user.update({ where: { id: adminUser.id }, data: { is_superadmin: true } }); // only a superadmin may delete a decided claim
     const del = await authed(request(app).delete(`/api/v1/expenses/claims/${c.id}`), adminToken);
     expect(del.status).toBe(200);
-    expect(await walletTx({ reference_type: 'expense' })).toHaveLength(0);
-    const removed = await prisma.walletTransaction.findFirst({ where: { reference_type: 'expense' } });
+    expect(await walletTx({ reference_type: 'payment' })).toHaveLength(1); // the vendor payment's entry stays
+    const removed = await prisma.walletTransaction.findFirst({ where: { reference_type: 'payment', deleted_at: { not: null } } });
     expect(removed.deleted_at).not.toBeNull();
     expect(await prisma.walletAudit.count({ where: { entity_id: removed.id, action: 'delete' } })).toBe(1);
   });
@@ -113,7 +114,8 @@ describe('group cash: payment hooks', () => {
   test('a salary marked paid posts to the wallet; changing it updates the entry and marking it not paid removes it', async () => {
     await goLive('2020-01-01');
     const save = (body) => authed(request(app).put('/api/v1/payroll/salary-payments'), adminToken).send({ org_membership_id: membershipId, period_month: 4, period_year: 2026, ...body });
-    expect((await save({ status: 'paid', paid_on: '2026-05-01', amount_paid: 40000 })).status).toBe(422);
+    expect((await save({ status: 'paid', paid_on: '2026-05-01', amount_paid: 40000 })).status).toBe(200); // no wallet: a choice now
+    expect(await walletTx({ reference_type: 'salary_run' })).toHaveLength(0);
     expect((await save({ status: 'paid', paid_on: '2026-05-01', amount_paid: 40000, wallet_payment: wp({ mode: 'neft' }) })).status).toBe(200);
     let rows = await walletTx({ reference_type: 'salary_run' });
     expect(rows).toHaveLength(1);

@@ -19,6 +19,8 @@ const boardQuerySchema = z.object({
   account_id: optionalUuid,
   account_ids: z.string().optional(),
   profile_source: z.string().optional(),
+  // Candidates that came through these vendor accounts (comma separated account ids).
+  vendor_ids: z.string().optional(),
   req_type: z.string().optional(),
   premium: z.enum(['yes', 'no']).optional(),
   bda_id: optionalUuid,

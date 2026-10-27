@@ -29,6 +29,8 @@ const prisma = require('../../config/db');
 const billingEngine = require('../calculations/engines/billing.engine');
 const vendorEngine = require('../calculations/engines/vendorPayment.engine');
 const exchangeRates = require('./exchangeRates.service');
+const invoicePayments = require('./invoicePayments.service');
+const paymentsService = require('../payments/payments.service');
 const chargesService = require('./charges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
@@ -361,6 +363,8 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   if (fixedBid.isFixedBid(account) && (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year }))) return { error: 'billing_locked' };
   await prisma.$transaction(async (tx) => {
     await require('../cashPosition/cash.hooks').unlink(tx, user.id, 'invoice', invoice.id);
+    // its payments (and their wallet entries) go with it
+    await require('../payments/payments.service').undoWithin(tx, { orgId, user, kind: 'client_invoice', referenceId: invoice.id, reason: why || 'Invoice deleted' });
     // Soft delete: restorable from Group Dashboard > Logs. The number is released so a replacement can use it.
     await tx.clientInvoice.update({
       where: { id: invoice.id },
@@ -387,12 +391,15 @@ async function listClientInvoices(orgId, { client_account_id, status, period_mon
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { created_at: 'desc' }],
     include: { client_account: CLIENT_INVOICE_ACCOUNT },
   });
-  return rows.map(serializeClientInvoice);
+  const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', rows.map((r) => r.id));
+  return rows.map((r) => invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id)));
 }
 
 async function getClientInvoice(orgId, invoiceId) {
   const row = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId }, include: { client_account: CLIENT_INVOICE_ACCOUNT } });
-  return row ? { invoice: serializeClientInvoice(row) } : { error: 'not_found' };
+  if (!row) return { error: 'not_found' };
+  const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', [row.id]);
+  return { invoice: invoicePayments.withPayments(serializeClientInvoice(row), totals.get(row.id)) };
 }
 
 // --- Vendor invoices -------------------------------------------------------

@@ -2264,6 +2264,7 @@ model Org {
   // Group cash: the legal entity this workspace is (if any) and the wallets it owns.
   legal_entity_links LegalEntity[]
   owned_wallets      Wallet[]
+  payment_records    PaymentRecord[]
 
   @@index([org_group_id])
   @@map("orgs")
@@ -7847,4 +7848,34 @@ model CompanyJobApplication {
   @@index([org_id, created_at])
   @@index([job_id, email])
   @@map("company_job_applications")
+}
+
+// One payment against a record (client invoice, expense, vendor payment ...). A record can take many (part payments); the
+// pending amount is what is left. Wallet side is optional (Paras: "track in a wallet? yes / no", default no).
+model PaymentRecord {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String    @db.Uuid
+  org                   Org       @relation(fields: [org_id], references: [id])
+  kind                  String // client_invoice | expense | vendor_payment
+  reference_id          String    @db.Uuid
+  direction             String // in | out
+  paid_on               DateTime  @db.Date
+  amount                Decimal   @db.Decimal(16, 2) // gross, in `currency`: what it settles on the record
+  currency              Currency
+  exchange_rate         Decimal?  @db.Decimal(14, 6) // INR per 1 unit of `currency`, asked at payment time; null for INR
+  inr_amount            Decimal   @db.Decimal(16, 2) // gross in INR (reporting)
+  bank_charges          Decimal   @default(0) @db.Decimal(16, 2) // in `currency`
+  other_deductions      Decimal   @default(0) @db.Decimal(16, 2) // in `currency`
+  deduction_notes       String?
+  notes                 String?
+  wallet_transaction_id String?   @db.Uuid // set when it was tracked in a wallet
+  created_by            String?   @db.Uuid
+  created_at            DateTime  @default(now())
+  // Undo (group admin): the row stays, nothing counts it any more.
+  deleted_at            DateTime?
+  deleted_by            String?   @db.Uuid
+  delete_reason         String?
+
+  @@index([org_id, kind, reference_id])
+  @@map("payment_records")
 }

@@ -70,7 +70,7 @@ async function prepare({ orgId, user, kind, record, walletPayment }) {
   const setting = await getSetting(org.org_group_id);
   const affected = setting.go_live_date && ymd(record.created_at) >= setting.go_live_date;
   if (!affected) return { post: async () => null };
-  if (!walletPayment) return { error: 'wallet_required' };
+  if (!walletPayment) return { post: async () => null }; // tracking in a wallet is a choice (default: no)
   const wallet = await prisma.wallet.findUnique({ where: { id: walletPayment.wallet_id }, include: { owner_legal_entity: true } });
   if (!wallet || !(await walletAllowed(prisma, user, orgId, org.org_group_id, wallet))) return { error: 'wallet_not_allowed' };
   if (!wallet.active) return { error: 'wallet_inactive' };
@@ -101,4 +101,4 @@ async function unlink(client, userId, kind, referenceId) {
   return rows.length;
 }
 
-module.exports = { KINDS, HOOK_ERRORS, walletPaymentSchema, getSetting, setGoLive, prepare, unlink };
+module.exports = { KINDS, HOOK_ERRORS, walletPaymentSchema, getSetting, setGoLive, prepare, unlink, walletAllowed, groupOf };

@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the Gulati Foundation API (/api/v1/foundation). Every call returns the unwrapped `data` payload.
@@ -38,7 +39,13 @@ export const fxApi = {
   deleteCampaign: (id) => del(`/campaigns/${id}`),
 
   entries: (params) => apiClient.get('/foundation/entries', { params: clean(params) }).then((res) => res.data),
-  createEntry: (body) => post('/entries', body),
+  createEntry: async (body) => {
+    const r = await post('/entries', body);
+    if (body?.kind === 'expense' || body?.kind === 'funding') {
+      await trackInWallet({ kind: body.kind === 'funding' ? 'other_in' : 'ledger_expense', reference_id: r?.id, amount: r?.amount ?? body.amount, title: body.kind === 'funding' ? 'Funding received' : 'Expense paid', category: body.kind === 'funding' ? 'Funding' : undefined });
+    }
+    return r;
+  },
   updateEntry: (id, body) => patch(`/entries/${id}`, body),
   setEntryStatus: (id, body) => post(`/entries/${id}/status`, body),
   deleteEntry: (id, reason) => del(`/entries/${id}`, reason ? { reason } : {}),
