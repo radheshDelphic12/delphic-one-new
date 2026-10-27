@@ -6,7 +6,7 @@ export const ACCOUNT_TRANSITIONS = {
   meeting_scheduled: ['active', 'rescheduled', 'dropped'],
   rescheduled: ['meeting_scheduled', 'dropped'],
   active: ['dropped'],
-  dropped: [],
+  dropped: ['active'], // reactivate (reason required)
 };
 
 // Every stage, for the superadmin override drawer (backward moves + straight to lead).
@@ -37,6 +37,13 @@ export function canMutateAccount(account, user) {
   if (!account || !user) return false;
   // Admin and BDA may edit any account and schedule / move meeting stages.
   return allowed(user, ['accounts.update', 'meetings.schedule', 'vendors.onboard'], user.role === 'admin' || user.role === 'bda');
+}
+
+// Saving the account's details (PATCH /accounts/:id) needs accounts.update on its own; meetings.schedule / vendors.onboard only
+// cover stages and meetings, so they must not open the edit form (it would fail on Save).
+export function canEditAccountDetails(account, user) {
+  if (!account || !user || account.is_project) return false;
+  return allowed(user, ['accounts.update'], user.role === 'admin' || user.role === 'bda');
 }
 
 export function canClassifyAccount(account, user) {

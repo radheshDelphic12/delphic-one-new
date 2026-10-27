@@ -25,6 +25,9 @@ const entityBody = z.object({
   active: z.boolean().optional(),
 });
 
+// An optional alert level: empty / null = none, otherwise a non-negative amount.
+const minimumBalance = z.preprocess((v) => (v === '' || v === undefined ? null : v), z.union([z.null(), z.preprocess((x) => (typeof x === 'number' ? String(x) : x), z.string().trim().regex(/^\d{1,14}(\.\d{1,2})?$/, 'Enter a minimum balance of 0 or more, with at most 2 decimals'))])).optional();
+
 const accountBody = z.object({
   legal_entity_id: uuidOrNull,
   name: z.string().trim().min(1).max(200),
@@ -33,6 +36,7 @@ const accountBody = z.object({
   account_last4: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().regex(/^\d{4}$/, 'Last 4 digits only').nullable().optional()),
   currency: z.enum(CURRENCIES),
   declared_opening_balance: signedAmount.default('0'),
+  minimum_balance: minimumBalance,
   opening_date: dateStr,
   payment_instructions: text(1000),
 });
@@ -42,6 +46,7 @@ const accountUpdate = z.object({
   bank_name: text(120),
   account_last4: accountBody.shape.account_last4,
   declared_opening_balance: signedAmount,
+  minimum_balance: minimumBalance,
   opening_date: dateStr,
   payment_instructions: text(1000),
   active: z.boolean(),

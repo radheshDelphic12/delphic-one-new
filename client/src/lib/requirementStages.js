@@ -5,7 +5,7 @@ export const REQUIREMENT_STATUS_TRANSITIONS = {
   in_progress: ['on_hold', 'closed', 'dropped'],
   on_hold: ['open', 'in_progress', 'dropped'],
   closed: [],
-  dropped: [],
+  dropped: ['open'], // reactivate (reason required)
 };
 
 export const SEAT_STATUS_TRANSITIONS = {

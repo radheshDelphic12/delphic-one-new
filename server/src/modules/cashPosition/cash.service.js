@@ -373,6 +373,10 @@ async function position(groupIds, q = {}) {
       balance: money(balance), shown_balance: money(calc.sum(wallets.map((w) => w.balance))), opening: { declared: money(a.declared_opening_balance), wallets_total: money(calc.sum(a.wallets.map((w) => w.opening_balance))) }, wallets,
     };
     view.opening.difference = money(D(view.opening.declared).minus(view.opening.wallets_total));
+    // alert level: the whole account balance (not the filtered share) against the minimum the group set for it
+    view.minimum_balance = a.minimum_balance == null ? null : money(a.minimum_balance);
+    view.below_minimum = a.minimum_balance != null && D(balance).lt(D(a.minimum_balance));
+    view.shortfall = view.below_minimum ? money(D(a.minimum_balance).minus(D(balance))) : null;
     view.warnings = [...(D(view.opening.difference).eq(0) ? [] : [`Opening balances differ by ${view.opening.difference}`]), ...wallets.filter((w) => w.negative).map((w) => `${w.name} is negative`)];
     accountsFlat.push(view);
     return view;
@@ -402,7 +406,8 @@ async function position(groupIds, q = {}) {
   for (const a of accountsFlat) for (const w of a.wallets) addToFund(w, { bank_account_name: a.name, legal_entity_name: a.legal_entity_name, type: a.type, currency: a.currency });
   for (const w of unmapped) addToFund(w, { bank_account_name: 'Not mapped', legal_entity_name: null, type: null });
   const funds = [...owners.values()].map((o) => ({ ...o, totals: calc.totalsByCurrency(o.wallets, (w) => w.balance) })).sort((x, y) => x.name.localeCompare(y.name));
-  return { entities: tree, unmapped_wallets: unmapped, unmapped_totals: calc.totalsByCurrency(unmapped, (w) => w.balance), funds, totals: calc.totalsByCurrency(tree.flatMap((e) => e.accounts), (a) => a.shown_balance) };
+  const belowMinimum = accountsFlat.filter((a) => a.below_minimum).map((a) => ({ id: a.id, name: a.name, currency: a.currency, balance: a.balance, minimum_balance: a.minimum_balance, shortfall: a.shortfall, legal_entity_name: a.legal_entity_name }));
+  return { entities: tree, below_minimum: belowMinimum, unmapped_wallets: unmapped, unmapped_totals: calc.totalsByCurrency(unmapped, (w) => w.balance), funds, totals: calc.totalsByCurrency(tree.flatMap((e) => e.accounts), (a) => a.shown_balance) };
 }
 
 /** Pick-lists for the forms: entities, workspaces, accounts and wallets. */
@@ -410,12 +415,12 @@ async function options(groupIds) {
   const [entities, workspaces, accounts, wallets] = await Promise.all([
     prisma.legalEntity.findMany({ where: { org_group_id: { in: groupIds } }, select: { id: true, name: true, workspace_id: true, active: true }, orderBy: { name: 'asc' } }),
     prisma.org.findMany({ where: { org_group_id: { in: groupIds }, status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
+    prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, minimum_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
     prisma.wallet.findMany({ where: { active: true, ...grp(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
   ]);
   return {
     entities, workspaces, modes: calc.MODES, currencies: calc.CURRENCIES,
-    accounts: accounts.map((a) => ({ ...a, declared_opening_balance: money(a.declared_opening_balance), opening_date: ymd(a.opening_date) })),
+    accounts: accounts.map((a) => ({ ...a, declared_opening_balance: money(a.declared_opening_balance), minimum_balance: a.minimum_balance == null ? null : money(a.minimum_balance), opening_date: ymd(a.opening_date) })),
     wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account?.name || null, currency: w.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id })),
   };
 }
@@ -636,7 +641,7 @@ async function setupLists(groupIds) {
     entities,
     accounts: accounts.map((a) => ({
       id: a.id, name: a.name, type: a.type, bank_name: a.bank_name, account_last4: a.account_last4, currency: a.currency, active: a.active, payment_instructions: a.payment_instructions,
-      declared_opening_balance: money(a.declared_opening_balance), opening_date: ymd(a.opening_date), legal_entity_id: a.legal_entity_id, legal_entity_name: a.legal_entity?.name || null,
+      declared_opening_balance: money(a.declared_opening_balance), minimum_balance: a.minimum_balance == null ? null : money(a.minimum_balance), opening_date: ymd(a.opening_date), legal_entity_id: a.legal_entity_id, legal_entity_name: a.legal_entity?.name || null,
     })),
     wallets: wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null })),
   };

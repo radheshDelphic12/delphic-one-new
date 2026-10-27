@@ -287,9 +287,11 @@ async function changeStatus(id, { to_status, reason }, user) {
     const requirement = await tx.requirement.findUnique({ where: { id } });
     if (!requirement) return { error: 'not_found' };
     if (!canMutateRequirement(requirement, user)) return { error: 'forbidden' };
-    if (requirement.is_locked) return { error: 'locked' };
+    // Reactivating a dropped requirement is the one move allowed while it is locked (the drop locks it).
+    const reactivating = requirement.status === 'dropped' && to_status === 'open';
+    if (requirement.is_locked && !reactivating) return { error: 'locked' };
     if (!(REQUIREMENT_STATUS_TRANSITIONS[requirement.status] || []).includes(to_status)) return { error: 'invalid_transition' };
-    if (to_status === 'dropped' && !reason) return { error: 'reason_required' };
+    if ((to_status === 'dropped' || reactivating) && !reason) return { error: 'reason_required' };
 
     if (to_status === 'closed') {
       const openSeats = await tx.requirementSeat.count({
@@ -300,6 +302,7 @@ async function changeStatus(id, { to_status, reason }, user) {
 
     const patch = { status: to_status };
     if (to_status === 'dropped') patch.is_locked = true;
+    if (reactivating) patch.is_locked = false;
     if (to_status === 'closed') {
       patch.is_locked = true;
       patch.closed_at = new Date();
@@ -314,7 +317,7 @@ async function changeStatus(id, { to_status, reason }, user) {
         from_stage: requirement.status,
         to_stage: to_status,
         changed_by: user.id,
-        reason: reason || null,
+        reason: reason ? (reactivating ? `[reactivated] ${reason}` : reason) : null,
       },
     });
 

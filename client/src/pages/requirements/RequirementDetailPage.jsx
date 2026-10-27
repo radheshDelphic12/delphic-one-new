@@ -137,7 +137,7 @@ export default function RequirementDetailPage() {
     setBusy(true);
     try {
       const body = { to_status: statusModal };
-      if (requiresDropReason(statusModal)) body.reason = reason.trim();
+      if (statusNeedsReason(statusModal)) body.reason = reason.trim();
       await apiClient.post(`/requirements/${id}/status`, body);
       setStatusModal(null);
       setReason('');
@@ -208,6 +208,10 @@ export default function RequirementDetailPage() {
   }
 
   const nextStatuses = nextRequirementStatuses(requirement.status);
+  // A dropped requirement is locked, but can be reactivated (back to open) with a reason.
+  const dropped = requirement.status === 'dropped';
+  const reactivatable = locked && dropped && canEdit;
+  const statusNeedsReason = (to) => requiresDropReason(to) || dropped;
   const activeAssignments = assignments.filter((a) => !a.unassigned_at);
 
   const seatColumns = [
@@ -382,7 +386,7 @@ export default function RequirementDetailPage() {
       {locked && (
         <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           This requirement is locked. It remains available for viewing.
-          {user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
+          {reactivatable ? ' Use Reactivate requirement to bring it back to open.' : user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
         </div>
       )}
 
@@ -398,7 +402,7 @@ export default function RequirementDetailPage() {
             </button>
           )}
         </div>
-        {locked || !canEdit ? (
+        {(locked && !reactivatable) || !canEdit ? (
           <p className="mt-2 text-sm text-tertiary-500">
             {locked ? 'This requirement is locked. Admin unlock is required to change status.' : 'Only the sales owner or admin can change status.'}
           </p>
@@ -412,7 +416,7 @@ export default function RequirementDetailPage() {
                 label={
                   to === 'closed'
                     ? 'All seats must already be closed or dropped'
-                    : requiresDropReason(to)
+                    : statusNeedsReason(to)
                       ? 'Requires a reason'
                       : `Move this requirement to ${to.replace(/_/g, ' ')}`
                 }
@@ -422,7 +426,7 @@ export default function RequirementDetailPage() {
                   className={to === 'dropped' ? 'btn-danger' : 'btn-secondary'}
                   onClick={() => openStatus(to)}
                 >
-                  Move to {to.replace(/_/g, ' ')}
+                  {dropped && to === 'open' ? 'Reactivate requirement' : `Move to ${to.replace(/_/g, ' ')}`}
                 </button>
               </Tooltip>
             ))}
@@ -689,7 +693,7 @@ export default function RequirementDetailPage() {
             <button
               type="button"
               className="btn-primary"
-              disabled={busy || (requiresDropReason(statusModal) && !reason.trim())}
+              disabled={busy || (statusNeedsReason(statusModal) && !reason.trim())}
               onClick={confirmRequirementStatus}
             >
               Confirm
@@ -700,7 +704,7 @@ export default function RequirementDetailPage() {
         {statusModal === 'closed' && (
           <p className="mb-2 text-tertiary-600">All seats must already be closed or dropped.</p>
         )}
-        {requiresDropReason(statusModal) && (
+        {statusNeedsReason(statusModal) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-tertiary-500">Reason *</label>
             <textarea
@@ -708,11 +712,11 @@ export default function RequirementDetailPage() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="w-full rounded-md border px-3 py-2 text-sm"
-              placeholder="Why is this being dropped?"
+              placeholder={dropped ? 'Why is this being reactivated?' : 'Why is this being dropped?'}
             />
           </div>
         )}
-        {!requiresDropReason(statusModal) && statusModal !== 'closed' && (
+        {!statusNeedsReason(statusModal) && statusModal !== 'closed' && (
           <p className="text-tertiary-600">Confirm moving this requirement to {statusModal?.replace(/_/g, ' ')}.</p>
         )}
       </Modal>

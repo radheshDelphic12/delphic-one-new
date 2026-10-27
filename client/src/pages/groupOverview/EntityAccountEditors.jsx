@@ -55,13 +55,13 @@ export function AccountEditDrawer({ account, entities, onClose, onSaved }) {
   const [v, setV] = useState({});
   const { busy, save } = useSave(onSaved, onClose);
   useEffect(() => {
-    if (account) setV({ legal_entity_id: account.legal_entity_id || '', name: account.name, bank_name: account.bank_name || '', account_last4: account.account_last4 || '', payment_instructions: account.payment_instructions || '', declared_opening_balance: account.declared_opening_balance ?? '0', opening_date: account.opening_date || '', active: account.active !== false });
+    if (account) setV({ legal_entity_id: account.legal_entity_id || '', name: account.name, bank_name: account.bank_name || '', account_last4: account.account_last4 || '', payment_instructions: account.payment_instructions || '', declared_opening_balance: account.declared_opening_balance ?? '0', minimum_balance: account.minimum_balance ?? '', opening_date: account.opening_date || '', active: account.active !== false });
   }, [account]);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   return (
     <Drawer open={Boolean(account)} onClose={onClose} size="md" tone="edit" title={account ? `Edit ${account.name}` : 'Edit bank account'}>
       {account && (
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save(() => apiClient.patch(`/group-cash/accounts/${account.id}`, { ...(account.type === 'cash' ? { name: v.name, payment_instructions: v.payment_instructions } : { name: v.name, bank_name: v.bank_name, account_last4: v.account_last4, payment_instructions: v.payment_instructions }), legal_entity_id: v.legal_entity_id || null, declared_opening_balance: v.declared_opening_balance, ...(v.opening_date ? { opening_date: v.opening_date } : {}), active: v.active }), 'Bank account saved'); }}>
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save(() => apiClient.patch(`/group-cash/accounts/${account.id}`, { ...(account.type === 'cash' ? { name: v.name, payment_instructions: v.payment_instructions } : { name: v.name, bank_name: v.bank_name, account_last4: v.account_last4, payment_instructions: v.payment_instructions }), legal_entity_id: v.legal_entity_id || null, declared_opening_balance: v.declared_opening_balance, minimum_balance: String(v.minimum_balance ?? '').trim() === '' ? null : v.minimum_balance, ...(v.opening_date ? { opening_date: v.opening_date } : {}), active: v.active }), 'Bank account saved'); }}>
           <label className={labelCls}>Name<input required className={inputCls} value={v.name || ''} onChange={set('name')} /></label>
           <label className={labelCls}>Legal entity (optional)<select className={inputCls} value={v.legal_entity_id || ''} onChange={set('legal_entity_id')}><option value="">None</option>{(entities || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
           {account.type !== 'cash' && (
@@ -74,6 +74,7 @@ export function AccountEditDrawer({ account, entities, onClose, onSaved }) {
             <label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={v.declared_opening_balance ?? ''} onChange={set('declared_opening_balance')} /></label>
             <label className={labelCls}>As on<input type="date" className={inputCls} value={v.opening_date || ''} onChange={set('opening_date')} /></label>
           </div>
+          <label className={labelCls}>Minimum balance (optional)<input inputMode="decimal" className={inputCls} value={v.minimum_balance ?? ''} onChange={set('minimum_balance')} placeholder="e.g. 500000" data-testid="min-balance-input" /><span className="text-[11px] font-normal text-tertiary-400">The account is highlighted in red once its balance falls below this. Leave empty for no alert.</span></label>
           <label className={labelCls}>Payment details printed on invoices (bank, IFSC / SWIFT, account holder)
             <textarea rows={4} className={inputCls} maxLength={1000} value={v.payment_instructions || ''} onChange={set('payment_instructions')} />
           </label>

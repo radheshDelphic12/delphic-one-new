@@ -46,6 +46,7 @@ import {
   ACCOUNT_TRANSITIONS,
   accountKey,
   apiErrorMessage,
+  canEditAccountDetails,
   canMutateAccount,
 } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
@@ -397,7 +398,7 @@ export default function AccountPipelineBoardPage() {
                 Submit candidate
               </button>
             )}
-            {canMutate && !account.is_locked && (
+            {canEditAccountDetails(account, user) && !account.is_locked && (
               <button type="button" className="btn-secondary" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-4 w-4" /> Edit account
               </button>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ClipboardList, Download, Plus, Timer, Trash2 } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Download, Info, Plus, Timer, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -293,11 +293,16 @@ export default function ItTimesheetPage() {
           </span>
         </div>
         <form onSubmit={saveDay} className="mt-3 space-y-3">
-          <label className="block text-xs font-medium text-tertiary-600">
-            Date
-            <input required type="date" min={earliestLogIso()} max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full max-w-xs rounded-xl border px-3 py-2 text-sm" />
-            <span className="mt-1 block font-normal text-tertiary-500">Last month can be filled until the 5th of this month.</span>
-          </label>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-tertiary-100 bg-tertiary-50/40 px-3 py-2.5">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="log-date" className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-500">Date</label>
+              <input id="log-date" required type="date" min={earliestLogIso()} max={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} className="h-10 w-48 rounded-lg border border-tertiary-200 bg-white px-3 text-sm font-medium text-tertiary-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100" />
+            </div>
+            <div className="flex min-w-0 flex-1 items-start gap-2 self-end pb-2 text-xs leading-snug text-tertiary-500">
+              <Info className="mt-px h-3.5 w-3.5 shrink-0 text-primary-500" />
+              <span>{dateLabel(date)} selected. Last month can be filled until the 5th of this month.</span>
+            </div>
+          </div>
           <LeaveDayNotice leave={leave} />
           {noProjects && (
             <p className="rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700">
