@@ -1,6 +1,6 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarRange, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
+import { CalendarRange, FileText, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
 import ExpensesTab from './ExpensesTab.jsx';
@@ -9,6 +9,7 @@ import GroupChargesTab from './GroupChargesTab.jsx';
 import MonthProjectsTab from './MonthProjectsTab.jsx';
 import BillingSetupTab from './BillingSetupTab.jsx';
 import VendorInvoicesTab from './VendorInvoicesTab.jsx';
+import InvoicingSection from './InvoicingSection.jsx';
 // Project P&L is hidden for now (client brief 2026-10-01: its cost rules —
 // partial-month salary on a last working day, actual project cost — are not
 // settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
@@ -20,6 +21,8 @@ const ADMIN_TABS = [
   { key: 'projects', label: 'Projects', icon: FolderKanban, need: 'billing.view' },
   // Month-wise: running projects -> timesheet -> billing -> invoice -> payment -> financial status, plus the Sales / Salary exports.
   { key: 'month-view', label: 'Month View', icon: CalendarRange, need: ['analytics.view', 'financials.view', 'finance.view'] },
+  // Every client invoice, month by month: paid / partly paid / unpaid, filters, totals, payments (the payment popup, wallet yes / no).
+  { key: 'invoicing', label: 'Invoicing', icon: FileText, need: 'billing.view' },
   // Per-resource billing rates and the client billing status rules (PL / NPL / comp off / FH / SH ...).
   { key: 'billing-setup', label: 'Billing Setup', icon: SlidersHorizontal, need: 'billing.view' },
   // Vendor invoices: TDS, adjustment, sent / unsent, paid / unpaid, trace, Excel export.
@@ -57,6 +60,7 @@ export default function FinanceHubPage() {
       {section === 'expenses' && has('expenses') && <ExpensesTab />}
       {section === 'projects' && has('projects') && <ProjectsTab />}
       {section === 'month-view' && has('month-view') && <MonthProjectsTab />}
+      {section === 'invoicing' && has('invoicing') && <InvoicingSection />}
       {section === 'billing-setup' && has('billing-setup') && <BillingSetupTab />}
       {section === 'vendor-invoices' && has('vendor-invoices') && <VendorInvoicesTab />}
       {section === 'group-charges' && has('group-charges') && <GroupChargesTab />}

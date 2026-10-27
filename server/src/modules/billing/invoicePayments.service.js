@@ -17,7 +17,9 @@ async function paidOf(orgId, id) {
 
 /** What the invoice list / page shows about payments: paid, pending and paid / partly paid / unpaid. */
 function withPayments(invoice, total) {
-  return { ...invoice, ...payments.summarize(invoice.amount, total.paid), payments_count: total.count };
+  // An invoice marked paid before payments were recorded has no payment rows: it counts as fully paid, not as pending.
+  const paid = invoice.status === 'paid' && total.count === 0 ? D(invoice.amount) : total.paid;
+  return { ...invoice, ...payments.summarize(invoice.amount, paid), payments_count: total.count };
 }
 
 async function list(orgId, invoiceId) {

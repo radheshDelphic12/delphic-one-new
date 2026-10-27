@@ -62,6 +62,13 @@ describe('part payments on a client invoice', () => {
     expect((await list()).find((r) => r.id === inv.id)).toMatchObject({ status: 'paid', paid_amount: '1000.00' });
   });
 
+  test('an invoice marked paid before payments were recorded counts as fully paid, not as pending', async () => {
+    const legacy = await invoice({ status: 'paid', paid_at: new Date() });
+    const row = (await list()).find((r) => r.id === legacy.id);
+    expect(row).toMatchObject({ status: 'paid', paid_amount: '1000.00', pending_amount: '0.00', payment_status: 'paid', payments_count: 0 });
+    expect((await pay(legacy.id, { amount: '1' })).status).toBe(409);
+  });
+
   test('a draft invoice cannot take a payment', async () => {
     const inv = await invoice({ status: 'draft' });
     expect((await pay(inv.id, { amount: '100' })).status).toBe(409);
