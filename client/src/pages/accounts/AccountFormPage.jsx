@@ -12,8 +12,8 @@ import {
   apiErrorMessage,
   buildAccountBody,
   canCreateAccount,
+  canEditAccountDetails,
   canEditBroughtBy,
-  canMutateAccount,
   formFromAccount,
 } from './accountUtils.js';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
@@ -49,7 +49,7 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
   const [loadFailed, setLoadFailed] = useState(false);
   const [ownerOptions, setOwnerOptions] = useState([]);
   // Anyone who can edit the account can also reassign its owner/POC to any active user.
-  const canEditOwner = isEditing && canMutateAccount(account, user);
+  const canEditOwner = isEditing && canEditAccountDetails(account, user);
   const canEditType = isEditing && (user?.role === 'admin' || user?.role === 'bda');
   // "Brought by" is normally set once at creation — admin or BDA may correct it (not superadmin-only).
   const canEditOriginOwner = isEditing && canEditBroughtBy(user);
@@ -153,7 +153,7 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
     !asPanel &&
     isEditing &&
     account &&
-    (!canMutateAccount(account, user) || (account.is_locked && !canEditBroughtBy(user)))
+    (!canEditAccountDetails(account, user) || (account.is_locked && !canEditBroughtBy(user)))
   ) {
     return <Navigate to={`/accounts/${id}`} replace />;
   }

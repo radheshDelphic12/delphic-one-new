@@ -256,8 +256,15 @@ function BankView({ position, selected, toggle, setOpenWallet, setOpenAccount })
   const [collapsed, setCollapsed] = useState({});
   const unmapped = position.unmapped_wallets || [];
   if (!position.entities.length && !unmapped.length) return <EmptyState icon={Landmark} title="No bank accounts yet" description="Add bank accounts and wallets under Setup, then map each wallet to its bank account." />;
+  const low = position.below_minimum || [];
   return (
     <div className="space-y-4">
+      {low.length > 0 && (
+        <div className="rounded-2xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800" role="alert" data-testid="below-minimum-banner">
+          <p className="font-semibold">{low.length} bank account{low.length === 1 ? ' is' : 's are'} below the minimum balance</p>
+          <ul className="mt-1 list-disc pl-5 text-xs">{low.map((a) => <li key={a.id}>{a.name}{a.legal_entity_name ? ` (${a.legal_entity_name})` : ''}: {formatMoney(a.balance, a.currency)} against a minimum of {formatMoney(a.minimum_balance, a.currency)}, short by {formatMoney(a.shortfall, a.currency)}</li>)}</ul>
+        </div>
+      )}
       {position.entities.map((e) => (
         <section key={e.id || 'no-entity'} className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-tertiary-100 p-3">
@@ -267,7 +274,7 @@ function BankView({ position, selected, toggle, setOpenWallet, setOpenAccount })
           <table className="min-w-full text-sm"><tbody>
             {e.accounts.map((a) => (
               <FragmentRows key={a.id}>
-                <tr className="bg-tertiary-50/60">
+                <tr className={a.below_minimum ? 'bg-danger-50 ring-1 ring-inset ring-danger-200' : 'bg-tertiary-50/60'} data-testid={a.below_minimum ? 'below-minimum-row' : undefined}>
                   <td className="p-2 pl-3"><input type="checkbox" aria-label={`Select ${a.name}`} checked={selected.has(accountKey(a.id))} onChange={() => toggle(accountKey(a.id))} /></td>
                   <td className="p-2">
                     <button type="button" className="inline-flex items-center gap-1 font-semibold text-tertiary-900" onClick={() => setCollapsed((c) => ({ ...c, [a.id]: !c[a.id] }))}>
@@ -277,7 +284,7 @@ function BankView({ position, selected, toggle, setOpenWallet, setOpenAccount })
                   </td>
                   <td className="p-2"><Pill tone="blue">{TYPE_LABEL[a.type]}</Pill><button type="button" className="ml-2 text-xs font-normal text-primary-700 hover:underline" onClick={() => setOpenAccount(a.id)}>Statement</button></td>
                   <td className="p-2 text-xs text-tertiary-500">{a.currency}</td>
-                  <td className="p-2 text-right font-semibold"><Money value={a.shown_balance} currency={a.currency} />{a.shown_balance !== a.balance && <p className="text-xs font-normal text-tertiary-500">of {formatMoney(a.balance, a.currency)}</p>}</td>
+                  <td className="p-2 text-right font-semibold"><span className={a.below_minimum ? 'text-danger-700' : ''}><Money value={a.shown_balance} currency={a.currency} /></span>{a.shown_balance !== a.balance && <p className="text-xs font-normal text-tertiary-500">of {formatMoney(a.balance, a.currency)}</p>}{a.below_minimum && <p className="text-xs font-semibold text-danger-700">Below minimum {formatMoney(a.minimum_balance, a.currency)} · short by {formatMoney(a.shortfall, a.currency)}</p>}</td>
                 </tr>
                 {a.warnings.length > 0 && <tr><td /><td colSpan={4} className="px-2 pb-1 text-xs text-warning-700">⚠ {a.warnings.join(' · ')}</td></tr>}
                 {!collapsed[a.id] && a.wallets.map((w) => (
@@ -458,7 +465,7 @@ function GoLiveCard() {
 function SetupView({ options, position, onChanged }) {
   const saved = useSaved();
   const [entity, setEntity] = useState({ name: '', workspace_id: '', gstin: '', pan: '' });
-  const [account, setAccount] = useState({ legal_entity_id: '', name: '', type: 'current', bank_name: '', account_last4: '', currency: 'INR', declared_opening_balance: '0', opening_date: today() });
+  const [account, setAccount] = useState({ legal_entity_id: '', name: '', type: 'current', bank_name: '', account_last4: '', currency: 'INR', declared_opening_balance: '0', minimum_balance: '', opening_date: today() });
   const [wallet, setWallet] = useState({ bank_account_id: '', owner: '', purpose: 'general', name: '', opening_balance: '0', currency: 'INR' });
   const [editWallet, setEditWallet] = useState(null);
   const [editEntity, setEditEntity] = useState(null);
@@ -493,7 +500,7 @@ function SetupView({ options, position, onChanged }) {
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>GSTIN<input className={inputCls} value={entity.gstin} onChange={(e) => setEntity((c) => ({ ...c, gstin: e.target.value }))} /></label><label className={labelCls}>PAN<input className={inputCls} value={entity.pan} onChange={(e) => setEntity((c) => ({ ...c, pan: e.target.value }))} /></label></div>
           <button type="submit" className="btn-primary" disabled={!entity.name.trim()}>Add entity</button>
         </form>
-        <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => { e.preventDefault(); if (await run(() => apiClient.post('/group-cash/accounts', { ...account, legal_entity_id: account.legal_entity_id || null, bank_name: account.bank_name || null, account_last4: account.account_last4 || null }), 'Bank account added', 'Could not add')) setAccount((c) => ({ ...c, name: '', bank_name: '', account_last4: '' })); }}>
+        <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => { e.preventDefault(); if (await run(() => apiClient.post('/group-cash/accounts', { ...account, legal_entity_id: account.legal_entity_id || null, minimum_balance: account.minimum_balance.trim() === '' ? null : account.minimum_balance, bank_name: account.bank_name || null, account_last4: account.account_last4 || null }), 'Bank account added', 'Could not add')) setAccount((c) => ({ ...c, name: '', bank_name: '', account_last4: '' })); }}>
           <h3 className="font-heading font-semibold text-tertiary-900">New bank account</h3>
           <label className={labelCls}>Legal entity (optional)<select className={inputCls} value={account.legal_entity_id} onChange={(e) => setAccount((c) => ({ ...c, legal_entity_id: e.target.value }))}><option value="">None</option>{(options?.entities || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
           <label className={labelCls}>Name<input required className={inputCls} value={account.name} onChange={(e) => setAccount((c) => ({ ...c, name: e.target.value }))} placeholder="e.g. HDFC Current" /></label>
@@ -503,6 +510,7 @@ function SetupView({ options, position, onChanged }) {
           </div>
           {account.type !== 'cash' && <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Bank<input className={inputCls} value={account.bank_name} onChange={(e) => setAccount((c) => ({ ...c, bank_name: e.target.value }))} /></label><label className={labelCls}>Last 4 digits<input className={inputCls} maxLength={4} value={account.account_last4} onChange={(e) => setAccount((c) => ({ ...c, account_last4: e.target.value }))} /></label></div>}
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={account.declared_opening_balance} onChange={(e) => setAccount((c) => ({ ...c, declared_opening_balance: e.target.value }))} /></label><label className={labelCls}>As on<input type="date" className={inputCls} value={account.opening_date} onChange={(e) => setAccount((c) => ({ ...c, opening_date: e.target.value }))} /></label></div>
+          <label className={labelCls}>Minimum balance (optional)<input inputMode="decimal" className={inputCls} value={account.minimum_balance} onChange={(e) => setAccount((c) => ({ ...c, minimum_balance: e.target.value }))} placeholder="Alert when the balance falls below" /></label>
           <button type="submit" className="btn-primary" disabled={!account.name.trim()}>Add bank account</button>
         </form>
         <form className="space-y-2 rounded-2xl border border-tertiary-100 bg-white p-4" onSubmit={async (e) => {
@@ -545,6 +553,7 @@ function SetupView({ options, position, onChanged }) {
                 </div>
                 {(() => { const m = accountMap.get(a.id); const ws = m?.wallets || []; return (
                   <div className="mt-1 pl-1 text-xs text-tertiary-600">
+                    {a.minimum_balance != null && <p className={m?.below_minimum ? 'font-medium text-danger-700' : ''}>Minimum balance <Money value={a.minimum_balance} currency={a.currency} />{m?.below_minimum ? ' · below the minimum' : ''}</p>}
                     {ws.length === 0 ? <span className="text-tertiary-400">No wallets mapped, so no balance yet. Map wallets from the Wallets list below.</span> : (
                       <>
                         <span className="font-medium text-tertiary-900">Balance <Money value={m.balance} currency={a.currency} /></span> = {ws.map((w, k) => <span key={w.id}>{k ? ' + ' : ''}{w.name} <Money value={w.balance} currency={a.currency} /></span>)}

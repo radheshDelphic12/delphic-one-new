@@ -45,10 +45,13 @@ export default function AccountStageMoveDrawer({
     setAttendeeIds((account?.meeting_attendees || []).map((a) => a.id));
   }, [open, account?.stage, preferredToStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Dropping, and reactivating a dropped account, both need a reason (written to stage history).
+  const needsReason = toStage === 'dropped' || account?.stage === 'dropped';
+
   function submit(event) {
     event.preventDefault();
     const body = { to_stage: toStage };
-    if (toStage === 'dropped') body.reason = reason.trim();
+    if (needsReason) body.reason = reason.trim();
     if (toStage === 'meeting_scheduled') {
       body.meeting_mode = meetingMode;
       body.meeting_date = new Date(meetingDate).toISOString();
@@ -146,7 +149,7 @@ export default function AccountStageMoveDrawer({
             <AccountAttendeesPicker open={open} value={attendeeIds} onChange={setAttendeeIds} />
           </>
         )}
-        {toStage === 'dropped' && (
+        {needsReason && (
           <label className="block text-xs font-medium text-tertiary-600">
             Reason
             <textarea

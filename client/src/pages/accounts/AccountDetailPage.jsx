@@ -18,7 +18,7 @@ import AccountStageOverrideDrawer from './AccountStageOverrideDrawer.jsx';
 import AccountMeetingEditDrawer from './AccountMeetingEditDrawer.jsx';
 import AccountClientMeetings from './AccountClientMeetings.jsx';
 import { accountAccent } from '../../lib/accountAccent.js';
-import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canMutateAccount, formatAccountValue } from './accountUtils.js';
+import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canEditAccountDetails, canMutateAccount, formatAccountValue } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
 
 function DetailField({ label, value, children }) {
@@ -155,6 +155,7 @@ export default function AccountDetailPage() {
   }
 
   const canMutate = canMutateAccount(account, user);
+  const canEditDetails = canEditAccountDetails(account, user);
   const canOverride = Boolean(user?.is_superadmin);
   const canUnlock = userCan(user, 'unlockAccount');
   const nextStages = ACCOUNT_TRANSITIONS[account.stage] || [];
@@ -195,13 +196,15 @@ export default function AccountDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to={`/pipeline/${id}`} className="btn-secondary">Pipeline board</Link>
-            {((canMutate && !account.is_locked) || canOverride) && (
+            {((canEditDetails && !account.is_locked) || canOverride) && (
               <button type="button" className="btn-secondary" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-4 w-4" /> Edit
               </button>
             )}
-            {canMutate && !account.is_locked && nextStages.length > 0 && (
-              <button type="button" onClick={() => setIsStageModalOpen(true)} className="btn-primary">Move stage</button>
+            {canMutate && (!account.is_locked || account.stage === 'dropped') && nextStages.length > 0 && (
+              <button type="button" onClick={() => setIsStageModalOpen(true)} className="btn-primary">
+                {account.stage === 'dropped' ? 'Reactivate' : 'Move stage'}
+              </button>
             )}
             {canOverride && (
               <button type="button" onClick={() => setOverrideOpen(true)} className="btn-secondary">Override stage</button>
@@ -234,7 +237,7 @@ export default function AccountDetailPage() {
       {account.is_locked && (
         <div className="rounded-lg border border-danger-100 bg-danger-50 px-3 py-2 text-sm text-danger-700">
           This account is locked because it reached a terminal stage. It remains available for viewing.
-          {canUnlock ? ' Use Unlock to allow edits again.' : ''}
+          {account.stage === 'dropped' ? ' Use Reactivate to bring it back to Active.' : canUnlock ? ' Use Unlock to allow edits again.' : ''}
         </div>
       )}
 

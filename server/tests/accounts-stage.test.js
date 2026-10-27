@@ -162,6 +162,26 @@ describe('account stage machine', () => {
   });
 });
 
+describe('reactivating a dropped account', () => {
+  test('a dropped account goes back to active with a reason and is unlocked', async () => {
+    const account = await createAccount();
+    await authed(request(app).post(`/api/v1/accounts/${account.id}/stage`), bdaToken).send({
+      to_stage: 'meeting_scheduled',
+      meeting_mode: 'online',
+      meeting_date: new Date().toISOString(),
+    });
+    await authed(request(app).post(`/api/v1/accounts/${account.id}/stage`), bdaToken).send({ to_stage: 'dropped', reason: 'not interested' });
+
+    const noReason = await authed(request(app).post(`/api/v1/accounts/${account.id}/stage`), bdaToken).send({ to_stage: 'active' });
+    expect(noReason.status).toBe(400);
+
+    const back = await authed(request(app).post(`/api/v1/accounts/${account.id}/stage`), bdaToken).send({ to_stage: 'active', reason: 'they came back' });
+    expect(back.status).toBe(200);
+    expect(back.body.data.stage).toBe('active');
+    expect(back.body.data.is_locked).toBe(false);
+  });
+});
+
 describe('lead classification (client/vendor undecided at creation)', () => {
   test('a lead can be created without a type, then classified', async () => {
     const create = await authed(request(app).post('/api/v1/accounts'), bdaToken).send({

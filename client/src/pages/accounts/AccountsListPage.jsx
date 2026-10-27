@@ -18,6 +18,7 @@ import {
   accountKey,
   apiErrorMessage,
   canCreateAccount,
+  canEditAccountDetails,
   canMutateAccount,
   canOverrideStage,
 } from './accountUtils.js';
@@ -38,6 +39,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
   }, [row]);
 
   const canEdit = canMutateAccount(detail, user) && !detail.is_locked;
+  const canEditDetails = canEditAccountDetails(detail, user) && !detail.is_locked;
   const nextStages = ACCOUNT_TRANSITIONS[detail.stage] || [];
   const canOverride = canOverrideStage(user);
 
@@ -80,7 +82,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
         <Link to={`/accounts/${detail.id}`} className="btn-secondary">
           Open details
         </Link>
-        {canEdit && (
+        {canEditDetails && (
           <button type="button" className="btn-secondary" onClick={() => navigate(`/accounts/${detail.id}?edit=1`)}>
             Edit account
           </button>

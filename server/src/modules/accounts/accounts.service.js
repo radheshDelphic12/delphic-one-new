@@ -11,7 +11,8 @@ const TRANSITIONS = {
   meeting_scheduled: ['active', 'rescheduled', 'dropped'],
   rescheduled: ['meeting_scheduled', 'dropped'],
   active: ['dropped'],
-  dropped: [],
+  // A dropped client / vendor can be reactivated with a reason; the lock set by the drop is lifted with it.
+  dropped: ['active'],
 };
 
 function serialize(row) {
@@ -243,9 +244,11 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
     if (!account) return { error: 'not_found' };
     if (account.is_project) return { error: 'is_project' };
     if (!canMutateAccount(account, user, MEETING_PERMS)) return { error: 'forbidden' };
-    if (account.is_locked) return { error: 'locked' };
+    // Reactivating a dropped account is the one move allowed while it is locked (the drop locks it).
+    const reactivating = account.stage === 'dropped' && to_stage === 'active';
+    if (account.is_locked && !reactivating) return { error: 'locked' };
     if (!canTransition(account.stage, to_stage)) return { error: 'invalid_transition' };
-    if (to_stage === 'dropped' && !reason) return { error: 'reason_required' };
+    if ((to_stage === 'dropped' || reactivating) && !reason) return { error: 'reason_required' };
     if (to_stage === 'meeting_scheduled' && (!meeting_mode || !meeting_date)) {
       return { error: 'meeting_fields_required' };
     }
@@ -261,6 +264,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
       if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
     }
     if (to_stage === 'dropped') patch.is_locked = true;
+    if (reactivating) patch.is_locked = false;
 
     const updated = await tx.account.update({
       where: { id },
@@ -289,7 +293,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
         from_stage: account.stage,
         to_stage,
         changed_by: user.id,
-        reason: reason || null,
+        reason: reason ? (reactivating ? `[reactivated] ${reason}` : reason) : null,
       },
     });
 

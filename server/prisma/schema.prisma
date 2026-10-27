@@ -7464,6 +7464,8 @@ model BankAccount {
   account_last4            String? // empty for cash
   currency                 String // INR | USD
   declared_opening_balance Decimal      @default(0) @db.Decimal(16, 2)
+  // Alert level: the account is highlighted when its balance (in its own currency) falls below this. Null = no minimum set.
+  minimum_balance          Decimal?     @db.Decimal(16, 2)
   opening_date             DateTime     @db.Date
   payment_instructions     String? // bank / IFSC / SWIFT lines printed on invoices paid into this account
   active                   Boolean      @default(true)
