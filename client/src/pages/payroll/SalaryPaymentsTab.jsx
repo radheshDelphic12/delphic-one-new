@@ -118,7 +118,7 @@ export default function SalaryPaymentsTab({ filters }) {
       setEdit(null);
       load();
       // a newly paid salary: "track in a wallet?" (the same popup as everywhere; Cancel skips)
-      const saved = res?.data?.payment;
+      const saved = res?.data; // the route sends the saved payment itself as data
       if (body.status === 'paid' && !wasPaid && saved?.id) {
         await trackInWallet({ kind: 'salary', reference_id: saved.id, amount: saved.amount_paid, title: `Salary paid - ${edit.employee || ''}`.trim(), party: edit.employee, category: 'Salary' });
       }
