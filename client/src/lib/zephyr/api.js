@@ -34,7 +34,7 @@ export const zephyrApi = {
   unapproveSalary: (id, reason) => apiClient.post(`/zephyr/salaries/${id}/unapprove`, { reason }).then(unwrap),
   paySalary: async (id, paid_on) => {
     const r = await apiClient.post(`/zephyr/salaries/${id}/pay`, paid_on ? { paid_on } : {}).then(unwrap);
-    await trackInWallet({ kind: 'salary', reference_id: id, amount: r?.record?.net, title: 'Salary paid', category: 'Salary' });
+    await trackInWallet({ kind: 'salary', reference_id: id, amount: r?.net, title: 'Salary paid', category: 'Salary' });
     return r;
   },
   deleteSalary: (id) => apiClient.delete(`/zephyr/salaries/${id}`).then(unwrap),
@@ -148,7 +148,7 @@ export const zephyrApi = {
   updateRentDue: (id, body) => apiClient.patch(`/zephyr/rent/dues/${id}`, body).then(unwrap),
   payRent: async (id, body) => {
     const r = await apiClient.post(`/zephyr/rent/dues/${id}/payments`, body).then(unwrap);
-    await trackInWallet({ kind: 'rent_payment', reference_id: r?.payment_id, amount: body.amount, title: 'Rent received', category: 'Rent received' });
+    await trackInWallet({ kind: 'rent_payment', reference_id: r?.id, amount: body.amount, title: 'Rent received', category: 'Rent received' });
     return r;
   },
   updateRentPayment: (id, body) => apiClient.patch(`/zephyr/rent/payments/${id}`, body).then(unwrap),

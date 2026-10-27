@@ -70,7 +70,9 @@ export const nxApi = {
     invoiceShipment: (shipmentId, body) => post(ops(`/invoices/from-shipment/${shipmentId}`), body),
     pay: async (id, body) => {
       const r = await post(ops(`/invoices/${id}/pay`), body);
-      await trackInWallet({ kind: 'invoice_payment', reference_id: id, amount: body?.amount, title: 'Invoice payment received', category: 'Invoice payment' });
+      // a purchase invoice is money going out; a sales / franchise invoice is money coming in
+      const outgoing = r?.type === 'purchase';
+      await trackInWallet({ kind: outgoing ? 'ledger_expense' : 'invoice_payment', reference_id: id, amount: body?.amount, title: outgoing ? 'Purchase invoice paid' : 'Invoice payment received', category: outgoing ? 'Purchase invoice' : 'Invoice payment' });
       return r;
     },
     cancelInvoice: (id, body) => post(ops(`/invoices/${id}/cancel`), body),
