@@ -34,6 +34,13 @@ function earliestLogIso() {
 // OT the employee raised on purpose (OT ticket, the OT hrs box, holiday OT) stays visible.
 const OT_HIDDEN = true; // derived OT only
 
+const MARKUP_TOOLS = [
+  { label: 'B', title: 'Bold', before: '**', after: '**', placeholder: 'bold text', className: 'font-bold' },
+  { label: 'I', title: 'Italic', before: '*', after: '*', placeholder: 'italic text', className: 'italic' },
+  { label: '• List', title: 'Bulleted list', prefix: '- ' },
+  { label: 'Link', title: 'Link', before: '[', after: '](https://)', placeholder: 'link text' },
+];
+
 function blankRow() {
   return { key: Math.random().toString(36).slice(2), account_id: '', hours: '', overtime_hours: '', notes: '' };
 }
@@ -128,7 +135,8 @@ export default function ItTimesheetPage() {
   }, [days]);
   const shownDays = useMemo(() => {
     const week = weeks.find((w) => w.key === weekFilter);
-    return days
+    return [...days]
+      .sort((a, b) => b.date.localeCompare(a.date))
       .filter((d) => !week || (d.date >= week.from && d.date <= week.to))
       .map((d) => {
         if (!projectFilter) return d;
@@ -148,6 +156,21 @@ export default function ItTimesheetPage() {
 
   function setRow(key, field, value) {
     setRows((current) => current.map((r) => (r.key === key ? { ...r, [field]: value } : r)));
+  }
+  // Wraps the selected text (or inserts the markers) in the description box.
+  function applyMarkup(key, tool) {
+    const el = document.getElementById(`desc-${key}`);
+    if (!el) return;
+    const { selectionStart: start, selectionEnd: end, value } = el;
+    const selected = value.slice(start, end);
+    let inserted;
+    if (tool.prefix) {
+      inserted = (selected || 'item').split('\n').map((l) => `${tool.prefix}${l}`).join('\n');
+    } else {
+      inserted = `${tool.before}${selected || tool.placeholder}${tool.after}`;
+    }
+    setRow(key, 'notes', value.slice(0, start) + inserted + value.slice(end));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start, start + inserted.length); });
   }
   function addRow() {
     setRows((current) => [...current, blankRow()]);
@@ -261,7 +284,16 @@ export default function ItTimesheetPage() {
                 ) : (
                   <input type="number" min="0" max="24" step="0.25" placeholder="OT hrs" aria-label="Overtime hours" title="Overtime beyond your regular hours — billed only on projects that pay overtime" value={row.overtime_hours} onChange={(e) => setRow(row.key, 'overtime_hours', e.target.value)} className="rounded-xl border px-3 py-2 text-sm" />
                 )}
-                <textarea placeholder="Description" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] resize-y rounded-xl border px-3 py-2 text-sm" />
+                <div>
+                  <div className="mb-1 flex gap-1">
+                    {MARKUP_TOOLS.map((tool) => (
+                      <button key={tool.label} type="button" title={tool.title} aria-label={tool.title} onMouseDown={(e) => e.preventDefault()} onClick={() => applyMarkup(row.key, tool)} className={`rounded-md border border-tertiary-200 px-2 py-0.5 text-xs text-tertiary-700 hover:bg-tertiary-50 ${tool.className || ''}`}>
+                        {tool.label}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea id={`desc-${row.key}`} placeholder="Description (supports **bold**, *italic*, - bullets, links)" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} className="min-h-[2.5rem] w-full resize-y rounded-xl border px-3 py-2 text-sm" />
+                </div>
                 <button type="button" aria-label="Remove row" className="justify-self-end text-tertiary-400 hover:text-red-600 sm:justify-self-center" onClick={() => removeRow(row.key)}>
                   <Trash2 className="h-4 w-4" />
                 </button>
