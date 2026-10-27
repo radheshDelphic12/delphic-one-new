@@ -12,9 +12,9 @@ describe('requirement stageMachines (UI + API shared rules)', () => {
     expect(nextRequirementStatuses('open')).toEqual(['in_progress', 'on_hold', 'closed', 'dropped']);
   });
 
-  test('terminal requirement statuses have no next steps', () => {
+  test('a closed requirement has no next steps; a dropped one can only be reactivated (to open)', () => {
     expect(nextRequirementStatuses('closed')).toEqual([]);
-    expect(nextRequirementStatuses('dropped')).toEqual([]);
+    expect(nextRequirementStatuses('dropped')).toEqual(['open']);
   });
 
   test('seat path is open → interviewing → offer → bgv → closed', () => {
