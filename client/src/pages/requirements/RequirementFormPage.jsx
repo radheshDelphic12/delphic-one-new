@@ -17,6 +17,8 @@ const emptyForm = {
   account_id: '',
   title: '',
   req_type: 'managed_services',
+  hiring_track: '',
+  pass_percentage: '',
   sales_owner_id: '',
   seats_total: 1,
   description: '',
@@ -64,6 +66,8 @@ function buildPayload(form, { isCreate }) {
   const payload = {
     title: form.title.trim(),
     req_type: form.req_type,
+    hiring_track: form.req_type === 'internal_hiring' ? form.hiring_track || undefined : undefined,
+    pass_percentage: form.pass_percentage === '' ? null : Number(form.pass_percentage),
     description: form.description.trim() || undefined,
     job_description: form.job_description.trim() || undefined,
     designation: form.designation.trim() || undefined,
@@ -107,6 +111,8 @@ function hydrateForm(req) {
     account_id: req.account?.id || '',
     title: req.title || '',
     req_type: req.req_type || 'recruitment',
+    hiring_track: req.hiring_track || '',
+    pass_percentage: req.pass_percentage != null ? String(req.pass_percentage) : '',
     sales_owner_id: req.sales_owner?.id || '',
     seats_total: req.seats_total || 1,
     description: req.description || '',
@@ -337,7 +343,38 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 <option value="managed_services">Manage Services</option>
                 <option value="project">Projects</option>
                 <option value="recruitment">Recruitment</option>
+                <option value="internal_hiring">Internal Hiring</option>
               </select>
+            </div>
+
+            {form.req_type === 'internal_hiring' && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-tertiary-600">Hiring kind *</label>
+                <select
+                  value={form.hiring_track}
+                  onChange={(e) => updateField('hiring_track', e.target.value)}
+                  required
+                  className={FIELD_INPUT}
+                >
+                  <option value="">Select...</option>
+                  <option value="technical">Technical</option>
+                  <option value="non_technical">Non-Technical (Sales, HR &amp; Operations)</option>
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Minimum pass % (interviews)</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={form.pass_percentage}
+                onChange={(e) => updateField('pass_percentage', e.target.value)}
+                placeholder="Template default"
+                className={FIELD_INPUT}
+              />
+              <p className="mt-1 text-xs text-tertiary-500">Leave empty to use the interview template&apos;s pass mark.</p>
             </div>
 
             {!isEdit && (

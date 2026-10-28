@@ -26,6 +26,8 @@ beforeEach(async () => {
   ({ access_token: recruiterToken } = await loginAs(recruiter));
   account = await createActiveClientAccount(sales.id);
   requirement = await createRequirement(salesToken, account.id);
+  // These cases exercise the older internal_r1 / client_r1 rounds, so the requirement has no interview template.
+  await prisma.requirement.update({ where: { id: requirement.id }, data: { interview_template_id: null } });
   const seats = await authed(request(app).get(`/api/v1/requirements/${requirement.id}/seats`), salesToken);
   seatId = seats.body.data[0].id;
   profile = await createProfile(recruiterToken);

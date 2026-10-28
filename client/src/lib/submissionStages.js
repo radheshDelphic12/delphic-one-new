@@ -62,10 +62,12 @@ export const ROUND_TYPE_LABELS = {
   client_r2: 'Client Round 2',
   client_r3: 'Client Round 3',
   hr_cto_ceo: 'HR, CTO & CEO Round',
+  template_internal: 'Interview Round',
+  template_client: 'Client Round',
 };
 
-export const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo'];
-export const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2'];
+export const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo', 'template_client'];
+export const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2', 'template_internal'];
 
 // Soft rule only - UI warns when a mandatory round/stage is missing, never blocks.
 export const MANDATORY_ROUND_TYPES = ['internal_r1', 'hr_cto_ceo'];

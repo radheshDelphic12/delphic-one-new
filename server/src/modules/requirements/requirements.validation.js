@@ -32,19 +32,23 @@ const baseFields = {
   sla_days: z.number().int().optional(),
   // TAT in hours (24 = one day, 48 = two days...). New requirements default to 24 hours; changing it on an edit restarts the clock.
   tat_hours: z.number().int().min(1).max(24 * 60).optional(),
+
+  // Internal Hiring only. The track picks the interview template; pass_percentage overrides the template's minimum pass %.
+  hiring_track: z.enum(['technical', 'non_technical']).nullable().optional(),
+  pass_percentage: z.number().int().min(1).max(100).nullable().optional(),
 };
 
 const createSchema = z.object({
   account_id: z.string().uuid(),
   title: z.string().min(1),
-  req_type: z.enum(['managed_services', 'recruitment', 'project']),
+  req_type: z.enum(['managed_services', 'recruitment', 'project', 'internal_hiring']),
   seats_total: z.number().int().min(1).default(1),
   ...baseFields,
-});
+}).refine((d) => d.req_type !== 'internal_hiring' || d.hiring_track, { message: 'Choose Technical or Non-Technical for Internal Hiring', path: ['hiring_track'] });
 
 const updateSchema = z.object({
   title: z.string().min(1).optional(),
-  req_type: z.enum(['managed_services', 'recruitment', 'project']).optional(),
+  req_type: z.enum(['managed_services', 'recruitment', 'project', 'internal_hiring']).optional(),
   sales_owner_id: z.string().uuid().optional(),
   ...baseFields,
 });
@@ -88,7 +92,7 @@ const seatStageSchema = z.object({
 
 const listQuerySchema = z.object({
   status: z.enum(['open', 'in_progress', 'on_hold', 'closed', 'dropped']).optional(),
-  req_type: z.enum(['managed_services', 'recruitment', 'project']).optional(),
+  req_type: z.enum(['managed_services', 'recruitment', 'project', 'internal_hiring']).optional(),
   account_id: z.string().uuid().optional(),
   // Premium customers only (yes) or the rest (no): decided by the client account the requirement belongs to.
   premium: z.enum(['yes', 'no']).optional(),

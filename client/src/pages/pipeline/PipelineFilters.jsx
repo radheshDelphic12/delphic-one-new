@@ -38,6 +38,7 @@ const REQ_TYPE_OPTIONS = [
   { id: 'managed_services', label: 'Managed Services' },
   { id: 'recruitment', label: 'Recruitment' },
   { id: 'project', label: 'Project' },
+  { id: 'internal_hiring', label: 'Internal Hiring' },
 ];
 
 const STAGE_OPTIONS = [

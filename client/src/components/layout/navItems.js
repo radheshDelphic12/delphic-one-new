@@ -22,6 +22,7 @@ import {
   MapPin,
   UserPlus,
   UserX,
+  ClipboardList,
 } from 'lucide-react';
 
 /**
@@ -41,6 +42,7 @@ export const NAV_ITEMS = [
   { to: '/accounts', label: 'Accounts', icon: Building2, capability: 'viewPipeline', need: 'accounts.view', masterOnly: true },
   { to: '/pipeline', label: 'Pipeline', icon: Columns3, capability: 'viewPipeline', need: 'pipeline.view', masterOnly: true },
   { to: '/requirements', label: 'Requirements', icon: Briefcase, capability: 'viewPipeline', need: 'requirements.view', masterOnly: true },
+  { to: '/hiring-setup', label: 'Hiring Setup', icon: ClipboardList, capability: 'viewPipeline', need: 'requirements.update', masterOnly: true },
   { to: '/profiles', label: 'Profiles', icon: Users, capability: 'viewProfiles', need: 'profiles.view', masterOnly: true },
   { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', need: 'submissions.view', masterOnly: true },
   { to: '/rejected-candidates', label: 'Rejected', icon: UserX, capability: 'viewPipeline', need: 'rejected.view', masterOnly: true },

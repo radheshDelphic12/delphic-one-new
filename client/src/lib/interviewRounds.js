@@ -13,6 +13,9 @@ export const ROUND_TYPES = [
   { value: 'client_r2', label: 'Client Round 2', group: 'client', color: 'bg-indigo-50 text-indigo-800 border-indigo-200' },
   { value: 'client_r3', label: 'Client Round 3', group: 'client', color: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200' },
   { value: 'hr_cto_ceo', label: 'HR, CTO & CEO Round', group: 'hr', color: 'bg-amber-50 text-amber-900 border-amber-200' },
+  // rounds that come from an interview template (named by the template round)
+  { value: 'template_internal', label: 'Interview Round', group: 'internal', color: 'bg-sky-50 text-sky-800 border-sky-200', template: true },
+  { value: 'template_client', label: 'Client Round', group: 'client', color: 'bg-violet-50 text-violet-800 border-violet-200', template: true },
 ];
 
 export const RESULT_COLORS = {

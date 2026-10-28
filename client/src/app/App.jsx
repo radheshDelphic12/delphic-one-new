@@ -36,6 +36,8 @@ import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
 import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
+import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
+import HiringSetupPage from '../pages/hiringSetup/HiringSetupPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
 import TradingHubPage from '../pages/trading/TradingHubPage.jsx';
@@ -334,6 +336,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
+      <Route path="/assessment/:token" element={<AssessmentTakePage />} />
       <Route path="/careers" element={<CareerRedirect />} />
       <Route path="/careers/:slug" element={<CareerRedirect />} />
       <Route
@@ -377,6 +380,7 @@ export default function App() {
           }
         />
         <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="hiring-setup" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.update"><HiringSetupPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
