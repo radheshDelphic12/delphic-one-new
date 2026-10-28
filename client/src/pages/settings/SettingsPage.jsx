@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Activity, Bell, IdCard, KeyRound, LogOut, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+import { Activity, Bell, Briefcase, Building2, IdCard, KeyRound, LogOut, Mail, Pencil, Phone, ShieldCheck, Trash2, UserMinus, UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import Avatar from '../../components/ui/Avatar.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
@@ -17,6 +16,8 @@ import { isZephyrOrg } from '../../lib/zephyr/useZephyr.js';
 import NotificationPreferencesPage from '../notifications/NotificationPreferencesPage.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
+import ResignationCard from '../../components/resignation/ResignationCard.jsx';
+import ResignationsTab from './ResignationsTab.jsx';
 
 const BASE_TABS = [
   { key: 'account', label: 'Account', icon: UserRound },
@@ -27,6 +28,7 @@ const BASE_TABS = [
   { key: 'activity', label: 'Activity', icon: Activity },
 ];
 
+const RESIGNATIONS_TAB = { key: 'resignations', label: 'Resignations', icon: UserMinus };
 const DELETED_TAB = { key: 'deleted', label: 'Deleted records', icon: Trash2 };
 const ROLES_TAB = { key: 'roles', label: 'Roles & permissions', icon: KeyRound };
 const PERMISSIONS_TAB = { key: 'permissions', label: 'Permissions', icon: KeyRound };
@@ -93,69 +95,120 @@ function AccountTab({ user, onLogout }) {
     }
   }
 
-  const rows = [
-    ['Name', user?.name || '—'],
-    ['Email', user?.email || '—'],
-    ['Phone', user?.phone || '—'],
-    isPermissionMode(user) ? ['Job title', user?.designation?.name || user?.custom_role?.name || '—'] : ['Role', user?.role ? user.role.toUpperCase() : '—'],
-    ['Department', user?.department?.name || '—'],
-    isPermissionMode(user) ? ['Access', `${LEVEL_LABEL[user.access.level] || 'Employee'}${user.access.set ? ` · ${user.access.set.name}` : ''}`] : ['Access', user?.is_superadmin ? 'Superadmin' : 'Standard'],
+  const isPerm = isPermissionMode(user);
+  const roleLabel = isPerm ? (user?.designation?.name || user?.custom_role?.name || '') : (user?.role ? (user.role === 'bda' ? 'BDA' : user.role.charAt(0).toUpperCase() + user.role.slice(1)) : '');
+  const accessLabel = isPerm ? `${LEVEL_LABEL[user.access.level] || 'Employee'}${user.access.set ? ` · ${user.access.set.name}` : ''}` : (user?.is_superadmin ? 'Superadmin' : 'Standard');
+  const groups = [
+    {
+      title: 'Contact',
+      columns: 'sm:grid-cols-2',
+      items: [
+        [Mail, 'Email (login)', user?.email || '—'],
+        [Phone, 'Phone', user?.phone || '—'],
+      ],
+    },
+    {
+      title: 'Work',
+      columns: 'sm:grid-cols-3',
+      items: [
+        [Briefcase, isPerm ? 'Job title' : 'Role', roleLabel || '—'],
+        [Building2, 'Department', user?.department?.name || '—'],
+        [ShieldCheck, 'Access level', accessLabel],
+      ],
+    },
   ];
+  const inputClass = 'mt-1.5 w-full rounded-lg border border-tertiary-200 bg-white px-3 py-2.5 text-sm text-tertiary-900 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
+  const labelClass = 'block text-xs font-semibold uppercase tracking-wide text-tertiary-500';
 
   return (
-    <div className="space-y-4">
-      <Card title="Profile">
-        <div className="flex items-center gap-3">
-          <Avatar name={user?.name} size="lg" />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-tertiary-900">{user?.name}</div>
-            <div className="truncate text-xs text-tertiary-500">{user?.email}</div>
+    <div className="space-y-5">
+      <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <div className="flex items-center justify-between gap-4 border-b border-tertiary-100 px-6 py-4">
+          <div>
+            <h2 className="font-heading text-sm font-semibold text-tertiary-900">Profile</h2>
+            <p className="mt-0.5 text-xs text-tertiary-500">Your personal and work information.</p>
           </div>
+          {!editing && canEdit && (
+            <button type="button" className="btn-secondary" onClick={startEdit}>
+              <Pencil className="h-4 w-4" aria-hidden />
+              Edit profile
+            </button>
+          )}
         </div>
+
         {editing ? (
-          <form onSubmit={saveProfile} className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs font-medium text-tertiary-500">Name
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          <form onSubmit={saveProfile} className="grid gap-5 px-6 py-6 sm:grid-cols-2">
+            <label className={labelClass}>Name
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} />
             </label>
-            <label className="block text-xs font-medium text-tertiary-500">Email (login)
-              <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            <label className={labelClass}>Email (login)
+              <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputClass} />
             </label>
-            <label className="block text-xs font-medium text-tertiary-500">Phone
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            <label className={labelClass}>Phone
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputClass} />
             </label>
-            <div className="flex items-end gap-2">
+            <div className="flex items-end gap-3">
               <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
               <button type="button" className="btn-secondary" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
             </div>
           </form>
         ) : (
-          <>
-            <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-              {rows.map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-tertiary-400">{label}</dt>
-                  <dd className="mt-0.5 text-sm text-tertiary-800">{value}</dd>
+          <div className="grid lg:grid-cols-3">
+            <div className="flex flex-col items-center border-b border-tertiary-100 bg-tertiary-50/50 px-6 py-8 text-center lg:border-b-0 lg:border-r">
+              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-600 text-3xl font-semibold text-white shadow-sm" aria-hidden>
+                {String(user?.name || '?').trim().slice(0, 1).toUpperCase()}
+              </span>
+              <h3 className="mt-4 font-heading text-lg font-semibold text-tertiary-900">{user?.name}</h3>
+              {roleLabel && <p className="mt-0.5 text-sm text-tertiary-500">{roleLabel}</p>}
+              {user?.department?.name && (
+                <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-medium text-tertiary-600 ring-1 ring-tertiary-200">
+                  <Building2 className="h-3.5 w-3.5 text-tertiary-400" aria-hidden />
+                  {user.department.name}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-7 px-6 py-6 lg:col-span-2">
+              {groups.map((group) => (
+                <div key={group.title}>
+                  <h3 className="border-b border-tertiary-100 pb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-400">{group.title}</h3>
+                  <dl className={`mt-4 grid gap-x-8 gap-y-5 ${group.columns}`}>
+                    {group.items.map(([Icon, label, value]) => (
+                      <div key={label} className="flex items-start gap-3">
+                        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-tertiary-400" aria-hidden />
+                        <div className="min-w-0">
+                          <dt className="text-xs text-tertiary-500">{label}</dt>
+                          <dd className="mt-0.5 truncate text-sm font-medium text-tertiary-900" title={String(value)}>{value}</dd>
+                        </div>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
               ))}
-            </dl>
-            {canEdit ? (
-              <button type="button" className="btn-secondary mt-4" onClick={startEdit}>Edit profile</button>
-            ) : (
-              <p className="mt-4 text-xs text-tertiary-400">
-                Need a name, email or role change? Ask an admin on the{' '}
-                <Link to="/users" className="text-primary-700 hover:underline">Users</Link> page.
-              </p>
-            )}
-          </>
+            </div>
+          </div>
         )}
-      </Card>
 
-      <Card title="Session" description="Sign out of this browser. You'll need your credentials to sign back in.">
-        <button type="button" className="btn-danger" onClick={onLogout}>
-          <LogOut className="h-4 w-4" />
+        {!editing && !canEdit && (
+          <p className="border-t border-tertiary-100 bg-tertiary-50/50 px-6 py-3 text-xs text-tertiary-500">
+            Need a name, email or role change? Ask an admin on the{' '}
+            <Link to="/users" className="text-primary-700 hover:underline">Users</Link> page.
+          </p>
+        )}
+      </section>
+
+      {!isZephyrOrg(user) && <ResignationCard />}
+
+      <section className="flex flex-col gap-3 rounded-2xl border border-tertiary-100 bg-white px-6 py-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-heading text-sm font-semibold text-tertiary-900">Session</h2>
+          <p className="mt-0.5 text-xs text-tertiary-500">Sign out of this browser. You&apos;ll need your credentials to sign back in.</p>
+        </div>
+        <button type="button" className="btn-secondary shrink-0" onClick={onLogout}>
+          <LogOut className="h-4 w-4" aria-hidden />
           Log out
         </button>
-      </Card>
+      </section>
     </div>
   );
 }
@@ -253,12 +306,20 @@ export default function SettingsPage() {
   const canManageRoles = !onPermissions && user?.role === 'admin' && Boolean(user?.is_superadmin || user?.is_group_superadmin);
   // Permissions: the Super Admin and the company Admin (in a company that moved); the Super Admin also in a company that has not yet (Migration).
   const canManagePermissions = onPermissions ? isAdminUser(user) : Boolean(user?.access?.level === 'super_admin');
+  // Resignations: a manager sees their team's requests; HR (People edit) sees everyone's.
+  const canHrResign = isAdminUser(user) || userCan(user, 'people.update');
+  const [hasTeamResignations, setHasTeamResignations] = useState(false);
+  useEffect(() => {
+    if (hideDetails) return;
+    apiClient.get('/resignations/team').then((res) => setHasTeamResignations(res.data.data.length > 0)).catch(() => {});
+  }, [hideDetails]);
+  const showResignations = !hideDetails && (canHrResign || hasTeamResignations);
   const TABS = useMemo(() => {
-    const base = hideDetails ? BASE_TABS.filter((t) => t.key !== 'details') : BASE_TABS;
+    const base = hideDetails ? BASE_TABS.filter((t) => t.key !== 'details') : showResignations ? [...BASE_TABS, RESIGNATIONS_TAB] : BASE_TABS;
     const withDeleted = canSeeDeleted ? [...base, DELETED_TAB] : base;
     const withRoles = canManageRoles ? [...withDeleted, ROLES_TAB] : withDeleted;
     return canManagePermissions ? [...withRoles, PERMISSIONS_TAB] : withRoles;
-  }, [canSeeDeleted, canManageRoles, canManagePermissions, hideDetails]
+  }, [canSeeDeleted, canManageRoles, canManagePermissions, hideDetails, showResignations]
   );
   const active = useMemo(
     () => (TABS.some((t) => t.key === requested) ? requested : 'account'),
@@ -303,6 +364,7 @@ export default function SettingsPage() {
       {active === 'security' && <SecurityTab />}
       {active === 'notifications' && <NotificationPreferencesPage />}
       {active === 'activity' && <ActivityTab />}
+      {active === 'resignations' && showResignations && <ResignationsTab showTeam={hasTeamResignations} canHr={canHrResign} isAdmin={isAdminUser(user)} />}
       {active === 'deleted' && canSeeDeleted && <DeletedRecordsPanel />}
       {active === 'roles' && canManageRoles && <RolesPermissionsPanel />}
       {active === 'permissions' && canManagePermissions && <PermissionsPanel />}

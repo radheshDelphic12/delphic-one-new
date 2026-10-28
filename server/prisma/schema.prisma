@@ -374,6 +374,9 @@ enum NotificationType {
   timesheet_regularization_decided
   increment_review_due
   bench_countdown
+  resignation_submitted
+  resignation_manager_updated
+  resignation_decided
 }
 
 enum NotificationEntityType {
@@ -383,6 +386,7 @@ enum NotificationEntityType {
   interview_round
   profile
   pm_ticket
+  resignation
 }
 
 enum HistoryEntityType {
@@ -2025,6 +2029,11 @@ model Org {
   // true = a calculation cannot be locked while the month's timesheets are open, and the month's
   // financials cannot be locked while calculations are still open.
   enforce_lock_order         Boolean   @default(true)
+  // Resignation requests (Settings > Account > Resign): on/off, the notice period suggested as the last working day,
+  // and whether the reporting manager must record the retention call before HR can approve.
+  resignation_enabled          Boolean   @default(true)
+  resignation_notice_days      Int       @default(30)
+  resignation_manager_required Boolean   @default(true)
   created_at                 DateTime  @default(now())
   updated_at                 DateTime  @default(now()) @updatedAt
 
@@ -2212,6 +2221,7 @@ model Org {
   attendance_records                 AttendanceRecord[]
   attendance_regularization_requests AttendanceRegularizationRequest[]
   fnf_records                        FnfRecord[]
+  resignation_requests               ResignationRequest[]
   increment_reminders                IncrementReminder[]
   previous_month_dues                PreviousMonthDue[]
   leave_types                        LeaveType[]
@@ -2368,6 +2378,7 @@ model OrgMembership {
   attendance_records                 AttendanceRecord[]
   attendance_regularization_requests AttendanceRegularizationRequest[]
   fnf_records                        FnfRecord[]
+  resignation_requests                ResignationRequest[]
   increment_reminders                IncrementReminder[]
   previous_month_dues                PreviousMonthDue[]
   office_assignments                 EmployeeOfficeAssignment[]
@@ -8230,4 +8241,48 @@ model PmCustomField {
 
   @@unique([project_id, key])
   @@map("pm_custom_fields")
+}
+
+enum ResignationStatus {
+  submitted
+  manager_approved
+  approved
+  rejected
+  withdrawn
+  retained
+}
+
+// An employee's resignation (Settings > Account > Resign). The reporting manager records the retention call
+// (meeting done, what the problem is, retained or not), then HR approves with the last working day or rejects.
+// Approving puts the person on notice exactly as the HR edit drawer does; starting the F&F is a separate HR action.
+model ResignationRequest {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                String            @db.Uuid
+  org                   Org               @relation(fields: [org_id], references: [id])
+  org_membership_id     String            @db.Uuid
+  org_membership        OrgMembership     @relation(fields: [org_membership_id], references: [id], onDelete: Cascade)
+  manager_membership_id String?           @db.Uuid
+  reason                String
+  reason_category       String?
+  proposed_lwd          DateTime?         @db.Date
+  status                ResignationStatus @default(submitted)
+  meeting_done          Boolean           @default(false)
+  meeting_date          DateTime?         @db.Date
+  manager_notes         String?
+  manager_outcome       String?
+  manager_updated_by    String?           @db.Uuid
+  manager_updated_at    DateTime?
+  approved_lwd          DateTime?         @db.Date
+  decided_by            String?           @db.Uuid
+  decided_at            DateTime?
+  decision_remarks      String?
+  fnf_started_at        DateTime?
+  fnf_started_by        String?           @db.Uuid
+  created_at            DateTime          @default(now())
+  updated_at            DateTime          @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([org_membership_id])
+  @@index([manager_membership_id])
+  @@map("resignation_requests")
 }
