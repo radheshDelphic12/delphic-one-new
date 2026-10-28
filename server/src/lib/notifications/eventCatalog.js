@@ -52,6 +52,9 @@ const ROLE_EVENT_MATRIX = {
   increment_review_due: { roles: ['admin'], defaultInApp: true },
   // To the person on the bench and the admins: days left on the bench.
   bench_countdown: { roles: ['admin', 'employee'], defaultInApp: true },
+  resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  resignation_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
@@ -87,6 +90,9 @@ const NOTIFICATION_LABELS = {
   timesheet_entry_decided: ['Timesheet decision', 'Your manager approves or rejects a timesheet entry.'],
   timesheet_regularization_requested: ['Regularisation requested', 'A direct report asks to regularise a locked timesheet day.'],
   timesheet_regularization_decided: ['Regularisation decision', 'Your regularisation request is approved or rejected.'],
+  resignation_submitted: ['Resignation submitted', 'An employee submits a resignation (to their reporting manager, HR and admins).'],
+  resignation_manager_updated: ['Resignation: manager update', 'A manager records the retention call on a resignation (to HR and admins).'],
+  resignation_decided: ['Resignation decision', 'Your resignation is approved, rejected or closed as retained, or the F&F is started.'],
   bench_countdown: ['Bench countdown', "Days left of an employee's bench period."],
   increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
@@ -221,6 +227,12 @@ function renderNotification(type, ctx = {}) {
         `${actorPrefix(ctx)}closed the ticket for ${candidate} on "${truncate(requirement)}" (${account}).`,
         'submission', ctx.submissionId, ctx
       );
+    case 'resignation_submitted':
+      return envelope('Resignation submitted', `${ctx.employeeName || 'An employee'} has resigned (proposed last working day ${ctx.lwd || 'not set'}).`, 'resignation', ctx.resignationId, ctx);
+    case 'resignation_manager_updated':
+      return envelope('Resignation: manager update', `${ctx.managerName || 'The manager'} updated the retention call for ${ctx.employeeName || 'an employee'}: ${ctx.outcomeLabel || 'update recorded'}.`, 'resignation', ctx.resignationId, ctx);
+    case 'resignation_decided':
+      return envelope('Resignation update', ctx.message || 'Your resignation request was updated.', 'resignation', ctx.resignationId, ctx);
     case 'pm_ticket_assigned':
       return envelope(
         'Project ticket assigned',

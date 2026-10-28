@@ -14,6 +14,7 @@ import TicketPanel from './TicketPanel.jsx';
 import { FieldsTab, SharingTab } from './PmProjectSettingsTabs.jsx';
 
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
+const CONTRACT_STATE_LABEL = { running: 'Running', not_started: 'Not started', about_to_end: 'About to end', on_hold: 'On hold', completed: 'Completed' };
 const Empty = ({ children }) => <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-tertiary-500">{children}</p>;
 
 function TicketsTab({ project, meta, reload, openTicket }) {
@@ -149,11 +150,13 @@ function ContractsTab({ project, isManager, reload }) {
   const [open, setOpen] = useState(false);
   const [linkable, setLinkable] = useState([]);
   const [pick, setPick] = useState('');
+  const [query, setQuery] = useState('');
   useEffect(() => { if (open) pmApi.linkableContracts().then(setLinkable).catch(() => setLinkable([])); }, [open]);
+  const shown = linkable.filter((c) => `${c.title} ${c.counterparty_name || ''}`.toLowerCase().includes(query.trim().toLowerCase()));
   async function act(fn, ok) { try { await fn(); pushSuccess(ok); await reload(); } catch (e) { pushError(pmError(e, 'Could not update'), 'Failed'); } }
   return (
     <div className="space-y-3">
-      <p className="text-sm text-tertiary-600">Tickets work without a contract. Link one (or several) whenever the project is tied to actual work, and its progress shows next to the contract&apos;s own figure.</p>
+      <p className="text-sm text-tertiary-600">Tickets work without a contract. Link one (or several) of the company&apos;s projects from Finance whenever this project is tied to actual work, and the ticket progress shows beside it.</p>
       {project.can_manage && <button type="button" className="btn-primary inline-flex items-center gap-1.5" onClick={() => setOpen(true)}><Link2 className="h-4 w-4" />Link a contract</button>}
       {project.contracts.length === 0 ? <Empty>No contract linked yet.</Empty> : (
         <div className="space-y-3" data-testid="pm-contracts">
@@ -162,7 +165,7 @@ function ContractsTab({ project, isManager, reload }) {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h4 className="font-medium text-tertiary-900">{c.title} {c.is_primary && <Pill tone="purple">Primary</Pill>}</h4>
-                  <p className="text-xs text-tertiary-500">{c.counterparty_name} · {c.status} · {c.currency ? money(c.value, c.currency) : '-'} · billed {c.currency ? money(c.billed_to_date, c.currency) : '-'}</p>
+                  <p className="text-xs text-tertiary-500">{[c.counterparty_name, CONTRACT_STATE_LABEL[c.status] || c.status, c.agreement_start_date ? `${c.agreement_start_date} to ${c.agreement_end_date || 'open'}` : null, c.currency ? `${money(c.value, c.currency)}, billed ${money(c.billed_to_date, c.currency)}` : null].filter(Boolean).join(' · ')}</p>
                 </div>
                 {project.can_manage && (
                   <div className="flex gap-1">
@@ -172,22 +175,24 @@ function ContractsTab({ project, isManager, reload }) {
                 )}
               </div>
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                <div><div className="mb-1 text-xs text-tertiary-500">Contract&apos;s own progress (manual)</div><ProgressBar percent={c.manual_progress_percent ?? 0} /><div className="mt-1 text-xs">{c.manual_progress_percent ?? 0}%</div></div>
+                {c.manual_progress_percent !== null && <div><div className="mb-1 text-xs text-tertiary-500">Contract&apos;s own progress (manual)</div><ProgressBar percent={c.manual_progress_percent} /><div className="mt-1 text-xs">{c.manual_progress_percent}%</div></div>}
                 <div><div className="mb-1 text-xs text-tertiary-500">From tickets ({c.ticket_progress.done} of {c.ticket_progress.total} done{c.ticket_progress.overdue ? `, ${c.ticket_progress.overdue} overdue` : ''})</div><ProgressBar percent={c.ticket_progress.percent} /><div className="mt-1 text-xs">{c.ticket_progress.percent}%</div></div>
               </div>
-              {isManager && c.ticket_progress.percent !== c.manual_progress_percent && (
+              {isManager && c.manual_progress_percent !== null && c.ticket_progress.percent !== c.manual_progress_percent && (
                 <button type="button" className="mt-3 text-xs text-primary-700 hover:underline" onClick={() => window.confirm(`Set the contract's own progress to ${c.ticket_progress.percent}%?`) && act(() => pmApi.copyProgress(project.id, c.contract_id), 'Contract progress updated')}>Use the ticket figure ({c.ticket_progress.percent}%) as the contract&apos;s progress</button>
               )}
             </section>
           ))}
         </div>
       )}
-      <Modal open={open} onClose={() => setOpen(false)} title="Link a contract">
+      <Modal open={open} onClose={() => setOpen(false)} title="Link a contract" wide>
         <div className="space-y-3">
-          <select className={`${INPUT} w-full`} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Contract">
-            <option value="">Choose a contract...</option>{linkable.map((c) => <option key={c.id} value={c.id}>{c.title} · {c.counterparty_name}</option>)}
+          <input className={`${INPUT} w-full`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by project code, name or client" aria-label="Search contracts" />
+          <select className={`${INPUT} w-full`} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Contract" size={Math.min(8, Math.max(2, shown.length + 1))}>
+            <option value="">Choose a contract...</option>{shown.map((c) => <option key={c.id} value={c.id}>{c.title}{c.counterparty_name ? ` · ${c.counterparty_name}` : ''}{c.status ? ` · ${CONTRACT_STATE_LABEL[c.status] || c.status}` : ''}</option>)}
           </select>
-          {linkable.length === 0 && <p className="text-xs text-tertiary-500">No unlinked draft or active contract is available.</p>}
+          {linkable.length === 0 && <p className="text-xs text-tertiary-500">Every Finance project is already linked, or none exists yet.</p>}
+          {linkable.length > 0 && shown.length === 0 && <p className="text-xs text-tertiary-500">No project matches that search.</p>}
           <div className="flex justify-end gap-2"><button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={() => setOpen(false)}>Cancel</button><button type="button" className="btn-primary" disabled={!pick} onClick={() => act(async () => { await pmApi.linkContract(project.id, { contract_id: pick }); setOpen(false); setPick(''); }, 'Contract linked')}>Link</button></div>
         </div>
       </Modal>

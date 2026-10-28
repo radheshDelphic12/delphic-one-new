@@ -148,8 +148,6 @@ describe('contracts: linked later, independent of tickets', () => {
     expect((await get(`/projects/${p.id}`, adminToken)).body.data.contracts).toEqual([]);
 
     const c = await contract();
-    const linkable = (await get('/contracts/linkable', adminToken)).body.data;
-    expect(linkable.map((x) => x.id)).toContain(c.id);
     expect((await post(`/projects/${p.id}/contracts`, annToken, { contract_id: c.id })).status).toBe(403);
     const linked = await post(`/projects/${p.id}/contracts`, adminToken, { contract_id: c.id });
     expect(linked.status).toBe(201);
@@ -161,6 +159,33 @@ describe('contracts: linked later, independent of tickets', () => {
     expect((await post(`/projects/${p.id}/contracts/${c.id}/copy-progress`, annToken)).status).toBe(403);
     expect((await post(`/projects/${p.id}/contracts/${c.id}/copy-progress`, adminToken)).status).toBe(200);
     expect((await prisma.contract.findUnique({ where: { id: c.id } })).progress_percent).toBe(50);
+  });
+
+  test('a project links to the Finance projects (P0045 ...): they are listed, show their contract state, and are never listed twice', async () => {
+    const fin = (over = {}) => prisma.account.create({ data: { org_id: org.id, type: 'client', stage: 'active', is_project: true, name: 'Delphic One', project_name: 'Delphic One', project_code: `PT${Date.now() % 100000}`, client_name: 'Delphic Global', owner_id: admin.id, origin_owner_id: admin.id, agreement_start_date: new Date('2026-01-01'), ...over } });
+    const a = await fin();
+    const b = await fin({ name: 'Secure', project_name: 'Secure', project_code: `PU${Date.now() % 100000}`, contract_status: 'on_hold' });
+    await prisma.account.create({ data: { org_id: org.id, type: 'client', stage: 'active', name: 'Plain client', owner_id: admin.id, origin_owner_id: admin.id } }); // not a project: never listed
+    const p = await project();
+    const listed = (await get('/contracts/linkable', adminToken)).body.data;
+    expect(listed.map((x) => x.id)).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(listed.map((x) => x.title)).not.toContain('Plain client');
+    expect(listed.find((x) => x.id === b.id).status).toBe('on_hold'); // the Finance contract status wins over the dates
+    expect(listed.find((x) => x.id === a.id)).toMatchObject({ title: `${a.project_code} · Delphic One`, counterparty_name: 'Delphic Global', status: 'running' });
+
+    expect((await post(`/projects/${p.id}/contracts`, annToken, { contract_id: a.id })).status).toBe(403);
+    const linked = await post(`/projects/${p.id}/contracts`, adminToken, { contract_id: a.id });
+    expect(linked.status).toBe(201);
+    expect(linked.body.data.contracts[0]).toMatchObject({ contract_id: a.id, kind: 'finance_project', is_primary: true, manual_progress_percent: null, status: 'running' });
+    expect((await get('/contracts/linkable', adminToken)).body.data.map((x) => x.id)).not.toContain(a.id);
+    const other2 = await project({ name: 'Other' });
+    expect((await post(`/projects/${other2.id}/contracts`, adminToken, { contract_id: a.id })).status).toBe(409);
+    expect((await post(`/projects/${p.id}/contracts/${a.id}/copy-progress`, adminToken)).status).toBe(422);
+    // a ticket can be tagged to the linked Finance project
+    const t = await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Billing', contract_id: a.id });
+    expect(t.status).toBe(201);
+    expect((await del(`/projects/${p.id}/contracts/${a.id}`, adminToken)).status).toBe(200);
+    await prisma.account.deleteMany({ where: { org_id: org.id, type: 'client' } });
   });
 
   test('a contract belongs to one project; several contracts per project, one primary; tickets can be tagged per contract', async () => {

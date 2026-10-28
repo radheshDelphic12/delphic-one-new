@@ -65,6 +65,10 @@ const RULES = [
   [/^\/calendars(\/|$)/, 'holidays.update'],
 
   [/^\/attendance\/(me|shifts)$/, { GET: 'open', '*': 'hr_settings.update' }],
+  [/^\/resignations\/(mine|team|settings)$/, { GET: 'open', '*': 'admin' }],
+  [/^\/resignations\/[^/]+\/(withdraw|manager-review)$/, 'open'],
+  [/^\/resignations\/?$/, { POST: 'open', '*': 'people.update' }],
+  [/^\/resignations\/[^/]+\/(approve|reject|start-fnf)$/, 'people.update'],
   [/^\/attendance\/regularization-requests\/mine$/, 'open'],
   [/^\/attendance\/regularization-requests\/[^/]+\/decision$/, 'regularization.approve'],
   [/^\/attendance\/regularization-requests$/, { GET: 'regularization.view', '*': 'open' }],

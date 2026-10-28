@@ -4,6 +4,8 @@ const path = require('path');
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
+const { projectListWhere } = require('../../lib/projectScope');
+const { contractState } = require('../../lib/contractState');
 
 // Project Management (Delphic Global): projects with their own tickets. Projects and tickets work on their own; a project can be
 // linked to real contracts later (and unlinked) without touching its tickets. See docs/features/PROJECT-MANAGEMENT.md.
@@ -783,9 +785,27 @@ async function guestComment(grant, ticketId, body) {
 
 async function contractProgress(orgId, project, links, tickets, cat) {
   if (!links.length) return [];
-  const contracts = await prisma.contract.findMany({ where: { id: { in: links.map((l) => l.contract_id) }, org_id: orgId } });
+  const ids = links.map((l) => l.contract_id);
+  const [accounts, contracts] = await Promise.all([
+    prisma.account.findMany({ where: { id: { in: ids }, org_id: orgId }, select: FINANCE_PROJECT_SELECT }),
+    prisma.contract.findMany({ where: { id: { in: ids }, org_id: orgId } }),
+  ]);
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
   const byId = new Map(contracts.map((c) => [c.id, c]));
   return links.map((l) => {
+    const a = accountById.get(l.contract_id);
+    if (a) {
+      // a Finance project (the "contract" the business bills against): no manual progress or money figures of its own here
+      const v = financeProjectView(a);
+      const mine = tickets.filter((t) => t.contract_id === l.contract_id || (!t.contract_id && links.length === 1));
+      return {
+        link_id: l.id, contract_id: l.contract_id, is_primary: l.is_primary, kind: 'finance_project',
+        title: v.title, project_code: v.project_code, counterparty_name: v.counterparty_name, status: v.status, service_category: v.service_category,
+        agreement_start_date: v.agreement_start_date, agreement_end_date: v.agreement_end_date,
+        value: null, currency: null, billed_to_date: null, manual_progress_percent: null,
+        ticket_progress: summarize(mine, cat),
+      };
+    }
     const c = byId.get(l.contract_id);
     // tickets tagged to this contract; untagged tickets belong to it when it is the project's only contract
     const mine = tickets.filter((t) => t.contract_id === l.contract_id || (!t.contract_id && links.length === 1));
@@ -800,20 +820,44 @@ async function contractProgress(orgId, project, links, tickets, cat) {
   });
 }
 
+// The contracts a project is linked to are the company's Finance projects (Finance > Projects: P0045 ... with their client,
+// agreement dates and contract status). Contract rows from the separate Contracts module are still read if one was linked before.
+const FINANCE_PROJECT_SELECT = {
+  id: true, name: true, project_name: true, project_code: true, client_name: true, client_account: { select: { name: true } },
+  service_category: true, agreement_start_date: true, agreement_end_date: true, contract_status: true, contract_hold_periods: true,
+};
+
+function financeProjectView(a) {
+  const name = a.project_name || a.name;
+  return {
+    id: a.id,
+    project_code: a.project_code || null,
+    title: a.project_code ? `${a.project_code} · ${name}` : name,
+    counterparty_name: a.client_account?.name || a.client_name || null,
+    status: contractState(a).state,
+    service_category: a.service_category || null,
+    agreement_start_date: dayOf(a.agreement_start_date),
+    agreement_end_date: dayOf(a.agreement_end_date),
+  };
+}
+
 async function listLinkableContracts(orgId) {
   const linked = await prisma.pmProjectContract.findMany({ where: { org_id: orgId }, select: { contract_id: true } });
-  const rows = await prisma.contract.findMany({
-    where: { org_id: orgId, id: { notIn: linked.map((l) => l.contract_id) }, status: { in: ['draft', 'active'] } },
-    orderBy: { created_at: 'desc' }, select: { id: true, title: true, counterparty_name: true, status: true, value: true, currency: true },
+  const rows = await prisma.account.findMany({
+    where: { AND: [projectListWhere(orgId), { id: { notIn: linked.map((l) => l.contract_id) } }] },
+    orderBy: [{ project_code: 'asc' }, { name: 'asc' }], select: FINANCE_PROJECT_SELECT,
   });
-  return rows.map((c) => ({ ...c, value: num(c.value) }));
+  return rows.map(financeProjectView);
 }
 
 async function linkContract(orgId, projectId, actor, { contract_id, is_primary }) {
   const p = await loadProject(orgId, projectId, actor);
   if (!p) return { error: 'not_found' };
   if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
-  const contract = await prisma.contract.findFirst({ where: { id: contract_id, org_id: orgId }, select: { id: true, title: true } });
+  const account = await prisma.account.findFirst({ where: { AND: [projectListWhere(orgId), { id: contract_id }] }, select: FINANCE_PROJECT_SELECT });
+  const contract = account
+    ? { id: account.id, title: financeProjectView(account).title }
+    : await prisma.contract.findFirst({ where: { id: contract_id, org_id: orgId }, select: { id: true, title: true } });
   if (!contract) return { error: 'contract_not_found' };
   if (await prisma.pmProjectContract.findUnique({ where: { contract_id } })) return { error: 'contract_already_linked' };
   const first = (await prisma.pmProjectContract.count({ where: { project_id: projectId } })) === 0;
@@ -863,6 +907,7 @@ async function copyProgressToContract(orgId, projectId, actor, contractId) {
   const project = await getProject(orgId, projectId, actor);
   const row = project?.contracts.find((c) => c.contract_id === contractId);
   if (!row) return { error: 'not_found' };
+  if (row.kind === 'finance_project') return { error: 'no_manual_progress' };
   await prisma.contract.update({ where: { id: contractId }, data: { progress_percent: row.ticket_progress.percent } });
   await logActivity(prisma, orgId, projectId, null, actor.userId, 'contract_progress_copied', String(row.manual_progress_percent), String(row.ticket_progress.percent));
   return { project: await getProject(orgId, projectId, actor) };
