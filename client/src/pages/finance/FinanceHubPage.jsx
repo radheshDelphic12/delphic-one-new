@@ -1,6 +1,6 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarRange, FileText, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
+import { CalendarRange, FileCheck, FileText, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
 import ExpensesTab from './ExpensesTab.jsx';
@@ -10,6 +10,7 @@ import MonthProjectsTab from './MonthProjectsTab.jsx';
 import BillingSetupTab from './BillingSetupTab.jsx';
 import VendorInvoicesTab from './VendorInvoicesTab.jsx';
 import InvoicingSection from './InvoicingSection.jsx';
+import TaxInvoicesTab from './TaxInvoicesTab.jsx';
 // Project P&L is hidden for now (client brief 2026-10-01: its cost rules —
 // partial-month salary on a last working day, actual project cost — are not
 // settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
@@ -17,6 +18,8 @@ import InvoicingSection from './InvoicingSection.jsx';
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
 
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt, need: ['basic.expenses', 'finance.view'] }];
+// GST (INR) and USD export invoices of the company's legal entity: the group admin issues them (their own tab, next to Invoicing).
+const TAX_INVOICES_TAB = { key: 'tax-invoices', label: 'GST / USD invoices', icon: FileCheck };
 const ADMIN_TABS = [
   { key: 'projects', label: 'Projects', icon: FolderKanban, need: 'billing.view' },
   // Month-wise: running projects -> timesheet -> billing -> invoice -> payment -> financial status, plus the Sales / Salary exports.
@@ -48,7 +51,7 @@ export default function FinanceHubPage() {
   // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
   const modern = !isGroupSuperadmin;
   const isAdmin = isAdminUser(user);
-  const tabs = [...BASE_TABS.filter((t) => allowed(user, t.need, true)), ...ADMIN_TABS.filter((t) => allowed(user, t.need, isAdmin))];
+  const tabs = [...BASE_TABS.filter((t) => allowed(user, t.need, true)), ...ADMIN_TABS.filter((t) => allowed(user, t.need, isAdmin)), ...(isGroupSuperadmin ? [TAX_INVOICES_TAB] : [])];
   const has = (key) => tabs.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'expenses';
@@ -61,6 +64,7 @@ export default function FinanceHubPage() {
       {section === 'projects' && has('projects') && <ProjectsTab />}
       {section === 'month-view' && has('month-view') && <MonthProjectsTab />}
       {section === 'invoicing' && has('invoicing') && <InvoicingSection />}
+      {section === 'tax-invoices' && has('tax-invoices') && <TaxInvoicesTab />}
       {section === 'billing-setup' && has('billing-setup') && <BillingSetupTab />}
       {section === 'vendor-invoices' && has('vendor-invoices') && <VendorInvoicesTab />}
       {section === 'group-charges' && has('group-charges') && <GroupChargesTab />}

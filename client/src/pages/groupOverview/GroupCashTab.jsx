@@ -13,6 +13,8 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import GroupInvoicesView from './GroupInvoicesView.jsx';
 import { AccountEditDrawer, EntityEditDrawer } from './EntityAccountEditors.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -535,15 +537,47 @@ function StatementsView({ options, filters, seed }) {
 }
 
 /** Every company's payments (from the payment popup and the wallet link): INR value, bank charges, deductions, the wallet; filters and CSV. */
+const OWN_STATUS_KINDS = new Set(['client_invoice', 'expense', 'vendor_payment']); // edited / undone where they were paid, not here
+
 function PaymentsReportView({ options }) {
   const saved = useSaved();
+  const paymentDialog = usePaymentDialog();
+  const [undoing, setUndoing] = useState(null);
   const [f, setF] = useState({ from: '', to: '', org_id: '', kind: '', direction: '' });
   const params = Object.fromEntries(Object.entries(f).filter(([, x]) => x));
   const data = useLiveData(() => api('/payments', params), { deps: [f.from, f.to, f.org_id, f.kind, f.direction] });
   const d = data.data;
   const set = (k) => (e) => setF((c) => ({ ...c, [k]: e.target.value }));
+  const headersOf = (r) => ({ 'X-Org-Id': r.company_id });
+  async function editPayment(r) {
+    try {
+      await paymentDialog.pay(
+        { title: `Edit payment · ${r.label}`, direction: r.direction, currency: r.currency, amount: r.amount, initialAmount: r.amount, cap: 1e13, party: r.company,
+          initial: { date: r.paid_on, exchange_rate: r.exchange_rate || '', bank_charges: Number(r.bank_charges) ? r.bank_charges : '', other_deductions: Number(r.other_deductions) ? r.other_deductions : '', deduction_notes: r.deduction_notes || '', notes: r.notes || '' },
+          note: 'Saving replaces this payment (and its wallet entry, if there was one). Choose Yes again to keep it in a wallet.', submitLabel: 'Save changes' },
+        (body) => apiClient.patch(`/payments/track/${r.id}`, { ...body, reason: 'Edited' }, { headers: headersOf(r) }),
+      );
+      saved.done('Payment updated');
+      data.refresh();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) saved.fail(err, 'Could not update the payment');
+    }
+  }
   return (
     <div className="space-y-4">
+      {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(undoing)}
+        title="Undo this payment"
+        description="The payment stops counting and its wallet entry (if any) is removed."
+        onClose={() => setUndoing(null)}
+        onConfirm={async (reason) => {
+          await apiClient.delete(`/payments/track/${undoing.id}`, { data: { reason }, headers: headersOf(undoing) });
+          setUndoing(null);
+          saved.done('Payment undone');
+          data.refresh();
+        }}
+      />
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4">
         <h3 className="font-heading font-semibold text-tertiary-900">Payments</h3>
         <p className="text-xs text-tertiary-500">Every payment recorded through the payment popup, in all companies: what was paid, the rate and INR value, bank charges and deductions, and whether it was tracked in a wallet.</p>
@@ -565,7 +599,7 @@ function PaymentsReportView({ options }) {
           </div>
           <div className="overflow-x-auto rounded-xl border border-tertiary-100 bg-white">
             <table className="min-w-full text-sm">
-              <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Company</th><th className="p-2">Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">INR value</th><th className="p-2 text-right">Bank charges</th><th className="p-2 text-right">Deductions</th><th className="p-2 text-right">Net</th><th className="p-2">Wallet</th></tr></thead>
+              <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Company</th><th className="p-2">Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">INR value</th><th className="p-2 text-right">Bank charges</th><th className="p-2 text-right">Deductions</th><th className="p-2 text-right">Net</th><th className="p-2">Wallet</th><th className="p-2" /></tr></thead>
               <tbody>
                 {d.rows.map((r) => (
                   <tr key={r.id} className="border-t border-tertiary-100">
@@ -579,9 +613,17 @@ function PaymentsReportView({ options }) {
                     <td className="p-2 text-right">{Number(r.other_deductions) ? <span title={r.deduction_notes || ''}><Money value={r.other_deductions} currency={r.currency} /></span> : '—'}</td>
                     <td className="p-2 text-right"><Money value={r.net_amount} currency={r.currency} /></td>
                     <td className="p-2">{r.wallet || <span className="text-tertiary-400">not tracked</span>}</td>
+                    <td className="whitespace-nowrap p-2 text-right">
+                      {!OWN_STATUS_KINDS.has(r.kind) && (
+                        <>
+                          <button type="button" title="Edit" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => editPayment(r)}><Pencil className="h-4 w-4" /></button>
+                          <button type="button" title="Undo" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={() => setUndoing(r)}><Trash2 className="h-4 w-4" /></button>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {!d.rows.length && <tr><td colSpan={10} className="p-4 text-center text-tertiary-500">No payments in this selection.</td></tr>}
+                {!d.rows.length && <tr><td colSpan={11} className="p-4 text-center text-tertiary-500">No payments in this selection.</td></tr>}
               </tbody>
             </table>
           </div>

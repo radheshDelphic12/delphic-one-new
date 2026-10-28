@@ -248,3 +248,121 @@ describe('the group payments report (Group Dashboard > Book Keeping > Payments)'
   });
 });
 
+describe('editing a payment (group admin): the old one stays as undone, the corrected one replaces it', () => {
+  const edit = (id, pid, body, t = superToken) => authed(request(app).patch(`${B}/invoices/${id}/payments/${pid}`), t).send(body);
+
+  test('invoice payment: amount, charges and wallet entry are replaced; the invoice follows the new total', async () => {
+    const inv = await invoice();
+    const made = await pay(inv.id, { amount: '400', wallet_payment: wp() });
+    const pid = made.body.data.payment.id;
+    expect((await edit(inv.id, pid, { amount: '700', bank_charges: '10' }, adminToken)).status).toBe(403); // a company admin cannot
+    expect((await edit(inv.id, pid, { amount: '1500' })).status).toBe(422); // more than the invoice
+    const ok = await edit(inv.id, pid, { amount: '700', bank_charges: '10', wallet_payment: wp(), reason: 'client sent more' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.invoice).toMatchObject({ status: 'sent', paid_amount: '700.00', pending_amount: '300.00', payment_status: 'partly_paid' });
+    const rows = await walletTx({ reference_type: 'payment' });
+    expect(rows).toHaveLength(1); // replaced, never doubled
+    expect(rows[0].amount.toFixed(2)).toBe('690.00'); // 700 - 10 charges
+    const history = (await authed(request(app).get(`${B}/invoices/${inv.id}/payments`), adminToken)).body.data;
+    expect(history.map((r) => [r.amount, r.undone])).toEqual([['400.00', true], ['700.00', false]]);
+    expect(history[0].undone_reason).toBe('client sent more');
+    // to the full amount: paid; back down: sent again
+    expect((await edit(inv.id, ok.body.data.payment.id, { amount: '1000' })).body.data.invoice.status).toBe('paid');
+    const down = await edit(inv.id, (await prisma.paymentRecord.findFirst({ where: { reference_id: inv.id, deleted_at: null } })).id, { amount: '600' });
+    expect(down.body.data.invoice).toMatchObject({ status: 'sent', pending_amount: '400.00' });
+    expect((await prisma.clientInvoice.findUnique({ where: { id: inv.id } })).paid_at).toBeNull();
+  });
+
+  test('a payment tracked from any company can be edited the same way', async () => {
+    const ref = '55555555-5555-4555-8555-555555555555';
+    const made = await authed(request(app).post('/api/v1/payments/track'), adminToken).send({ kind: 'rent_payment', reference_id: ref, amount: '500', party: 'Tenant', wallet_payment: wp() });
+    const id = made.body.data.id;
+    const url = `/api/v1/payments/track/${id}`;
+    expect((await authed(request(app).patch(url), adminToken).send({ amount: '650' })).status).toBe(403);
+    const ok = await authed(request(app).patch(url), superToken).send({ amount: '650', bank_charges: '5', wallet_payment: wp(), reason: 'typo' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data).toMatchObject({ amount: '650.00', bank_charges: '5.00' });
+    const rows = await walletTx({ reference_type: 'payment' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ direction: 'in', party: 'Tenant' });
+    expect(rows[0].amount.toFixed(2)).toBe('645.00');
+    expect((await authed(request(app).patch(url), superToken).send({ amount: '1' })).status).toBe(409); // the old one is already replaced
+  });
+});
+
+describe('who may record a payment from a company screen', () => {
+  const { canTrack } = require('../src/modules/payments/payments.access');
+  const track = (t) => authed(request(app).post('/api/v1/payments/track'), t).send({ kind: 'ledger_expense', reference_id: '66666666-6666-4666-8666-666666666666', amount: '10' });
+
+  test('a plain employee is refused; the company admin is let in', async () => {
+    const emp = await createUser({ role: 'employee', withOrg: false });
+    await createOrgMembership(emp.id, org.id, { role: 'employee' });
+    const { access_token: empToken } = await loginAs(emp);
+    expect((await track(empToken)).status).toBe(403);
+    expect((await track(adminToken)).status).toBe(201);
+  });
+
+  test('on the permission model a finance / billing / payroll permission is enough, nothing else', async () => {
+    const user = { id: adminUser.id, org_id: org.id, role: 'employee' };
+    const access = (permissions) => ({ mode: 'permissions', level: 'employee', permissions, basic: [] });
+    expect(await canTrack({ ...user, access: access({ 'finance.update': true }) })).toBe(true);
+    expect(await canTrack({ ...user, access: access({ 'payroll.create': true }) })).toBe(true);
+    expect(await canTrack({ ...user, access: access({ 'accounts.update': true }) })).toBe(false);
+    expect(await canTrack({ ...user, access: { mode: 'permissions', level: 'admin', permissions: {}, basic: [] } })).toBe(true);
+  });
+
+  test('in a company workspace its manager and finance roles are let in, staff are not', async () => {
+    const make = async (role) => {
+      const u = await createUser({ role: 'employee', withOrg: false });
+      await createOrgMembership(u.id, org.id, { role: 'employee' });
+      await prisma.zxPerson.create({ data: { org_id: org.id, name: `${role} person`, user_id: u.id, access_role: role } });
+      return { id: u.id, org_id: org.id, role: 'employee' };
+    };
+    expect(await canTrack(await make('finance'))).toBe(true);
+    expect(await canTrack(await make('manager'))).toBe(true);
+    expect(await canTrack(await make('staff'))).toBe(false);
+  });
+});
+
+describe('Financials: the month\'s payments in INR beside the profit figures', () => {
+  test('received, paid, bank charges and deductions, whether or not a wallet was used; undone payments leave', async () => {
+    const { computeFinancialMonth } = require('../src/modules/calculations/engines/financials.engine');
+    const inv = await invoice({ currency: 'USD', amount: 100 });
+    const made = await pay(inv.id, { amount: '100', bank_charges: '4', other_deductions: '6', exchange_rate: '80', wallet_payment: wp() });
+    await authed(request(app).post('/api/v1/payments/track'), adminToken).send({ kind: 'salary', reference_id: '77777777-7777-4777-8777-777777777777', amount: '500' });
+    const now = new Date();
+    const period = { period_month: now.getMonth() + 1, period_year: now.getFullYear() };
+    // the engine takes the month's components from a resolver (locked or live); empty ones are enough here
+    const resolve = async (kind) => ({ locked: false, version: null, raw: kind === 'billing' ? { supported: false } : { lines: [] } });
+    const m = await computeFinancialMonth(org.id, period, resolve);
+    expect(m.payments).toEqual({ count: 2, received: 8000, paid: 500, bank_charges: 320, deductions: 480, net: 7500 });
+    expect(m.totals).toHaveProperty('profit'); // the profit figures are untouched
+    await undoPay(inv.id, made.body.data.payment.id, { reason: 'test' });
+    expect((await computeFinancialMonth(org.id, period, resolve)).payments).toMatchObject({ count: 1, received: 0, paid: 500 });
+  });
+});
+
+describe('Financials (records): payments count once the month is locked', () => {
+  test('locked by default only after the financial lock of the month; unlocked / all show the rest; undone payments leave', async () => {
+    const { financialRecords } = require('../src/modules/calculations/records.service');
+    const inv = await invoice({ currency: 'USD', amount: 100 });
+    const made = await pay(inv.id, { amount: '100', bank_charges: '4', exchange_rate: '80' });
+    await authed(request(app).post('/api/v1/payments/track'), adminToken).send({ kind: 'salary', reference_id: '88888888-8888-4888-8888-888888888888', amount: '500' });
+    const now = new Date();
+    const range = { period_year: now.getFullYear(), from_month: 1, to_month: 12 };
+    const locked0 = (await financialRecords(org.id, { ...range, state: 'locked' })).payments;
+    expect(locked0).toMatchObject({ count: 0, received: 0, paid: 0 }); // the month is not locked yet: nothing counts
+    expect((await financialRecords(org.id, { ...range, state: 'unlocked' })).payments).toMatchObject({ count: 2, received: 8000, paid: 500, bank_charges: 320, net: 7500 });
+    await prisma.financialCalculation.create({ data: { org_id: org.id, kind: 'financials', scope_key: 'org', period_month: now.getMonth() + 1, period_year: now.getFullYear(), status: 'locked', created_by: su.id } });
+    const locked1 = (await financialRecords(org.id, { ...range, state: 'locked' })).payments;
+    expect(locked1).toMatchObject({ count: 2, received: 8000, paid: 500, bank_charges: 320, net: 7500 });
+    expect((await financialRecords(org.id, { ...range, state: 'unlocked' })).payments.count).toBe(0);
+    const all = (await financialRecords(org.id, { ...range, state: 'all' })).payments;
+    expect(all).toMatchObject({ count: 2, received: 8000 });
+    expect(all.locked.received).toBe(8000);
+    // a locked month freezes its invoices' payments (undo needs the lock reopened first); the test invoice belongs to May 2026
+    await prisma.financialCalculation.create({ data: { org_id: org.id, kind: 'financials', scope_key: 'org', period_month: 5, period_year: 2026, status: 'locked', created_by: su.id } });
+    expect((await undoPay(inv.id, made.body.data.payment.id, { reason: 'test' })).status).toBe(423);
+  });
+});
+

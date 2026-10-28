@@ -226,4 +226,21 @@ async function report(orgIds, { from, to, kind, direction, org_id } = {}) {
   return { rows: out, totals, inr: { in: money(inrIn), out: money(inrOut) }, kinds: Object.entries(KIND_LABEL).map(([key, label]) => ({ key, label })) };
 }
 
-module.exports = { report, TRACK_KINDS, KIND_DIRECTION, PAYMENT_ERRORS, paymentInputSchema, undoSchema, prepare, withSavedRate, totals, summarize, serialize, list, undoWithin };
+/**
+ * Edits a payment: the old one stays in the history as undone ("Edited") and the corrected one is recorded in the same transaction
+ * (so the wallet entry is replaced, never doubled). `record.pending` must already leave out the payment being replaced.
+ */
+async function replace({ orgId, user, kind, referenceId, paymentId, record, input, fixedAmount, reason }) {
+  const old = await prisma.paymentRecord.findFirst({ where: { id: paymentId, org_id: orgId, kind, reference_id: referenceId } });
+  if (!old) return { error: 'payment_not_found' };
+  if (old.deleted_at) return { error: 'already_undone' };
+  const prepared = await prepare({ orgId, user, record, input, fixedAmount });
+  if (prepared.error) return { error: prepared.error };
+  const payment = await prisma.$transaction(async (tx) => {
+    await undoWithin(tx, { orgId, user, kind, referenceId, paymentId, reason: reason || 'Edited' });
+    return prepared.commit(tx);
+  });
+  return { payment, old };
+}
+
+module.exports = { replace, report, TRACK_KINDS, KIND_DIRECTION, PAYMENT_ERRORS, paymentInputSchema, undoSchema, prepare, withSavedRate, totals, summarize, serialize, list, undoWithin };

@@ -17,7 +17,8 @@ export const isPaymentCancelled = (err) => err?.message === PAYMENT_CANCELLED;
  * The one payment popup (Paras): how much (full or part, the rest stays pending), the rate typed at payment time for a foreign currency,
  * bank charges and other deductions with a note, and "track in a wallet?" Yes / No (default No) with the wallet.
  *
- * config = { title, direction ('in' | 'out'), currency, amount (pending, or the fixed amount), fixedAmount (no part payment), party }
+ * config = { title, direction ('in' | 'out'), currency, amount (pending, or the fixed amount), fixedAmount (no part payment), party,
+ *             cap (the most that may be entered, default amount), initialAmount, initial (field values to prefill: an edit), note, submitLabel }
  */
 function PaymentDialog({ config, onSubmit, onCancel }) {
   const open = Boolean(config);
@@ -31,7 +32,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
   useEffect(() => {
     if (!config) return;
     setError('');
-    setV({ amount: config.amount ? String(config.amount) : '', date: today(), exchange_rate: '', bank_charges: '', other_deductions: '', deduction_notes: '', notes: '', track: false, wallet_id: '', mode: 'neft' });
+    setV({ amount: config.initialAmount !== undefined ? String(config.initialAmount) : config.amount ? String(config.amount) : '', date: today(), exchange_rate: '', bank_charges: '', other_deductions: '', deduction_notes: '', notes: '', track: false, wallet_id: '', mode: 'neft', ...(config.initial || {}) });
     setSaving(false);
     if (foreign) {
       apiClient.get('/billing/exchange-rates').then((r) => {
@@ -51,7 +52,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
   const charges = num(v.bank_charges) + num(v.other_deductions);
   const net = amount - charges;
   const inr = foreign ? amount * num(v.exchange_rate) : amount;
-  const pending = num(config?.amount);
+  const pending = config?.cap !== undefined ? config.cap : num(config?.amount);
   const problem = !amount || amount <= 0 ? 'Enter the amount.'
     : !config?.fixedAmount && amount > pending + 0.001 ? 'That is more than what is pending.'
     : foreign && !num(v.exchange_rate) ? 'Enter the exchange rate.'
@@ -84,13 +85,14 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
       footer={(
         <>
           <button type="button" className="btn-secondary" disabled={saving} onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={saving || Boolean(problem)} title={problem} onClick={submit}>{saving ? 'Saving…' : config?.direction === 'in' ? 'Save payment received' : 'Save payment'}</button>
+          <button type="button" className="btn-primary" disabled={saving || Boolean(problem)} title={problem} onClick={submit}>{saving ? 'Saving…' : config?.submitLabel || (config?.direction === 'in' ? 'Save payment received' : 'Save payment')}</button>
         </>
       )}
     >
       {config && (
         <div className="space-y-3">
           {config.party && <p className="text-xs text-tertiary-500">{config.party}</p>}
+          {config.note && <p className="rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs text-warning-700">{config.note}</p>}
           <div className="grid grid-cols-2 gap-3">
             <label className={labelCls}>{config.direction === 'in' ? 'Amount received' : 'Amount paid'} ({currency}){config.fixedAmount
               ? <input className={`${inputCls} bg-tertiary-50`} readOnly value={fmt(config.amount)} />
@@ -98,7 +100,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
             </label>
             <label className={labelCls}>Date<input type="date" className={inputCls} value={v.date || ''} onChange={set('date')} /></label>
           </div>
-          {!config.fixedAmount && <p className="-mt-1 text-xs text-tertiary-500">Pending: {fmt(pending, currency)}. A part payment leaves the rest pending.</p>}
+          {!config.fixedAmount && config.cap === undefined && <p className="-mt-1 text-xs text-tertiary-500">Pending: {fmt(pending, currency)}. A part payment leaves the rest pending.</p>}
 
           {foreign && (
             <div className="grid grid-cols-2 gap-3">

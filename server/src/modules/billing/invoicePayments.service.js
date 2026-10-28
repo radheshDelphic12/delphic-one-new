@@ -80,4 +80,34 @@ async function undo(orgId, user, invoiceId, paymentId, reason) {
   return { invoice: withPayments({ id: invoiceId, status, amount: Number(invoice.amount), currency: invoice.currency }, out.total) };
 }
 
-module.exports = { KIND, withPayments, list, record, undo };
+/** Edit one payment of an invoice (group admin): same fields as recording one; the invoice goes paid / back to sent by the new total. */
+async function edit(orgId, user, invoiceId, paymentId, input) {
+  const invoice = await findInvoice(orgId, invoiceId);
+  if (!invoice) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
+  if (frozen) return frozen;
+  const old = await prisma.paymentRecord.findFirst({ where: { id: paymentId, org_id: orgId, kind: KIND, reference_id: invoiceId } });
+  if (!old) return { error: 'payment_not_found' };
+  if (old.deleted_at) return { error: 'already_undone' };
+
+  const paidWithout = D(await paidOf(orgId, invoiceId)).minus(old.amount);
+  const pending = D(invoice.amount).minus(paidWithout);
+  const body = await payments.withSavedRate(orgId, invoice.currency, { ...input, amount: input.amount || money(old.amount) });
+  const done = await payments.replace({
+    orgId, user, kind: KIND, referenceId: invoiceId, paymentId, input: body, reason: input.reason,
+    record: { kind: KIND, id: invoice.id, currency: invoice.currency, pending, party: invoice.client_account?.project_name || invoice.client_account?.name || null, category: `Invoice ${invoice.invoice_number || `${invoice.period_month}/${invoice.period_year}`}` },
+  });
+  if (done.error) return { error: done.error };
+  const total = (await payments.totals(prisma, orgId, KIND, [invoiceId])).get(invoiceId);
+  let status = invoice.status;
+  if (D(total.paid).gte(invoice.amount) && status === 'sent') {
+    await prisma.clientInvoice.update({ where: { id: invoiceId }, data: { status: 'paid', paid_at: new Date() } });
+    status = 'paid';
+  } else if (D(total.paid).lt(invoice.amount) && status === 'paid') {
+    await prisma.clientInvoice.update({ where: { id: invoiceId }, data: { status: 'sent', paid_at: null } });
+    status = 'sent';
+  }
+  return { payment: payments.serialize(done.payment, null), invoice: withPayments({ id: invoiceId, status, amount: Number(invoice.amount), currency: invoice.currency }, total) };
+}
+
+module.exports = { KIND, withPayments, list, record, undo, edit };

@@ -267,6 +267,37 @@ const monthIdx = (y, m) => y * 12 + (m - 1);
 
 const MONTH_CONCURRENCY = 4;
 
+// The payments (payment popup / wallet link) of a range, in INR, whether or not a wallet was used. A payment is "locked" - and counts in
+// the Financials numbers by default - once the financial lock of its month is on (Live Analytics > Financials); until then it is live.
+async function paymentTotals(orgId, { period_year, from_month, to_month, state }) {
+  const [rows, locks] = await Promise.all([
+    prisma.paymentRecord.findMany({
+      where: { org_id: orgId, deleted_at: null, paid_on: { gte: new Date(Date.UTC(period_year, from_month - 1, 1)), lt: new Date(Date.UTC(period_year, to_month, 1)) } },
+      select: { direction: true, paid_on: true, inr_amount: true, bank_charges: true, other_deductions: true, exchange_rate: true },
+    }),
+    prisma.financialCalculation.findMany({
+      where: { org_id: orgId, kind: 'financials', period_year, period_month: { gte: from_month, lte: to_month }, status: { in: ['locked', 'change_detected'] } },
+      select: { period_month: true },
+    }),
+  ]);
+  const lockedMonths = new Set(locks.map((l) => l.period_month));
+  const blank = () => ({ count: 0, received: 0, paid: 0, bank_charges: 0, deductions: 0 });
+  const bucket = { locked: blank(), unlocked: blank() };
+  for (const r of rows) {
+    const b = lockedMonths.has(r.paid_on.getUTCMonth() + 1) ? bucket.locked : bucket.unlocked;
+    const rate = r.exchange_rate === null ? 1 : Number(r.exchange_rate);
+    b.count += 1;
+    if (r.direction === 'in') b.received += Number(r.inr_amount); else b.paid += Number(r.inr_amount);
+    b.bank_charges += Number(r.bank_charges) * rate;
+    b.deductions += Number(r.other_deductions) * rate;
+  }
+  const fin = (b) => ({ count: b.count, received: round2(b.received), paid: round2(b.paid), bank_charges: round2(b.bank_charges), deductions: round2(b.deductions), net: round2(b.received - b.paid) });
+  const locked = fin(bucket.locked);
+  const unlocked = fin(bucket.unlocked);
+  const all = fin({ count: bucket.locked.count + bucket.unlocked.count, received: bucket.locked.received + bucket.unlocked.received, paid: bucket.locked.paid + bucket.unlocked.paid, bank_charges: bucket.locked.bank_charges + bucket.unlocked.bank_charges, deductions: bucket.locked.deductions + bucket.unlocked.deductions });
+  return { ...(state === 'locked' ? locked : state === 'unlocked' ? unlocked : all), locked, unlocked };
+}
+
 async function financialRecords(orgId, { period_year, from_month = 1, to_month = 12, state = 'locked' }, now = new Date()) {
   const wantLocked = state !== 'unlocked';
   const wantLive = state !== 'locked';
@@ -429,7 +460,8 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
     expenses: expensesNode.amount,
     profit: round2(revenueNode.amount - salariesNode.amount - expensesNode.amount),
   };
-  return { state, period_year, from_month, to_month, months, categories: [revenueNode, salariesNode, expensesNode], totals, counts, missing_rates: [...missing] };
+  const payments = await paymentTotals(orgId, { period_year, from_month, to_month, state });
+  return { state, period_year, from_month, to_month, months, categories: [revenueNode, salariesNode, expensesNode], totals, payments, counts, missing_rates: [...missing] };
 }
 
 module.exports = { expenseRecords, lockedList, financialRecords, summarize, monthExpenseRows };

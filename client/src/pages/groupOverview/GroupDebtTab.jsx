@@ -1,4 +1,5 @@
 import { trackInWallet } from '../../lib/payments/trackInWallet.js';
+import TrackedPaymentsPanel from '../../components/payments/TrackedPaymentsPanel.jsx';
 import { useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CalendarClock, Landmark, Percent, Plus, Settings2, Wallet } from 'lucide-react';
@@ -159,6 +160,12 @@ function LoanDrawer({ loan, onClose, onEdit, onChanged, onDelete }) {
           </div>
           <p className="text-[11px] text-tertiary-400">Marking an EMI paid also marks every earlier one; undoing one also undoes every later one.</p>
         </section>
+      )}
+      {!readOnly && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <TrackedPaymentsPanel kind="debt_repayment" referenceId={loan.id} direction="out" title="Repayments (money returned)" party={loan.lender} category="Debt repayment" recordLabel="Record repayment" />
+          <TrackedPaymentsPanel kind="debt_received" referenceId={loan.id} direction="in" title="Money received (loan amount)" party={loan.lender} category="Debt received" recordLabel="Record money received" />
+        </div>
       )}
       {loan.notes && <p className="whitespace-pre-wrap text-sm text-tertiary-600">{loan.notes}</p>}
     </div>

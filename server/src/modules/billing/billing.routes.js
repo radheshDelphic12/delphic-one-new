@@ -1,4 +1,5 @@
 const express = require('express');
+const { z } = require('zod');
 const { canMethod } = require('../../lib/permissions');
 const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
@@ -539,6 +540,18 @@ router.post(
     const result = await invoicePaymentsService.record(req.user.org_id, req.user, req.params.id, paymentsService.paymentInputSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error);
     return created(res, result);
+  })
+);
+
+router.patch(
+  '/invoices/:id/payments/:paymentId',
+  authorizeGroupSuperadmin,
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const input = paymentsService.paymentInputSchema.extend({ reason: z.string().trim().max(500).optional() }).parse(req.body || {});
+    const result = await invoicePaymentsService.edit(req.user.org_id, req.user, req.params.id, req.params.paymentId, input);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
   })
 );
 
