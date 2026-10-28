@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -10,6 +10,7 @@ const TABS = [
   { key: 'templates', label: 'Interview templates' },
   { key: 'questions', label: 'Question bank' },
   { key: 'tests', label: 'Tests' },
+  { key: 'analytics', label: 'Tests & interviews' },
 ];
 const CATEGORIES = [
   { value: 'behavioural', label: 'Behavioural' },
@@ -217,7 +218,7 @@ function QuestionsTab() {
 }
 
 // ---------------------------------------------------------------- tests
-function TestsTab({ onChanged }) {
+function TestsTab({ onChanged, isAdmin }) {
   const [rows, setRows] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [edit, setEdit] = useState(null);
@@ -242,6 +243,7 @@ function TestsTab({ onChanged }) {
 
   return (
     <div className="space-y-3">
+      <AttemptLimitSetting isAdmin={isAdmin} />
       <div className="flex items-center justify-between">
         <p className="text-sm text-tertiary-600">A test is a set of questions with a minimum pass %. The candidate takes it from a link; it is scored automatically.</p>
         <button type="button" className="btn-primary text-xs" onClick={() => open(null)}>+ New test</button>
@@ -283,8 +285,162 @@ function TestsTab({ onChanged }) {
   );
 }
 
+// ---------------------------------------------------------------- tests & interviews analytics
+// Counting rule: only live test attempts count (not deleted, not replaced by a newer link), so a retake replaces the deleted
+// result instead of adding to it. Tests are dated by the day they were sent, interviews by their interview time.
+const TEST_STATUS_LABEL = { not_opened: 'Not opened', in_progress: 'In progress', scored: 'Scored' };
+const INTERVIEW_STATUS_LABEL = { scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled' };
+const PAGE_SIZE = 25;
+const shortDate = (v) => (v ? new Date(v).toLocaleDateString() : '-');
+
+function Tile({ label, value, hint, tone = '' }) {
+  return (
+    <div className="rounded-xl border border-tertiary-100 bg-white p-3 shadow-soft">
+      <p className="text-xs text-tertiary-500">{label}</p>
+      <p className={`mt-0.5 font-heading text-2xl font-semibold ${tone || 'text-tertiary-900'}`}>{value ?? '-'}</p>
+      {hint && <p className="text-[11px] text-tertiary-400">{hint}</p>}
+    </div>
+  );
+}
+
+function AnalyticsTab() {
+  const [filters, setFilters] = useState({ from: '', to: '', requirement_id: '', recruiter_id: '', account_id: '' });
+  const [options, setOptions] = useState({ requirements: [], recruiters: [], clients: [] });
+  const [summary, setSummary] = useState(null);
+  const [kind, setKind] = useState('tests');
+  const [page, setPage] = useState(1);
+  const [records, setRecords] = useState({ total: 0, items: [] });
+  const [loading, setLoading] = useState(false);
+  const { pushError } = useAlerts();
+
+  const params = useMemo(() => Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), [filters]);
+  useEffect(() => { apiClient.get('/assessments/analytics/filters').then(({ data }) => setOptions(data.data)).catch(() => {}); }, []);
+  useEffect(() => {
+    apiClient.get('/assessments/analytics/summary', { params }).then(({ data }) => setSummary(data.data)).catch((err) => pushError(apiErrorMessage(err, 'Could not load the numbers'), 'Something went wrong'));
+    setPage(1);
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setLoading(true);
+    apiClient.get('/assessments/analytics/records', { params: { ...params, kind, page, limit: PAGE_SIZE } })
+      .then(({ data }) => setRecords(data.data))
+      .catch(() => setRecords({ total: 0, items: [] }))
+      .finally(() => setLoading(false));
+  }, [params, kind, page]);
+
+  const set = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  const pages = Math.max(1, Math.ceil(records.total / PAGE_SIZE));
+  const t = summary?.tests;
+  const iv = summary?.interviews;
+  const select = (value, onChange, label, list) => (
+    <select className={`${FIELD_INPUT} !w-auto`} value={value} onChange={onChange} aria-label={label}>
+      <option value="">{label}</option>
+      {list.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+    </select>
+  );
+
+  return (
+    <div className="space-y-4" data-testid="hiring-analytics">
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="From"><input type="date" className={`${FIELD_INPUT} !w-auto`} value={filters.from} onChange={set('from')} /></Field>
+        <Field label="To"><input type="date" className={`${FIELD_INPUT} !w-auto`} value={filters.to} onChange={set('to')} /></Field>
+        {select(filters.requirement_id, set('requirement_id'), 'All requirements', options.requirements)}
+        {select(filters.recruiter_id, set('recruiter_id'), 'All recruiters', options.recruiters)}
+        {select(filters.account_id, set('account_id'), 'All clients', options.clients)}
+        <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ from: '', to: '', requirement_id: '', recruiter_id: '', account_id: '' })}>Clear</button>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-tertiary-800">Tests</h3>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          <Tile label="Sent" value={t?.sent} />
+          <Tile label="Started" value={t?.started} hint={t ? `${t.not_opened} not opened` : ''} />
+          <Tile label="Completed" value={t?.completed} hint={t ? `${t.in_progress} in progress` : ''} />
+          <Tile label="Passed" value={t?.passed} tone="text-success-700" />
+          <Tile label="Failed" value={t?.failed} tone="text-danger-700" />
+          <Tile label="Pass rate" value={t?.pass_rate != null ? `${t.pass_rate}%` : '-'} />
+        </div>
+        <h3 className="mb-2 mt-4 text-sm font-semibold text-tertiary-800">Interviews</h3>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Tile label="Scheduled" value={iv?.scheduled} />
+          <Tile label="Completed" value={iv?.completed} tone="text-success-700" />
+          <Tile label="Still to do" value={iv?.pending} />
+          <Tile label="Cancelled" value={iv?.cancelled} hint="not in Scheduled" />
+        </div>
+        <p className="mt-2 text-xs text-tertiary-500">Deleted and replaced test links are not counted, and a retake counts once. Tests are dated by the day they were sent, interviews by their interview time.</p>
+      </div>
+
+      <div className="rounded-xl border border-tertiary-100 bg-white shadow-soft">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-tertiary-100 px-3 py-2">
+          <div className="flex gap-1">
+            {[['tests', 'Test records'], ['interviews', 'Interview records']].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => { setKind(k); setPage(1); }} className={`rounded-lg px-3 py-1 text-xs ${kind === k ? 'bg-primary-50 font-medium text-primary-700' : 'text-tertiary-500'}`}>{label}</button>
+            ))}
+          </div>
+          <span className="text-xs text-tertiary-500">{records.total} record{records.total === 1 ? '' : 's'}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs" data-testid="analytics-records">
+            <thead className="bg-tertiary-50 text-tertiary-500">
+              <tr>
+                <th className="px-3 py-2">Candidate</th><th className="px-3 py-2">Requirement</th><th className="px-3 py-2">Client</th>
+                <th className="px-3 py-2">Round</th>{kind === 'tests' && <th className="px-3 py-2">Test</th>}
+                <th className="px-3 py-2">Status</th><th className="px-3 py-2">Score</th>
+                <th className="px-3 py-2">{kind === 'tests' ? 'Sent' : 'Interview'}</th><th className="px-3 py-2">{kind === 'tests' ? 'Submitted' : 'Completed'}</th>
+                <th className="px-3 py-2">Recruiter</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.items.map((r) => (
+                <tr key={r.id} className="border-t border-tertiary-100">
+                  <td className="px-3 py-2">
+                    {r.submission_id ? <a className="text-primary-700 hover:underline" href={`/submissions/${r.submission_id}`}>{r.candidate || 'Candidate'}</a> : (r.candidate || '-')}
+                  </td>
+                  <td className="px-3 py-2">{r.requirement || '-'}</td>
+                  <td className="px-3 py-2">{r.client || '-'}</td>
+                  <td className="px-3 py-2">{r.round}</td>
+                  {kind === 'tests' && <td className="px-3 py-2">{r.test}</td>}
+                  <td className="px-3 py-2">{(kind === 'tests' ? TEST_STATUS_LABEL : INTERVIEW_STATUS_LABEL)[r.status] || r.status}{kind === 'tests' && r.status === 'scored' ? (r.passed ? ' - passed' : ' - failed') : ''}{kind === 'interviews' && r.status === 'completed' ? ` - ${r.result}` : ''}</td>
+                  <td className="px-3 py-2">{r.score_percent != null ? `${r.score_percent}%` : '-'}</td>
+                  <td className="px-3 py-2">{shortDate(kind === 'tests' ? r.sent_at : r.scheduled_at)}</td>
+                  <td className="px-3 py-2">{shortDate(kind === 'tests' ? r.submitted_at : r.completed_at)}</td>
+                  <td className="px-3 py-2">{r.recruiter || '-'}</td>
+                </tr>
+              ))}
+              {!loading && records.items.length === 0 && <tr><td colSpan={10} className="px-3 py-6 text-center text-tertiary-500">Nothing matches these filters.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-end gap-2 border-t border-tertiary-100 px-3 py-2 text-xs">
+            <button type="button" className="btn-secondary text-xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
+            <span>Page {page} of {pages}</span>
+            <button type="button" className="btn-secondary text-xs" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Attempt limit: how many tests can be sent for one submission (admin editable; 0 = no limit).
+function AttemptLimitSetting({ isAdmin }) {
+  const [value, setValue] = useState('');
+  const { busy, run } = useSave();
+  useEffect(() => { apiClient.get('/assessments/settings').then(({ data }) => setValue(String(data.data.assessment_max_attempts))).catch(() => {}); }, []);
+  if (value === '') return null;
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-tertiary-100 bg-white p-3 shadow-soft" data-testid="attempt-limit">
+      <Field label="Tests allowed per candidate submission" hint="Counted per submission (not per email), including replaced links; deleting an attempt frees a slot. 0 = no limit. An admin can still send past the limit.">
+        <input type="number" min={0} max={50} className={`${FIELD_INPUT} !w-28`} value={value} disabled={!isAdmin} onChange={(e) => setValue(e.target.value)} />
+      </Field>
+      {isAdmin && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={() => run(() => apiClient.put('/assessments/settings', { assessment_max_attempts: Number(value) }), 'Limit saved')}>Save limit</button>}
+    </div>
+  );
+}
+
 export default function HiringSetupPage() {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || Boolean(user?.is_superadmin);
   const [tab, setTab] = useState('templates');
   const [tests, setTests] = useState([]);
   const loadTests = useCallback(() => apiClient.get('/assessments/tests').then(({ data }) => setTests(data.data || [])).catch(() => setTests([])), []);
@@ -294,16 +450,17 @@ export default function HiringSetupPage() {
     <div className="space-y-4">
       <div>
         <h1 className="font-heading text-lg font-semibold text-tertiary-900">Hiring setup</h1>
-        <p className="text-sm text-tertiary-500">Interview templates per service type, and the tests candidates take.</p>
+        <p className="text-sm text-tertiary-500">Interview templates per service type, the tests candidates take, and how they are going.</p>
       </div>
       <div className="flex gap-1 border-b border-tertiary-100">
         {TABS.map((t) => (
           <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === t.key ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-tertiary-500'}`}>{t.label}</button>
         ))}
       </div>
-      {tab === 'templates' && <TemplatesTab isAdmin={user?.role === 'admin' || user?.is_superadmin} tests={tests} />}
+      {tab === 'templates' && <TemplatesTab isAdmin={isAdmin} tests={tests} />}
       {tab === 'questions' && <QuestionsTab />}
-      {tab === 'tests' && <TestsTab onChanged={loadTests} />}
+      {tab === 'tests' && <TestsTab onChanged={loadTests} isAdmin={isAdmin} />}
+      {tab === 'analytics' && <AnalyticsTab />}
     </div>
   );
 }

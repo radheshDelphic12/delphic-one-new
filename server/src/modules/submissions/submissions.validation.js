@@ -87,10 +87,10 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-// One skill the interviewer rated, out of 10.
+// One skill the interviewer rated, 0 to 10.
 const skillRatingSchema = z.object({
   skill_name: z.string().trim().min(1, 'Enter the skill name'),
-  rating: z.number().int().min(1).max(10),
+  rating: z.number().int().min(0).max(10),
   comment: z.string().optional(),
 });
 

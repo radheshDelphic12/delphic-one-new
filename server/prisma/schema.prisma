@@ -2034,6 +2034,8 @@ model Org {
   resignation_enabled          Boolean   @default(true)
   resignation_notice_days      Int       @default(30)
   resignation_manager_required Boolean   @default(true)
+  // Hiring: how many assessment tests can be sent for one submission (0 = no limit).
+  assessment_max_attempts      Int       @default(3)
   created_at                 DateTime  @default(now())
   updated_at                 DateTime  @default(now()) @updatedAt
 
@@ -8038,8 +8040,16 @@ model AssessmentAttempt {
   expires_at      DateTime
   started_at      DateTime?
   submitted_at    DateTime?
+  // The screening round of the candidate's interview plan this test belongs to: one live attempt per submission + round.
+  template_round_id String?   @db.Uuid
+  // A newer link replaced this unopened one; kept for the record, no longer live.
+  superseded_at     DateTime?
+  // Admin deleted it (audit_logs holds who / when / why); it no longer counts anywhere.
+  deleted_at        DateTime?
+  deleted_by        String?   @db.Uuid
 
   @@index([submission_id])
+  @@index([submission_id, template_round_id])
   @@index([test_id])
   @@map("assessment_attempts")
 }

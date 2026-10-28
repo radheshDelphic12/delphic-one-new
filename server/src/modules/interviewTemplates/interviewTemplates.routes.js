@@ -18,6 +18,8 @@ const mapError = (res, error) => fail(res, ...(ERRORS[error] || [400, 'Bad reque
 
 router.get('/', asyncHandler(async (req, res) => ok(res, await service.listTemplates(req.query.include_inactive === 'true' && req.user.role === 'admin'))));
 
+router.get('/skill-options', asyncHandler(async (req, res) => ok(res, await service.skillOptions())));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const row = await service.getTemplate(req.params.id);
   return row ? ok(res, row) : mapError(res, 'not_found');

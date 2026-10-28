@@ -41,3 +41,21 @@ Internal Hiring requirements use the same flow as any other: publish from Websit
 
 - A requirement still needs an active client account; for Internal Hiring use a "Delphic (Internal)" account.
 - Round reminders/calendar still label template rounds by the generic "Interview Round"; the round name is shown beside it.
+
+## Test link management, JD skill prefill and analytics (2026-10-28)
+
+### One live test per submission and round
+- A test attempt is **live** when it is not deleted and not superseded. There is at most one live attempt per submission and screening round.
+- Sending a new test **replaces an unopened link** (the old one is marked replaced and stops working). It is **refused** while the candidate is mid-test, and while a scored result exists. An admin deletes the scored result to allow a **retake**.
+- Admins can **delete** any link or result (confirmation drawer, optional reason; recorded in `audit_logs` with who, when and a snapshot) and **extend** an unfinished link by 7 days. Deleted attempts disappear from lists and every count.
+- Each attempt shows status (not opened, in progress, scored with % and pass/fail, expired, replaced), created date and created by.
+
+### Attempt limit
+- `orgs.assessment_max_attempts` (default **3**, `0` = no limit), edited in Hiring setup > Tests. Counted **per submission** (not per email), every attempt sent and not deleted, replaced links included, so re-sending cannot dodge it. Deleting an attempt frees a slot. An admin can send past the limit on purpose (confirmation); others cannot.
+
+### Skill ratings from the JD
+- A round with "skill ratings required" opens its feedback panel with the requirement's `primary_tech_stack` then `secondary_tech_stack` as rows (repeats and blanks dropped). Ratings are 0-10 and start unrated; every row left must be rated before saving. Rows can be removed; other skills are picked from the dropdown (JD skills, candidate skills, skills rated before, catalog) or typed. A new skill saved on a round joins the dropdown. An empty stack shows just "+ Add skill".
+
+### Tests & interviews analytics (Hiring setup > Tests & interviews)
+- Counting rule: only **live** attempts count, so a retake replaces the deleted result. Tests are dated by the day sent, interviews by interview time. Completed interview = pass/fail recorded; cancelled interviews are shown separately and are not in "scheduled". Filters: date range, requirement, recruiter (who submitted the candidate), client. Drill-down lists the individual records.
+- API: `GET /assessments/analytics/summary | records | filters`, `GET/PUT /assessments/settings`, `DELETE /assessments/attempts/:id`, `POST /assessments/attempts/:id/extend`, `GET /interview-templates/skill-options`. Migration `20261031100000_assessment_attempt_management` (additive; retires old unopened duplicate links).

@@ -84,10 +84,54 @@ async function updateTest(id, data) {
 }
 
 // ---- attempts ----
+// Rules (see docs/features/INTERVIEW-TEMPLATES.md > Test link management):
+//  * One LIVE attempt per submission + round: not deleted and not superseded. Sending a new test replaces an unopened link
+//    (the old one is superseded); it is refused while the candidate is mid-test or already has a scored result.
+//    Deleting a scored result (admin) lets the candidate retake.
+//  * The org's attempt limit counts every attempt sent for the submission that is not deleted (superseded ones included, so
+//    re-sending cannot dodge the limit). Deleting an attempt frees a slot; an admin can also send past the limit.
 const attemptLink = (token) => `${env.corsOrigin.replace(/\/$/, '')}/assessment/${token}`;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const isLive = (a) => !a.deleted_at && !a.superseded_at;
+const adminOf = (user) => user?.role === 'admin' || Boolean(user?.is_superadmin);
+
+async function getSettings(orgId) {
+  const org = orgId ? await prisma.org.findUnique({ where: { id: orgId }, select: { assessment_max_attempts: true } }) : null;
+  return { assessment_max_attempts: org?.assessment_max_attempts ?? DEFAULT_MAX_ATTEMPTS };
+}
+
+const updateSettings = (orgId, patch) =>
+  prisma.org.update({ where: { id: orgId }, data: { assessment_max_attempts: patch.assessment_max_attempts }, select: { assessment_max_attempts: true } });
+
+async function audit(db, user, action, attempt, reason, extra = {}) {
+  await db.auditLog.create({
+    data: {
+      actor_id: user.id,
+      action,
+      entity_type: 'assessment_attempt',
+      entity_id: attempt.id,
+      reason: reason || (action === 'delete_attempt' ? 'Deleted by admin' : 'Changed by admin'),
+      org_id: user.org_id || null,
+      snapshot: {
+        submission_id: attempt.submission_id, test_id: attempt.test_id, status: attempt.status,
+        score_percent: attempt.score_percent != null ? Number(attempt.score_percent) : null, passed: attempt.passed,
+        invited_at: attempt.invited_at, submitted_at: attempt.submitted_at, expires_at: attempt.expires_at, ...extra,
+      },
+    },
+  });
+}
+
+// The screening round of the candidate's interview plan that a test belongs to (null for requirements without a template).
+async function screeningRoundId(db, submissionId) {
+  const sub = await db.submission.findUnique({
+    where: { id: submissionId },
+    select: { seat: { select: { requirement: { select: { interview_template: { select: { rounds: { where: { kind: 'screening_test' }, orderBy: { sort_order: 'asc' }, take: 1, select: { id: true } } } } } } } } },
+  });
+  return sub?.seat?.requirement?.interview_template?.rounds?.[0]?.id || null;
+}
 
 // Sends the test to the candidate of a submission: a new public link, also emailed when the profile has an email.
-async function invite({ testId, submissionId }, user) {
+async function invite({ testId, submissionId, overrideLimit = false }, user) {
   const test = await prisma.assessmentTest.findUnique({ where: { id: testId }, include: { _count: { select: { questions: true } } } });
   if (!test || !test.is_active) return { error: 'not_found' };
   if (!test._count.questions) return { error: 'empty_test' };
@@ -97,18 +141,31 @@ async function invite({ testId, submissionId }, user) {
   });
   if (!submission) return { error: 'not_found' };
 
+  const roundId = await screeningRoundId(prisma, submissionId);
+  const existing = await prisma.assessmentAttempt.findMany({ where: { submission_id: submissionId, deleted_at: null } });
+  const live = existing.filter((a) => isLive(a) && (a.template_round_id || roundId) === roundId);
+  if (live.some((a) => a.status === 'submitted')) return { error: 'already_completed' };
+  if (live.some((a) => a.status === 'started')) return { error: 'in_progress' };
+
+  const { assessment_max_attempts: limit } = await getSettings(user.org_id);
+  if (limit > 0 && existing.length >= limit && !(overrideLimit && adminOf(user))) return { error: 'limit_reached', limit, used: existing.length };
+
   const token = crypto.randomBytes(24).toString('hex');
-  const attempt = await prisma.assessmentAttempt.create({
-    data: {
-      token,
-      test_id: testId,
-      submission_id: submissionId,
-      candidate_name: submission.profile?.name || 'Candidate',
-      candidate_email: submission.profile?.email || null,
-      pass_percentage: test.pass_percentage,
-      invited_by: user.id,
-      expires_at: new Date(Date.now() + LINK_VALID_DAYS * 86400000),
-    },
+  const attempt = await prisma.$transaction(async (tx) => {
+    if (live.length) await tx.assessmentAttempt.updateMany({ where: { id: { in: live.map((a) => a.id) } }, data: { superseded_at: new Date() } });
+    return tx.assessmentAttempt.create({
+      data: {
+        token,
+        test_id: testId,
+        submission_id: submissionId,
+        template_round_id: roundId,
+        candidate_name: submission.profile?.name || 'Candidate',
+        candidate_email: submission.profile?.email || null,
+        pass_percentage: test.pass_percentage,
+        invited_by: user.id,
+        expires_at: new Date(Date.now() + LINK_VALID_DAYS * 86400000),
+      },
+    });
   });
   const link = attemptLink(token);
   if (attempt.candidate_email) {
@@ -119,39 +176,90 @@ async function invite({ testId, submissionId }, user) {
       text: `Hi ${attempt.candidate_name},\n\nPlease complete this short assessment: ${link}\n\nThe link is valid for ${LINK_VALID_DAYS} days${test.duration_minutes ? ` and the test takes about ${test.duration_minutes} minutes` : ''}. You can open it once and submit your answers once.\n\nThank you,\nDelphic Team`,
     });
   }
-  return { attempt: toAttemptView(attempt), link };
+  return { attempt: toAttemptView(attempt), link, superseded: live.length };
 }
 
-function toAttemptView(a) {
+// not_opened | in_progress | scored | expired | superseded (what the team sees); deleted attempts are never listed.
+function viewStatus(a) {
+  if (a.superseded_at) return 'superseded';
+  if (a.status === 'submitted') return 'scored';
+  if (a.expires_at < new Date()) return 'expired';
+  return a.status === 'started' ? 'in_progress' : 'not_opened';
+}
+
+function toAttemptView(a, names = new Map()) {
   return {
     id: a.id,
     test_id: a.test_id,
     submission_id: a.submission_id,
+    template_round_id: a.template_round_id,
     candidate_name: a.candidate_name,
     status: a.status,
+    view_status: viewStatus(a),
+    is_live: isLive(a),
     score_percent: a.score_percent != null ? Number(a.score_percent) : null,
     passed: a.passed,
     pass_percentage: a.pass_percentage,
     invited_at: a.invited_at,
+    invited_by: a.invited_by,
+    created_by_name: names.get(a.invited_by) || null,
     expires_at: a.expires_at,
     submitted_at: a.submitted_at,
-    link: a.status === 'submitted' ? null : attemptLink(a.token),
+    link: a.status === 'submitted' || a.superseded_at ? null : attemptLink(a.token),
   };
 }
 
-async function listAttempts({ submissionId }) {
+async function userNames(ids) {
+  const list = [...new Set(ids.filter(Boolean))];
+  if (!list.length) return new Map();
+  const rows = await prisma.user.findMany({ where: { id: { in: list } }, select: { id: true, name: true } });
+  return new Map(rows.map((u) => [u.id, u.name]));
+}
+
+// Attempts of a submission (newest first) plus the live one and the limit position. Deleted attempts are not listed.
+async function listAttempts({ submissionId }, user) {
   const rows = await prisma.assessmentAttempt.findMany({
-    where: { submission_id: submissionId },
+    where: { submission_id: submissionId, deleted_at: null },
     include: { test: { select: { name: true } } },
     orderBy: { invited_at: 'desc' },
   });
-  return rows.map((a) => ({ ...toAttemptView(a), test_name: a.test.name }));
+  const names = await userNames(rows.map((a) => a.invited_by));
+  const { assessment_max_attempts: limit } = await getSettings(user?.org_id);
+  const items = rows.map((a) => ({ ...toAttemptView(a, names), test_name: a.test.name }));
+  const live = items.find((a) => a.is_live) || null;
+  return { items, live_id: live?.id || null, used: rows.length, limit, remaining: limit > 0 ? Math.max(0, limit - rows.length) : null };
+}
+
+// Admin: delete a link or a scored result. A deleted attempt stops working, drops out of every count and frees a slot of the limit.
+async function deleteAttempt(id, { reason }, user) {
+  const attempt = await prisma.assessmentAttempt.findFirst({ where: { id, deleted_at: null } });
+  if (!attempt) return { error: 'not_found' };
+  await prisma.$transaction(async (tx) => {
+    await tx.assessmentAttempt.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id } });
+    await audit(tx, user, 'delete_attempt', attempt, reason);
+  });
+  return { deleted: true };
+}
+
+// Admin: give an unfinished link a fresh validity window (e.g. it expired before the candidate could start).
+async function extendAttempt(id, { days }, user) {
+  const attempt = await prisma.assessmentAttempt.findFirst({ where: { id, deleted_at: null } });
+  if (!attempt) return { error: 'not_found' };
+  if (attempt.status === 'submitted' || attempt.superseded_at) return { error: 'not_extendable' };
+  const expires = new Date(Date.now() + (days || LINK_VALID_DAYS) * 86400000);
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.assessmentAttempt.update({ where: { id }, data: { expires_at: expires } });
+    await audit(tx, user, 'extend_attempt', attempt, `Validity extended to ${expires.toISOString().slice(0, 10)}`, { new_expires_at: expires });
+    return row;
+  });
+  return { attempt: toAttemptView(updated) };
 }
 
 // ---- public (candidate) side: the token is the only credential ----
 async function loadByToken(token) {
   const a = await prisma.assessmentAttempt.findUnique({ where: { token }, include: { test: { include: TEST_INCLUDE } } });
-  if (!a) return { error: 'not_found' };
+  if (!a || a.deleted_at) return { error: 'not_found' };
+  if (a.superseded_at) return { error: 'superseded' };
   if (a.status === 'submitted') return { error: 'already_submitted' };
   if (a.expires_at < new Date()) return { error: 'expired' };
   return { attempt: a };
@@ -204,6 +312,10 @@ module.exports = {
   updateTest,
   invite,
   listAttempts,
+  deleteAttempt,
+  extendAttempt,
+  getSettings,
+  updateSettings,
   openForCandidate,
   submitForCandidate,
 };
