@@ -75,7 +75,9 @@ async function present(orgId, id) {
 // ---- notifications (never block the change they report on: notify() swallows its own errors)
 async function tell(type, actor, recipientUserIds, context) {
   const { notify } = require('../../lib/notifications');
-  await notify(prisma, { type, actorId: actor?.id || null, recipientIds: recipientUserIds.filter(Boolean), context });
+  // skipAdmins: the generic copy-every-admin rule reaches the admins of every other company. HR here is this company's Admin and the
+  // People > Edit holders (hrUserIds), which the callers pass in.
+  await notify(prisma, { type, actorId: actor?.id || null, recipientIds: [...new Set(recipientUserIds.filter(Boolean))], context: { skipAdmins: true, ...context } });
 }
 
 /**
@@ -83,6 +85,7 @@ async function tell(type, actor, recipientUserIds, context) {
  * own grant). They are told the moment a resignation is submitted, not only once the manager has passed it on.
  */
 async function hrUserIds(orgId) {
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { access_mode: true } });
   const rows = await prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
@@ -100,6 +103,8 @@ async function hrUserIds(orgId) {
     .filter((m) => {
       const level = levelOf(m.person, m.role);
       if (level !== 'employee') return true;
+      // a company that has not moved to the permission model: the plain Admin role is the HR
+      if (org?.access_mode !== 'permissions' && m.role === 'admin') return true;
       const { permissions } = effectivePermissions({ level, setPermissions: m.custom_role?.permissions, grants: m.permission_grants, isLeaveManager: m.is_leave_manager });
       return Boolean(permissions['people.update']);
     })
@@ -165,7 +170,7 @@ async function withdraw(orgId, id, user) {
   if (!OPEN_STATUSES.includes(row.status)) return { error: 'not_open' };
   await prisma.resignationRequest.update({ where: { id }, data: { status: 'withdrawn' } });
   const names = await nameMap(orgId, [row.manager_membership_id]);
-  await tell('resignation_decided', user, [names.get(row.manager_membership_id)?.user_id], {
+  await tell('resignation_decided', user, [names.get(row.manager_membership_id)?.user_id, row.org_membership.hr_poc_id, ...(await hrUserIds(orgId))], {
     orgId, resignationId: id, message: `${row.org_membership.person.name} withdrew the resignation.`, emailFooter: REVIEW_FOOTER,
   });
   return { request: await present(orgId, id) };
