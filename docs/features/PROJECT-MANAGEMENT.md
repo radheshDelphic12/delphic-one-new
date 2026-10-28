@@ -8,6 +8,9 @@ Built 2026-10-29. Brief (Paras): multiple projects, each with its own ticketing 
 - Assignees must be **members of the project**, and only Delphic Global employees (no client/vendor access yet).
 - Contract progress is **shown, never overwritten automatically**: the contract's own (manual) percentage sits beside the ticket-based one; an admin can copy the ticket figure over with one click.
 
+## Which "contracts" a project links to (corrected 2026-10-30)
+The first build linked to rows of the Contracts module (`contracts` table), which is not what the business calls contracts. A project now links to the company's **Finance projects** (Finance > Projects: P0045 Delphic One, P0007 ... : `accounts` rows that `lib/projectScope.projectListWhere` treats as projects), shown with their code, client, agreement dates and contract state (Running / Not started / About to end / On hold / Completed, from `lib/contractState`). `pm_project_contracts.contract_id` simply holds that account id (still one project per Finance project). A Finance project has no manual progress or money figure here, so only the ticket progress is shown and "copy progress" is refused for it (422). Links made earlier to a Contracts-module row still display and work. `GET /pm/contracts/linkable` now lists unlinked Finance projects.
+
 ## Data (migration `20261029100000_project_management`, additive)
 `pm_projects` (code per org, owner, status, dates, `ticket_seq` for per-project ticket numbers), `pm_project_members` (member / lead), `pm_statuses`, `pm_tickets`, `pm_ticket_comments`, `pm_activity` (one audit trail for projects and tickets), `pm_project_contracts`. Org / person / contract ids are plain uuids on purpose (no relations to the shared Org, OrgMembership, Contract models). The old Self Projects module (`SelfProject`) is untouched.
 

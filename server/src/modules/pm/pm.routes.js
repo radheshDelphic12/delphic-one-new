@@ -35,6 +35,7 @@ const ERRORS = {
   assignee_not_in_project: [422, 'Only members of the project can be assigned. Add them to the project first'],
   contract_not_linked: [422, 'That contract is not linked to this project'],
   contract_not_found: [404, 'Contract not found'],
+  no_manual_progress: [422, 'A Finance project has no progress figure of its own to update'],
   contract_already_linked: [409, 'That contract is already linked to a project'],
   status_not_found: [422, 'Unknown or switched-off status'],
   resolution_required: [422, 'Write the resolution before moving a ticket to a done status'],
