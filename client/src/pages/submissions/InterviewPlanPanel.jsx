@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -57,22 +58,43 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
   }
 
   function openSchedule(step) {
-    setSchedule({ step, form: { scheduled_at: '', duration_minutes: '60', interviewer_ids: [], interviewer_name: '', meeting_link: '' } });
+    setSchedule({ step, round: null, form: { scheduled_at: '', duration_minutes: '60', interviewer_ids: [], interviewer_name: '', meeting_link: '' } });
+  }
+
+  // Change the date / interviewers / link of a round that is already scheduled.
+  function openEditSchedule(step) {
+    const round = roundById.get(step.interview_round_id);
+    if (!round) return;
+    const d = round.scheduled_at ? new Date(round.scheduled_at) : null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const local = d && !Number.isNaN(d.getTime()) ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
+    setSchedule({
+      step,
+      round,
+      form: {
+        scheduled_at: local,
+        duration_minutes: round.duration_minutes != null ? String(round.duration_minutes) : '',
+        interviewer_ids: (round.interviewers || []).map((i) => i.id),
+        interviewer_name: round.interviewer_name || '',
+        meeting_link: round.meeting_link || '',
+      },
+    });
   }
 
   async function saveSchedule() {
-    const { step, form } = schedule;
+    const { step, round, form } = schedule;
     if (!form.scheduled_at) return pushError('Choose the interview date & time.', 'Please fix the form');
     await run(async () => {
-      await apiClient.post(`/submissions/${submissionId}/interview-rounds`, {
-        template_round_id: step.template_round_id,
+      const body = {
         scheduled_at: new Date(form.scheduled_at).toISOString(),
         duration_minutes: form.duration_minutes ? Number(form.duration_minutes) : undefined,
         meeting_link: form.meeting_link.trim() || undefined,
         ...(step.conducted_by === 'client' ? { interviewer_name: form.interviewer_name.trim() || undefined } : { interviewer_ids: form.interviewer_ids }),
-      });
+      };
+      if (round) await apiClient.patch(`/interview-rounds/${round.id}`, body);
+      else await apiClient.post(`/submissions/${submissionId}/interview-rounds`, { template_round_id: step.template_round_id, ...body });
       setSchedule(null);
-    }, 'Failed to schedule the round');
+    }, round ? 'Failed to update the interview' : 'Failed to schedule the round');
   }
 
   function openFinish(step) {
@@ -191,6 +213,11 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                     </button>
                   )}
                   {step.state !== 'not_scheduled' && canManage(step) && (
+                    <button type="button" title="Edit interview" aria-label="Edit interview" className="rounded p-1.5 text-tertiary-500 hover:bg-primary-50 disabled:opacity-50" disabled={busy} onClick={() => openEditSchedule(step)}>
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                  {step.state !== 'not_scheduled' && canManage(step) && (
                     <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => openFinish(step)}>
                       {step.state === 'completed' ? 'Edit feedback' : 'Give feedback'}
                     </button>
@@ -221,8 +248,8 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
         })}
       </ol>
 
-      <Drawer open={!!schedule} onClose={() => setSchedule(null)} title={schedule ? `Schedule: ${schedule.step.name}` : ''} tone="create"
-        footer={<div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setSchedule(null)}>Cancel</button><button type="button" className="btn-primary" disabled={busy} onClick={saveSchedule}>Schedule</button></div>}>
+      <Drawer open={!!schedule} onClose={() => setSchedule(null)} title={schedule ? `${schedule.round ? 'Edit interview' : 'Schedule'}: ${schedule.step.name}` : ''} tone={schedule?.round ? 'edit' : 'create'}
+        footer={<div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setSchedule(null)}>Cancel</button><button type="button" className="btn-primary" disabled={busy} onClick={saveSchedule}>{schedule?.round ? 'Save changes' : 'Schedule'}</button></div>}>
         {schedule && (
           <div className="space-y-3">
             <div>

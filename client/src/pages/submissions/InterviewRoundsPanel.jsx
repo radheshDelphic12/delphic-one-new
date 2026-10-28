@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -224,8 +225,8 @@ export default function InterviewRoundsPanel({ submissionId, submission, rounds,
                     </span>
                     {r.rating != null && <span className="text-xs text-amber-700">★ {r.rating}</span>}
                     {!locked && canManageInterviewRound(submission, r.round_type, user) && (
-                      <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => openEdit(r)}>
-                        Edit
+                      <button type="button" title="Edit" aria-label="Edit" className="rounded p-1.5 text-tertiary-500 hover:bg-primary-50" onClick={() => openEdit(r)}>
+                        <Pencil className="h-4 w-4" />
                       </button>
                     )}
                     {userCan(user, 'deleteRecords') && (
