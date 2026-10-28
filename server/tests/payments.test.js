@@ -273,6 +273,13 @@ describe('editing a payment (group admin): the old one stays as undone, the corr
     expect((await prisma.clientInvoice.findUnique({ where: { id: inv.id } })).paid_at).toBeNull();
   });
 
+  test('a hand-typed entry without a description (party and category null) still tracks, with or without a wallet', async () => {
+    const body = { kind: 'ledger_income', reference_id: '88888888-8888-4888-8888-888888888888', amount: '3750', party: null, category: null };
+    expect((await authed(request(app).post('/api/v1/payments/track'), adminToken).send(body)).status).toBe(201);
+    const withWallet = await authed(request(app).post('/api/v1/payments/track'), adminToken).send({ ...body, reference_id: '99999999-9999-4999-8999-999999999999', wallet_payment: wp() });
+    expect(withWallet.status).toBe(201);
+  });
+
   test('a payment tracked from any company can be edited the same way', async () => {
     const ref = '55555555-5555-4555-8555-555555555555';
     const made = await authed(request(app).post('/api/v1/payments/track'), adminToken).send({ kind: 'rent_payment', reference_id: ref, amount: '500', party: 'Tenant', wallet_payment: wp() });

@@ -20,8 +20,8 @@ const trackSchema = payments.paymentInputSchema.extend({
   reference_id: z.string().uuid(),
   amount: z.preprocess((v) => (typeof v === 'number' ? String(v) : v), z.string().trim().regex(/^\d{1,14}(\.\d{1,2})?$/, 'Enter an amount with at most 2 decimals')),
   currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).default('INR'),
-  party: z.string().trim().max(200).optional(),
-  category: z.string().trim().max(120).optional(),
+  party: z.string().trim().max(200).nullish(),
+  category: z.string().trim().max(120).nullish(),
 });
 
 router.post('/track', trackAccess, asyncHandler(async (req, res) => {
