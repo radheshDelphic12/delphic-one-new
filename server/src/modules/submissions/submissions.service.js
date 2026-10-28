@@ -278,6 +278,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
       rejected: 'candidate_rejected',
       backout: 'candidate_backout',
       offer_sent: 'candidate_offer',
+      closed: 'candidate_closed',
     };
     if (NOTIFY_STAGES[to_stage]) {
       const ctx = await loadNotifyContext(tx, id);

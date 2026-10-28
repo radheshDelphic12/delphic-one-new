@@ -56,6 +56,12 @@ const ROLE_EVENT_MATRIX = {
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
 
+// Whether email is on for someone who has not set a preference. Admins are copied on every event (see above), so for them email
+// is opt-in: otherwise an admin who never subscribed gets every interview mail in the company. They can still switch it on per event.
+function defaultEmailFor(type, role) {
+  return role !== 'admin' && ROLE_EVENT_MATRIX[type]?.defaultEmail === true;
+}
+
 // One-line human labels + descriptions for the preferences UI.
 const NOTIFICATION_LABELS = {
   account_activated: ['Account activated', 'A client account you own moves to Active.'],
@@ -279,5 +285,6 @@ module.exports = {
   NOTIFICATION_TYPES,
   NOTIFICATION_LABELS,
   eventsForRole,
+  defaultEmailFor,
   renderNotification,
 };

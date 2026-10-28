@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { contractState } = require('../../lib/contractState');
+const holdPeriods = require('../../lib/holdPeriods');
 const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
@@ -445,6 +446,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
     contract_status: account.contract_status,
+    contract_hold_periods: Array.isArray(account.contract_hold_periods) ? account.contract_hold_periods : [],
     contract: contractState(account),
     benchmark_hours: account.benchmark_hours,
     overtime_billable: account.overtime_billable,
@@ -488,6 +490,7 @@ const PROFILE_SELECT = {
   agreement_start_date: true,
   agreement_end_date: true,
   contract_status: true,
+  contract_hold_periods: true,
   benchmark_hours: true,
   client_billing_currency: true,
   project_calendar: { select: { calendar: { select: { id: true, name: true, kind: true } } } },
@@ -576,6 +579,11 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.agreement_start_date !== undefined) data.agreement_start_date = patch.agreement_start_date;
   if (patch.agreement_end_date !== undefined) data.agreement_end_date = patch.agreement_end_date;
   if (patch.contract_status !== undefined) data.contract_status = patch.contract_status;
+  if (patch.contract_hold_periods !== undefined) {
+    const holdError = holdPeriods.validate(patch.contract_hold_periods);
+    if (holdError) return { error: holdError };
+    data.contract_hold_periods = patch.contract_hold_periods;
+  }
   const start = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   const end = patch.agreement_end_date !== undefined ? patch.agreement_end_date : existing.agreement_end_date;
   if (start && end && end < start) return { error: 'end_before_start' };

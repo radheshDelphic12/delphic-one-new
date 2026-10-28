@@ -114,6 +114,7 @@ function emptyForm(profile) {
     agreement_start_date: profile.agreement_start_date || '',
     agreement_end_date: profile.agreement_end_date || '',
     contract_status: profile.contract_status || '',
+    contract_hold_periods: (profile.contract_hold_periods || []).map((p) => ({ from: p.from || '', resume: p.resume || '' })),
     benchmark_hours: profile.benchmark_hours ?? 160,
     overtime_billable: Boolean(profile.overtime_billable),
     overtime_multiplier: profile.overtime_multiplier ?? 1,
@@ -162,6 +163,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
       vendor_payout_basis: form.vendor_payout_basis,
       billable_day_hours: Number(form.billable_day_hours) || 8,
     };
+    // Hold periods only apply to a monthly rate (an hourly project bills approved hours); rows without a start date are dropped.
+    if (monthly) patch.contract_hold_periods = form.contract_hold_periods.filter((p) => p.from).map((p) => ({ from: p.from, resume: p.resume || null }));
     // The client's hour estimate only applies to hourly billing; leave it alone otherwise.
     if (hourly) patch.estimated_monthly_hours = Number(form.estimated_monthly_hours) > 0 ? Number(form.estimated_monthly_hours) : null;
     if (hourly) patch.minimum_monthly_hours = Number(form.minimum_monthly_hours) > 0 ? Number(form.minimum_monthly_hours) : null;
@@ -314,6 +317,33 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 Automatic: not started before the start date, about to end in its last 30 days, completed after the end date.
               </p>
             </div>
+            {monthly && (
+              <div className="mt-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-tertiary-700">
+                    Hold periods <span className="font-normal text-tertiary-500">— the monthly fee is not billed for these days (prorated by days). Add one row each time the contract is put on hold.</span>
+                  </p>
+                  <button type="button" className="btn-secondary shrink-0 !px-2 !py-1 text-xs" onClick={() => set('contract_hold_periods', [...form.contract_hold_periods, { from: '', resume: '' }])}>Add hold</button>
+                </div>
+                {form.contract_hold_periods.map((p, i) => {
+                  const change = (key, value) => set('contract_hold_periods', form.contract_hold_periods.map((row, j) => (j === i ? { ...row, [key]: value } : row)));
+                  return (
+                    <div key={i} className="mt-2 grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <label className="block text-xs font-medium text-tertiary-600">
+                        On hold from
+                        <input type="date" value={p.from} onChange={(e) => change('from', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                      </label>
+                      <label className="block text-xs font-medium text-tertiary-600">
+                        Resumed on <span className="font-normal text-tertiary-400">(empty = still on hold)</span>
+                        <input type="date" min={p.from || undefined} value={p.resume} onChange={(e) => change('resume', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                      </label>
+                      <button type="button" className="btn-secondary !px-2 !py-2 text-xs" aria-label="Remove hold period" onClick={() => set('contract_hold_periods', form.contract_hold_periods.filter((_, j) => j !== i))}>Remove</button>
+                    </div>
+                  );
+                })}
+                {!form.contract_hold_periods.length && <p className="mt-2 text-xs text-tertiary-400">No hold periods.</p>}
+              </div>
+            )}
             <div className="mt-3 grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3 sm:grid-cols-3">
               <label className="flex items-center gap-2 text-xs font-medium text-tertiary-700 sm:col-span-2">
                 <input type="checkbox" checked={form.overtime_billable} onChange={(e) => set('overtime_billable', e.target.checked)} className="h-4 w-4 rounded border-tertiary-300" />

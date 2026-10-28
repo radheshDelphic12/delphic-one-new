@@ -1,6 +1,8 @@
 // Project contract tracking, shared by Finance → Projects and Project P&L:
 // a manual hold / completed wins; otherwise the agreement dates decide
 // (not started → running → about to end within 30 days → completed).
+const holdPeriods = require('./holdPeriods');
+
 const ABOUT_TO_END_DAYS = 30;
 
 function todayUtc() {
@@ -10,6 +12,8 @@ function todayUtc() {
 
 function contractState(account, today = todayUtc()) {
   if (account.contract_status) return { state: account.contract_status, days_left: null };
+  // Today falls inside a recorded hold period (monthly-rate projects): on hold until it resumes.
+  if (holdPeriods.isHeld(holdPeriods.parse(account.contract_hold_periods), today)) return { state: 'on_hold', days_left: null };
   const start = account.agreement_start_date;
   const end = account.agreement_end_date;
   if (end && end < today) return { state: 'completed', days_left: null };

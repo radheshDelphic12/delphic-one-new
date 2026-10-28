@@ -4,6 +4,7 @@ const {
   NOTIFICATION_LABELS,
   ROLE_EVENT_MATRIX,
   eventsForRole,
+  defaultEmailFor,
 } = require('../../lib/notifications/eventCatalog');
 
 function serialize(row) {
@@ -76,7 +77,8 @@ async function deliveryRole(user) {
 }
 
 async function getPreferences(user) {
-  const relevant = eventsForRole(await deliveryRole(user));
+  const role = await deliveryRole(user);
+  const relevant = eventsForRole(role);
   const rows = await prisma.notificationPreference.findMany({
     where: { user_id: user.id, type: { in: relevant } },
   });
@@ -90,7 +92,7 @@ async function getPreferences(user) {
       description,
       in_app: stored ? stored.in_app : ROLE_EVENT_MATRIX[type].defaultInApp !== false,
       // Same default notify() uses, so the toggle shows what is actually sent.
-      email: stored ? stored.email : ROLE_EVENT_MATRIX[type].defaultEmail === true,
+      email: stored ? stored.email : defaultEmailFor(type, role),
       is_overridden: Boolean(stored),
     };
   });
