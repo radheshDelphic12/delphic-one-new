@@ -44,6 +44,11 @@ test('full flow: submit, manager retention call, HR approves with an LWD, then m
   const id = submitted.body.data.id;
   expect(submitted.body.data).toMatchObject({ status: 'submitted', meeting_done: false });
 
+  // the manager and the admin are e-mailed about it (queued in the outbox), the employee is not mailed about their own request
+  const mails = await prisma.emailOutbox.findMany({ where: { kind: 'notification:resignation_submitted' }, select: { to_email: true, body_text: true } });
+  expect(mails.length).toBe(2);
+  expect(mails.every((m) => /has resigned/.test(m.body_text) && /Settings > Resignations/.test(m.body_text))).toBe(true);
+
   // the employee still works as before until HR approves
   expect((await prisma.orgMembership.findUnique({ where: { id: empM.id } })).employment_status).toBe('active');
 
@@ -89,6 +94,34 @@ test('guards: one open request, past LWD, own record only, manager only for thei
   expect((await empT.post(`/${id}/withdraw`)).status).toBe(200);
   expect((await adminT.post(`/${id}/approve`, { approved_lwd: day(25) })).status).toBe(409); // closed
   expect((await empT.post('/', { reason: 'Second try', proposed_lwd: day(20) })).status).toBe(201);
+});
+
+test('resignation notices are e-mailed by default, to the Admin as well; the decision mail is not copied to the Admin', () => {
+  const { defaultEmailFor } = require('../src/lib/notifications/eventCatalog');
+  for (const role of ['employee', 'sales', 'admin']) expect(defaultEmailFor('resignation_submitted', role)).toBe(true);
+  expect(defaultEmailFor('resignation_manager_updated', 'admin')).toBe(true);
+  expect(defaultEmailFor('resignation_decided', 'employee')).toBe(true);
+  expect(defaultEmailFor('resignation_decided', 'admin')).toBe(false);
+});
+
+test('everyone with People > Edit (and the Admin) is told and e-mailed the moment a resignation is submitted, not only the HR POC', async () => {
+  const { org, empT, adminT } = await setup();
+  const hr = await createUser({ role: 'employee', name: unique('HR'), withOrg: false });
+  const hrM = await createOrgMembership(hr.id, org.id, { role: 'employee' });
+  const set = await prisma.customRole.create({ data: { org_id: org.id, name: unique('HR set'), permissions: { 'people.update': 'all' } } });
+  await prisma.orgMembership.update({ where: { id: hrM.id }, data: { custom_role_id: set.id } });
+  const bystander = await createUser({ role: 'employee', name: unique('Bystander'), withOrg: false });
+  await createOrgMembership(bystander.id, org.id, { role: 'employee' });
+
+  const res = await empT.post('/', { reason: 'Moving on' });
+  expect(res.status).toBe(201);
+  const told = async (userId) => prisma.notification.count({ where: { user_id: userId, type: 'resignation_submitted' } });
+  expect(await told(hr.id)).toBe(1);
+  expect(await told(bystander.id)).toBe(0);
+  expect(await prisma.emailOutbox.count({ where: { kind: 'notification:resignation_submitted', to_email: hr.email } })).toBe(1);
+  // the HR list shows it straight away, still with the manager
+  const list = await adminT.get('/');
+  expect(list.body.data.find((r) => r.id === res.body.data.id).status).toBe('submitted');
 });
 
 test('the proposed last working day is optional; HR sets it on approval', async () => {

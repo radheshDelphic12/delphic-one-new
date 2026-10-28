@@ -7,6 +7,7 @@ const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const { ensureFnf } = require('../../lib/fnf');
 const { adminPower } = require('../../lib/access/guard');
+const { levelOf, effectivePermissions } = require('../../lib/access/effective');
 const orgsService = require('../orgs/orgs.service');
 
 const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
@@ -14,9 +15,13 @@ const OUTCOME_LABELS = { retained: 'retained, resignation closed', not_retained:
 // still in progress: with the manager (submitted) or with HR (manager_approved)
 const OPEN_STATUSES = ['submitted', 'manager_approved'];
 
+// closing line of the e-mail copy of a resignation notification
+const REVIEW_FOOTER = 'Open Delphic One > Settings > Resignations to review it.';
+const OWN_FOOTER = 'Open Delphic One > Settings > Account to see the details.';
+
 const ORG_SETTINGS_SELECT = { resignation_enabled: true, resignation_notice_days: true, resignation_manager_required: true };
 const INCLUDE = {
-  org_membership: { select: { id: true, employee_code: true, employment_status: true, joined_at: true, manager_id: true, notice_start_date: true, notice_end_date: true, person: { select: { id: true, name: true } } } },
+  org_membership: { select: { id: true, employee_code: true, employment_status: true, joined_at: true, manager_id: true, hr_poc_id: true, notice_start_date: true, notice_end_date: true, person: { select: { id: true, name: true } } } },
 };
 
 async function nameMap(orgId, membershipIds) {
@@ -73,6 +78,34 @@ async function tell(type, actor, recipientUserIds, context) {
   await notify(prisma, { type, actorId: actor?.id || null, recipientIds: recipientUserIds.filter(Boolean), context });
 }
 
+/**
+ * Who counts as HR for a resignation: the company Admin and anyone holding People > Edit (through a permission set or an
+ * own grant). They are told the moment a resignation is submitted, not only once the manager has passed it on.
+ */
+async function hrUserIds(orgId) {
+  const rows = await prisma.orgMembership.findMany({
+    where: {
+      org_id: orgId,
+      employment_status: { in: ['active', 'on_leave', 'notice_period'] },
+      OR: [{ role: 'admin' }, { custom_role_id: { not: null } }, { permission_grants: { some: { key: 'people.update' } } }],
+    },
+    select: {
+      role: true, is_leave_manager: true, person_id: true,
+      person: { select: { is_superadmin: true, is_group_superadmin: true } },
+      custom_role: { select: { permissions: true } },
+      permission_grants: { select: { key: true, scope: true, effect: true } },
+    },
+  });
+  return rows
+    .filter((m) => {
+      const level = levelOf(m.person, m.role);
+      if (level !== 'employee') return true;
+      const { permissions } = effectivePermissions({ level, setPermissions: m.custom_role?.permissions, grants: m.permission_grants, isLeaveManager: m.is_leave_manager });
+      return Boolean(permissions['people.update']);
+    })
+    .map((m) => m.person_id);
+}
+
 // ---- settings (admin editable)
 
 async function getSettings(orgId) {
@@ -115,8 +148,8 @@ async function create(orgId, user, body) {
   });
   const names = await nameMap(orgId, [member.manager_id]);
   const managerUser = names.get(member.manager_id)?.user_id;
-  await tell('resignation_submitted', user, [managerUser, member.hr_poc_id], {
-    orgId, resignationId: row.id, employeeName: member.person?.name, lwd: ymd(body.proposed_lwd),
+  await tell('resignation_submitted', user, [managerUser, member.hr_poc_id, ...(await hrUserIds(orgId))], {
+    orgId, resignationId: row.id, employeeName: member.person?.name, lwd: ymd(body.proposed_lwd), emailFooter: REVIEW_FOOTER,
   });
   return { request: await present(orgId, row.id) };
 }
@@ -133,7 +166,7 @@ async function withdraw(orgId, id, user) {
   await prisma.resignationRequest.update({ where: { id }, data: { status: 'withdrawn' } });
   const names = await nameMap(orgId, [row.manager_membership_id]);
   await tell('resignation_decided', user, [names.get(row.manager_membership_id)?.user_id], {
-    orgId, resignationId: id, message: `${row.org_membership.person.name} withdrew the resignation.`,
+    orgId, resignationId: id, message: `${row.org_membership.person.name} withdrew the resignation.`, emailFooter: REVIEW_FOOTER,
   });
   return { request: await present(orgId, id) };
 }
@@ -176,13 +209,16 @@ async function managerReview(orgId, id, user, body) {
   });
   const name = row.org_membership.person.name;
   const managerNames = await nameMap(orgId, [user.org_membership_id]);
-  await tell('resignation_manager_updated', user, [], {
-    orgId, resignationId: id, employeeName: name, managerName: managerNames.get(user.org_membership_id)?.name,
-    outcomeLabel: outcome ? OUTCOME_LABELS[outcome] : (body.meeting_done ? 'meeting done' : 'in progress'),
-  });
+  // HR (the person's HR POC) and the admins hear about the manager's decision, not about every saved note
+  if (outcome) {
+    await tell('resignation_manager_updated', user, [row.org_membership.hr_poc_id, ...(await hrUserIds(orgId))], {
+      orgId, resignationId: id, employeeName: name, managerName: managerNames.get(user.org_membership_id)?.name,
+      outcomeLabel: OUTCOME_LABELS[outcome], emailFooter: REVIEW_FOOTER,
+    });
+  }
   if (retained) {
     await tell('resignation_decided', user, [row.org_membership.person.id], {
-      orgId, resignationId: id, message: 'Your manager has recorded that you are staying. The resignation is closed.',
+      orgId, resignationId: id, message: 'Your manager has recorded that you are staying. The resignation is closed.', emailFooter: OWN_FOOTER,
     });
   }
   return { request: await present(orgId, id) };
@@ -219,7 +255,7 @@ async function approve(orgId, id, admin, body) {
     data: { status: 'approved', approved_lwd: body.approved_lwd, decided_by: admin.id, decided_at: new Date(), decision_remarks: body.remarks || null },
   });
   await tell('resignation_decided', admin, [membership.person.id], {
-    orgId, resignationId: id, message: `Your resignation is approved. Your last working day is ${ymd(body.approved_lwd)}.`,
+    orgId, resignationId: id, message: `Your resignation is approved. Your last working day is ${ymd(body.approved_lwd)}.`, emailFooter: OWN_FOOTER,
   });
   return { request: await present(orgId, id) };
 }
@@ -230,7 +266,7 @@ async function reject(orgId, id, admin, { remarks }) {
   if (!OPEN_STATUSES.includes(row.status)) return { error: 'not_open' };
   await prisma.resignationRequest.update({ where: { id }, data: { status: 'rejected', decided_by: admin.id, decided_at: new Date(), decision_remarks: remarks } });
   await tell('resignation_decided', admin, [row.org_membership.person.id], {
-    orgId, resignationId: id, message: `Your resignation was not accepted. ${remarks}`,
+    orgId, resignationId: id, message: `Your resignation was not accepted. ${remarks}`, emailFooter: OWN_FOOTER,
   });
   return { request: await present(orgId, id) };
 }
@@ -244,7 +280,7 @@ async function startFnf(orgId, id, admin) {
   await ensureFnf(prisma, orgId, row.org_membership_id, row.approved_lwd);
   await prisma.resignationRequest.update({ where: { id }, data: { fnf_started_at: new Date(), fnf_started_by: admin.id } });
   await tell('resignation_decided', admin, [row.org_membership.person.id], {
-    orgId, resignationId: id, message: 'Your full and final settlement process has started.',
+    orgId, resignationId: id, message: 'Your full and final settlement process has started.', emailFooter: OWN_FOOTER,
   });
   return { request: await present(orgId, id) };
 }
