@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Link2, Pencil, Plus, Star, Trash2, Unlink, UserMinus } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, Link2, List, Pencil, Plus, Star, Trash2, Unlink, UserMinus } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { pmApi, pmError, PRIORITY_OPTIONS, PRIORITY_TONE, CATEGORY_TONE, PROJECT_STATUS_OPTIONS } from '../../lib/pm/api.js';
 import { dateLabel, money } from '../../lib/format.js';
@@ -15,9 +15,12 @@ import TicketPanel from './TicketPanel.jsx';
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const Empty = ({ children }) => <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-tertiary-500">{children}</p>;
 
-function TicketsTab({ project, openTicket }) {
-  const { pushError } = useAlerts();
+function TicketsTab({ project, meta, reload, openTicket }) {
+  const { pushError, pushSuccess } = useAlerts();
   const [rows, setRows] = useState(null);
+  const [view, setView] = useState(() => { try { return localStorage.getItem('pm_ticket_view') === 'board' ? 'board' : 'list'; } catch { return 'list'; } });
+  const [dragOver, setDragOver] = useState('');
+  const switchView = (v) => { setView(v); try { localStorage.setItem('pm_ticket_view', v); } catch { /* storage unavailable */ } };
   const [f, setF] = useState({ category: '', assignee_membership_id: '', priority: '', overdue: '', q: '' });
   const [dq, setDq] = useState('');
   useEffect(() => { const t = setTimeout(() => setDq(f.q.trim()), 250); return () => clearTimeout(t); }, [f.q]);
@@ -40,9 +43,48 @@ function TicketsTab({ project, openTicket }) {
           <option value="">Any priority</option>{PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <label className="flex items-center gap-1.5 text-sm text-tertiary-600"><input type="checkbox" checked={f.overdue === 'true'} onChange={(e) => setF({ ...f, overdue: e.target.checked ? 'true' : '' })} />Overdue only</label>
-        <button type="button" className="btn-primary ml-auto inline-flex items-center gap-1.5" onClick={() => openTicket(null)}><Plus className="h-4 w-4" />New ticket</button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-xl border" role="group" aria-label="View">
+            <button type="button" aria-pressed={view === 'list'} className={`inline-flex items-center gap-1 px-3 py-2 text-sm ${view === 'list' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500'}`} onClick={() => switchView('list')}><List className="h-4 w-4" />List</button>
+            <button type="button" aria-pressed={view === 'board'} className={`inline-flex items-center gap-1 border-l px-3 py-2 text-sm ${view === 'board' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500'}`} onClick={() => switchView('board')}><LayoutGrid className="h-4 w-4" />Board</button>
+          </div>
+          <button type="button" className="btn-primary inline-flex items-center gap-1.5" onClick={() => openTicket(null)}><Plus className="h-4 w-4" />New ticket</button>
+        </div>
       </div>
-      {rows === null ? <Skeleton className="h-40" /> : rows.length === 0 ? <Empty>No tickets match.</Empty> : (
+      {rows !== null && view === 'board' && (
+        <div className="flex gap-3 overflow-x-auto pb-2" data-testid="pm-board">
+          {meta.statuses.filter((s) => s.is_active).map((s) => {
+            const cards = rows.filter((t) => t.status_key === s.key);
+            return (
+              <section key={s.key} data-testid={`pm-col-${s.key}`}
+                className={`w-64 shrink-0 rounded-xl border p-2 ${dragOver === s.key ? 'border-primary-400 bg-primary-50/40' : 'bg-tertiary-50/60'}`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(s.key); }} onDragLeave={() => setDragOver('')}
+                onDrop={async (e) => {
+                  e.preventDefault(); setDragOver('');
+                  const id = e.dataTransfer.getData('text/plain');
+                  const t = rows.find((r) => r.id === id);
+                  if (!t || t.status_key === s.key) return;
+                  if (s.category === 'done') { openTicket(id, s.key); return; } // a done status needs its resolution written first
+                  try { await pmApi.updateTicket(id, { status_key: s.key }); pushSuccess(`Moved to ${s.label}`); await load(); reload(); } catch (err) { pushError(pmError(err, 'Could not move the ticket'), 'Failed'); }
+                }}>
+                <h4 className="mb-2 flex items-center justify-between px-1 text-xs font-semibold text-tertiary-700">{s.label}<span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-tertiary-500">{cards.length}</span></h4>
+                <div className="space-y-2">
+                  {cards.map((t) => (
+                    <article key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', t.id)} onClick={() => openTicket(t.id)} data-testid={`pm-card-${t.number}`}
+                      className="cursor-grab rounded-lg border bg-white p-2 text-sm shadow-sm hover:border-primary-300">
+                      <div className="flex items-center justify-between text-[11px] text-tertiary-400"><span>#{t.number} · {t.type}</span><Pill tone={PRIORITY_TONE[t.priority]}>{t.priority}</Pill></div>
+                      <div className="mt-1 font-medium text-tertiary-900">{t.title}</div>
+                      <div className="mt-1 flex items-center justify-between text-xs text-tertiary-500"><span>{t.assignee?.name || 'Unassigned'}</span><span className={t.overdue ? 'font-medium text-danger-600' : ''}>{t.due_date ? dateLabel(t.due_date) : ''}</span></div>
+                    </article>
+                  ))}
+                  {cards.length === 0 && <p className="px-1 py-3 text-center text-xs text-tertiary-400">Drop a ticket here</p>}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+      {view === 'list' && (rows === null ? <Skeleton className="h-40" /> : rows.length === 0 ? <Empty>No tickets match.</Empty> : (
         <div className="overflow-x-auto rounded-xl border bg-white">
           <table className="w-full min-w-[48rem] text-sm" data-testid="pm-tickets-table">
             <thead className="bg-primary-50/60 text-xs text-tertiary-500"><tr><th className="px-3 py-2 text-left font-medium">#</th><th className="px-3 py-2 text-left font-medium">Title</th><th className="px-3 py-2 text-left font-medium">Status</th><th className="px-3 py-2 text-left font-medium">Priority</th><th className="px-3 py-2 text-left font-medium">Assignee</th><th className="px-3 py-2 text-left font-medium">Due</th></tr></thead>
@@ -60,7 +102,8 @@ function TicketsTab({ project, openTicket }) {
             </tbody>
           </table>
         </div>
-      )}
+      ))}
+      {view === 'board' && rows === null && <Skeleton className="h-40" />}
     </div>
   );
 }
@@ -165,7 +208,7 @@ export default function PmProjectDetailPage() {
   const [meta, setMeta] = useState(null);
   const [people, setPeople] = useState([]);
   const [tab, setTab] = useState('tickets');
-  const [panel, setPanel] = useState({ open: false, ticketId: null });
+  const [panel, setPanel] = useState({ open: false, ticketId: null, presetStatus: null });
   const [edit, setEdit] = useState(false);
   const [missing, setMissing] = useState(false);
   const [bump, setBump] = useState(0);
@@ -180,7 +223,7 @@ export default function PmProjectDetailPage() {
   if (!project || !meta) return <Skeleton className="h-64" />;
 
   const tabs = [{ key: 'tickets', label: `Tickets (${project.progress.total})` }, { key: 'members', label: `Team (${project.members.length})` }, { key: 'contracts', label: `Contracts (${project.contracts.length})` }, { key: 'activity', label: 'Activity' }];
-  const closePanel = () => { setPanel({ open: false, ticketId: null }); if (sp.get('ticket')) setSp({}, { replace: true }); };
+  const closePanel = () => { setPanel({ open: false, ticketId: null, presetStatus: null }); if (sp.get('ticket')) setSp({}, { replace: true }); };
 
   return (
     <div className="space-y-4">
@@ -202,11 +245,11 @@ export default function PmProjectDetailPage() {
         ))}
       </div>
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />
-      {tab === 'tickets' && <TicketsTab key={bump} project={project} openTicket={(tid) => setPanel({ open: true, ticketId: tid })} />}
+      {tab === 'tickets' && <TicketsTab key={bump} project={project} meta={meta} reload={reload} openTicket={(tid, presetStatus) => setPanel({ open: true, ticketId: tid, presetStatus })} />}
       {tab === 'members' && <MembersTab project={project} people={people} reload={reload} />}
       {tab === 'contracts' && <ContractsTab project={project} isManager={meta.is_manager} reload={reload} />}
       {tab === 'activity' && <ActivityTab project={project} />}
-      <TicketPanel open={panel.open} ticketId={panel.ticketId} project={project} meta={meta} canManage={project.can_manage} onClose={closePanel} onChanged={() => { reload(); setBump((b) => b + 1); }} />
+      <TicketPanel open={panel.open} ticketId={panel.ticketId} presetStatus={panel.presetStatus} project={project} meta={meta} canManage={project.can_manage} onClose={closePanel} onChanged={() => { reload(); setBump((b) => b + 1); }} />
       <FormDrawer
         open={edit}
         title="Edit project"
@@ -224,7 +267,10 @@ export default function PmProjectDetailPage() {
           { name: 'description', label: 'Description', type: 'textarea' },
         ]}
         onSubmit={async (v) => {
-          try { await pmApi.updateProject(id, v); pushSuccess('Project saved'); setEdit(false); await reload(); } catch (e) { pushError(pmError(e, 'Could not save the project'), 'Could not save'); throw e; }
+          // FormDrawer drops empty fields; for these an empty box means "clear it"
+          const body = { ...v };
+          for (const k of ['owner_membership_id', 'start_date', 'end_date', 'description']) if (!(k in body)) body[k] = null;
+          try { await pmApi.updateProject(id, body); pushSuccess('Project saved'); setEdit(false); await reload(); } catch (e) { pushError(pmError(e, 'Could not save the project'), 'Could not save'); throw e; }
         }}
       />
     </div>

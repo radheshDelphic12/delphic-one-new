@@ -206,3 +206,74 @@ describe('my tickets', () => {
     expect((await get('/my-tickets', bobToken)).body.data).toEqual([]);
   });
 });
+
+describe('notifications', () => {
+  const notes = (userId, type) => prisma.notification.findMany({ where: { user_id: userId, ...(type ? { type } : {}) } });
+
+  test('assigning, moving and commenting tell the people on the ticket, never the actor, and do not copy every admin', async () => {
+    const p = await project({ member_ids: [annM.id, bobM.id] });
+    const annUser = (await prisma.orgMembership.findUnique({ where: { id: annM.id } })).person_id;
+    const bobUser = (await prisma.orgMembership.findUnique({ where: { id: bobM.id } })).person_id;
+    const second = await mkUser(org, 'admin'); // another admin must NOT get a copy
+    const t = (await post(`/projects/${p.id}/tickets`, bobToken, { title: 'Bob raised this', assignee_membership_id: annM.id })).body.data;
+    expect((await notes(annUser, 'pm_ticket_assigned')).map((n) => n.entity_id)).toEqual([t.id]);
+    expect(await notes(bobUser, 'pm_ticket_assigned')).toHaveLength(0); // the actor
+    await patch(`/tickets/${t.id}`, annToken, { status_key: 'in_progress' });
+    const moved = await notes(bobUser, 'pm_ticket_status_changed');
+    expect(moved).toHaveLength(1);
+    expect(moved[0].body).toContain('In progress');
+    expect(moved[0].metadata).toMatchObject({ project_id: p.id });
+    await post(`/tickets/${t.id}/comments`, bobToken, { body: 'Any update?' });
+    expect(await notes(annUser, 'pm_ticket_commented')).toHaveLength(1);
+    expect(await notes(second.u.id)).toHaveLength(0);
+  });
+
+  test('the nightly reminder tells the assignee of open tickets due today or tomorrow, once a day, and skips done ones', async () => {
+    const pm = require('../src/modules/pm/pm.service');
+    const p = await project();
+    const annUser = (await prisma.orgMembership.findUnique({ where: { id: annM.id } })).person_id;
+    const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const day = (add) => new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + add)).toISOString().slice(0, 10);
+    const soon = (await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Due tomorrow', assignee_membership_id: annM.id, due_date: day(1) })).body.data;
+    await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Due next month', assignee_membership_id: annM.id, due_date: day(30) });
+    const finished = (await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Due today but done', assignee_membership_id: annM.id, due_date: day(0) })).body.data;
+    await patch(`/tickets/${finished.id}`, adminToken, { status_key: 'closed', resolution: 'done' });
+    expect((await pm.notifyDueSoon()).sent).toBe(1);
+    expect((await pm.notifyDueSoon()).sent).toBe(0); // idempotent within the day
+    const rows = await prisma.notification.findMany({ where: { user_id: annUser, type: 'pm_ticket_due_soon' } });
+    expect(rows.map((n) => n.entity_id)).toEqual([soon.id]);
+    expect(rows[0].body).toContain('tomorrow');
+  });
+});
+
+describe('attachments', () => {
+  const up = (id, t, name = 'spec.pdf', body = 'hello') => authed(request(app).post(`${P}/tickets/${id}/attachments`), t).attach('file', Buffer.from(body), name);
+
+  test('a project member attaches a file and downloads it; outsiders cannot; the uploader or an admin removes it', async () => {
+    const p = await project({ member_ids: [annM.id] });
+    const t = (await post(`/projects/${p.id}/tickets`, adminToken, { title: 'With a file' })).body.data;
+    const made = await up(t.id, annToken, 'spec.pdf', 'pdf-bytes');
+    expect(made.status).toBe(201);
+    const listed = (await get(`/tickets/${t.id}`, annToken)).body.data.attachments;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ filename: 'spec.pdf', can_delete: true });
+    const dl = await get(`/attachments/${made.body.data.id}/download`, annToken);
+    expect(dl.status).toBe(200);
+    expect(dl.headers['content-disposition']).toContain('spec.pdf');
+    expect((await get(`/attachments/${made.body.data.id}/download`, bobToken)).status).toBe(404); // not in the project
+    expect((await up(t.id, bobToken)).status).toBe(404);
+    expect((await up(t.id, annToken, 'virus.exe')).status).toBe(400);
+    expect((await del(`/attachments/${made.body.data.id}`, bobToken)).status).toBe(404);
+    expect((await del(`/attachments/${made.body.data.id}`, adminToken)).status).toBe(200);
+    expect(await prisma.pmTicketAttachment.count()).toBe(0);
+  });
+});
+
+describe('clearing fields', () => {
+  test('a project owner, dates and description can be cleared', async () => {
+    const p = await project({ owner_membership_id: annM.id, start_date: '2026-01-01', end_date: '2026-06-30', description: 'x'.repeat(5) });
+    const r = await patch(`/projects/${p.id}`, adminToken, { owner_membership_id: null, start_date: null, end_date: null, description: null });
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ owner: null, start_date: null, end_date: null, description: null });
+  });
+});

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Paperclip, Trash2, X } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
+import apiClient from '../../lib/apiClient.js';
 import { pmApi, pmError, PRIORITY_OPTIONS, PRIORITY_TONE, TYPE_OPTIONS, CATEGORY_TONE } from '../../lib/pm/api.js';
 import { dateLabel } from '../../lib/format.js';
 import Drawer from '../../components/ui/Drawer.jsx';
@@ -9,19 +10,20 @@ import Pill from '../../components/ui/Pill.jsx';
 const INPUT = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 const ACTION_LABEL = {
   ticket_created: 'Created', status_changed: 'Status', priority_changed: 'Priority', assignee_membership_id_changed: 'Assignee', due_date_changed: 'Due date',
-  title_changed: 'Title', description_changed: 'Description', type_changed: 'Type', contract_id_changed: 'Contract', resolution_changed: 'Resolution',
+  attachment_added: 'File attached', attachment_removed: 'File removed', title_changed: 'Title', description_changed: 'Description', type_changed: 'Type', contract_id_changed: 'Contract', resolution_changed: 'Resolution',
 };
 
 /**
  * One ticket: edit its fields, move it through the statuses (a done status needs a resolution), comment, see the history.
  * `ticketId` null creates a new ticket in `project`. props: project (with members, contracts), meta (statuses), canManage.
  */
-export default function TicketPanel({ open, ticketId, project, meta, canManage, onClose, onChanged }) {
+export default function TicketPanel({ open, ticketId, presetStatus, project, meta, canManage, onClose, onChanged }) {
   const { pushError, pushSuccess } = useAlerts();
   const [t, setT] = useState(null);
   const [form, setForm] = useState({});
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
   const isNew = !ticketId;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -31,9 +33,9 @@ export default function TicketPanel({ open, ticketId, project, meta, canManage, 
     if (isNew) { setT(null); setForm({ title: '', description: '', type: 'task', priority: 'medium', status_key: 'open', assignee_membership_id: '', contract_id: '', due_date: '' }); return; }
     pmApi.ticket(ticketId).then((d) => {
       setT(d);
-      setForm({ title: d.title, description: d.description || '', type: d.type, priority: d.priority, status_key: d.status_key, assignee_membership_id: d.assignee?.id || '', contract_id: d.contract_id || '', due_date: d.due_date || '', resolution: d.resolution || '' });
+      setForm({ title: d.title, description: d.description || '', type: d.type, priority: d.priority, status_key: presetStatus || d.status_key, assignee_membership_id: d.assignee?.id || '', contract_id: d.contract_id || '', due_date: d.due_date || '', resolution: d.resolution || '' });
     }).catch((e) => pushError(pmError(e, 'Could not load the ticket'), 'Load failed'));
-  }, [open, ticketId, isNew, pushError]);
+  }, [open, ticketId, presetStatus, isNew, pushError]);
 
   const statusCategory = (key) => meta.statuses.find((s) => s.key === key)?.category;
   const wantsResolution = statusCategory(form.status_key) === 'done';
@@ -54,6 +56,26 @@ export default function TicketPanel({ open, ticketId, project, meta, canManage, 
   async function addComment() {
     if (!comment.trim()) return;
     try { await pmApi.comment(ticketId, comment.trim()); setComment(''); setT(await pmApi.ticket(ticketId)); } catch (e) { pushError(pmError(e, 'Could not add the comment'), 'Failed'); }
+  }
+  async function attach(file) {
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try { await apiClient.post(`/pm/tickets/${ticketId}/attachments`, body); setT(await pmApi.ticket(ticketId)); pushSuccess('File attached'); } catch (e) { pushError(pmError(e, 'Could not attach the file'), 'Failed'); }
+    if (fileRef.current) fileRef.current.value = '';
+  }
+  async function download(a) {
+    try {
+      const res = await apiClient.get(`/pm/attachments/${a.id}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url; link.download = a.filename; link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { pushError(pmError(e, 'Could not download the file'), 'Failed'); }
+  }
+  async function dropFile(a) {
+    if (!window.confirm(`Remove ${a.filename}?`)) return;
+    try { await pmApi.deleteAttachment(a.id); setT(await pmApi.ticket(ticketId)); } catch (e) { pushError(pmError(e, 'Could not remove the file'), 'Failed'); }
   }
   async function remove() {
     if (!window.confirm('Delete this ticket? Its comments and history go with it.')) return;
@@ -105,6 +127,22 @@ export default function TicketPanel({ open, ticketId, project, meta, canManage, 
 
           {!isNew && t && (
             <>
+              <section>
+                <h4 className="mb-2 flex items-center justify-between text-sm font-semibold text-tertiary-900">Attachments
+                  <label className="inline-flex cursor-pointer items-center gap-1 rounded-xl border px-2 py-1 text-xs font-normal hover:bg-primary-50"><Paperclip className="h-3.5 w-3.5" />Attach a file
+                    <input ref={fileRef} type="file" className="hidden" data-testid="pm-attach-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg" onChange={(e) => attach(e.target.files?.[0])} />
+                  </label>
+                </h4>
+                <ul className="space-y-1" data-testid="pm-attachments">
+                  {t.attachments.length === 0 && <li className="text-xs text-tertiary-400">No files attached.</li>}
+                  {t.attachments.map((a) => (
+                    <li key={a.id} className="flex items-center justify-between gap-2 rounded-xl bg-tertiary-50 px-3 py-1.5 text-sm">
+                      <button type="button" className="truncate text-left text-primary-700 hover:underline" onClick={() => download(a)}>{a.filename}</button>
+                      <span className="flex shrink-0 items-center gap-2 text-xs text-tertiary-500">{Math.max(1, Math.round(a.size_bytes / 1024))} KB · {a.uploaded_by}{a.can_delete && <button type="button" title="Remove" className="text-tertiary-400 hover:text-danger-600" onClick={() => dropFile(a)}><X className="h-3.5 w-3.5" /></button>}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
               <section>
                 <h4 className="mb-2 text-sm font-semibold text-tertiary-900">Comments</h4>
                 <ul className="space-y-2">

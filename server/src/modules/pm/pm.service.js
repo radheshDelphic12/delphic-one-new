@@ -1,5 +1,8 @@
+const fs = require('fs');
+const path = require('path');
 const { z } = require('zod');
 const prisma = require('../../config/db');
+const env = require('../../config/env');
 
 // Project Management (Delphic Global): projects with their own tickets. Projects and tickets work on their own; a project can be
 // linked to real contracts later (and unlinked) without touching its tickets. See docs/features/PROJECT-MANAGEMENT.md.
@@ -134,6 +137,25 @@ async function membershipOk(orgId, membershipId) {
 
 async function logActivity(db, orgId, projectId, ticketId, actorUserId, action, from, to, note) {
   await db.pmActivity.create({ data: { org_id: orgId, project_id: projectId, ticket_id: ticketId || null, actor_user_id: actorUserId, action, from_value: from ?? null, to_value: to ?? null, note: note ?? null } });
+}
+
+// ---- notifications (never block the change they report on: notify() swallows its own errors)
+
+async function userIdsOf(membershipIds) {
+  const ids = [...new Set(membershipIds.filter(Boolean))];
+  if (!ids.length) return [];
+  const rows = await prisma.orgMembership.findMany({ where: { id: { in: ids } }, select: { person_id: true } });
+  return rows.map((r) => r.person_id);
+}
+
+async function tell(type, ticket, project, actor, membershipIds, extra = {}) {
+  const { notify } = require('../../lib/notifications');
+  const recipientIds = await userIdsOf(membershipIds);
+  if (!recipientIds.length) return;
+  await notify(prisma, {
+    type, actorId: actor?.userId || null, recipientIds,
+    context: { skipAdmins: true, actorName: actor?.name, orgId: ticket.org_id, ticketNumber: ticket.number, ticketTitle: ticket.title, projectCode: project.code, projectName: project.name, metadata: { project_id: project.id }, ticketId: ticket.id, ...extra },
+  });
 }
 
 // ---- names
@@ -399,6 +421,7 @@ async function createTicket(orgId, projectId, actor, input) {
     return t;
   });
   const cat = await categoryResolver(orgId);
+  if (ticket.assignee_membership_id) await tell('pm_ticket_assigned', ticket, p, actor, [ticket.assignee_membership_id]);
   return { ticket: (await shapeTickets(orgId, [ticket], cat))[0] };
 }
 
@@ -413,15 +436,17 @@ async function getTicket(orgId, ticketId, actor) {
   const { ticket, project } = await loadTicket(orgId, ticketId, actor);
   if (!ticket) return null;
   const cat = await categoryResolver(orgId);
-  const [comments, activity] = await Promise.all([
+  const [comments, activity, attachments] = await Promise.all([
     prisma.pmTicketComment.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'asc' } }),
     prisma.pmActivity.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'desc' }, take: 100 }),
+    prisma.pmTicketAttachment.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'asc' } }),
   ]);
-  const users = await prisma.user.findMany({ where: { id: { in: [...new Set([...comments.map((c) => c.author_user_id), ...activity.map((a) => a.actor_user_id)])] } }, select: { id: true, name: true } });
+  const users = await prisma.user.findMany({ where: { id: { in: [...new Set([...comments.map((c) => c.author_user_id), ...activity.map((a) => a.actor_user_id), ...attachments.map((a) => a.uploaded_by)])] } }, select: { id: true, name: true } });
   const who = new Map(users.map((u) => [u.id, u.name]));
   return {
     ...(await shapeTickets(orgId, [ticket], cat))[0],
     project: { id: project.id, code: project.code, name: project.name },
+    attachments: attachments.map((a) => ({ id: a.id, filename: a.filename, mime_type: a.mime_type, size_bytes: a.size_bytes, uploaded_by: who.get(a.uploaded_by) || 'Unknown', can_delete: actor.isManager || a.uploaded_by === actor.userId, created_at: a.created_at })),
     comments: comments.map((c) => ({ id: c.id, body: c.body, author: who.get(c.author_user_id) || 'Unknown', created_at: c.created_at })),
     activity: activity.map((a) => ({ id: a.id, action: a.action, from_value: a.from_value, to_value: a.to_value, note: a.note, actor: who.get(a.actor_user_id) || 'Unknown', created_at: a.created_at })),
   };
@@ -469,6 +494,12 @@ async function updateTicket(orgId, ticketId, actor, input) {
     const show = (k, v) => (v == null || v === '' ? null : k === 'assignee_membership_id' ? who.get(v)?.name || String(v) : String(v));
     for (const [k, from, to] of changes) await logActivity(tx, orgId, project.id, ticketId, actor.userId, `${k}_changed`, show(k, from), show(k, to));
   });
+  const after = { ...before, ...data };
+  if (data.assignee_membership_id && data.assignee_membership_id !== before.assignee_membership_id) await tell('pm_ticket_assigned', after, project, actor, [data.assignee_membership_id]);
+  if (data.status_key) {
+    const label = (await statusRow(orgId, data.status_key))?.label || data.status_key;
+    await tell('pm_ticket_status_changed', after, project, actor, [after.assignee_membership_id, after.reporter_membership_id], { statusLabel: label });
+  }
   return { ticket: await getTicket(orgId, ticketId, actor) };
 }
 
@@ -484,10 +515,77 @@ async function deleteTicket(orgId, ticketId, actor) {
 }
 
 async function addComment(orgId, ticketId, actor, body) {
-  const { ticket } = await loadTicket(orgId, ticketId, actor);
+  const { ticket, project } = await loadTicket(orgId, ticketId, actor);
   if (!ticket) return { error: 'not_found' };
   const c = await prisma.pmTicketComment.create({ data: { org_id: orgId, ticket_id: ticketId, author_user_id: actor.userId, body } });
+  await tell('pm_ticket_commented', ticket, project, actor, [ticket.assignee_membership_id, ticket.reporter_membership_id], { comment: body });
   return { comment: c };
+}
+
+// ---- attachments (files live in the upload folder; they are read only through the authenticated download route)
+
+const ALLOWED_ATTACHMENT_EXT = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.png', '.jpg', '.jpeg'];
+const dropFile = (name) => fs.unlink(path.join(env.uploadDir, path.basename(name)), () => {});
+
+async function addAttachment(orgId, ticketId, actor, file) {
+  const { ticket, project } = await loadTicket(orgId, ticketId, actor);
+  if (!ticket) { dropFile(file.filename); return { error: 'not_found' }; }
+  const a = await prisma.$transaction(async (tx) => {
+    const row = await tx.pmTicketAttachment.create({ data: { org_id: orgId, ticket_id: ticketId, filename: file.originalname.slice(0, 200), stored_name: file.filename, mime_type: file.mimetype || null, size_bytes: file.size, uploaded_by: actor.userId } });
+    await logActivity(tx, orgId, project.id, ticketId, actor.userId, 'attachment_added', null, row.filename);
+    return row;
+  });
+  return { attachment: { id: a.id, filename: a.filename, size_bytes: a.size_bytes } };
+}
+
+async function loadAttachment(orgId, id, actor) {
+  const a = await prisma.pmTicketAttachment.findFirst({ where: { id, org_id: orgId } });
+  if (!a) return {};
+  const { ticket, project } = await loadTicket(orgId, a.ticket_id, actor);
+  return ticket ? { attachment: a, ticket, project } : {};
+}
+
+async function attachmentFile(orgId, id, actor) {
+  const { attachment } = await loadAttachment(orgId, id, actor);
+  if (!attachment) return { error: 'not_found' };
+  const full = path.join(env.uploadDir, path.basename(attachment.stored_name));
+  if (!fs.existsSync(full)) return { error: 'not_found' };
+  return { path: path.resolve(full), filename: attachment.filename };
+}
+
+async function deleteAttachment(orgId, id, actor) {
+  const { attachment, project } = await loadAttachment(orgId, id, actor);
+  if (!attachment) return { error: 'not_found' };
+  if (!actor.isManager && attachment.uploaded_by !== actor.userId && !(await canManageProject(actor, project))) return { error: 'forbidden' };
+  await prisma.$transaction(async (tx) => {
+    await tx.pmTicketAttachment.delete({ where: { id } });
+    await logActivity(tx, orgId, project.id, attachment.ticket_id, actor.userId, 'attachment_removed', attachment.filename, null);
+  });
+  dropFile(attachment.stored_name);
+  return { ok: true };
+}
+
+// Nightly: tell the assignee of every open ticket due today or tomorrow, once per ticket per day.
+async function notifyDueSoon({ now = new Date() } = {}) {
+  const { notify } = require('../../lib/notifications');
+  const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);
+  const today = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const startOfDay = new Date(today.getTime() - 5.5 * 3600 * 1000);
+  const tickets = await prisma.pmTicket.findMany({ where: { assignee_membership_id: { not: null }, due_date: { gte: today, lte: tomorrow } }, include: { project: true } });
+  let sent = 0;
+  const catByOrg = new Map();
+  for (const t of tickets) {
+    if (!catByOrg.has(t.org_id)) catByOrg.set(t.org_id, await categoryResolver(t.org_id));
+    if (catByOrg.get(t.org_id)(t.status_key) === 'done') continue;
+    const [userId] = await userIdsOf([t.assignee_membership_id]);
+    if (!userId) continue;
+    const already = await prisma.notification.findFirst({ where: { user_id: userId, type: 'pm_ticket_due_soon', entity_id: t.id, created_at: { gte: startOfDay } }, select: { id: true } });
+    if (already) continue;
+    await notify(prisma, { type: 'pm_ticket_due_soon', recipientIds: [userId], context: { skipAdmins: true, notifySelf: true, orgId: t.org_id, ticketId: t.id, ticketNumber: t.number, ticketTitle: t.title, projectCode: t.project.code, projectName: t.project.name, dueLabel: dayOf(t.due_date) === dayOf(today) ? 'today' : 'tomorrow', metadata: { project_id: t.project_id } } });
+    sent += 1;
+  }
+  return { sent };
 }
 
 // ---- contracts (linked later, independent of tickets)
@@ -591,6 +689,7 @@ module.exports = {
   PROJECT_STATUSES, TICKET_TYPES, PRIORITIES, CATEGORIES,
   projectCreateSchema, projectUpdateSchema, ticketCreateSchema, ticketUpdateSchema, ticketListQuerySchema, statusSchema, statusUpdateSchema,
   listStatuses, createStatus, updateStatus, listPeople,
+  ALLOWED_ATTACHMENT_EXT, addAttachment, attachmentFile, deleteAttachment, notifyDueSoon,
   listProjects, getProject, createProject, updateProject, deleteProject, setMembers,
   listTickets, createTicket, getTicket, updateTicket, deleteTicket, addComment,
   listLinkableContracts, linkContract, unlinkContract, makePrimary, copyProgressToContract, myTickets,

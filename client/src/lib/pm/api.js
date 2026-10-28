@@ -25,6 +25,7 @@ export const pmApi = {
   updateTicket: (id, body) => unwrap(apiClient.patch(`/pm/tickets/${id}`, body)),
   deleteTicket: (id) => unwrap(apiClient.delete(`/pm/tickets/${id}`)),
   comment: (id, body) => unwrap(apiClient.post(`/pm/tickets/${id}/comments`, { body })),
+  deleteAttachment: (id) => unwrap(apiClient.delete(`/pm/attachments/${id}`)),
 
   linkContract: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/contracts`, body)),
   unlinkContract: (id, contractId) => unwrap(apiClient.delete(`/pm/projects/${id}/contracts/${contractId}`)),

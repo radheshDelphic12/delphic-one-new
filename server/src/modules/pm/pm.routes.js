@@ -1,4 +1,8 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const env = require('../../config/env');
 const { z } = require('zod');
 const { authenticate, requireOrgMembership, loadSuperadminFlag } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
@@ -8,6 +12,16 @@ const service = require('./pm.service');
 
 // Project Management: Delphic Global only (the master workspace). Every member sees the projects they belong to; an admin sees all.
 // Who may change what is decided per record in the service (admin / project owner / project lead manage; members work their tickets).
+fs.mkdirSync(env.uploadDir, { recursive: true });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, env.uploadDir),
+    filename: (req, file, cb) => cb(null, `pm-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`),
+  }),
+  limits: { fileSize: env.maxUploadMb * 1024 * 1024 },
+  fileFilter: (req, file, cb) => (service.ALLOWED_ATTACHMENT_EXT.includes(path.extname(file.originalname).toLowerCase()) ? cb(null, true) : cb(new Error('Unsupported file type'))),
+});
+
 const router = express.Router();
 router.use(authenticate, requireOrgMembership, requireMasterWorkspace, loadSuperadminFlag);
 
@@ -31,7 +45,7 @@ function actorOf(req) {
   const access = req.user.access;
   const permissionMode = Boolean(access && access.mode === 'permissions');
   const adminLevel = permissionMode ? access.level !== 'employee' : req.user.role === 'admin';
-  return { userId: req.user.id, membershipId: req.user.org_membership_id, isManager: Boolean(adminLevel || req.user.is_superadmin) };
+  return { userId: req.user.id, name: req.user.name, membershipId: req.user.org_membership_id, isManager: Boolean(adminLevel || req.user.is_superadmin) };
 }
 const manager = (req, res, next) => (actorOf(req).isManager ? next() : fail(res, 403, 'Admin only'));
 const run = (fn, okStatus = 200, key) => asyncHandler(async (req, res) => {
@@ -71,6 +85,21 @@ router.get('/tickets/:id', run((req, a) => service.getTicket(orgId(req), req.par
 router.patch('/tickets/:id', run((req, a) => service.updateTicket(orgId(req), req.params.id, a, service.ticketUpdateSchema.parse(req.body || {})), 200, 'ticket'));
 router.delete('/tickets/:id', run((req, a) => service.deleteTicket(orgId(req), req.params.id, a)));
 router.post('/tickets/:id/comments', run((req, a) => service.addComment(orgId(req), req.params.id, a, z.object({ body: z.string().trim().min(1).max(5000) }).parse(req.body || {}).body), 201, 'comment'));
+
+// ---- attachments (downloads go through here, never a public file URL)
+router.post('/tickets/:id/attachments', (req, res, next) => upload.single('file')(req, res, (err) => (err ? fail(res, 400, err.message) : next())),
+  asyncHandler(async (req, res) => {
+    if (!req.file) return fail(res, 400, 'Choose a file to attach');
+    const r = await service.addAttachment(orgId(req), req.params.id, actorOf(req), req.file);
+    if (r.error) return bad(res, r.error);
+    return ok(res, r.attachment, {}, 201);
+  }));
+router.get('/attachments/:id/download', asyncHandler(async (req, res) => {
+  const r = await service.attachmentFile(orgId(req), req.params.id, actorOf(req));
+  if (r.error) return bad(res, r.error);
+  return res.download(r.path, r.filename);
+}));
+router.delete('/attachments/:id', run((req, a) => service.deleteAttachment(orgId(req), req.params.id, a)));
 
 // ---- contract links (added whenever required; tickets never depend on them)
 router.post('/projects/:id/contracts', run((req, a) => service.linkContract(orgId(req), req.params.id, a, z.object({ contract_id: z.string().uuid(), is_primary: z.boolean().optional() }).parse(req.body || {})), 201, 'project'));

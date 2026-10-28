@@ -24,7 +24,13 @@ Built 2026-10-29. Brief (Paras): multiple projects, each with its own ticketing 
 Sidebar "Project Management" (master workspace). `/pm` (Projects, My tickets, Ticket statuses for admins), `/pm/projects/:id` (Tickets, Team, Contracts, Activity; ticket drawer with comments and history).
 
 ## Tests
-`server/tests/pm.test.js` (13): access, numbering, status flow and resolution, progress, statuses, contract link/unlink, my tickets. Browser flow checked locally (12 of 13 steps asserted; the 13th was a test timing issue, the screen was correct).
+`server/tests/pm.test.js` (17): access, numbering, status flow and resolution, progress, statuses, contract link/unlink, my tickets. Browser flows checked locally on an isolated instance: main flow (12 of 13 steps asserted, the 13th was a test timing issue) and board / attachments / clearing / notification link (11 of 11).
 
-## Not built yet
-Notifications (assign, status, due soon), kanban board view, attachments on tickets, client/vendor viewers, per-project custom fields, clearing a project's owner/dates from the edit drawer.
+## Added later the same day
+- **Notifications** (migration `20261029110000_pm_notifications_attachments`): `pm_ticket_assigned`, `pm_ticket_status_changed`, `pm_ticket_commented` (to the people on the ticket, never the actor, no copy to every admin) and `pm_ticket_due_soon` (nightly job `pmDueSoon`, 08:30 IST, once per ticket per day). Clicking one opens the ticket in its project.
+- **Board view** on a project's Tickets tab (List / Board toggle, remembered). Drag a card between status columns; dropping on a done column opens the ticket so the resolution is written first.
+- **Attachments** on tickets (pdf, Office, csv, txt, png, jpg; size limit = `MAX_UPLOAD_MB`). Files are read only through the authenticated `GET /pm/attachments/:id/download`; the uploader, a project lead or an admin removes them.
+- The project edit drawer can now clear the owner, dates and description.
+
+## Not built
+Client / vendor viewers (needs a decision: which accounts, read-only or comment, what they may see), per-project custom fields.

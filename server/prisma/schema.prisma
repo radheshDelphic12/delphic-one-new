@@ -364,6 +364,10 @@ enum NotificationType {
   candidate_backout
   candidate_offer
   candidate_closed
+  pm_ticket_assigned
+  pm_ticket_status_changed
+  pm_ticket_commented
+  pm_ticket_due_soon
   timesheet_submitted
   timesheet_entry_decided
   timesheet_regularization_requested
@@ -378,6 +382,7 @@ enum NotificationEntityType {
   submission
   interview_round
   profile
+  pm_ticket
 }
 
 enum HistoryEntityType {
@@ -8126,8 +8131,9 @@ model PmTicket {
   created_at             DateTime  @default(now())
   updated_at             DateTime  @default(now()) @updatedAt
 
-  comments PmTicketComment[]
-  activity PmActivity[]
+  comments    PmTicketComment[]
+  activity    PmActivity[]
+  attachments PmTicketAttachment[]
 
   @@unique([project_id, number])
   @@index([org_id, assignee_membership_id])
@@ -8182,4 +8188,20 @@ model PmProjectContract {
   @@unique([contract_id])
   @@index([project_id])
   @@map("pm_project_contracts")
+}
+
+model PmTicketAttachment {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  ticket_id   String   @db.Uuid
+  ticket      PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  filename    String
+  stored_name String
+  mime_type   String?
+  size_bytes  Int
+  uploaded_by String   @db.Uuid
+  created_at  DateTime @default(now())
+
+  @@index([ticket_id])
+  @@map("pm_ticket_attachments")
 }
