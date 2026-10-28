@@ -8073,6 +8073,7 @@ model PmProject {
   tickets   PmTicket[]
   contracts PmProjectContract[]
   activity  PmActivity[]
+  fields    PmCustomField[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -8127,6 +8128,9 @@ model PmTicket {
   due_date               DateTime? @db.Date
   resolution             String?
   resolved_at            DateTime?
+  // Values of the project's custom fields, keyed by field key. internal_only hides the ticket from client / vendor shares.
+  custom_values          Json      @default("{}")
+  internal_only          Boolean   @default(false)
   created_by             String    @db.Uuid
   created_at             DateTime  @default(now())
   updated_at             DateTime  @default(now()) @updatedAt
@@ -8146,8 +8150,11 @@ model PmTicketComment {
   org_id         String   @db.Uuid
   ticket_id      String   @db.Uuid
   ticket         PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
-  author_user_id String   @db.Uuid
+  author_user_id String?  @db.Uuid
   body           String
+  // Shown to client / vendor shares. A comment typed by a guest has no user: external_label names them.
+  is_public      Boolean  @default(false)
+  external_label String?
   created_at     DateTime @default(now())
 
   @@index([ticket_id, created_at])
@@ -8204,4 +8211,23 @@ model PmTicketAttachment {
 
   @@index([ticket_id])
   @@map("pm_ticket_attachments")
+}
+
+// Fields a project adds to its own tickets (text / number / date / pick-one). Values live in pm_tickets.custom_values by key.
+model PmCustomField {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  project_id String    @db.Uuid
+  project    PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  type       String
+  options    Json      @default("[]")
+  required   Boolean   @default(false)
+  position   Int       @default(0)
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+
+  @@unique([project_id, key])
+  @@map("pm_custom_fields")
 }

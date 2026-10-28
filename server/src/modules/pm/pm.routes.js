@@ -38,6 +38,16 @@ const ERRORS = {
   contract_already_linked: [409, 'That contract is already linked to a project'],
   status_not_found: [422, 'Unknown or switched-off status'],
   resolution_required: [422, 'Write the resolution before moving a ticket to a done status'],
+  unknown_field: [422, 'That custom field does not exist (or is switched off) in this project'],
+  bad_field_value: [422, 'A custom field value is not valid for its type'],
+  field_required: [422, 'A required custom field is empty'],
+  duplicate_field: [409, 'A field with that key already exists in this project'],
+  options_required: [422, 'A pick-one field needs at least one option'],
+  options_not_allowed: [422, 'Only pick-one fields have options'],
+  bad_field_key: [422, 'Choose a longer field name'],
+  expiry_in_past: [422, 'Choose an expiry date in the future'],
+  expiry_too_far: [422, 'A shared link can last at most one year'],
+  already_revoked: [409, 'Already revoked'],
 };
 const bad = (res, e) => { const [s, m] = ERRORS[e] || [400, 'Request failed']; return fail(res, s, m); };
 
@@ -80,11 +90,20 @@ router.post('/projects/:id/members', run((req, a) => service.setMembers(orgId(re
 
 // ---- tickets
 router.get('/projects/:id/tickets', run((req, a) => service.listTickets(orgId(req), req.params.id, a, service.ticketListQuerySchema.parse(req.query)), 200, 'tickets'));
+// ---- custom fields of a project
+router.post('/projects/:id/fields', run((req, a) => service.createField(orgId(req), req.params.id, a, service.fieldCreateSchema.parse(req.body || {})), 201, 'field'));
+router.patch('/projects/:id/fields/:fieldId', run((req, a) => service.updateField(orgId(req), req.params.id, req.params.fieldId, a, service.fieldUpdateSchema.parse(req.body || {})), 200, 'field'));
+
+// ---- sharing a project read-only with a client or vendor (the plain link token is shown once)
+router.get('/projects/:id/shares', run((req, a) => service.listShares(orgId(req), req.params.id, a), 200, 'shares'));
+router.post('/projects/:id/shares', run((req, a) => service.createShare(orgId(req), req.params.id, a, service.shareSchema.parse(req.body || {})), 201));
+router.delete('/projects/:id/shares/:shareId', run((req, a) => service.revokeShare(orgId(req), req.params.id, req.params.shareId, a), 200, 'share'));
+
 router.post('/projects/:id/tickets', run((req, a) => service.createTicket(orgId(req), req.params.id, a, service.ticketCreateSchema.parse(req.body || {})), 201, 'ticket'));
 router.get('/tickets/:id', run((req, a) => service.getTicket(orgId(req), req.params.id, a)));
 router.patch('/tickets/:id', run((req, a) => service.updateTicket(orgId(req), req.params.id, a, service.ticketUpdateSchema.parse(req.body || {})), 200, 'ticket'));
 router.delete('/tickets/:id', run((req, a) => service.deleteTicket(orgId(req), req.params.id, a)));
-router.post('/tickets/:id/comments', run((req, a) => service.addComment(orgId(req), req.params.id, a, z.object({ body: z.string().trim().min(1).max(5000) }).parse(req.body || {}).body), 201, 'comment'));
+router.post('/tickets/:id/comments', run((req, a) => { const c = z.object({ body: z.string().trim().min(1).max(5000), is_public: z.boolean().optional() }).parse(req.body || {}); return service.addComment(orgId(req), req.params.id, a, c.body, c.is_public); }, 201, 'comment'));
 
 // ---- attachments (downloads go through here, never a public file URL)
 router.post('/tickets/:id/attachments', (req, res, next) => upload.single('file')(req, res, (err) => (err ? fail(res, 400, err.message) : next())),

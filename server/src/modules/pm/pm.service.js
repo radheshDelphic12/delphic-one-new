@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
@@ -38,6 +39,30 @@ const projectCreateSchema = z.object({
 });
 const projectUpdateSchema = projectCreateSchema.omit({ member_ids: true }).partial();
 
+const customValues = z.record(z.string().max(60), z.union([z.string().max(2000), z.number(), z.null()]));
+const FIELD_TYPES = ['text', 'number', 'date', 'select'];
+const fieldCreateSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  key: z.string().trim().min(2).max(40).regex(/^[a-z0-9_]+$/, 'Lowercase letters, digits and underscores only').optional(),
+  type: z.enum(FIELD_TYPES),
+  options: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+  required: z.boolean().optional(),
+  position: z.number().int().min(0).max(999).optional(),
+});
+const fieldUpdateSchema = z.object({
+  label: z.string().trim().min(1).max(60).optional(),
+  options: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+  required: z.boolean().optional(),
+  position: z.number().int().min(0).max(999).optional(),
+  is_active: z.boolean().optional(),
+});
+const shareSchema = z.object({
+  email: z.string().trim().email(),
+  label: z.string().trim().min(1).max(80),
+  expires_at: z.coerce.date(),
+  can_comment: z.boolean().optional(),
+});
+
 const ticketCreateSchema = z.object({
   title: z.string().trim().min(2).max(240),
   description: z.string().trim().max(10000).nullish(),
@@ -47,6 +72,8 @@ const ticketCreateSchema = z.object({
   assignee_membership_id: uuid.nullish(),
   contract_id: uuid.nullish(),
   due_date: day.nullish(),
+  custom_values: customValues.optional(),
+  internal_only: z.boolean().optional(),
 });
 const ticketUpdateSchema = ticketCreateSchema.partial().extend({ resolution: z.string().trim().max(5000).nullish() });
 const ticketListQuerySchema = z.object({
@@ -100,6 +127,68 @@ async function updateStatus(orgId, id, input) {
     if (used > 0 && !stillThere && before.category === 'done') return { error: 'last_done_status' };
   }
   return { status: await prisma.pmStatus.update({ where: { id }, data: input }) };
+}
+
+// ---- custom fields (per project)
+
+async function listFields(projectId, { includeInactive = false } = {}) {
+  return prisma.pmCustomField.findMany({ where: { project_id: projectId, ...(includeInactive ? {} : { is_active: true }) }, orderBy: [{ position: 'asc' }, { created_at: 'asc' }] });
+}
+
+// Turns what the form sent into the stored values, or says what is wrong. Blank / null clears a value.
+function checkCustom(fields, incoming, { creating = false, existing = {} } = {}) {
+  const byKey = new Map(fields.map((f) => [f.key, f]));
+  const out = { ...existing };
+  for (const [key, raw] of Object.entries(incoming || {})) {
+    const f = byKey.get(key);
+    if (!f || !f.is_active) return { error: 'unknown_field' };
+    if (raw === null || raw === '') { delete out[key]; continue; }
+    if (f.type === 'number') {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return { error: 'bad_field_value' };
+      out[key] = n;
+    } else if (f.type === 'date') {
+      if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { error: 'bad_field_value' };
+      out[key] = raw;
+    } else if (f.type === 'select') {
+      if (!(f.options || []).includes(String(raw))) return { error: 'bad_field_value' };
+      out[key] = String(raw);
+    } else {
+      out[key] = String(raw).trim().slice(0, 2000);
+    }
+  }
+  for (const f of fields) {
+    if (!f.required || !f.is_active) continue;
+    const touched = creating || Object.prototype.hasOwnProperty.call(incoming || {}, f.key);
+    if (touched && (out[f.key] === undefined || out[f.key] === '')) return { error: 'field_required', label: f.label };
+  }
+  return { values: out };
+}
+
+async function createField(orgId, projectId, actor, input) {
+  const p = await loadProject(orgId, projectId, actor);
+  if (!p) return { error: 'not_found' };
+  if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
+  if (input.type === 'select' && !(input.options || []).length) return { error: 'options_required' };
+  const key = input.key || input.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+  if (key.length < 2) return { error: 'bad_field_key' };
+  if (await prisma.pmCustomField.findUnique({ where: { project_id_key: { project_id: projectId, key } } })) return { error: 'duplicate_field' };
+  const last = await prisma.pmCustomField.aggregate({ where: { project_id: projectId }, _max: { position: true } });
+  const field = await prisma.pmCustomField.create({ data: { org_id: orgId, project_id: projectId, key, label: input.label, type: input.type, options: input.type === 'select' ? input.options : [], required: Boolean(input.required), position: input.position ?? (last._max.position ?? -1) + 1 } });
+  await logActivity(prisma, orgId, projectId, null, actor.userId, 'field_added', null, field.label);
+  return { field };
+}
+
+async function updateField(orgId, projectId, fieldId, actor, input) {
+  const p = await loadProject(orgId, projectId, actor);
+  if (!p) return { error: 'not_found' };
+  if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
+  const before = await prisma.pmCustomField.findFirst({ where: { id: fieldId, project_id: projectId } });
+  if (!before) return { error: 'not_found' };
+  if (input.options && before.type !== 'select') return { error: 'options_not_allowed' };
+  const field = await prisma.pmCustomField.update({ where: { id: fieldId }, data: input });
+  await logActivity(prisma, orgId, projectId, null, actor.userId, input.is_active === false ? 'field_switched_off' : 'field_changed', before.label, field.label);
+  return { field };
 }
 
 // ---- access helpers (the route passes `actor`: { userId, membershipId, isManager })
@@ -292,12 +381,13 @@ async function listProjects(orgId, actor, { status, q, linked, mine } = {}) {
 async function getProject(orgId, id, actor) {
   const p = await loadProject(orgId, id, actor);
   if (!p) return null;
-  const [tickets, members, links, cat, activity] = await Promise.all([
+  const [tickets, members, links, cat, activity, fields] = await Promise.all([
     prisma.pmTicket.findMany({ where: { project_id: id }, select: { id: true, status_key: true, due_date: true, contract_id: true } }),
     prisma.pmProjectMember.findMany({ where: { project_id: id }, orderBy: { created_at: 'asc' } }),
     prisma.pmProjectContract.findMany({ where: { project_id: id }, orderBy: { linked_at: 'asc' } }),
     categoryResolver(orgId),
     prisma.pmActivity.findMany({ where: { project_id: id, ticket_id: null }, orderBy: { created_at: 'desc' }, take: 30 }),
+    listFields(id, { includeInactive: true }),
   ]);
   const names = await nameMap(orgId, [p.owner_membership_id, ...members.map((m) => m.membership_id)]);
   const contracts = await contractProgress(orgId, p, links, tickets, cat);
@@ -310,6 +400,7 @@ async function getProject(orgId, id, actor) {
     members: members.map((m) => ({ id: m.id, membership_id: m.membership_id, role: m.role, name: names.get(m.membership_id)?.name || 'Unknown' })),
     contracts,
     activity,
+    fields,
   };
 }
 
@@ -374,6 +465,7 @@ async function shapeTickets(orgId, rows, cat) {
       assignee: names.get(t.assignee_membership_id) || null, reporter: names.get(t.reporter_membership_id) || null,
       contract_id: t.contract_id, due_date: dayOf(t.due_date), overdue: category !== 'done' && Boolean(t.due_date) && new Date(t.due_date) < t0,
       resolution: t.resolution, resolved_at: t.resolved_at, created_at: t.created_at, updated_at: t.updated_at,
+      custom_values: t.custom_values || {}, internal_only: t.internal_only,
     };
   });
 }
@@ -408,6 +500,8 @@ async function createTicket(orgId, projectId, actor, input) {
   const status = await statusRow(orgId, statusKey);
   if (!status || !status.is_active) return { error: 'status_not_found' };
   if (status.category === 'done') return { error: 'resolution_required' };
+  const custom = checkCustom(await listFields(projectId, { includeInactive: true }), input.custom_values, { creating: true });
+  if (custom.error) return custom;
   const ticket = await prisma.$transaction(async (tx) => {
     const bumped = await tx.pmProject.update({ where: { id: projectId }, data: { ticket_seq: { increment: 1 } }, select: { ticket_seq: true } });
     const t = await tx.pmTicket.create({
@@ -415,6 +509,7 @@ async function createTicket(orgId, projectId, actor, input) {
         org_id: orgId, project_id: projectId, number: bumped.ticket_seq, title: input.title, description: input.description || null, type: input.type || 'task',
         priority: input.priority || 'medium', status_key: statusKey, assignee_membership_id: input.assignee_membership_id || null, reporter_membership_id: actor.membershipId || null,
         contract_id: input.contract_id || null, due_date: toDate(input.due_date), created_by: actor.userId,
+        custom_values: custom.values, internal_only: Boolean(input.internal_only),
       },
     });
     await logActivity(tx, orgId, projectId, t.id, actor.userId, 'ticket_created', null, t.title);
@@ -441,13 +536,13 @@ async function getTicket(orgId, ticketId, actor) {
     prisma.pmActivity.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'desc' }, take: 100 }),
     prisma.pmTicketAttachment.findMany({ where: { ticket_id: ticketId }, orderBy: { created_at: 'asc' } }),
   ]);
-  const users = await prisma.user.findMany({ where: { id: { in: [...new Set([...comments.map((c) => c.author_user_id), ...activity.map((a) => a.actor_user_id), ...attachments.map((a) => a.uploaded_by)])] } }, select: { id: true, name: true } });
+  const users = await prisma.user.findMany({ where: { id: { in: [...new Set([...comments.map((c) => c.author_user_id).filter(Boolean), ...activity.map((a) => a.actor_user_id), ...attachments.map((a) => a.uploaded_by)])] } }, select: { id: true, name: true } });
   const who = new Map(users.map((u) => [u.id, u.name]));
   return {
     ...(await shapeTickets(orgId, [ticket], cat))[0],
     project: { id: project.id, code: project.code, name: project.name },
     attachments: attachments.map((a) => ({ id: a.id, filename: a.filename, mime_type: a.mime_type, size_bytes: a.size_bytes, uploaded_by: who.get(a.uploaded_by) || 'Unknown', can_delete: actor.isManager || a.uploaded_by === actor.userId, created_at: a.created_at })),
-    comments: comments.map((c) => ({ id: c.id, body: c.body, author: who.get(c.author_user_id) || 'Unknown', created_at: c.created_at })),
+    comments: comments.map((c) => ({ id: c.id, body: c.body, author: c.external_label ? `${c.external_label} (shared access)` : who.get(c.author_user_id) || 'Unknown', is_public: c.is_public, external: Boolean(c.external_label), created_at: c.created_at })),
     activity: activity.map((a) => ({ id: a.id, action: a.action, from_value: a.from_value, to_value: a.to_value, note: a.note, actor: who.get(a.actor_user_id) || 'Unknown', created_at: a.created_at })),
   };
 }
@@ -467,6 +562,16 @@ async function updateTicket(orgId, ticketId, actor, input) {
     if (input[k] !== undefined && String(input[k] ?? '') !== String(before[k] ?? '')) { data[k] = input[k] === '' ? null : input[k]; changes.push([k, before[k], input[k]]); }
   }
   if (input.due_date !== undefined && (input.due_date || null) !== dayOf(before.due_date)) { data.due_date = toDate(input.due_date); changes.push(['due_date', dayOf(before.due_date), input.due_date]); }
+
+  if (input.internal_only !== undefined && input.internal_only !== before.internal_only) { data.internal_only = input.internal_only; changes.push(['internal_only', String(before.internal_only), String(input.internal_only)]); }
+  if (input.custom_values) {
+    const custom = checkCustom(await listFields(project.id, { includeInactive: true }), input.custom_values, { existing: before.custom_values || {} });
+    if (custom.error) return custom;
+    if (JSON.stringify(custom.values) !== JSON.stringify(before.custom_values || {})) {
+      data.custom_values = custom.values;
+      for (const k of Object.keys(input.custom_values)) changes.push([`field_${k}`, (before.custom_values || {})[k] ?? null, custom.values[k] ?? null]);
+    }
+  }
 
   const cat = await categoryResolver(orgId);
   const newKey = input.status_key || before.status_key;
@@ -514,10 +619,10 @@ async function deleteTicket(orgId, ticketId, actor) {
   return { ok: true };
 }
 
-async function addComment(orgId, ticketId, actor, body) {
+async function addComment(orgId, ticketId, actor, body, isPublic = false) {
   const { ticket, project } = await loadTicket(orgId, ticketId, actor);
   if (!ticket) return { error: 'not_found' };
-  const c = await prisma.pmTicketComment.create({ data: { org_id: orgId, ticket_id: ticketId, author_user_id: actor.userId, body } });
+  const c = await prisma.pmTicketComment.create({ data: { org_id: orgId, ticket_id: ticketId, author_user_id: actor.userId, body, is_public: Boolean(isPublic) } });
   await tell('pm_ticket_commented', ticket, project, actor, [ticket.assignee_membership_id, ticket.reporter_membership_id], { comment: body });
   return { comment: c };
 }
@@ -586,6 +691,92 @@ async function notifyDueSoon({ now = new Date() } = {}) {
     sent += 1;
   }
   return { sent };
+}
+
+// ---- sharing with a client or vendor (read-only link built on the existing external-access tokens)
+
+const SHARE_RESOURCE = 'project_management';
+const newToken = () => `ext_${crypto.randomBytes(32).toString('hex')}`;
+const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const shareRow = (g) => ({
+  id: g.id, email: g.email, label: g.scope?.label || g.email, can_comment: Boolean(g.scope?.can_comment),
+  expires_at: g.expires_at, revoked_at: g.revoked_at, last_used_at: g.last_used_at, use_count: g.use_count, created_at: g.created_at,
+  active: !g.revoked_at && g.expires_at > new Date(),
+});
+
+async function listShares(orgId, projectId, actor) {
+  const p = await loadProject(orgId, projectId, actor);
+  if (!p) return { error: 'not_found' };
+  if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
+  const rows = await prisma.externalAccess.findMany({ where: { org_id: orgId, scope: { path: ['pm_project_id'], equals: projectId } }, orderBy: { created_at: 'desc' } });
+  return { shares: rows.map(shareRow) };
+}
+
+async function createShare(orgId, projectId, actor, input) {
+  const p = await loadProject(orgId, projectId, actor);
+  if (!p) return { error: 'not_found' };
+  if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
+  const now = Date.now();
+  if (input.expires_at.getTime() <= now) return { error: 'expiry_in_past' };
+  if (input.expires_at.getTime() > now + 365 * 86400000) return { error: 'expiry_too_far' };
+  const token = newToken();
+  const grant = await prisma.externalAccess.create({
+    data: { org_id: orgId, email: input.email, scope: { resources: [SHARE_RESOURCE], pm_project_id: projectId, can_comment: Boolean(input.can_comment), label: input.label }, token_hash: hashToken(token), granted_by: actor.userId, expires_at: input.expires_at },
+  });
+  await logActivity(prisma, orgId, projectId, null, actor.userId, 'share_created', null, `${input.label} (${input.email})`);
+  return { share: shareRow(grant), token }; // the plain token is returned this once only
+}
+
+async function revokeShare(orgId, projectId, shareId, actor) {
+  const p = await loadProject(orgId, projectId, actor);
+  if (!p) return { error: 'not_found' };
+  if (!(await canManageProject(actor, p))) return { error: 'forbidden' };
+  const g = await prisma.externalAccess.findFirst({ where: { id: shareId, org_id: orgId, scope: { path: ['pm_project_id'], equals: projectId } } });
+  if (!g) return { error: 'not_found' };
+  if (g.revoked_at) return { error: 'already_revoked' };
+  const updated = await prisma.externalAccess.update({ where: { id: shareId }, data: { revoked_at: new Date() } });
+  await logActivity(prisma, orgId, projectId, null, actor.userId, 'share_revoked', g.scope?.label || g.email, null);
+  return { share: shareRow(updated) };
+}
+
+// What the shared link shows: the project, its non-internal tickets (no assignees, no internal comments, nothing about contracts or money).
+async function guestView(grant) {
+  const projectId = grant.scope?.pm_project_id;
+  const project = await prisma.pmProject.findFirst({ where: { id: projectId, org_id: grant.org_id } });
+  if (!project) return { error: 'not_found' };
+  const [rows, fields, cat, statuses] = await Promise.all([
+    prisma.pmTicket.findMany({ where: { project_id: projectId, internal_only: false }, orderBy: { number: 'desc' }, include: { comments: { where: { is_public: true }, orderBy: { created_at: 'asc' } } } }),
+    listFields(projectId),
+    categoryResolver(grant.org_id),
+    listStatuses(grant.org_id, { includeInactive: true }),
+  ]);
+  const label = new Map(statuses.map((st) => [st.key, st.label]));
+  const t0 = new Date(); t0.setUTCHours(0, 0, 0, 0);
+  return {
+    project: { code: project.code, name: project.name, description: project.description, status: project.status, start_date: dayOf(project.start_date), end_date: dayOf(project.end_date) },
+    share: { label: grant.scope?.label || grant.email, can_comment: Boolean(grant.scope?.can_comment), expires_at: grant.expires_at },
+    progress: summarize(rows, cat),
+    fields: fields.map((f) => ({ key: f.key, label: f.label, type: f.type })),
+    tickets: rows.map((t) => {
+      const category = cat(t.status_key);
+      return {
+        id: t.id, number: t.number, title: t.title, description: t.description, type: t.type, priority: t.priority, status_label: label.get(t.status_key) || t.status_key, category,
+        due_date: dayOf(t.due_date), overdue: category !== 'done' && Boolean(t.due_date) && new Date(t.due_date) < t0, resolution: t.resolution, custom_values: t.custom_values || {},
+        comments: t.comments.map((c) => ({ id: c.id, body: c.body, author: c.external_label ? c.external_label : 'Delphic team', mine: Boolean(c.external_label), created_at: c.created_at })),
+      };
+    }),
+  };
+}
+
+async function guestComment(grant, ticketId, body) {
+  if (!grant.scope?.can_comment) return { error: 'comment_not_allowed' };
+  const ticket = await prisma.pmTicket.findFirst({ where: { id: ticketId, project_id: grant.scope.pm_project_id, org_id: grant.org_id, internal_only: false } });
+  if (!ticket) return { error: 'not_found' };
+  const label = grant.scope.label || grant.email;
+  const c = await prisma.pmTicketComment.create({ data: { org_id: grant.org_id, ticket_id: ticketId, author_user_id: null, body, is_public: true, external_label: label } });
+  const project = await prisma.pmProject.findUnique({ where: { id: ticket.project_id } });
+  await tell('pm_ticket_commented', ticket, project, null, [ticket.assignee_membership_id, ticket.reporter_membership_id], { comment: body, actorName: `${label} (shared access)` });
+  return { comment: { id: c.id } };
 }
 
 // ---- contracts (linked later, independent of tickets)
@@ -689,6 +880,8 @@ module.exports = {
   PROJECT_STATUSES, TICKET_TYPES, PRIORITIES, CATEGORIES,
   projectCreateSchema, projectUpdateSchema, ticketCreateSchema, ticketUpdateSchema, ticketListQuerySchema, statusSchema, statusUpdateSchema,
   listStatuses, createStatus, updateStatus, listPeople,
+  FIELD_TYPES, fieldCreateSchema, fieldUpdateSchema, shareSchema, listFields, createField, updateField,
+  listShares, createShare, revokeShare, guestView, guestComment,
   ALLOWED_ATTACHMENT_EXT, addAttachment, attachmentFile, deleteAttachment, notifyDueSoon,
   listProjects, getProject, createProject, updateProject, deleteProject, setMembers,
   listTickets, createTicket, getTicket, updateTicket, deleteTicket, addComment,

@@ -24,7 +24,7 @@ Built 2026-10-29. Brief (Paras): multiple projects, each with its own ticketing 
 Sidebar "Project Management" (master workspace). `/pm` (Projects, My tickets, Ticket statuses for admins), `/pm/projects/:id` (Tickets, Team, Contracts, Activity; ticket drawer with comments and history).
 
 ## Tests
-`server/tests/pm.test.js` (17): access, numbering, status flow and resolution, progress, statuses, contract link/unlink, my tickets. Browser flows checked locally on an isolated instance: main flow (12 of 13 steps asserted, the 13th was a test timing issue) and board / attachments / clearing / notification link (11 of 11).
+`server/tests/pm.test.js` (20): access, numbering, status flow and resolution, progress, statuses, contract link/unlink, my tickets. Browser flows checked locally on an isolated instance: main flow (12 of 13 steps asserted, the 13th was a test timing issue) and board / attachments / clearing / notification link (11 of 11), and custom fields / sharing / guest page (8 of 8).
 
 ## Added later the same day
 - **Notifications** (migration `20261029110000_pm_notifications_attachments`): `pm_ticket_assigned`, `pm_ticket_status_changed`, `pm_ticket_commented` (to the people on the ticket, never the actor, no copy to every admin) and `pm_ticket_due_soon` (nightly job `pmDueSoon`, 08:30 IST, once per ticket per day). Clicking one opens the ticket in its project.
@@ -32,5 +32,11 @@ Sidebar "Project Management" (master workspace). `/pm` (Projects, My tickets, Ti
 - **Attachments** on tickets (pdf, Office, csv, txt, png, jpg; size limit = `MAX_UPLOAD_MB`). Files are read only through the authenticated `GET /pm/attachments/:id/download`; the uploader, a project lead or an admin removes them.
 - The project edit drawer can now clear the owner, dates and description.
 
+## Custom fields and sharing with a client or vendor (migration `20261029120000_pm_custom_fields_sharing`)
+- **Custom fields per project** (`pm_custom_fields`): text, number, date or pick-one, optional "required". Managers (admin, project owner or lead) add, rename, change options, switch off (old values stay on old tickets). Values sit in `pm_tickets.custom_values` by key and are validated by type; a required field cannot be blanked.
+- **Share a project read-only** (project > Sharing): a link for a client or vendor, built on the existing external-access tokens (`external_accesses`, scope `{resources:['project_management'], pm_project_id, can_comment, label}`). The plain token is shown once, only its hash is stored; expiry 1 to 365 days; revoke any time.
+- What a guest sees (`/guest-project#token=...`, API `/api/v1/pm-guest`): the project, progress and its tickets that are not marked **Hide from shared links** (`internal_only`), with description, status, priority, due date, resolution, custom fields and comments marked **Visible to client / vendor**. Never: assignees or any staff name (public staff comments read "Delphic team"), internal comments, attachments, contracts, money. With "They can comment" the guest adds comments tagged with the name given when the link was made; the assignee and reporter are notified.
+- A share covers one project only; a normal login token does not work on the guest API and the guest token does not work anywhere else.
+
 ## Not built
-Client / vendor viewers (needs a decision: which accounts, read-only or comment, what they may see), per-project custom fields.
+Nothing from the brief is left. Ideas for later, only if wanted: guest file attachments, an email that carries the link, saved board filters.

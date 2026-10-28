@@ -22,6 +22,7 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
   const [t, setT] = useState(null);
   const [form, setForm] = useState({});
   const [comment, setComment] = useState('');
+  const [commentPublic, setCommentPublic] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const isNew = !ticketId;
@@ -30,10 +31,10 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
   useEffect(() => {
     if (!open) return;
     setComment('');
-    if (isNew) { setT(null); setForm({ title: '', description: '', type: 'task', priority: 'medium', status_key: 'open', assignee_membership_id: '', contract_id: '', due_date: '' }); return; }
+    if (isNew) { setT(null); setForm({ title: '', description: '', type: 'task', priority: 'medium', status_key: 'open', assignee_membership_id: '', contract_id: '', due_date: '', internal_only: false, custom_values: {} }); return; }
     pmApi.ticket(ticketId).then((d) => {
       setT(d);
-      setForm({ title: d.title, description: d.description || '', type: d.type, priority: d.priority, status_key: presetStatus || d.status_key, assignee_membership_id: d.assignee?.id || '', contract_id: d.contract_id || '', due_date: d.due_date || '', resolution: d.resolution || '' });
+      setForm({ title: d.title, description: d.description || '', type: d.type, priority: d.priority, status_key: presetStatus || d.status_key, assignee_membership_id: d.assignee?.id || '', contract_id: d.contract_id || '', due_date: d.due_date || '', resolution: d.resolution || '', internal_only: d.internal_only, custom_values: d.custom_values || {} });
     }).catch((e) => pushError(pmError(e, 'Could not load the ticket'), 'Load failed'));
   }, [open, ticketId, presetStatus, isNew, pushError]);
 
@@ -55,7 +56,7 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
   }
   async function addComment() {
     if (!comment.trim()) return;
-    try { await pmApi.comment(ticketId, comment.trim()); setComment(''); setT(await pmApi.ticket(ticketId)); } catch (e) { pushError(pmError(e, 'Could not add the comment'), 'Failed'); }
+    try { await pmApi.comment(ticketId, comment.trim(), commentPublic); setComment(''); setCommentPublic(false); setT(await pmApi.ticket(ticketId)); } catch (e) { pushError(pmError(e, 'Could not add the comment'), 'Failed'); }
   }
   async function attach(file) {
     if (!file) return;
@@ -118,6 +119,27 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
             )}
           </div>
           <label className="block text-xs text-tertiary-500">Description<textarea className={INPUT} rows={4} value={form.description || ''} onChange={(e) => set('description', e.target.value)} disabled={!canEdit} /></label>
+          {project.fields.filter((f) => f.is_active).length > 0 && (
+            <div className="grid grid-cols-2 gap-3" data-testid="pm-custom-fields">
+              {project.fields.filter((f) => f.is_active).map((f) => {
+                const val = form.custom_values?.[f.key] ?? '';
+                const setVal = (v) => set('custom_values', { ...(form.custom_values || {}), [f.key]: v === '' ? null : v });
+                const label = <>{f.label}{f.required && <span className="text-danger-600"> *</span>}</>;
+                return (
+                  <label key={f.key} className="block text-xs text-tertiary-500">{label}
+                    {f.type === 'select' ? (
+                      <select className={INPUT} value={val} onChange={(e) => setVal(e.target.value)} disabled={!canEdit} data-testid={`pm-cf-${f.key}`}><option value="">Not set</option>{(f.options || []).map((o) => <option key={o} value={o}>{o}</option>)}</select>
+                    ) : (
+                      <input className={INPUT} type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} value={val} onChange={(e) => setVal(e.target.value)} disabled={!canEdit} data-testid={`pm-cf-${f.key}`} />
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {canManage && (
+            <label className="flex items-center gap-2 text-xs text-tertiary-600"><input type="checkbox" checked={Boolean(form.internal_only)} onChange={(e) => set('internal_only', e.target.checked)} disabled={!canEdit} data-testid="pm-internal-only" />Hide from shared client / vendor links</label>
+          )}
           {!isNew && wantsResolution && (
             <label className="block text-xs text-tertiary-500">Resolution <span className="text-danger-600">(required for a done status)</span>
               <textarea className={INPUT} rows={3} value={form.resolution || ''} onChange={(e) => set('resolution', e.target.value)} disabled={!canEdit} data-testid="pm-resolution" />
@@ -148,13 +170,14 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
                 <ul className="space-y-2">
                   {t.comments.length === 0 && <li className="text-xs text-tertiary-400">No comments yet.</li>}
                   {t.comments.map((c) => (
-                    <li key={c.id} className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm"><div className="text-xs text-tertiary-500">{c.author} · {dateLabel(c.created_at)}</div><div className="whitespace-pre-wrap">{c.body}</div></li>
+                    <li key={c.id} className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm"><div className="text-xs text-tertiary-500">{c.author} · {dateLabel(c.created_at)}{c.is_public && <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{c.external ? 'From client / vendor' : 'Visible to client / vendor'}</span>}</div><div className="whitespace-pre-wrap">{c.body}</div></li>
                   ))}
                 </ul>
                 <div className="mt-2 flex gap-2">
                   <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Write a comment..." value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addComment()} data-testid="pm-comment-input" />
                   <button type="button" className="rounded-xl border px-3 py-2 text-sm" onClick={addComment}>Add</button>
                 </div>
+                <label className="mt-1 flex items-center gap-2 text-xs text-tertiary-500"><input type="checkbox" checked={commentPublic} onChange={(e) => setCommentPublic(e.target.checked)} data-testid="pm-comment-public" />Visible to shared client / vendor links</label>
               </section>
               <section>
                 <h4 className="mb-2 text-sm font-semibold text-tertiary-900">History</h4>

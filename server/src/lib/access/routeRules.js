@@ -119,6 +119,7 @@ const RULES = [
   [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
   // Project Management (Delphic Global only): the route limits it to the master workspace; admin / project lead / member rights are per record.
   [/^\/pm(\/|$)/, 'open'],
+  [/^\/pm-guest(\/|$)/, 'open'], // bearer-token share link (no login); the route checks the token's scope
   // Tracking a company payment in a wallet (POST /payments/track): open here, and the route itself lets in the Admin, the group admin,
   // people holding a finance / billing / payroll permission, and a company workspace's admin / manager / finance role (payments.routes.js).
   [/^\/payments(\/|$)/, 'open'],

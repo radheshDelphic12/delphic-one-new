@@ -24,7 +24,12 @@ export const pmApi = {
   ticket: (id) => unwrap(apiClient.get(`/pm/tickets/${id}`)),
   updateTicket: (id, body) => unwrap(apiClient.patch(`/pm/tickets/${id}`, body)),
   deleteTicket: (id) => unwrap(apiClient.delete(`/pm/tickets/${id}`)),
-  comment: (id, body) => unwrap(apiClient.post(`/pm/tickets/${id}/comments`, { body })),
+  comment: (id, body, isPublic = false) => unwrap(apiClient.post(`/pm/tickets/${id}/comments`, { body, is_public: isPublic })),
+  createField: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/fields`, body)),
+  updateField: (id, fieldId, body) => unwrap(apiClient.patch(`/pm/projects/${id}/fields/${fieldId}`, body)),
+  shares: (id) => unwrap(apiClient.get(`/pm/projects/${id}/shares`)),
+  createShare: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/shares`, body)),
+  revokeShare: (id, shareId) => unwrap(apiClient.delete(`/pm/projects/${id}/shares/${shareId}`)),
   deleteAttachment: (id) => unwrap(apiClient.delete(`/pm/attachments/${id}`)),
 
   linkContract: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/contracts`, body)),

@@ -33,6 +33,7 @@ import FinanceHubPage from '../pages/finance/FinanceHubPage.jsx';
 import PayrollHubPage from '../pages/payroll/PayrollHubPage.jsx';
 import GroupOverviewPage from '../pages/groupOverview/GroupOverviewPage.jsx';
 import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
+import GuestProjectPage from '../pages/guest/GuestProjectPage.jsx';
 import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
@@ -338,6 +339,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
+      <Route path="/guest-project" element={<GuestProjectPage />} />
       <Route path="/assessment/:token" element={<AssessmentTakePage />} />
       <Route path="/careers" element={<CareerRedirect />} />
       <Route path="/careers/:slug" element={<CareerRedirect />} />

@@ -277,3 +277,90 @@ describe('clearing fields', () => {
     expect(r.body.data).toMatchObject({ owner: null, start_date: null, end_date: null, description: null });
   });
 });
+
+describe('custom fields of a project', () => {
+  test('a manager defines fields; ticket values are validated by type; required fields are enforced; switched-off fields are refused', async () => {
+    const p = await project();
+    expect((await post(`/projects/${p.id}/fields`, annToken, { label: 'Sprint', type: 'text' })).status).toBe(403);
+    expect((await post(`/projects/${p.id}/fields`, adminToken, { label: 'Env', type: 'select' })).status).toBe(422); // needs options
+    const points = await post(`/projects/${p.id}/fields`, adminToken, { label: 'Story points', type: 'number' });
+    expect(points.body.data.key).toBe('story_points');
+    await post(`/projects/${p.id}/fields`, adminToken, { label: 'Environment', type: 'select', options: ['dev', 'staging', 'prod'], required: true });
+    await post(`/projects/${p.id}/fields`, adminToken, { label: 'Go live', type: 'date' });
+    expect((await post(`/projects/${p.id}/fields`, adminToken, { label: 'Story points', type: 'text' })).status).toBe(409);
+
+    const mk = (custom_values) => post(`/projects/${p.id}/tickets`, adminToken, { title: 'Field ticket', custom_values });
+    expect((await mk({ story_points: 5 })).status).toBe(422); // Environment is required
+    expect((await mk({ environment: 'moon' })).status).toBe(422);
+    expect((await mk({ environment: 'dev', story_points: 'many' })).status).toBe(422);
+    expect((await mk({ environment: 'dev', nope: 1 })).status).toBe(422);
+    const made = await mk({ environment: 'prod', story_points: '8', go_live: '2026-12-01' });
+    expect(made.status).toBe(201);
+    expect(made.body.data.custom_values).toEqual({ environment: 'prod', story_points: 8, go_live: '2026-12-01' });
+
+    const upd = await patch(`/tickets/${made.body.data.id}`, adminToken, { custom_values: { story_points: null, environment: 'staging' } });
+    expect(upd.body.data.custom_values).toEqual({ environment: 'staging', go_live: '2026-12-01' });
+    expect((await patch(`/tickets/${made.body.data.id}`, adminToken, { custom_values: { environment: '' } })).status).toBe(422); // required cannot be blanked
+
+    const field = (await get(`/projects/${p.id}`, adminToken)).body.data.fields.find((f) => f.key === 'environment');
+    await authed(request(app).patch(`${P}/projects/${p.id}/fields/${field.id}`), adminToken).send({ is_active: false });
+    expect((await mk({ environment: 'dev' })).status).toBe(422); // switched off
+    expect((await mk({ story_points: 1 })).status).toBe(201); // and no longer required
+  });
+});
+
+describe('sharing a project with a client or vendor', () => {
+  const guest = (token, url = '', method = 'get', body) => request(app)[method](`/api/v1/pm-guest${url}`).set('Authorization', `Bearer ${token}`).send(body);
+  const soon = () => new Date(Date.now() + 7 * 86400000).toISOString();
+  const share = async (p, over = {}) => (await post(`/projects/${p.id}/shares`, adminToken, { email: 'client@acme.test', label: 'Acme Corp', expires_at: soon(), ...over })).body.data;
+
+  test('only a manager shares; the guest sees non-internal tickets without assignees or internal comments; revoking cuts the link', async () => {
+    const p = await project({ member_ids: [annM.id] });
+    const open = (await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Visible ticket', assignee_membership_id: annM.id, description: 'what we do' })).body.data;
+    await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Secret ticket', internal_only: true });
+    await post(`/tickets/${open.id}/comments`, adminToken, { body: 'internal note' });
+    await post(`/tickets/${open.id}/comments`, adminToken, { body: 'Update for the client', is_public: true });
+
+    expect((await post(`/projects/${p.id}/shares`, annToken, { email: 'x@y.test', label: 'X', expires_at: soon() })).status).toBe(403);
+    expect((await post(`/projects/${p.id}/shares`, adminToken, { email: 'x@y.test', label: 'X', expires_at: '2020-01-01' })).status).toBe(422);
+    const made = await share(p);
+    expect(made.token).toMatch(/^ext_/);
+    expect(made.share).toMatchObject({ label: 'Acme Corp', can_comment: false, active: true });
+
+    const view = (await guest(made.token)).body.data;
+    expect(view.project).toMatchObject({ name: 'Website revamp' });
+    expect(view.tickets.map((t) => t.title)).toEqual(['Visible ticket']);
+    expect(view.progress.total).toBe(1);
+    expect(JSON.stringify(view)).not.toMatch(/assignee|internal note|Secret ticket|Ann|tester/);
+    expect(view.tickets[0].comments[0].author).toBe('Delphic team');
+    expect(view.tickets[0].comments.map((c) => c.body)).toEqual(['Update for the client']);
+    expect((await guest(made.token, `/tickets/${open.id}/comments`, 'post', { body: 'hi' })).status).toBe(403); // view-only
+
+    const list = (await get(`/projects/${p.id}/shares`, adminToken)).body.data;
+    expect(list).toHaveLength(1);
+    expect(JSON.stringify(list)).not.toContain(made.token);
+    expect((await get(`/projects/${p.id}/shares`, annToken)).status).toBe(403);
+    expect((await del(`/projects/${p.id}/shares/${made.share.id}`, annToken)).status).toBe(403);
+    expect((await del(`/projects/${p.id}/shares/${made.share.id}`, adminToken)).status).toBe(200);
+    expect((await guest(made.token)).status).toBe(401);
+  });
+
+  test('a comment-enabled share lets the guest comment (tagged, public, tells the team); a share covers only its own project; a normal login token is no use', async () => {
+    const p = await project({ member_ids: [annM.id] });
+    const other = await project({ name: 'Other project' });
+    const t = (await post(`/projects/${p.id}/tickets`, adminToken, { title: 'Needs the client', assignee_membership_id: annM.id })).body.data;
+    const made = await share(p, { can_comment: true });
+    expect((await guest(made.token, `/tickets/${t.id}/comments`, 'post', { body: 'Please use the new logo' })).status).toBe(201);
+    const seen = (await guest(made.token)).body.data.tickets[0].comments;
+    expect(seen).toEqual([expect.objectContaining({ author: 'Acme Corp', mine: true, body: 'Please use the new logo' })]);
+    const inside = (await get(`/tickets/${t.id}`, annToken)).body.data.comments[0];
+    expect(inside).toMatchObject({ external: true, is_public: true });
+    expect(inside.author).toContain('Acme Corp');
+    const annUser = (await prisma.orgMembership.findUnique({ where: { id: annM.id } })).person_id;
+    expect(await prisma.notification.count({ where: { user_id: annUser, type: 'pm_ticket_commented' } })).toBe(1);
+    const otherTicket = (await post(`/projects/${other.id}/tickets`, adminToken, { title: 'Not shared' })).body.data;
+    expect((await guest(made.token, `/tickets/${otherTicket.id}/comments`, 'post', { body: 'sneaky' })).status).toBe(404);
+    expect((await guest(adminToken)).status).toBe(401);
+    expect((await guest('ext_nope')).status).toBe(401);
+  });
+});
