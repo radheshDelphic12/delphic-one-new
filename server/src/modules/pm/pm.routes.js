@@ -1,0 +1,81 @@
+const express = require('express');
+const { z } = require('zod');
+const { authenticate, requireOrgMembership, loadSuperadminFlag } = require('../../middleware/auth');
+const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
+const { ok, fail } = require('../../utils/response');
+const asyncHandler = require('../../utils/asyncHandler');
+const service = require('./pm.service');
+
+// Project Management: Delphic Global only (the master workspace). Every member sees the projects they belong to; an admin sees all.
+// Who may change what is decided per record in the service (admin / project owner / project lead manage; members work their tickets).
+const router = express.Router();
+router.use(authenticate, requireOrgMembership, requireMasterWorkspace, loadSuperadminFlag);
+
+const ERRORS = {
+  not_found: [404, 'Not found'],
+  forbidden: [403, 'Only an admin or the project lead can do that'],
+  person_not_found: [404, 'That person is not an active member of this company'],
+  duplicate_code: [409, 'A project with that code already exists'],
+  duplicate_status: [409, 'A status with that key already exists'],
+  last_done_status: [409, 'Keep at least one active "done" status while tickets use it'],
+  assignee_not_in_project: [422, 'Only members of the project can be assigned. Add them to the project first'],
+  contract_not_linked: [422, 'That contract is not linked to this project'],
+  contract_not_found: [404, 'Contract not found'],
+  contract_already_linked: [409, 'That contract is already linked to a project'],
+  status_not_found: [422, 'Unknown or switched-off status'],
+  resolution_required: [422, 'Write the resolution before moving a ticket to a done status'],
+};
+const bad = (res, e) => { const [s, m] = ERRORS[e] || [400, 'Request failed']; return fail(res, s, m); };
+
+function actorOf(req) {
+  const access = req.user.access;
+  const permissionMode = Boolean(access && access.mode === 'permissions');
+  const adminLevel = permissionMode ? access.level !== 'employee' : req.user.role === 'admin';
+  return { userId: req.user.id, membershipId: req.user.org_membership_id, isManager: Boolean(adminLevel || req.user.is_superadmin) };
+}
+const manager = (req, res, next) => (actorOf(req).isManager ? next() : fail(res, 403, 'Admin only'));
+const run = (fn, okStatus = 200, key) => asyncHandler(async (req, res) => {
+  const r = await fn(req, actorOf(req));
+  if (r && r.error) return bad(res, r.error);
+  if (r === null) return fail(res, 404, 'Not found');
+  return ok(res, key ? r[key] : r, {}, okStatus);
+});
+
+const orgId = (req) => req.user.org_id;
+
+// ---- lookups
+router.get('/meta', asyncHandler(async (req, res) => ok(res, {
+  project_statuses: service.PROJECT_STATUSES, ticket_types: service.TICKET_TYPES, priorities: service.PRIORITIES, categories: service.CATEGORIES,
+  statuses: await service.listStatuses(orgId(req), { includeInactive: actorOf(req).isManager }), is_manager: actorOf(req).isManager,
+})));
+router.get('/people', run((req) => service.listPeople(orgId(req))));
+router.get('/my-tickets', run((req, a) => service.myTickets(orgId(req), a)));
+router.get('/contracts/linkable', manager, run((req) => service.listLinkableContracts(orgId(req))));
+
+// ---- ticket statuses (admin-editable)
+router.post('/statuses', manager, run((req) => service.createStatus(orgId(req), service.statusSchema.parse(req.body || {})), 201, 'status'));
+router.patch('/statuses/:id', manager, run((req) => service.updateStatus(orgId(req), req.params.id, service.statusUpdateSchema.parse(req.body || {})), 200, 'status'));
+
+// ---- projects
+router.get('/projects', run((req, a) => service.listProjects(orgId(req), a, z.object({ status: z.enum(service.PROJECT_STATUSES).optional(), q: z.string().trim().max(120).optional(), linked: z.enum(['true', 'false']).optional(), mine: z.enum(['true', 'false']).optional() }).parse(req.query))));
+router.post('/projects', manager, run((req, a) => service.createProject(orgId(req), a, service.projectCreateSchema.parse(req.body || {})), 201, 'project'));
+router.get('/projects/:id', run((req, a) => service.getProject(orgId(req), req.params.id, a)));
+router.patch('/projects/:id', run((req, a) => service.updateProject(orgId(req), req.params.id, a, service.projectUpdateSchema.parse(req.body || {})), 200, 'project'));
+router.delete('/projects/:id', run((req, a) => service.deleteProject(orgId(req), req.params.id, a)));
+router.post('/projects/:id/members', run((req, a) => service.setMembers(orgId(req), req.params.id, a, z.object({ add: z.array(z.string().uuid()).max(100).optional(), remove: z.array(z.string().uuid()).max(100).optional(), leads: z.array(z.string().uuid()).max(100).optional() }).parse(req.body || {})), 200, 'project'));
+
+// ---- tickets
+router.get('/projects/:id/tickets', run((req, a) => service.listTickets(orgId(req), req.params.id, a, service.ticketListQuerySchema.parse(req.query)), 200, 'tickets'));
+router.post('/projects/:id/tickets', run((req, a) => service.createTicket(orgId(req), req.params.id, a, service.ticketCreateSchema.parse(req.body || {})), 201, 'ticket'));
+router.get('/tickets/:id', run((req, a) => service.getTicket(orgId(req), req.params.id, a)));
+router.patch('/tickets/:id', run((req, a) => service.updateTicket(orgId(req), req.params.id, a, service.ticketUpdateSchema.parse(req.body || {})), 200, 'ticket'));
+router.delete('/tickets/:id', run((req, a) => service.deleteTicket(orgId(req), req.params.id, a)));
+router.post('/tickets/:id/comments', run((req, a) => service.addComment(orgId(req), req.params.id, a, z.object({ body: z.string().trim().min(1).max(5000) }).parse(req.body || {}).body), 201, 'comment'));
+
+// ---- contract links (added whenever required; tickets never depend on them)
+router.post('/projects/:id/contracts', run((req, a) => service.linkContract(orgId(req), req.params.id, a, z.object({ contract_id: z.string().uuid(), is_primary: z.boolean().optional() }).parse(req.body || {})), 201, 'project'));
+router.delete('/projects/:id/contracts/:contractId', run((req, a) => service.unlinkContract(orgId(req), req.params.id, a, req.params.contractId), 200, 'project'));
+router.post('/projects/:id/contracts/:contractId/primary', run((req, a) => service.makePrimary(orgId(req), req.params.id, a, req.params.contractId), 200, 'project'));
+router.post('/projects/:id/contracts/:contractId/copy-progress', manager, run((req, a) => service.copyProgressToContract(orgId(req), req.params.id, a, req.params.contractId), 200, 'project'));
+
+module.exports = router;

@@ -363,6 +363,7 @@ enum NotificationType {
   candidate_rejected
   candidate_backout
   candidate_offer
+  candidate_closed
   timesheet_submitted
   timesheet_entry_decided
   timesheet_regularization_requested
@@ -2535,6 +2536,8 @@ model Account {
   // about to end / completed).
   agreement_end_date      DateTime?              @db.Date
   contract_status         ProjectContractStatus?
+  // Monthly-rate projects: periods the contract was on hold ([{ from, resume }], see lib/holdPeriods) - no billing for those days.
+  contract_hold_periods   Json?
   client_name             String?
   // The project's client, picked from this org's client accounts (client or
   // unclassified, any stage). client_name above is kept as a snapshot of the
@@ -8023,4 +8026,160 @@ model AssessmentAttempt {
   @@index([submission_id])
   @@index([test_id])
   @@map("assessment_attempts")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Project Management (Delphic Global): projects with their own tickets. Independent of contracts; a project can be linked to
+// actual contracts later (pm_project_contracts) without touching its tickets. People / org / contract ids are plain uuids on
+// purpose (no relation to the shared Org / OrgMembership / Contract models).
+// ---------------------------------------------------------------------------------------------------------------------
+enum PmProjectStatus {
+  planning
+  active
+  on_hold
+  completed
+  cancelled
+}
+
+// What a ticket status MEANS. Admins add / rename / reorder statuses freely; progress counts the `done` ones.
+enum PmStatusCategory {
+  todo
+  in_progress
+  blocked
+  done
+}
+
+model PmProject {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String          @db.Uuid
+  code                String
+  name                String
+  description         String?
+  status              PmProjectStatus @default(planning)
+  owner_membership_id String?         @db.Uuid
+  start_date          DateTime?       @db.Date
+  end_date            DateTime?       @db.Date
+  ticket_seq          Int             @default(0)
+  created_by          String          @db.Uuid
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @default(now()) @updatedAt
+
+  members   PmProjectMember[]
+  tickets   PmTicket[]
+  contracts PmProjectContract[]
+  activity  PmActivity[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@map("pm_projects")
+}
+
+model PmProjectMember {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  project_id    String    @db.Uuid
+  project       PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  membership_id String    @db.Uuid
+  // 'lead' may manage the project (members, contracts); 'member' works tickets.
+  role          String    @default("member")
+  created_at    DateTime  @default(now())
+
+  @@unique([project_id, membership_id])
+  @@index([org_id, membership_id])
+  @@map("pm_project_members")
+}
+
+model PmStatus {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String           @db.Uuid
+  key        String
+  label      String
+  category   PmStatusCategory
+  position   Int              @default(0)
+  is_active  Boolean          @default(true)
+  created_at DateTime         @default(now())
+  updated_at DateTime         @default(now()) @updatedAt
+
+  @@unique([org_id, key])
+  @@map("pm_statuses")
+}
+
+model PmTicket {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String    @db.Uuid
+  project_id             String    @db.Uuid
+  project                PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  number                 Int
+  title                  String
+  description            String?
+  type                   String    @default("task")
+  priority               String    @default("medium")
+  status_key             String    @default("open")
+  assignee_membership_id String?   @db.Uuid
+  reporter_membership_id String?   @db.Uuid
+  // Optional tag to one of the project's linked contracts (progress per contract).
+  contract_id            String?   @db.Uuid
+  due_date               DateTime? @db.Date
+  resolution             String?
+  resolved_at            DateTime?
+  created_by             String    @db.Uuid
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  comments PmTicketComment[]
+  activity PmActivity[]
+
+  @@unique([project_id, number])
+  @@index([org_id, assignee_membership_id])
+  @@index([project_id, status_key])
+  @@map("pm_tickets")
+}
+
+model PmTicketComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String   @db.Uuid
+  ticket_id      String   @db.Uuid
+  ticket         PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  author_user_id String   @db.Uuid
+  body           String
+  created_at     DateTime @default(now())
+
+  @@index([ticket_id, created_at])
+  @@map("pm_ticket_comments")
+}
+
+// One audit trail for projects and tickets: who changed what (ticket_id is null for project-level events).
+model PmActivity {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  project_id    String    @db.Uuid
+  project       PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  ticket_id     String?   @db.Uuid
+  ticket        PmTicket? @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  actor_user_id String    @db.Uuid
+  action        String
+  from_value    String?
+  to_value      String?
+  note          String?
+  created_at    DateTime  @default(now())
+
+  @@index([project_id, created_at])
+  @@index([ticket_id, created_at])
+  @@map("pm_activity")
+}
+
+// A contract belongs to at most one project (unique contract_id); a project may have many contracts, one marked primary.
+model PmProjectContract {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  project_id  String    @db.Uuid
+  project     PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  contract_id String    @db.Uuid
+  is_primary  Boolean   @default(false)
+  linked_by   String    @db.Uuid
+  linked_at   DateTime  @default(now())
+
+  @@unique([contract_id])
+  @@index([project_id])
+  @@map("pm_project_contracts")
 }

@@ -23,6 +23,7 @@ import {
   UserPlus,
   UserX,
   ClipboardList,
+  KanbanSquare,
 } from 'lucide-react';
 
 /**
@@ -60,6 +61,8 @@ export const NAV_ITEMS = [
   { to: '/leads', label: 'Leads', icon: Target, capability: 'viewLeads', module: 'leads' },
   { to: '/contracts', label: 'Contracts', icon: FileSignature, capability: 'viewContracts', module: 'contracts' },
   { to: '/projects', label: 'Self Projects', icon: HardHat, capability: 'viewProjects', module: 'projects' },
+  // Project Management (Delphic Global): projects with their own tickets; every member sees the projects they belong to.
+  { to: '/pm', label: 'Project Management', icon: KanbanSquare, masterOnly: true },
   { to: '/reports', label: 'Reports', icon: BarChart3, capability: 'viewReports', masterOnly: true },
   { to: '/website', label: 'Website', icon: Globe, capability: 'manageWebsite', need: ['website.view', 'website.update'], masterOnly: true },
   { to: '/group-overview', label: 'Group Overview', icon: Network, groupSuperadminOnly: true },

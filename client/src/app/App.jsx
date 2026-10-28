@@ -45,6 +45,8 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import PmProjectsPage from '../pages/pm/PmProjectsPage.jsx';
+import PmProjectDetailPage from '../pages/pm/PmProjectDetailPage.jsx';
 import ZephyrHomePage from '../pages/zephyr/ZephyrHomePage.jsx';
 import ZephyrSectionPage from '../pages/zephyr/ZephyrSectionPage.jsx';
 import ZephyrPartiesPage from '../pages/zephyr/ZephyrPartiesPage.jsx';
@@ -542,6 +544,8 @@ export default function App() {
         <Route path="contracts" element={<RequireModule module="contracts" capability="viewContracts"><ContractsPage /></RequireModule>} />
         <Route path="projects" element={<RequireModule module="projects" capability="viewProjects"><ProjectsHubPage /></RequireModule>} />
         <Route path="projects/:id" element={<RequireModule module="projects" capability="viewProjects"><ProjectDetailPage /></RequireModule>} />
+        <Route path="pm" element={<RequireMasterWorkspace><PmProjectsPage /></RequireMasterWorkspace>} />
+        <Route path="pm/projects/:id" element={<RequireMasterWorkspace><PmProjectDetailPage /></RequireMasterWorkspace>} />
         <Route
           path="group-overview"
           element={
