@@ -18,6 +18,7 @@ import UnlockButton from '../../components/UnlockButton.jsx';
 import DeleteRecordButton from '../../components/DeleteRecordButton.jsx';
 import { userCan } from '../../lib/permissions.js';
 import InterviewRoundsPanel from './InterviewRoundsPanel.jsx';
+import InterviewPlanPanel from './InterviewPlanPanel.jsx';
 import SubmissionStageOverrideDrawer from './SubmissionStageOverrideDrawer.jsx';
 import {
   SUBMISSION_PIPELINE,
@@ -149,8 +150,15 @@ export default function SubmissionDetailPage() {
     );
   }, [form]);
 
+  // The interview template plan; stays null (older rounds panel) for requirements made before templates existed.
+  const [plan, setPlan] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
+    apiClient
+      .get(`/submissions/${id}/interview-plan`)
+      .then((res) => setPlan(res.data.data || null))
+      .catch(() => setPlan(null));
     // The stage-history request is secondary — a failure there must never blank the
     // whole ticket (candidate, commercials, rounds). Fetch it separately.
     apiClient
@@ -520,14 +528,25 @@ export default function SubmissionDetailPage() {
         </section>
       </div>
 
-      <InterviewRoundsPanel
-        submissionId={id}
-        submission={submission}
-        rounds={submission.interview_rounds || []}
-        user={user}
-        missingMandatoryRounds={submission.missing_mandatory_rounds}
-        onChanged={load}
-      />
+      {plan ? (
+        <InterviewPlanPanel
+          submissionId={id}
+          submission={submission}
+          plan={plan}
+          rounds={submission.interview_rounds || []}
+          user={user}
+          onChanged={load}
+        />
+      ) : (
+        <InterviewRoundsPanel
+          submissionId={id}
+          submission={submission}
+          rounds={submission.interview_rounds || []}
+          user={user}
+          missingMandatoryRounds={submission.missing_mandatory_rounds}
+          onChanged={load}
+        />
+      )}
 
       <form onSubmit={handleSave} className="space-y-4">
         <section className="rounded-lg border bg-white p-4">

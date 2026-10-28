@@ -33,9 +33,12 @@ import FinanceHubPage from '../pages/finance/FinanceHubPage.jsx';
 import PayrollHubPage from '../pages/payroll/PayrollHubPage.jsx';
 import GroupOverviewPage from '../pages/groupOverview/GroupOverviewPage.jsx';
 import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
+import GuestProjectPage from '../pages/guest/GuestProjectPage.jsx';
 import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
+import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
+import HiringSetupPage from '../pages/hiringSetup/HiringSetupPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
 import TradingHubPage from '../pages/trading/TradingHubPage.jsx';
@@ -43,6 +46,8 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import PmProjectsPage from '../pages/pm/PmProjectsPage.jsx';
+import PmProjectDetailPage from '../pages/pm/PmProjectDetailPage.jsx';
 import ZephyrHomePage from '../pages/zephyr/ZephyrHomePage.jsx';
 import ZephyrSectionPage from '../pages/zephyr/ZephyrSectionPage.jsx';
 import ZephyrPartiesPage from '../pages/zephyr/ZephyrPartiesPage.jsx';
@@ -334,6 +339,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
+      <Route path="/guest-project" element={<GuestProjectPage />} />
+      <Route path="/assessment/:token" element={<AssessmentTakePage />} />
       <Route path="/careers" element={<CareerRedirect />} />
       <Route path="/careers/:slug" element={<CareerRedirect />} />
       <Route
@@ -377,6 +384,7 @@ export default function App() {
           }
         />
         <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="hiring-setup" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.update"><HiringSetupPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
@@ -538,6 +546,8 @@ export default function App() {
         <Route path="contracts" element={<RequireModule module="contracts" capability="viewContracts"><ContractsPage /></RequireModule>} />
         <Route path="projects" element={<RequireModule module="projects" capability="viewProjects"><ProjectsHubPage /></RequireModule>} />
         <Route path="projects/:id" element={<RequireModule module="projects" capability="viewProjects"><ProjectDetailPage /></RequireModule>} />
+        <Route path="pm" element={<RequireMasterWorkspace><PmProjectsPage /></RequireMasterWorkspace>} />
+        <Route path="pm/projects/:id" element={<RequireMasterWorkspace><PmProjectDetailPage /></RequireMasterWorkspace>} />
         <Route
           path="group-overview"
           element={

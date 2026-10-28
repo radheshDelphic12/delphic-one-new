@@ -28,6 +28,7 @@ const REQ_TYPE_OPTIONS = [
   { value: 'managed_services', label: 'Managed services' },
   { value: 'recruitment', label: 'Recruitment' },
   { value: 'project', label: 'Project' },
+  { value: 'internal_hiring', label: 'Internal hiring' },
 ];
 
 const SORT_OPTIONS = [

@@ -91,6 +91,9 @@ const ERRORS = {
   charge_raised_by_group: [403, 'This charge was raised by the group — only a group superadmin can edit it'],
   client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
   end_before_start: [422, 'The agreement end date cannot be before its start date'],
+  hold_periods_invalid: [422, 'A hold period needs a valid start date'],
+  hold_resume_before_from: [422, 'A hold period must resume after the day it starts'],
+  hold_periods_overlap: [422, 'Hold periods cannot overlap - leave only the last one without a resume date'],
   catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };

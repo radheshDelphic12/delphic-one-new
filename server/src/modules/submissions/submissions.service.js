@@ -3,6 +3,7 @@ const { decide } = require('../../lib/permissions');
 const env = require('../../config/env');
 const { SUBMISSION_STAGE_TRANSITIONS, CLIENT_ROUND_TYPES, INTERNAL_ROUND_TYPES, computeMargin, computeMissingMandatoryRounds, isBackwardTransition, roundTypeLabel } = require('./stageMachines');
 const { computeClosureDetail } = require('../../utils/closureProgress');
+const templates = require('../interviewTemplates/interviewTemplates.service');
 const { notify, interviewRoundParticipants, submissionParticipants, admins } = require('../../lib/notifications');
 const { interviewRoundInvite } = require('../../lib/email/invites');
 
@@ -43,6 +44,7 @@ function fmtWhen(date) {
 const INTERVIEWER_INCLUDE = {
   interviewers: { include: { user: { select: { id: true, name: true, email: true } } } },
   scheduler: { select: { id: true, name: true, email: true } },
+  skill_ratings: { orderBy: { skill_name: 'asc' } },
 };
 
 const INCLUDE = {
@@ -225,6 +227,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
       const rounds = await tx.interviewRound.findMany({ where: { submission_id: id } });
       const allResolved = rounds.length > 0 && rounds.every((r) => r.result !== 'pending');
       if (!allResolved) return { error: 'rounds_not_resolved' };
+      if (!(await templates.mandatoryRoundsDone(tx, id))) return { error: 'mandatory_rounds_pending' };
     }
     if (to_stage === 'closed') {
       if (submission.bgv_status !== 'cleared') return { error: 'bgv_not_cleared' };
@@ -275,6 +278,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
       rejected: 'candidate_rejected',
       backout: 'candidate_backout',
       offer_sent: 'candidate_offer',
+      closed: 'candidate_closed',
     };
     if (NOTIFY_STAGES[to_stage]) {
       const ctx = await loadNotifyContext(tx, id);
@@ -391,7 +395,28 @@ async function loadInterviewRound(tx, id) {
     where: { id },
     include: INTERVIEWER_INCLUDE,
   });
-  return serializeInterviewRound(round);
+  const out = serializeInterviewRound(round);
+  if (out && out.template_round_id) {
+    // The manager decides what a below-pass score means; the round only carries the flag.
+    const requirement = await templates.loadRequirementForSubmission(tx, out.submission_id);
+    out.pass_percentage = templates.passMarkFor(requirement);
+    out.below_pass = out.score_percent != null && Number(out.score_percent) < out.pass_percentage;
+  }
+  return out;
+}
+
+// Feedback is mandatory to finish a template round; rounds that require ratings need every skill rated (at least one skill).
+function checkRoundCompletion(templateRound, { feedback, skillRatings }) {
+  if (!feedback || !String(feedback).trim()) return 'feedback_required';
+  if (templateRound.rating_required && !(skillRatings && skillRatings.length)) return 'ratings_required';
+  return null;
+}
+
+// Legacy 1-10 rating (kept for old screens) = the average of the skill ratings; score_percent = overall %.
+function ratingFields(skillRatings) {
+  if (!skillRatings || !skillRatings.length) return { score_percent: null, rating: null };
+  const avg = skillRatings.reduce((s, r) => s + r.rating, 0) / skillRatings.length;
+  return { score_percent: templates.scorePercent(skillRatings), rating: Math.min(10, Math.max(1, Math.round(avg))) };
 }
 
 async function addInterviewRound(submissionId, data, user) {
@@ -401,13 +426,31 @@ async function addInterviewRound(submissionId, data, user) {
     if (!submission) return { error: 'not_found' };
 
     const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
+
+    // Template flow: the type comes from the template round, and the earlier mandatory rounds must be done first.
+    let templateRound = null;
+    if (data.template_round_id) {
+      const check = await templates.checkCanStart(tx, submissionId, data.template_round_id);
+      if (check.error) return { error: check.error };
+      templateRound = check.templateRound;
+      data = {
+        ...data,
+        round_type: templateRound.conducted_by === 'client' ? 'template_client' : 'template_internal',
+        round_name: data.round_name || templateRound.name,
+      };
+    }
     if (!canManageInterviewRound(submission, salesOwnerId, data.round_type, user)) return { error: 'forbidden' };
 
     const last = await tx.interviewRound.findFirst({ where: { submission_id: submissionId }, orderBy: { round_number: 'desc' } });
     const round_number = last ? last.round_number + 1 : 1;
 
-    const { interviewer_ids, ...roundFields } = data;
+    const { interviewer_ids, skill_ratings, ...roundFields } = data;
     const payload = { ...roundFields, submission_id: submissionId, round_number, scheduled_by: userId };
+    if (skill_ratings && skill_ratings.length) Object.assign(payload, ratingFields(skill_ratings));
+    if (templateRound && ['pass', 'fail'].includes(payload.result)) {
+      const problem = checkRoundCompletion(templateRound, { feedback: payload.feedback, skillRatings: skill_ratings });
+      if (problem) return { error: problem };
+    }
     if (payload.scheduled_at) payload.scheduled_at = new Date(payload.scheduled_at);
     if (payload.completed_at) payload.completed_at = new Date(payload.completed_at);
     if (['pass', 'fail', 'no_show'].includes(payload.result) && !payload.completed_at) {
@@ -421,6 +464,7 @@ async function addInterviewRound(submissionId, data, user) {
     }
 
     const created = await tx.interviewRound.create({ data: payload });
+    if (skill_ratings && skill_ratings.length) await templates.saveSkillRatings(tx, created.id, skill_ratings);
 
     if (INTERNAL_ROUND_TYPES.includes(data.round_type) && interviewer_ids !== undefined) {
       await syncInterviewers(tx, created.id, interviewer_ids);
@@ -483,8 +527,30 @@ async function updateInterviewRound(id, patch, user) {
     const isScheduler = canRescheduleInterviewRound(existing, submission, salesOwnerId, user);
     if (!isManager && !isScheduler) return { error: 'forbidden' };
 
-    const { interviewer_ids, ...patchFields } = patch;
+    const { interviewer_ids, skill_ratings, ...patchFields } = patch;
     const finalPatch = { ...patchFields };
+
+    // Template rounds: finishing one (pass / fail) needs feedback, and ratings where the template asks for them.
+    let skillsToSave;
+    if (isManager && existing.template_round_id) {
+      const templateRound = await tx.interviewTemplateRound.findUnique({ where: { id: existing.template_round_id } });
+      const finalResult = patch.result !== undefined ? patch.result : existing.result;
+      const touched = patch.result !== undefined || patch.feedback !== undefined || skill_ratings !== undefined;
+      if (templateRound && ['pass', 'fail'].includes(finalResult) && touched) {
+        const currentSkills = skill_ratings !== undefined
+          ? skill_ratings
+          : await tx.interviewRoundSkillRating.findMany({ where: { interview_round_id: id } });
+        const problem = checkRoundCompletion(templateRound, {
+          feedback: patch.feedback !== undefined ? patch.feedback : existing.feedback,
+          skillRatings: currentSkills,
+        });
+        if (problem) return { error: problem };
+      }
+      if (skill_ratings !== undefined) {
+        skillsToSave = skill_ratings;
+        Object.assign(finalPatch, ratingFields(skill_ratings));
+      }
+    }
     if (!isManager) {
       const allowed = ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'];
       for (const key of Object.keys(finalPatch)) {
@@ -516,6 +582,7 @@ async function updateInterviewRound(id, patch, user) {
     }
 
     await tx.interviewRound.update({ where: { id }, data: finalPatch });
+    if (skillsToSave !== undefined) await templates.saveSkillRatings(tx, id, skillsToSave);
 
     if (isManager && INTERNAL_ROUND_TYPES.includes(existing.round_type) && interviewer_ids !== undefined) {
       await syncInterviewers(tx, id, interviewer_ids);
@@ -528,7 +595,7 @@ async function updateInterviewRound(id, patch, user) {
 
     const rescheduled = finalPatch.scheduled_at
       && (!existing.scheduled_at || new Date(finalPatch.scheduled_at).getTime() !== new Date(existing.scheduled_at).getTime());
-    const feedbackTouched = patch.result !== undefined || patch.feedback !== undefined || patch.rating !== undefined;
+    const feedbackTouched = patch.result !== undefined || patch.feedback !== undefined || patch.rating !== undefined || skill_ratings !== undefined;
 
     if (rescheduled || feedbackTouched) {
       const ctx = await loadNotifyContext(tx, existing.submission_id);

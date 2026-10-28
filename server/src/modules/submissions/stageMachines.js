@@ -29,7 +29,7 @@ const SUBMISSION_PIPELINE = [
 // Named candidate interview rounds (round_type). Kept intentionally flexible: composition
 // can change (rounds added/shortened) without touching SubmissionStage - only these lists
 // and their labels need updating.
-const ROUND_TYPES = ['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo'];
+const ROUND_TYPES = ['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo', 'template_internal', 'template_client'];
 
 const ROUND_TYPE_LABELS = {
   internal_r1: 'Internal Round 1',
@@ -38,10 +38,12 @@ const ROUND_TYPE_LABELS = {
   client_r2: 'Client Round 2',
   client_r3: 'Client Round 3',
   hr_cto_ceo: 'HR, CTO & CEO Round',
+  template_internal: 'Interview Round',
+  template_client: 'Client Round',
 };
 
-const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo'];
-const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2'];
+const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo', 'template_client'];
+const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2', 'template_internal'];
 
 // Mandatory milestones per the recruiting process - enforced as a SOFT rule only (UI warns,
 // never blocks). The existing hard gates below (unresolved rounds before offer_sent, BGV
@@ -54,6 +56,7 @@ function roundTypeLabel(type) {
 }
 
 function computeMissingMandatoryRounds(rounds) {
+  if ((rounds || []).some((r) => r.template_round_id)) return [];
   const present = new Set((rounds || []).map((r) => r.round_type));
   return MANDATORY_ROUND_TYPES.filter((type) => !present.has(type));
 }

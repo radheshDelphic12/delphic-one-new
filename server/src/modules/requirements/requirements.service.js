@@ -2,6 +2,7 @@ const prisma = require('../../config/db');
 const { decide } = require('../../lib/permissions');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { notify, requirementParticipants, admins } = require('../../lib/notifications');
+const { resolveTemplate } = require('../interviewTemplates/interviewTemplates.service');
 const {
   REQUIREMENT_STATUS_TRANSITIONS,
   SEAT_STATUS_TRANSITIONS,
@@ -188,10 +189,14 @@ async function create(data, salesOwnerId, actor = null) {
   }
 
   const { seats_total = 1, tat_hours = DEFAULT_TAT_HOURS, ...rest } = data;
+  // The service type (and Internal Hiring track) picks the interview template; requirements made before this flow have none.
+  const template = await resolveTemplate(prisma, rest.req_type, rest.hiring_track);
+  if (rest.req_type !== 'internal_hiring') rest.hiring_track = null;
 
   const row = await prisma.requirement.create({
     data: {
       ...rest,
+      interview_template_id: template?.id || null,
       tat_hours,
       tat_ends_at: new Date(Date.now() + tat_hours * 3600000),
       seats_total,
@@ -259,7 +264,18 @@ async function update(id, patch, user) {
   }
 
   // A different TAT restarts the clock from now.
-  const data = patch.tat_hours && patch.tat_hours !== existing.tat_hours ? { ...patch, tat_ends_at: new Date(Date.now() + patch.tat_hours * 3600000) } : patch;
+  const data = patch.tat_hours && patch.tat_hours !== existing.tat_hours ? { ...patch, tat_ends_at: new Date(Date.now() + patch.tat_hours * 3600000) } : { ...patch };
+  // Changing the service type / track re-picks the template, but only while no interview has used the current one.
+  const typeChanged = (patch.req_type && patch.req_type !== existing.req_type) || (patch.hiring_track !== undefined && patch.hiring_track !== existing.hiring_track);
+  if (typeChanged) {
+    const reqType = patch.req_type || existing.req_type;
+    if (reqType !== 'internal_hiring') data.hiring_track = null;
+    const track = reqType === 'internal_hiring' ? (data.hiring_track !== undefined ? data.hiring_track : existing.hiring_track) : null;
+    if (reqType === 'internal_hiring' && !track) return { error: 'hiring_track_required' };
+    const used = await prisma.interviewRound.count({ where: { template_round_id: { not: null }, submission: { seat: { requirement_id: id } } } });
+    if (used) return { error: 'template_in_use' };
+    data.interview_template_id = (await resolveTemplate(prisma, reqType, track))?.id || null;
+  }
   const row = await prisma.requirement.update({ where: { id }, data, include: DECORATE_INCLUDE });
   const changes = changedFields(existing, row, patch);
   if (Object.keys(changes).length) await logActivity(user, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });

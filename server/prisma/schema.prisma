@@ -231,6 +231,7 @@ enum ReqType {
   managed_services
   recruitment
   project
+  internal_hiring
 }
 
 enum RequirementStatus {
@@ -328,6 +329,9 @@ enum RoundType {
   client_r2
   client_r3
   hr_cto_ceo
+  // Rounds that come from an interview template (named by the template round, not by this enum)
+  template_internal
+  template_client
 }
 
 enum RoundResult {
@@ -359,6 +363,11 @@ enum NotificationType {
   candidate_rejected
   candidate_backout
   candidate_offer
+  candidate_closed
+  pm_ticket_assigned
+  pm_ticket_status_changed
+  pm_ticket_commented
+  pm_ticket_due_soon
   timesheet_submitted
   timesheet_entry_decided
   timesheet_regularization_requested
@@ -373,6 +382,7 @@ enum NotificationEntityType {
   submission
   interview_round
   profile
+  pm_ticket
 }
 
 enum HistoryEntityType {
@@ -2029,9 +2039,9 @@ model Org {
   access_backups          AccessBackup[]
   // 'legacy' = the plain role on each membership decides (as before); 'permissions' = default basic access + permission set + grants.
   // Flipped company by company by the Super Admin (Settings > Permissions > Migration), never by a deploy.
-  access_mode             String            @default("legacy")
+  access_mode             String                 @default("legacy")
   access_applied_at       DateTime?
-  access_applied_by       String?           @db.Uuid
+  access_applied_by       String?                @db.Uuid
   vendor_email_logs       VendorEmailLog[]
   team_membership_periods TeamMembershipPeriod[]
 
@@ -2531,6 +2541,8 @@ model Account {
   // about to end / completed).
   agreement_end_date      DateTime?              @db.Date
   contract_status         ProjectContractStatus?
+  // Monthly-rate projects: periods the contract was on hold ([{ from, resume }], see lib/holdPeriods) - no billing for those days.
+  contract_hold_periods   Json?
   client_name             String?
   // The project's client, picked from this org's client accounts (client or
   // unclassified, any stage). client_name above is kept as a snapshot of the
@@ -2706,6 +2718,14 @@ model Requirement {
   title      String
   req_type   ReqType
   status     RequirementStatus @default(open)
+
+  // Internal Hiring only: technical | non_technical. Picks the interview template together with req_type.
+  hiring_track          String?
+  // Set on requirements created after the template flow shipped; null = legacy rounds (internal_r1, client_r1 ...).
+  interview_template_id String?            @db.Uuid
+  interview_template    InterviewTemplate? @relation(fields: [interview_template_id], references: [id])
+  // Overrides the template's minimum pass % for this requirement.
+  pass_percentage       Int?
 
   description     String?
   job_description String?
@@ -3028,6 +3048,12 @@ model InterviewRound {
   feedback          String?
   rating            Int?
   completed_at      DateTime?
+
+  // Template flow: which template round this is, and the overall % from the per-skill ratings (each out of 10).
+  template_round_id String?                     @db.Uuid
+  template_round    InterviewTemplateRound?     @relation(fields: [template_round_id], references: [id], onDelete: SetNull)
+  score_percent     Decimal?                    @db.Decimal(5, 2)
+  skill_ratings     InterviewRoundSkillRating[]
 
   status                  InterviewRoundStatus @default(scheduled)
   cancelled_at            DateTime?
@@ -5442,30 +5468,30 @@ model AxInvestment {
 // (or dropped). Each tranche of money put in is an AxInvestment (type venture) linked by investee_id, so cost, current value and
 // the cash coming back (sale or dividend, through a realisation) use the existing investment arithmetic and ledger posting.
 model AxInvestee {
-  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String         @db.Uuid
-  org                Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  name               String
-  sector             String?
-  website            String?
-  contact_name       String?
-  contact_email      String?
-  stage              String         @default("discussion")
-  proposed_amount    Decimal?       @db.Decimal(16, 2)
-  proposed_stake_pct Decimal?       @db.Decimal(7, 3)
-  expected_return_pct Decimal?      @db.Decimal(7, 2)
-  stake_pct          Decimal?       @db.Decimal(7, 3)
-  valuation          Decimal?       @db.Decimal(16, 2)
-  lead_id            String?        @db.Uuid
-  deal_id            String?        @db.Uuid
-  decided_at         DateTime?      @db.Date
-  discussion_notes   String?
-  notes              String?
-  created_by         String?        @db.Uuid
-  created_at         DateTime       @default(now())
-  updated_at         DateTime       @default(now()) @updatedAt
-  deleted_at         DateTime?
-  investments        AxInvestment[]
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String         @db.Uuid
+  org                 Org            @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name                String
+  sector              String?
+  website             String?
+  contact_name        String?
+  contact_email       String?
+  stage               String         @default("discussion")
+  proposed_amount     Decimal?       @db.Decimal(16, 2)
+  proposed_stake_pct  Decimal?       @db.Decimal(7, 3)
+  expected_return_pct Decimal?       @db.Decimal(7, 2)
+  stake_pct           Decimal?       @db.Decimal(7, 3)
+  valuation           Decimal?       @db.Decimal(16, 2)
+  lead_id             String?        @db.Uuid
+  deal_id             String?        @db.Uuid
+  decided_at          DateTime?      @db.Date
+  discussion_notes    String?
+  notes               String?
+  created_by          String?        @db.Uuid
+  created_at          DateTime       @default(now())
+  updated_at          DateTime       @default(now()) @updatedAt
+  deleted_at          DateTime?
+  investments         AxInvestment[]
 
   @@index([org_id, stage])
   @@map("ax_investees")
@@ -7357,28 +7383,28 @@ model NxCounter {
 // A recruitment Requirement published to the website's /career page. Holds
 // only the public copy of the job; budget / billing never leave Requirement.
 model WebsiteJobPosting {
-  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String      @db.Uuid
-  org                Org         @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  requirement_id     String      @unique @db.Uuid
-  requirement        Requirement @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
-  slug               String?     @unique // public link: /careers/<slug>
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String             @db.Uuid
+  org                Org                @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  requirement_id     String             @unique @db.Uuid
+  requirement        Requirement        @relation(fields: [requirement_id], references: [id], onDelete: Cascade)
+  slug               String?            @unique // public link: /careers/<slug>
   // Human-readable Job ID ("DLP-0001"): drawn from a sequence by the database, never changes (a trigger refuses an update),
   // shown on the public, internal and admin screens and searchable everywhere.
-  job_code           String      @unique @default(dbgenerated("(('DLP-'::text || lpad((nextval('website_job_code_seq'::regclass))::text, 4, '0'::text)))"))
+  job_code           String             @unique @default(dbgenerated("(('DLP-'::text || lpad((nextval('website_job_code_seq'::regclass))::text, 4, '0'::text)))"))
   title              String
   department         String?
   location           String?
   employment_type    String? // the display label of employment_kind ("Full-time"); older rows may hold anything
   employment_kind    JobEmploymentKind?
   public_description String?
-  status             String      @default("published") // published | closed
+  status             String             @default("published") // published | closed
   last_synced_at     DateTime?
   sync_error         String?
-  created_by         String      @db.Uuid
-  updated_by         String?     @db.Uuid
-  created_at         DateTime    @default(now())
-  updated_at         DateTime    @default(now()) @updatedAt
+  created_by         String             @db.Uuid
+  updated_by         String?            @db.Uuid
+  created_at         DateTime           @default(now())
+  updated_at         DateTime           @default(now()) @updatedAt
 
   @@index([org_id, status])
   @@index([org_id, status, created_at])
@@ -7781,13 +7807,13 @@ model GroupLoanInstallment {
 }
 
 model GroupDebtSetting {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id     String   @unique @db.Uuid
-  org_group        OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
-  max_debt_ratio_pct Decimal @default(30) @db.Decimal(6, 2)
-  ratio_basis      String   @default("valuation") // valuation | assets | revenue
-  updated_by       String?  @db.Uuid
-  updated_at       DateTime @default(now()) @updatedAt
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id       String   @unique @db.Uuid
+  org_group          OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  max_debt_ratio_pct Decimal  @default(30) @db.Decimal(6, 2)
+  ratio_basis        String   @default("valuation") // valuation | assets | revenue
+  updated_by         String?  @db.Uuid
+  updated_at         DateTime @default(now()) @updatedAt
 
   @@map("group_debt_settings")
 }
@@ -7878,4 +7904,330 @@ model PaymentRecord {
 
   @@index([org_id, kind, reference_id])
   @@map("payment_records")
+}
+
+// ===================== Interview templates (per service type) =====================
+// A requirement's service type (managed_services | recruitment | project | internal_hiring + technical/non_technical track)
+// picks one template; its ordered rounds drive the candidate's interview plan. Admin-editable.
+model InterviewTemplate {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  description     String?
+  service_types   String[] // ReqType values this template serves
+  hiring_track    String? // technical | non_technical (internal_hiring only); null = any
+  pass_percentage Int      @default(60) // minimum overall % an interviewer's skill ratings must reach
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  rounds       InterviewTemplateRound[]
+  requirements Requirement[]
+
+  @@map("interview_templates")
+}
+
+model InterviewTemplateRound {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template_id        String            @db.Uuid
+  template           InterviewTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  sort_order         Int
+  name               String
+  conducted_by       String            @default("delphic") // delphic | client
+  kind               String            @default("interview") // interview | screening_test
+  is_mandatory       Boolean           @default(true)
+  rating_required    Boolean           @default(false) // every skill needs a rating out of 10 to finish the round
+  // screening_test rounds: the test sent to the candidate by default
+  assessment_test_id String?           @db.Uuid
+  assessment_test    AssessmentTest?   @relation(fields: [assessment_test_id], references: [id], onDelete: SetNull)
+
+  interview_rounds InterviewRound[]
+
+  @@index([template_id, sort_order])
+  @@map("interview_template_rounds")
+}
+
+// One skill an interviewer rated (skill names are free text, chosen by the interviewer), out of 10.
+model InterviewRoundSkillRating {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interview_round_id String         @db.Uuid
+  interview_round    InterviewRound @relation(fields: [interview_round_id], references: [id], onDelete: Cascade)
+  skill_name         String
+  rating             Int
+  comment            String?
+
+  @@index([interview_round_id])
+  @@map("interview_round_skill_ratings")
+}
+
+// ===================== Assessments (Behavioural / Reasoning / Aptitude / Mind tests) =====================
+// The team writes the questions; a test is a set of them with a minimum pass %. A candidate takes it from a public link
+// (no login) and it is scored automatically: each option carries marks, a question's best option is its full marks.
+model AssessmentQuestion {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category   String // behavioural | reasoning | aptitude | mind
+  text       String
+  options    Json // [{ text, marks }]
+  is_active  Boolean  @default(true)
+  created_by String?  @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  tests AssessmentTestQuestion[]
+
+  @@index([category, is_active])
+  @@map("assessment_questions")
+}
+
+model AssessmentTest {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  description      String?
+  pass_percentage  Int      @default(60)
+  duration_minutes Int?
+  is_active        Boolean  @default(true)
+  created_by       String?  @db.Uuid
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  questions       AssessmentTestQuestion[]
+  attempts        AssessmentAttempt[]
+  template_rounds InterviewTemplateRound[]
+
+  @@map("assessment_tests")
+}
+
+model AssessmentTestQuestion {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  test_id     String             @db.Uuid
+  test        AssessmentTest     @relation(fields: [test_id], references: [id], onDelete: Cascade)
+  question_id String             @db.Uuid
+  question    AssessmentQuestion @relation(fields: [question_id], references: [id])
+  sort_order  Int
+
+  @@unique([test_id, question_id])
+  @@index([test_id, sort_order])
+  @@map("assessment_test_questions")
+}
+
+model AssessmentAttempt {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token           String         @unique
+  test_id         String         @db.Uuid
+  test            AssessmentTest @relation(fields: [test_id], references: [id])
+  submission_id   String?        @db.Uuid
+  candidate_name  String
+  candidate_email String?
+  status          String         @default("invited") // invited | started | submitted
+  answers         Json? // { questionId: optionIndex }
+  score_percent   Decimal?       @db.Decimal(5, 2)
+  passed          Boolean?
+  pass_percentage Int // the test's pass mark on the day it was sent
+  invited_by      String?        @db.Uuid
+  invited_at      DateTime       @default(now())
+  expires_at      DateTime
+  started_at      DateTime?
+  submitted_at    DateTime?
+
+  @@index([submission_id])
+  @@index([test_id])
+  @@map("assessment_attempts")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Project Management (Delphic Global): projects with their own tickets. Independent of contracts; a project can be linked to
+// actual contracts later (pm_project_contracts) without touching its tickets. People / org / contract ids are plain uuids on
+// purpose (no relation to the shared Org / OrgMembership / Contract models).
+// ---------------------------------------------------------------------------------------------------------------------
+enum PmProjectStatus {
+  planning
+  active
+  on_hold
+  completed
+  cancelled
+}
+
+// What a ticket status MEANS. Admins add / rename / reorder statuses freely; progress counts the `done` ones.
+enum PmStatusCategory {
+  todo
+  in_progress
+  blocked
+  done
+}
+
+model PmProject {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id              String          @db.Uuid
+  code                String
+  name                String
+  description         String?
+  status              PmProjectStatus @default(planning)
+  owner_membership_id String?         @db.Uuid
+  start_date          DateTime?       @db.Date
+  end_date            DateTime?       @db.Date
+  ticket_seq          Int             @default(0)
+  created_by          String          @db.Uuid
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @default(now()) @updatedAt
+
+  members   PmProjectMember[]
+  tickets   PmTicket[]
+  contracts PmProjectContract[]
+  activity  PmActivity[]
+  fields    PmCustomField[]
+
+  @@unique([org_id, code])
+  @@index([org_id, status])
+  @@map("pm_projects")
+}
+
+model PmProjectMember {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  project_id    String    @db.Uuid
+  project       PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  membership_id String    @db.Uuid
+  // 'lead' may manage the project (members, contracts); 'member' works tickets.
+  role          String    @default("member")
+  created_at    DateTime  @default(now())
+
+  @@unique([project_id, membership_id])
+  @@index([org_id, membership_id])
+  @@map("pm_project_members")
+}
+
+model PmStatus {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String           @db.Uuid
+  key        String
+  label      String
+  category   PmStatusCategory
+  position   Int              @default(0)
+  is_active  Boolean          @default(true)
+  created_at DateTime         @default(now())
+  updated_at DateTime         @default(now()) @updatedAt
+
+  @@unique([org_id, key])
+  @@map("pm_statuses")
+}
+
+model PmTicket {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String    @db.Uuid
+  project_id             String    @db.Uuid
+  project                PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  number                 Int
+  title                  String
+  description            String?
+  type                   String    @default("task")
+  priority               String    @default("medium")
+  status_key             String    @default("open")
+  assignee_membership_id String?   @db.Uuid
+  reporter_membership_id String?   @db.Uuid
+  // Optional tag to one of the project's linked contracts (progress per contract).
+  contract_id            String?   @db.Uuid
+  due_date               DateTime? @db.Date
+  resolution             String?
+  resolved_at            DateTime?
+  // Values of the project's custom fields, keyed by field key. internal_only hides the ticket from client / vendor shares.
+  custom_values          Json      @default("{}")
+  internal_only          Boolean   @default(false)
+  created_by             String    @db.Uuid
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  comments    PmTicketComment[]
+  activity    PmActivity[]
+  attachments PmTicketAttachment[]
+
+  @@unique([project_id, number])
+  @@index([org_id, assignee_membership_id])
+  @@index([project_id, status_key])
+  @@map("pm_tickets")
+}
+
+model PmTicketComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id         String   @db.Uuid
+  ticket_id      String   @db.Uuid
+  ticket         PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  author_user_id String?  @db.Uuid
+  body           String
+  // Shown to client / vendor shares. A comment typed by a guest has no user: external_label names them.
+  is_public      Boolean  @default(false)
+  external_label String?
+  created_at     DateTime @default(now())
+
+  @@index([ticket_id, created_at])
+  @@map("pm_ticket_comments")
+}
+
+// One audit trail for projects and tickets: who changed what (ticket_id is null for project-level events).
+model PmActivity {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  project_id    String    @db.Uuid
+  project       PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  ticket_id     String?   @db.Uuid
+  ticket        PmTicket? @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  actor_user_id String    @db.Uuid
+  action        String
+  from_value    String?
+  to_value      String?
+  note          String?
+  created_at    DateTime  @default(now())
+
+  @@index([project_id, created_at])
+  @@index([ticket_id, created_at])
+  @@map("pm_activity")
+}
+
+// A contract belongs to at most one project (unique contract_id); a project may have many contracts, one marked primary.
+model PmProjectContract {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  project_id  String    @db.Uuid
+  project     PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  contract_id String    @db.Uuid
+  is_primary  Boolean   @default(false)
+  linked_by   String    @db.Uuid
+  linked_at   DateTime  @default(now())
+
+  @@unique([contract_id])
+  @@index([project_id])
+  @@map("pm_project_contracts")
+}
+
+model PmTicketAttachment {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  ticket_id   String   @db.Uuid
+  ticket      PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  filename    String
+  stored_name String
+  mime_type   String?
+  size_bytes  Int
+  uploaded_by String   @db.Uuid
+  created_at  DateTime @default(now())
+
+  @@index([ticket_id])
+  @@map("pm_ticket_attachments")
+}
+
+// Fields a project adds to its own tickets (text / number / date / pick-one). Values live in pm_tickets.custom_values by key.
+model PmCustomField {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  project_id String    @db.Uuid
+  project    PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  type       String
+  options    Json      @default("[]")
+  required   Boolean   @default(false)
+  position   Int       @default(0)
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+
+  @@unique([project_id, key])
+  @@map("pm_custom_fields")
 }

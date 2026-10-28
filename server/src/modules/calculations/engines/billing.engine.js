@@ -32,6 +32,7 @@ const prisma = require('../../../config/db');
 const calendarsService = require('../../calendars/calendars.service');
 const { round2, ymd, monthBounds, monthDates, isWeekend, todayIst } = require('../period');
 const { projectListWhere } = require('../../../lib/projectScope');
+const holdPeriods = require('../../../lib/holdPeriods');
 const resourceBilling = require('./resourceBilling');
 
 const DEFAULT_BENCHMARK_HOURS = 160;
@@ -47,6 +48,7 @@ const PROJECT_SELECT = {
   service_category: true,
   agreement_start_date: true,
   agreement_end_date: true,
+  contract_hold_periods: true,
   benchmark_hours: true,
   client_billing_currency: true,
   overtime_billable: true,
@@ -277,6 +279,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
   const adjustmentTotal = round2(adjustmentItems.reduce((sum, a) => sum + a.amount, 0));
   const agreementStart = account.agreement_start_date;
   const agreementEnd = account.agreement_end_date;
+  const heldPeriods = holdPeriods.parse(account.contract_hold_periods);
 
   const byDate = new Map();
   for (const e of entries) {
@@ -290,9 +293,11 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
     const key = ymd(date);
     const holiday = cal.holidayLabels.get(key) || null;
     const isWorkingDay = cal.workingDates.has(key) || (!isWeekend(date) && !holiday);
-    const inContract = (!agreementStart || date >= agreementStart) && (!agreementEnd || date <= agreementEnd);
     const dayEntries = byDate.get(key) || [];
     const rate = rateOn(rates, date);
+    // A monthly-rate project is not billed for days inside a hold period (hourly bills approved hours, which a hold leaves at 0).
+    const inContract = (!agreementStart || date >= agreementStart) && (!agreementEnd || date <= agreementEnd)
+      && !(rate?.rate_type === 'monthly' && holdPeriods.isHeld(heldPeriods, date));
 
     // Per resource, approved hours only.
     const perResource = new Map();

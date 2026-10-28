@@ -87,8 +87,18 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+// One skill the interviewer rated, out of 10.
+const skillRatingSchema = z.object({
+  skill_name: z.string().trim().min(1, 'Enter the skill name'),
+  rating: z.number().int().min(1).max(10),
+  comment: z.string().optional(),
+});
+
 const interviewRoundCreateSchema = z.object({
-  round_type: z.enum(['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo']),
+  // Template flow: send template_round_id and the type is derived; legacy flow: send round_type.
+  round_type: z.enum(['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo']).optional(),
+  template_round_id: z.string().uuid().optional(),
+  skill_ratings: z.array(skillRatingSchema).optional(),
   round_name: z.string().optional(),
   scheduled_at: z.string().min(1, 'Interview date & time is required'),
   duration_minutes: z.number().int().optional(),
@@ -101,9 +111,10 @@ const interviewRoundCreateSchema = z.object({
   feedback: z.string().optional(),
   rating: z.number().int().min(1).max(10).optional(),
   completed_at: z.string().optional(),
-});
+}).refine((d) => d.round_type || d.template_round_id, { message: 'round_type or template_round_id is required', path: ['round_type'] });
 
 const interviewRoundUpdateSchema = z.object({
+  skill_ratings: z.array(skillRatingSchema).optional(),
   // the name was missing here, so an edited name was silently dropped
   round_name: z.string().optional(),
   // put a cancelled round back on the calendar

@@ -23,6 +23,8 @@ const ERROR_STATUS = {
   reason_required: [400, 'reason is required for this transition'],
   seats_not_closed: [400, 'All seats must be closed before closing the requirement'],
   invalid_account: [400, 'account_id must reference an active client'],
+  hiring_track_required: [400, 'Choose Technical or Non-Technical for Internal Hiring'],
+  template_in_use: [400, 'Candidates already have interviews on this requirement, so its service type cannot change'],
   user_not_found: [404, 'User not found'],
   forbidden_owner_change: [403, 'Only an admin can change the sales owner'],
   invalid_owner_role: [400, 'Sales owner must be a sales, BDA, or admin user'],

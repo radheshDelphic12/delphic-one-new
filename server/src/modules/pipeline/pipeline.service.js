@@ -22,7 +22,7 @@ const REQUIREMENT_INCLUDE = {
 
 // Profile source (UI labels: direct = Bench, vendor = Vendor, linkedin = Market).
 const PROFILE_SOURCES = ['direct', 'vendor', 'linkedin'];
-const REQ_TYPES = ['managed_services', 'recruitment', 'project'];
+const REQ_TYPES = ['managed_services', 'recruitment', 'project', 'internal_hiring'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseCsvList(value) {

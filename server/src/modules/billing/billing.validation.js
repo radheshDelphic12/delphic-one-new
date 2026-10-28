@@ -307,6 +307,11 @@ const updateProjectProfileSchema = z
     agreement_end_date: optionalDate.nullable(),
     // Manual override; null = follow the agreement dates.
     contract_status: z.enum(['on_hold', 'completed']).nullable().optional(),
+    // Periods on hold (monthly-rate projects skip billing for them); `resume` null = still on hold.
+    contract_hold_periods: z
+      .array(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), resume: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().transform((v) => v || null) }))
+      .max(50)
+      .optional(),
     benchmark_hours: z.coerce.number().int().min(1).max(744).optional(),
     // Whether this client pays overtime, and at what multiple of the
     // hourly-equivalent rate. Admin-only (the route is).

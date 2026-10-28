@@ -1,6 +1,9 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
+const prisma = require('../../config/db');
 const service = require('./submissions.service');
+const { z } = require('zod');
+const { getPlan, sendCandidateFeedbackMessage } = require('../interviewTemplates/interviewTemplates.service');
 const {
   createSchema,
   updateSchema,
@@ -30,6 +33,13 @@ const ERROR_STATUS = {
   forbidden: [403, 'You are not allowed to manage this interview round'],
   forbidden_stage_change: [403, 'You are not allowed to make this stage change'],
   invalid_interviewers: [400, 'One or more interviewers are invalid or inactive'],
+  invalid_template_round: [400, 'This round is not part of the candidate\'s interview template'],
+  round_already_exists: [400, 'This round is already scheduled for the candidate'],
+  previous_round_pending: [400, 'Finish the previous mandatory round (with feedback) before the next one'],
+  feedback_required: [400, 'Feedback is required to finish this round'],
+  ratings_required: [400, 'Rate every skill out of 10 to finish this round (at least one skill)'],
+  candidate_email_missing: [400, 'This candidate has no email on the profile'],
+  mandatory_rounds_pending: [400, 'All mandatory interview rounds must be completed with feedback before the offer'],
 };
 
 function mapError(res, error) {
@@ -81,6 +91,19 @@ const changeStageOverride = asyncHandler(async (req, res) => {
   return ok(res, result.submission);
 });
 
+const candidateFeedbackMessage = asyncHandler(async (req, res) => {
+  const { note } = z.object({ note: z.string().trim().max(1000).optional() }).parse(req.body || {});
+  const result = await sendCandidateFeedbackMessage(req.params.id, { note }, req.user);
+  if (result.error) return mapError(res, result.error);
+  return ok(res, result);
+});
+
+const interviewPlan = asyncHandler(async (req, res) => {
+  const result = await getPlan(prisma, req.params.id);
+  if (result.error) return mapError(res, result.error);
+  return ok(res, result.plan);
+});
+
 const history = asyncHandler(async (req, res) => {
   const submission = await service.getById(req.params.id);
   if (!submission) return fail(res, 404, 'Not found');
@@ -108,4 +131,4 @@ const updateRound = asyncHandler(async (req, res) => {
   return ok(res, result.round);
 });
 
-module.exports = { list, getOne, create, update, changeStage, changeStageOverride, history, addRound, updateRound };
+module.exports = { candidateFeedbackMessage, interviewPlan, list, getOne, create, update, changeStage, changeStageOverride, history, addRound, updateRound };

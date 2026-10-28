@@ -39,6 +39,11 @@ const ROLE_EVENT_MATRIX = {
   candidate_rejected: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true },
   candidate_backout: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true },
   candidate_offer: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true, defaultEmail: true },
+  candidate_closed: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true },
+  pm_ticket_assigned: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_status_changed: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_commented: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_due_soon: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_entry_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_regularization_requested: { roles: TIMESHEET_ROLES, defaultInApp: true },
@@ -50,6 +55,12 @@ const ROLE_EVENT_MATRIX = {
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
+
+// Whether email is on for someone who has not set a preference. Admins are copied on every event (see above), so for them email
+// is opt-in: otherwise an admin who never subscribed gets every interview mail in the company. They can still switch it on per event.
+function defaultEmailFor(type, role) {
+  return role !== 'admin' && ROLE_EVENT_MATRIX[type]?.defaultEmail === true;
+}
 
 // One-line human labels + descriptions for the preferences UI.
 const NOTIFICATION_LABELS = {
@@ -67,6 +78,11 @@ const NOTIFICATION_LABELS = {
   candidate_rejected: ['Candidate rejected', 'A candidate is marked rejected.'],
   candidate_backout: ['Candidate backed out', 'A candidate backs out.'],
   candidate_offer: ['Offer sent', 'An offer is sent to a candidate.'],
+  candidate_closed: ['Ticket closed', 'A candidate ticket is closed (BGV cleared, candidate joined).'],
+  pm_ticket_assigned: ['Project ticket assigned', 'A project ticket is assigned to you.'],
+  pm_ticket_status_changed: ['Project ticket status changed', 'The status of a project ticket you raised or work on changes.'],
+  pm_ticket_commented: ['Project ticket comment', 'Someone comments on a project ticket you raised or work on.'],
+  pm_ticket_due_soon: ['Project ticket due soon', 'A project ticket assigned to you is due today or tomorrow.'],
   timesheet_submitted: ['Timesheet submitted', 'A direct report submits timesheet hours for your approval.'],
   timesheet_entry_decided: ['Timesheet decision', 'Your manager approves or rejects a timesheet entry.'],
   timesheet_regularization_requested: ['Regularisation requested', 'A direct report asks to regularise a locked timesheet day.'],
@@ -199,6 +215,36 @@ function renderNotification(type, ctx = {}) {
         `${actorPrefix(ctx)}sent an offer to ${candidate} for "${truncate(requirement)}" (${account}).`,
         'submission', ctx.submissionId, ctx
       );
+    case 'candidate_closed':
+      return envelope(
+        'Ticket closed',
+        `${actorPrefix(ctx)}closed the ticket for ${candidate} on "${truncate(requirement)}" (${account}).`,
+        'submission', ctx.submissionId, ctx
+      );
+    case 'pm_ticket_assigned':
+      return envelope(
+        'Project ticket assigned',
+        `${actorPrefix(ctx)}assigned you #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" in ${ctx.projectCode} ${ctx.projectName || ''}.`.replace(/\s+\./, '.'),
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_status_changed':
+      return envelope(
+        'Project ticket status changed',
+        `${actorPrefix(ctx)}moved #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode}) to ${ctx.statusLabel || 'a new status'}.`,
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_commented':
+      return envelope(
+        'New comment on a project ticket',
+        `${actorPrefix(ctx)}commented on #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode})${ctx.comment ? `: ${truncate(ctx.comment)}` : '.'}`,
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_due_soon':
+      return envelope(
+        'Project ticket due soon',
+        `#${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode}) is due ${ctx.dueLabel || 'soon'}.`,
+        'pm_ticket', ctx.ticketId, ctx
+      );
     case 'timesheet_submitted':
       return envelope(
         'Timesheet awaiting approval',
@@ -239,5 +285,6 @@ module.exports = {
   NOTIFICATION_TYPES,
   NOTIFICATION_LABELS,
   eventsForRole,
+  defaultEmailFor,
   renderNotification,
 };

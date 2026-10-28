@@ -117,6 +117,9 @@ const RULES = [
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
   [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
+  // Project Management (Delphic Global only): the route limits it to the master workspace; admin / project lead / member rights are per record.
+  [/^\/pm(\/|$)/, 'open'],
+  [/^\/pm-guest(\/|$)/, 'open'], // bearer-token share link (no login); the route checks the token's scope
   // Tracking a company payment in a wallet (POST /payments/track): open here, and the route itself lets in the Admin, the group admin,
   // people holding a finance / billing / payroll permission, and a company workspace's admin / manager / finance role (payments.routes.js).
   [/^\/payments(\/|$)/, 'open'],
@@ -132,6 +135,8 @@ const RULES = [
   [/^\/leads(\/|$)/, { GET: 'accounts.view', '*': ['accounts.create', 'accounts.update'] }],
   [/^\/requirements(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.create', 'requirements.update', 'requirements.delete'] }],
   [/^\/seats(\/|$)/, ['submissions.update', 'requirements.update']],
+  [/^\/assessments(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update', 'submissions.create'] }],
+  [/^\/interview-templates(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update'] }],
   [/^\/profiles(\/|$)/, { GET: ['profiles.view', 'submissions.create', 'submissions.view', 'pipeline.view'], '*': ['profiles.create', 'profiles.update', 'profiles.delete', 'submissions.create'] }],
   [/^\/submissions(\/|$)/, { GET: ['submissions.view', 'pipeline.view', 'rejected.view', 'profiles.view'], '*': ['submissions.create', 'submissions.update', 'meetings.schedule'] }],
   [/^\/interview-rounds(\/|$)/, ['submissions.update', 'meetings.schedule']],
