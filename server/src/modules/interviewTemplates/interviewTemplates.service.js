@@ -31,13 +31,45 @@ async function loadRequirementForSubmission(db, submissionId) {
     where: { id: submissionId },
     select: {
       id: true,
-      seat: { select: { requirement: { select: { id: true, interview_template_id: true, pass_percentage: true, interview_template: { include: ROUND_INCLUDE } } } } },
+      seat: { select: { requirement: { select: { id: true, interview_template_id: true, pass_percentage: true, primary_tech_stack: true, secondary_tech_stack: true, interview_template: { include: ROUND_INCLUDE } } } } },
     },
   });
   return sub?.seat?.requirement || null;
 }
 
 const passMarkFor = (requirement) => requirement?.pass_percentage ?? requirement?.interview_template?.pass_percentage ?? DEFAULT_PASS_PERCENTAGE;
+
+// Skills of the requirement's JD, primary first; empty / repeated entries dropped (a stack can be empty).
+function cleanSkills(list, seen) {
+  const out = [];
+  for (const raw of list || []) {
+    const name = String(raw || '').trim();
+    const key = name.toLowerCase();
+    if (name && !seen.has(key)) { seen.add(key); out.push(name); }
+  }
+  return out;
+}
+function jdSkills(requirement) {
+  const seen = new Set();
+  const primary = cleanSkills(requirement?.primary_tech_stack, seen);
+  const secondary = cleanSkills(requirement?.secondary_tech_stack, seen);
+  return { primary, secondary };
+}
+
+// Every skill name already known: JD stacks, candidate profiles and skills interviewers rated before (so a skill added once
+// shows up in the dropdown for the next interview). Sorted, one spelling per skill.
+async function skillOptions(db = prisma) {
+  const rows = await db.$queryRaw`
+    SELECT DISTINCT TRIM(s) AS name FROM (
+      SELECT unnest(primary_tech_stack) AS s FROM requirements
+      UNION ALL SELECT unnest(secondary_tech_stack) FROM requirements
+      UNION ALL SELECT unnest(primary_skills) FROM profiles
+      UNION ALL SELECT unnest(secondary_skills) FROM profiles
+      UNION ALL SELECT skill_name FROM interview_round_skill_ratings
+    ) t WHERE TRIM(s) <> '' ORDER BY 1 LIMIT 2000`;
+  const seen = new Set();
+  return rows.map((r) => r.name).filter((n) => { const k = n.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+}
 
 // The candidate's interview plan: every template round, in order, with its state and whether it can be started now.
 async function getPlan(db, submissionId) {
@@ -86,6 +118,8 @@ async function getPlan(db, submissionId) {
       template: { id: template.id, name: template.name },
       pass_percentage: passMark,
       steps,
+      // The JD's primary / secondary stack: pre-fills the skill rows of a round that needs skill ratings.
+      jd_skills: jdSkills(requirement),
       mandatory_pending: steps.filter((s) => s.is_mandatory && s.state !== 'completed').length,
     },
   };
@@ -203,6 +237,8 @@ module.exports = {
   scorePercent,
   resolveTemplate,
   getPlan,
+  jdSkills,
+  skillOptions,
   checkCanStart,
   mandatoryRoundsDone,
   saveSkillRatings,

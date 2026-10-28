@@ -73,7 +73,7 @@ describe('assessments', () => {
     expect((await request(app).post(`/api/v1/public/assessments/${token}/submit`).send({ answers: {} })).status).toBe(410);
 
     const attempts = await authed(request(app).get(`/api/v1/assessments/attempts?submission_id=${submissionId}`), recruiterToken);
-    expect(attempts.body.data[0]).toMatchObject({ status: 'submitted', score_percent: 60, passed: true });
+    expect(attempts.body.data.items[0]).toMatchObject({ status: 'submitted', score_percent: 60, passed: true });
   });
 
   test('a score below the test pass mark is a fail', async () => {
@@ -83,7 +83,7 @@ describe('assessments', () => {
     const token = invite.body.data.link.split('/assessment/')[1];
     await request(app).post(`/api/v1/public/assessments/${token}/submit`).send({ answers: { [q.id]: 0 } });
     const attempts = await authed(request(app).get(`/api/v1/assessments/attempts?submission_id=${submissionId}`), recruiterToken);
-    expect(attempts.body.data[0]).toMatchObject({ score_percent: 0, passed: false });
+    expect(attempts.body.data.items[0]).toMatchObject({ score_percent: 0, passed: false });
   });
 
   test('an unknown token and an empty test are refused', async () => {

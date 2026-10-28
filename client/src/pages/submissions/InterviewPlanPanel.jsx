@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -7,6 +7,8 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { canManageInterviewRound } from '../../lib/submissionStages.js';
+import { isAdminUser } from '../../lib/access.js';
+import { SKILLS_CATALOG } from '../../lib/skillsCatalog.js';
 
 const STATE_STYLE = {
   not_scheduled: 'border-tertiary-200 bg-white text-tertiary-700',
@@ -14,12 +16,24 @@ const STATE_STYLE = {
   completed: 'border-success-200 bg-success-50 text-success-800',
 };
 const STATE_LABEL = { not_scheduled: 'Not scheduled', scheduled: 'Scheduled', completed: 'Completed' };
+const ATTEMPT_LABEL = { not_opened: 'Not opened', in_progress: 'In progress', scored: 'Scored', expired: 'Expired', superseded: 'Replaced' };
+const ATTEMPT_TONE = {
+  not_opened: 'bg-tertiary-100 text-tertiary-700',
+  in_progress: 'bg-sky-100 text-sky-800',
+  scored: 'bg-success-100 text-success-800',
+  expired: 'bg-warning-100 text-warning-800',
+  superseded: 'bg-tertiary-50 text-tertiary-400 line-through',
+};
+const NO_ATTEMPTS = { items: [], live_id: null, used: 0, limit: 0, remaining: null };
 
-const emptySkill = () => ({ skill_name: '', rating: 5 });
+// rating: null = not rated yet (every row left in the form has to be rated before saving)
+const emptySkill = () => ({ skill_name: '', rating: null });
+const when = (value) => (value ? new Date(value).toLocaleString() : '-');
 
 /**
  * The candidate's interview plan from the requirement's interview template: rounds in order, each with its state.
- * A mandatory round needs feedback (and skill ratings out of 10 where the template asks) before the next one can start.
+ * A mandatory round needs feedback (and skill ratings, 0 to 10, where the template asks) before the next one can start.
+ * Rounds that need skill ratings open pre-filled with the requirement JD's primary and secondary stack.
  * `plan` is null for requirements made before templates existed; the page then shows the older rounds panel instead.
  */
 export default function InterviewPlanPanel({ submissionId, submission, plan, rounds, user, onChanged }) {
@@ -28,10 +42,14 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
   const [finish, setFinish] = useState(null); // { step, round, form }
   const [users, setUsers] = useState([]);
   const [tests, setTests] = useState([]);
-  const [attempts, setAttempts] = useState([]);
+  const [attemptState, setAttemptState] = useState(NO_ATTEMPTS);
+  const [skillOptions, setSkillOptions] = useState([]);
+  const [removing, setRemoving] = useState(null); // { attempt, reason }
   const [busy, setBusy] = useState(false);
 
   const locked = !!submission?.is_locked;
+  const isAdmin = isAdminUser(user);
+  const attempts = attemptState.items;
   const roundById = useMemo(() => new Map((rounds || []).map((r) => [r.id, r])), [rounds]);
 
   useEffect(() => {
@@ -39,7 +57,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     apiClient.get('/assessments/tests').then(({ data }) => setTests(data.data || [])).catch(() => setTests([]));
   }, []);
   const loadAttempts = () =>
-    apiClient.get('/assessments/attempts', { params: { submission_id: submissionId } }).then(({ data }) => setAttempts(data.data || [])).catch(() => setAttempts([]));
+    apiClient.get('/assessments/attempts', { params: { submission_id: submissionId } }).then(({ data }) => setAttemptState(data.data || NO_ATTEMPTS)).catch(() => setAttemptState(NO_ATTEMPTS));
   useEffect(() => { loadAttempts(); }, [submissionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const roundType = (step) => (step.conducted_by === 'client' ? 'template_client' : 'template_internal');
@@ -97,30 +115,55 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     }, round ? 'Failed to update the interview' : 'Failed to schedule the round');
   }
 
+  // Skill names the dropdown offers: the JD stacks, everything interviewers rated before, candidate skills and the catalog.
+  function loadSkillOptions() {
+    apiClient.get('/interview-templates/skill-options').then(({ data }) => setSkillOptions(data.data || [])).catch(() => setSkillOptions([]));
+  }
+  const allSkillOptions = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    const add = (name) => {
+      const clean = String(name || '').trim();
+      if (clean && !seen.has(clean.toLowerCase())) { seen.add(clean.toLowerCase()); out.push(clean); }
+    };
+    [...(plan?.jd_skills?.primary || []), ...(plan?.jd_skills?.secondary || [])].forEach(add);
+    skillOptions.forEach(add);
+    SKILLS_CATALOG.forEach((s) => add(s.label));
+    return out;
+  }, [plan, skillOptions]);
+
   function openFinish(step) {
     const round = roundById.get(step.interview_round_id);
+    const saved = round?.skill_ratings?.length ? round.skill_ratings.map((s) => ({ skill_name: s.skill_name, rating: s.rating })) : null;
+    // Rounds that need ratings start from the JD's stacks (primary, then secondary); an empty stack leaves just "+ Add skill".
+    const fromJd = step.rating_required ? [...(plan?.jd_skills?.primary || []), ...(plan?.jd_skills?.secondary || [])].map((skill_name) => ({ skill_name, rating: null })) : [];
+    loadSkillOptions();
     setFinish({
       step,
       round,
       form: {
         result: round?.result && round.result !== 'pending' ? round.result : 'pass',
         feedback: round?.feedback || '',
-        skills: round?.skill_ratings?.length ? round.skill_ratings.map((s) => ({ skill_name: s.skill_name, rating: s.rating })) : [emptySkill()],
+        skills: saved || (fromJd.length ? fromJd : [emptySkill()]),
       },
     });
   }
 
   const draftScore = useMemo(() => {
     if (!finish) return null;
-    const rated = finish.form.skills.filter((s) => s.skill_name.trim());
+    const rated = finish.form.skills.filter((s) => s.skill_name.trim() && s.rating != null);
     if (!rated.length) return null;
     return Math.round((rated.reduce((sum, s) => sum + Number(s.rating), 0) / (rated.length * 10)) * 10000) / 100;
   }, [finish]);
 
   async function saveFinish() {
     const { step, round, form } = finish;
-    const skills = form.skills.filter((s) => s.skill_name.trim()).map((s) => ({ skill_name: s.skill_name.trim(), rating: Number(s.rating) }));
+    // a row nobody touched (no name, no rating) is dropped; every other row needs a name and a rating
+    const rows = form.skills.filter((s) => s.skill_name.trim() || s.rating != null);
     if (!form.feedback.trim()) return pushError('Feedback is required to finish a round.', 'Please fix the form');
+    if (rows.some((s) => !s.skill_name.trim())) return pushError('Give every rated row a skill name, or remove the row.', 'Please fix the form');
+    if (rows.some((s) => s.rating == null)) return pushError('Rate every skill (0 to 10), or remove the skills that do not apply.', 'Please fix the form');
+    const skills = rows.map((s) => ({ skill_name: s.skill_name.trim(), rating: Number(s.rating) }));
     if (step.rating_required && !skills.length) return pushError('Add at least one skill and rate it out of 10.', 'Please fix the form');
     await run(async () => {
       await apiClient.patch(`/interview-rounds/${round.id}`, {
@@ -132,13 +175,44 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     }, 'Failed to save the feedback');
   }
 
-  async function sendTest(step, testId) {
+  // ---- test links
+  async function sendTest(testId, overrideLimit = false) {
     if (!testId) return;
-    await run(async () => {
-      const { data } = await apiClient.post('/assessments/attempts', { test_id: testId, submission_id: submissionId });
+    setBusy(true);
+    try {
+      const { data } = await apiClient.post('/assessments/attempts', { test_id: testId, submission_id: submissionId, ...(overrideLimit ? { override_limit: true } : {}) });
       await loadAttempts();
-      pushSuccess(data.data.link ? `Test link ready: ${data.data.link}` : 'Test sent', 'Test sent');
-    }, 'Failed to send the test');
+      const replaced = data.data.superseded ? ' The earlier unopened link was replaced.' : '';
+      pushSuccess(data.data.link ? `Test link ready: ${data.data.link}.${replaced}` : `Test sent.${replaced}`, 'Test sent');
+    } catch (err) {
+      const message = apiErrorMessage(err, 'Failed to send the test');
+      if (err.response?.status === 409 && /allowed tests/i.test(message) && isAdmin && !overrideLimit) {
+        // an admin may go past the limit on purpose
+        if (window.confirm(`${message}.\n\nSend one anyway?`)) { setBusy(false); return sendTest(testId, true); }
+      } else {
+        pushError(message, 'Something went wrong');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeAttempt() {
+    const { attempt, reason } = removing;
+    await run(async () => {
+      await apiClient.delete(`/assessments/attempts/${attempt.id}`, { data: { reason: reason.trim() || undefined } });
+      setRemoving(null);
+      await loadAttempts();
+      pushSuccess(attempt.view_status === 'scored' ? 'Result deleted. The candidate can retake the test.' : 'Test link deleted.', 'Deleted');
+    }, 'Failed to delete the test');
+  }
+
+  async function extendAttempt(attempt) {
+    await run(async () => {
+      await apiClient.post(`/assessments/attempts/${attempt.id}/extend`, {});
+      await loadAttempts();
+      pushSuccess('The link is valid for another 7 days.', 'Link extended');
+    }, 'Failed to extend the link');
   }
 
   async function messageCandidate() {
@@ -155,6 +229,8 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
 
   const userOptions = users.map((u) => ({ id: u.id, label: u.name, hint: u.role }));
   const anyBelowPass = plan.steps.some((s) => s.below_pass);
+  const liveAttempt = attempts.find((a) => a.id === attemptState.live_id) || null;
+  const limitText = attemptState.limit > 0 ? `${attemptState.used} of ${attemptState.limit} tests used` : `${attemptState.used} test${attemptState.used === 1 ? '' : 's'} sent (no limit)`;
 
   return (
     <section id="interview-plan" className="rounded-2xl border border-sky-100 bg-sky-50/40 p-4 shadow-soft">
@@ -176,7 +252,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
       <ol className="mt-3 space-y-2">
         {plan.steps.map((step) => {
           const round = roundById.get(step.interview_round_id);
-          const stepAttempts = step.kind === 'screening_test' ? attempts : [];
+          const isTestStep = step.kind === 'screening_test';
           return (
             <li key={step.template_round_id} className={`rounded-xl border px-3 py-3 ${STATE_STYLE[step.state]}`}>
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -225,19 +301,47 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                 </div>
               </div>
 
-              {step.kind === 'screening_test' && (
-                <div className="mt-2 border-t border-current/10 pt-2 text-xs">
-                  {stepAttempts.map((a) => (
-                    <p key={a.id} className="text-tertiary-700">
-                      Test: <strong>{a.test_name}</strong> -{' '}
-                      {a.status === 'submitted'
-                        ? <>score <strong>{a.score_percent}%</strong> ({a.passed ? 'passed' : 'below'} {a.pass_percentage}%)</>
-                        : <>sent, {a.status === 'started' ? 'in progress' : 'not opened yet'}{a.link ? <> · <button type="button" className="underline" onClick={() => navigator.clipboard?.writeText(a.link)}>copy link</button></> : null}</>}
+              {isTestStep && (
+                <div className="mt-2 space-y-2 border-t border-current/10 pt-2 text-xs" data-testid="test-attempts">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-tertiary-800">
+                      Tests · {limitText}
+                      {liveAttempt ? <span className="ml-2 rounded-full bg-success-100 px-2 py-0.5 text-[11px] font-medium text-success-800">1 live</span> : <span className="ml-2 rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] text-tertiary-600">No live link</span>}
                     </p>
-                  ))}
+                  </div>
+                  {attempts.length === 0 && <p className="text-tertiary-500">No test sent yet.</p>}
+                  <ul className="space-y-1">
+                    {attempts.map((a) => (
+                      <li key={a.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-2 py-1.5 ${a.is_live ? 'border-success-200' : 'border-tertiary-100 opacity-80'}`} data-testid="test-attempt">
+                        <div className="min-w-0">
+                          <p className="text-tertiary-800">
+                            <strong>{a.test_name}</strong>{' '}
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${ATTEMPT_TONE[a.view_status]}`}>{ATTEMPT_LABEL[a.view_status]}</span>
+                            {a.is_live && <span className="ml-1 rounded-full bg-success-100 px-2 py-0.5 text-[11px] font-medium text-success-800">Live</span>}
+                            {a.view_status === 'scored' && <span className="ml-2">{a.score_percent}% · <span className={a.passed ? 'text-success-700' : 'text-danger-700'}>{a.passed ? 'Passed' : 'Failed'}</span> (pass {a.pass_percentage}%)</span>}
+                          </p>
+                          <p className="text-[11px] text-tertiary-500">
+                            Sent {when(a.invited_at)}{a.created_by_name ? ` by ${a.created_by_name}` : ''}
+                            {a.view_status === 'scored' ? ` · submitted ${when(a.submitted_at)}` : a.is_live ? ` · valid until ${when(a.expires_at)}` : ''}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {a.link && a.is_live && <button type="button" className="underline" onClick={() => navigator.clipboard?.writeText(a.link).then(() => pushSuccess('Link copied', 'Copied'))}>copy link</button>}
+                          {isAdmin && !locked && a.is_live && a.view_status !== 'scored' && (
+                            <button type="button" className="underline" disabled={busy} onClick={() => extendAttempt(a)}>extend 7 days</button>
+                          )}
+                          {isAdmin && !locked && (
+                            <button type="button" title={a.view_status === 'scored' ? 'Delete result (lets the candidate retake)' : 'Delete this link'} aria-label="Delete test attempt" className="rounded p-1 text-danger-600 hover:bg-danger-50" disabled={busy} onClick={() => setRemoving({ attempt: a, reason: '' })}>
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                   {!locked && tests.length > 0 && (
-                    <select className={`${FIELD_INPUT} mt-1 max-w-xs`} value="" disabled={busy} onChange={(e) => sendTest(step, e.target.value)}>
-                      <option value="">{stepAttempts.length ? 'Send another test...' : 'Send a test to the candidate...'}</option>
+                    <select className={`${FIELD_INPUT} mt-1 max-w-xs`} value="" disabled={busy} onChange={(e) => sendTest(e.target.value)}>
+                      <option value="">{liveAttempt ? (liveAttempt.view_status === 'scored' ? 'Retake: delete the result first' : 'Replace the unopened link...') : 'Send a test to the candidate...'}</option>
                       {tests.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.question_count} questions, pass {t.pass_percentage}%)</option>)}
                     </select>
                   )}
@@ -303,17 +407,51 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                   </span>
                 )}
               </div>
-              <div className="mt-2 space-y-2">
+              {finish.step.rating_required && (
+                <p className="mt-1 text-xs text-tertiary-500">
+                  {(plan.jd_skills?.primary?.length || plan.jd_skills?.secondary?.length)
+                    ? 'Skills come from the requirement\'s JD. Rate each one, remove what does not apply, or add another skill.'
+                    : 'This requirement\'s JD has no skills listed. Add the skills you assessed.'}
+                </p>
+              )}
+              <datalist id="interview-skill-options">
+                {allSkillOptions.map((name) => <option key={name} value={name} />)}
+              </datalist>
+              <div className="mt-2 space-y-2" data-testid="skill-rows">
                 {finish.form.skills.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <input className={FIELD_INPUT} placeholder="Skill (e.g. React, Communication)" value={s.skill_name} onChange={(e) => updateSkill(i, { skill_name: e.target.value })} />
-                    <input type="range" min={1} max={10} value={s.rating} onChange={(e) => updateSkill(i, { rating: Number(e.target.value) })} className="w-32" />
-                    <span className="w-10 text-right text-sm font-medium">{s.rating}/10</span>
+                  <div key={i} className="flex items-center gap-2" data-testid="skill-row">
+                    <input className={FIELD_INPUT} list="interview-skill-options" placeholder="Pick or type a skill (e.g. React, Communication)" value={s.skill_name} onChange={(e) => updateSkill(i, { skill_name: e.target.value })} />
+                    <input
+                      type="range" min={0} max={10} value={s.rating ?? 0}
+                      aria-label={`Rating for ${s.skill_name || 'skill'}`}
+                      onChange={(e) => updateSkill(i, { rating: Number(e.target.value) })}
+                      onClick={(e) => updateSkill(i, { rating: Number(e.target.value) })}
+                      className={`w-32 ${s.rating == null ? 'opacity-50' : ''}`}
+                    />
+                    <span className={`w-14 text-right text-sm font-medium ${s.rating == null ? 'text-tertiary-400' : ''}`}>{s.rating == null ? 'not rated' : `${s.rating}/10`}</span>
                     <button type="button" className="text-xs text-danger-600" onClick={() => setFinish((p) => ({ ...p, form: { ...p.form, skills: p.form.skills.filter((_, idx) => idx !== i) } }))}>Remove</button>
                   </div>
                 ))}
               </div>
               <button type="button" className="btn-ghost mt-2 text-xs" onClick={() => setFinish((p) => ({ ...p, form: { ...p.form, skills: [...p.form.skills, emptySkill()] } }))}>+ Add skill</button>
+            </div>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!removing} onClose={() => setRemoving(null)} title={removing?.attempt.view_status === 'scored' ? 'Delete test result' : 'Delete test link'} tone="edit"
+        footer={<div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setRemoving(null)}>Cancel</button><button type="button" className="btn-danger" disabled={busy} onClick={removeAttempt}>Delete</button></div>}>
+        {removing && (
+          <div className="space-y-3 text-sm text-tertiary-700">
+            <p>
+              {removing.attempt.view_status === 'scored'
+                ? `This removes ${removing.attempt.candidate_name}'s score of ${removing.attempt.score_percent}%. They can then be sent the test again, and it stops counting in the reports.`
+                : 'The link stops working and no longer counts towards the limit or the reports.'}
+            </p>
+            <p className="text-xs text-tertiary-500">The deletion is recorded (who, when, and the reason below).</p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Reason (optional)</label>
+              <textarea rows={3} className={FIELD_INPUT} value={removing.reason} onChange={(e) => setRemoving((p) => ({ ...p, reason: e.target.value }))} />
             </div>
           </div>
         )}
