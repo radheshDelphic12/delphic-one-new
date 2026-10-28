@@ -43,9 +43,9 @@ function preview(type, lines, intra) {
   return { sub, tax: Math.round(tax * 100) / 100, intra };
 }
 
-function NewInvoiceDrawer({ open, options, entities, invoice, onClose, onSaved }) {
+function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, onClose, onSaved }) {
   const { pushSuccess, pushError } = useAlerts();
-  const empty = { legal_entity_id: '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
+  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
   const [v, setV] = useState(empty);
   const [lines, setLines] = useState([blankLine()]);
   const [busy, setBusy] = useState(false);
@@ -221,8 +221,8 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
 }
 
 /** Book Keeping > Invoices: what each legal entity has billed, what is still due, and the receipts that went into wallets. */
-export default function GroupInvoicesView({ options, onWalletsChanged }) {
-  const [f, setF] = useState({ legal_entity_id: '', status: '', from: '', to: '', search: '' });
+export default function GroupInvoicesView({ options, onWalletsChanged, entityId = '' }) {
+  const [f, setF] = useState({ legal_entity_id: entityId, status: '', from: '', to: '', search: '' });
   const [newOpen, setNewOpen] = useState(false);
   const [openId, setOpenId] = useState(null);
   const params = Object.fromEntries(Object.entries(f).filter(([, x]) => x));
@@ -269,7 +269,7 @@ export default function GroupInvoicesView({ options, onWalletsChanged }) {
           )}
         </>
       )}
-      <NewInvoiceDrawer open={newOpen} options={options} entities={entities.data || []} onClose={() => setNewOpen(false)} onSaved={(inv) => { changed(); setOpenId(inv.id); }} />
+      <NewInvoiceDrawer open={newOpen} options={options} entities={entities.data || []} defaultEntityId={entityId} onClose={() => setNewOpen(false)} onSaved={(inv) => { changed(); setOpenId(inv.id); }} />
       <InvoiceDrawer id={openId} onClose={() => setOpenId(null)} onChanged={changed} />
     </div>
   );

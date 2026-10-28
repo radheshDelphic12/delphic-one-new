@@ -151,6 +151,7 @@ app.use('/api/v1/super-dashboard', superDashboardRoutes);
 app.use('/api/v1/hiring', hiringRoutes);
 // Group cash: bank accounts + wallets (group superadmin), and a read-only view of a workspace's own wallets.
 app.use('/api/v1/group-cash', groupCashRoutes.group);
+app.use('/api/v1/payments', require('./modules/payments/payments.routes'));
 app.use('/api/v1/wallets', groupCashRoutes.company);
 // Finance scope reduction — see middleware/financeScope.js. Expense claims stay
 // on; only the vendor-payment sub-routes of /expenses are switched off.

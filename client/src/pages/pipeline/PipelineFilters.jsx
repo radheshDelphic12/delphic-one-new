@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Filter, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
+import { fetchAllPages } from '../../lib/fetchAllPages.js';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import {
@@ -67,6 +68,7 @@ export default function PipelineFilters({
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams]);
   const [draftSearch, setDraftSearch] = useState(filters.search);
   const [accounts, setAccounts] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [bdas, setBdas] = useState([]);
   const [salesUsers, setSalesUsers] = useState([]);
   const [admins, setAdmins] = useState([]);
@@ -93,13 +95,21 @@ export default function PipelineFilters({
   useEffect(() => {
     let cancelled = false;
     if (fieldSet.has('account_id') || fieldSet.has('account_ids')) {
-      apiClient
-        .get('/accounts', { params: { type: 'client', limit: 100, sort_by: 'name', sort_order: 'asc' } })
-        .then(({ data }) => {
-          if (!cancelled) setAccounts((data.data || []).map((row) => ({ id: row.id, label: row.name })));
+      fetchAllPages('/accounts', { type: 'client', sort_by: 'name', sort_order: 'asc' })
+        .then((rows) => {
+          if (!cancelled) setAccounts((rows || []).map((row) => ({ id: row.id, label: row.name })));
         })
         .catch(() => {
           if (!cancelled) setAccounts([]);
+        });
+    }
+    if (fieldSet.has('vendor_ids')) {
+      fetchAllPages('/accounts', { type: 'vendor', sort_by: 'name', sort_order: 'asc' })
+        .then((rows) => {
+          if (!cancelled) setVendors((rows || []).map((row) => ({ id: row.id, label: row.name })));
+        })
+        .catch(() => {
+          if (!cancelled) setVendors([]);
         });
     }
     if (fieldSet.has('bda_id')) {
@@ -222,6 +232,18 @@ export default function PipelineFilters({
             options={PROFILE_SOURCE_OPTIONS}
             placeholder="Candidate source…"
             searchPlaceholder="Search source…"
+          />
+        </div>
+      )}
+
+      {fieldSet.has('vendor_ids') && (
+        <div className="min-w-[180px]">
+          <MultiSelectDropdown
+            value={filters.vendor_ids}
+            onChange={(vendor_ids) => patchFilters({ vendor_ids })}
+            options={vendors}
+            placeholder="Vendors…"
+            searchPlaceholder="Search vendors…"
           />
         </div>
       )}

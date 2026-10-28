@@ -62,4 +62,10 @@ function entriesPdf(data) {
   return toBuffer(doc);
 }
 
-module.exports = { entriesCsv, entriesPdf, receiptsCsv };
+function paymentsCsv(data) {
+  return csv([['Date', 'Company', 'Type', 'In / out', 'Amount', 'Currency', 'Rate to INR', 'INR value', 'Bank charges', 'Other deductions', 'Deduction note', 'Net', 'Wallet', 'Notes'],
+    ...data.rows.map((r) => [r.paid_on, r.company, r.label, r.direction, r.amount, r.currency, r.exchange_rate, r.inr_amount, r.bank_charges, r.other_deductions, r.deduction_notes, r.net_amount, r.wallet, r.notes]),
+    [], ['Total in (INR)', data.inr.in], ['Total out (INR)', data.inr.out]]);
+}
+
+module.exports = { entriesCsv, entriesPdf, receiptsCsv, paymentsCsv };

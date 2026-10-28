@@ -13,6 +13,8 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import GroupInvoicesView from './GroupInvoicesView.jsx';
 import { AccountEditDrawer, EntityEditDrawer } from './EntityAccountEditors.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -534,6 +536,103 @@ function StatementsView({ options, filters, seed }) {
   );
 }
 
+/** Every company's payments (from the payment popup and the wallet link): INR value, bank charges, deductions, the wallet; filters and CSV. */
+const OWN_STATUS_KINDS = new Set(['client_invoice', 'expense', 'vendor_payment']); // edited / undone where they were paid, not here
+
+function PaymentsReportView({ options }) {
+  const saved = useSaved();
+  const paymentDialog = usePaymentDialog();
+  const [undoing, setUndoing] = useState(null);
+  const [f, setF] = useState({ from: '', to: '', org_id: '', kind: '', direction: '' });
+  const params = Object.fromEntries(Object.entries(f).filter(([, x]) => x));
+  const data = useLiveData(() => api('/payments', params), { deps: [f.from, f.to, f.org_id, f.kind, f.direction] });
+  const d = data.data;
+  const set = (k) => (e) => setF((c) => ({ ...c, [k]: e.target.value }));
+  const headersOf = (r) => ({ 'X-Org-Id': r.company_id });
+  async function editPayment(r) {
+    try {
+      await paymentDialog.pay(
+        { title: `Edit payment · ${r.label}`, direction: r.direction, currency: r.currency, amount: r.amount, initialAmount: r.amount, cap: 1e13, party: r.company,
+          initial: { date: r.paid_on, exchange_rate: r.exchange_rate || '', bank_charges: Number(r.bank_charges) ? r.bank_charges : '', other_deductions: Number(r.other_deductions) ? r.other_deductions : '', deduction_notes: r.deduction_notes || '', notes: r.notes || '' },
+          note: 'Saving replaces this payment (and its wallet entry, if there was one). Choose Yes again to keep it in a wallet.', submitLabel: 'Save changes' },
+        (body) => apiClient.patch(`/payments/track/${r.id}`, { ...body, reason: 'Edited' }, { headers: headersOf(r) }),
+      );
+      saved.done('Payment updated');
+      data.refresh();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) saved.fail(err, 'Could not update the payment');
+    }
+  }
+  return (
+    <div className="space-y-4">
+      {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(undoing)}
+        title="Undo this payment"
+        description="The payment stops counting and its wallet entry (if any) is removed."
+        onClose={() => setUndoing(null)}
+        onConfirm={async (reason) => {
+          await apiClient.delete(`/payments/track/${undoing.id}`, { data: { reason }, headers: headersOf(undoing) });
+          setUndoing(null);
+          saved.done('Payment undone');
+          data.refresh();
+        }}
+      />
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4">
+        <h3 className="font-heading font-semibold text-tertiary-900">Payments</h3>
+        <p className="text-xs text-tertiary-500">Every payment recorded through the payment popup, in all companies: what was paid, the rate and INR value, bank charges and deductions, and whether it was tracked in a wallet.</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className={labelCls}>From<input type="date" className={inputCls} value={f.from} onChange={set('from')} /></label>
+          <label className={labelCls}>To<input type="date" className={inputCls} value={f.to} onChange={set('to')} /></label>
+          <label className={labelCls}>Company<select className={inputCls} value={f.org_id} onChange={set('org_id')}><option value="">All companies</option>{(options?.workspaces || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+          <label className={labelCls}>Type<select className={inputCls} value={f.kind} onChange={set('kind')}><option value="">All types</option>{(d?.kinds || []).map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
+          <label className={labelCls}>In / out<select className={inputCls} value={f.direction} onChange={set('direction')}><option value="">Both</option><option value="in">Money in</option><option value="out">Money out</option></select></label>
+          <div className="flex items-end"><button type="button" className="btn-secondary inline-flex items-center gap-1" onClick={() => downloadFile('/group-cash/payments', { ...params, format: 'csv' }, 'payments.csv').catch((err) => saved.fail(err, 'Could not download'))}><Download className="h-4 w-4" />CSV</button></div>
+        </div>
+      </div>
+      {!d ? <Skeleton className="h-40" /> : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-3" data-testid="payments-totals">
+            <div className="rounded-xl border border-tertiary-100 bg-white p-3 text-sm"><p className="text-xs text-tertiary-500">Total in (INR value)</p><Money value={d.inr.in} currency="INR" className="font-semibold" /></div>
+            <div className="rounded-xl border border-tertiary-100 bg-white p-3 text-sm"><p className="text-xs text-tertiary-500">Total out (INR value)</p><Money value={d.inr.out} currency="INR" className="font-semibold" /></div>
+            <div className="rounded-xl border border-tertiary-100 bg-white p-3 text-xs text-tertiary-600">{Object.entries(d.totals).map(([c, t]) => <p key={c}>{c}: bank charges {formatMoney(t.bank_charges, c)} · deductions {formatMoney(t.deductions, c)}</p>)}{!Object.keys(d.totals).length && <p>No payments yet.</p>}</div>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-tertiary-100 bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Date</th><th className="p-2">Company</th><th className="p-2">Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">INR value</th><th className="p-2 text-right">Bank charges</th><th className="p-2 text-right">Deductions</th><th className="p-2 text-right">Net</th><th className="p-2">Wallet</th><th className="p-2" /></tr></thead>
+              <tbody>
+                {d.rows.map((r) => (
+                  <tr key={r.id} className="border-t border-tertiary-100">
+                    <td className="whitespace-nowrap p-2">{r.paid_on}</td>
+                    <td className="p-2">{r.company}</td>
+                    <td className="p-2">{r.label}<span className="ml-1 text-[11px] text-tertiary-400">{r.direction === 'in' ? 'in' : 'out'}</span>{r.notes && <p className="text-xs text-tertiary-500">{r.notes}</p>}</td>
+                    <td className="p-2 text-right"><Money value={r.amount} currency={r.currency} /></td>
+                    <td className="p-2 text-right">{r.exchange_rate || '—'}</td>
+                    <td className="p-2 text-right"><Money value={r.inr_amount} currency="INR" /></td>
+                    <td className="p-2 text-right">{Number(r.bank_charges) ? <Money value={r.bank_charges} currency={r.currency} /> : '—'}</td>
+                    <td className="p-2 text-right">{Number(r.other_deductions) ? <span title={r.deduction_notes || ''}><Money value={r.other_deductions} currency={r.currency} /></span> : '—'}</td>
+                    <td className="p-2 text-right"><Money value={r.net_amount} currency={r.currency} /></td>
+                    <td className="p-2">{r.wallet || <span className="text-tertiary-400">not tracked</span>}</td>
+                    <td className="whitespace-nowrap p-2 text-right">
+                      {!OWN_STATUS_KINDS.has(r.kind) && (
+                        <>
+                          <button type="button" title="Edit" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => editPayment(r)}><Pencil className="h-4 w-4" /></button>
+                          <button type="button" title="Undo" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={() => setUndoing(r)}><Trash2 className="h-4 w-4" /></button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!d.rows.length && <tr><td colSpan={11} className="p-4 text-center text-tertiary-500">No payments in this selection.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function GoLiveCard() {
   const saved = useSaved();
   const setting = useLiveData(() => api('/settings'), { deps: [] });
@@ -734,6 +833,7 @@ const SECTIONS = [
   { key: 'invoices', label: 'Invoices', icon: FileText },
   { key: 'receipts', label: 'Receipts', icon: Receipt },
   { key: 'statements', label: 'Statements', icon: FileText },
+  { key: 'payments', label: 'Payments', icon: Receipt },
   { key: 'reconcile', label: 'Reconciliation', icon: Scale },
   { key: 'setup', label: 'Setup', icon: Banknote },
 ];
@@ -794,6 +894,7 @@ export default function GroupCashTab() {
           {section === 'invoices' && <GroupInvoicesView options={options.data} onWalletsChanged={refresh} />}
           {section === 'receipts' && <ReceiptsView options={options.data} />}
           {section === 'statements' && <StatementsView options={options.data} filters={filters} seed={stmtSeed} />}
+          {section === 'payments' && <PaymentsReportView options={options.data} />}
           {section === 'reconcile' && <ReconcileView position={p} onSaved={refresh} onOpenStatement={(accountId) => { setStmtSeed({ scope: 'account', id: accountId }); setSection('statements'); }} />}
           {section === 'setup' && <SetupView options={options.data} position={p} onChanged={refresh} />}
         </>

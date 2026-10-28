@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Plus, Truck } from 'lucide-react';
-import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
+import { useAuth } from '../../lib/authContext.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -131,14 +133,19 @@ export default function VendorPaymentsTab() {
     }
   }
 
-  const walletPay = useWalletPayment('out');
+  const { user } = useAuth();
+  const paymentDialog = usePaymentDialog();
+  const [undoPayment, setUndoPayment] = useState(null);
   async function pay(row) {
     try {
-      await walletPay.run((wp) => apiClient.post(`/expenses/vendor-payments/${row.id}/pay`, wp ? { wallet_payment: wp } : {}));
+      await paymentDialog.pay(
+        { title: 'Pay vendor', direction: 'out', currency: row.currency, amount: row.amount, fixedAmount: true, party: row.vendor_name },
+        (body) => apiClient.post(`/expenses/vendor-payments/${row.id}/pay`, body),
+      );
       pushInfo('Marked paid');
       load();
     } catch (err) {
-      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark paid'), 'Something went wrong');
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark paid'), 'Something went wrong');
     }
   }
 
@@ -160,6 +167,7 @@ export default function VendorPaymentsTab() {
             </>
           )}
           {row.status === 'approved' && <button type="button" className="btn-ghost text-xs" onClick={() => pay(row)}>Mark paid</button>}
+          {user?.is_group_superadmin && row.status === 'paid' && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setUndoPayment(row)}>Undo paid</button>}
         </div>
       ),
     },
@@ -167,7 +175,19 @@ export default function VendorPaymentsTab() {
 
   return (
     <div className="space-y-4">
-      {walletPay.dialog}
+      {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(undoPayment)}
+        title="Undo this payment"
+        description="The payment stops counting, its wallet entry (if any) is removed, and it goes back to approved. Only the group admin can do this."
+        onClose={() => setUndoPayment(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/expenses/vendor-payments/${undoPayment.id}/undo-paid`, { reason });
+          setUndoPayment(null);
+          pushInfo('Payment undone');
+          load();
+        }}
+      />
       <div className="flex justify-end">
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
           <Plus className="h-4 w-4" /> Raise payment

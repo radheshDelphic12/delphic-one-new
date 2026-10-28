@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the Novarex Pharmaceuticals API (/api/v1/novarex). Every call returns the unwrapped `data` payload.
@@ -67,7 +68,13 @@ export const nxApi = {
     invoices: (params) => get(ops('/invoices'), params),
     invoice: (id) => get(ops(`/invoices/${id}`)),
     invoiceShipment: (shipmentId, body) => post(ops(`/invoices/from-shipment/${shipmentId}`), body),
-    pay: (id, body) => post(ops(`/invoices/${id}/pay`), body),
+    pay: async (id, body) => {
+      const r = await post(ops(`/invoices/${id}/pay`), body);
+      // a purchase invoice is money going out; a sales / franchise invoice is money coming in
+      const outgoing = r?.type === 'purchase';
+      await trackInWallet({ kind: outgoing ? 'ledger_expense' : 'invoice_payment', reference_id: id, amount: body?.amount, title: outgoing ? 'Purchase invoice paid' : 'Invoice payment received', category: outgoing ? 'Purchase invoice' : 'Invoice payment' });
+      return r;
+    },
     cancelInvoice: (id, body) => post(ops(`/invoices/${id}/cancel`), body),
     returns: (params) => get(ops('/returns'), params),
     createReturn: (body) => post(ops('/returns'), body),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, Printer } from 'lucide-react';
-import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -240,14 +241,28 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     }
   }
 
-  const walletPay = useWalletPayment('in');
+  const paymentDialog = usePaymentDialog();
+  const [paymentsFor, setPaymentsFor] = useState(null);
   async function transition(row, status) {
     try {
-      await walletPay.run((wp) => apiClient.post(`/billing/invoices/${row.id}/status`, { status, ...(wp ? { wallet_payment: wp } : {}) }));
+      await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
       pushInfo(`Invoice ${row.invoice_number || ''} marked ${status}`);
       load();
     } catch (err) {
-      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
+      pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
+    }
+  }
+  // Marking paid is a payment: how much arrived (part payments leave the rest pending), the rate, bank charges, and the wallet (optional).
+  async function recordPayment(row) {
+    try {
+      await paymentDialog.pay(
+        { title: `Payment received · ${row.invoice_number || ''}`, direction: 'in', currency: row.currency, amount: row.pending_amount ?? row.amount, party: row.project?.name || row.project?.client_name || '' },
+        (body) => apiClient.post(`/billing/invoices/${row.id}/payments`, body),
+      );
+      pushInfo(`Payment recorded for invoice ${row.invoice_number || ''}`);
+      load();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to record the payment'), 'Something went wrong');
     }
   }
 
@@ -264,7 +279,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
       </span>
     ) },
     { key: 'currency', header: 'Currency', render: (r) => r.currency },
-    { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
+    { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.payment_status === 'partly_paid' && <span className="block text-[11px] text-warning-700">Paid {amountText(r.paid_amount, r.currency)} · pending {amountText(r.pending_amount, r.currency)}</span>}{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
     {
       key: 'actions',
       header: 'Action',
@@ -274,7 +289,8 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
           <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => remove(r)}>Delete</button>
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
-          {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
+          {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(r)}>{r.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
+          {r.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(r)}>Payments</button>}
         </div>
       ),
     },
@@ -286,7 +302,8 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
 
   return (
     <>
-      {walletPay.dialog}
+      {paymentDialog.dialog}
+      <InvoicePaymentsModal invoice={paymentsFor} canUndo={Boolean(user?.is_group_superadmin)} onClose={() => setPaymentsFor(null)} onChanged={load} />
       <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} />
     </>
   );

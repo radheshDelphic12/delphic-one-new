@@ -117,6 +117,9 @@ const RULES = [
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
   [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
+  // Tracking a company payment in a wallet (POST /payments/track): open here, and the route itself lets in the Admin, the group admin,
+  // people holding a finance / billing / payroll permission, and a company workspace's admin / manager / finance role (payments.routes.js).
+  [/^\/payments(\/|$)/, 'open'],
 
   // ---- Reports
   [/^\/reports\/hr(\/|$)/, ['reports.hr']],

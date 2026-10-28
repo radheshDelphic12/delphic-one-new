@@ -27,6 +27,7 @@ const MATRIX_FIELDS = [
   'account_ids',
   'premium',
   'profile_source',
+  'vendor_ids',
   'req_type',
   'bda_id',
   'sales_id',

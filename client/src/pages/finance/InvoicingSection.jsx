@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Printer, RefreshCw } from 'lucide-react';
-import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -174,24 +175,63 @@ export default function InvoicingSection() {
     }
   }
 
-  const walletPay = useWalletPayment('in');
+  const paymentDialog = usePaymentDialog();
+  const [paymentsFor, setPaymentsFor] = useState(null);
   async function transition(row, status) {
     try {
-      await walletPay.run((wp) => apiClient.post(`/billing/invoices/${row.id}/status`, { status, ...(wp ? { wallet_payment: wp } : {}) }));
+      await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
       pushInfo(`Invoice marked ${status}`);
       load();
     } catch (err) {
-      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to update invoice status'), 'Something went wrong');
+      pushError(apiErrorMessage(err, 'Failed to update invoice status'), 'Something went wrong');
+    }
+  }
+  async function recordPayment(row) {
+    try {
+      await paymentDialog.pay(
+        { title: `Payment received${row.invoice_number ? ` · ${row.invoice_number}` : ''}`, direction: 'in', currency: row.currency, amount: row.pending_amount ?? row.amount, party: row.line_items?.project?.name || row.client_account?.name || '' },
+        (body) => apiClient.post(`/billing/invoices/${row.id}/payments`, body),
+      );
+      pushInfo('Payment recorded');
+      load();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to record the payment'), 'Something went wrong');
     }
   }
 
+  // Month by month: which invoices are paid, partly paid or unpaid; filters combine, totals follow them (one line per currency).
+  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '' });
+  const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
+  const years = useMemo(() => [...new Set(rows.map((r) => r.period_year))].sort((a, b) => b - a), [rows]);
+  const shown = useMemo(() => rows.filter((r) => (
+    (!filters.year || String(r.period_year) === filters.year)
+    && (!filters.month || String(r.period_month) === filters.month)
+    && (!filters.status || r.status === filters.status)
+    && (!filters.pay || r.payment_status === filters.pay)
+    && (!filters.q || `${r.invoice_number || ''} ${r.line_items?.project?.name || ''} ${r.client_account?.name || ''}`.toLowerCase().includes(filters.q.toLowerCase()))
+  )), [rows, filters]);
+  const totals = useMemo(() => {
+    const by = new Map();
+    for (const r of shown) {
+      if (r.status === 'draft') continue;
+      const t = by.get(r.currency) || { invoiced: 0, paid: 0, pending: 0 };
+      t.invoiced += Number(r.amount || 0);
+      t.paid += Number(r.paid_amount || 0);
+      t.pending += Number(r.pending_amount ?? r.amount ?? 0);
+      by.set(r.currency, t);
+    }
+    return [...by];
+  }, [shown]);
+  const anyFilter = Object.values(filters).some(Boolean);
+
   const columns = [
+    { key: 'number', header: 'Invoice no.', render: (row) => <span className="font-mono text-xs font-medium text-tertiary-900">{row.invoice_number || '—'}</span> },
     { key: 'client', header: 'Project', render: (row) => <span>{row.line_items?.project?.name || row.client_account?.name || '—'}{row.line_items?.project?.code && <span className="block text-xs text-tertiary-500">{row.line_items.project.code}{row.line_items.project.client_name ? ` · ${row.line_items.project.client_name}` : ''}</span>}</span> },
     { key: 'period', header: 'Period', render: (row) => `${row.period_month}/${row.period_year}` },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
     { key: 'lines', header: 'Line items', render: (row) => invoiceLines(row).length },
     { key: 'source', header: 'Source', render: (row) => (row.calculation_version_id ? <span className="text-xs text-success-700">Locked billing v{row.line_items?.calculation_version}</span> : <span className="text-xs text-tertiary-500">Computed revenue</span>) },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
+    { key: 'status', header: 'Status', render: (row) => <span><Badge value={row.status} />{row.payment_status === 'partly_paid' && <span className="block text-[11px] text-warning-700">Paid {row.currency} {money(row.paid_amount)} · pending {money(row.pending_amount)}</span>}</span> },
     {
       key: 'actions',
       header: 'Actions',
@@ -199,7 +239,8 @@ export default function InvoicingSection() {
         <div className="flex gap-2">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(row, user?.active_org?.name)}><Printer className="h-3.5 w-3.5" /> View / download</button>
           {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
-          {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'paid')}>Mark paid</button>}
+          {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(row)}>{row.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
+          {row.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(row)}>Payments</button>}
         </div>
       ),
     },
@@ -207,15 +248,36 @@ export default function InvoicingSection() {
 
   return (
     <div className="space-y-3">
-      {walletPay.dialog}
+      {paymentDialog.dialog}
+      <InvoicePaymentsModal invoice={paymentsFor} canUndo={Boolean(user?.is_group_superadmin)} onClose={() => setPaymentsFor(null)} onChanged={load} />
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setComputeOpen(true)}><RefreshCw className="h-4 w-4" /> Compute revenue</button>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setGenerateOpen(true)}><Plus className="h-4 w-4" /> Generate invoice</button>
       </div>
+      <div className="flex flex-wrap items-end gap-2" data-testid="invoicing-filters">
+        <input value={filters.q} onChange={setFilter('q')} placeholder="Search invoice or project…" className="w-52 rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" />
+        <select value={filters.year} onChange={setFilter('year')} aria-label="Year" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All years</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+        <select value={filters.month} onChange={setFilter('month')} aria-label="Month" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All months</option>{['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+        <select value={filters.status} onChange={setFilter('status')} aria-label="Status" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any status</option><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option></select>
+        <select value={filters.pay} onChange={setFilter('pay')} aria-label="Payment" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any payment</option><option value="unpaid">Unpaid</option><option value="partly_paid">Partly paid</option><option value="paid">Paid</option></select>
+        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '' })}>Clear filters</button>}
+      </div>
+      {totals.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="invoicing-totals">
+          {totals.map(([cur, t]) => (
+            <div key={cur} className="rounded-xl border border-tertiary-100 bg-white p-3 text-sm">
+              <p className="text-xs font-medium text-tertiary-500">{cur}: sent and paid invoices</p>
+              <p className="mt-1">Invoiced <span className="font-semibold tabular-nums">{money(t.invoiced)}</span></p>
+              <p className="text-success-700">Paid <span className="font-semibold tabular-nums">{money(t.paid)}</span></p>
+              <p className="text-warning-700">Pending <span className="font-semibold tabular-nums">{money(t.pending)}</span></p>
+            </div>
+          ))}
+        </div>
+      )}
       {!loading && rows.length === 0 ? (
         <EmptyState title="No invoices yet" description="Compute revenue for a period, then generate an invoice for a project." />
       ) : (
-        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No invoices." />
+        <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} />
       )}
       <GenerateInvoiceDrawer open={generateOpen} onClose={() => setGenerateOpen(false)} onSubmit={generate} />
       <ComputeRevenueDrawer open={computeOpen} onClose={() => setComputeOpen(false)} onSubmit={computeRevenue} />

@@ -7,6 +7,7 @@ const FILTER_KEYS = [
   'account_id',
   'account_ids',
   'profile_source',
+  'vendor_ids',
   'req_type',
   'premium',
   'joining',
@@ -31,6 +32,7 @@ export function emptyPipelineFilters() {
     account_id: '',
     account_ids: [],
     profile_source: [],
+    vendor_ids: [],
     req_type: [],
     premium: '',
     joining: '',
@@ -56,6 +58,7 @@ export function filtersFromSearchParams(searchParams) {
   next.account_id = searchParams.get('account_id') || '';
   next.account_ids = csvToList(searchParams.get('account_ids'));
   next.profile_source = csvToList(searchParams.get('profile_source'));
+  next.vendor_ids = csvToList(searchParams.get('vendor_ids'));
   next.req_type = csvToList(searchParams.get('req_type'));
   next.premium = searchParams.get('premium') || '';
   next.joining = searchParams.get('joining') || '';
@@ -109,6 +112,7 @@ export function filtersToApiParams(filters, fields = null) {
   if (include('account_id') && filters.account_id) params.account_id = filters.account_id;
   if (include('account_ids') && filters.account_ids?.length) params.account_ids = filters.account_ids.join(',');
   if (include('profile_source') && filters.profile_source?.length) params.profile_source = filters.profile_source.join(',');
+  if (include('vendor_ids') && filters.vendor_ids?.length) params.vendor_ids = filters.vendor_ids.join(',');
   if (include('req_type') && filters.req_type?.length) params.req_type = filters.req_type.join(',');
   if (include('premium') && filters.premium) params.premium = filters.premium;
   if (include('joining') && filters.joining) params.joining = filters.joining;

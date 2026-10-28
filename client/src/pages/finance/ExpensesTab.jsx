@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
-import useWalletPayment, { isCancelled } from '../../components/cash/useWalletPayment.jsx';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { adminFor } from '../../lib/access.js';
@@ -327,14 +328,19 @@ export default function ExpensesTab() {
     apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
   }
 
-  const walletPay = useWalletPayment('out');
+  const paymentDialog = usePaymentDialog();
+  const [undoClaim, setUndoClaim] = useState(null);
+  // Reimbursing is a payment out: the rate (foreign claims), bank charges, and which wallet it comes from (optional, default no wallet).
   async function reimburse(row) {
     try {
-      await walletPay.run((wp) => apiClient.post(`/expenses/claims/${row.id}/reimburse`, wp ? { wallet_payment: wp } : {}));
+      await paymentDialog.pay(
+        { title: 'Reimburse expense', direction: 'out', currency: row.currency, amount: row.amount, fixedAmount: true, party: [row.submitter?.name, row.category].filter(Boolean).join(' · ') },
+        (body) => apiClient.post(`/expenses/claims/${row.id}/reimburse`, body),
+      );
       pushInfo('Marked reimbursed');
       load();
     } catch (err) {
-      if (!isCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
     }
   }
 
@@ -375,6 +381,7 @@ export default function ExpensesTab() {
             </>
           )}
           {isAdmin && row.status === 'approved' && <button type="button" className="btn-ghost text-xs" onClick={() => reimburse(row)}>Mark reimbursed</button>}
+          {user?.is_group_superadmin && row.status === 'reimbursed' && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setUndoClaim(row)}>Undo reimbursement</button>}
         </div>
       ),
     },
@@ -389,7 +396,19 @@ export default function ExpensesTab() {
 
   return (
     <div className="space-y-4">
-      {walletPay.dialog}
+      {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(undoClaim)}
+        title="Undo this reimbursement"
+        description="The payment stops counting, its wallet entry (if any) is removed, and the claim goes back to approved so it can be reimbursed properly. Only the group admin can do this."
+        onClose={() => setUndoClaim(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/expenses/claims/${undoClaim.id}/undo-reimbursement`, { reason });
+          setUndoClaim(null);
+          pushInfo('Reimbursement undone');
+          load();
+        }}
+      />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
           {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
