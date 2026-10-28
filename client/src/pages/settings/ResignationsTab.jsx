@@ -252,7 +252,7 @@ export default function ResignationsTab({ showTeam, canHr, isAdmin }) {
   const [team, setTeam] = useState(null);
   const [all, setAll] = useState(null);
   const [settings, setSettings] = useState(null);
-  const [filter, setFilter] = useState('pending');
+  const [filter, setFilter] = useState('open');
 
   const load = useCallback(async () => {
     try {
@@ -276,10 +276,10 @@ export default function ResignationsTab({ showTeam, canHr, isAdmin }) {
 
   const shown = all.filter((r) => {
     if (filter === 'all') return true;
+    if (filter === 'open') return r.status === 'submitted' || r.status === 'manager_approved';
     if (filter === 'pending') return r.status === 'manager_approved' || (r.status === 'submitted' && !r.manager_membership_id);
     return r.status === filter;
   });
-  const waitingOnManagers = all.filter((r) => r.status === 'submitted' && r.manager_membership_id).length;
 
   return (
     <div className="space-y-6">
@@ -297,11 +297,11 @@ export default function ResignationsTab({ showTeam, canHr, isAdmin }) {
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="font-heading text-sm font-semibold text-tertiary-900">All resignations (HR)</h2>
             <select value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-xl border px-3 py-1.5 text-sm">
+              <option value="open">All open</option>
               <option value="pending">Waiting for HR</option>
               <option value="all">All</option>
               {Object.entries(STATUS_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select>
-            {waitingOnManagers > 0 && <span className="text-xs text-tertiary-500">{waitingOnManagers} still with the reporting manager</span>}
           </div>
           {shown.length === 0 ? <p className="text-sm text-tertiary-400">Nothing here.</p> : shown.map((r) => <HrCard key={`${r.id}-${r.status}`} r={r} onChanged={load} />)}
         </section>

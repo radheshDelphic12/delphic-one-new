@@ -52,9 +52,10 @@ const ROLE_EVENT_MATRIX = {
   increment_review_due: { roles: ['admin'], defaultInApp: true },
   // To the person on the bench and the admins: days left on the bench.
   bench_countdown: { roles: ['admin', 'employee'], defaultInApp: true },
-  resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true },
-  resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true },
-  resignation_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  // Resignations also go by email (HR and the Admin act on them, so the Admin is mailed too, unlike the copy-everything events).
+  resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
+  resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
+  resignation_decided: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
@@ -62,7 +63,8 @@ const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
 // Whether email is on for someone who has not set a preference. Admins are copied on every event (see above), so for them email
 // is opt-in: otherwise an admin who never subscribed gets every interview mail in the company. They can still switch it on per event.
 function defaultEmailFor(type, role) {
-  return role !== 'admin' && ROLE_EVENT_MATRIX[type]?.defaultEmail === true;
+  const entry = ROLE_EVENT_MATRIX[type];
+  return (role !== 'admin' || entry?.defaultEmailAdmins === true) && entry?.defaultEmail === true;
 }
 
 // One-line human labels + descriptions for the preferences UI.

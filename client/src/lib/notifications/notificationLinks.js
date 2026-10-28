@@ -13,6 +13,9 @@ export function entityLink({ entity_type, entity_id, metadata } = {}) {
       return entity_id ? `/submissions/${entity_id}` : '/submissions';
     case 'profile':
       return entity_id ? `/profiles/${entity_id}` : '/profiles';
+    // managers and HR land on Settings > Resignations; an employee has no such tab, so they land on Account (their own card)
+    case 'resignation':
+      return '/settings?tab=resignations';
     case 'pm_ticket':
       return metadata?.project_id && entity_id ? `/pm/projects/${metadata.project_id}?ticket=${entity_id}` : '/pm';
     case 'interview_round': {
