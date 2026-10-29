@@ -7,28 +7,29 @@ import { allowed, isAdminUser } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Modal from '../../components/ui/Modal.jsx';
+import { CHECKIN_RESULT_LABEL, CHECKIN_COMPARISON_LABEL, CHECKIN_PLACE_LABEL, hoursMinutes, clock } from './checkinLabels.js';
 
 // Location check-in (Delphic Global, full-time employees). Kept apart from Attendance: nothing here marks a day present or touches pay.
 // My check-in (everyone), Report (HR / admin), Settings (admin).
 
 const RESULT = {
-  in_office: { label: 'In office', cls: 'bg-green-50 text-green-700' },
-  outside_office: { label: 'Outside office', cls: 'bg-red-50 text-red-700 ring-1 ring-red-200' },
-  work_from_home: { label: 'Work from home', cls: 'bg-blue-50 text-blue-700' },
-  location_unavailable: { label: 'Location unavailable', cls: 'bg-amber-50 text-amber-700' },
+  in_office: { label: CHECKIN_RESULT_LABEL.in_office, cls: 'bg-green-50 text-green-700' },
+  outside_office: { label: CHECKIN_RESULT_LABEL.outside_office, cls: 'bg-red-50 text-red-700 ring-1 ring-red-200' },
+  work_from_home: { label: CHECKIN_RESULT_LABEL.work_from_home, cls: 'bg-blue-50 text-blue-700' },
+  location_unavailable: { label: CHECKIN_RESULT_LABEL.location_unavailable, cls: 'bg-amber-50 text-amber-700' },
 };
 const COMPARISON = {
-  as_planned: { label: 'As planned', cls: 'text-green-700' },
-  office_day_outside: { label: 'Office day, checked in away from office', cls: 'font-semibold text-red-700' },
-  home_day_at_office: { label: 'Home day, checked in at office', cls: 'text-amber-700' },
-  no_location: { label: 'Office day, no location', cls: 'text-amber-700' },
-  wfh_no_location: { label: 'Home day, no location', cls: 'text-tertiary-500' },
-  no_checkin: { label: 'Working day, no check-in', cls: 'font-medium text-amber-700' },
-  on_leave: { label: 'On leave', cls: 'text-tertiary-500' },
+  as_planned: { label: CHECKIN_COMPARISON_LABEL.as_planned, cls: 'text-green-700' },
+  office_day_outside: { label: CHECKIN_COMPARISON_LABEL.office_day_outside, cls: 'font-semibold text-red-700' },
+  home_day_at_office: { label: CHECKIN_COMPARISON_LABEL.home_day_at_office, cls: 'text-amber-700' },
+  no_location: { label: CHECKIN_COMPARISON_LABEL.no_location, cls: 'text-amber-700' },
+  wfh_no_location: { label: CHECKIN_COMPARISON_LABEL.wfh_no_location, cls: 'text-tertiary-500' },
+  no_checkin: { label: CHECKIN_COMPARISON_LABEL.no_checkin, cls: 'font-medium text-amber-700' },
+  on_leave: { label: CHECKIN_COMPARISON_LABEL.on_leave, cls: 'text-tertiary-500' },
 };
 const REASON = { lunch: 'Lunch', break: 'Break', meeting: 'Meeting', other: 'Other' };
 const ATTENDANCE = { present: 'Present', absent: 'Absent', half_day: 'Half day', leave: 'On leave', holiday: 'Holiday', wfh: 'Work from home' };
-const PLACE = { office: 'Work from office', home: 'Work from home' };
+const PLACE = CHECKIN_PLACE_LABEL;
 
 const pad = (n) => String(n).padStart(2, '0');
 const minutesToTime = (m) => (m == null ? '' : `${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
@@ -36,18 +37,9 @@ const timeToMinutes = (t) => {
   const [h, m] = String(t || '0:0').split(':').map(Number);
   return h * 60 + (m || 0);
 };
-// 211 -> "3h 31m", 45 -> "45m", 120 -> "2h"
-const hoursMinutes = (m) => {
-  const total = Math.round(Number(m) || 0);
-  const h = Math.floor(total / 60);
-  const r = total % 60;
-  if (h === 0) return `${r}m`;
-  return r === 0 ? `${h}h` : `${h}h ${r}m`;
-};
 // An instant <-> the value of a datetime-local input, in India time.
 const toLocalInput = (iso) => (iso ? new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 16) : '');
 const fromLocalInput = (v) => new Date(`${v}:00+05:30`).toISOString();
-const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }) : '—');
 const todayIso = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
 const daysAgoIso = (n) => new Date(Date.now() + 330 * 60000 - n * 86400000).toISOString().slice(0, 10);
 
@@ -738,6 +730,7 @@ function RegisterView() {
                     <td className="px-3 py-2">{c.checkin ? <Pill result={c.checkin.result} /> : '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {c.state === 'missing' && <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">Missing</span>}
+                      {c.state === 'not_yet' && <span className="text-tertiary-500">Not yet (before late-after time)</span>}
                       {c.state === 'checked_in' && <button type="button" className="text-primary-700 underline" onClick={() => setDetail({ p, c })}>Entries</button>}
                       {c.state === 'leave' && <span className="text-blue-700">On leave</span>}
                       {c.state === 'off' && <span className="text-tertiary-500">{c.attendance_code === 'H' ? 'Holiday' : 'Weekly off'}</span>}
