@@ -4,14 +4,15 @@ import { LogIn, LogOut, MapPin } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 
-const CHECKIN_PATH = '/attendance?section=location-checkin';
+// The check-in card lives on the dashboard.
+const CHECKIN_PATH = '/#workplace-checkin';
 
 const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '');
 
 /**
  * Workplace Check-in shortcut beside the notification bell (Delphic Global, full-time employees).
  * Not checked in: a highlighted "Check in" button; checked in: the time plus "Check out"; done: a quiet chip.
- * It only links to the Workplace Check-in tab, where the location / selfie step happens.
+ * It only links to the dashboard card, where the location / selfie step happens.
  */
 export default function HeaderCheckinButton() {
   const { user } = useAuth();

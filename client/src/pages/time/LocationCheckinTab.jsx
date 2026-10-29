@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Camera, Download, LogIn, LogOut, MapPin } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -97,7 +98,7 @@ function SelfieCapture({ onCapture, onCancel }) {
   );
 }
 
-function MyCheckin() {
+function MyCheckin({ showHistory = true }) {
   const { pushError, pushSuccess } = useAlerts();
   const [today, setToday] = useState(null);
   const [history, setHistory] = useState([]);
@@ -169,7 +170,7 @@ function MyCheckin() {
         )}
       </div>
       {camera && <SelfieCapture onCancel={() => setCamera(false)} onCapture={(blob) => send('/location-checkin/check-in', blob)} />}
-      <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
+      {showHistory && <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <table className="min-w-full text-sm">
           <thead className="bg-tertiary-50 text-left text-xs uppercase text-tertiary-500">
             <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Planned</th><th className="px-3 py-2">In</th><th className="px-3 py-2">Out</th><th className="px-3 py-2">Late</th><th className="px-3 py-2">Where</th></tr>
@@ -184,8 +185,31 @@ function MyCheckin() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
+  );
+}
+
+/** Highlighted check-in card for the dashboard (Delphic Global, full-time employees); hidden for everyone else. */
+export function DashboardCheckinCard() {
+  const { user } = useAuth();
+  const { hash } = useLocation();
+  const [eligible, setEligible] = useState(false);
+  const isMaster = Boolean(user?.active_org?.is_master_workspace);
+  useEffect(() => {
+    if (!isMaster) return;
+    apiClient.get('/location-checkin/today').then(({ data }) => setEligible(Boolean(data.data?.eligible))).catch(() => setEligible(false));
+  }, [isMaster, user?.active_org?.id]);
+  // The header button links to /#workplace-checkin; bring the card into view once it has rendered.
+  useEffect(() => {
+    if (eligible && hash === '#workplace-checkin') document.getElementById('workplace-checkin')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [eligible, hash]);
+  if (!isMaster || !eligible) return null;
+  return (
+    <section id="workplace-checkin" className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4 shadow-card">
+      <h2 className="mb-3 flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><MapPin className="h-4 w-4 text-primary-600" aria-hidden="true" />Workplace check-in</h2>
+      <MyCheckin showHistory={false} />
+    </section>
   );
 }
 
