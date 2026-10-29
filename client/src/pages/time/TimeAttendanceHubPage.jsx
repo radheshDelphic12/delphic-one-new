@@ -37,7 +37,7 @@ const BASE_TABS = [
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
 // Where people check in from (office, home, away) and who is late: a separate record, never feeds attendance or pay. Delphic Global only.
-const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Location Check-in', icon: MapPin, need: 'basic.attendance' };
+const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Workplace Check-in', icon: MapPin, need: 'basic.attendance' };
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
 const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.timesheet' };
 // Admin: the client project timesheet (IT and contractors).

@@ -11,6 +11,7 @@ import { usePermissions } from '../../lib/permissions.js';
 import { hasNeed, isAdminUser, isPermissionMode } from '../../lib/access.js';
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
+import HeaderCheckinButton from './HeaderCheckinButton.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
 import { NAV_ITEMS } from './navItems.js';
 import Drawer from '../ui/Drawer.jsx';
@@ -599,6 +600,7 @@ export default function AppLayout() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <HeaderCheckinButton />
                 <NotificationBell />
               </div>
             </div>
