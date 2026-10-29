@@ -95,13 +95,18 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const isLive = (a) => !a.deleted_at && !a.superseded_at;
 const adminOf = (user) => user?.role === 'admin' || Boolean(user?.is_superadmin);
 
+const SETTINGS_SELECT = { assessment_max_attempts: true, assessment_email_candidate: true };
+
 async function getSettings(orgId) {
-  const org = orgId ? await prisma.org.findUnique({ where: { id: orgId }, select: { assessment_max_attempts: true } }) : null;
-  return { assessment_max_attempts: org?.assessment_max_attempts ?? DEFAULT_MAX_ATTEMPTS };
+  const org = orgId ? await prisma.org.findUnique({ where: { id: orgId }, select: SETTINGS_SELECT }) : null;
+  return { assessment_max_attempts: org?.assessment_max_attempts ?? DEFAULT_MAX_ATTEMPTS, assessment_email_candidate: org?.assessment_email_candidate ?? false };
 }
 
-const updateSettings = (orgId, patch) =>
-  prisma.org.update({ where: { id: orgId }, data: { assessment_max_attempts: patch.assessment_max_attempts }, select: { assessment_max_attempts: true } });
+async function updateSettings(orgId, patch) {
+  const data = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  await prisma.org.update({ where: { id: orgId }, data });
+  return getSettings(orgId);
+}
 
 async function audit(db, user, action, attempt, reason, extra = {}) {
   await db.auditLog.create({
@@ -130,7 +135,8 @@ async function screeningRoundId(db, submissionId) {
   return sub?.seat?.requirement?.interview_template?.rounds?.[0]?.id || null;
 }
 
-// Sends the test to the candidate of a submission: a new public link, also emailed when the profile has an email.
+// Sends the test to the candidate of a submission: a new public link to copy. It is e-mailed only when the company setting
+// "e-mail the test link to the candidate" is on (off by default).
 async function invite({ testId, submissionId, overrideLimit = false }, user) {
   const test = await prisma.assessmentTest.findUnique({ where: { id: testId }, include: { _count: { select: { questions: true } } } });
   if (!test || !test.is_active) return { error: 'not_found' };
@@ -147,7 +153,7 @@ async function invite({ testId, submissionId, overrideLimit = false }, user) {
   if (live.some((a) => a.status === 'submitted')) return { error: 'already_completed' };
   if (live.some((a) => a.status === 'started')) return { error: 'in_progress' };
 
-  const { assessment_max_attempts: limit } = await getSettings(user.org_id);
+  const { assessment_max_attempts: limit, assessment_email_candidate: emailCandidate } = await getSettings(user.org_id);
   if (limit > 0 && existing.length >= limit && !(overrideLimit && adminOf(user))) return { error: 'limit_reached', limit, used: existing.length };
 
   const token = crypto.randomBytes(24).toString('hex');
@@ -168,7 +174,7 @@ async function invite({ testId, submissionId, overrideLimit = false }, user) {
     });
   });
   const link = attemptLink(token);
-  if (attempt.candidate_email) {
+  if (emailCandidate && attempt.candidate_email) {
     await enqueue(prisma, {
       kind: 'assessment_invite',
       to: { email: attempt.candidate_email, name: attempt.candidate_name },
@@ -228,6 +234,49 @@ async function listAttempts({ submissionId }, user) {
   const items = rows.map((a) => ({ ...toAttemptView(a, names), test_name: a.test.name }));
   const live = items.find((a) => a.is_live) || null;
   return { items, live_id: live?.id || null, used: rows.length, limit, remaining: limit > 0 ? Math.max(0, limit - rows.length) : null };
+}
+
+// Opens a submitted attempt for review: every question with the candidate's pick, the marks it carried and whether it was right.
+// Uses the test's questions as they are now (answers are stored by question id); a question removed since is simply not listed.
+async function reviewAttempt(id) {
+  const a = await prisma.assessmentAttempt.findFirst({ where: { id, deleted_at: null }, include: { test: { include: TEST_INCLUDE } } });
+  if (!a) return { error: 'not_found' };
+  if (a.status !== 'submitted') return { error: 'not_submitted' };
+  const answers = a.answers || {};
+  const questions = a.test.questions.map((tq, i) => {
+    const q = tq.question;
+    const options = Array.isArray(q.options) ? q.options : [];
+    const best = Math.max(0, ...options.map((o) => Number(o.marks) || 0));
+    const raw = answers[q.id];
+    const picked = raw === undefined || raw === null ? null : Number(raw);
+    const pickedOption = picked != null ? options[picked] : null;
+    const got = pickedOption ? Number(pickedOption.marks) || 0 : 0;
+    const result = !pickedOption ? 'not_answered' : got >= best && best > 0 ? 'correct' : got > 0 ? 'partial' : 'wrong';
+    return {
+      number: i + 1,
+      id: q.id,
+      category: q.category,
+      text: q.text,
+      options: options.map((o, idx) => ({ text: o.text, marks: Number(o.marks) || 0, picked: idx === picked, best: best > 0 && (Number(o.marks) || 0) === best })),
+      marks_got: got,
+      marks_full: best,
+      result,
+    };
+  });
+  const count = (r) => questions.filter((q) => q.result === r).length;
+  return {
+    review: {
+      id: a.id,
+      test_name: a.test.name,
+      candidate_name: a.candidate_name,
+      score_percent: a.score_percent != null ? Number(a.score_percent) : null,
+      passed: a.passed,
+      pass_percentage: a.pass_percentage,
+      submitted_at: a.submitted_at,
+      summary: { total: questions.length, correct: count('correct'), partial: count('partial'), wrong: count('wrong'), not_answered: count('not_answered') },
+      questions,
+    },
+  };
 }
 
 // Admin: delete a link or a scored result. A deleted attempt stops working, drops out of every count and frees a slot of the limit.
@@ -313,6 +362,7 @@ module.exports = {
   invite,
   listAttempts,
   deleteAttempt,
+  reviewAttempt,
   extendAttempt,
   getSettings,
   updateSettings,

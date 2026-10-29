@@ -327,3 +327,61 @@ describe('tests & interviews analytics', () => {
     expect(filters.recruiters.length).toBeGreaterThan(0);
   });
 });
+
+describe('e-mail setting and answer review', () => {
+  test('the test link is e-mailed only when the company setting is on (default off)', async () => {
+    const req = await makeRequirement();
+    const sub = await makeSubmission(req.id);
+    await prisma.profile.updateMany({ data: { email: 'cand@test.local' } });
+    expect((await authed(request(app).get('/api/v1/assessments/settings'), recruiterToken)).body.data.assessment_email_candidate).toBe(false);
+    expect((await send(sub)).status).toBe(201);
+    expect(await prisma.emailOutbox.count({ where: { kind: 'assessment_invite' } })).toBe(0);
+
+    expect((await authed(request(app).put('/api/v1/assessments/settings'), recruiterToken).send({ assessment_email_candidate: true })).status).toBe(403);
+    const on = await authed(request(app).put('/api/v1/assessments/settings'), adminToken).send({ assessment_email_candidate: true });
+    expect(on.body.data).toMatchObject({ assessment_email_candidate: true, assessment_max_attempts: 3 });
+    expect((await send(sub)).status).toBe(201);
+    expect(await prisma.emailOutbox.count({ where: { kind: 'assessment_invite' } })).toBe(1);
+  });
+
+  test('a submitted attempt can be opened to see each answer marked right, partly right or wrong', async () => {
+    const req = await makeRequirement();
+    const sub = await makeSubmission(req.id);
+    const q2 = (await authed(request(app).post('/api/v1/assessments/questions'), adminToken).send({
+      category: 'behavioural', text: 'A teammate misses a deadline', options: [{ text: 'Ignore', marks: 0 }, { text: 'Ask why', marks: 2 }, { text: 'Help plan', marks: 4 }],
+    })).body.data;
+    const q3 = (await authed(request(app).post('/api/v1/assessments/questions'), adminToken).send({
+      category: 'reasoning', text: 'Next in 2, 4, 8?', options: [{ text: '10', marks: 0 }, { text: '16', marks: 1 }],
+    })).body.data;
+    const t2 = (await authed(request(app).post('/api/v1/assessments/tests'), adminToken).send({ name: 'Three question test', pass_percentage: 50, question_ids: [questionId, q2.id, q3.id] })).body.data;
+    const sent = await authed(request(app).post('/api/v1/assessments/attempts'), recruiterToken).send({ test_id: t2.id, submission_id: sub });
+    const id = sent.body.data.id;
+
+    // nothing to review before the candidate submits
+    expect((await authed(request(app).get(`/api/v1/assessments/attempts/${id}/review`), recruiterToken)).status).toBe(409);
+
+    // q1 right, q2 middle option (partly right), q3 not answered
+    const token = tokenOf(sent.body.data.link);
+    const res = await request(app).post(`/api/v1/public/assessments/${token}/submit`).send({ answers: { [questionId]: 1, [q2.id]: 1 } });
+    expect(res.status).toBe(200);
+
+    const review = (await authed(request(app).get(`/api/v1/assessments/attempts/${id}/review`), recruiterToken)).body.data;
+    expect(review.summary).toEqual({ total: 3, correct: 1, partial: 1, wrong: 0, not_answered: 1 });
+    expect(review.questions.map((q) => q.result)).toEqual(['correct', 'partial', 'not_answered']);
+    expect(review.questions[1]).toMatchObject({ marks_got: 2, marks_full: 4 });
+    expect(review.questions[1].options.map((o) => [o.picked, o.best])).toEqual([[false, false], [true, false], [false, true]]);
+    expect(review.score_percent).toBe(50); // (1 + 2 + 0) of (1 + 4 + 1) marks, rounded
+    // the candidate-facing link never exposes marks or answers
+    expect((await request(app).get(`/api/v1/public/assessments/${token}`)).status).toBe(410);
+    expect((await request(app).get(`/api/v1/assessments/attempts/${id}/review`)).status).toBe(401);
+
+    // a wrong pick is marked wrong
+    await authed(request(app).delete(`/api/v1/assessments/attempts/${id}`), adminToken).send({});
+    const retake = await authed(request(app).post('/api/v1/assessments/attempts'), recruiterToken).send({ test_id: t2.id, submission_id: sub });
+    await request(app).post(`/api/v1/public/assessments/${tokenOf(retake.body.data.link)}/submit`).send({ answers: { [questionId]: 0, [q2.id]: 0, [q3.id]: 0 } });
+    const wrong = (await authed(request(app).get(`/api/v1/assessments/attempts/${retake.body.data.id}/review`), recruiterToken)).body.data;
+    expect(wrong.summary).toMatchObject({ correct: 0, wrong: 3 });
+    // a deleted attempt cannot be reviewed
+    expect((await authed(request(app).get(`/api/v1/assessments/attempts/${id}/review`), recruiterToken)).status).toBe(404);
+  });
+});

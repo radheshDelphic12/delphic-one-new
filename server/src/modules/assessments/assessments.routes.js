@@ -18,6 +18,7 @@ const ERRORS = {
   superseded: [410, 'This link was replaced by a newer one. Ask the recruiter for the latest link'],
   already_completed: [409, 'This candidate already has a scored test for this round. An admin can delete the result to allow a retake'],
   in_progress: [409, 'The candidate is in the middle of this test. Wait for it to be submitted, or ask an admin to delete the attempt'],
+  not_submitted: [409, 'The candidate has not submitted this test yet, so there are no answers to review'],
   not_extendable: [409, 'Only an unfinished, current link can be extended'],
 };
 const mapError = (res, error) => fail(res, ...(ERRORS[error] || [400, 'Bad request']));
@@ -76,6 +77,11 @@ router.post('/attempts', authorize('admin', 'recruiter', 'sales'), asyncHandler(
   if (r.error === 'limit_reached') return fail(res, 409, `This submission has used ${r.used} of ${r.limit} allowed tests. An admin can raise the limit, delete an attempt or send one anyway`);
   return r.error ? mapError(res, r.error) : created(res, { ...r.attempt, link: r.link, superseded: r.superseded });
 }));
+// The answers of a submitted attempt, marked right / wrong (for the team only; never sent to the candidate).
+router.get('/attempts/:id/review', asyncHandler(async (req, res) => {
+  const r = await service.reviewAttempt(z.string().uuid().parse(req.params.id));
+  return r.error ? mapError(res, r.error) : ok(res, r.review);
+}));
 // Admin only: remove a link or a scored result (the candidate can then be sent a new test), or give a link more time. Audited.
 router.delete('/attempts/:id', authorize('admin'), asyncHandler(async (req, res) => {
   const body = z.object({ reason: z.string().trim().max(500).optional() }).parse(req.body || {});
@@ -91,7 +97,7 @@ router.post('/attempts/:id/extend', authorize('admin'), asyncHandler(async (req,
 // Attempt limit per submission (0 = no limit); admin editable.
 router.get('/settings', asyncHandler(async (req, res) => ok(res, await service.getSettings(req.user.org_id))));
 router.put('/settings', authorize('admin'), asyncHandler(async (req, res) => {
-  const body = z.object({ assessment_max_attempts: z.number().int().min(0).max(50) }).parse(req.body);
+  const body = z.object({ assessment_max_attempts: z.number().int().min(0).max(50).optional(), assessment_email_candidate: z.boolean().optional() }).parse(req.body);
   return ok(res, await service.updateSettings(req.user.org_id, body));
 }));
 

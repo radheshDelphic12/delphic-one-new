@@ -425,15 +425,33 @@ function AnalyticsTab() {
 // Attempt limit: how many tests can be sent for one submission (admin editable; 0 = no limit).
 function AttemptLimitSetting({ isAdmin }) {
   const [value, setValue] = useState('');
+  const [emailOn, setEmailOn] = useState(false);
   const { busy, run } = useSave();
-  useEffect(() => { apiClient.get('/assessments/settings').then(({ data }) => setValue(String(data.data.assessment_max_attempts))).catch(() => {}); }, []);
+  useEffect(() => {
+    apiClient.get('/assessments/settings').then(({ data }) => { setValue(String(data.data.assessment_max_attempts)); setEmailOn(Boolean(data.data.assessment_email_candidate)); }).catch(() => {});
+  }, []);
   if (value === '') return null;
   return (
+    <div className="space-y-2">
     <div className="flex flex-wrap items-end gap-3 rounded-xl border border-tertiary-100 bg-white p-3 shadow-soft" data-testid="attempt-limit">
       <Field label="Tests allowed per candidate submission" hint="Counted per submission (not per email), including replaced links; deleting an attempt frees a slot. 0 = no limit. An admin can still send past the limit.">
         <input type="number" min={0} max={50} className={`${FIELD_INPUT} !w-28`} value={value} disabled={!isAdmin} onChange={(e) => setValue(e.target.value)} />
       </Field>
       {isAdmin && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={() => run(() => apiClient.put('/assessments/settings', { assessment_max_attempts: Number(value) }), 'Limit saved')}>Save limit</button>}
+    </div>
+    <div className="rounded-xl border border-tertiary-100 bg-white p-3 shadow-soft" data-testid="email-setting">
+      <label className="flex items-start gap-2 text-sm text-tertiary-800">
+        <input type="checkbox" className="mt-1" checked={emailOn} disabled={!isAdmin || busy}
+          onChange={async (e) => {
+            const next = e.target.checked;
+            const ok = await run(() => apiClient.put('/assessments/settings', { assessment_email_candidate: next }), next ? 'Test links will be e-mailed' : 'Test links will not be e-mailed');
+            if (ok) setEmailOn(next);
+          }} />
+        <span>E-mail the test link to the candidate
+          <span className="block text-xs text-tertiary-500">Off by default: the recruiter copies the link from the candidate&apos;s interview plan and sends it themselves. Turn on to also e-mail it to the candidate&apos;s address when a test is sent.</span>
+        </span>
+      </label>
+    </div>
     </div>
   );
 }

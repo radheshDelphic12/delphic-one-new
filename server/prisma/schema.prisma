@@ -2036,6 +2036,8 @@ model Org {
   resignation_manager_required Boolean   @default(true)
   // Hiring: how many assessment tests can be sent for one submission (0 = no limit).
   assessment_max_attempts      Int       @default(3)
+  // Hiring: e-mail the test link to the candidate (off by default; the recruiter copies the link instead).
+  assessment_email_candidate   Boolean   @default(false)
   created_at                 DateTime  @default(now())
   updated_at                 DateTime  @default(now()) @updatedAt
 
