@@ -31,6 +31,14 @@ const timeToMinutes = (t) => {
   const [h, m] = String(t || '0:0').split(':').map(Number);
   return h * 60 + (m || 0);
 };
+// 211 -> "3h 31m", 45 -> "45m", 120 -> "2h"
+const hoursMinutes = (m) => {
+  const total = Math.round(Number(m) || 0);
+  const h = Math.floor(total / 60);
+  const r = total % 60;
+  if (h === 0) return `${r}m`;
+  return r === 0 ? `${h}h` : `${h}h ${r}m`;
+};
 const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }) : '—');
 const todayIso = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
 const daysAgoIso = (n) => new Date(Date.now() + 330 * 60000 - n * 86400000).toISOString().slice(0, 10);
@@ -164,7 +172,7 @@ function MyCheckin({ showHistory = true }) {
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
             <span>In <b>{clock(rec.check_in_at)}</b></span>
             <Pill result={rec.check_in_result} />
-            {rec.late_minutes > 0 && <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">{rec.late_minutes} min late</span>}
+            {rec.late_minutes > 0 && <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">{hoursMinutes(rec.late_minutes)} late</span>}
             {rec.check_out_at && <span>Out <b>{clock(rec.check_out_at)}</b></span>}
           </div>
         )}
@@ -180,7 +188,7 @@ function MyCheckin({ showHistory = true }) {
             {history.map((r) => (
               <tr key={r.id} className="border-t border-tertiary-100">
                 <td className="px-3 py-2">{r.date}</td><td className="px-3 py-2">{PLACE[r.planned_place]}</td><td className="px-3 py-2">{clock(r.check_in_at)}</td><td className="px-3 py-2">{clock(r.check_out_at)}</td>
-                <td className="px-3 py-2">{r.late_minutes > 0 ? `${r.late_minutes} min` : '—'}</td><td className="px-3 py-2"><Pill result={r.check_in_result} /></td>
+                <td className="px-3 py-2">{r.late_minutes > 0 ? hoursMinutes(r.late_minutes) : '—'}</td><td className="px-3 py-2"><Pill result={r.check_in_result} /></td>
               </tr>
             ))}
           </tbody>
@@ -311,7 +319,7 @@ function Report() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Tile label="Check-ins" value={s.check_ins} />
           <Tile label="Late" value={s.late} tone={s.late ? 'text-red-700' : undefined} />
-          <Tile label="Avg late (min)" value={s.avg_late_minutes} />
+          <Tile label="Avg late" value={s.avg_late_minutes ? hoursMinutes(s.avg_late_minutes) : '—'} />
           <Tile label="Outside office" value={s.outside_office} tone={s.outside_office ? 'text-red-700' : undefined} />
           {s.location_unavailable > 0 && <Tile label="No location" value={s.location_unavailable} tone="text-amber-700" />}
           <Tile label="Office day, away" value={s.office_day_outside} tone={s.office_day_outside ? 'text-red-700' : undefined} />
@@ -331,7 +339,7 @@ function Report() {
                 <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{r.name}</span>{r.employee_code && <span className="ml-1 text-xs text-tertiary-500">{r.employee_code}</span>}</td>
                 <td className="px-3 py-2 whitespace-nowrap">{PLACE[r.planned_place]}</td>
                 <td className="px-3 py-2">{clock(r.check_in_at)}</td><td className="px-3 py-2">{clock(r.check_out_at)}</td>
-                <td className="px-3 py-2">{r.late_minutes > 0 ? <span className="font-medium text-red-700">{r.late_minutes} min</span> : '—'}</td>
+                <td className="px-3 py-2">{r.late_minutes > 0 ? <span className="font-medium text-red-700">{hoursMinutes(r.late_minutes)}</span> : '—'}</td>
                 <td className="px-3 py-2"><Pill result={r.check_in_result} /></td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {r.check_in_distance_m != null ? `${r.check_in_distance_m} m` : '—'}
@@ -351,7 +359,7 @@ function Report() {
             <thead className="text-left text-xs uppercase text-tertiary-500"><tr><th className="px-3 py-2">Employee</th><th className="px-3 py-2">Check-in days</th><th className="px-3 py-2">Late days</th><th className="px-3 py-2">Avg late (min)</th><th className="px-3 py-2">Outside office days</th></tr></thead>
             <tbody>
               {data.people.map((p) => (
-                <tr key={p.org_membership_id} className="border-t border-tertiary-100"><td className="px-3 py-2">{p.name}</td><td className="px-3 py-2">{p.days}</td><td className="px-3 py-2">{p.late_days}</td><td className="px-3 py-2">{p.avg_late_minutes}</td><td className="px-3 py-2">{p.outside_days}</td></tr>
+                <tr key={p.org_membership_id} className="border-t border-tertiary-100"><td className="px-3 py-2">{p.name}</td><td className="px-3 py-2">{p.days}</td><td className="px-3 py-2">{p.late_days}</td><td className="px-3 py-2">{p.avg_late_minutes ? hoursMinutes(p.avg_late_minutes) : '—'}</td><td className="px-3 py-2">{p.outside_days}</td></tr>
               ))}
             </tbody>
           </table>
