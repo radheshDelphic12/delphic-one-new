@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const { enqueue } = require('../../lib/email/outbox');
+const { loadRequirementForSubmission } = require('../interviewTemplates/interviewTemplates.service');
 
 const CATEGORIES = ['behavioural', 'reasoning', 'aptitude', 'mind'];
 const LINK_VALID_DAYS = 7;
@@ -147,11 +148,8 @@ async function audit(db, user, action, attempt, reason, extra = {}) {
 
 // The screening round of the candidate's interview plan that a test belongs to (null for requirements without a template).
 async function screeningRoundId(db, submissionId) {
-  const sub = await db.submission.findUnique({
-    where: { id: submissionId },
-    select: { seat: { select: { requirement: { select: { interview_template: { select: { rounds: { where: { kind: 'screening_test' }, orderBy: { sort_order: 'asc' }, take: 1, select: { id: true } } } } } } } } },
-  });
-  return sub?.seat?.requirement?.interview_template?.rounds?.[0]?.id || null;
+  const requirement = await loadRequirementForSubmission(db, submissionId);
+  return requirement?.interview_template?.rounds?.find((r) => r.kind === 'screening_test')?.id || null;
 }
 
 // Sends the test to the candidate of a submission: a new public link to copy. It is e-mailed only when the company setting
