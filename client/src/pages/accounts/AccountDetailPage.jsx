@@ -288,6 +288,7 @@ export default function AccountDetailPage() {
             <DetailField label="Mode" value={account.meeting_mode} />
             <DetailField label="Date" value={account.meeting_date ? new Date(account.meeting_date).toLocaleString() : null} />
             <DetailField label="Location" value={account.meeting_location} />
+            <DetailField label="Duration" value={account.meeting_date ? `${account.meeting_duration_minutes || 60} min` : null} />
             <DetailField label="Notes" value={account.meeting_notes} />
             <DetailField label="Attendees">
               {account.meeting_attendees?.length

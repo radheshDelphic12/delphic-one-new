@@ -239,7 +239,7 @@ function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
-async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids }, user) {
+async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids }, user) {
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
@@ -263,6 +263,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
       patch.meeting_date = new Date(meeting_date);
       patch.meeting_location = meeting_mode === 'offline' ? meeting_location : null;
       if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+      if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
     }
     if (to_stage === 'dropped') patch.is_locked = true;
     if (reactivating) patch.is_locked = false;
@@ -318,7 +319,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
 // whether the meeting is upcoming (`meeting_scheduled`) or already happened
 // (the account has since moved to `active`/`rescheduled`). Lets BDA/admin fix a
 // wrong attendee list or correct the date/location after the fact.
-async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids }, user) {
+async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids }, user) {
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
@@ -333,6 +334,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
       meeting_location: meeting_mode === 'offline' ? meeting_location : null,
     };
     if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+    if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
 
     await tx.account.update({ where: { id }, data: patch });
 
@@ -366,7 +368,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
 // Superadmin-only: move an account to any stage (backward, or straight to `lead`),
 // ignoring ownership, the lock, and the transition map. Still audited in stage_history.
 async function changeStageOverride(id, body, user) {
-  const { to_stage, reason, is_locked, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids } =
+  const { to_stage, reason, is_locked, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids } =
     body;
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
@@ -379,6 +381,7 @@ async function changeStageOverride(id, body, user) {
       if (meeting_date) patch.meeting_date = new Date(meeting_date);
       if (meeting_mode === 'offline' && meeting_location) patch.meeting_location = meeting_location;
       if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+      if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
     }
 
     const updated = await tx.account.update({ where: { id }, data: patch, include: ACCOUNT_INCLUDE });

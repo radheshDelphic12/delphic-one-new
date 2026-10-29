@@ -40,7 +40,8 @@ const CLIENT_MEETING_INCLUDE = {
 /** An account's scheduled meeting, shaped like a calendar event (kind: client_meeting). */
 function serializeClientMeeting(account) {
   const startsAt = account.meeting_date;
-  const endsAt = startsAt ? new Date(new Date(startsAt).getTime() + 60 * 60000) : null;
+  const durationMinutes = account.meeting_duration_minutes || 60;
+  const endsAt = startsAt ? new Date(new Date(startsAt).getTime() + durationMinutes * 60000) : null;
   const attendees = (account.meeting_attendees || []).map((a) => ({
     id: a.user.id,
     name: a.user.name,
@@ -54,7 +55,7 @@ function serializeClientMeeting(account) {
     account_id: account.id,
     account_name: account.name,
     scheduled_at: startsAt,
-    duration_minutes: 60,
+    duration_minutes: durationMinutes,
     ends_at: endsAt,
     status: account.stage === 'dropped' ? 'cancelled' : 'scheduled',
     round_type: null,

@@ -69,6 +69,7 @@ const stageOverrideSchema = z.object({
   meeting_date: z.string().datetime().optional(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 
@@ -79,6 +80,7 @@ const stageSchema = z.object({
   meeting_date: z.string().datetime().optional(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 
@@ -91,6 +93,7 @@ const meetingSchema = z.object({
   meeting_date: z.string().datetime(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 

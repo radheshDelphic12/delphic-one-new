@@ -31,6 +31,7 @@ export default function AccountStageMoveDrawer({
   const [meetingDate, setMeetingDate] = useState('');
   const [meetingLocation, setMeetingLocation] = useState('');
   const [meetingNotes, setMeetingNotes] = useState('');
+  const [duration, setDuration] = useState(60);
   const [attendeeIds, setAttendeeIds] = useState([]);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function AccountStageMoveDrawer({
     setMeetingDate('');
     setMeetingLocation('');
     setMeetingNotes(account?.meeting_notes || '');
+    setDuration(account?.meeting_duration_minutes || 60);
     setAttendeeIds((account?.meeting_attendees || []).map((a) => a.id));
   }, [open, account?.stage, preferredToStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -57,6 +59,7 @@ export default function AccountStageMoveDrawer({
       body.meeting_date = new Date(meetingDate).toISOString();
       if (meetingMode === 'offline') body.meeting_location = meetingLocation.trim();
       body.meeting_notes = meetingNotes.trim();
+      body.meeting_duration_minutes = Number(duration) || 60;
       body.meeting_attendee_ids = attendeeIds;
     }
     onMove(body);
@@ -120,6 +123,18 @@ export default function AccountStageMoveDrawer({
                 type="datetime-local"
                 value={meetingDate}
                 onChange={(event) => setMeetingDate(event.target.value)}
+                className={INPUT_CLASS}
+              />
+            </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              Duration (minutes)
+              <input
+                type="number"
+                min={5}
+                max={1440}
+                step={5}
+                value={duration}
+                onChange={(event) => setDuration(event.target.value)}
                 className={INPUT_CLASS}
               />
             </label>

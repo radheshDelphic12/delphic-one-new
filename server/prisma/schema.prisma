@@ -2523,6 +2523,8 @@ model Account {
   meeting_date     DateTime?
   meeting_location String?
   meeting_notes    String?
+  // Length of the account's meeting in minutes (calendar block); editable per meeting.
+  meeting_duration_minutes Int @default(60)
 
   vendor_specializations String[]
   vendor_rate_range      Json?
