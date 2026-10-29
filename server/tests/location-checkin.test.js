@@ -473,6 +473,91 @@ describe('register: every employee x every day', () => {
   });
 });
 
+describe('Attendance Dashboard register carries the check-ins', () => {
+  const regUrl = (extra = '') => `/api/v1/attendance-dashboard/register?year=2026&month=9${extra}`;
+  const get = (token, extra) => authed(request(app).get(regUrl(extra)), token);
+
+  async function seedDays(ctx) {
+    const here = await ctx.person('Here Hari');
+    const remote = await ctx.person('Remote Rina', { workMode: 'remote' });
+    const silent = await ctx.person('Silent Sam');
+    const tue = new Date('2026-09-01T00:00:00.000Z');
+    const at = (h, m) => new Date(Date.UTC(2026, 8, 1, h, m) - 330 * 60000);
+    const day = (who, data) => prisma.locationCheckin.create({
+      data: { org_id: ctx.org.id, org_membership_id: who.membership.id, date: tue, planned_place: 'office', check_in_result: 'in_office', check_in_at: at(10, 45), late_minutes: 0, ...data,
+        sessions: { create: [{ org_id: ctx.org.id, org_membership_id: who.membership.id, date: tue, in_at: at(10, 45), in_result: data.check_in_result || 'in_office', out_at: at(18, 0) }] } },
+    });
+    await day(here, { late_minutes: 15, check_in_at_office: true, check_in_distance_m: 40, check_out_at: at(18, 0) });
+    await day(remote, { planned_place: 'home', check_in_result: 'work_from_home', check_in_at_office: false, check_in_distance_m: 20000, check_out_at: at(18, 0) });
+    return { here, remote, silent };
+  }
+  const cellOf = (res, name, date = '2026-09-01') => res.body.data.people.find((p) => p.name === name).days.find((d) => d.date === date);
+
+  test('each day keeps its attendance code and adds where the person checked in, with the details a tooltip needs', async () => {
+    const ctx = await seed();
+    await seedDays(ctx);
+    const res = await get(ctx.admin);
+    expect(res.status).toBe(200);
+    expect(res.body.data.checkin).toEqual({ enabled: true, scope: 'all' });
+    const hari = cellOf(res, 'Here Hari');
+    expect(hari).toHaveProperty('code'); // the attendance cell is still there
+    expect(hari.checkin_state).toBe('checked_in');
+    expect(hari.checkin).toMatchObject({ result: 'in_office', late_minutes: 15, distance_m: 40, comparison: 'as_planned', planned_place: 'office' });
+    expect(cellOf(res, 'Remote Rina').checkin).toMatchObject({ result: 'work_from_home', planned_place: 'home' });
+    expect(cellOf(res, 'Silent Sam').checkin_state).toBe('missing');
+    expect(cellOf(res, 'Silent Sam', '2026-09-05').checkin_state).toBe('off'); // a weekly off is never "not checked in"
+    const totals = res.body.data.people.find((p) => p.name === 'Here Hari').checkin_totals;
+    expect(totals).toMatchObject({ checked_in: 1, late: 1, away: 0 });
+    expect(res.body.data.people.find((p) => p.name === 'Silent Sam').checkin_totals.missing).toBeGreaterThan(15);
+  });
+
+  test('the dashboard filters (work type, office) drive the combined view, and ?checkin=0 leaves the check-ins out', async () => {
+    const ctx = await seed();
+    await seedDays(ctx);
+    const remoteOnly = await get(ctx.admin, '&work_mode=remote');
+    expect(remoteOnly.body.data.people.map((p) => p.name)).toEqual(['Remote Rina']);
+    expect(cellOf(remoteOnly, 'Remote Rina').checkin_state).toBe('checked_in');
+    const here = await get(ctx.admin, `&location_id=${ctx.indore.id}&work_mode=onsite`);
+    expect(here.body.data.people.map((p) => p.name).sort()).toEqual(['Here Hari', 'Silent Sam']);
+    const off = await get(ctx.admin, '&checkin=0');
+    expect(off.body.data.checkin).toBeUndefined();
+    expect(cellOf(off, 'Here Hari').checkin_state).toBeUndefined();
+    expect(cellOf(off, 'Here Hari').code).toBeDefined();
+  });
+
+  test('a manager sees check-ins on their own row only; other companies get no check-in data', async () => {
+    const ctx = await seed();
+    const { here, silent } = await seedDays(ctx);
+    await prisma.orgMembership.update({ where: { id: silent.membership.id }, data: { manager_id: here.membership.id } });
+    const res = await get(here.token);
+    expect(res.status).toBe(200);
+    expect(res.body.data.checkin).toEqual({ enabled: true, scope: 'own' });
+    expect(cellOf(res, 'Here Hari').checkin_state).toBe('checked_in');
+    expect(cellOf(res, 'Silent Sam').checkin_state).toBeUndefined(); // a direct report's check-ins need the report permission
+
+    const other = await createOrg({ is_master_workspace: false });
+    const user = await createUser({ role: 'recruiter' });
+    await createOrgMembership(user.id, other.id, { role: 'recruiter' });
+    const token = (await loginAs(user)).access_token;
+    const otherRes = await get(token);
+    expect(otherRes.status).toBe(200);
+    expect(otherRes.body.data.checkin).toBeUndefined();
+  });
+
+  test('today is only "not checked in" once the late-after time has passed', () => {
+    const working = { date: '2026-09-02', kind: 'present', code: 'P', in_employment: true, day_type: 'working' };
+    const ctx = { today: '2026-09-02', nowMinutes: 500, cutoff: 600 };
+    expect(service.dayState(working, null, ctx).state).toBe('not_yet');
+    expect(service.dayState(working, null, { ...ctx, nowMinutes: 700 }).state).toBe('missing');
+    expect(service.dayState({ ...working, date: '2026-09-01' }, null, ctx).state).toBe('missing'); // a past day does not wait
+    expect(service.dayState({ ...working, date: '2026-09-03' }, null, ctx).state).toBe('none'); // the future is blank
+    expect(service.dayState({ ...working, kind: 'leave', code: 'CL' }, null, ctx).state).toBe('leave');
+    expect(service.dayState({ ...working, kind: 'leave', code: 'CL½', date: '2026-09-01' }, null, ctx).state).toBe('missing'); // half a day of leave still checks in
+    expect(service.dayState({ ...working, kind: 'weekly_off', code: 'WO', day_type: 'weekend' }, null, ctx).state).toBe('off');
+    expect(service.dayState(working, { id: 'x' }, ctx).state).toBe('checked_in');
+  });
+});
+
 describe('isolation', () => {
   test('checking in changes nothing in attendance', async () => {
     const ctx = await seed();

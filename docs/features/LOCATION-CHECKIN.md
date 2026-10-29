@@ -51,6 +51,12 @@ Time & Attendance > **Location Check-in** (master workspace only): My check-in (
 - Two views: **Month grid**, and **One day** (a table of everyone with attendance, planned, first in, last out, late, out of desk, entries, where from, status). Search, "Missing only". Click a cell for that day's entries. Editing and deleting stay in the Report tab.
 - The attendance register's day rows gained `day_type` and `in_employment` (additive).
 
+## Check-ins on the Attendance Dashboard register (Time & Attendance > Attendance Dashboard > Register)
+- `GET /attendance-dashboard/register` (Delphic Global only; `?checkin=0` leaves it out) now also returns, per day, `checkin` (first in, last out, late, where from, distance, planned vs actual, out of desk, entries), `checkin_state` (`checked_in`, `missing`, `not_yet`, `leave`, `off`, `none`) and `checkin_flags`, plus `checkin_totals` per person and `checkin: { enabled, scope }` on the response. One extra query for the month; no per-cell requests. Built by `locationCheckin.service.attachToRegister`, which shares `compare()`, `dayTotals()` and the stored late values with the report; the Workplace Check-in Register tab uses the same `checkinOverlay`.
+- Visibility: people with the Workplace Check-in view permission (and admins) see everyone's check-ins; everyone else only their own row (`scope: own`). Other companies get no check-in data.
+- "Not checked in" = a working day (not a holiday, weekly off or a full day of leave) with no check-in. Today only counts once the person's late-after time (their shift rule, else shift start + grace, else the company default) has passed; until then it is "not yet".
+- UI: the status code is unchanged; a dot in the cell corner shows where they checked in (green office, blue home, amber no location, red away), a red underline means late, a dashed outline means not checked in. Hover shows In / Out, late, checked in from, distance, planned vs actual, out of desk. Extra totals columns (Checked in, Not checked in), a "Today: N checked in, M not checked in" line, a "Not checked in only" filter and a "Show check-ins" switch. The existing Month / Year / Status / Work type / Office / Employee filters drive it; Export CSV and the Project hours register are unchanged.
+
 ## Not built / open
 - Contractors are not in the register (they have no attendance). A register CSV export is not built (the Report tab exports records).
 - Late is measured in the org timezone; no per-day override.

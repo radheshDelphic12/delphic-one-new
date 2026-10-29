@@ -6,6 +6,9 @@ const prisma = require('../../config/db');
 const service = require('./attendanceDashboard.service');
 const v = require('./attendanceDashboard.validation');
 const projectCalendar = require('./projectCalendar.service');
+const locationCheckin = require('../locationCheckin/locationCheckin.service');
+const { hasPermission } = require('../../lib/permissions');
+const { isMasterWorkspace } = require('../../middleware/requireMasterWorkspace');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -34,7 +37,17 @@ async function canOpen(req, orgMembershipId) {
   return Boolean(member && member.manager_id === own);
 }
 
-router.get('/register', asyncHandler(async (req, res) => ok(res, await service.register(req.user.org_id, req.user, v.peopleQuery.parse(req.query)))));
+// The month register. In the master workspace it also carries where each person checked in (display only; ?checkin=0 leaves it out).
+// Check-ins are shown for everyone to people who may read the Workplace Check-in report, and only on their own row to everyone else.
+router.get('/register', asyncHandler(async (req, res) => {
+  const data = await service.register(req.user.org_id, req.user, v.peopleQuery.parse(req.query));
+  if (req.query.checkin !== '0' && (await isMasterWorkspace(req.user.org_id))) {
+    const decided = hasPermission(req.user, 'location_checkin.view');
+    const everyone = decided === null ? req.user.role === 'admin' : decided;
+    await locationCheckin.attachToRegister(req.user.org_id, data, { ownMembershipId: everyone ? null : req.user.org_membership_id });
+  }
+  return ok(res, data);
+}));
 router.get('/people', asyncHandler(async (req, res) => ok(res, await service.people(req.user.org_id, req.user, v.peopleQuery.parse(req.query)))));
 
 router.get(

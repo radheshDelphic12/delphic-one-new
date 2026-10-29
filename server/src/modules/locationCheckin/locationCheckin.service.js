@@ -677,54 +677,126 @@ async function report(orgId, q) {
   return { rows: all, summary, people };
 }
 
-// ----- Register (HR / admin): every employee x every day of a month -----
-// One row per current employee, one cell per day: what attendance says (present / leave / holiday / weekly off) beside what the person
-// did at the workplace (where and when they checked in and out, time out of desk). A working day with no check-in is "missing".
-// Read only: attendance is only read, never written.
-async function register(orgId, user, { year, month }) {
-  const from = new Date(Date.UTC(year, month - 1, 1));
-  const to = new Date(Date.UTC(year, month, 0));
-  // The route is already limited to people who read this report, so the register covers everyone, not just direct reports.
-  const [attendance, records] = await Promise.all([
-    attendanceDashboard.register(orgId, { ...user, role: 'admin' }, { year, month, status: 'current' }),
-    prisma.locationCheckin.findMany({ where: { org_id: orgId, date: { gte: from, lte: to } }, include: withSessions }),
+// ----- Check-ins laid over the attendance register (shared by the Attendance Dashboard and the Workplace Check-in Register) -----
+// One row per current employee, one cell per day: what attendance says beside what the person did at the workplace. All the numbers
+// (late, where from, planned vs actual, out of desk) are the ones the Workplace Check-in report uses. Read only: attendance is never written.
+
+// The minute of the day after which each person counts as late: the admin's time for their shift, else shift start + grace, else the
+// company default. Used to leave "today" alone until the person's own cut-off has passed.
+async function cutoffsFor(orgId, memberIds, settings) {
+  const [members, shifts, rules] = await Promise.all([
+    prisma.orgMembership.findMany({ where: { id: { in: memberIds } }, select: { id: true, shift_id: true } }),
+    prisma.shift.findMany({ where: { org_id: orgId }, select: { id: true, start_minutes: true, grace_minutes: true } }),
+    prisma.locationCheckinShiftRule.findMany({ where: { org_id: orgId } }),
+  ]);
+  const shiftById = new Map(shifts.map((s) => [s.id, s]));
+  const ruleByShift = new Map(rules.map((r) => [r.shift_id, r.late_after_minutes]));
+  return new Map(
+    members.map((m) => {
+      const shift = m.shift_id ? shiftById.get(m.shift_id) : null;
+      const cutoff = shift ? (ruleByShift.has(shift.id) ? ruleByShift.get(shift.id) : (shift.start_minutes + shift.grace_minutes) % 1440) : settings.default_cutoff_minutes;
+      return [m.id, cutoff];
+    })
+  );
+}
+
+// What a check-in looks like on one day, for a cell.
+const cellCheckin = (rec) => ({
+  id: rec.id,
+  planned_place: rec.planned_place,
+  first_in: rec.check_in_at,
+  last_out: rec.check_out_at,
+  result: rec.check_in_result,
+  distance_m: rec.check_in_distance_m,
+  late_minutes: rec.late_minutes,
+  comparison: compare(rec),
+  ...dayTotals(rec.sessions),
+});
+
+// One day's state: checked_in, missing (a working day with nothing recorded), not_yet (today, before the person's late-after time),
+// leave (a full day), off (weekly off / holiday) or none (not employed, or a future day).
+function dayState(d, rec, { today, nowMinutes, cutoff }) {
+  if (rec) return d.kind === 'leave' && !String(d.code).includes('½') ? { state: 'checked_in', flags: ['leave_but_checked_in'] } : { state: 'checked_in', flags: [] };
+  const fullLeave = d.kind === 'leave' && !String(d.code).includes('½');
+  if (d.in_employment && d.date <= today && d.day_type === 'working' && !['holiday', 'weekly_off'].includes(d.kind) && !fullLeave) {
+    return { state: d.date === today && nowMinutes < cutoff ? 'not_yet' : 'missing', flags: [] };
+  }
+  if (d.kind === 'leave') return { state: 'leave', flags: [] };
+  if (d.kind === 'holiday' || d.kind === 'weekly_off') return { state: 'off', flags: [] };
+  return { state: 'none', flags: [] };
+}
+
+// For every person of an attendance register: a cell per day ({ state, flags, checkin }) and totals. Keyed by membership id, then date.
+async function checkinOverlay(orgId, attendance) {
+  const from = new Date(Date.UTC(attendance.year, attendance.month - 1, 1));
+  const to = new Date(Date.UTC(attendance.year, attendance.month, 0));
+  const ids = attendance.people.map((p) => p.org_membership_id);
+  const settings = await getSettings(orgId);
+  const [records, cutoffs] = await Promise.all([
+    prisma.locationCheckin.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, include: withSessions }),
+    cutoffsFor(orgId, ids, settings),
   ]);
   const byDay = new Map(records.map((r) => [`${r.org_membership_id}|${r.date.toISOString().slice(0, 10)}`, r]));
-  const people = attendance.people.map((p) => {
+  const nowMinutes = minutesOfDayInZone(new Date(), 'Asia/Kolkata');
+  const out = new Map();
+  for (const p of attendance.people) {
     const totals = { checked_in: 0, missing: 0, late: 0, away: 0, no_location: 0, leave_but_checked_in: 0, out_of_desk_minutes: 0 };
-    const days = p.days.map((d) => {
+    const cutoff = cutoffs.has(p.org_membership_id) ? cutoffs.get(p.org_membership_id) : settings.default_cutoff_minutes;
+    const days = new Map();
+    for (const d of p.days) {
       const rec = byDay.get(`${p.org_membership_id}|${d.date}`);
-      const cell = { date: d.date, weekday: d.weekday, attendance_code: d.code, attendance_kind: d.kind, attendance_label: d.label, checkin: null, state: 'none', flags: [] };
-      if (rec) {
-        const t = dayTotals(rec.sessions);
-        const onLeave = d.kind === 'leave' && !String(d.code).includes('½');
-        cell.checkin = {
-          id: rec.id,
-          planned_place: rec.planned_place,
-          first_in: rec.check_in_at,
-          last_out: rec.check_out_at,
-          result: rec.check_in_result,
-          late_minutes: rec.late_minutes,
-          comparison: compare(rec),
-          ...t,
-        };
-        cell.state = 'checked_in';
-        if (onLeave) cell.flags.push('leave_but_checked_in');
+      const { state, flags } = dayState(d, rec, { today: attendance.today, nowMinutes, cutoff });
+      const checkin = rec ? cellCheckin(rec) : null;
+      if (checkin) {
         totals.checked_in += 1;
-        totals.out_of_desk_minutes += t.out_of_desk_minutes;
+        totals.out_of_desk_minutes += checkin.out_of_desk_minutes;
         if (rec.late_minutes > 0) totals.late += 1;
         if (rec.check_in_result === 'outside_office') totals.away += 1;
         if (rec.check_in_result === 'location_unavailable') totals.no_location += 1;
-        if (onLeave) totals.leave_but_checked_in += 1;
-      } else if (d.in_employment && d.date <= attendance.today && d.day_type === 'working' && !['holiday', 'weekly_off'].includes(d.kind) && !(d.kind === 'leave' && !String(d.code).includes('½'))) {
-        // a working day, not a full day of leave: they were meant to check in
-        cell.state = 'missing';
-        totals.missing += 1;
-      } else if (d.kind === 'leave') cell.state = 'leave';
-      else if (d.kind === 'holiday' || d.kind === 'weekly_off') cell.state = 'off';
-      return cell;
-    });
-    return { org_membership_id: p.org_membership_id, name: p.name, employee_code: p.employee_code, department: p.department, days, totals };
+        if (flags.includes('leave_but_checked_in')) totals.leave_but_checked_in += 1;
+      } else if (state === 'missing') totals.missing += 1;
+      days.set(d.date, { state, flags, checkin });
+    }
+    out.set(p.org_membership_id, { days, totals });
+  }
+  return out;
+}
+
+// Attendance Dashboard: put the check-in data onto its register response (one query for the month). `ownOnly` keeps it to the
+// caller's own row, for people who may see the dashboard but not everyone's check-ins.
+async function attachToRegister(orgId, attendance, { ownMembershipId = null } = {}) {
+  const shown = ownMembershipId ? { ...attendance, people: attendance.people.filter((p) => p.org_membership_id === ownMembershipId) } : attendance;
+  const overlay = await checkinOverlay(orgId, shown);
+  for (const p of shown.people) {
+    const o = overlay.get(p.org_membership_id);
+    p.checkin_totals = o.totals;
+    for (const d of p.days) {
+      const c = o.days.get(d.date);
+      d.checkin = c.checkin;
+      d.checkin_state = c.state;
+      d.checkin_flags = c.flags;
+    }
+  }
+  attendance.checkin = { enabled: true, scope: ownMembershipId ? 'own' : 'all' };
+  return attendance;
+}
+
+// Workplace Check-in > Register: the same overlay, as its own response.
+async function register(orgId, user, { year, month }) {
+  // The route is already limited to people who read this report, so the register covers everyone, not just direct reports.
+  const attendance = await attendanceDashboard.register(orgId, { ...user, role: 'admin' }, { year, month, status: 'current' });
+  const overlay = await checkinOverlay(orgId, attendance);
+  const people = attendance.people.map((p) => {
+    const o = overlay.get(p.org_membership_id);
+    const days = p.days.map((d) => ({
+      date: d.date,
+      weekday: d.weekday,
+      attendance_code: d.code,
+      attendance_kind: d.kind,
+      attendance_label: d.label,
+      ...o.days.get(d.date),
+    }));
+    return { org_membership_id: p.org_membership_id, name: p.name, employee_code: p.employee_code, department: p.department, days, totals: o.totals };
   });
   return { year, month, today: attendance.today, days: attendance.days, people };
 }
@@ -794,6 +866,8 @@ module.exports = {
   deleteDay,
   report,
   register,
+  attachToRegister,
+  dayState,
   toCsv,
   selfiePath,
   sessionSelfiePath,
