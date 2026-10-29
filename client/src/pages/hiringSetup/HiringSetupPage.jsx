@@ -227,14 +227,15 @@ function TestsTab({ onChanged, isAdmin }) {
   useEffect(() => { load(); apiClient.get('/assessments/questions').then(({ data }) => setQuestions(data.data || [])); }, [load]);
 
   async function open(t) {
-    if (!t) return setEdit({ name: '', description: '', pass_percentage: 60, duration_minutes: '', question_ids: [] });
+    if (!t) return setEdit({ name: '', description: '', pass_percentage: 60, duration_minutes: '', questions_per_candidate: '', question_ids: [] });
     const { data } = await apiClient.get(`/assessments/tests/${t.id}`);
-    setEdit({ id: t.id, name: t.name, description: t.description || '', pass_percentage: t.pass_percentage, duration_minutes: t.duration_minutes || '', question_ids: data.data.questions.map((q) => q.id) });
+    setEdit({ id: t.id, name: t.name, description: t.description || '', pass_percentage: t.pass_percentage, duration_minutes: t.duration_minutes || '', questions_per_candidate: t.questions_per_candidate || '', question_ids: data.data.questions.map((q) => q.id) });
   }
   async function save() {
     const body = {
       name: edit.name, description: edit.description || null, pass_percentage: Number(edit.pass_percentage),
-      duration_minutes: edit.duration_minutes === '' ? null : Number(edit.duration_minutes), question_ids: edit.question_ids,
+      duration_minutes: edit.duration_minutes === '' ? null : Number(edit.duration_minutes),
+      questions_per_candidate: edit.questions_per_candidate === '' ? null : Number(edit.questions_per_candidate), question_ids: edit.question_ids,
     };
     const ok = await run(() => (edit.id ? apiClient.patch(`/assessments/tests/${edit.id}`, body) : apiClient.post('/assessments/tests', body)), 'Test saved');
     if (ok) { setEdit(null); load(); onChanged(); }
@@ -252,7 +253,7 @@ function TestsTab({ onChanged, isAdmin }) {
         <div key={t.id} className="flex items-center justify-between rounded-xl border border-tertiary-100 bg-white p-3 shadow-soft">
           <div>
             <p className="text-sm font-medium text-tertiary-900">{t.name} {!t.is_active && <span className="text-xs text-tertiary-400">(inactive)</span>}</p>
-            <p className="text-xs text-tertiary-500">{t.question_count} questions · pass {t.pass_percentage}%{t.duration_minutes ? ` · ${t.duration_minutes} min` : ''}</p>
+            <p className="text-xs text-tertiary-500">{t.questions_per_candidate ? `${t.questions_per_candidate} random of ${t.question_count} questions` : `${t.question_count} questions`} · pass {t.pass_percentage}%{t.duration_minutes ? ` · ${t.duration_minutes} min` : ''}</p>
           </div>
           <button type="button" className="btn-secondary text-xs" onClick={() => open(t)}>Edit</button>
         </div>
@@ -267,7 +268,10 @@ function TestsTab({ onChanged, isAdmin }) {
               <Field label="Minimum pass %"><input type="number" min={1} max={100} className={FIELD_INPUT} value={edit.pass_percentage} onChange={(e) => setEdit({ ...edit, pass_percentage: e.target.value })} /></Field>
               <Field label="Time limit (minutes)" hint="Empty = no limit"><input type="number" min={1} className={FIELD_INPUT} value={edit.duration_minutes} onChange={(e) => setEdit({ ...edit, duration_minutes: e.target.value })} /></Field>
             </div>
-            <Field label={`Questions (${edit.question_ids.length} selected)`}>
+            <Field label="Questions per candidate" hint={`Empty = every selected question, in order. Set a number to give each candidate that many questions, picked at random from the ${edit.question_ids.length} selected and shuffled.`}>
+              <input type="number" min={1} max={Math.max(1, edit.question_ids.length)} className={FIELD_INPUT} value={edit.questions_per_candidate} onChange={(e) => setEdit({ ...edit, questions_per_candidate: e.target.value })} />
+            </Field>
+            <Field label={`Question pool (${edit.question_ids.length} selected)`}>
               <div className="max-h-72 space-y-1 overflow-auto rounded-lg border border-tertiary-100 p-2">
                 {questions.map((q) => (
                   <label key={q.id} className="flex items-start gap-2 text-sm">

@@ -8001,6 +8001,8 @@ model AssessmentTest {
   description      String?
   pass_percentage  Int      @default(60)
   duration_minutes Int?
+  // How many questions each candidate gets, picked at random from the test's questions and shuffled. null = every question, in order.
+  questions_per_candidate Int?
   is_active        Boolean  @default(true)
   created_by       String?  @db.Uuid
   created_at       DateTime @default(now())
@@ -8036,6 +8038,7 @@ model AssessmentAttempt {
   candidate_email String?
   status          String         @default("invited") // invited | started | submitted
   answers         Json? // { questionId: optionIndex }
+  question_ids    Json? // the questions this candidate was given, in the order shown (null = all of the test's questions)
   score_percent   Decimal?       @db.Decimal(5, 2)
   passed          Boolean?
   pass_percentage Int // the test's pass mark on the day it was sent
@@ -8365,9 +8368,46 @@ model LocationCheckin {
   created_at           DateTime  @default(now())
   updated_at           DateTime  @default(now()) @updatedAt
 
+  sessions LocationCheckinSession[]
+
   @@unique([org_membership_id, date])
   @@index([org_id, date])
   @@map("location_checkins")
+}
+
+// One check-in / check-out pair of a day. A person may check in and out several times; the gap between one check-out and the next
+// check-in is time out of desk. The day row above keeps the first check-in (late) and the latest check-out for the report.
+model LocationCheckinSession {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String          @db.Uuid
+  checkin_id        String          @db.Uuid
+  checkin           LocationCheckin @relation(fields: [checkin_id], references: [id], onDelete: Cascade)
+  org_membership_id String          @db.Uuid
+  date              DateTime        @db.Date
+  in_at             DateTime
+  in_lat            Decimal?        @db.Decimal(9, 6)
+  in_lng            Decimal?        @db.Decimal(9, 6)
+  in_accuracy_m     Int?
+  in_distance_m     Int?
+  in_at_office      Boolean?
+  in_result         String // in_office | outside_office | work_from_home | location_unavailable
+  in_photo          String?
+  out_at            DateTime?
+  out_lat           Decimal?        @db.Decimal(9, 6)
+  out_lng           Decimal?        @db.Decimal(9, 6)
+  out_accuracy_m    Int?
+  out_distance_m    Int?
+  out_at_office     Boolean?
+  out_result        String?
+  out_reason        String? // lunch | break | meeting | other: why the person stepped away
+  edited_by         String?         @db.Uuid
+  edited_at         DateTime?
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @default(now()) @updatedAt
+
+  @@index([checkin_id, in_at])
+  @@index([org_id, date])
+  @@map("location_checkin_sessions")
 }
 
 // The time after which someone on this shift counts as late, for the location check-in report only. No row: shift start + its grace

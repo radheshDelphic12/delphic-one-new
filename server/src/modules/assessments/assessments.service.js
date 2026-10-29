@@ -59,9 +59,25 @@ async function validQuestionIds(db, ids) {
   return found === new Set(ids).size;
 }
 
+// A random pick of `count` questions from the test, in a random order (Fisher-Yates with a secure source). No count = every question,
+// in the order the team set.
+function pickQuestionIds(orderedIds, count) {
+  if (!count || count >= orderedIds.length) return count ? shuffle(orderedIds) : orderedIds;
+  return shuffle(orderedIds).slice(0, count);
+}
+function shuffle(ids) {
+  const a = [...ids];
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomInt(i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 async function createTest(data, userId) {
   const { question_ids = [], ...rest } = data;
   if (!(await validQuestionIds(prisma, question_ids))) return { error: 'invalid_questions' };
+  if (rest.questions_per_candidate && rest.questions_per_candidate > new Set(question_ids).size) return { error: 'too_many_per_candidate' };
   const row = await prisma.assessmentTest.create({
     data: { ...rest, created_by: userId, questions: { create: [...new Set(question_ids)].map((question_id, i) => ({ question_id, sort_order: i + 1 })) } },
   });
@@ -73,6 +89,9 @@ async function updateTest(id, data) {
   if (!existing) return { error: 'not_found' };
   const { question_ids, ...rest } = data;
   if (question_ids && !(await validQuestionIds(prisma, question_ids))) return { error: 'invalid_questions' };
+  const perCandidate = rest.questions_per_candidate === undefined ? existing.questions_per_candidate : rest.questions_per_candidate;
+  const poolSize = question_ids ? new Set(question_ids).size : await prisma.assessmentTestQuestion.count({ where: { test_id: id } });
+  if (perCandidate && perCandidate > poolSize) return { error: 'too_many_per_candidate' };
   await prisma.$transaction(async (tx) => {
     await tx.assessmentTest.update({ where: { id }, data: rest });
     if (question_ids) {
@@ -237,14 +256,13 @@ async function listAttempts({ submissionId }, user) {
 }
 
 // Opens a submitted attempt for review: every question with the candidate's pick, the marks it carried and whether it was right.
-// Uses the test's questions as they are now (answers are stored by question id); a question removed since is simply not listed.
+// Lists the questions this candidate was given (their random pick, when the test has one); a question removed since is not listed.
 async function reviewAttempt(id) {
   const a = await prisma.assessmentAttempt.findFirst({ where: { id, deleted_at: null }, include: { test: { include: TEST_INCLUDE } } });
   if (!a) return { error: 'not_found' };
   if (a.status !== 'submitted') return { error: 'not_submitted' };
   const answers = a.answers || {};
-  const questions = a.test.questions.map((tq, i) => {
-    const q = tq.question;
+  const questions = attemptQuestions(a).map((q, i) => {
     const options = Array.isArray(q.options) ? q.options : [];
     const best = Math.max(0, ...options.map((o) => Number(o.marks) || 0));
     const raw = answers[q.id];
@@ -314,11 +332,28 @@ async function loadByToken(token) {
   return { attempt: a };
 }
 
+// The questions this attempt is made of, in the order the candidate sees them. A test with "questions per candidate" fixes a random
+// pick on the first open and keeps it, so a refresh shows the same questions; otherwise every question of the test, in order.
+// A question removed from the test since is left out.
+function attemptQuestions(attempt) {
+  const all = attempt.test.questions.map((q) => q.question);
+  const ids = Array.isArray(attempt.question_ids) ? attempt.question_ids : null;
+  if (!ids) return all;
+  const byId = new Map(all.map((q) => [q.id, q]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
 async function openForCandidate(token) {
   const r = await loadByToken(token);
   if (r.error) return r;
   const a = r.attempt;
-  if (a.status === 'invited') await prisma.assessmentAttempt.update({ where: { id: a.id }, data: { status: 'started', started_at: new Date() } });
+  const data = {};
+  if (a.status === 'invited') Object.assign(data, { status: 'started', started_at: new Date() });
+  if (!Array.isArray(a.question_ids) && a.test.questions_per_candidate) {
+    data.question_ids = pickQuestionIds(a.test.questions.map((q) => q.question.id), a.test.questions_per_candidate);
+    a.question_ids = data.question_ids;
+  }
+  if (Object.keys(data).length) await prisma.assessmentAttempt.update({ where: { id: a.id }, data });
   return {
     test: {
       name: a.test.name,
@@ -326,11 +361,11 @@ async function openForCandidate(token) {
       duration_minutes: a.test.duration_minutes,
       candidate_name: a.candidate_name,
       // never send the marks: only the wording of each option
-      questions: a.test.questions.map((q) => ({
-        id: q.question.id,
-        category: q.question.category,
-        text: q.question.text,
-        options: q.question.options.map((o) => o.text),
+      questions: attemptQuestions(a).map((q) => ({
+        id: q.id,
+        category: q.category,
+        text: q.text,
+        options: q.options.map((o) => o.text),
       })),
     },
   };
@@ -340,8 +375,7 @@ async function submitForCandidate(token, answers) {
   const r = await loadByToken(token);
   if (r.error) return r;
   const a = r.attempt;
-  const questions = a.test.questions.map((q) => q.question);
-  const score = scoreAnswers(questions, answers);
+  const score = scoreAnswers(attemptQuestions(a), answers);
   await prisma.assessmentAttempt.update({
     where: { id: a.id },
     data: { status: 'submitted', answers, score_percent: score, passed: score >= a.pass_percentage, submitted_at: new Date(), started_at: a.started_at || new Date() },
@@ -352,6 +386,7 @@ async function submitForCandidate(token, answers) {
 module.exports = {
   CATEGORIES,
   scoreAnswers,
+  pickQuestionIds,
   listQuestions,
   createQuestion,
   updateQuestion,

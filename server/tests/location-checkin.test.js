@@ -10,7 +10,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
 beforeEach(async () => {
   await cleanDatabase();
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE location_checkins, location_checkin_settings, office_geofences, work_place_days');
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE location_checkin_sessions, location_checkins, location_checkin_settings, office_geofences, work_place_days');
 });
 afterAll(async () => {
   await prisma.$disconnect();
@@ -259,6 +259,217 @@ describe('report', () => {
     expect((await api('get', `/records/${id}/selfie`, a.token)).status).toBe(200);
     expect((await api('get', `/records/${id}/selfie`, ctx.admin)).status).toBe(200);
     expect((await api('get', `/records/${id}/selfie`, b.token)).status).toBe(404);
+  });
+});
+
+const checkOut = (token, point, reason) => {
+  const r = api('post', '/check-out', token);
+  if (point) r.field('latitude', String(point.latitude)).field('longitude', String(point.longitude));
+  if (reason) r.field('reason', reason);
+  return r;
+};
+
+describe('several check-ins a day and breaks', () => {
+  test('after a check-out the person can check in again; the gap is time out of desk, and late is judged on the first check-in only', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Asha');
+    const first = await checkIn(emp.token, NEAR);
+    expect(first.body.data.sessions).toHaveLength(1);
+    expect((await checkIn(emp.token, NEAR)).status).toBe(409); // still in
+    const out = await checkOut(emp.token, NEAR, 'lunch');
+    expect(out.status).toBe(200);
+    expect(out.body.data).toMatchObject({ currently_in: false });
+    expect(out.body.data.sessions[0].out_reason).toBe('lunch');
+    expect((await checkOut(emp.token, NEAR)).status).toBe(409); // not in
+
+    const again = await checkIn(emp.token, NEAR);
+    expect(again.status).toBe(200);
+    expect(again.body.data).toMatchObject({ currently_in: true, check_out_at: null });
+    expect(again.body.data.sessions).toHaveLength(2);
+    expect(again.body.data.late_minutes).toBe(first.body.data.late_minutes);
+
+    // push the first session an hour back so the gap between the two is measurable
+    const sessions = await prisma.locationCheckinSession.findMany({ orderBy: { in_at: 'asc' } });
+    await prisma.locationCheckinSession.update({ where: { id: sessions[0].id }, data: { in_at: new Date(sessions[0].in_at.getTime() - 3600000), out_at: new Date(Date.now() - 1800000) } });
+    const today = (await api('get', '/today', emp.token)).body.data.record;
+    expect(today.break_count).toBe(1);
+    expect(today.out_of_desk_minutes).toBeGreaterThanOrEqual(29);
+    expect(today.out_of_desk_minutes).toBeLessThanOrEqual(31);
+    expect(today.worked_minutes).toBeGreaterThanOrEqual(29);
+    expect((await checkOut(emp.token, NEAR, 'sometimes')).status).toBe(422);
+    expect((await checkOut(emp.token, NEAR)).status).toBe(200);
+  });
+
+  test('a re-check-in still needs a selfie when the admin requires one', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Asha');
+    await checkIn(emp.token, NEAR);
+    await checkOut(emp.token, NEAR);
+    expect((await checkIn(emp.token, NEAR, { selfie: false })).status).toBe(422);
+    expect((await checkIn(emp.token, NEAR)).status).toBe(200);
+  });
+});
+
+describe('admin corrections', () => {
+  async function twoSessions(ctx, emp) {
+    await checkIn(emp.token, NEAR);
+    await checkOut(emp.token, NEAR);
+    await checkIn(emp.token, NEAR);
+    const rows = await prisma.locationCheckinSession.findMany({ orderBy: { in_at: 'asc' } });
+    const base = Date.now() - 4 * 3600000;
+    await prisma.locationCheckinSession.update({ where: { id: rows[0].id }, data: { in_at: new Date(base), out_at: new Date(base + 3600000) } });
+    await prisma.locationCheckinSession.update({ where: { id: rows[1].id }, data: { in_at: new Date(base + 2 * 3600000), out_at: null } });
+    return (await prisma.locationCheckinSession.findMany({ orderBy: { in_at: 'asc' } })).map((s) => s.id);
+  }
+
+  test('only an admin edits, with a reason; the day row follows and the change is audited', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Asha');
+    const [first, second] = await twoSessions(ctx, emp);
+    const newOut = new Date(Date.now() - 3 * 3600000 + 600000).toISOString();
+
+    expect((await api('patch', `/sessions/${first}`, emp.token).send({ out_at: newOut, reason: 'fix' })).status).toBe(403);
+    expect((await api('patch', `/sessions/${first}`, ctx.admin).send({ out_at: newOut })).status).toBe(422); // reason is mandatory
+    const ok = await api('patch', `/sessions/${first}`, ctx.admin).send({ out_at: newOut, out_reason: 'meeting', reason: 'Forgot to check out' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.sessions[0]).toMatchObject({ out_reason: 'meeting', edited: true });
+    expect(await prisma.auditLog.count({ where: { entity_type: 'location_checkin', action: 'edit_session', reason: 'Forgot to check out' } })).toBe(1);
+
+    // out before in, and overlapping the other session, are refused
+    const inAt = (await prisma.locationCheckinSession.findUnique({ where: { id: first } })).in_at;
+    expect((await api('patch', `/sessions/${first}`, ctx.admin).send({ out_at: new Date(inAt.getTime() - 1000).toISOString(), reason: 'oops' })).status).toBe(422);
+    expect((await api('patch', `/sessions/${first}`, ctx.admin).send({ out_at: new Date(Date.now()).toISOString(), reason: 'oops' })).status).toBe(409);
+
+    // closing the open session makes it the latest check-out
+    const closed = await api('patch', `/sessions/${second}`, ctx.admin).send({ out_at: new Date().toISOString(), reason: 'Left for the day' });
+    expect(closed.status).toBe(200);
+    expect(closed.body.data).toMatchObject({ currently_in: false });
+    expect(closed.body.data.check_out_at).toBeTruthy();
+  });
+
+  test('deleting a session keeps the day; deleting the last one, or the whole day, removes it; each is audited', async () => {
+    const ctx = await seed();
+    const emp = await ctx.person('Asha');
+    const [first, second] = await twoSessions(ctx, emp);
+    expect((await api('delete', `/sessions/${first}`, emp.token).send({ reason: 'x y z' })).status).toBe(403);
+    expect((await api('delete', `/sessions/${first}`, ctx.admin).send({})).status).toBe(422);
+
+    const one = await api('delete', `/sessions/${first}`, ctx.admin).send({ reason: 'Duplicate tap' });
+    expect(one.status).toBe(200);
+    expect(one.body.data.day_removed).toBe(false);
+    expect(one.body.data.record.sessions).toHaveLength(1);
+
+    const last = await api('delete', `/sessions/${second}`, ctx.admin).send({ reason: 'Wrong person' });
+    expect(last.body.data.day_removed).toBe(true);
+    expect(await prisma.locationCheckin.count()).toBe(0);
+
+    await checkIn(emp.token, NEAR);
+    const dayId = (await prisma.locationCheckin.findFirst()).id;
+    expect((await api('delete', `/records/${dayId}`, emp.token).send({ reason: 'mine' })).status).toBe(403);
+    expect((await api('delete', `/records/${dayId}`, ctx.admin).send({ reason: 'Test entry' })).status).toBe(200);
+    expect(await prisma.locationCheckin.count()).toBe(0);
+    expect(await prisma.auditLog.count({ where: { entity_type: 'location_checkin' } })).toBe(3);
+  });
+});
+
+describe('report: attendance status, not as planned, no check-in', () => {
+  test('location unavailable on an office day counts as not as planned; a home day without a location does not', async () => {
+    const ctx = await seed({ geofence: false });
+    await api('put', '/settings', ctx.admin).send({ default_cutoff_minutes: (nowMinutes() + 60) % 1440 });
+    const officeDay = await ctx.person('Office Olga');
+    const homeDay = await ctx.person('Remote Ravi', { workMode: 'remote' });
+    await checkIn(officeDay.token, NEAR); // no map point: location unavailable
+    await checkIn(homeDay.token, null);
+    const res = await api('get', `/report?${range}&mismatch_only=true`, ctx.admin);
+    expect(res.body.data.rows.map((r) => r.name)).toEqual(['Office Olga']);
+    expect(res.body.data.rows[0].comparison).toBe('no_location');
+    expect(res.body.data.summary.not_as_planned).toBe(1);
+  });
+
+  test('shows the attendance status and approved leave type beside the check-in, and lists a working day with no check-in', async () => {
+    const ctx = await seed();
+    await api('put', '/settings', ctx.admin).send({ default_cutoff_minutes: (nowMinutes() + 60) % 1440 });
+    const present = await ctx.person('Present Pia');
+    const onLeave = await ctx.person('Leave Lata');
+    const silent = await ctx.person('Silent Sam');
+    const away = await ctx.person('Leave But Here');
+    const date = todayDate();
+    const cl = await prisma.leaveType.create({ data: { org_id: ctx.org.id, name: 'CL' } });
+    await prisma.attendanceRecord.createMany({
+      data: [
+        { org_id: ctx.org.id, org_membership_id: present.membership.id, date, status: 'present' },
+        { org_id: ctx.org.id, org_membership_id: onLeave.membership.id, date, status: 'leave' },
+        { org_id: ctx.org.id, org_membership_id: silent.membership.id, date, status: 'present' },
+        { org_id: ctx.org.id, org_membership_id: away.membership.id, date, status: 'leave' },
+      ],
+    });
+    await prisma.leaveRequest.createMany({
+      data: [onLeave, away].map((p) => ({ org_id: ctx.org.id, org_membership_id: p.membership.id, leave_type_id: cl.id, from_date: date, to_date: date, status: 'approved' })),
+    });
+    await checkIn(present.token, NEAR);
+    await checkIn(away.token, NEAR);
+
+    const res = await api('get', `/report?${range}`, ctx.admin);
+    const byName = Object.fromEntries(res.body.data.rows.map((r) => [r.name, r]));
+    expect(byName['Present Pia']).toMatchObject({ attendance_status: 'present', attendance_label: 'Present', check_in_result: 'in_office' });
+    expect(byName['Silent Sam']).toMatchObject({ id: null, comparison: 'no_checkin', flags: ['present_no_checkin'], attendance_status: 'present' });
+    expect(byName['Leave Lata']).toMatchObject({ id: null, comparison: 'on_leave', leave_type: 'CL', attendance_label: 'CL' });
+    expect(byName['Leave Lata'].flags).toEqual([]);
+    expect(byName['Leave But Here'].flags).toEqual(['leave_but_checked_in']);
+    expect(res.body.data.summary).toMatchObject({ check_ins: 2, no_checkin: 1, leave_but_checked_in: 1 });
+
+    expect((await api('get', `/report?${range}&no_checkin_only=true`, ctx.admin)).body.data.rows.map((r) => r.name).sort()).toEqual(['Leave Lata', 'Silent Sam']);
+    expect((await api('get', `/report?${range}&attendance_status=leave`, ctx.admin)).body.data.rows.map((r) => r.name).sort()).toEqual(['Leave But Here', 'Leave Lata']);
+    // the stricter filters never list people who did not check in
+    expect((await api('get', `/report?${range}&late_only=true`, ctx.admin)).body.data.rows.every((r) => r.id)).toBe(true);
+    const csv = await api('get', `/report.csv?${range}`, ctx.admin);
+    expect(csv.text.split('\n')[0]).toContain('Attendance status');
+    expect(csv.text).toContain('Silent Sam');
+    // none of it changed attendance
+    expect(await prisma.attendanceRecord.count()).toBe(4);
+  });
+});
+
+describe('register: every employee x every day', () => {
+  test('lists everyone, shows check-ins with their times, marks a working day without one as missing, and leaves weekly offs and leave alone', async () => {
+    const ctx = await seed();
+    const here = await ctx.person('Here Hari');
+    await ctx.person('Missing Mina');
+    const leave = await ctx.person('Leave Lata');
+    const contractor = await ctx.person('Con Tractor', { workerType: 'contractor' });
+    const tue = new Date('2026-09-01T00:00:00.000Z'); // a Tuesday
+    const sat = new Date('2026-09-05T00:00:00.000Z'); // a Saturday
+    const at = (h, m) => new Date(Date.UTC(2026, 8, 1, h, m) - 330 * 60000);
+    const day = await prisma.locationCheckin.create({
+      data: {
+        org_id: ctx.org.id, org_membership_id: here.membership.id, date: tue, planned_place: 'office', check_in_at: at(10, 45), check_in_result: 'in_office', check_in_at_office: true, late_minutes: 15, check_out_at: at(18, 0),
+        sessions: { create: [{ org_id: ctx.org.id, org_membership_id: here.membership.id, date: tue, in_at: at(10, 45), in_result: 'in_office', out_at: at(13, 0) }, { org_id: ctx.org.id, org_membership_id: here.membership.id, date: tue, in_at: at(13, 30), in_result: 'in_office', out_at: at(18, 0) }] },
+      },
+    });
+    const cl = await prisma.leaveType.create({ data: { org_id: ctx.org.id, name: 'Casual Leave' } });
+    await prisma.leaveRequest.create({ data: { org_id: ctx.org.id, org_membership_id: leave.membership.id, leave_type_id: cl.id, from_date: tue, to_date: tue, status: 'approved' } });
+
+    expect((await api('get', '/register?year=2026&month=9', here.token)).status).toBe(403);
+    const res = await api('get', '/register?year=2026&month=9', ctx.admin);
+    expect(res.status).toBe(200);
+    const names = res.body.data.people.map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['Here Hari', 'Missing Mina', 'Leave Lata']));
+    expect(names).not.toContain('Con Tractor'); // contractors have no attendance
+    const cell = (name, date) => res.body.data.people.find((p) => p.name === name).days.find((d) => d.date === date);
+
+    const hari = cell('Here Hari', '2026-09-01');
+    expect(hari.state).toBe('checked_in');
+    expect(hari.checkin).toMatchObject({ id: day.id, late_minutes: 15, out_of_desk_minutes: 30, break_count: 1, result: 'in_office', currently_in: false });
+    expect(hari.checkin.sessions).toHaveLength(2);
+    expect(cell('Missing Mina', '2026-09-01').state).toBe('missing');
+    expect(cell('Leave Lata', '2026-09-01').state).toBe('leave');
+    expect(cell('Missing Mina', '2026-09-05').state).toBe('off'); // weekly off
+    expect(cell('Missing Mina', '2026-09-02').state).toBe('missing');
+    const mina = res.body.data.people.find((p) => p.name === 'Missing Mina');
+    expect(mina.totals.missing).toBeGreaterThan(15);
+    expect(res.body.data.people.find((p) => p.name === 'Here Hari').totals).toMatchObject({ checked_in: 1, late: 1, out_of_desk_minutes: 30 });
+    expect(sat.getUTCDay()).toBe(6);
+    expect(contractor.membership.id).toBeTruthy();
   });
 });
 

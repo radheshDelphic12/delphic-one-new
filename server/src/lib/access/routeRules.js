@@ -80,7 +80,8 @@ const RULES = [
 
   // Location check-in (Delphic Global): the employee's own check-in is open; the report and office points need the report permission.
   [/^\/location-checkin\/(today|check-in|check-out|mine|settings)$/, { GET: 'open', POST: 'open', '*': 'hr_settings.update' }],
-  [/^\/location-checkin\/records\/[^/]+\/selfie$/, 'open'], // its owner, or a report reader: the service decides
+  [/^\/location-checkin\/(records|sessions)\/[^/]+\/selfie$/, 'open'], // its owner, or a report reader: the service decides
+  [/^\/location-checkin\/(records|sessions)\/[^/]+$/, { '*': 'hr_settings.update' }], // an admin corrects or removes a record
   [/^\/location-checkin\/(offices|shifts)\/[^/]+$/, { '*': 'hr_settings.update' }],
   [/^\/location-checkin(\/|$)/, 'location_checkin.view'],
 

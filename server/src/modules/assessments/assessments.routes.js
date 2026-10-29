@@ -12,6 +12,7 @@ const analytics = require('./assessmentAnalytics.service');
 const ERRORS = {
   not_found: [404, 'Not found'],
   invalid_questions: [400, 'One or more questions do not exist'],
+  too_many_per_candidate: [400, 'Questions per candidate cannot be more than the questions in the test'],
   empty_test: [400, 'Add questions to the test before sending it'],
   already_submitted: [410, 'This test has already been submitted'],
   expired: [410, 'This link has expired. Ask the recruiter for a new one'],
@@ -35,6 +36,7 @@ const testSchema = z.object({
   description: z.string().nullable().optional(),
   pass_percentage: z.number().int().min(1).max(100).default(60),
   duration_minutes: z.number().int().min(1).max(600).nullable().optional(),
+  questions_per_candidate: z.number().int().min(1).max(200).nullable().optional(),
   is_active: z.boolean().optional(),
   question_ids: z.array(z.string().uuid()).default([]),
 });

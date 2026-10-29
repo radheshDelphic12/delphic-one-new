@@ -63,3 +63,7 @@ Internal Hiring requirements use the same flow as any other: publish from Websit
 ### E-mail setting and answer review (2026-10-29)
 - `orgs.assessment_email_candidate` (default **off**, migration `20261101100000_assessment_email_setting`): the test link is no longer e-mailed to the candidate unless an admin ticks "E-mail the test link to the candidate" in Hiring setup > Tests. The recruiter copies the link from the interview plan. `GET/PUT /assessments/settings` carry both settings.
 - `GET /assessments/attempts/:id/review` (team only): for a submitted attempt, each question with the candidate's pick, the marks every option carries, the best option, and the result (right, partly right for graded behavioural questions, wrong, not answered). Shown in the interview plan via "view answers". Uses the test's questions as they are now.
+
+### Random questions per candidate (2026-10-29, migration `20261104110000_assessment_random_questions`)
+- `assessment_tests.questions_per_candidate` (null = every question in order, as before). Set it in Hiring setup > Tests > Edit (cannot exceed the questions selected). Each candidate gets that many questions picked at random from the selected pool and shuffled; options keep their order.
+- The pick is made when the candidate first opens the link and stored in `assessment_attempts.question_ids`, so a refresh shows the same questions. Scoring, pass % and "view answers" use that candidate's questions only. Attempts without a stored pick (older ones) use every question.
