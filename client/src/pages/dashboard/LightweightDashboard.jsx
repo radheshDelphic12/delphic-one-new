@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
 import BenchCard from './BenchCard.jsx';
+import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
 
 const QUICK_LINKS = [
   { to: '/people', label: 'People', description: 'Directory, org chart, and HR settings.', icon: Users, tint: 'bg-[#EFF6FF] text-[#2563EB]' },
@@ -54,6 +55,7 @@ function ModernDashboard() {
           <Link to="/attendance" className="text-sm font-medium text-primary-700 hover:underline">View my attendance</Link>
         </div>
       </div>
+      <DashboardCheckinCard />
       <div>
         <h2 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Quick links</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -65,7 +65,8 @@ export default function TimeAttendanceHubPage() {
     ...BASE_TABS.slice(0, 2),
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
-    ...(user?.active_org?.is_master_workspace ? [LOCATION_CHECKIN_TAB] : []),
+    // Employees check in from the dashboard; this tab is only the report / settings for those who manage it.
+    ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
     ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
   ].filter((t) => t.need == null || allowed(user, t.need, true));
