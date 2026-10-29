@@ -365,7 +365,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
       else if (c.kind === 'absent') totals.absent += 1;
       totals.hours += hours;
       const rec = recordBy.get(`${m.id}|${d.date}`);
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null };
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
     return {

@@ -32,7 +32,10 @@ const ERRORS = {
   not_eligible: [403, 'Location check-in is for full-time employees'],
   already_checked_in: [409, 'You have already checked in today'],
   not_checked_in: [409, 'Check in first'],
-  already_checked_out: [409, 'You have already checked out today'],
+  already_checked_out: [409, 'You are not checked in right now'],
+  bad_times: [422, 'The check-out must be after the check-in'],
+  wrong_day: [422, 'The check-in must stay on the same day'],
+  overlap: [409, 'This overlaps another check-in of the same day'],
   selfie_required: [422, 'Take a selfie to check in'],
   location_not_found: [404, 'Office not found'],
   range_too_long: [422, 'Pick a range of up to 93 days'],
@@ -58,7 +61,7 @@ router.post(
   '/check-out',
   upload.none(),
   asyncHandler(async (req, res) => {
-    const point = v.point.parse(v.emptyToUndefined(req.body));
+    const point = v.checkOutPoint.parse(v.emptyToUndefined(req.body));
     const result = await service.checkOut(req.user, point);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.record);
@@ -79,6 +82,13 @@ router.get(
     if (result.error) return failFor(res, result.error);
     return ok(res, result);
   })
+);
+
+// Every employee x every day of a month: who checked in, when, where, and who is missing.
+router.get(
+  '/register',
+  can('location_checkin.view', 'admin'),
+  asyncHandler(async (req, res) => ok(res, await service.register(req.user.org_id, req.user, v.registerQuery.parse(req.query))))
 );
 
 router.get(
@@ -107,6 +117,52 @@ router.get(
     return res.sendFile(found.file, (err) => {
       if (err && !res.headersSent) failFor(res, 'not_found');
     });
+  })
+);
+
+// The selfie of one check-in (a day can hold several).
+router.get(
+  '/sessions/:id/selfie',
+  asyncHandler(async (req, res) => {
+    const found = await service.sessionSelfiePath(req.user.org_id, req.params.id);
+    if (found.error) return failFor(res, found.error);
+    if (found.org_membership_id !== req.user.org_membership_id) {
+      const decided = hasPermission(req.user, 'location_checkin.view');
+      const allowed = decided === null ? req.user.role === 'admin' : decided;
+      if (!allowed) return failFor(res, 'not_found');
+    }
+    return res.sendFile(found.file, (err) => {
+      if (err && !res.headersSent) failFor(res, 'not_found');
+    });
+  })
+);
+
+// ----- Correct or remove a record (admin; a reason is required and audited) -----
+router.patch(
+  '/sessions/:id',
+  can('hr_settings.update', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.updateSession(req.user, req.params.id, v.sessionEditSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.record);
+  })
+);
+router.delete(
+  '/sessions/:id',
+  can('hr_settings.update', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteSession(req.user, req.params.id, v.removeSchema.parse(req.body || {}).reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { record: result.record, day_removed: result.day_removed });
+  })
+);
+router.delete(
+  '/records/:id',
+  can('hr_settings.update', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.deleteDay(req.user, req.params.id, v.removeSchema.parse(req.body || {}).reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
   })
 );
 

@@ -37,10 +37,21 @@ Per check-in: planned (office/home), check-in/out time, late minutes, where they
 Time & Attendance > **Location Check-in** (master workspace only): My check-in (camera selfie + GPS), Report, Settings (selfie Required / Optional / Off, full-time only switch, late time per shift, default late time, office map points with "Use my location"). When contractors are allowed, their My Portal shows the same check-in card.
 
 ## Tests
-`server/tests/location-checkin.test.js` (14 tests); `access-model.test.js` still green after the route-rule and catalog additions.
+`server/tests/location-checkin.test.js` (20 tests); `access-model.test.js` still green after the route-rule and catalog additions.
+
+## Several check-ins a day, breaks, corrections (2026-10-29, migration `20261104100000_location_checkin_sessions`)
+- New table `location_checkin_sessions`: one row per check-in / check-out pair. The day row keeps the first check-in (late is judged on that one only) and the latest check-out. Existing days are copied in as session one by the migration.
+- Check-in and check-out ask for confirmation (a dialog). The check-out dialog takes an optional reason (lunch / break / meeting / other). After a check-out the card offers "Check in again" (a mistaken check-out, or back from a break); the selfie rule applies again.
+- **Out of desk** = the gaps between one check-out and the next check-in of the day. Shown per day (total, number of breaks, longest) and averaged in the report.
+- Admin (`hr_settings.update`): `PATCH /sessions/:id` edits the in / out time (clearing the out time re-opens it) or the break reason; `DELETE /sessions/:id` and `DELETE /records/:id` remove one check-in or the whole day. A reason is mandatory and every change is written to `audit_logs` (entity `location_checkin`). The day row is recomputed (first in, late, last out). Nothing touches attendance.
+- Report: each row also shows the **attendance status** (Present / Half day / Absent / Holiday / Work from home, or the approved leave type such as CL / SL), read only from attendance and leave. "Not as planned" now includes an office-day check-in whose location was unavailable (a home day without a location is not flagged). Working days with attendance marked but no check-in are listed ("Working day, no check-in"); a person on leave who still checked in is flagged. New filters: attendance status, no check-in only. CSV gained attendance status, sessions, out of desk, breaks.
+
+## Register: every employee x every day (Workplace Check-in > Register)
+- `GET /location-checkin/register?year=&month=` (needs `location_checkin.view`): one row per current employee (contractors have no attendance and are not listed), one cell per day, built on the Attendance Dashboard register so weekly offs, holidays, leave and employment dates follow the same rules. Cell = where the person checked in (O office, WFH home, AW away, ? location unavailable, red ring = late), or what attendance says (leave code, WO, H). **M = missing**: a working day, not a full day of leave, with no check-in. Totals per person: checked in, late, missing, away, no location, average out of desk.
+- Two views: **Month grid**, and **One day** (a table of everyone with attendance, planned, first in, last out, late, out of desk, entries, where from, status). Search, "Missing only". Click a cell for that day's entries. Editing and deleting stay in the Report tab.
+- The attendance register's day rows gained `day_type` and `in_employment` (additive).
 
 ## Not built / open
-- Not browser-checked (camera and GPS need HTTPS or localhost).
-- Employees who never check in are not listed (the report shows check-ins only).
+- Contractors are not in the register (they have no attendance). A register CSV export is not built (the Report tab exports records).
 - Late is measured in the org timezone; no per-day override.
 - Other companies are not included.
