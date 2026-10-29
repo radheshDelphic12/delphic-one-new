@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, UserCheck, Lock, Users, FileClock } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, MapPin, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
@@ -8,6 +8,7 @@ import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
 import AttendanceDashboard from './AttendanceDashboard.jsx';
+import LocationCheckinTab from './LocationCheckinTab.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
@@ -35,6 +36,8 @@ const BASE_TABS = [
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
+// Where people check in from (office, home, away) and who is late: a separate record, never feeds attendance or pay. Delphic Global only.
+const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Location Check-in', icon: MapPin, need: 'basic.attendance' };
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
 const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.timesheet' };
 // Admin: the client project timesheet (IT and contractors).
@@ -62,6 +65,7 @@ export default function TimeAttendanceHubPage() {
     ...BASE_TABS.slice(0, 2),
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
+    ...(user?.active_org?.is_master_workspace ? [LOCATION_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
     ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
   ].filter((t) => t.need == null || allowed(user, t.need, true));
@@ -101,6 +105,7 @@ export default function TimeAttendanceHubPage() {
       {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
       {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}
+      {section === 'location-checkin' && has('location-checkin') && <LocationCheckinTab />}
       {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}

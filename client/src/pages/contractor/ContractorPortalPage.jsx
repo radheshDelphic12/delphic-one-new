@@ -5,6 +5,7 @@ import useLiveData from '../../lib/useLiveData.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import MyHolidaysTab from '../time/MyHolidaysTab.jsx';
+import { LocationCheckinPortalCard } from '../time/LocationCheckinTab.jsx';
 import ItTimesheetPage from '../time/ItTimesheetPage.jsx';
 import ProjectTeamTimesheet from '../time/ProjectTeamTimesheet.jsx';
 
@@ -47,6 +48,7 @@ export default function ContractorPortalPage() {
 
   return (
     <div className="space-y-4">
+      <LocationCheckinPortalCard />
       <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
