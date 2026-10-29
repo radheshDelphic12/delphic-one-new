@@ -14,6 +14,9 @@ const CONTRACTOR_ALLOWED = [
   ['*', /^\/api\/v1\/timesheets(\/|$)/],
   // The timesheet grid checks whether the day is a leave day.
   ['GET', /^\/api\/v1\/leave\/day-status$/],
+  // Location check-in: open to a contractor only when an admin switches "full-time only" off (the service refuses otherwise).
+  ['GET', /^\/api\/v1\/location-checkin\/(today|mine)$/],
+  ['POST', /^\/api\/v1\/location-checkin\/check-(in|out)$/],
   ['GET', /^\/api\/v1\/tasks\/mine$/],
   ['PATCH', /^\/api\/v1\/tasks\/[^/]+$/],
 ];

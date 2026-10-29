@@ -57,8 +57,16 @@ describe('assessments', () => {
 
     const invite = await authed(request(app).post('/api/v1/assessments/attempts'), recruiterToken).send({ test_id: test.body.data.id, submission_id: submissionId });
     expect(invite.status).toBe(201);
-    const token = invite.body.data.link.split('/assessment/')[1];
+    let token = invite.body.data.link.split("/assessment/")[1];
+    // the link is not e-mailed unless the company turns that setting on (off by default)
+    expect(await prisma.emailOutbox.count({ where: { kind: 'assessment_invite' } })).toBe(0);
+    await authed(request(app).put('/api/v1/assessments/settings'), adminToken).send({ assessment_email_candidate: true });
+    const second = await authed(request(app).post('/api/v1/assessments/attempts'), recruiterToken).send({ test_id: test.body.data.id, submission_id: submissionId });
+    expect(second.status).toBe(201);
     expect(await prisma.emailOutbox.count({ where: { kind: 'assessment_invite' } })).toBe(1);
+    const token2 = second.body.data.link.split('/assessment/')[1];
+    expect(token2).not.toBe(token);
+    token = token2; // the first (unopened) link was replaced by the second
 
     // no login; the marks are never sent to the candidate
     const open = await request(app).get(`/api/v1/public/assessments/${token}`);
@@ -80,7 +88,7 @@ describe('assessments', () => {
     const q = (await makeQuestion('reasoning', 'Pick the odd one', [0, 3])).body.data;
     const test = await authed(request(app).post('/api/v1/assessments/tests'), adminToken).send({ name: 'T', pass_percentage: 70, question_ids: [q.id] });
     const invite = await authed(request(app).post('/api/v1/assessments/attempts'), recruiterToken).send({ test_id: test.body.data.id, submission_id: submissionId });
-    const token = invite.body.data.link.split('/assessment/')[1];
+    let token = invite.body.data.link.split("/assessment/")[1];
     await request(app).post(`/api/v1/public/assessments/${token}/submit`).send({ answers: { [q.id]: 0 } });
     const attempts = await authed(request(app).get(`/api/v1/assessments/attempts?submission_id=${submissionId}`), recruiterToken);
     expect(attempts.body.data.items[0]).toMatchObject({ score_percent: 0, passed: false });

@@ -52,6 +52,7 @@ const CATALOG = [
   // ---- Time and Attendance
   { module: 'attendance', category: 'time', label: 'Team attendance', actions: [A('attendance', 'view', 'View', true), A('attendance', 'update', 'Edit and import', true), A('attendance', 'approve', 'Check attendance changes (everyone)')] },
   { module: 'attendance_dashboard', category: 'time', label: 'Attendance dashboard', actions: [A('attendance_dashboard', 'view', 'View')] },
+  { module: 'location_checkin', category: 'time', label: 'Location check-in report', actions: [A('location_checkin', 'view', 'View the report and office settings')] },
   { module: 'project_calendar', category: 'time', label: 'Project calendar', actions: [A('project_calendar', 'view', 'View'), A('project_calendar', 'update', 'Edit')] },
   { module: 'project_team', category: 'time', label: 'Project team', actions: [A('project_team', 'view', 'View')] },
   { module: 'holidays', category: 'time', label: 'Holiday calendar', actions: [A('holidays', 'view', 'View'), A('holidays', 'update', 'Edit and assign')] },

@@ -78,6 +78,12 @@ const RULES = [
   // Their own record, or their reports': the service limits it. Holding the Attendance dashboard permission widens it to everyone (see modulesOf).
   [/^\/attendance-dashboard(\/|$)/, 'open'],
 
+  // Location check-in (Delphic Global): the employee's own check-in is open; the report and office points need the report permission.
+  [/^\/location-checkin\/(today|check-in|check-out|mine|settings)$/, { GET: 'open', POST: 'open', '*': 'hr_settings.update' }],
+  [/^\/location-checkin\/records\/[^/]+\/selfie$/, 'open'], // its owner, or a report reader: the service decides
+  [/^\/location-checkin\/(offices|shifts)\/[^/]+$/, { '*': 'hr_settings.update' }],
+  [/^\/location-checkin(\/|$)/, 'location_checkin.view'],
+
   [/^\/leave\/(types|day-status|balances\/me|requests\/me)$/, { GET: 'open', '*': 'leave.update' }],
   [/^\/leave\/requests$/, { GET: ['leave.view', 'leave.approve'], '*': 'open' }],
   [/^\/leave\/requests\/[^/]+\/cancel$/, 'open'],

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -24,6 +24,13 @@ const ATTEMPT_TONE = {
   expired: 'bg-warning-100 text-warning-800',
   superseded: 'bg-tertiary-50 text-tertiary-400 line-through',
 };
+const RESULT_LABEL = { correct: 'Right', partial: 'Partly right', wrong: 'Wrong', not_answered: 'Not answered' };
+const RESULT_TONE = {
+  correct: 'bg-success-100 text-success-800',
+  partial: 'bg-warning-100 text-warning-800',
+  wrong: 'bg-danger-100 text-danger-700',
+  not_answered: 'bg-tertiary-100 text-tertiary-600',
+};
 const NO_ATTEMPTS = { items: [], live_id: null, used: 0, limit: 0, remaining: null };
 
 // rating: null = not rated yet (every row left in the form has to be rated before saving)
@@ -45,6 +52,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
   const [attemptState, setAttemptState] = useState(NO_ATTEMPTS);
   const [skillOptions, setSkillOptions] = useState([]);
   const [removing, setRemoving] = useState(null); // { attempt, reason }
+  const [reviewing, setReviewing] = useState(null); // the attempt's answers, marked right / wrong
   const [busy, setBusy] = useState(false);
 
   const locked = !!submission?.is_locked;
@@ -207,6 +215,18 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     }, 'Failed to delete the test');
   }
 
+  async function openReview(attempt) {
+    setBusy(true);
+    try {
+      const { data } = await apiClient.get(`/assessments/attempts/${attempt.id}/review`);
+      setReviewing(data.data);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not open the answers'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function extendAttempt(attempt) {
     await run(async () => {
       await apiClient.post(`/assessments/attempts/${attempt.id}/extend`, {});
@@ -327,6 +347,11 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                         </div>
                         <div className="flex items-center gap-2">
                           {a.link && a.is_live && <button type="button" className="underline" onClick={() => navigator.clipboard?.writeText(a.link).then(() => pushSuccess('Link copied', 'Copied'))}>copy link</button>}
+                          {a.status === 'submitted' && (
+                            <button type="button" className="inline-flex items-center gap-1 underline" disabled={busy} onClick={() => openReview(a)}>
+                              <Eye className="h-3.5 w-3.5" aria-hidden />view answers
+                            </button>
+                          )}
                           {isAdmin && !locked && a.is_live && a.view_status !== 'scored' && (
                             <button type="button" className="underline" disabled={busy} onClick={() => extendAttempt(a)}>extend 7 days</button>
                           )}
@@ -435,6 +460,38 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
               </div>
               <button type="button" className="btn-ghost mt-2 text-xs" onClick={() => setFinish((p) => ({ ...p, form: { ...p.form, skills: [...p.form.skills, emptySkill()] } }))}>+ Add skill</button>
             </div>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!reviewing} onClose={() => setReviewing(null)} size="lg" tone="edit" title={reviewing ? `Answers: ${reviewing.test_name}` : ''}
+        footer={<div className="flex justify-end"><button type="button" className="btn-secondary" onClick={() => setReviewing(null)}>Close</button></div>}>
+        {reviewing && (
+          <div className="space-y-3" data-testid="answer-review">
+            <p className="text-sm text-tertiary-700">
+              {reviewing.candidate_name}: <strong>{reviewing.score_percent}%</strong> ({reviewing.passed ? 'passed' : 'failed'}, pass mark {reviewing.pass_percentage}%) · submitted {when(reviewing.submitted_at)}
+            </p>
+            <p className="text-xs text-tertiary-600">
+              {reviewing.summary.correct} right · {reviewing.summary.partial} partly right · {reviewing.summary.wrong} wrong · {reviewing.summary.not_answered} not answered, out of {reviewing.summary.total}. The best option of each question is marked; only the team sees this page.
+            </p>
+            <ol className="space-y-3">
+              {reviewing.questions.map((q) => (
+                <li key={q.id} className="rounded-xl border border-tertiary-100 bg-white p-3" data-testid="review-question" data-result={q.result}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-tertiary-900">{q.number}. {q.text} <span className="text-xs font-normal capitalize text-tertiary-400">{q.category}</span></p>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${RESULT_TONE[q.result]}`}>{RESULT_LABEL[q.result]} · {q.marks_got}/{q.marks_full}</span>
+                  </div>
+                  <ul className="mt-2 space-y-1">
+                    {q.options.map((o, i) => (
+                      <li key={i} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-xs ${o.picked ? (q.result === 'correct' ? 'border-success-300 bg-success-50' : q.result === 'partial' ? 'border-warning-300 bg-warning-50' : 'border-danger-300 bg-danger-50') : o.best ? 'border-success-200 bg-success-50/50' : 'border-tertiary-100'}`}>
+                        <span>{o.text}{o.picked ? ' (candidate answer)' : ''}{o.best ? ' (best answer)' : ''}</span>
+                        <span className="text-tertiary-500">{o.marks} mark{o.marks === 1 ? '' : 's'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ol>
           </div>
         )}
       </Drawer>

@@ -2036,6 +2036,8 @@ model Org {
   resignation_manager_required Boolean   @default(true)
   // Hiring: how many assessment tests can be sent for one submission (0 = no limit).
   assessment_max_attempts      Int       @default(3)
+  // Hiring: e-mail the test link to the candidate (off by default; the recruiter copies the link instead).
+  assessment_email_candidate   Boolean   @default(false)
   created_at                 DateTime  @default(now())
   updated_at                 DateTime  @default(now()) @updatedAt
 
@@ -2521,6 +2523,8 @@ model Account {
   meeting_date     DateTime?
   meeting_location String?
   meeting_notes    String?
+  // Length of the account's meeting in minutes (calendar block); editable per meeting.
+  meeting_duration_minutes Int @default(60)
 
   vendor_specializations String[]
   vendor_rate_range      Json?
@@ -8295,4 +8299,88 @@ model ResignationRequest {
   @@index([org_membership_id])
   @@index([manager_membership_id])
   @@map("resignation_requests")
+}
+
+// ===================== Location check-in (Delphic Global only) =====================
+// A monitoring feature kept apart from attendance: where each full-time employee checked in and out, whether that was inside the
+// office radius, and how late. Nothing here is read by attendance, payroll, leave or timesheets, and nothing in them is changed.
+// Plain id columns (no relations) so the existing models are untouched.
+
+// The map point and radius of one office (a Location). Admin-editable.
+model OfficeGeofence {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  location_id String   @db.Uuid
+  latitude    Decimal  @db.Decimal(9, 6)
+  longitude   Decimal  @db.Decimal(9, 6)
+  radius_m    Int      @default(150)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, location_id])
+  @@index([org_id])
+  @@map("office_geofences")
+}
+
+// One row per company: whether a selfie is needed at check-in, and the cutoff used for someone with no shift (minutes from midnight).
+model LocationCheckinSetting {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String   @unique @db.Uuid
+  selfie_mode            String   @default("required") // required | optional | off
+  full_time_only         Boolean  @default(true) // false: contractors can check in too
+  default_cutoff_minutes Int      @default(600)
+  updated_by             String?  @db.Uuid
+  created_at             DateTime @default(now())
+  updated_at             DateTime @default(now()) @updatedAt
+
+  @@map("location_checkin_settings")
+}
+
+// One check-in / check-out per person per day. planned_place and the result are stored as they were at check-in, so the report keeps
+// showing what was true that day even if the person's work arrangement changes later.
+model LocationCheckin {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id               String    @db.Uuid
+  org_membership_id    String    @db.Uuid
+  date                 DateTime  @db.Date
+  location_id          String?   @db.Uuid // the office the person was measured against
+  planned_place        String // office | home: the approved arrangement for the day
+  check_in_at          DateTime
+  check_in_lat         Decimal?  @db.Decimal(9, 6)
+  check_in_lng         Decimal?  @db.Decimal(9, 6)
+  check_in_accuracy_m  Int?
+  check_in_distance_m  Int?
+  check_in_at_office   Boolean? // inside the office radius at check-in (null = no location)
+  check_in_result      String // in_office | outside_office | work_from_home | location_unavailable
+  check_in_photo       String? // file name under the upload dir, served only through this module
+  cutoff_minutes       Int? // the shift start (+ grace) used, minutes from midnight
+  late_minutes         Int       @default(0)
+  check_out_at         DateTime?
+  check_out_lat        Decimal?  @db.Decimal(9, 6)
+  check_out_lng        Decimal?  @db.Decimal(9, 6)
+  check_out_accuracy_m Int?
+  check_out_distance_m Int?
+  check_out_at_office  Boolean?
+  check_out_result     String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  @@unique([org_membership_id, date])
+  @@index([org_id, date])
+  @@map("location_checkins")
+}
+
+// The time after which someone on this shift counts as late, for the location check-in report only. No row: shift start + its grace
+// (as set in HR settings). Kept here so changing it never changes attendance.
+model LocationCheckinShiftRule {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @db.Uuid
+  shift_id           String   @db.Uuid
+  late_after_minutes Int // minutes from midnight
+  updated_by         String?  @db.Uuid
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, shift_id])
+  @@map("location_checkin_shift_rules")
 }
