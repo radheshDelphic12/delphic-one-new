@@ -41,7 +41,7 @@ const monthRange = (back) => ({ from: `${monthKey(back)}-01`, to: iso(new Date(D
 const qs = (o) => `?${new URLSearchParams(o).toString()}`;
 
 async function investment(a, body = {}) {
-  const r = await a.post('/investments', { name: 'Growth fund', investment_date: dayIn(2, 5), amount: 500000, expected_return_amount: 560000, expected_return_date: dayIn(0, 28), investor: 'Self', ...body });
+  const r = await a.post('/investments', { name: 'Growth fund', investment_date: dayIn(2, 5), amount: 500000, expected_return_amount: 560000, expected_return_date: dayIn(-1, 28), investor: 'Self', ...body });
   expect(r.status).toBe(201);
   return r.body.data;
 }
