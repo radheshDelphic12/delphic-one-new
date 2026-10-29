@@ -31,10 +31,21 @@ async function loadRequirementForSubmission(db, submissionId) {
     where: { id: submissionId },
     select: {
       id: true,
-      seat: { select: { requirement: { select: { id: true, interview_template_id: true, pass_percentage: true, primary_tech_stack: true, secondary_tech_stack: true, interview_template: { include: ROUND_INCLUDE } } } } },
+      seat: { select: { requirement: { select: { id: true, req_type: true, hiring_track: true, interview_template_id: true, pass_percentage: true, primary_tech_stack: true, secondary_tech_stack: true, interview_template: { include: ROUND_INCLUDE } } } } },
     },
   });
-  return sub?.seat?.requirement || null;
+  const requirement = sub?.seat?.requirement || null;
+  // Requirements created before templates existed (or while none matched) have no template, so the candidate got no test link
+  // or rounds. Attach the matching one now, once.
+  if (requirement && !requirement.interview_template_id) {
+    const template = await resolveTemplate(db, requirement.req_type, requirement.hiring_track);
+    if (template) {
+      await db.requirement.update({ where: { id: requirement.id }, data: { interview_template_id: template.id } });
+      requirement.interview_template_id = template.id;
+      requirement.interview_template = await db.interviewTemplate.findUnique({ where: { id: template.id }, include: ROUND_INCLUDE });
+    }
+  }
+  return requirement;
 }
 
 const passMarkFor = (requirement) => requirement?.pass_percentage ?? requirement?.interview_template?.pass_percentage ?? DEFAULT_PASS_PERCENTAGE;
