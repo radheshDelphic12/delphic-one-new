@@ -142,7 +142,7 @@ function MyCheckin() {
   }
 
   if (!today) return <p className="text-sm text-tertiary-500">Loading…</p>;
-  if (!today.eligible) return <p className="rounded-xl bg-tertiary-50 px-4 py-3 text-sm text-tertiary-700">Location check-in is for full-time employees.</p>;
+  if (!today.eligible) return <p className="rounded-xl bg-tertiary-50 px-4 py-3 text-sm text-tertiary-700">Workplace check-in is for full-time employees.</p>;
   const rec = today.record;
   return (
     <div className="space-y-4">
@@ -198,7 +198,7 @@ export function LocationCheckinPortalCard() {
   if (!eligible) return null;
   return (
     <section className="space-y-3">
-      <h2 className="text-base font-semibold text-tertiary-900">Location check-in</h2>
+      <h2 className="text-base font-semibold text-tertiary-900">Workplace check-in</h2>
       <MyCheckin />
     </section>
   );
@@ -465,7 +465,7 @@ export default function LocationCheckinTab() {
   const [view, setView] = useState('mine');
   return (
     <div className="space-y-4">
-      <p className="text-xs text-tertiary-500">Location check-in is a separate record of where people check in from. It does not change attendance, leave or salary.</p>
+      <p className="text-xs text-tertiary-500">Workplace check-in is a separate record of where people check in from. It does not change attendance, leave or salary.</p>
       {views.length > 1 && (
         <div className="flex gap-1">
           {views.map(([key, label]) => (
