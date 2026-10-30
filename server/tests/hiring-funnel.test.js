@@ -135,7 +135,11 @@ describe('hiring funnel', () => {
     await history(subB, 'closed', 1);
     await prisma.submission.update({ where: { id: subB }, data: { stage: 'closed' } });
 
-    const fn = (await funnel()).body.data.funnels[0];
+    const res = await funnel();
+    const fn = res.body.data.funnels[0];
+    // both moved past screening, so both count as having cleared it in the summary; the client-round rate never exceeds 100%
+    expect(res.body.data.summary.first_round_cleared).toBe(2);
+    expect(res.body.data.summary.client_round_pct).toBeLessThanOrEqual(100);
     expect(stage(fn, 'screening')).toMatchObject({ reached: 2, assumed: 1, unavailable: 1, passed: 0 });
     expect(stage(fn, 'client_r1')).toMatchObject({ reached: 2, passed: 1, unavailable: 1 });
   });

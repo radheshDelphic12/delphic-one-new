@@ -230,7 +230,8 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
     const joinedDays = outs.map((e) => e.times.joined).filter((d) => d != null);
     return {
       submitted: facts.submitted,
-      first_round_cleared: has('screening', 'passed', 'assumed'),
+      // moved on past the screening = cleared it, even when that round has no record (the funnel table lists those under Data unavailable)
+      first_round_cleared: has('screening', 'passed', 'assumed', 'unavailable'),
       reached_client_round: facts.tracks.client?.outcomes.client_r1 != null,
       selected,
       dropped,
@@ -318,7 +319,7 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
       'A profile submitted to more than one requirement counts once per funnel, at its furthest submission in that funnel.',
       'Passed = the round result is Pass. Dropped = the round result is Fail, or the submission was rejected / backed out while waiting at that stage. A candidate who has simply not moved on yet is In progress, not dropped.',
       'An optional round that was not held, or a round skipped for a bench profile, counts as Passed by default (shown as "Not held"). Untick the option to see those separately.',
-      'A mandatory round with no record although the candidate moved on, and old submissions without round records, go to Data unavailable instead of being counted as a pass.',
+      'A mandatory round with no record although the candidate moved on, and old submissions without round records, go to Data unavailable in the funnel table instead of being counted as a pass. In the summary and the recruiter table such a candidate still counts as having cleared the round, because they moved on past it.',
       'A round that the requirement\'s own template does not have (for example L3 on a non-technical template) is left out for that candidate.',
       'Old (pre-template) rounds are mapped: internal round 1 = Screening, internal round 2 = L1 (Internal hiring) or Screening (Client hiring), client rounds 1-3 = Client Round 1-3, HR/CTO/CEO = MD round.',
       'Rejected / backed-out candidates are counted as dropped at the first stage they had not yet cleared.',
