@@ -171,7 +171,14 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
   );
 }
 
-const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '' };
+const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '', status: '' };
+
+const CLAIM_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'reimbursed', label: 'Reimbursed' },
+  { value: 'rejected', label: 'Rejected' },
+];
 
 const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', payout: 'Bank payout', group: 'Group expenses' };
 
@@ -206,6 +213,8 @@ export default function ExpensesTab() {
   const params = useMemo(() => {
     const base = chargeQuery({ month: filters.month, date: '', category_id: filters.category_id, location_id: filters.location_id });
     if (view === 'team' && filters.org_membership_id) base.org_membership_id = filters.org_membership_id;
+    // Group charges have no claim status.
+    if ((view === 'mine' || view === 'team') && filters.status) base.status = filters.status;
     return base;
   }, [filters, view]);
 
@@ -437,7 +446,7 @@ export default function ExpensesTab() {
       {view === 'payout' && <ReimbursementPayoutPanel />}
 
       {view !== 'payout' && (<>
-      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
         {view === 'team' && (
           <label className="block text-xs font-medium text-tertiary-600">Employee<div className="mt-1"><SearchableSelect value={filters.org_membership_id} onChange={(v) => setFilter('org_membership_id', v)} options={memberOptions} placeholder="All employees" allowClear /></div></label>
         )}
@@ -454,6 +463,14 @@ export default function ExpensesTab() {
             {locationOptions.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </label>
+        {(view === 'mine' || view === 'team') && (
+          <label className="block text-xs font-medium text-tertiary-600">Status
+            <select value={filters.status} onChange={(e) => setFilter('status', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">All statuses</option>
+              {CLAIM_STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </label>
+        )}
         <div className="flex items-end justify-between gap-2">
           <button type="button" className="btn-ghost text-xs" onClick={() => setFilters(EMPTY_FILTERS)} disabled={!filtered}>Clear filters</button>
           {!loading && rows.length > 0 && <span className="pb-1 text-xs font-medium text-tertiary-700">Total {total}</span>}

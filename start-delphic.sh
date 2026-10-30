@@ -237,7 +237,7 @@ rehearse_migrations() {
   info "Restoring ${dump} into throwaway container ${name}"
   docker run -d --rm --name "${name}" --network "${network}"     -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=rehearsal postgres:16-alpine >/dev/null
   # shellcheck disable=SC2064
-  trap "docker rm -f ${name} >/dev/null 2>&1 || true" EXIT
+  trap "docker rm -fv ${name} >/dev/null 2>&1 || true" EXIT
   # Check over TCP: during first-boot init the image runs a temporary server on
   # the unix socket only, then restarts. TCP answers only once the real one is up.
   for i in $(seq 1 60); do
@@ -258,7 +258,8 @@ rehearse_migrations() {
   compose_cmd run --rm --no-deps -T     -e DATABASE_URL="postgres://postgres:rehearsal@${name}:5432/rehearsal"     server npx prisma migrate deploy
   rc=$?
   set -e
-  docker rm -f "${name}" >/dev/null 2>&1 || true
+  # -v also drops the image's anonymous data volume; plain rm -f leaked one per deploy
+  docker rm -fv "${name}" >/dev/null 2>&1 || true
   trap - EXIT
 
   if [[ "${rc}" -ne 0 ]]; then
