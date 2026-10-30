@@ -252,7 +252,10 @@ function candidateView(a) {
 
 async function openForCandidate(token) {
   const r = await load(token);
-  return r.error ? r : { view: candidateView(r.a) };
+  if (r.error) return r;
+  // before the start, tell the page whether this company records interviews, so it can ask for consent up front
+  const settings = await getSettings(r.a.org_id);
+  return { view: { ...candidateView(r.a), recording_offered: Boolean(settings.recording_enabled), recording_days: settings.recording_retention_days } };
 }
 
 async function startForCandidate(token, { consent, recording_consent: recordingConsent }) {

@@ -5,12 +5,14 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
+import AiInterviewTab from './AiInterviewTab.jsx';
 
 const TABS = [
   { key: 'templates', label: 'Interview templates' },
   { key: 'questions', label: 'Question bank' },
   { key: 'tests', label: 'Tests' },
   { key: 'analytics', label: 'Tests & interviews' },
+  { key: 'ai', label: 'AI interview' },
 ];
 const CATEGORIES = [
   { value: 'behavioural', label: 'Behavioural' },
@@ -483,6 +485,7 @@ export default function HiringSetupPage() {
       {tab === 'questions' && <QuestionsTab />}
       {tab === 'tests' && <TestsTab onChanged={loadTests} isAdmin={isAdmin} />}
       {tab === 'analytics' && <AnalyticsTab />}
+      {tab === 'ai' && <AiInterviewTab isAdmin={isAdmin} />}
     </div>
   );
 }

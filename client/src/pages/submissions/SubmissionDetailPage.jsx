@@ -19,6 +19,7 @@ import DeleteRecordButton from '../../components/DeleteRecordButton.jsx';
 import { userCan } from '../../lib/permissions.js';
 import InterviewRoundsPanel from './InterviewRoundsPanel.jsx';
 import InterviewPlanPanel from './InterviewPlanPanel.jsx';
+import AiInterviewCard from './AiInterviewCard.jsx';
 import SubmissionStageOverrideDrawer from './SubmissionStageOverrideDrawer.jsx';
 import {
   SUBMISSION_PIPELINE,
@@ -547,6 +548,8 @@ export default function SubmissionDetailPage() {
           onChanged={load}
         />
       )}
+
+      <AiInterviewCard submissionId={id} submission={submission} user={user} />
 
       <form onSubmit={handleSave} className="space-y-4">
         <section className="rounded-lg border bg-white p-4">

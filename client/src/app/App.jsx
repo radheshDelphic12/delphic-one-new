@@ -38,6 +38,7 @@ import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
 import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
+import AiInterviewPage from '../pages/public/AiInterviewPage.jsx';
 import HiringSetupPage from '../pages/hiringSetup/HiringSetupPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
@@ -341,6 +342,7 @@ export default function App() {
       <Route path="/guest-access" element={<GuestPortalPage />} />
       <Route path="/guest-project" element={<GuestProjectPage />} />
       <Route path="/assessment/:token" element={<AssessmentTakePage />} />
+      <Route path="/ai-interview/:token" element={<AiInterviewPage />} />
       <Route path="/careers" element={<CareerRedirect />} />
       <Route path="/careers/:slug" element={<CareerRedirect />} />
       <Route
