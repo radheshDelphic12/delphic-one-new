@@ -110,7 +110,13 @@ router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => {
 
 // ---- candidate side (no login, the token in the link is the credential) ----
 const publicRouter = express.Router();
-if (env.nodeEnv !== 'test') publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));
+// Recording sends a chunk every 5 seconds (about 720 an hour), so it has its own, much higher budget; sharing the 240/hour limit of
+// the interview calls would cut a recording off a few minutes in.
+const isRecording = (req) => req.path.endsWith('/recording');
+if (env.nodeEnv !== 'test') {
+  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 240, skip: isRecording, standardHeaders: true, legacyHeaders: false }));
+  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 2500, skip: (req) => !isRecording(req), standardHeaders: true, legacyHeaders: false }));
+}
 
 publicRouter.get('/ai-interviews/:token', asyncHandler(async (req, res) => {
   const r = await service.openForCandidate(req.params.token);

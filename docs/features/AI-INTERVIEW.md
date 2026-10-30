@@ -67,7 +67,7 @@ hourly job `jobs/aiInterviewRecordings.js`; the interview, transcript and scores
 | Candidate page | `client/src/pages/public/AiInterviewPage.jsx` |
 | Team card | `client/src/pages/submissions/AiInterviewCard.jsx` (mounted in `SubmissionDetailPage`) |
 | Admin settings + analytics | `client/src/pages/hiringSetup/AiInterviewTab.jsx` (tab "AI interview") |
-| Tests | `server/tests/ai-interviews.test.js` (AI provider stubbed) |
+| Tests | `server/tests/ai-interviews.test.js` (AI provider stubbed), `server/tests/ai-client.test.js` (the Anthropic request / failure handling with fetch replaced) |
 
 ## Settings (admin editable, per company)
 On/off, role question count, follow-ups, pass mark, borderline range, link validity, extra instructions for the AI, aptitude on/off + count,
@@ -83,6 +83,7 @@ weights (knowledge / communication / depth / aptitude), auto-reject on/off, reco
 ## Still manual / known limits
 - Needs the Anthropic key and a real staging run with camera + mic: the browser parts (speech, MediaRecorder, mic test) were not
   exercised in a browser.
-- A CV that is a Word file is not read (PDF only).
+- A CV that is a Word file is not read (PDF only): reading .docx would need a new dependency (jszip is only a transitive one today).
 - A recording split into parts is not merged; each part plays on its own.
 - The e-mail to the candidate with the link follows the existing "e-mail the test link" company setting.
+- Public rate limits: 240 interview calls per hour per IP, and a separate 2500 per hour for recording chunks (one every 5 seconds).
