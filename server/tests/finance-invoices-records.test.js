@@ -87,6 +87,13 @@ describe('Client invoices — contract amount, right project / client / currency
     expect(created.status).toBe(201);
     expect(created.body.data).toMatchObject({ invoice_number: 'MII/2026/07', invoice_date: '2026-09-01', currency: 'USD', amount: 2000, project: { name: 'Miicare Platform', client_name: 'Miicare' } });
 
+    // The same invoice as a PDF in the tax-invoice layout; reading it changes nothing.
+    const pdf = await authed(request(app).get(`/api/v1/billing/invoices/${created.body.data.id}/pdf`), ctx.adminToken).buffer(true).parse((res, cb) => { const c = []; res.on('data', (x) => c.push(x)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toMatch(/application\/pdf/);
+    expect(pdf.headers['content-disposition']).toContain('MII-2026-07.pdf');
+    expect(pdf.body.slice(0, 4).toString()).toBe('%PDF');
+
     const list = await authed(request(app).get('/api/v1/billing/invoices'), ctx.adminToken).query(AUG);
     expect(list.body.data).toHaveLength(1);
     expect(list.body.data[0]).toMatchObject({ invoice_number: 'MII/2026/07', currency: 'USD', project: { name: 'Miicare Platform', client_name: 'Miicare' }, details: { contract_working_days: 10 } });
@@ -282,6 +289,12 @@ describe('Per-record locks and the Locked section', () => {
     const gen = await authed(request(app).post('/api/v1/billing/vendor-invoices/generate'), ctx.adminToken).send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'ABC-0815' });
     expect(gen.status).toBe(201);
     expect(gen.body.data[0]).toMatchObject({ invoice_number: 'ABC-0815', currency: 'USD', amount: 1000, generated: true, project: { name: 'Miicare Platform' } });
+
+    const vpdf = await authed(request(app).get('/api/v1/billing/vendor-invoices/pdf'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id, ...AUG }).buffer(true).parse((res, cb) => { const c = []; res.on('data', (x) => c.push(x)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(vpdf.status).toBe(200);
+    expect(vpdf.headers['content-disposition']).toContain('ABC-0815.pdf');
+    expect(vpdf.body.slice(0, 4).toString()).toBe('%PDF');
+    expect((await authed(request(app).get('/api/v1/billing/vendor-invoices/pdf'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id })).status).toBe(422);
 
     expect((await lock(ctx, { kind: 'vendor_bill', scope_key: ctx.vendor.id })).status).toBe(200);
     const locked = await authed(request(app).get('/api/v1/calculations/locked'), ctx.adminToken).query({ period_year: 2026, kind: 'vendor_bill' });
