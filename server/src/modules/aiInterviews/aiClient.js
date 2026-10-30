@@ -51,7 +51,18 @@ const setProvider = (fn) => { provider = fn || anthropicProvider; };
 
 // Asks for JSON only and parses it; tolerates a ```json fence. Returns { data, usage }; throws AiUnavailableError when the
 // reply is not usable JSON, so every caller has one failure path.
-async function askJson({ system, user, maxTokens, documents }) {
+// A reply that is not usable JSON (an occasional cut-off or stray prose) is asked for once more before giving up.
+async function askJson(args) {
+  try {
+    return await askJsonOnce(args);
+  } catch (err) {
+    if (!(err instanceof AiUnavailableError) || !/JSON/.test(err.message)) throw err;
+    const again = await askJsonOnce(args);
+    return again;
+  }
+}
+
+async function askJsonOnce({ system, user, maxTokens, documents }) {
   const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents });
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = cleaned.indexOf('{');

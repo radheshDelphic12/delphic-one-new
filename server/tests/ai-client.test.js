@@ -37,6 +37,13 @@ test('a workspace id, when configured, is sent as the anthropic-workspace-id hea
   env.aiInterview.workspaceId = null;
 });
 
+test('a reply that is not JSON is asked for once more, and the second try is used', async () => {
+  const replies = ['sorry, here is some prose', '{"ok":1}'];
+  global.fetch = jest.fn(async () => reply(replies.shift()));
+  expect((await askJson({ system: 'S', user: 'U' })).data).toEqual({ ok: 1 });
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
 test('a CV PDF goes in front of the question as a document block', async () => {
   let body;
   global.fetch = jest.fn(async (url, opts) => { body = JSON.parse(opts.body); return reply('{}'); });
