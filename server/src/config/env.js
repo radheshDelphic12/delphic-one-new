@@ -83,6 +83,8 @@ const env = {
   aiInterview: {
     apiKey: process.env.ANTHROPIC_API_KEY || null,
     model: process.env.AI_INTERVIEW_MODEL || 'claude-sonnet-5-5',
+    // Only for a user-level key (sk-ant-usr-...), which Anthropic wants tied to a workspace; a workspace key does not need it.
+    workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || null,
     maxOutputTokens: Number(process.env.AI_INTERVIEW_MAX_OUTPUT_TOKENS) || 1200,
   },
   // Marketing website control (modules/website). Each URL is one Apps Script

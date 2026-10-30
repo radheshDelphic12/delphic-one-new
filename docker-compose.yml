@@ -51,6 +51,10 @@ services:
       WEBSITE_CONTACT_SCRIPT_URL: ${WEBSITE_CONTACT_SCRIPT_URL:-}
       WEBSITE_CAREER_SCRIPT_URL: ${WEBSITE_CAREER_SCRIPT_URL:-}
       WEBSITE_SECURE_SCRIPT_URL: ${WEBSITE_SECURE_SCRIPT_URL:-}
+      # AI interview (modules/aiInterviews): unset = the feature cannot ask questions; nothing else is affected.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_INTERVIEW_MODEL: ${AI_INTERVIEW_MODEL:-}
+      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
       # Email (vendor emails, interview invites, ...). Unset keeps queued mail 'skipped'. See docs/guides/EMAIL-SMTP-PRODUCTION.md.
       NOTIFICATIONS_EMAIL_FROM: ${NOTIFICATIONS_EMAIL_FROM:-}
       NOTIFICATIONS_SMTP_URL: ${NOTIFICATIONS_SMTP_URL:-}

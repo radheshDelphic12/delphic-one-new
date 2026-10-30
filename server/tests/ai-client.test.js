@@ -25,6 +25,18 @@ test('sends the key, model, system prompt and question, and returns parsed JSON 
   expect(seen.body).toMatchObject({ model: env.aiInterview.model, max_tokens: 321, system: 'SYS', messages: [{ role: 'user', content: 'ASK' }] });
 });
 
+test('a workspace id, when configured, is sent as the anthropic-workspace-id header (user-level keys need it)', async () => {
+  let headers;
+  global.fetch = jest.fn(async (url, opts) => { headers = opts.headers; return reply('{}'); });
+  env.aiInterview.workspaceId = null;
+  await askJson({ system: 'S', user: 'U' });
+  expect(headers['anthropic-workspace-id']).toBeUndefined();
+  env.aiInterview.workspaceId = 'wrkspc_test';
+  await askJson({ system: 'S', user: 'U' });
+  expect(headers['anthropic-workspace-id']).toBe('wrkspc_test');
+  env.aiInterview.workspaceId = null;
+});
+
 test('a CV PDF goes in front of the question as a document block', async () => {
   let body;
   global.fetch = jest.fn(async (url, opts) => { body = JSON.parse(opts.body); return reply('{}'); });
