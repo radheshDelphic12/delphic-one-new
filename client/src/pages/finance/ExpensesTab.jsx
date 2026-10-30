@@ -15,6 +15,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import { chargeColumns, chargeQuery } from './GroupChargesTab.jsx';
+import ReimbursementPayoutPanel from './ReimbursementPayoutPanel.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
@@ -172,7 +173,7 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
 
 const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '' };
 
-const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', group: 'Group expenses' };
+const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', payout: 'Bank payout', group: 'Group expenses' };
 
 /**
  * Finance → Expenses. Everyone: their own claims. Admins also get
@@ -209,6 +210,7 @@ export default function ExpensesTab() {
   }, [filters, view]);
 
   async function load() {
+    if (view === 'payout') { setLoading(false); return; } // the payout panel loads its own data
     setLoading(true);
     try {
       if (view === 'group') {
@@ -411,7 +413,7 @@ export default function ExpensesTab() {
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
+          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'payout', 'group'] : [])].map((key) => (
             <button key={key} type="button" role="tab" aria-selected={view === key} className={`border-b-2 px-3 py-2 text-sm font-medium ${view === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setView(key)}>
               {VIEW_LABEL[key]}
               {key === 'approvals' && approvalCount > 0 && <span className="ml-1.5 rounded-full bg-primary-100 px-1.5 text-[11px] font-semibold text-primary-700">{approvalCount}</span>}
@@ -424,7 +426,7 @@ export default function ExpensesTab() {
             {bulkBusy ? 'Working…' : `Approve all pending (${rows.filter((row) => row.status === 'pending').length})`}
           </button>
         )}
-        {view !== 'group' && (
+        {view !== 'group' && view !== 'payout' && (
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
             <Plus className="h-4 w-4" /> Submit claim
           </button>
@@ -432,6 +434,9 @@ export default function ExpensesTab() {
         </div>
       </div>
 
+      {view === 'payout' && <ReimbursementPayoutPanel />}
+
+      {view !== 'payout' && (<>
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
         {view === 'team' && (
           <label className="block text-xs font-medium text-tertiary-600">Employee<div className="mt-1"><SearchableSelect value={filters.org_membership_id} onChange={(v) => setFilter('org_membership_id', v)} options={memberOptions} placeholder="All employees" allowClear /></div></label>
@@ -474,6 +479,7 @@ export default function ExpensesTab() {
           ]}
         />
       )}
+      </>)}
       <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} members={isAdmin ? memberOptions : null} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
       <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} categories={expenseCategories} onClose={() => setEditing(null)} onSubmit={updateClaim} />
     </div>

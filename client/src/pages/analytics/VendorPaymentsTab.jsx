@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Building2, IndianRupee, Printer, Truck, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
-import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useVendorAccountOptions } from '../../lib/lookups.js';
@@ -15,7 +14,8 @@ import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import { inr } from '../../components/finance/CalculationLockBar.jsx';
-import { amountText, dateText, printVendorInvoice, vendorLineText } from '../../components/finance/financePrint.js';
+import { amountText, dateText, vendorLineText } from '../../components/finance/financePrint.js';
+import { downloadFile } from '../../lib/downloadFile.js';
 import { GenerateInvoiceButton } from './ClientInvoices.jsx';
 import { cleanParams } from './AttendanceSalaryTab.jsx';
 
@@ -208,7 +208,6 @@ function VendorInvoiceEditDrawer({ group, onClose, onSaved }) {
 
 /** Generated vendor invoices of the month, one line per vendor invoice. */
 function VendorInvoicesTable({ period, refreshKey, onEdit }) {
-  const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/billing/vendor-invoices', { params: period }).then((r) => r.data.data), { deps: [period.period_month, period.period_year, refreshKey] });
   // Admin delete of a whole vendor invoice (all its project rows), with a reason (audited).
@@ -250,7 +249,7 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
         <div className="flex flex-wrap gap-1">
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(g)}>Edit</button>}
           <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => removeGroup(g)}>Delete</button>
-          {g.rows[0].generated && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => { if (!printVendorInvoice(g.rows, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked'); }}><Printer className="h-3.5 w-3.5" /> Download</button>}
+          {g.rows[0].generated && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => downloadFile('/billing/vendor-invoices/pdf', { vendor_account_id: g.rows[0].vendor_account_id, period_month: g.rows[0].period_month, period_year: g.rows[0].period_year }, `${g.rows[0].invoice_number || 'vendor-invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'))}><Printer className="h-3.5 w-3.5" /> Download</button>}
         </div>
       ),
     },

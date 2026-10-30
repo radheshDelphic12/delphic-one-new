@@ -7,6 +7,7 @@ import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
 import BenchCard from './BenchCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
+import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
 
 const QUICK_LINKS = [
   { to: '/people', label: 'People', description: 'Directory, org chart, and HR settings.', icon: Users, tint: 'bg-[#EFF6FF] text-[#2563EB]' },
@@ -56,6 +57,7 @@ function ModernDashboard() {
         </div>
       </div>
       <DashboardCheckinCard />
+      <SpeakUpDashboardCard />
       <div>
         <h2 className="mb-2 font-heading text-sm font-semibold text-tertiary-900">Quick links</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

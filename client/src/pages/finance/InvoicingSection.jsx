@@ -3,6 +3,7 @@ import { Plus, Printer, RefreshCw } from 'lucide-react';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
+import { downloadFile } from '../../lib/downloadFile.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -98,39 +99,12 @@ function ComputeRevenueDrawer({ open, onClose, onSubmit }) {
   );
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // Invoices built from a locked Billing & Sales month carry { lines, project, … };
 // older ones (from computed daily revenue) are a plain array of requirement lines.
 function invoiceLines(row) {
   const items = row.line_items;
   if (Array.isArray(items)) return items.map((li) => ({ label: li.requirement_title || 'Services', hours: li.hours, overtime_hours: 0, amount: li.revenue }));
   return (items?.lines || []).map((li) => ({ label: li.resource, hours: li.hours, overtime_hours: li.overtime_hours, amount: li.revenue }));
-}
-
-/**
- * Review / download: a standalone, printable invoice ("Save as PDF" in the
- * print dialog is the download) — same approach as payslips.
- */
-function printInvoice(row, orgName) {
-  const lines = invoiceLines(row);
-  const meta = Array.isArray(row.line_items) ? {} : row.line_items || {};
-  const win = window.open('', '_blank', 'width=820,height=960');
-  if (!win) return;
-  win.document.write(`<!doctype html><html><head><title>Invoice — ${escapeHtml(row.client_account?.name)} ${row.period_month}/${row.period_year}</title>
-    <style>body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;padding:32px}h1{font-size:18px;margin:0}.sub{color:#64748b;font-size:12px;margin:4px 0 20px}
-    table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;font-size:13px;text-align:left;border-bottom:1px solid #e8ebf2}.r{text-align:right}.total td{font-weight:700;font-size:15px}</style></head><body>
-    <h1>${escapeHtml(orgName || 'Invoice')}</h1>
-    <p class="sub">Invoice for ${escapeHtml(meta.project?.name || row.client_account?.name)}${meta.project?.code ? ` (${escapeHtml(meta.project.code)})` : ''}${meta.project?.client_name ? ` · ${escapeHtml(meta.project.client_name)}` : ''} · Period ${row.period_month}/${row.period_year} · Status ${escapeHtml(row.status)}${meta.calculation_version ? ` · locked billing v${meta.calculation_version}` : ''}</p>
-    <table><thead><tr><th>Item</th><th class="r">Hours</th><th class="r">Overtime hrs</th><th class="r">Amount (${escapeHtml(row.currency)})</th></tr></thead><tbody>
-    ${lines.map((l) => `<tr><td>${escapeHtml(l.label)}</td><td class="r">${escapeHtml(l.hours ?? '')}</td><td class="r">${escapeHtml(l.overtime_hours || '')}</td><td class="r">${escapeHtml(money(l.amount))}</td></tr>`).join('')}
-    <tr class="total"><td colspan="3">Total</td><td class="r">${escapeHtml(row.currency)} ${escapeHtml(money(row.amount))}</td></tr></tbody></table>
-    </body></html>`);
-  win.document.close();
-  win.focus();
-  win.print();
 }
 
 /**
@@ -173,6 +147,10 @@ export default function InvoicingSection() {
       pushError(apiErrorMessage(err, 'Failed to compute revenue'), 'Something went wrong');
       throw err;
     }
+  }
+
+  function downloadInvoice(row) {
+    downloadFile(`/billing/invoices/${row.id}/pdf`, undefined, `${row.invoice_number || 'invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'));
   }
 
   const paymentDialog = usePaymentDialog();
@@ -237,7 +215,7 @@ export default function InvoicingSection() {
       header: 'Actions',
       render: (row) => (
         <div className="flex gap-2">
-          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(row, user?.active_org?.name)}><Printer className="h-3.5 w-3.5" /> View / download</button>
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => downloadInvoice(row)}><Printer className="h-3.5 w-3.5" /> View / download</button>
           {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
           {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(row)}>{row.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
           {row.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(row)}>Payments</button>}

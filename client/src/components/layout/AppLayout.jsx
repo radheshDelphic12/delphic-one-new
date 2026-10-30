@@ -13,6 +13,7 @@ import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
 import { NAV_ITEMS } from './navItems.js';
+import { useSpeakUpSummary } from '../../pages/speakup/speakUp.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
@@ -120,6 +121,7 @@ export default function AppLayout() {
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
   const isContractor = user?.worker_type === 'contractor';
+  const speakUp = useSpeakUpSummary(Boolean(user?.active_org?.is_master_workspace) && !isContractor, user?.active_org?.id);
   const isZephyr = isZephyrOrg(user);
   const { me: zxMe } = useZephyr();
   const isGulati = isGulatiOrg(user);
@@ -171,6 +173,7 @@ export default function AppLayout() {
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
         if (item.meetingsCalendar && !canSeeMeetingsCalendar(user)) return false;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
+        if (item.speakUp && !(speakUp && (speakUp.enabled || speakUp.can_manage))) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
         // A company on permissions: a menu item shows only when the person holds View on that module (no empty pages).
         if (isPermissionMode(user) && item.need) return hasNeed(user, item.need);
@@ -178,7 +181,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.access, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
+    [user?.role, user?.access, speakUp, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.

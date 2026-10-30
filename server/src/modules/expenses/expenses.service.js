@@ -320,6 +320,7 @@ async function deleteClaim(orgId, claimId, actor = { isSuperadmin: true }) {
 }
 
 module.exports = {
+  claimFilterWhere,
   createClaim,
   updateClaim,
   deleteClaim,

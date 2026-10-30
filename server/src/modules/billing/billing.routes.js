@@ -7,6 +7,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
+const invoicePdf = require('./invoices.pdf');
 const adjustments = require('./adjustments.service');
 const resourceBilling = require('./resourceBilling.service');
 const vendorTracking = require('./vendorTracking.service');
@@ -181,6 +182,20 @@ router.get(
   requireOrgMembership,
   canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
+);
+
+router.get(
+  '/vendor-invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const query = listVendorInvoicesQuerySchema.parse(req.query);
+    if (!query.vendor_account_id || !query.period_month || !query.period_year) return fail(res, 422, 'Give the vendor, month and year of the invoice');
+    const rows = (await invoices.listVendorInvoices(req.user.org_id, query)).filter((r) => r.generated);
+    if (!rows.length) return fail(res, 404, 'No generated vendor invoice for that vendor and month');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${String(rows[0].invoice_number || 'vendor-invoice').replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.vendorInvoicePdf(req.user.org_id, rows));
+  })
 );
 
 router.get(
@@ -487,6 +502,18 @@ router.get(
     const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.preview);
+  })
+);
+
+router.get(
+  '/invoices/:id/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${String(result.invoice.invoice_number || 'invoice').replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.clientInvoicePdf(req.user.org_id, result.invoice));
   })
 );
 

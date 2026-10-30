@@ -21,6 +21,7 @@ import {
   Globe,
   MapPin,
   UserPlus,
+  Megaphone,
   UserX,
   ClipboardList,
   KanbanSquare,
@@ -51,6 +52,8 @@ export const NAV_ITEMS = [
   { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true, need: 'basic.calendar' },
   { to: '/offices', label: 'Offices', icon: MapPin, capability: 'viewPeople', groupSuperadminOnly: true },
   { to: '/internal-jobs', label: 'Internal Jobs', icon: UserPlus, masterOnly: true, need: 'basic.internal_jobs' },
+  // Speak Up - Confidential Reporting: shown only while an admin has it switched on (or to the people who set it up).
+  { to: '/speak-up', label: 'Speak Up', icon: Megaphone, masterOnly: true, need: 'basic.whistleblower', speakUp: true },
   { to: '/people', label: 'People', icon: Users, capability: 'viewPeople' },
   { to: '/attendance', label: 'Time & Attendance', icon: Clock, capability: 'viewAttendance' },
   { to: '/finance', label: 'Finance', icon: Wallet, capability: 'viewExpenses' },

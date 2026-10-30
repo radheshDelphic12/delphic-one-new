@@ -12,7 +12,8 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import PeriodPicker, { periodLabel } from '../../components/finance/PeriodPicker.jsx';
-import { amountText, billingCalculationLines, dateText, printClientInvoice } from '../../components/finance/financePrint.js';
+import { amountText, billingCalculationLines, dateText } from '../../components/finance/financePrint.js';
+import { downloadFile } from '../../lib/downloadFile.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -297,7 +298,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
   ];
 
   function printInvoice(r) {
-    if (!printClientInvoice(r, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked');
+    downloadFile(`/billing/invoices/${r.id}/pdf`, undefined, `${r.invoice_number || 'invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'));
   }
 
   return (
