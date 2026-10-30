@@ -147,6 +147,7 @@ const RULES = [
   [/^\/requirements(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.create', 'requirements.update', 'requirements.delete'] }],
   [/^\/seats(\/|$)/, ['submissions.update', 'requirements.update']],
   [/^\/assessments(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update', 'submissions.create'] }],
+  [/^\/ai-interviews(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update', 'submissions.create'] }],
   [/^\/interview-templates(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update'] }],
   [/^\/profiles(\/|$)/, { GET: ['profiles.view', 'submissions.create', 'submissions.view', 'pipeline.view'], '*': ['profiles.create', 'profiles.update', 'profiles.delete', 'submissions.create'] }],
   [/^\/submissions(\/|$)/, { GET: ['submissions.view', 'pipeline.view', 'rejected.view', 'profiles.view'], '*': ['submissions.create', 'submissions.update', 'meetings.schedule'] }],

@@ -8061,6 +8061,70 @@ model AssessmentAttempt {
   @@map("assessment_attempts")
 }
 
+// ===================== AI interview (first-round screening) =====================
+// A candidate opens a public link (no login), is interviewed by the AI one question at a time and is scored on a rubric the
+// company sets. The AI recommends; a person decides (override with a reason). Plain uuids for people / org on purpose.
+model AiInterview {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token           String  @unique
+  submission_id   String  @db.Uuid
+  org_id          String? @db.Uuid
+  template_round_id String? @db.Uuid
+  candidate_name  String
+  candidate_email String?
+  role_title      String?
+  status          String  @default("invited") // invited | started | completed | pending_review
+  // [{ id, text }] the main questions generated when the interview starts; transcript is the running conversation.
+  questions       Json?
+  transcript      Json    @default("[]") // [{ role: 'ai' | 'candidate', kind: 'question' | 'follow_up' | 'answer', text, question_index, at }]
+  followups_used  Int     @default(0)
+  // Rubric result: { parameters: [{ key, label, weight, score, summary, evidence }], summary, strengths, red_flags }
+  scores          Json?
+  score_percent   Decimal? @db.Decimal(5, 2)
+  outcome         String? // pass | borderline | below_pass | pending_review
+  pass_percentage Int
+  consented_at    DateTime?
+  override_outcome String? // pass | borderline | below_pass: the person's decision, wins over outcome
+  override_reason String?
+  override_by     String? @db.Uuid
+  override_at     DateTime?
+  input_tokens    Int     @default(0)
+  output_tokens   Int     @default(0)
+  invited_by      String? @db.Uuid
+  invited_at      DateTime @default(now())
+  expires_at      DateTime
+  started_at      DateTime?
+  completed_at    DateTime?
+  superseded_at   DateTime?
+  deleted_at      DateTime?
+  deleted_by      String? @db.Uuid
+
+  @@index([submission_id])
+  @@index([org_id, status])
+  @@map("ai_interviews")
+}
+
+// Admin-editable AI interview settings, one row per org (defaults apply until a row exists).
+model AiInterviewSettings {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String   @unique @db.Uuid
+  is_enabled         Boolean  @default(true)
+  question_count     Int      @default(7)
+  max_followups      Int      @default(3)
+  pass_percentage    Int      @default(60)
+  borderline_margin  Int      @default(10)
+  weight_knowledge   Int      @default(50)
+  weight_communication Int    @default(25)
+  weight_depth       Int      @default(25)
+  extra_instructions String?
+  auto_reject        Boolean  @default(false)
+  link_valid_days    Int      @default(7)
+  updated_by         String?  @db.Uuid
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@map("ai_interview_settings")
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Project Management (Delphic Global): projects with their own tickets. Independent of contracts; a project can be linked to
 // actual contracts later (pm_project_contracts) without touching its tickets. People / org / contract ids are plain uuids on

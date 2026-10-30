@@ -78,6 +78,13 @@ const env = {
       clientSecret: process.env.MS_GRAPH_CLIENT_SECRET || null,
     },
   },
+  // AI interview (modules/aiInterviews): the Anthropic API key stays in the server environment, never in code. Unset, a started
+  // interview cannot ask questions (the candidate sees "try again later"); answers already given are never lost.
+  aiInterview: {
+    apiKey: process.env.ANTHROPIC_API_KEY || null,
+    model: process.env.AI_INTERVIEW_MODEL || 'claude-sonnet-5-5',
+    maxOutputTokens: Number(process.env.AI_INTERVIEW_MAX_OUTPUT_TOKENS) || 1200,
+  },
   // Marketing website control (modules/website). Each URL is one Apps Script
   // web app (…/exec) the website already uses; the secret must equal the
   // PLATFORM_SECRET script property on every one of them. Any value unset →
