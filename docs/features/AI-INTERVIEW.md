@@ -10,7 +10,7 @@ depends on it or waits for it.
 2. The candidate (no login) does a microphone test, agrees to AI evaluation (and, if the company records, optionally to recording).
 3. The AI asks one question at a time:
    - **role questions** (default 7) built from the requirement (title, JD, skills, experience) and the candidate's profile
-     (designation, company, skills, experience, education);
+     (designation, company, skills, experience, education, and the CV when a PDF is stored);
    - up to 3 short **follow-ups** on vague answers (never on aptitude);
    - an **aptitude section** (default 4): AI-written logic / number / pattern questions, each with an expected answer that stays on the server.
    Answers are spoken (browser speech-to-text, Chrome/Edge) or typed. Closing the tab keeps progress; the same link resumes.
@@ -19,16 +19,35 @@ depends on it or waits for it.
    (within 10 points below), **below pass**.
 5. The card shows score, outcome and a plain-language **"Why"** (built from the numbers, not asked of the AI): score vs pass mark,
    weakest parts, red flags. "View result" shows the breakdown, strengths, red flags, transcript and the recording.
-6. A person can **override** the outcome with a reason (audit log `override_ai_interview`); the AI result is kept. An admin can delete an
-   interview (audited) so a new link can be sent. Nothing is auto-rejected: **auto-reject is not built**; the stage never changes by itself.
+6. **Auto-reject (setting, off by default).** With it on, a below-pass result moves the candidate to Rejected through the normal stage
+   machine (history, notification, reason `AI interview: <why>`), only while they are in `sourced` / `internal_screening`. Later
+   stages, locked tickets, borderline and pass results are never rejected; the card shows why it did not. An admin can reactivate a
+   rejected candidate.
+7. **Result notification.** When an interview finishes (scored or pending review) the person who sent it, and the admins, get a bell
+   notification (and an e-mail, per their notification preferences): event `ai_interview_completed`.
+8. A person can **override** the outcome with a reason (audit log `override_ai_interview`); the AI result is kept. An admin can delete
+   an interview (audited) so a new link can be sent.
+
+## CV
+If a PDF is stored for the profile (Documents; newest "Resume" / "CV" first; up to 4 MB) it is attached to the question-writing call
+so the questions are specific to the candidate's real work. No PDF, a Word file or a huge file means the AI uses the profile fields only.
+
+## Per requirement
+On the card, "Turn off for this requirement" (admin / recruiter / sales; audited as `set_ai_interview_switch`) stops new links for that
+requirement even when the company setting is on. `requirements.ai_interview_enabled`: null = follow the company, false = off.
+
+## Analytics
+Hiring setup > AI interview shows: links sent, finished, pass / borderline / below pass, needs review, not opened, in progress, decided
+by a person, auto-rejected, average score and minutes. API: `GET /ai-interviews/analytics?from&to`.
 
 ## Optional recording (audio + video)
 Off by default (Hiring setup > AI interview > Recording). When on, the candidate is asked for permission and can decline and still
-interview. The browser records with `MediaRecorder` (about 500 kbps) and uploads 5-second parts in order to
-`POST /public/ai-interviews/:token/recording?seq=n`; the server appends to `uploads/ai-interviews/<id>.webm`. Cap 250 MB per interview.
-The file is **deleted automatically after the retention days (default 2, setting 1-30)** by the hourly job
-`jobs/aiInterviewRecordings.js`; the interview, transcript and scores stay. The team plays/downloads it through
-`GET /ai-interviews/:id/recording` (login required, never a public URL).
+interview. The browser records with `MediaRecorder` (about 500 kbps) and uploads 5-second chunks in order to
+`POST /public/ai-interviews/:token/recording?part=p&seq=n`; the server appends to `uploads/ai-interviews/<id>.webm`. A candidate who
+closes the tab and reopens the link records the **next part** as its own file (`<id>-p2.webm`, ...); the team plays / downloads each
+part. Cap 250 MB per interview. The files are **deleted automatically after the retention days (default 2, setting 1-30)** by the
+hourly job `jobs/aiInterviewRecordings.js`; the interview, transcript and scores stay. The team plays / downloads through
+`GET /ai-interviews/:id/recording?part=n` (login required, never a public URL).
 
 ## Never blocks the candidate
 - AI down when starting: "try again later"; the link is not used up.
@@ -40,26 +59,30 @@ The file is **deleted automatically after the retention days (default 2, setting
 ## Where things are
 | Part | Path |
 |---|---|
-| Tables | `ai_interviews`, `ai_interview_settings` (migrations `20261105100000_ai_interview`, `20261105110000_ai_interview_aptitude_recording`) |
-| API (team, login) | `/api/v1/ai-interviews` (list, send, review, override, delete, recording, settings) |
+| Tables | `ai_interviews`, `ai_interview_settings`, `requirements.ai_interview_enabled` (migrations `20261105100000_ai_interview`, `...110000_ai_interview_aptitude_recording`, `...120000_ai_interview_completion`, `...130000_ai_interview_notification_type`) |
+| API (team, login) | `/api/v1/ai-interviews` (list, send, review, override, delete, recording, settings, analytics, requirements/:id/switch) |
 | API (candidate, token) | `/api/v1/public/ai-interviews/:token` (open, start, answer, recording) |
 | Server code | `server/src/modules/aiInterviews/` (`aiClient.js` Anthropic call, `aiInterviews.logic.js` prompts + rubric maths, `aiInterviews.service.js`, `aiInterviews.routes.js`) |
 | Job | `server/src/jobs/aiInterviewRecordings.js` |
 | Candidate page | `client/src/pages/public/AiInterviewPage.jsx` |
 | Team card | `client/src/pages/submissions/AiInterviewCard.jsx` (mounted in `SubmissionDetailPage`) |
-| Admin settings | `client/src/pages/hiringSetup/AiInterviewTab.jsx` (tab "AI interview") |
+| Admin settings + analytics | `client/src/pages/hiringSetup/AiInterviewTab.jsx` (tab "AI interview") |
 | Tests | `server/tests/ai-interviews.test.js` (AI provider stubbed) |
 
 ## Settings (admin editable, per company)
 On/off, role question count, follow-ups, pass mark, borderline range, link validity, extra instructions for the AI, aptitude on/off + count,
-weights (knowledge / communication / depth / aptitude), recording on/off + retention days.
+weights (knowledge / communication / depth / aptitude), auto-reject on/off, recording on/off + retention days.
 
 ## Going live
 - Needs `ANTHROPIC_API_KEY` (and optionally `AI_INTERVIEW_MODEL`, default `claude-sonnet-5-5`) in the server environment. Without it the
   candidate sees "not switched on yet" and nothing else is affected. Never commit the key.
-- Two additive migrations; nothing existing is altered. Settings start with the feature **off**.
+- Four additive migrations (one adds a nullable `requirements` column, one a notification enum value); nothing existing is altered.
+  Settings start with the feature **off**.
 - Recording storage lives in `UPLOAD_DIR/ai-interviews`; keep disk headroom (a 20-minute interview is roughly 70 MB).
 
-## Not built yet
-Auto-reject, e-mail of the result to anyone, resume text (the AI uses the profile fields, not the CV file), analytics counts for AI
-screened / pass / borderline / below pass, per-requirement on/off switch, resuming a recording after a closed tab.
+## Still manual / known limits
+- Needs the Anthropic key and a real staging run with camera + mic: the browser parts (speech, MediaRecorder, mic test) were not
+  exercised in a browser.
+- A CV that is a Word file is not read (PDF only).
+- A recording split into parts is not merged; each part plays on its own.
+- The e-mail to the candidate with the link follows the existing "e-mail the test link" company setting.

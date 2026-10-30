@@ -49,6 +49,7 @@ function contextBlock(ctx) {
     `Candidate background: ${[ctx.candidate_designation, ctx.candidate_company, ctx.candidate_experience != null ? `${ctx.candidate_experience} years total experience` : null].filter(Boolean).join(', ') || 'not given'}`,
     `Candidate skills: ${(ctx.candidate_skills || []).join(', ') || 'not given'}`,
     ctx.candidate_education ? `Education: ${bounded(ctx.candidate_education, 400)}` : null,
+    ctx.resume ? 'The CV of the candidate is attached as a PDF; use it to make the questions specific to their actual work.' : null,
   ].filter(Boolean).join('\n');
 }
 
@@ -67,6 +68,7 @@ async function generateQuestions(ctx, settings) {
     system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}`,
     user: `${contextBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role. Start with a short, easy opening question about their work, then move to role-specific questions built from the required skills and the candidate's own background. Each question must be answerable in 1 to 3 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
     maxTokens: 2200,
+    documents: ctx.resume ? [ctx.resume] : [],
   });
   const role = (Array.isArray(data.questions) ? data.questions : [])
     .map((q) => bounded(typeof q === 'string' ? q : q?.text, 600).trim())

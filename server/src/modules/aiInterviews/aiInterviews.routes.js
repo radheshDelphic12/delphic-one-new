@@ -16,6 +16,7 @@ const ERRORS = {
   not_finished: [409, 'The candidate has not finished the interview yet'],
   forbidden: [403, 'Only an admin can do this'],
   no_org: [400, 'Choose a company workspace first'],
+  requirement_off: [409, 'The AI interview is turned off for this requirement'],
   weights_zero: [400, 'At least one rubric weight must be above 0'],
   already_submitted: [410, 'This interview is already complete'],
   expired: [410, 'This link has expired. Ask the recruiter for a new one'],
@@ -47,6 +48,7 @@ const settingsSchema = z.object({
   aptitude_question_count: z.number().int().min(2).max(10).optional(),
   weight_aptitude: z.number().int().min(0).max(100).optional(),
   recording_enabled: z.boolean().optional(),
+  auto_reject: z.boolean().optional(),
   recording_retention_days: z.number().int().min(1).max(30).optional(),
   extra_instructions: z.string().trim().max(1500).nullable().optional(),
   link_valid_days: z.number().int().min(1).max(60).optional(),
@@ -69,13 +71,26 @@ router.put('/settings', authorize('admin'), asyncHandler(async (req, res) => {
   return r.error ? mapError(res, r.error) : ok(res, r.settings);
 }));
 
+// Counts for Hiring setup (sent, completed, pass / borderline / below pass, overridden, auto-rejected, averages).
+router.get('/analytics', asyncHandler(async (req, res) => {
+  const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  const q = z.object({ from: day.optional(), to: day.optional() }).parse(req.query);
+  return ok(res, await service.analytics(q, req.user));
+}));
+// Per requirement: false = no AI interview for this requirement, null = follow the company setting.
+router.put('/requirements/:id/switch', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
+  const body = z.object({ enabled: z.boolean().nullable() }).parse(req.body);
+  const r = await service.setRequirementSwitch(z.string().uuid().parse(req.params.id), body.enabled === false ? false : null, req.user);
+  return r.error ? mapError(res, r.error) : ok(res, r);
+}));
 router.get('/:id/review', asyncHandler(async (req, res) => {
   const r = await service.review(z.string().uuid().parse(req.params.id));
   return r.error ? mapError(res, r.error) : ok(res, r.review);
 }));
 // The stored recording (audio + video), for the team only; it is deleted automatically after the retention days.
 router.get('/:id/recording', asyncHandler(async (req, res) => {
-  const r = await service.recordingFor(z.string().uuid().parse(req.params.id));
+  const part = z.coerce.number().int().min(0).max(20).default(0).parse(req.query.part);
+  const r = await service.recordingFor(z.string().uuid().parse(req.params.id), part);
   if (r.error) return mapError(res, r.error);
   res.setHeader('Content-Type', r.mime);
   res.setHeader('Cache-Control', 'private, no-store');
@@ -106,10 +121,11 @@ publicRouter.post('/ai-interviews/:token/start', asyncHandler(async (req, res) =
   const r = await service.startForCandidate(req.params.token, body);
   return r.error ? mapError(res, r.error) : ok(res, r.view);
 }));
-// One part of the recording, in order (?seq=0,1,2...). Raw bytes; the Content-Type is the recording's type.
+// One chunk of the recording, in order (?part=0&seq=0,1,2...; a returning candidate starts the next part). Raw bytes; the Content-Type is the recording's type.
 publicRouter.post('/ai-interviews/:token/recording', express.raw({ type: () => true, limit: '13mb' }), asyncHandler(async (req, res) => {
   const seq = z.coerce.number().int().min(0).parse(req.query.seq);
-  const r = await service.saveRecordingChunk(req.params.token, { seq, buffer: Buffer.isBuffer(req.body) ? req.body : null, mime: req.headers['content-type'] });
+  const part = z.coerce.number().int().min(0).max(20).default(0).parse(req.query.part);
+  const r = await service.saveRecordingChunk(req.params.token, { part, seq, buffer: Buffer.isBuffer(req.body) ? req.body : null, mime: req.headers['content-type'] });
   return r.error ? mapError(res, r.error) : ok(res, { saved: true });
 }));
 publicRouter.post('/ai-interviews/:token/answer', asyncHandler(async (req, res) => {

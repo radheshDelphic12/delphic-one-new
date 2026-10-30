@@ -44,6 +44,41 @@ function NumberField({ field, value, onChange, disabled }) {
  * Admin settings of the AI interview. The whole feature is off until switched on here: it is an optional, separate link
  * on a candidate's page and nothing in the existing interview flow depends on it.
  */
+function Stat({ label, value, tone = '' }) {
+  return (
+    <div className="rounded-xl border border-tertiary-100 bg-white px-3 py-2">
+      <p className={`text-lg font-semibold ${tone || 'text-tertiary-900'}`}>{value ?? '-'}</p>
+      <p className="text-xs text-tertiary-500">{label}</p>
+    </div>
+  );
+}
+
+/** How the AI interviews are going: sent, finished, pass / borderline / below pass, how often a person overrode the AI. */
+function AiAnalytics() {
+  const [stats, setStats] = useState(null);
+  useEffect(() => { apiClient.get('/ai-interviews/analytics').then(({ data }) => setStats(data.data)).catch(() => setStats(null)); }, []);
+  if (!stats) return null;
+  return (
+    <div className="rounded-2xl border border-tertiary-100 bg-tertiary-50/40 p-4">
+      <h3 className="text-sm font-semibold text-tertiary-900">How it is going</h3>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <Stat label="Links sent" value={stats.sent} />
+        <Stat label="Finished" value={stats.completed} />
+        <Stat label="Pass" value={stats.pass} tone="text-success-700" />
+        <Stat label="Borderline" value={stats.borderline} tone="text-warning-700" />
+        <Stat label="Below pass" value={stats.below_pass} tone="text-danger-700" />
+        <Stat label="Needs review" value={stats.pending_review} />
+        <Stat label="Not opened" value={stats.not_started} />
+        <Stat label="In progress" value={stats.in_progress} />
+        <Stat label="Decided by a person" value={stats.overridden} />
+        <Stat label="Auto-rejected" value={stats.auto_rejected} />
+        <Stat label="Average score" value={stats.average_score != null ? `${stats.average_score}%` : '-'} />
+        <Stat label="Average minutes" value={stats.average_minutes} />
+      </div>
+    </div>
+  );
+}
+
 export default function AiInterviewTab({ isAdmin }) {
   const { pushError, pushSuccess } = useAlerts();
   const [form, setForm] = useState(null);
@@ -63,7 +98,7 @@ export default function AiInterviewTab({ isAdmin }) {
     try {
       const body = {
         ...Object.fromEntries([...NUMBER_FIELDS, ...WEIGHTS, { key: 'aptitude_question_count' }, { key: 'recording_retention_days' }].map((f) => [f.key, Number(form[f.key])])),
-        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled,
+        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject,
         extra_instructions: (form.extra_instructions || '').trim() || null,
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
@@ -79,6 +114,7 @@ export default function AiInterviewTab({ isAdmin }) {
   const off = !isAdmin;
   return (
     <div className="space-y-5">
+      <AiAnalytics />
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
         <Switch checked={form.is_enabled} onChange={set('is_enabled')} disabled={off} label="Offer the AI interview" hint="Off by default. When on, recruiters see a separate 'AI interview' card on a candidate's page where they can send the candidate a link. The existing screening test and interview rounds are not changed and never wait for it." />
       </div>
@@ -91,6 +127,13 @@ export default function AiInterviewTab({ isAdmin }) {
         <div className="mt-4">
           <label className="mb-1 block text-xs font-medium text-tertiary-600">Extra instructions for the AI (optional)</label>
           <textarea className={FIELD_INPUT} rows={3} maxLength={1500} disabled={off} value={form.extra_instructions || ''} onChange={(e) => set('extra_instructions')(e.target.value)} placeholder="e.g. Ask about Salesforce integrations; keep a friendly tone." />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
+        <h3 className="text-sm font-semibold text-tertiary-900">After the result</h3>
+        <div className="mt-3">
+          <Switch checked={form.auto_reject} onChange={set('auto_reject')} disabled={off} label="Reject automatically on a below-pass result" hint="Off by default. When on, a below-pass result moves the candidate to Rejected with the AI's reason, but only while they are still in sourcing or screening (before any client has seen them). A borderline or pass result never rejects, and an admin can reactivate a rejected candidate." />
         </div>
       </div>
 

@@ -377,6 +377,7 @@ enum NotificationType {
   resignation_submitted
   resignation_manager_updated
   resignation_decided
+  ai_interview_completed
 }
 
 enum NotificationEntityType {
@@ -2754,6 +2755,8 @@ model Requirement {
   primary_tech_stack      String[]
   secondary_tech_stack    String[]
   domain_experience       String?
+  // null = follow the company's AI interview switch; false = no AI interview link for this requirement.
+  ai_interview_enabled    Boolean?
   experience_min          Decimal? @db.Decimal(4, 1)
   experience_max          Decimal? @db.Decimal(4, 1)
   certifications_required String[]
@@ -8107,6 +8110,11 @@ model AiInterview {
   recording_chunks     Int       @default(0)
   recording_expires_at DateTime?
   recording_deleted_at DateTime?
+  // One entry per recording session ({ name, mime, bytes, chunks }): a candidate who closes the tab and comes back records a new part.
+  recording_files      Json      @default("[]")
+  // Set when the company's auto-reject switch moved the candidate to Rejected after a below-pass result, or why it did not.
+  auto_rejected_at     DateTime?
+  auto_reject_note     String?
 
   @@index([submission_id])
   @@index([org_id, status])

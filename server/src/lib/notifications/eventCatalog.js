@@ -40,6 +40,8 @@ const ROLE_EVENT_MATRIX = {
   candidate_backout: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true },
   candidate_offer: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true, defaultEmail: true },
   candidate_closed: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true },
+  // The AI interview a recruiter sent has a result (to the sender and the admins).
+  ai_interview_completed: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true, defaultEmail: true },
   pm_ticket_assigned: { roles: TIMESHEET_ROLES, defaultInApp: true },
   pm_ticket_status_changed: { roles: TIMESHEET_ROLES, defaultInApp: true },
   pm_ticket_commented: { roles: TIMESHEET_ROLES, defaultInApp: true },
@@ -83,6 +85,7 @@ const NOTIFICATION_LABELS = {
   candidate_rejected: ['Candidate rejected', 'A candidate is marked rejected.'],
   candidate_backout: ['Candidate backed out', 'A candidate backs out.'],
   candidate_offer: ['Offer sent', 'An offer is sent to a candidate.'],
+  ai_interview_completed: ['AI interview result', 'A candidate finishes the AI interview you sent, with the score and outcome.'],
   candidate_closed: ['Ticket closed', 'A candidate ticket is closed (BGV cleared, candidate joined).'],
   pm_ticket_assigned: ['Project ticket assigned', 'A project ticket is assigned to you.'],
   pm_ticket_status_changed: ['Project ticket status changed', 'The status of a project ticket you raised or work on changes.'],
@@ -205,6 +208,14 @@ function renderNotification(type, ctx = {}) {
         `${actorPrefix(ctx)}submitted ${candidate} to ${account} for "${truncate(requirement)}".`,
         'submission', ctx.submissionId, ctx
       );
+    case 'ai_interview_completed': {
+      const outcomeText = { pass: 'Pass', borderline: 'Borderline', below_pass: 'Below pass', pending_review: 'Needs a person to review' }[ctx.outcome] || 'Done';
+      return envelope(
+        'AI interview result',
+        `${candidate} finished the AI interview for "${truncate(requirement)}": ${outcomeText}${ctx.score != null ? `, ${ctx.score}% (pass mark ${ctx.passPercentage}%)` : ''}.`,
+        'submission', ctx.submissionId, ctx
+      );
+    }
     case 'candidate_rejected':
       return envelope(
         'Candidate rejected',

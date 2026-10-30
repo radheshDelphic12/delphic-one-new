@@ -40,7 +40,7 @@ export default function AiInterviewPage() {
   const streamRef = useRef(null);
   const videoRef = useRef(null);
   const queueRef = useRef(Promise.resolve());
-  const seqRef = useRef(0);
+  const resumedRef = useRef(false);
 
   useEffect(() => {
     apiClient.get(`/public/ai-interviews/${token}`)
@@ -49,28 +49,30 @@ export default function AiInterviewPage() {
   }, [token]);
 
   // ---- recording: parts are uploaded one after another so the server can append them in order ----
-  const uploadPart = useCallback((blob, seq, type) => {
+  const uploadPart = useCallback((blob, part, seq, type) => {
     queueRef.current = queueRef.current.then(async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          await apiClient.post(`/public/ai-interviews/${token}/recording?seq=${seq}`, blob, { headers: { 'Content-Type': type } });
+          await apiClient.post(`/public/ai-interviews/${token}/recording?part=${part}&seq=${seq}`, blob, { headers: { 'Content-Type': type } });
           return;
         } catch { /* retry; a recording problem never stops the interview */ }
       }
     });
   }, [token]);
 
-  const startRecording = useCallback(async () => {
+  // `part` is 0 for a first recording; a candidate who closed the page and came back records the next part (its own file).
+  const startRecording = useCallback(async (part = 0) => {
     try {
       const stream = streamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
       streamRef.current = stream;
       const type = RECORDER_TYPES.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
       if (!type) return;
       const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 500000, audioBitsPerSecond: 64000 });
+      let seq = 0;
       recorder.ondataavailable = (e) => {
         if (!e.data || !e.data.size) return;
-        uploadPart(e.data, seqRef.current, type.split(';')[0]);
-        seqRef.current += 1;
+        uploadPart(e.data, part, seq, type.split(';')[0]);
+        seq += 1;
       };
       recorder.start(5000);
       recorderRef.current = recorder;
@@ -92,6 +94,14 @@ export default function AiInterviewPage() {
 
   useEffect(() => { if (recording && videoRef.current) videoRef.current.srcObject = streamRef.current; }, [recording]);
   useEffect(() => () => { recRef.current?.stop?.(); streamRef.current?.getTracks().forEach((t) => t.stop()); }, []);
+
+  // A reopened, recorded interview carries on recording as the next part (the same consent still applies).
+  useEffect(() => {
+    if (view?.status === 'started' && view.recording_on && !resumedRef.current) {
+      resumedRef.current = true;
+      startRecording(view.recording_parts || 0);
+    }
+  }, [view, startRecording]);
 
   // ---- microphone test ----
   async function testMic() {
@@ -126,7 +136,6 @@ export default function AiInterviewPage() {
     try {
       const { data } = await apiClient.post(`/public/ai-interviews/${token}/start`, { consent: true, recording_consent: recordConsent });
       setView((v) => ({ ...v, ...data.data }));
-      if (data.data.recording_on) startRecording();
     } catch (err) {
       setError(apiErrorMessage(err, 'Could not start the interview. Please try again.'));
     } finally {

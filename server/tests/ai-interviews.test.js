@@ -14,12 +14,17 @@ const env = require('../src/config/env');
 let adminToken;
 let recruiterToken;
 let submissionId;
+let requirementId;
+let profileId;
+let recruiterId;
 const calls = { questions: 0, followUp: 0, score: 0 };
 let scoreOf = () => 8; // every rubric parameter score, 0-10
 let followUps = true;
 let failOn = null; // 'questions' | 'score' | null
+const seenDocuments = []; // CV documents the AI was given
 
-function stubProvider({ system, messages }) {
+function stubProvider({ system, messages, documents = [] }) {
+  if (documents.length) seenDocuments.push(...documents);
   const user = messages[0].content;
   const reply = (obj) => ({ text: JSON.stringify(obj), usage: { input: 100, output: 50 } });
   if (user.includes('Write exactly')) {
@@ -54,12 +59,14 @@ beforeEach(async () => {
   await prisma.aiInterview.deleteMany();
   await prisma.aiInterviewSettings.deleteMany();
   Object.assign(calls, { questions: 0, followUp: 0, score: 0 });
+  seenDocuments.length = 0;
   scoreOf = () => 8;
   followUps = true;
   failOn = null;
   setProvider(stubProvider);
   const sales = await createUser({ role: 'sales' });
   const recruiter = await createUser({ role: 'recruiter' });
+  recruiterId = recruiter.id;
   const admin = await createUser({ role: 'admin' });
   ({ access_token: adminToken } = await loginAs(admin));
   ({ access_token: recruiterToken } = await loginAs(recruiter));
@@ -67,7 +74,9 @@ beforeEach(async () => {
   const account = await createActiveClientAccount(sales.id);
   const requirement = await createRequirement(salesToken, account.id, { primary_tech_stack: ['Salesforce'] });
   const seats = await authed(request(app).get(`/api/v1/requirements/${requirement.id}/seats`), salesToken);
+  requirementId = requirement.id;
   const profile = await createProfile(recruiterToken, { email: 'cand@test.local' });
+  profileId = profile.id;
   const sub = await authed(request(app).post('/api/v1/submissions'), recruiterToken).send({
     requirement_seat_id: seats.body.data[0].id, profile_id: profile.id, proposed_rate: 100, proposed_rate_currency: 'INR',
   });
@@ -398,5 +407,128 @@ describe('optional recording (audio + video), deleted after the retention days',
     const file = await fileOf(token);
     expect((await authed(request(app).delete(`/api/v1/ai-interviews/${created.id}`), adminToken).send({})).status).toBe(200);
     expect(fs.existsSync(file)).toBe(false);
+  });
+});
+
+describe('recording parts (a candidate who returns records a new part)', () => {
+  const binary = (res, cb) => { const parts = []; res.on('data', (c) => parts.push(c)); res.on('end', () => cb(null, Buffer.concat(parts))); };
+  const chunk = (token, part, seq, bytes) =>
+    request(app).post(`/api/v1/public/ai-interviews/${token}/recording?part=${part}&seq=${seq}`).set('Content-Type', 'video/webm').send(Buffer.from(bytes));
+
+  test('each session is its own file; the team plays any part; the job deletes all of them', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ recording_enabled: true });
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await post(`${token}/start`, { consent: true, recording_consent: true });
+    expect((await chunk(token, 0, 0, 'AAAA')).status).toBe(200);
+    expect((await chunk(token, 2, 0, 'ZZZZ')).status).toBe(409); // a part cannot be skipped
+    expect((await chunk(token, 1, 0, 'BBBB')).status).toBe(200); // the candidate came back: part 2
+    expect((await chunk(token, 1, 1, 'CCCC')).status).toBe(200);
+    expect((await chunk(token, 1, 0, 'BBBB')).status).toBe(200); // retry
+    expect((await pub(token)).body.data.recording_parts).toBe(2);
+
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(row.recording_files.map((p) => p.chunks)).toEqual([1, 2]);
+    const files = row.recording_files.map((p) => path.join(env.uploadDir, 'ai-interviews', p.name));
+    expect(files.every((p) => fs.existsSync(p))).toBe(true);
+
+    followUps = false;
+    await runInterview(token);
+    const review = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken);
+    expect(review.body.data.recording_parts).toHaveLength(2);
+    const second = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording?part=1`), recruiterToken).buffer(true).parse(binary);
+    expect(second.body.toString()).toBe('BBBBCCCC');
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording?part=5`), recruiterToken)).status).toBe(404);
+
+    await prisma.aiInterview.update({ where: { token }, data: { recording_expires_at: new Date(Date.now() - 1000) } });
+    const { purgeExpiredRecordings } = require('../src/modules/aiInterviews/aiInterviews.service');
+    expect((await purgeExpiredRecordings()).purged).toBe(1);
+    expect(files.some((p) => fs.existsSync(p))).toBe(false);
+  });
+});
+
+describe('auto-reject, result notification, CV, per-requirement switch and analytics', () => {
+  const stageOf = async () => (await prisma.submission.findUnique({ where: { id: submissionId } })).stage;
+
+  test('auto-reject is off by default; with it on a below-pass result moves a sourcing candidate to Rejected with the reason', async () => {
+    followUps = false;
+    scoreOf = () => 2;
+    const first = (await invite()).body.data;
+    await runInterview(tokenOf(first.link));
+    expect(await stageOf()).toBe('sourced'); // switch is off: nothing moves
+    await authed(request(app).delete(`/api/v1/ai-interviews/${first.id}`), adminToken).send({});
+
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ auto_reject: true });
+    const second = (await invite()).body.data;
+    await runInterview(tokenOf(second.link));
+    const sub = await prisma.submission.findUnique({ where: { id: submissionId } });
+    expect(sub.stage).toBe('rejected');
+    expect(sub.rejection_reason).toMatch(/^AI interview: Scored/);
+    const row = await prisma.aiInterview.findUnique({ where: { id: second.id } });
+    expect(row.auto_rejected_at).not.toBeNull();
+    expect(await prisma.stageHistory.count({ where: { entity_id: submissionId, to_stage: 'rejected' } })).toBe(1);
+  });
+
+  test('a candidate who is already past screening is not rejected automatically; a pass is never rejected', async () => {
+    followUps = false;
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ auto_reject: true });
+    await prisma.submission.update({ where: { id: submissionId }, data: { stage: 'submitted_to_client' } });
+    scoreOf = () => 2;
+    const low = (await invite()).body.data;
+    await runInterview(tokenOf(low.link));
+    expect(await stageOf()).toBe('submitted_to_client');
+    expect((await prisma.aiInterview.findUnique({ where: { id: low.id } })).auto_reject_note).toMatch(/Not rejected automatically/);
+
+    await authed(request(app).delete(`/api/v1/ai-interviews/${low.id}`), adminToken).send({});
+    await prisma.submission.update({ where: { id: submissionId }, data: { stage: 'sourced' } });
+    scoreOf = () => 9;
+    await runInterview(tokenOf((await invite()).body.data.link));
+    expect(await stageOf()).toBe('sourced');
+  });
+
+  test('the person who sent the interview is notified of the result', async () => {
+    followUps = false;
+    await runInterview(tokenOf((await invite()).body.data.link));
+    const n = await prisma.notification.findMany({ where: { user_id: recruiterId, type: 'ai_interview_completed' } });
+    expect(n).toHaveLength(1);
+    expect(n[0].body).toMatch(/finished the AI interview .*Pass, 80%/);
+  });
+
+  test('a stored CV (PDF) is given to the AI; no CV means the profile fields only', async () => {
+    followUps = false;
+    await runInterview(tokenOf((await invite()).body.data.link));
+    expect(seenDocuments).toHaveLength(0);
+
+    await prisma.aiInterview.deleteMany();
+    fs.mkdirSync(env.uploadDir, { recursive: true });
+    fs.writeFileSync(path.join(env.uploadDir, 'ai-test-cv.pdf'), '%PDF-1.4 test cv');
+    await prisma.document.create({ data: { entity_type: 'profile', entity_id: profileId, label: 'Resume', file_url: '/uploads/ai-test-cv.pdf', file_type: 'application/pdf', uploaded_by: recruiterId } });
+    await runInterview(tokenOf((await invite()).body.data.link));
+    expect(seenDocuments.length).toBeGreaterThan(0);
+    expect(Buffer.from(seenDocuments[0].base64, 'base64').toString()).toBe('%PDF-1.4 test cv');
+    fs.unlinkSync(path.join(env.uploadDir, 'ai-test-cv.pdf'));
+    await prisma.document.deleteMany({ where: { entity_id: profileId } });
+  });
+
+  test('a requirement can switch the AI interview off, and back to following the company', async () => {
+    const off = await authed(request(app).put(`/api/v1/ai-interviews/requirements/${requirementId}/switch`), recruiterToken).send({ enabled: false });
+    expect(off.status).toBe(200);
+    expect((await invite()).status).toBe(409);
+    expect((await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken)).body.data.requirement_switch).toBe(false);
+    expect(await prisma.auditLog.count({ where: { entity_type: 'requirement', entity_id: requirementId, action: 'set_ai_interview_switch' } })).toBe(1);
+    await authed(request(app).put(`/api/v1/ai-interviews/requirements/${requirementId}/switch`), recruiterToken).send({ enabled: true });
+    expect((await invite()).status).toBe(201);
+  });
+
+  test('analytics count what was sent and how it went', async () => {
+    followUps = false;
+    scoreOf = () => 9;
+    const a = (await invite()).body.data;
+    await runInterview(tokenOf(a.link));
+    await authed(request(app).post(`/api/v1/ai-interviews/${a.id}/override`), recruiterToken).send({ outcome: 'borderline', reason: 'Wants a second look' });
+    const res = await authed(request(app).get('/api/v1/ai-interviews/analytics'), recruiterToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ sent: 1, completed: 1, pass: 1, borderline: 0, below_pass: 0, overridden: 1, pending_review: 0, average_score: 90 });
+    expect((await authed(request(app).get('/api/v1/ai-interviews/analytics?from=2020-01-01&to=2020-01-02'), recruiterToken)).body.data.sent).toBe(0);
   });
 });

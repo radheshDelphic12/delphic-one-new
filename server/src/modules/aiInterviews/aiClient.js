@@ -11,7 +11,15 @@ class AiUnavailableError extends Error {
   }
 }
 
-async function anthropicProvider({ system, messages, maxTokens }) {
+// PDFs (the candidate's CV) go in front of the first user message as document blocks.
+function withDocuments(messages, documents) {
+  if (!documents.length) return messages;
+  const [first, ...rest] = messages;
+  const blocks = documents.map((d) => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.base64 } }));
+  return [{ ...first, content: [...blocks, { type: 'text', text: first.content }] }, ...rest];
+}
+
+async function anthropicProvider({ system, messages, maxTokens, documents = [] }) {
   const { apiKey, model } = env.aiInterview;
   if (!apiKey) throw new AiUnavailableError('ANTHROPIC_API_KEY is not set');
   const controller = new AbortController();
@@ -21,7 +29,7 @@ async function anthropicProvider({ system, messages, maxTokens }) {
       method: 'POST',
       signal: controller.signal,
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages }),
+      body: JSON.stringify({ model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages: withDocuments(messages, documents) }),
     });
     if (!res.ok) throw new AiUnavailableError(`AI provider answered ${res.status}`);
     const body = await res.json();
@@ -40,8 +48,8 @@ const setProvider = (fn) => { provider = fn || anthropicProvider; };
 
 // Asks for JSON only and parses it; tolerates a ```json fence. Returns { data, usage }; throws AiUnavailableError when the
 // reply is not usable JSON, so every caller has one failure path.
-async function askJson({ system, user, maxTokens }) {
-  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens });
+async function askJson({ system, user, maxTokens, documents }) {
+  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents });
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');

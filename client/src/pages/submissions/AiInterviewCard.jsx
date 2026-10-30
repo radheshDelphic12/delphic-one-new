@@ -73,22 +73,23 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     }, 'Could not open the result');
   }
 
-  async function loadVideo() {
+  // A candidate who closed the tab and came back has more than one part; each is its own file.
+  async function loadVideo(part = 0) {
     try {
-      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { responseType: 'blob' });
-      setVideo({ url: URL.createObjectURL(res.data), error: '' });
+      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { part }, responseType: 'blob' });
+      setVideo({ url: URL.createObjectURL(res.data), part, error: '' });
     } catch (err) {
-      setVideo({ url: null, error: apiErrorMessage(err, 'The recording is not available') });
+      setVideo({ url: null, part, error: apiErrorMessage(err, 'The recording is not available') });
     }
   }
 
-  async function downloadVideo() {
+  async function downloadVideo(part = 0) {
     try {
-      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { download: 'true' }, responseType: 'blob' });
+      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { part, download: 'true' }, responseType: 'blob' });
       const href = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = href;
-      a.download = `ai-interview-${review.candidate_name.replace(/[^a-z0-9]+/gi, '-')}.webm`;
+      a.download = `ai-interview-${review.candidate_name.replace(/[^a-z0-9]+/gi, '-')}${review.recording_parts.length > 1 ? `-part${part + 1}` : ''}.webm`;
       a.click();
       URL.revokeObjectURL(href);
     } catch (err) {
@@ -109,7 +110,15 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     run(async () => { await apiClient.delete(`/ai-interviews/${item.id}`, { data: { reason: reason.trim() || undefined } }); await load(); }, 'Could not delete the AI interview');
   };
 
-  const canSend = !locked && (!live || ['not_opened', 'expired'].includes(live.view_status));
+  // false = this requirement has the AI interview turned off (the company setting is on, but this role opted out)
+  const switchedOff = state.requirement_switch === false;
+  const setSwitch = (enabled) => run(async () => {
+    await apiClient.put(`/ai-interviews/requirements/${state.requirement_id}/switch`, { enabled });
+    pushSuccess(enabled ? 'The AI interview follows the company setting again for this requirement.' : 'The AI interview is turned off for this requirement.', 'Saved');
+    await load();
+  }, 'Could not change the setting for this requirement');
+
+  const canSend = !locked && !switchedOff && (!live || ['not_opened', 'expired'].includes(live.view_status));
   return (
     <section className="rounded-2xl border border-violet-100 bg-violet-50/30 p-4 shadow-soft">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -117,8 +126,16 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
           <h2 className="font-heading text-sm font-semibold text-violet-900">AI interview (optional, first round)</h2>
           <p className="mt-0.5 text-xs text-violet-700/80">A separate link the candidate can take before any human round. It does not change the interview plan; you decide what to do with the result.</p>
         </div>
-        {canSend && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={send}>{live ? 'Send a new link' : 'Send AI interview link'}</button>}
+        <div className="flex items-center gap-2">
+          {state.requirement_id && !locked && (
+            <button type="button" className="text-xs text-violet-700 hover:underline" disabled={busy} onClick={() => setSwitch(switchedOff ? true : false)}>
+              {switchedOff ? 'Turn on for this requirement' : 'Turn off for this requirement'}
+            </button>
+          )}
+          {canSend && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={send}>{live ? 'Send a new link' : 'Send AI interview link'}</button>}
+        </div>
       </div>
+      {switchedOff && <p className="mt-2 rounded-lg bg-tertiary-50 px-3 py-2 text-xs text-tertiary-600">The AI interview is turned off for this requirement, so no new link can be sent. Existing results stay visible.</p>}
 
       {state.items.length === 0 && <p className="mt-3 text-sm text-tertiary-500">No AI interview sent yet.</p>}
       <ul className="mt-3 space-y-2">
@@ -131,6 +148,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                 {i.score_percent != null && <span className="text-xs text-tertiary-700">AI score <strong>{i.score_percent}%</strong> (pass mark {i.pass_percentage}%)</span>}
                 <span className="text-xs text-tertiary-400">Sent {when(i.invited_at)}{i.created_by_name ? ` by ${i.created_by_name}` : ''}</span>
               </div>
+              {i.auto_reject_note && <p className={`basis-full text-xs ${i.auto_rejected_at ? 'font-medium text-danger-700' : 'text-tertiary-500'}`}>{i.auto_reject_note}</p>}
               <div className="flex items-center gap-1">
                 {i.link && i.is_live && <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs text-tertiary-700 hover:bg-tertiary-50" onClick={() => copy(i.link)}><Copy className="h-3.5 w-3.5" /> Copy link</button>}
                 {['scored', 'pending_review'].includes(i.view_status) && <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs text-tertiary-700 hover:bg-tertiary-50" onClick={() => openReview(i)}><Eye className="h-3.5 w-3.5" /> View result</button>}
@@ -190,9 +208,19 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                 {review.has_recording && (
                   <>
                     <p className="mb-2 text-xs text-tertiary-500">Available until {when(review.recording_expires_at)}, then deleted automatically.</p>
-                    {video.url ? <video src={video.url} controls className="w-full rounded-lg bg-black" /> : <button type="button" className="btn-secondary text-xs" onClick={loadVideo}>Load recording</button>}
-                    {video.error && <p className="mt-1 text-xs text-danger-700">{video.error}</p>}
-                    <button type="button" className="ml-2 inline-flex items-center gap-1 text-xs text-primary-700 hover:underline" onClick={downloadVideo}><Download className="h-3.5 w-3.5" /> Download</button>
+                    {review.recording_parts.length > 1 && <p className="mb-2 text-xs text-tertiary-600">The candidate closed the page and came back, so this interview has {review.recording_parts.length} recording parts.</p>}
+                    {video.url && <video src={video.url} controls className="mb-2 w-full rounded-lg bg-black" />}
+                    {video.error && <p className="mb-2 text-xs text-danger-700">{video.error}</p>}
+                    <div className="flex flex-wrap gap-2">
+                      {review.recording_parts.map((p, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-2 rounded-lg border border-tertiary-200 px-2 py-1 text-xs">
+                          <button type="button" className={video.url && video.part === idx ? 'font-semibold text-primary-700' : 'text-tertiary-800 hover:underline'} onClick={() => loadVideo(idx)}>
+                            {review.recording_parts.length > 1 ? `Play part ${idx + 1}` : 'Play recording'} ({Math.max(1, Math.round(p.bytes / 1048576))} MB)
+                          </button>
+                          <button type="button" aria-label={`Download part ${idx + 1}`} className="text-primary-700 hover:underline" onClick={() => downloadVideo(idx)}><Download className="h-3.5 w-3.5" /></button>
+                        </span>
+                      ))}
+                    </div>
                   </>
                 )}
               </div>
