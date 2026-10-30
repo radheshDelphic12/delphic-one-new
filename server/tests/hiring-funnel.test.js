@@ -167,3 +167,61 @@ describe('hiring funnel', () => {
     expect((await authed(request(app).get('/api/v1/reports/export').query({ type: 'xlsx', report: 'hiring-funnel', date_from: from, date_to: to }), recruiterToken)).status).toBe(403);
   });
 });
+
+describe('hiring funnel details (the profiles behind a count)', () => {
+  const details = (query, token = adminToken) => {
+    const from = new Date(Date.now() - 30 * DAY).toISOString().slice(0, 10);
+    const to = new Date(Date.now() + DAY).toISOString().slice(0, 10);
+    return authed(request(app).get('/api/v1/reports/hiring-funnel/details').query({ date_from: from, date_to: to, ...query }), token);
+  };
+  const names = (res) => res.body.data.items.map((i) => i.name).sort();
+
+  test('summary metrics, stage cells, recruiter and period narrow to the right profiles; recruiters are refused', async () => {
+    const { seatId } = await makeRequirement();
+    const a = await sourced(10, 'Funnel A');
+    const subA = await submit(seatId, a.id);
+    await round(subA, 'Screening + Behavioural + Reasoning, Aptitude & Mind Test', 'pass');
+    await history(subA, 'submitted_to_client', 8);
+    await round(subA, 'Client Round 1', 'pass');
+    await round(subA, 'MD Round', 'pass');
+    await history(subA, 'offer_sent', 3);
+    await history(subA, 'closed', 2);
+    await prisma.submission.update({ where: { id: subA }, data: { stage: 'closed' } });
+    const b = await sourced(9, 'Funnel B');
+    const subB = await submit(seatId, b.id);
+    await round(subB, 'Screening + Behavioural + Reasoning, Aptitude & Mind Test', 'pass');
+    await history(subB, 'submitted_to_client', 7);
+    await round(subB, 'Client Round 1', 'fail');
+    const c = await sourced(5, 'Funnel C');
+    await submit(seatId, c.id);
+    await sourced(4, 'Funnel D');
+
+    expect(names(await details({ metric: 'sourced' }))).toEqual(['Funnel A', 'Funnel B', 'Funnel C', 'Funnel D']);
+    expect(names(await details({ metric: 'selected' }))).toEqual(['Funnel A']);
+    expect(names(await details({ metric: 'dropped' }))).toEqual(['Funnel B']);
+    expect(names(await details({ metric: 'in_progress' }))).toEqual(['Funnel C']);
+    expect(names(await details({ metric: 'not_submitted' }))).toEqual(['Funnel D']);
+    expect(names(await details({ metric: 'first_round_cleared' }))).toEqual(['Funnel A', 'Funnel B']);
+
+    const cell = await details({ track: 'client', stage: 'client_r1', outcome: 'dropped' });
+    expect(names(cell)).toEqual(['Funnel B']);
+    expect(cell.body.data.items[0]).toMatchObject({ outcome: 'Dropped', client: account.name, status: 'Dropped' });
+    expect(cell.body.data.items[0].submission_id).toBe(subB);
+    expect(names(await details({ track: 'client', stage: 'client_r2', outcome: 'assumed' }))).toEqual(['Funnel A']);
+    expect(names(await details({ track: 'client', stage: 'client_r1', outcome: 'reached' }))).toEqual(['Funnel A', 'Funnel B']);
+    expect(names(await details({ track: 'client', stage: 'client_r1', outcome: 'passed,assumed' }))).toEqual(['Funnel A']);
+
+    // the numbers on the report and the lists behind them agree
+    const report = (await funnel()).body.data;
+    expect((await details({ metric: 'dropped' })).body.data.total).toBe(report.summary.dropped);
+    expect((await details({ track: 'client', stage: 'screening', outcome: 'reached' })).body.data.total).toBe(stage(report.funnels[0], 'screening').reached);
+
+    expect((await details({ metric: 'sourced', sourcer_id: admin.id })).body.data.total).toBe(0);
+    expect((await details({ metric: 'sourced', sourcer_id: recruiter.id })).body.data.total).toBe(4);
+    const key = report.trend[0].bucket_key;
+    expect((await details({ metric: 'sourced', bucket: key, group_by: 'month' })).body.data.total).toBeGreaterThan(0);
+    expect((await details({ metric: 'sourced', bucket: '1999-01', group_by: 'month' })).body.data.total).toBe(0);
+
+    expect((await details({ metric: 'sourced' }, recruiterToken)).status).toBe(403);
+  });
+});

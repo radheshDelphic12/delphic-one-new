@@ -82,6 +82,15 @@ const hiringFunnelSchema = z.object({
   group_by: z.enum(['none', 'week', 'month']).default('month'),
 });
 
+// The profiles behind one count of the hiring funnel: a profile-level metric, or a stage cell (track + stage + outcome), optionally one period.
+const hiringFunnelDetailsSchema = hiringFunnelSchema.extend({
+  metric: z.enum(['sourced', 'submitted', 'not_submitted', 'first_round_cleared', 'reached_client_round', 'selected', 'dropped', 'in_progress']).optional(),
+  track: z.enum(['internal', 'client']).optional(),
+  stage: z.string().max(40).optional(),
+  outcome: z.string().max(80).optional(),
+  bucket: z.string().max(40).optional(),
+});
+
 // Joinings by month (by sourcer / interviewer L1+L2 / vendor).
 const joiningsSchema = z.object({
   date_from: z.string().min(1),
@@ -152,6 +161,7 @@ module.exports = {
   coverageSchema,
   hrSchema,
   hiringFunnelSchema,
+  hiringFunnelDetailsSchema,
   joiningsSchema,
   timeToSubmitSchema,
 };

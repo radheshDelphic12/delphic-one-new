@@ -19,6 +19,7 @@ const {
   coverageSchema,
   hrSchema,
   hiringFunnelSchema,
+  hiringFunnelDetailsSchema,
   joiningsSchema,
   timeToSubmitSchema,
 } = require('./reports.validation');
@@ -235,6 +236,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const query = hiringFunnelSchema.parse(req.query);
     const data = await hiringFunnelService.hiringFunnel(query);
+    return ok(res, data);
+  })
+);
+
+router.get(
+  '/hiring-funnel/details',
+  authorizeHr,
+  asyncHandler(async (req, res) => {
+    const query = hiringFunnelDetailsSchema.parse(req.query);
+    const data = await hiringFunnelService.hiringFunnelDetails(query);
     return ok(res, data);
   })
 );

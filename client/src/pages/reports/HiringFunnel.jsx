@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import apiClient from '../../lib/apiClient.js';
 import { fetchAllPages } from '../../lib/fetchAllPages.js';
@@ -7,6 +8,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { rangeForPreset } from '../../lib/datePresets.js';
 import { CHART_COLORS, chartTooltipStyle } from '../../lib/chartTheme.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
+import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilterBar from '../../components/ui/FilterBar.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
@@ -24,16 +26,27 @@ const GROUP_OPTIONS = [
 ];
 const COLORS = { passed: CHART_COLORS.success, notHeld: CHART_COLORS.warning, pending: CHART_COLORS.info, dropped: CHART_COLORS.danger, unavailable: CHART_COLORS.muted };
 
+const TREND_LABEL = { sourced: 'Sourced', first_round_cleared: 'First round cleared', reached_client_round: 'Reached a client round', selected: 'Selected / joined', dropped: 'Dropped' };
 const pctText = (v) => (v == null ? '—' : `${v}%`);
 const daysText = (v) => (v == null ? '—' : `${v}d`);
 const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500';
 const td = 'px-3 py-2 tabular-nums';
 
-function Stat({ label, value, hint }) {
+// A count that opens the profiles behind it (a zero has nothing to open).
+function Count({ value, onClick, className = 'text-primary-700', testId }) {
+  if (!value) return <span>{value ?? 0}</span>;
+  return (
+    <button type="button" data-testid={testId || 'funnel-count'} onClick={onClick} title="Click to see the profiles" className={`min-w-[1.5rem] rounded-md px-1.5 py-0.5 font-semibold tabular-nums hover:bg-primary-50 hover:underline ${className}`}>
+      {value}
+    </button>
+  );
+}
+
+function Stat({ label, value, hint, onClick, children }) {
   return (
     <div className="rounded-xl border border-tertiary-100 bg-white p-3 shadow-card">
       <p className="text-xs text-tertiary-500">{label}</p>
-      <p className="mt-1 font-heading text-2xl font-semibold text-tertiary-900">{value}</p>
+      <p className="mt-1 font-heading text-2xl font-semibold text-tertiary-900">{children || (onClick ? <Count value={value} onClick={onClick} className="text-tertiary-900" testId="summary-count" /> : value)}</p>
       {hint && <p className="mt-0.5 text-[11px] text-tertiary-500">{hint}</p>}
     </div>
   );
@@ -47,7 +60,8 @@ function stageNumbers(stage, assumedAsPass) {
   return { passed, notHeld, passRate: base > 0 ? Math.round((passed / base) * 1000) / 10 : null };
 }
 
-function FunnelSection({ funnel, assumedAsPass }) {
+function FunnelSection({ funnel, assumedAsPass, onOpen }) {
+  const open = (r, outcome, what) => () => onOpen({ title: `${funnel.label} · ${r.label} · ${what}`, params: { track: funnel.track, stage: r.key, outcome } });
   const rows = useMemo(() => funnel.stages.map((s) => ({ ...s, ...stageNumbers(s, assumedAsPass) })), [funnel, assumedAsPass]);
   const chartData = rows.map((r) => ({ name: r.label, Passed: r.passed, 'Not held': r.notHeld, 'In progress': r.pending, Dropped: r.dropped, 'Data unavailable': r.unavailable }));
   const clientR1 = rows.find((r) => r.key === 'client_r1');
@@ -74,8 +88,8 @@ function FunnelSection({ funnel, assumedAsPass }) {
 
       {clientR1 && (
         <div className="rounded-xl border border-primary-200 bg-primary-50/50 px-4 py-3 text-sm text-tertiary-800" data-testid="client-round-1">
-          <b>Client Round 1:</b> {clientR1.reached} came, <b className="text-success-700">{clientR1.passed} passed</b>
-          {clientR1.notHeld > 0 && <>, {clientR1.notHeld} not held</>}, <b className="text-danger-700">{clientR1.dropped} dropped</b>, {clientR1.pending} in progress
+          <b>Client Round 1:</b> <Count value={clientR1.reached} onClick={open(clientR1, 'reached', 'Came')} /> came, <Count value={clientR1.passed} className="text-success-700" onClick={open(clientR1, assumedAsPass ? 'passed,assumed' : 'passed', 'Passed')} /> passed
+          {clientR1.notHeld > 0 && <>, {clientR1.notHeld} not held</>}, <Count value={clientR1.dropped} className="text-danger-700" onClick={open(clientR1, 'dropped', 'Dropped')} /> dropped, {clientR1.pending} in progress
           {clientR1.unavailable > 0 && <>, {clientR1.unavailable} data unavailable</>}. Pass-through <b>{pctText(clientR1.passRate)}</b>.
         </div>
       )}
@@ -97,12 +111,12 @@ function FunnelSection({ funnel, assumedAsPass }) {
                     {r.label}{r.optional && <span className="ml-1.5 rounded-full bg-tertiary-100 px-1.5 py-0.5 text-[10px] font-normal text-tertiary-600">optional</span>}
                     {r.names.length > 0 && <span className="block text-[11px] font-normal text-tertiary-500">{r.names.join(' / ')}</span>}
                   </td>
-                  <td className={td}>{r.reached}</td>
-                  <td className={`${td} text-success-700`}>{r.passed}{assumedAsPass && r.assumed > 0 && <span className="ml-1 text-[11px] text-tertiary-500">(incl. {r.assumed} not held)</span>}</td>
-                  <td className={`${td} ${flagged ? 'font-semibold text-warning-800' : ''}`}>{r.notHeld || (assumedAsPass ? '—' : 0)}</td>
-                  <td className={`${td} text-danger-700`}>{r.dropped}</td>
-                  <td className={td}>{r.pending}</td>
-                  <td className={td}>{r.unavailable}</td>
+                  <td className={td}><Count value={r.reached} onClick={open(r, 'reached', 'Came')} /></td>
+                  <td className={`${td} text-success-700`}><Count value={r.passed} className="text-success-700" onClick={open(r, assumedAsPass ? 'passed,assumed' : 'passed', 'Passed')} />{assumedAsPass && r.assumed > 0 && <span className="ml-1 text-[11px] text-tertiary-500">(incl. {r.assumed} not held)</span>}</td>
+                  <td className={`${td} ${flagged ? 'font-semibold text-warning-800' : ''}`}>{r.notHeld ? <Count value={r.notHeld} className="text-warning-800" onClick={open(r, 'assumed', 'Not held')} /> : (assumedAsPass ? '—' : 0)}</td>
+                  <td className={`${td} text-danger-700`}><Count value={r.dropped} className="text-danger-700" onClick={open(r, 'dropped', 'Dropped')} /></td>
+                  <td className={td}><Count value={r.pending} onClick={open(r, 'pending', 'In progress')} /></td>
+                  <td className={td}><Count value={r.unavailable} className="text-tertiary-700" onClick={open(r, 'unavailable', 'Data unavailable')} /></td>
                   <td className={td}>{r.key === 'sourced' ? '—' : pctText(r.passRate)}</td>
                   <td className={td}>{daysText(r.avg_days_from_start)}</td>
                 </tr>
@@ -115,7 +129,8 @@ function FunnelSection({ funnel, assumedAsPass }) {
   );
 }
 
-function RecruiterTable({ rows, summary }) {
+function RecruiterTable({ rows, summary, onOpen }) {
+  const cell = (r, metric, label) => <Count value={r[metric]} onClick={() => onOpen({ title: `${r.sourcer || 'Whole team'} · ${label}`, params: { metric, ...(r.sourcer_id ? { sourcer_id: r.sourcer_id } : {}) } })} />;
   const team = { first: summary.first_round_pct, client: summary.client_round_pct, selected: summary.selected_pct };
   const weak = (value, ref) => value != null && ref != null && value < ref;
   return (
@@ -132,8 +147,8 @@ function RecruiterTable({ rows, summary }) {
           {rows.map((r) => (
             <tr key={r.sourcer_id} className="border-t border-tertiary-100">
               <td className="px-3 py-2 font-medium text-tertiary-900">{r.sourcer}</td>
-              <td className={td}>{r.sourced}</td><td className={td}>{r.submitted}</td><td className={td}>{r.first_round_cleared}</td>
-              <td className={td}>{r.reached_client_round}</td><td className={td}>{r.selected}</td><td className={td}>{r.dropped}</td><td className={td}>{r.in_progress}</td>
+              <td className={td}>{cell(r, 'sourced', 'Sourced')}</td><td className={td}>{cell(r, 'submitted', 'Submitted')}</td><td className={td}>{cell(r, 'first_round_cleared', 'First round cleared')}</td>
+              <td className={td}>{cell(r, 'reached_client_round', 'Reached a client round')}</td><td className={td}>{cell(r, 'selected', 'Selected / joined')}</td><td className={td}>{cell(r, 'dropped', 'Dropped')}</td><td className={td}>{cell(r, 'in_progress', 'In progress')}</td>
               <td className={`${td} ${weak(r.first_round_pct, team.first) ? 'bg-warning-50 font-semibold text-warning-800' : ''}`}>{pctText(r.first_round_pct)}</td>
               <td className={`${td} ${weak(r.client_round_pct, team.client) ? 'bg-warning-50 font-semibold text-warning-800' : ''}`}>{pctText(r.client_round_pct)}</td>
               <td className={`${td} ${weak(r.selected_pct, team.selected) ? 'bg-warning-50 font-semibold text-warning-800' : ''}`}>{pctText(r.selected_pct)}</td>
@@ -142,14 +157,57 @@ function RecruiterTable({ rows, summary }) {
           ))}
           <tr className="border-t-2 border-tertiary-200 bg-canvas-muted font-semibold">
             <td className="px-3 py-2">Whole team</td>
-            <td className={td}>{summary.sourced}</td><td className={td}>{summary.submitted}</td><td className={td}>{summary.first_round_cleared}</td>
-            <td className={td}>{summary.reached_client_round}</td><td className={td}>{summary.selected}</td><td className={td}>{summary.dropped}</td><td className={td}>{summary.in_progress}</td>
+            <td className={td}>{cell(summary, 'sourced', 'Sourced')}</td><td className={td}>{cell(summary, 'submitted', 'Submitted')}</td><td className={td}>{cell(summary, 'first_round_cleared', 'First round cleared')}</td>
+            <td className={td}>{cell(summary, 'reached_client_round', 'Reached a client round')}</td><td className={td}>{cell(summary, 'selected', 'Selected / joined')}</td><td className={td}>{cell(summary, 'dropped', 'Dropped')}</td><td className={td}>{cell(summary, 'in_progress', 'In progress')}</td>
             <td className={td}>{pctText(team.first)}</td><td className={td}>{pctText(team.client)}</td><td className={td}>{pctText(team.selected)}</td><td className={td}>{daysText(summary.avg_days_to_join)}</td>
           </tr>
         </tbody>
       </table>
       <p className="px-3 py-2 text-[11px] text-tertiary-500">Amber = below the team&apos;s rate. First round % = cleared / submitted; client round % = reached a client round / cleared the first round; selected % = selected / sourced.</p>
     </div>
+  );
+}
+
+function DetailsDrawer({ detail, onClose }) {
+  const data = detail?.data;
+  const showOutcome = data?.items.some((i) => i.outcome);
+  const showDays = data?.items.some((i) => i.days_at_stage != null);
+  return (
+    <Drawer open={Boolean(detail)} onClose={onClose} title={detail?.title || ''} size="xl" tone="info">
+      {detail?.loading && <p className="text-sm text-tertiary-500">Loading…</p>}
+      {detail?.error && <p className="text-sm text-danger-700">{detail.error}</p>}
+      {data && (
+        <div className="space-y-2" data-testid="funnel-details">
+          <p className="text-xs text-tertiary-500">{data.total} profile{data.total === 1 ? '' : 's'}{data.shown < data.total ? ` (showing the latest ${data.shown})` : ''}</p>
+          <div className="overflow-x-auto rounded-xl border border-tertiary-100">
+            <table className="min-w-full text-sm">
+              <thead className="bg-canvas-muted">
+                <tr>
+                  <th className={th}>Candidate</th><th className={th}>Sourced on</th><th className={th}>Recruiter</th><th className={th}>Client / requirement</th><th className={th}>Status</th>
+                  {showOutcome && <th className={th}>At this stage</th>}
+                  {showDays && <th className={th}>Days from sourcing</th>}
+                  <th className={th}>Submission</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((i) => (
+                  <tr key={`${i.profile_id}-${i.submission_id}`} className="border-t border-tertiary-100" data-testid="funnel-detail-row">
+                    <td className="px-3 py-2 font-medium"><Link to={`/profiles/${i.profile_id}`} className="text-primary-700 hover:underline">{i.name}</Link></td>
+                    <td className="whitespace-nowrap px-3 py-2">{formatReportDate(i.sourced_on)}</td>
+                    <td className="px-3 py-2">{i.recruiter}</td>
+                    <td className="px-3 py-2">{i.client || '—'}{i.requirement && <span className="block text-[11px] text-tertiary-500">{i.requirement}</span>}</td>
+                    <td className="px-3 py-2">{i.status}</td>
+                    {showOutcome && <td className="px-3 py-2">{i.outcome || '—'}</td>}
+                    {showDays && <td className={td}>{i.days_at_stage ?? '—'}</td>}
+                    <td className="px-3 py-2">{i.submission_id ? <Link to={`/submissions/${i.submission_id}`} className="text-primary-700 hover:underline">Open</Link> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Drawer>
   );
 }
 
@@ -169,6 +227,7 @@ export default function HiringFunnel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [detail, setDetail] = useState(null); // { title, loading, data, error }
 
   useEffect(() => {
     apiClient.get('/users/directory').then(({ data: res }) => setPeople((res.data || []).map((u) => ({ value: u.id, label: u.active === false ? `${u.name} (inactive)` : u.name })))).catch(() => setPeople([]));
@@ -201,6 +260,17 @@ export default function HiringFunnel() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open the profiles behind a count. `extra` carries the metric or stage cell, and may narrow to one recruiter / period.
+  async function openDetail({ title, params: extra }) {
+    setDetail({ title, loading: true });
+    try {
+      const { data: res } = await apiClient.get('/reports/hiring-funnel/details', { params: { ...params, ...extra } });
+      setDetail({ title, data: res.data });
+    } catch (err) {
+      setDetail({ title, error: apiErrorMessage(err, 'Failed to load the profiles') });
+    }
+  }
 
   async function exportReport(type) {
     setExporting(true);
@@ -251,29 +321,34 @@ export default function HiringFunnel() {
         </label>
       </FilterBar>
 
+      <DetailsDrawer detail={detail} onClose={() => setDetail(null)} />
+
       {loading && !data && <p className="text-sm text-tertiary-500">Loading…</p>}
       {data && (
         <>
           <p className="text-xs text-tertiary-500">Cohort: profiles sourced {formatReportDate(data.filters.date_from)} to {formatReportDate(data.filters.date_to)}.</p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" data-testid="funnel-summary">
-            <Stat label="Sourced" value={summary.sourced} hint={`${summary.not_submitted} not submitted anywhere`} />
-            <Stat label="Submitted" value={summary.submitted} />
-            <Stat label="First round cleared" value={summary.first_round_cleared} hint={pctText(summary.first_round_pct)} />
-            <Stat label="Reached a client round" value={summary.reached_client_round} hint={pctText(summary.client_round_pct)} />
-            <Stat label="Selected / joined" value={summary.selected} hint={pctText(summary.selected_pct)} />
-            <Stat label="Dropped / in progress" value={`${summary.dropped} / ${summary.in_progress}`} />
+            <Stat label="Sourced" value={summary.sourced} onClick={() => openDetail({ title: 'Sourced', params: { metric: 'sourced' } })}
+              hint={summary.not_submitted > 0 ? <button type="button" className="text-primary-700 hover:underline" onClick={() => openDetail({ title: 'Not submitted anywhere', params: { metric: 'not_submitted' } })}>{summary.not_submitted} not submitted anywhere</button> : '0 not submitted anywhere'} />
+            <Stat label="Submitted" value={summary.submitted} onClick={() => openDetail({ title: 'Submitted to a requirement', params: { metric: 'submitted' } })} />
+            <Stat label="First round cleared" value={summary.first_round_cleared} hint={pctText(summary.first_round_pct)} onClick={() => openDetail({ title: 'First round cleared', params: { metric: 'first_round_cleared' } })} />
+            <Stat label="Reached a client round" value={summary.reached_client_round} hint={pctText(summary.client_round_pct)} onClick={() => openDetail({ title: 'Reached a client round', params: { metric: 'reached_client_round' } })} />
+            <Stat label="Selected / joined" value={summary.selected} hint={pctText(summary.selected_pct)} onClick={() => openDetail({ title: 'Selected / joined', params: { metric: 'selected' } })} />
+            <Stat label="Dropped / in progress">
+              <Count value={summary.dropped} className="text-danger-700" testId="summary-count" onClick={() => openDetail({ title: 'Dropped', params: { metric: 'dropped' } })} /> / <Count value={summary.in_progress} className="text-tertiary-900" testId="summary-count" onClick={() => openDetail({ title: 'In progress', params: { metric: 'in_progress' } })} />
+            </Stat>
             <Stat label="Avg time sourcing → joined" value={daysText(summary.avg_days_to_join)} hint={summary.joined_count ? `median ${daysText(summary.median_days_to_join)} · ${summary.joined_count} joined` : 'no joiners yet'} />
           </div>
 
           {data.funnels.length === 0 ? (
             <EmptyState title="No profiles in this funnel" description="No profile sourced in these dates has been submitted to a requirement yet." />
           ) : (
-            data.funnels.map((funnel) => <FunnelSection key={funnel.track} funnel={funnel} assumedAsPass={assumedAsPass} />)
+            data.funnels.map((funnel) => <FunnelSection key={funnel.track} funnel={funnel} assumedAsPass={assumedAsPass} onOpen={openDetail} />)
           )}
 
           <section className="space-y-2">
             <h3 className="font-heading text-sm font-semibold text-tertiary-900">Recruiter-wise</h3>
-            {data.recruiters.length ? <RecruiterTable rows={data.recruiters} summary={summary} /> : <p className="text-sm text-tertiary-500">No recruiters in this selection.</p>}
+            {data.recruiters.length ? <RecruiterTable rows={data.recruiters} summary={summary} onOpen={openDetail} /> : <p className="text-sm text-tertiary-500">No recruiters in this selection.</p>}
           </section>
 
           {data.trend.length > 0 && (
@@ -284,7 +359,9 @@ export default function HiringFunnel() {
                   <thead className="bg-canvas-muted"><tr><th className={th}>Period</th><th className={th}>Sourced</th><th className={th}>First round cleared</th><th className={th}>Reached client round</th><th className={th}>Selected</th><th className={th}>Dropped</th></tr></thead>
                   <tbody>
                     {data.trend.map((t) => (
-                      <tr key={t.bucket} className="border-t border-tertiary-100"><td className="px-3 py-2 font-medium">{t.bucket}</td><td className={td}>{t.sourced}</td><td className={td}>{t.first_round_cleared}</td><td className={td}>{t.reached_client_round}</td><td className={td}>{t.selected}</td><td className={td}>{t.dropped}</td></tr>
+                      <tr key={t.bucket} className="border-t border-tertiary-100"><td className="px-3 py-2 font-medium">{t.bucket}</td>{['sourced', 'first_round_cleared', 'reached_client_round', 'selected', 'dropped'].map((m) => (
+                        <td key={m} className={td}><Count value={t[m]} onClick={() => openDetail({ title: `${t.bucket} · ${TREND_LABEL[m]}`, params: { metric: m, bucket: t.bucket_key } })} /></td>
+                      ))}</tr>
                     ))}
                   </tbody>
                 </table>

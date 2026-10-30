@@ -124,11 +124,11 @@ function evaluate(sub, track, seq, tmplInfo, hist, keyOf) {
   return { progress: p, outcomes, times };
 }
 
-async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service_type, group_by = 'month' }) {
+async function loadCohort({ date_from, date_to, sourcer_id, client_id, service_type }) {
   const range = { gte: reportFrom(date_from), lte: reportTo(date_to) };
   const profiles = await prisma.profile.findMany({
     where: { on_bench: false, created_at: range, ...(sourcer_id ? { added_by: sourcer_id } : {}) },
-    select: { id: true, created_at: true, added_by: true, added_by_user: { select: { id: true, name: true } } },
+    select: { id: true, name: true, created_at: true, added_by: true, added_by_user: { select: { id: true, name: true } } },
   });
 
   const submissions = [];
@@ -140,7 +140,7 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
         profile_id: true,
         stage: true,
         created_at: true,
-        seat: { select: { requirement: { select: { req_type: true, account_id: true, interview_template_id: true } } } },
+        seat: { select: { requirement: { select: { req_type: true, account_id: true, interview_template_id: true, title: true, account: { select: { name: true } } } } } },
         interview_rounds: { select: { round_type: true, template_round_id: true, status: true, result: true, completed_at: true, scheduled_at: true } },
       },
     }));
@@ -208,12 +208,18 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
         const tmpl = templates.get(s.seat?.requirement?.interview_template_id) || null;
         const keyOf = (r) => (r.template_round_id ? templateRoundKey.get(r.template_round_id)?.key : LEGACY(track)[r.round_type]);
         const result = evaluate(s, track, seqOf(track), tmpl ? new Map([...tmpl.values()].map((i) => [i.key, i])) : null, histories.get(s.id) || new Map(), keyOf);
-        if (!best || result.progress > best.progress || (result.progress === best.progress && s.created_at > best.created_at)) best = { ...result, created_at: s.created_at };
+        if (!best || result.progress > best.progress || (result.progress === best.progress && s.created_at > best.created_at)) best = { ...result, created_at: s.created_at, sub: s };
       }
       if (!best) continue;
       const times = {};
       for (const [k, at] of Object.entries(best.times)) times[k] = daysBetween(profile.created_at, at);
-      const entity = { profile_id: profile.id, outcomes: { sourced: 'passed', ...best.outcomes }, times };
+      const req = best.sub.seat?.requirement;
+      const entity = {
+        profile_id: profile.id,
+        outcomes: { sourced: 'passed', ...best.outcomes },
+        times,
+        info: { submission_id: best.sub.id, submission_stage: best.sub.stage, requirement: req?.title || null, client: req?.account?.name || null, track },
+      };
       entities[track].push(entity);
       facts.tracks[track] = entity;
     }
@@ -242,6 +248,12 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
 
   const inCohort = [...profileFacts.values()].filter((f) => (!client_id && !service_type) || f.submitted);
   const rows = inCohort.map((f) => ({ ...f, flags: flagsOf(f) }));
+  return { rows, entities, wantTrack, seqOf, names, optional };
+}
+
+async function hiringFunnel(params) {
+  const { date_from, date_to, sourcer_id, client_id, service_type, group_by = 'month' } = params;
+  const { rows, entities, wantTrack, seqOf, names, optional } = await loadCohort(params);
 
   const funnels = ['client', 'internal']
     .filter(wantTrack)
@@ -298,7 +310,7 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
       if (!buckets.has(b.key)) buckets.set(b.key, { key: b.key, label: b.label, list: [] });
       buckets.get(b.key).list.push(r);
     }
-    for (const b of [...buckets.values()].sort((x, y) => x.key.localeCompare(y.key))) trend.push({ bucket: b.label, ...withRates(tally(b.list)) });
+    for (const b of [...buckets.values()].sort((x, y) => x.key.localeCompare(y.key))) trend.push({ bucket: b.label, bucket_key: b.key, ...withRates(tally(b.list)) });
   }
 
   const totals = withRates(tally(rows));
@@ -328,4 +340,62 @@ async function hiringFunnel({ date_from, date_to, sourcer_id, client_id, service
   };
 }
 
-module.exports = { hiringFunnel };
+// The profiles behind one count of the report. Either a profile-level metric (summary / recruiter / trend counts) or a stage cell:
+// { track, stage, outcome } with outcome = reached | passed | assumed | dropped | pending | unavailable (comma separated).
+const PROFILE_METRICS = {
+  sourced: () => true,
+  submitted: (r) => r.flags.submitted,
+  not_submitted: (r) => !r.flags.submitted,
+  first_round_cleared: (r) => r.flags.first_round_cleared,
+  reached_client_round: (r) => r.flags.reached_client_round,
+  selected: (r) => r.flags.selected,
+  dropped: (r) => r.flags.dropped,
+  in_progress: (r) => r.flags.in_progress,
+};
+const DETAIL_LIMIT = 1000;
+
+async function hiringFunnelDetails(params) {
+  const { metric, track, stage, outcome, bucket, group_by = 'month' } = params;
+  const { rows, entities } = await loadCohort(params);
+  const byProfile = new Map(rows.map((r) => [r.profile.id, r]));
+  const inBucket = (profile) => !bucket || group_by === 'none' || bucketOf(profile.created_at, group_by).key === bucket;
+  const statusOf = (flags) => (flags.selected ? 'Selected / joined' : flags.dropped ? 'Dropped' : flags.in_progress ? 'In progress' : flags.submitted ? 'Submitted' : 'Not submitted');
+
+  let list = [];
+  if (stage && track) {
+    const wanted = (outcome || 'reached').split(',');
+    for (const e of entities[track] || []) {
+      const row = byProfile.get(e.profile_id);
+      const got = e.outcomes[stage];
+      if (!row || !got || !inBucket(row.profile) || !(wanted.includes('reached') || wanted.includes(got))) continue;
+      list.push({ row, entity: e, outcome: got });
+    }
+  } else {
+    const test = PROFILE_METRICS[metric] || PROFILE_METRICS.sourced;
+    list = rows.filter((r) => test(r) && inBucket(r.profile)).map((row) => {
+      const entity = Object.values(row.tracks).sort((a, b) => Object.keys(b.outcomes).length - Object.keys(a.outcomes).length)[0] || null;
+      return { row, entity, outcome: null };
+    });
+  }
+
+  const OUTCOME_TEXT = { passed: 'Passed', assumed: 'Not held (counted as passed)', dropped: 'Dropped', pending: 'In progress', unavailable: 'Data unavailable' };
+  const items = list
+    .sort((a, b) => new Date(b.row.profile.created_at) - new Date(a.row.profile.created_at))
+    .slice(0, DETAIL_LIMIT)
+    .map(({ row, entity, outcome }) => ({
+      profile_id: row.profile.id,
+      name: row.profile.name,
+      sourced_on: row.profile.created_at,
+      recruiter: row.profile.added_by_user?.name || 'Unknown',
+      status: statusOf(row.flags),
+      outcome: outcome ? OUTCOME_TEXT[outcome] : null,
+      days_at_stage: outcome && entity?.times?.[stage] != null ? Math.round(entity.times[stage] * 10) / 10 : null,
+      submission_id: entity?.info.submission_id || null,
+      submission_stage: entity?.info.submission_stage || null,
+      requirement: entity?.info.requirement || null,
+      client: entity?.info.client || null,
+    }));
+  return { total: list.length, shown: items.length, items };
+}
+
+module.exports = { hiringFunnel, hiringFunnelDetails };
