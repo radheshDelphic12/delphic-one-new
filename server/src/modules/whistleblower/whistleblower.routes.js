@@ -35,7 +35,7 @@ const ERRORS = {
   anonymous_off: [403, 'Anonymous complaints are switched off. Raise it as a confidential complaint'],
   bad_people: [422, 'One of the people you picked is not in this company'],
   bad_handlers: [422, 'Pick people who are in this company'],
-  involved_handler: [422, 'That person is named as involved in this concern, so they cannot handle it'],
+  involved_handler: [422, 'That person is named as involved in this complaint, so they cannot handle it'],
   resolution_required: [422, 'Write what was found or done (the resolution) before closing the complaint'],
 };
 const failFor = (res, code) => fail(res, ...(ERRORS[code] || [400, code]));

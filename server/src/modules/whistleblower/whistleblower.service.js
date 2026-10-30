@@ -420,7 +420,7 @@ async function updateCase(user, id, patch) {
   return getCase(user, id);
 }
 
-/** Counts for the dashboard cards: the person's own open concerns, and (for handlers) what is waiting on them. */
+/** Counts for the dashboard cards: the person's own open complaints, and (for handlers) what is waiting on them. */
 async function summary(user) {
   const [settings, v] = await Promise.all([getSettings(user.org_id), viewer(user)]);
   const mine = await prisma.whistleCase.count({ where: { org_id: user.org_id, reporter_membership_id: user.org_membership_id, status: { not: 'closed' } } });
