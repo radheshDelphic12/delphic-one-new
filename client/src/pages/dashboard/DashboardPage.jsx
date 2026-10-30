@@ -30,6 +30,7 @@ import LightweightDashboard from './LightweightDashboard.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
+import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
 import BenchCard from './BenchCard.jsx';
 
 const cardMotion = {
@@ -355,6 +356,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5">
       <DashboardCheckinCard />
+      <SpeakUpDashboardCard />
       {showDeptFilter && (
         <div className="mt-3 rounded-2xl border border-tertiary-100 bg-white px-4 py-3 shadow-card">
           <FilterBar

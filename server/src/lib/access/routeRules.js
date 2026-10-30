@@ -85,6 +85,12 @@ const RULES = [
   [/^\/location-checkin\/(offices|shifts)\/[^/]+$/, { '*': 'hr_settings.update' }],
   [/^\/location-checkin(\/|$)/, 'location_checkin.view'],
 
+  // Whistleblower (Delphic Global): everyone may raise and follow their own concerns; who sees which case is decided in the service
+  // from the handlers an admin set for each category. Settings and categories need Whistleblower > manage.
+  [/^\/whistleblower\/settings$/, { GET: 'basic.whistleblower', '*': 'whistleblower.manage' }],
+  [/^\/whistleblower\/categories(\/|$)/, 'whistleblower.manage'],
+  [/^\/whistleblower(\/|$)/, 'basic.whistleblower'],
+
   [/^\/leave\/(types|day-status|balances\/me|requests\/me)$/, { GET: 'open', '*': 'leave.update' }],
   [/^\/leave\/requests$/, { GET: ['leave.view', 'leave.approve'], '*': 'open' }],
   [/^\/leave\/requests\/[^/]+\/cancel$/, 'open'],

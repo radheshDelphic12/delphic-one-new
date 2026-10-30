@@ -377,6 +377,8 @@ enum NotificationType {
   resignation_submitted
   resignation_manager_updated
   resignation_decided
+  whistleblower_new
+  whistleblower_update
 }
 
 enum NotificationEntityType {
@@ -387,6 +389,7 @@ enum NotificationEntityType {
   profile
   pm_ticket
   resignation
+  whistle_case
 }
 
 enum HistoryEntityType {
@@ -8423,4 +8426,123 @@ model LocationCheckinShiftRule {
 
   @@unique([org_id, shift_id])
   @@map("location_checkin_shift_rules")
+}
+
+// ===================== Speak Up - Confidential Reporting (internally 'whistleblower') =====================
+// A confidential channel: any employee raises a concern, it is routed to the handlers an admin set for its category.
+// Kept apart from every other module: no foreign keys to people, never read by attendance / payroll / HR records, and
+// deliberately NOT in config/changeCapture.js, so the change log can never show who raised a concern. An anonymous case
+// stores no person at all (reporter_membership_id is null); the reporter follows it with a tracking code (only its hash is kept).
+model WhistleSettings {
+  org_id          String   @id @db.Uuid
+  enabled         Boolean  @default(false) // off until an admin switches it on for the company
+  allow_anonymous Boolean  @default(true)
+  sla_days        Int      @default(7) // a case nobody has touched for this many days shows as overdue
+  updated_at      DateTime @default(now()) @updatedAt
+
+  @@map("whistle_settings")
+}
+
+model WhistleCategory {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String   @db.Uuid
+  number                 Int
+  name                   String
+  examples               String   @default("")
+  // A restricted category (POSH, retaliation) is seen only by its own handlers and the group admin, not by every admin.
+  restricted             Boolean  @default(false)
+  active                 Boolean  @default(true)
+  // org_membership ids of the people who receive and handle this category; empty = the company admins
+  handler_membership_ids Json     @default("[]")
+  created_at             DateTime @default(now())
+  updated_at             DateTime @default(now()) @updatedAt
+
+  cases WhistleCase[]
+
+  @@unique([org_id, number])
+  @@index([org_id])
+  @@map("whistle_categories")
+}
+
+model WhistleCase {
+  id                      String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                  String          @db.Uuid
+  seq                     Int
+  case_no                 String // SU-2026-0001 (the complaint reference number)
+  category_id             String          @db.Uuid
+  category                WhistleCategory @relation(fields: [category_id], references: [id])
+  subject                 String
+  description             String
+  incident_date           DateTime?       @db.Date
+  location_id             String?         @db.Uuid // the office it is about (not a foreign key on purpose)
+  department_id           String?         @db.Uuid // the department it is about (not a foreign key on purpose)
+  people_involved         String?
+  // org_membership ids picked as involved: they never see or get the case, even if they are a handler of its category
+  involved_membership_ids Json            @default("[]")
+  status                  String          @default("new") // new | in_review | investigating | action_taken | closed
+  reporter_membership_id  String?         @db.Uuid // null when the concern is anonymous
+  is_anonymous            Boolean         @default(false)
+  access_code_hash        String? // anonymous only: sha256 of the tracking code
+  assigned_membership_id  String?         @db.Uuid
+  resolution              String?
+  last_activity_at        DateTime        @default(now())
+  closed_at               DateTime?
+  created_at              DateTime        @default(now())
+  updated_at              DateTime        @default(now()) @updatedAt
+
+  messages    WhistleMessage[]
+  events      WhistleEvent[]
+  attachments WhistleAttachment[]
+
+  @@unique([org_id, case_no])
+  @@unique([org_id, seq])
+  @@index([org_id, status])
+  @@index([reporter_membership_id])
+  @@map("whistle_cases")
+}
+
+model WhistleMessage {
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  case_id              String      @db.Uuid
+  whistle_case         WhistleCase @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  author_kind          String // reporter | handler
+  author_membership_id String?     @db.Uuid // null for an anonymous reporter
+  body                 String
+  internal             Boolean     @default(false) // a handler-only note, never shown to the reporter
+  created_at           DateTime    @default(now())
+
+  attachments WhistleAttachment[]
+
+  @@index([case_id, created_at])
+  @@map("whistle_messages")
+}
+
+model WhistleEvent {
+  id                  String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  case_id             String      @db.Uuid
+  whistle_case        WhistleCase @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  action              String // created | status | assigned | resolved | reopened
+  detail              Json        @default("{}")
+  actor_membership_id String?     @db.Uuid // null when the reporter is anonymous
+  created_at          DateTime    @default(now())
+
+  @@index([case_id, created_at])
+  @@map("whistle_events")
+}
+
+// Files carry no uploader: an anonymous reporter's file must not point back at them.
+model WhistleAttachment {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  case_id      String          @db.Uuid
+  whistle_case WhistleCase     @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  message_id   String?         @db.Uuid
+  message      WhistleMessage? @relation(fields: [message_id], references: [id], onDelete: SetNull)
+  file_name    String
+  stored_name  String
+  mime_type    String
+  size_bytes   Int
+  created_at   DateTime        @default(now())
+
+  @@index([case_id])
+  @@map("whistle_attachments")
 }

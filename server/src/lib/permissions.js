@@ -52,6 +52,7 @@ const CATALOG = [
   // ---- Time and Attendance
   { module: 'attendance', category: 'time', label: 'Team attendance', actions: [A('attendance', 'view', 'View', true), A('attendance', 'update', 'Edit and import', true), A('attendance', 'approve', 'Check attendance changes (everyone)')] },
   { module: 'attendance_dashboard', category: 'time', label: 'Attendance dashboard', actions: [A('attendance_dashboard', 'view', 'View')] },
+  { module: 'whistleblower', category: 'people', label: 'Speak Up - Confidential Reporting (complaints routed to the team)', actions: [A('whistleblower', 'view', 'See the complaints of non-restricted categories'), A('whistleblower', 'update', 'Reply, change status and assign'), A('whistleblower', 'manage', 'Settings, categories and handlers')] },
   { module: 'location_checkin', category: 'time', label: 'Location check-in report', actions: [A('location_checkin', 'view', 'View the report and office settings')] },
   { module: 'project_calendar', category: 'time', label: 'Project calendar', actions: [A('project_calendar', 'view', 'View'), A('project_calendar', 'update', 'Edit')] },
   { module: 'project_team', category: 'time', label: 'Project team', actions: [A('project_team', 'view', 'View')] },
@@ -94,6 +95,7 @@ const BASIC_ITEMS = [
   { key: 'basic.timesheet', label: 'Log and view own timesheet' },
   { key: 'basic.payslips', label: 'View own payslips' },
   { key: 'basic.expenses', label: 'File and track own expense claims' },
+  { key: 'basic.whistleblower', label: 'Speak Up (raise a complaint in confidence and follow it)' },
   { key: 'basic.settings', label: 'Own account (my details, security, notifications)' },
 ];
 const BASIC_KEYS = BASIC_ITEMS.map((b) => b.key);
