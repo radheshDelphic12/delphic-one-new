@@ -3,12 +3,14 @@ const { authenticate, authorize, authorizeGroupSuperadmin, loadSuperadminFlag, r
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
+const payout = require('./expenses.payout');
 const {
   createClaimSchema,
   updateClaimSchema,
   decideClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
+  claimsPayoutQuerySchema,
   createVendorPaymentSchema,
   decideVendorPaymentSchema,
   listVendorPaymentsQuerySchema,
@@ -104,6 +106,21 @@ router.get(
     const query = listClaimsQuerySchema.parse(req.query);
     const result = await service.listClaims(req.user.org_id, query);
     return ok(res, result.data, { pagination: result.pagination });
+  })
+);
+
+// Bank payout: one row per employee with the bank account on their profile and the total of their claims for a month and status
+// (approved = still to be paid). `format=json` previews it, otherwise an Excel file downloads. Admin only (it carries bank details).
+router.get(
+  '/claims/payout',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = claimsPayoutQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await payout.payoutData(req.user.org_id, query));
+    const buffer = await payout.payoutWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="reimbursement-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}-${query.status}.xlsx"`);
+    return res.send(Buffer.from(buffer));
   })
 );
 
