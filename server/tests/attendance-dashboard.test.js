@@ -120,9 +120,14 @@ describe('attendance dashboard', () => {
     expect((await get(`/calendar?year=2026&month=11&org_membership_id=${emp.membership.id}`, ctx.admin)).body.data.member.is_self).toBe(false);
     expect(range.body.data.count).toBeGreaterThan(5); // two weeks of working days, weekends skipped
     expect(range.body.data.count).toBeLessThanOrEqual(14);
-    const d1 = new Date(plus(1));
-    const cal = await get(`/calendar?year=${d1.getUTCFullYear()}&month=${d1.getUTCMonth() + 1}`, emp.token);
-    expect(cal.body.data.days.filter((d) => d.requested_place === 'home').length).toBeGreaterThan(0);
+    // the range's working days can fall in this month or the next (tomorrow may be a weekend at month end), so count both months
+    const months = new Set([plus(1), plus(14)].map((ymd) => ymd.slice(0, 7)));
+    let home = 0;
+    for (const ym of months) {
+      const cal = await get(`/calendar?year=${ym.slice(0, 4)}&month=${Number(ym.slice(5, 7))}`, emp.token);
+      home += cal.body.data.days.filter((d) => d.requested_place === 'home').length;
+    }
+    expect(home).toBe(range.body.data.count);
 
     // exactly 3 months ahead is allowed; beyond it is refused
     expect((await post('/place', emp.token, { date: plusMonths(3), work_place: 'home' })).status).toBe(201);

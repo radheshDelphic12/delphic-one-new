@@ -146,12 +146,15 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     // Rounds that need ratings start from the JD's stacks (primary, then secondary); an empty stack leaves just "+ Add skill".
     const fromJd = step.rating_required ? [...(plan?.jd_skills?.primary || []), ...(plan?.jd_skills?.secondary || [])].map((skill_name) => ({ skill_name, rating: null })) : [];
     loadSkillOptions();
+    // a screening round whose test is already scored starts from that result (an editable draft), so the form is not blank
+    const scored = step.kind === 'screening_test' ? attempts.find((a) => a.is_live && a.template_round_id === step.template_round_id && a.view_status === 'scored') : null;
+    const fromTest = scored ? `${scored.test_name || 'Screening test'}: scored ${scored.score_percent}% (pass mark ${scored.pass_percentage}%) - ${scored.passed ? 'passed' : 'not passed'}.` : '';
     setFinish({
       step,
       round,
       form: {
         result: round?.result && round.result !== 'pending' ? round.result : 'pass',
-        feedback: round?.feedback || '',
+        feedback: round?.feedback || fromTest,
         skills: saved || (fromJd.length ? fromJd : [emptySkill()]),
       },
     });
@@ -168,7 +171,11 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     const { step, round, form } = finish;
     // a row nobody touched (no name, no rating) is dropped; every other row needs a name and a rating
     const rows = form.skills.filter((s) => s.skill_name.trim() || s.rating != null);
-    if (!form.feedback.trim()) return pushError('Feedback is required to finish a round.', 'Please fix the form');
+    if (!form.feedback.trim()) {
+      setFinish((p) => ({ ...p, feedbackMissing: true }));
+      document.getElementById('finish-feedback')?.focus();
+      return pushError('Write the feedback for this round in the Feedback box, then save.', 'Feedback is required');
+    }
     if (rows.some((s) => !s.skill_name.trim())) return pushError('Give every rated row a skill name, or remove the row.', 'Please fix the form');
     if (rows.some((s) => s.rating == null)) return pushError('Rate every skill (0 to 10), or remove the skills that do not apply.', 'Please fix the form');
     const skills = rows.map((s) => ({ skill_name: s.skill_name.trim(), rating: Number(s.rating) }));
@@ -421,7 +428,8 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-tertiary-600">Feedback * (required to move to the next round)</label>
-              <textarea rows={4} className={FIELD_INPUT} value={finish.form.feedback} onChange={(e) => setFinish((p) => ({ ...p, form: { ...p.form, feedback: e.target.value } }))} />
+              <textarea id="finish-feedback" rows={4} className={`${FIELD_INPUT} ${finish.feedbackMissing ? 'border-danger-500 ring-1 ring-danger-300' : ''}`} value={finish.form.feedback} onChange={(e) => setFinish((p) => ({ ...p, feedbackMissing: false, form: { ...p.form, feedback: e.target.value } }))} />
+              {finish.feedbackMissing && <p className="mt-1 text-xs text-danger-700">Feedback is required before this round can be finished.</p>}
             </div>
             <div>
               <div className="flex items-center justify-between">
