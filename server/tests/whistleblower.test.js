@@ -258,6 +258,10 @@ describe('whistleblower: files, settings and privacy', () => {
     expect((await patch(`/categories/${cat.id}`, ctx.admin, { name: 'Discrimination and inclusion', active: false })).status).toBe(200);
     expect((await get('/meta', ctx.anna.token)).body.data.categories.map((c) => c.name)).not.toContain('Discrimination and inclusion');
     expect((await post('/categories', ctx.admin, { name: 'Remote work abuse', examples: 'Working two jobs' })).body.data.category.number).toBe(21);
+    // the same name twice (in any letter case) is refused, when adding and when renaming
+    expect((await post('/categories', ctx.admin, { name: 'remote WORK abuse' })).status).toBe(409);
+    expect((await patch(`/categories/${ctx.cat('Favouritism').id}`, ctx.admin, { name: 'REMOTE work abuse' })).status).toBe(409);
+    expect((await patch(`/categories/${ctx.cat('Favouritism').id}`, ctx.admin, { name: 'Favouritism & Bias' })).status).toBe(200); // keeping its own name is fine
     expect((await patch(`/categories/${cat.id}`, ctx.admin, { handler_membership_ids: ['00000000-0000-4000-8000-000000000000'] })).status).toBe(422);
     expect((await get('/categories', ctx.anna.token)).status).toBe(403);
     expect((await patch(`/categories/${cat.id}`, ctx.anna.token, { name: 'Renamed by an employee' })).status).toBe(403);

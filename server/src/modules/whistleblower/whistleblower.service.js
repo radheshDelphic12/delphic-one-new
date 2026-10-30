@@ -112,11 +112,15 @@ async function validHandlers(orgId, ids) {
   return n === new Set(ids).size;
 }
 
+/** Two categories with the same name would confuse the people choosing one. */
+const nameTaken = (orgId, name, exceptId = null) => prisma.whistleCategory.findFirst({ where: { org_id: orgId, name: { equals: name.trim(), mode: 'insensitive' }, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { id: true } });
+
 async function updateCategory(user, id, patch) {
   const v = await viewer(user);
   if (!v.canManage) return { error: 'forbidden' };
   const cat = await prisma.whistleCategory.findFirst({ where: { id, org_id: user.org_id } });
   if (!cat) return { error: 'not_found' };
+  if (patch.name && (await nameTaken(user.org_id, patch.name, id))) return { error: 'duplicate_name' };
   if (patch.handler_membership_ids && !(await validHandlers(user.org_id, patch.handler_membership_ids))) return { error: 'bad_handlers' };
   const row = await prisma.whistleCategory.update({ where: { id }, data: patch });
   const names = await memberNames(user.org_id, idsOf(row.handler_membership_ids));
@@ -127,6 +131,7 @@ async function createCategory(user, body) {
   const v = await viewer(user);
   if (!v.canManage) return { error: 'forbidden' };
   await ensureCategories(user.org_id);
+  if (await nameTaken(user.org_id, body.name)) return { error: 'duplicate_name' };
   if (!(await validHandlers(user.org_id, body.handler_membership_ids))) return { error: 'bad_handlers' };
   const last = await prisma.whistleCategory.aggregate({ where: { org_id: user.org_id }, _max: { number: true } });
   const row = await prisma.whistleCategory.create({ data: { org_id: user.org_id, number: (last._max.number || 0) + 1, ...body } });
