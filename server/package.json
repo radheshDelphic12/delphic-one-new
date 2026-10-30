@@ -5,8 +5,8 @@
   "type": "commonjs",
   "main": "src/index.js",
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
+    "dev": "node init && nodemon src/index.js",
+    "start": "node init && node src/index.js",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "attendance:auto-dryrun": "node scripts/attendance-auto-dryrun.js",

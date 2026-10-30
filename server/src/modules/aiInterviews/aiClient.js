@@ -20,7 +20,7 @@ function withDocuments(messages, documents) {
 }
 
 async function anthropicProvider({ system, messages, maxTokens, documents = [] }) {
-  const { apiKey, model } = env.aiInterview;
+  const { apiKey, model, workspaceId } = env.aiInterview;
   if (!apiKey) throw new AiUnavailableError('ANTHROPIC_API_KEY is not set');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -28,7 +28,10 @@ async function anthropicProvider({ system, messages, maxTokens, documents = [] }
     const res = await fetch(API_URL, {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: {
+        'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
+        ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}),
+      },
       body: JSON.stringify({ model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages: withDocuments(messages, documents) }),
     });
     if (!res.ok) throw new AiUnavailableError(`AI provider answered ${res.status}`);
