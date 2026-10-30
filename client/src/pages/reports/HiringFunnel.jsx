@@ -148,7 +148,7 @@ function RecruiterTable({ rows, summary }) {
           </tr>
         </tbody>
       </table>
-      <p className="px-3 py-2 text-[11px] text-tertiary-500">Amber = below the team's rate. First round % = cleared / submitted; client round % = reached a client round / cleared the first round; selected % = selected / sourced.</p>
+      <p className="px-3 py-2 text-[11px] text-tertiary-500">Amber = below the team&apos;s rate. First round % = cleared / submitted; client round % = reached a client round / cleared the first round; selected % = selected / sourced.</p>
     </div>
   );
 }
