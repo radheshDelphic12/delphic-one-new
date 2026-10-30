@@ -25,6 +25,11 @@ const ERRORS = {
   not_waiting: [409, 'There is no question waiting for an answer'],
   empty_answer: [400, 'Please type or say your answer first'],
   busy: [409, 'Your last answer is still being processed. Please wait a moment'],
+  bad_recording: [400, 'That recording part could not be accepted'],
+  recording_gap: [409, 'A recording part is missing; send them in order'],
+  recording_too_big: [413, 'The recording is too large'],
+  recording_expired: [410, 'The recording was deleted after its retention period'],
+  no_recording: [404, 'There is no recording for this interview'],
   ai_unavailable: [503, 'The interviewer is not available right now. Please try again in a few minutes'],
 };
 const mapError = (res, error) => fail(res, ...(ERRORS[error] || [400, 'Bad request']));
@@ -38,6 +43,11 @@ const settingsSchema = z.object({
   weight_knowledge: z.number().int().min(0).max(100).optional(),
   weight_communication: z.number().int().min(0).max(100).optional(),
   weight_depth: z.number().int().min(0).max(100).optional(),
+  aptitude_enabled: z.boolean().optional(),
+  aptitude_question_count: z.number().int().min(2).max(10).optional(),
+  weight_aptitude: z.number().int().min(0).max(100).optional(),
+  recording_enabled: z.boolean().optional(),
+  recording_retention_days: z.number().int().min(1).max(30).optional(),
   extra_instructions: z.string().trim().max(1500).nullable().optional(),
   link_valid_days: z.number().int().min(1).max(60).optional(),
 });
@@ -63,6 +73,15 @@ router.get('/:id/review', asyncHandler(async (req, res) => {
   const r = await service.review(z.string().uuid().parse(req.params.id));
   return r.error ? mapError(res, r.error) : ok(res, r.review);
 }));
+// The stored recording (audio + video), for the team only; it is deleted automatically after the retention days.
+router.get('/:id/recording', asyncHandler(async (req, res) => {
+  const r = await service.recordingFor(z.string().uuid().parse(req.params.id));
+  if (r.error) return mapError(res, r.error);
+  res.setHeader('Content-Type', r.mime);
+  res.setHeader('Cache-Control', 'private, no-store');
+  if (req.query.download === 'true') res.setHeader('Content-Disposition', `attachment; filename="${r.name}"`);
+  return res.sendFile(r.file); // sendFile answers Range requests, so the video can be scrubbed
+}));
 router.post('/:id/override', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
   const body = z.object({ outcome: z.enum(service.OUTCOMES), reason: z.string().trim().min(3).max(500) }).parse(req.body);
   const r = await service.override(z.string().uuid().parse(req.params.id), body, req.user);
@@ -83,9 +102,15 @@ publicRouter.get('/ai-interviews/:token', asyncHandler(async (req, res) => {
   return r.error ? mapError(res, r.error) : ok(res, r.view);
 }));
 publicRouter.post('/ai-interviews/:token/start', asyncHandler(async (req, res) => {
-  const body = z.object({ consent: z.boolean() }).parse(req.body);
+  const body = z.object({ consent: z.boolean(), recording_consent: z.boolean().optional() }).parse(req.body);
   const r = await service.startForCandidate(req.params.token, body);
   return r.error ? mapError(res, r.error) : ok(res, r.view);
+}));
+// One part of the recording, in order (?seq=0,1,2...). Raw bytes; the Content-Type is the recording's type.
+publicRouter.post('/ai-interviews/:token/recording', express.raw({ type: () => true, limit: '13mb' }), asyncHandler(async (req, res) => {
+  const seq = z.coerce.number().int().min(0).parse(req.query.seq);
+  const r = await service.saveRecordingChunk(req.params.token, { seq, buffer: Buffer.isBuffer(req.body) ? req.body : null, mime: req.headers['content-type'] });
+  return r.error ? mapError(res, r.error) : ok(res, { saved: true });
 }));
 publicRouter.post('/ai-interviews/:token/answer', asyncHandler(async (req, res) => {
   const body = z.object({ text: z.string().max(20000) }).parse(req.body);

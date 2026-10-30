@@ -10,6 +10,7 @@ const lwdExit = require('./lwdExit');
 const incrementReminders = require('./incrementReminders');
 const benchCountdown = require('./benchCountdown');
 const pmDueSoon = require('./pmDueSoon');
+const aiInterviewRecordings = require('./aiInterviewRecordings');
 
 /**
  * Start in-process background jobs. Called once from src/index.js after app.listen,
@@ -31,7 +32,8 @@ function startJobs() {
   tasks.push(incrementReminders.schedule());
   tasks.push(benchCountdown.schedule());
   tasks.push(pmDueSoon.schedule());
-  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance', 'websiteSync', 'lwdExit', 'incrementReminders', 'benchCountdown', 'pmDueSoon'] });
+  tasks.push(aiInterviewRecordings.schedule());
+  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance', 'websiteSync', 'lwdExit', 'incrementReminders', 'benchCountdown', 'pmDueSoon', 'aiInterviewRecordings'] });
   return tasks;
 }
 

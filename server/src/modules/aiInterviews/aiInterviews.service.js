@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const logger = require('../../config/logger');
@@ -8,10 +10,15 @@ const { AiUnavailableError } = require('./aiClient');
 const logic = require('./aiInterviews.logic');
 
 const OUTCOMES = ['pass', 'borderline', 'below_pass'];
+// is_enabled starts false: the AI interview is an optional, separate link and nothing in the existing flow depends on it.
 const DEFAULTS = {
-  is_enabled: true, question_count: 7, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
-  weight_knowledge: 50, weight_communication: 25, weight_depth: 25, extra_instructions: null, link_valid_days: 7,
+  is_enabled: false, question_count: 7, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
+  weight_knowledge: 50, weight_communication: 25, weight_depth: 25, aptitude_enabled: true, aptitude_question_count: 4, weight_aptitude: 20,
+  recording_enabled: false, recording_retention_days: 2, extra_instructions: null, link_valid_days: 7,
 };
+const RECORDING_DIR = () => path.join(env.uploadDir, 'ai-interviews');
+const MAX_RECORDING_BYTES = 250 * 1024 * 1024;
+const MAX_CHUNK_BYTES = 12 * 1024 * 1024;
 const SETTING_KEYS = Object.keys(DEFAULTS);
 
 const attemptLink = (token) => `${env.corsOrigin.replace(/\/$/, '')}/ai-interview/${token}`;
@@ -29,7 +36,8 @@ async function updateSettings(orgId, patch, user) {
   if (!orgId) return { error: 'no_org' };
   const data = Object.fromEntries(Object.entries(patch).filter(([k, v]) => SETTING_KEYS.includes(k) && v !== undefined));
   const merged = { ...(await getSettings(orgId)), ...data };
-  if (merged.weight_knowledge + merged.weight_communication + merged.weight_depth <= 0) return { error: 'weights_zero' };
+  const weightTotal = merged.weight_knowledge + merged.weight_communication + merged.weight_depth + (merged.aptitude_enabled ? merged.weight_aptitude : 0);
+  if (weightTotal <= 0) return { error: 'weights_zero' };
   await prisma.aiInterviewSettings.upsert({
     where: { org_id: orgId },
     create: { org_id: orgId, ...data, updated_by: user?.id || null },
@@ -76,6 +84,10 @@ function toTeamView(a, names = new Map()) {
     created_by_name: names.get(a.invited_by) || null,
     expires_at: a.expires_at,
     completed_at: a.completed_at,
+    recording_on: a.recording_on,
+    has_recording: Boolean(a.recording_path) && !a.recording_deleted_at,
+    recording_expires_at: a.recording_expires_at,
+    recording_deleted: Boolean(a.recording_deleted_at),
     link: a.status === 'invited' || a.status === 'started' ? (a.superseded_at ? null : attemptLink(a.token)) : null,
   };
 }
@@ -199,8 +211,9 @@ async function remove(id, { reason }, user) {
   if (!adminOf(user)) return { error: 'forbidden' };
   const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
   if (!a) return { error: 'not_found' };
+  if (a.recording_path) await fs.promises.unlink(recordingFilePath(a.recording_path)).catch(() => {});
   await prisma.$transaction(async (tx) => {
-    await tx.aiInterview.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id } });
+    await tx.aiInterview.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id, recording_path: null, recording_deleted_at: a.recording_path ? new Date() : a.recording_deleted_at } });
     await audit(tx, user, 'delete_ai_interview', a, reason || 'Deleted by admin');
   });
   return { deleted: true };
@@ -228,6 +241,8 @@ function candidateView(a) {
     role_title: a.role_title,
     status: a.status,
     total_questions: questions.length || null,
+    section: last && last.role === 'ai' ? last.section || 'role' : null,
+    recording_on: a.recording_on,
     answered: transcript.filter((t) => t.role === 'candidate').length,
     transcript: transcript.map((t) => ({ role: t.role, kind: t.kind, text: t.text })),
     waiting_for_answer: Boolean(last && last.role === 'ai'),
@@ -240,7 +255,7 @@ async function openForCandidate(token) {
   return r.error ? r : { view: candidateView(r.a) };
 }
 
-async function startForCandidate(token, { consent }) {
+async function startForCandidate(token, { consent, recording_consent: recordingConsent }) {
   const r = await load(token);
   if (r.error) return r;
   let a = r.a;
@@ -252,11 +267,13 @@ async function startForCandidate(token, { consent }) {
     const settings = await getSettings(a.org_id);
     const ctx = await contextFor(a.submission_id);
     const { questions, usage } = await logic.generateQuestions(ctx, { ...settings });
-    const first = { role: 'ai', kind: 'question', question_index: 1, text: questions[0].text, at: new Date().toISOString() };
+    const first = { role: 'ai', kind: 'question', section: questions[0].kind, question_index: 1, text: questions[0].text, at: new Date().toISOString() };
     a = await prisma.aiInterview.update({
       where: { id: a.id },
       data: {
         status: 'started', started_at: new Date(), consented_at: new Date(), questions, transcript: [first],
+        // recorded only when the company has recording on AND this candidate agreed; declining never blocks the interview
+        recording_on: Boolean(settings.recording_enabled && recordingConsent),
         input_tokens: { increment: usage.input }, output_tokens: { increment: usage.output },
       },
     });
@@ -270,15 +287,18 @@ async function startForCandidate(token, { consent }) {
 }
 
 async function finish(a, settings, ctx, transcript, tokens) {
-  const base = { transcript, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output }, completed_at: new Date() };
+  const questions = Array.isArray(a.questions) ? a.questions : [];
+  // the rubric of THIS interview: the pass mark it was sent with, and aptitude only if it actually had aptitude questions
+  const rubric = { ...settings, pass_percentage: a.pass_percentage, aptitude_enabled: questions.some((q) => q.kind === 'aptitude') };
+  const retention = a.recording_on ? { recording_expires_at: new Date(Date.now() + settings.recording_retention_days * 86400000) } : {};
+  const base = { transcript, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output }, completed_at: new Date(), ...retention };
   try {
-    const scored = await logic.scoreInterview(ctx, settings, transcript);
-    const { percent, scores } = logic.buildScores(scored.data, settings, transcript);
+    const scored = await logic.scoreInterview(ctx, rubric, transcript, questions);
+    const { percent, outcome, scores } = logic.buildScores(scored.data, rubric, transcript);
     return prisma.aiInterview.update({
       where: { id: a.id },
       data: {
-        ...base, status: 'completed', scores, score_percent: percent,
-        outcome: logic.outcomeFor(percent, a.pass_percentage, settings.borderline_margin),
+        ...base, status: 'completed', scores, score_percent: percent, outcome,
         input_tokens: { increment: tokens.input + scored.usage.input }, output_tokens: { increment: tokens.output + scored.usage.output },
       },
     });
@@ -306,20 +326,21 @@ async function answerForCandidate(token, rawText) {
     const settings = await getSettings(a.org_id);
     const ctx = await contextFor(a.submission_id);
     const questions = Array.isArray(a.questions) ? a.questions : [];
+    const current = questions.find((q) => q.id === last.question_index);
     const now = () => new Date().toISOString();
-    transcript.push({ role: 'candidate', kind: 'answer', question_index: last.question_index, text, at: now() });
+    transcript.push({ role: 'candidate', kind: 'answer', section: last.section, question_index: last.question_index, text, at: now() });
     const tokens = { input: 0, output: 0 };
 
     // Save the answer first so a later AI failure can never lose it.
     let row = await prisma.aiInterview.update({ where: { id: a.id }, data: { transcript } });
 
-    // One short follow-up at most per main question, and a capped number per interview.
-    if (last.kind === 'question' && row.followups_used < settings.max_followups) {
+    // One short follow-up at most per role question (never for aptitude), and a capped number per interview.
+    if (last.kind === 'question' && current?.kind === 'role' && row.followups_used < settings.max_followups) {
       try {
         const f = await logic.decideFollowUp(ctx, settings, last.text, text);
         tokens.input += f.usage.input; tokens.output += f.usage.output;
         if (f.follow_up) {
-          transcript.push({ role: 'ai', kind: 'follow_up', question_index: last.question_index, text: f.follow_up, at: now() });
+          transcript.push({ role: 'ai', kind: 'follow_up', section: 'role', question_index: last.question_index, text: f.follow_up, at: now() });
           row = await prisma.aiInterview.update({
             where: { id: a.id },
             data: { transcript, followups_used: { increment: 1 }, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output } },
@@ -331,10 +352,9 @@ async function answerForCandidate(token, rawText) {
       }
     }
 
-    const nextIndex = last.question_index + 1;
-    const next = questions.find((q) => q.id === nextIndex);
+    const next = questions.find((q) => q.id === last.question_index + 1);
     if (next) {
-      transcript.push({ role: 'ai', kind: 'question', question_index: nextIndex, text: next.text, at: now() });
+      transcript.push({ role: 'ai', kind: 'question', section: next.kind, question_index: next.id, text: next.text, at: now() });
       row = await prisma.aiInterview.update({
         where: { id: a.id }, data: { transcript, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output } },
       });
@@ -347,8 +367,71 @@ async function answerForCandidate(token, rawText) {
   }
 }
 
+// ---- recording (optional; audio + video; deleted automatically after the retention days) ----
+const RECORDING_TYPES = { 'video/webm': 'webm', 'audio/webm': 'webm', 'video/mp4': 'mp4' };
+const recBusy = new Set();
+const recordingFilePath = (name) => path.resolve(RECORDING_DIR(), path.basename(name));
+
+// The browser sends the recording in order, one chunk at a time. A chunk that arrives twice (a retry) is accepted and ignored.
+async function saveRecordingChunk(token, { seq, buffer, mime }) {
+  const a = await prisma.aiInterview.findUnique({ where: { token } });
+  if (!a || a.deleted_at || a.superseded_at || !a.recording_on || a.recording_deleted_at) return { error: 'not_found' };
+  // allowed while the interview runs and for a few minutes after it, so the last chunk can still be flushed
+  const open = a.status === 'started' || (a.completed_at && Date.now() - a.completed_at.getTime() < 10 * 60000);
+  if (!open) return { error: 'already_submitted' };
+  const ext = RECORDING_TYPES[String(mime || '').split(';')[0].trim()];
+  if (!ext) return { error: 'bad_recording' };
+  if (!buffer || !buffer.length || buffer.length > MAX_CHUNK_BYTES) return { error: 'bad_recording' };
+  if (seq < a.recording_chunks) return { saved: true, duplicate: true };
+  if (seq > a.recording_chunks) return { error: 'recording_gap' };
+  if (a.recording_bytes + buffer.length > MAX_RECORDING_BYTES) return { error: 'recording_too_big' };
+  if (recBusy.has(a.id)) return { error: 'busy' };
+  recBusy.add(a.id);
+  try {
+    const settings = await getSettings(a.org_id);
+    const name = a.recording_path || `${a.id}.${ext}`;
+    await fs.promises.mkdir(RECORDING_DIR(), { recursive: true });
+    await fs.promises.appendFile(recordingFilePath(name), buffer);
+    await prisma.aiInterview.update({
+      where: { id: a.id },
+      data: {
+        recording_path: name, recording_mime: mime.split(';')[0].trim(), recording_bytes: { increment: buffer.length }, recording_chunks: { increment: 1 },
+        recording_expires_at: new Date(Date.now() + settings.recording_retention_days * 86400000),
+      },
+    });
+    return { saved: true };
+  } finally {
+    recBusy.delete(a.id);
+  }
+}
+
+// For the team: the stored file, while it exists. Authorization is done by the route.
+async function recordingFor(id) {
+  const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
+  if (!a) return { error: 'not_found' };
+  if (a.recording_deleted_at) return { error: 'recording_expired' };
+  if (!a.recording_path) return { error: 'no_recording' };
+  const file = recordingFilePath(a.recording_path);
+  if (!fs.existsSync(file)) return { error: 'no_recording' };
+  return { file, mime: a.recording_mime || 'video/webm', name: `ai-interview-${a.candidate_name.replace(/[^a-z0-9]+/gi, '-')}.${a.recording_path.split('.').pop()}` };
+}
+
+// Deletes the files whose time is up (called by the hourly job); the interview, transcript and scores stay.
+async function purgeExpiredRecordings(now = new Date()) {
+  const due = await prisma.aiInterview.findMany({
+    where: { recording_path: { not: null }, recording_deleted_at: null, recording_expires_at: { lt: now } },
+    select: { id: true, recording_path: true },
+  });
+  for (const a of due) {
+    await fs.promises.unlink(recordingFilePath(a.recording_path)).catch(() => {});
+    await prisma.aiInterview.update({ where: { id: a.id }, data: { recording_path: null, recording_deleted_at: now } });
+  }
+  return { purged: due.length };
+}
+
 module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
   invite, list, review, override, remove,
   openForCandidate, startForCandidate, answerForCandidate,
+  saveRecordingChunk, recordingFor, purgeExpiredRecordings,
 };

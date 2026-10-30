@@ -8098,9 +8098,19 @@ model AiInterview {
   superseded_at   DateTime?
   deleted_at      DateTime?
   deleted_by      String? @db.Uuid
+  // Optional audio + video recording of the interview (only when the company turns it on AND the candidate agrees).
+  // The file is deleted automatically once recording_expires_at has passed; recording_deleted_at records that.
+  recording_on         Boolean   @default(false)
+  recording_path       String?
+  recording_mime       String?
+  recording_bytes      Int       @default(0)
+  recording_chunks     Int       @default(0)
+  recording_expires_at DateTime?
+  recording_deleted_at DateTime?
 
   @@index([submission_id])
   @@index([org_id, status])
+  @@index([recording_expires_at])
   @@map("ai_interviews")
 }
 
@@ -8108,7 +8118,8 @@ model AiInterview {
 model AiInterviewSettings {
   id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id             String   @unique @db.Uuid
-  is_enabled         Boolean  @default(true)
+  // Off until an admin turns it on: the AI interview is an optional, separate link and never part of the existing flow.
+  is_enabled         Boolean  @default(false)
   question_count     Int      @default(7)
   max_followups      Int      @default(3)
   pass_percentage    Int      @default(60)
@@ -8116,6 +8127,11 @@ model AiInterviewSettings {
   weight_knowledge   Int      @default(50)
   weight_communication Int    @default(25)
   weight_depth       Int      @default(25)
+  aptitude_enabled   Boolean  @default(true)
+  aptitude_question_count Int @default(4)
+  weight_aptitude    Int      @default(20)
+  recording_enabled  Boolean  @default(false)
+  recording_retention_days Int @default(2)
   extra_instructions String?
   auto_reject        Boolean  @default(false)
   link_valid_days    Int      @default(7)
