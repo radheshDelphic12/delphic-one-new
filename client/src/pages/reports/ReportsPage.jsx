@@ -44,6 +44,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
 import DrilldownDrawer from './DrilldownDrawer.jsx';
 import MonthlyReview from './MonthlyReview.jsx';
+import HiringFunnel from './HiringFunnel.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -663,7 +664,7 @@ export default function ReportsPage() {
 
   // silent = a background refresh: no spinner, and a failed refresh keeps what is on screen instead of blanking it.
   async function runReport({ silent = false } = {}) {
-    if (active === 'monthly-review') return; // its own screen loads its own data
+    if (active === 'monthly-review' || active === 'hiring-funnel') return; // their own screens load their own data
     const requestId = ++reportRequestId.current;
     if (!silent) setLoading(true);
     try {
@@ -945,7 +946,7 @@ export default function ReportsPage() {
     drawerRow?.group_label ||
     'Row details';
 
-  if (active === 'monthly-review') {
+  if (active === 'monthly-review' || active === 'hiring-funnel') {
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -954,11 +955,11 @@ export default function ReportsPage() {
             ariaLabel="Report type"
             value={active}
             onChange={(v) => { setActive(v); setPayload(null); setDrawerRow(null); setDrill(null); }}
-            searchPlaceholder="Search reports…"
+            searchPlaceholder="Search reportsï¿½"
             options={available.map((r) => ({ value: r.key, label: r.label }))}
           />
         </div>
-        <MonthlyReview />
+        {active === 'hiring-funnel' ? <HiringFunnel /> : <MonthlyReview />}
       </div>
     );
   }

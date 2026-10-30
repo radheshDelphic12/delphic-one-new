@@ -72,6 +72,16 @@ const hrSchema = z.object({
   source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
 });
 
+// Hiring funnel: profiles sourced in the dates, optionally narrowed to one sourcer / client / service type (internal vs client hiring).
+const hiringFunnelSchema = z.object({
+  date_from: z.string().min(1),
+  date_to: z.string().min(1),
+  sourcer_id: optionalUuid,
+  client_id: optionalUuid,
+  service_type: z.enum(['internal', 'client']).optional(),
+  group_by: z.enum(['none', 'week', 'month']).default('month'),
+});
+
 // Joinings by month (by sourcer / interviewer L1+L2 / vendor).
 const joiningsSchema = z.object({
   date_from: z.string().min(1),
@@ -141,6 +151,7 @@ module.exports = {
   explorerSchema,
   coverageSchema,
   hrSchema,
+  hiringFunnelSchema,
   joiningsSchema,
   timeToSubmitSchema,
 };

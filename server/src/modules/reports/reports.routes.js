@@ -9,6 +9,7 @@ const service = require('./reports.service');
 const explorerService = require('./explorer.service');
 const drilldownService = require('./drilldown.service');
 const monthlyReview = require('./monthlyReview.service');
+const hiringFunnelService = require('./hiringFunnel.service');
 const {
   drilldownSchema,
   dateRangeSchema,
@@ -17,6 +18,7 @@ const {
   explorerSchema,
   coverageSchema,
   hrSchema,
+  hiringFunnelSchema,
   joiningsSchema,
   timeToSubmitSchema,
 } = require('./reports.validation');
@@ -60,6 +62,7 @@ const REPORTS = {
   'clients-without-requirements': (q) => service.clientsWithoutRequirements(q),
   'recruiter-vendor-gaps': (q) => service.recruiterVendorGaps(q),
   hr: (q) => service.hrReport(q),
+  'hiring-funnel': (q) => hiringFunnelService.hiringFunnel(q),
   joinings: (q) => service.joinings(q),
   'time-to-submit': (q) => service.timeToSubmit(q),
   'bda-reports': (q) => service.bdaReports(q),
@@ -227,6 +230,16 @@ router.get(
 );
 
 router.get(
+  '/hiring-funnel',
+  authorizeHr,
+  asyncHandler(async (req, res) => {
+    const query = hiringFunnelSchema.parse(req.query);
+    const data = await hiringFunnelService.hiringFunnel(query);
+    return ok(res, data);
+  })
+);
+
+router.get(
   '/joinings',
   authorize('admin', 'sales'),
   asyncHandler(async (req, res) => {
@@ -328,13 +341,14 @@ router.get(
     if (!fn) return fail(res, 422, 'Unknown report');
     if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
     // HR is admin-only for the GET (or Reports > HR reports); keep its export the same.
-    if (report === 'hr' && !canOpenHr(req.user)) return fail(res, 403, 'Admin only');
+    if ((report === 'hr' || report === 'hiring-funnel') && !canOpenHr(req.user)) return fail(res, 403, 'Admin only');
 
     let query = { ...req.query };
     if (report === 'aging') query = agingSchema.parse(req.query);
     else if (report === 'closure') query = closureSchema.parse(req.query);
     else if (report === 'pipeline-explorer') query = explorerSchema.parse(req.query);
     else if (report === 'hr') query = hrSchema.parse(req.query);
+    else if (report === 'hiring-funnel') query = hiringFunnelSchema.parse(req.query);
     else if (report === 'joinings') query = joiningsSchema.parse(req.query);
     else if (report === 'time-to-submit') query = timeToSubmitSchema.parse(req.query);
     else if (report === 'clients-without-requirements' || report === 'recruiter-vendor-gaps') {
@@ -418,6 +432,64 @@ function buildExportSheets(report, data) {
     Array.isArray(data.tables)
   ) {
     return data.tables.map((t) => ({ name: t.title, rows: (t.rows || []).map((r) => flatten(r)) }));
+  }
+
+  if (report === 'hiring-funnel' && data && typeof data === 'object' && Array.isArray(data.funnels)) {
+    const num = (v) => (v == null ? '' : v);
+    const sheets = [{
+      name: 'Summary',
+      rows: [
+        { Metric: 'Profiles sourced', Value: data.summary.sourced },
+        { Metric: 'Submitted to a requirement', Value: data.summary.submitted },
+        { Metric: 'First round cleared', Value: data.summary.first_round_cleared },
+        { Metric: 'Reached a client round', Value: data.summary.reached_client_round },
+        { Metric: 'Selected / joined', Value: data.summary.selected },
+        { Metric: 'Dropped', Value: data.summary.dropped },
+        { Metric: 'In progress', Value: data.summary.in_progress },
+        { Metric: 'Avg days sourced to joined', Value: num(data.summary.avg_days_to_join) },
+        { Metric: 'Median days sourced to joined', Value: num(data.summary.median_days_to_join) },
+      ],
+    }];
+    for (const fn of data.funnels) {
+      sheets.push({
+        name: fn.label,
+        rows: fn.stages.map((st) => ({
+          Stage: st.label,
+          'Came (reached)': st.reached,
+          Passed: st.passed,
+          'Not held (assumed pass)': st.assumed,
+          Dropped: st.dropped,
+          'In progress': st.pending,
+          'Data unavailable': st.unavailable,
+          'Avg days from sourcing': num(st.avg_days_from_start),
+        })),
+      });
+    }
+    sheets.push({
+      name: 'By recruiter',
+      rows: data.recruiters.map((r) => ({
+        Recruiter: r.sourcer,
+        Sourced: r.sourced,
+        Submitted: r.submitted,
+        'First round cleared': r.first_round_cleared,
+        'Reached client round': r.reached_client_round,
+        Selected: r.selected,
+        Dropped: r.dropped,
+        'In progress': r.in_progress,
+        'First round %': num(r.first_round_pct),
+        'Client round %': num(r.client_round_pct),
+        'Selected %': num(r.selected_pct),
+        'Avg days to join': num(r.avg_days_to_join),
+      })),
+    });
+    if (data.trend.length) {
+      sheets.push({
+        name: 'Trend',
+        rows: data.trend.map((r) => ({ Period: r.bucket, Sourced: r.sourced, 'First round cleared': r.first_round_cleared, 'Reached client round': r.reached_client_round, Selected: r.selected, Dropped: r.dropped })),
+      });
+    }
+    sheets.push({ name: 'Assumptions', rows: data.assumptions.map((a) => ({ Assumption: a })) });
+    return sheets;
   }
 
   if (report === 'time-to-submit' && data && typeof data === 'object' && Array.isArray(data.rows)) {

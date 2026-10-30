@@ -21,6 +21,7 @@ export const ALL_REPORTS = [
   { key: 'clients-without-requirements', label: 'Clients w/o requirements', roles: ['admin', 'sales', 'bda'] },
   { key: 'recruiter-vendor-gaps', label: 'Recruiter-vendor gaps', roles: ['admin', 'recruiter'] },
   { key: 'hr', label: 'HR reports', roles: ['admin'], permission: 'reports.hr' },
+  { key: 'hiring-funnel', label: 'Hiring funnel', roles: ['admin'], permission: 'reports.hr' },
   { key: 'monthly-review', label: 'Monthly performance review', roles: ['admin'] },
   { key: 'joinings', label: 'Joinings', roles: ['admin', 'sales'] },
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },
