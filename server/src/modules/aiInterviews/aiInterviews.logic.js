@@ -124,6 +124,7 @@ async function scoreInterview(ctx, settings, transcript, questions = []) {
 
 // Plain-language "why": the score against the pass mark, which parameters held it back (or carried it) and any red flags.
 // Built from the numbers, not asked of the AI, so it always agrees with the score on screen.
+const short = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 function decisionReason(percent, passPercentage, margin, outcome, parameters, redFlags) {
   const ranked = [...parameters].sort((a, b) => a.score - b.score);
   const weakest = ranked.filter((p) => p.score < 6).slice(0, 2);
@@ -138,9 +139,10 @@ function decisionReason(percent, passPercentage, margin, outcome, parameters, re
     if (weakest.length) lines.push(`Held back by: ${list(weakest)}.`);
   } else {
     lines.push(`Scored ${percent}%, ${Math.round((passPercentage - percent) * 100) / 100} points under the ${passPercentage}% pass mark.`);
-    if (weakest.length) lines.push(`Main reasons: ${weakest.map((p) => `${p.label} ${p.score}/10${p.summary ? ` (${p.summary.replace(/\.$/, '')})` : ''}`).join('; ')}.`);
+    if (weakest.length) lines.push(`Main reasons: ${weakest.map((p) => `${p.label} ${p.score}/10${p.summary ? ` (${short(p.summary.replace(/\.$/, ''), 130)})` : ''}`).join('; ')}.`);
   }
-  if (redFlags.length) lines.push(`Red flags: ${redFlags.join(' ')}`);
+  // the full list stays on the result; the reason carries just the first two, shortened
+  if (redFlags.length) lines.push(`Red flags: ${redFlags.slice(0, 2).map((r) => short(r, 110).replace(/[.]$/, '')).join('; ')}${redFlags.length > 2 ? ` (+${redFlags.length - 2} more below)` : ''}.`);
   return lines.join(' ');
 }
 
