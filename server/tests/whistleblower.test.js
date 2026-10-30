@@ -80,6 +80,18 @@ describe('whistleblower: routing and who sees what', () => {
     expect(await prisma.notification.count({ where: { user_id: ctx.anna.user.id } })).toBe(0);
   });
 
+  test('a handler who muted Speak Up notifications in their preferences is not sent them, and the case still reaches them in the inbox', async () => {
+    const ctx = await seed();
+    await setHandlers(ctx, ctx.cat('Salary'), [ctx.hari]);
+    await prisma.notificationPreference.create({ data: { user_id: ctx.hari.user.id, type: 'whistleblower_new', in_app: false } });
+    const id = (await raise(ctx, ctx.anna)).body.data.case.id;
+    expect(await prisma.notification.count({ where: { user_id: ctx.hari.user.id } })).toBe(0);
+    expect((await get(`/cases/${id}`, ctx.hari.token)).status).toBe(200);
+    // the preference list offers both kinds to every employee
+    const types = (await authed(request(app).get('/api/v1/notifications/preferences'), ctx.bob.token)).body.data.map((p) => p.type);
+    expect(types).toEqual(expect.arrayContaining(['whistleblower_new', 'whistleblower_update']));
+  });
+
   test('named handlers receive and see their category; a non-restricted category is also seen by the admin', async () => {
     const ctx = await seed();
     expect((await setHandlers(ctx, ctx.cat('Salary'), [ctx.hari])).status).toBe(200);

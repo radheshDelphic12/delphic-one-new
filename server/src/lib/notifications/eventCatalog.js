@@ -56,9 +56,10 @@ const ROLE_EVENT_MATRIX = {
   resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
   resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
   resignation_decided: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true },
-  // Speak Up: written straight to the bell by the module (never by email, never with the subject or the reporter), so no role lists them in preferences.
-  whistleblower_new: { roles: [], defaultInApp: true },
-  whistleblower_update: { roles: [], defaultInApp: true },
+  // Speak Up: written straight to the bell by the module (never by email, never with the subject or the reporter). Anyone can be a
+  // handler or a reporter, so everyone lists them in their preferences, and the module honours a person's choice to mute them.
+  whistleblower_new: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  whistleblower_update: { roles: TIMESHEET_ROLES, defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);

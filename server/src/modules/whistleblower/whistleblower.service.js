@@ -157,7 +157,12 @@ async function adminMembershipIds(orgId) {
 }
 
 async function notifyUsers(orgId, userIds, { type, title, body, caseId, audience = 'handler' }) {
-  const unique = [...new Set(userIds)];
+  let unique = [...new Set(userIds)];
+  if (!unique.length) return;
+  // a person who muted this kind of notification in their preferences is not sent it (in-app is on unless they switched it off)
+  const muted = await prisma.notificationPreference.findMany({ where: { user_id: { in: unique }, type, in_app: false }, select: { user_id: true } });
+  const mutedIds = new Set(muted.map((m) => m.user_id));
+  unique = unique.filter((id) => !mutedIds.has(id));
   if (!unique.length) return;
   await prisma.notification.createMany({ data: unique.map((user_id) => ({ user_id, type, title, body, entity_type: 'whistle_case', entity_id: caseId, org_id: orgId, metadata: { audience } })) });
 }
