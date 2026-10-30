@@ -16,6 +16,7 @@ const STATE_STYLE = {
   completed: 'border-success-200 bg-success-50 text-success-800',
 };
 const STATE_LABEL = { not_scheduled: 'Not scheduled', scheduled: 'Scheduled', completed: 'Completed' };
+const RESULT_TEXT = { skipped: 'Skipped (bench profile)' };
 const ATTEMPT_LABEL = { not_opened: 'Not opened', in_progress: 'In progress', scored: 'Scored', expired: 'Expired', superseded: 'Replaced' };
 const ATTEMPT_TONE = {
   not_opened: 'bg-tertiary-100 text-tertiary-700',
@@ -52,6 +53,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
   const [attemptState, setAttemptState] = useState(NO_ATTEMPTS);
   const [skillOptions, setSkillOptions] = useState([]);
   const [removing, setRemoving] = useState(null); // { attempt, reason }
+  const [skipping, setSkipping] = useState(null); // { step, reason } - a bench profile's first round
   const [reviewing, setReviewing] = useState(null); // the attempt's answers, marked right / wrong
   const [busy, setBusy] = useState(false);
 
@@ -212,6 +214,15 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
     }
   }
 
+  async function skipRound() {
+    const { step, reason } = skipping;
+    await run(async () => {
+      await apiClient.post(`/submissions/${submissionId}/interview-rounds/skip`, { template_round_id: step.template_round_id, reason: reason.trim() || undefined });
+      setSkipping(null);
+      pushSuccess(`${step.name} skipped. The next round can now be scheduled.`, 'Round skipped');
+    }, 'Failed to skip the round');
+  }
+
   async function removeAttempt() {
     const { attempt, reason } = removing;
     await run(async () => {
@@ -295,7 +306,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                   </p>
                   {step.state === 'completed' && (
                     <p className="mt-1 text-xs text-tertiary-700">
-                      Result: <strong className="capitalize">{step.result}</strong>
+                      Result: <strong className="capitalize">{RESULT_TEXT[step.result] || step.result}</strong>
                       {step.score_percent != null && (
                         <>
                           {' '}· Score <strong>{step.score_percent}%</strong>
@@ -315,12 +326,17 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                       Schedule
                     </button>
                   )}
-                  {step.state !== 'not_scheduled' && canManage(step) && (
+                  {step.can_skip && canManage(step) && (
+                    <button type="button" className="btn-secondary text-xs" data-testid="skip-first-round" disabled={busy} onClick={() => setSkipping({ step, reason: '' })} title="This is a bench profile, so the first round can be skipped">
+                      Skip round
+                    </button>
+                  )}
+                  {step.state !== 'not_scheduled' && step.result !== 'skipped' && canManage(step) && (
                     <button type="button" title="Edit interview" aria-label="Edit interview" className="rounded p-1.5 text-tertiary-500 hover:bg-primary-50 disabled:opacity-50" disabled={busy} onClick={() => openEditSchedule(step)}>
                       <Pencil className="h-4 w-4" />
                     </button>
                   )}
-                  {step.state !== 'not_scheduled' && canManage(step) && (
+                  {step.state !== 'not_scheduled' && step.result !== 'skipped' && canManage(step) && (
                     <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => openFinish(step)}>
                       {step.state === 'completed' ? 'Edit feedback' : 'Give feedback'}
                     </button>
@@ -500,6 +516,20 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                 </li>
               ))}
             </ol>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!skipping} onClose={() => setSkipping(null)} title={skipping ? `Skip: ${skipping.step.name}` : ''} tone="edit"
+        footer={<div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setSkipping(null)}>Cancel</button><button type="button" className="btn-primary" disabled={busy} onClick={skipRound}>Skip this round</button></div>}>
+        {skipping && (
+          <div className="space-y-3 text-sm text-tertiary-700">
+            <p>This is a bench profile, so its first round does not need to be held. Skipping marks the round as done (no interview and no score) and opens the next round.</p>
+            <p className="text-xs text-tertiary-500">The skip is recorded with who did it and when.</p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Reason (optional)</label>
+              <textarea rows={3} className={FIELD_INPUT} value={skipping.reason} onChange={(e) => setSkipping((p) => ({ ...p, reason: e.target.value }))} />
+            </div>
           </div>
         )}
       </Drawer>

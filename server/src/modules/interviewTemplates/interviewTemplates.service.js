@@ -5,8 +5,8 @@ const DEFAULT_PASS_PERCENTAGE = 60;
 const ROUND_INCLUDE = { rounds: { orderBy: { sort_order: 'asc' } } };
 
 // A round counts as done once the interviewer recorded a verdict (pass / fail). Feedback (and ratings where required) are
-// enforced when that verdict is saved, so a verdict implies them.
-const DONE_RESULTS = ['pass', 'fail'];
+// enforced when that verdict is saved, so a verdict implies them. A skipped round (bench profile's first round) counts as done too.
+const DONE_RESULTS = ['pass', 'fail', 'skipped'];
 const isDone = (round) => Boolean(round) && round.status !== 'cancelled' && DONE_RESULTS.includes(round.result);
 
 // Overall % from per-skill ratings out of 10: sum / (skills * 10).
@@ -86,6 +86,11 @@ async function getPlan(db, submissionId) {
   const byTemplateRound = new Map();
   rounds.forEach((r) => byTemplateRound.set(r.template_round_id, r));
 
+  // A bench profile (UI label for source "direct") may skip the first round of the template.
+  const profileRow = await db.submission.findUnique({ where: { id: submissionId }, select: { profile: { select: { source: true } } } });
+  const benchProfile = profileRow?.profile?.source === 'direct';
+  const firstRoundId = template.rounds[0]?.id || null;
+
   const passMark = passMarkFor(requirement);
   let blocked = false; // an earlier mandatory round is not done yet
   const steps = template.rounds.map((tr) => {
@@ -104,6 +109,7 @@ async function getPlan(db, submissionId) {
       assessment_test_id: tr.assessment_test_id,
       state,
       can_start: !round && !blocked,
+      can_skip: benchProfile && tr.id === firstRoundId && !round,
       interview_round_id: round?.id || null,
       result: round?.result || null,
       score_percent: round?.score_percent != null ? Number(round.score_percent) : null,
@@ -117,6 +123,7 @@ async function getPlan(db, submissionId) {
     plan: {
       template: { id: template.id, name: template.name },
       pass_percentage: passMark,
+      bench_profile: benchProfile,
       steps,
       // The JD's primary / secondary stack: pre-fills the skill rows of a round that needs skill ratings.
       jd_skills: jdSkills(requirement),

@@ -11,6 +11,7 @@ const {
   stageOverrideSchema,
   listQuerySchema,
   interviewRoundCreateSchema,
+  interviewRoundSkipSchema,
   interviewRoundUpdateSchema,
 } = require('./submissions.validation');
 
@@ -36,6 +37,8 @@ const ERROR_STATUS = {
   invalid_template_round: [400, 'This round is not part of the candidate\'s interview template'],
   round_already_exists: [400, 'This round is already scheduled for the candidate'],
   previous_round_pending: [400, 'Finish the previous mandatory round (with feedback) before the next one'],
+  skip_bench_only: [400, 'Only a bench profile can skip the first round'],
+  skip_first_round_only: [400, 'Only the first round of the interview plan can be skipped'],
   feedback_required: [400, 'Feedback is required to finish this round'],
   ratings_required: [400, 'Rate every skill out of 10 to finish this round (at least one skill)'],
   candidate_email_missing: [400, 'This candidate has no email on the profile'],
@@ -124,6 +127,13 @@ const addRound = asyncHandler(async (req, res) => {
   return created(res, result.round);
 });
 
+const skipRound = asyncHandler(async (req, res) => {
+  const body = interviewRoundSkipSchema.parse(req.body);
+  const result = await service.skipFirstRound(req.params.id, body, req.user);
+  if (result.error) return mapError(res, result.error);
+  return created(res, result.round);
+});
+
 const updateRound = asyncHandler(async (req, res) => {
   const body = interviewRoundUpdateSchema.parse(req.body);
   const result = await service.updateInterviewRound(req.params.id, body, req.user);
@@ -131,4 +141,4 @@ const updateRound = asyncHandler(async (req, res) => {
   return ok(res, result.round);
 });
 
-module.exports = { candidateFeedbackMessage, interviewPlan, list, getOne, create, update, changeStage, changeStageOverride, history, addRound, updateRound };
+module.exports = { candidateFeedbackMessage, interviewPlan, list, getOne, create, update, changeStage, changeStageOverride, history, addRound, skipRound, updateRound };

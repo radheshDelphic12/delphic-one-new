@@ -19,6 +19,7 @@ const COLOR_MAP = {
   pass: 'bg-green-50 text-green-700',
   fail: 'bg-red-50 text-red-700',
   no_show: 'bg-amber-50 text-amber-700',
+  skipped: 'bg-tertiary-100 text-tertiary-700',
   cleared: 'bg-green-50 text-green-700',
   failed: 'bg-red-50 text-red-700',
   active: 'bg-green-50 text-green-700',
@@ -45,6 +46,7 @@ const COLOR_MAP = {
 
 const LABEL_OVERRIDES = {
   no_show: 'Candidate did not join',
+  skipped: 'Skipped (bench profile)',
   // Candidate source labels — the stored enum values stay `direct` / `linkedin`.
   direct: 'Bench',
   linkedin: 'Market',

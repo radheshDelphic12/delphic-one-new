@@ -24,6 +24,7 @@ export const RESULT_COLORS = {
   fail: 'bg-danger-50 text-danger-700',
   no_show: 'bg-warning-50 text-warning-800',
   rescheduled: 'bg-sky-50 text-sky-800',
+  skipped: 'bg-tertiary-100 text-tertiary-700',
 };
 
 export const RESULT_LABELS = {
@@ -32,6 +33,7 @@ export const RESULT_LABELS = {
   fail: 'Fail',
   no_show: 'Candidate did not join',
   rescheduled: 'Rescheduled',
+  skipped: 'Skipped (bench profile)',
 };
 
 export const ROUND_RESULTS = ['pending', 'pass', 'fail', 'no_show', 'rescheduled'];

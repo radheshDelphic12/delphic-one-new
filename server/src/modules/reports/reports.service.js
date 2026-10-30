@@ -144,7 +144,8 @@ async function loadSubmissionTimingMaps(submissionIds) {
 }
 
 function summarizeInterviewRounds(rounds, from, to) {
-  const inPeriod = rounds.filter((r) => {
+  // a skipped round (bench profile's first round) was never held, so it is not an interview
+  const inPeriod = rounds.filter((r) => r.result !== 'skipped').filter((r) => {
     const anchor = r.completed_at || r.scheduled_at;
     if (!anchor) return true;
     const t = new Date(anchor);

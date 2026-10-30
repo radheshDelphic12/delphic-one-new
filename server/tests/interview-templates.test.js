@@ -43,9 +43,9 @@ async function makeRequirement(body = {}) {
   });
 }
 
-async function makeSubmission(requirementId) {
+async function makeSubmission(requirementId, profileOverrides = {}) {
   const seats = await authed(request(app).get(`/api/v1/requirements/${requirementId}/seats`), salesToken);
-  const profile = await createProfile(recruiterToken);
+  const profile = await createProfile(recruiterToken, profileOverrides);
   const sub = await authed(request(app).post('/api/v1/submissions'), recruiterToken).send({
     requirement_seat_id: seats.body.data[0].id,
     profile_id: profile.id,
@@ -197,6 +197,57 @@ describe('legacy requirements and the offer gate', () => {
     const res = await authed(request(app).post(`/api/v1/submissions/${submissionId}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/mandatory interview rounds/i);
+  });
+});
+
+describe('bench profile skips the first round', () => {
+  const skip = (submissionId, body, token = recruiterToken) =>
+    authed(request(app).post(`/api/v1/submissions/${submissionId}/interview-rounds/skip`), token).send(body);
+
+  test('the plan offers the skip only for a bench profile and only on the first round', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    const bench = await getPlan(await makeSubmission(requirement.body.data.id));
+    expect(bench.bench_profile).toBe(true);
+    expect(bench.steps.map((st) => st.can_skip)).toEqual(bench.steps.map((_, i) => i === 0));
+
+    const market = await getPlan(await makeSubmission(requirement.body.data.id, { source: 'linkedin' }));
+    expect(market.bench_profile).toBe(false);
+    expect(market.steps.some((st) => st.can_skip)).toBe(false);
+  });
+
+  test('skipping marks the round done, opens the next one and counts for the offer gate', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    const submissionId = await makeSubmission(requirement.body.data.id);
+    const before = await getPlan(submissionId);
+    expect(before.steps[1].can_start).toBe(false);
+
+    const res = await skip(submissionId, { template_round_id: before.steps[0].template_round_id, reason: 'Already screened on the bench' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.result).toBe('skipped');
+
+    const after = await getPlan(submissionId);
+    expect(after.steps[0]).toMatchObject({ state: 'completed', result: 'skipped', can_skip: false, below_pass: false });
+    expect(after.steps[1].can_start).toBe(true);
+    expect(after.mandatory_pending).toBe(before.mandatory_pending - 1);
+    const round = await prisma.interviewRound.findFirst({ where: { submission_id: submissionId } });
+    expect(round).toMatchObject({ status: 'completed', result: 'skipped', feedback: 'Already screened on the bench' });
+    expect((await schedule(submissionId, after.steps[1].template_round_id)).status).toBe(201);
+  });
+
+  test('a market profile, a later round, a second skip and a plain sales user are refused', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    const marketSub = await makeSubmission(requirement.body.data.id, { source: 'linkedin' });
+    const marketPlan = await getPlan(marketSub);
+    expect((await skip(marketSub, { template_round_id: marketPlan.steps[0].template_round_id })).status).toBe(400);
+
+    const submissionId = await makeSubmission(requirement.body.data.id);
+    const plan = await getPlan(submissionId);
+    expect((await skip(submissionId, { template_round_id: plan.steps[1].template_round_id })).status).toBe(400);
+    // the first round is Delphic's; a sales user may only manage client rounds
+    expect((await skip(submissionId, { template_round_id: plan.steps[0].template_round_id }, salesToken)).status).toBe(403);
+
+    expect((await skip(submissionId, { template_round_id: plan.steps[0].template_round_id })).status).toBe(201);
+    expect((await skip(submissionId, { template_round_id: plan.steps[0].template_round_id })).status).toBe(400);
   });
 });
 

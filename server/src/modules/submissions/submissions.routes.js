@@ -21,5 +21,6 @@ router.post('/:id/stage', canOn('submissions.update', async (req) => (await pris
 router.post('/:id/stage/override', authorizeSuperadmin, controller.changeStageOverride);
 router.post('/:id/candidate-feedback-message', can('meetings.schedule', 'recruiter', 'sales', 'admin'), controller.candidateFeedbackMessage);
 router.post('/:id/interview-rounds', can('meetings.schedule', 'recruiter', 'sales', 'admin'), controller.addRound);
+router.post('/:id/interview-rounds/skip', can('meetings.schedule', 'recruiter', 'sales', 'admin'), controller.skipRound);
 
 module.exports = router;

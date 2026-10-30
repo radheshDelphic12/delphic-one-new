@@ -113,6 +113,11 @@ const interviewRoundCreateSchema = z.object({
   completed_at: z.string().optional(),
 }).refine((d) => d.round_type || d.template_round_id, { message: 'round_type or template_round_id is required', path: ['round_type'] });
 
+const interviewRoundSkipSchema = z.object({
+  template_round_id: z.string().uuid(),
+  reason: z.string().max(500).optional(),
+});
+
 const interviewRoundUpdateSchema = z.object({
   skill_ratings: z.array(skillRatingSchema).optional(),
   // the name was missing here, so an edited name was silently dropped
@@ -138,5 +143,6 @@ module.exports = {
   stageOverrideSchema,
   listQuerySchema,
   interviewRoundCreateSchema,
+  interviewRoundSkipSchema,
   interviewRoundUpdateSchema,
 };

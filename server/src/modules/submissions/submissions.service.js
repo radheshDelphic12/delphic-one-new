@@ -419,6 +419,44 @@ function ratingFields(skillRatings) {
   return { score_percent: templates.scorePercent(skillRatings), rating: Math.min(10, Math.max(1, Math.round(avg))) };
 }
 
+// A bench profile (source "direct") may skip the first round of its interview plan: recorded as a completed round with result
+// "skipped" (no interview, no score) so the next round opens and the offer gate counts it as done.
+async function skipFirstRound(submissionId, { template_round_id, reason }, user) {
+  return prisma.$transaction(async (tx) => {
+    const submission = await tx.submission.findUnique({ where: { id: submissionId }, include: { profile: { select: { source: true } } } });
+    if (!submission) return { error: 'not_found' };
+    if (submission.profile?.source !== 'direct') return { error: 'skip_bench_only' };
+
+    const requirement = await templates.loadRequirementForSubmission(tx, submissionId);
+    const first = requirement?.interview_template?.rounds?.[0];
+    if (!first || first.id !== template_round_id) return { error: 'skip_first_round_only' };
+
+    const roundType = first.conducted_by === 'client' ? 'template_client' : 'template_internal';
+    const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
+    if (!canManageInterviewRound(submission, salesOwnerId, roundType, user)) return { error: 'forbidden' };
+
+    const existing = await tx.interviewRound.findFirst({ where: { submission_id: submissionId, template_round_id, status: { not: 'cancelled' } } });
+    if (existing) return { error: 'round_already_exists' };
+
+    const last = await tx.interviewRound.findFirst({ where: { submission_id: submissionId }, orderBy: { round_number: 'desc' } });
+    const created = await tx.interviewRound.create({
+      data: {
+        submission_id: submissionId,
+        round_number: last ? last.round_number + 1 : 1,
+        round_type: roundType,
+        round_name: first.name,
+        template_round_id,
+        status: 'completed',
+        result: 'skipped',
+        feedback: (reason && reason.trim()) || 'Skipped: bench profile',
+        completed_at: new Date(),
+        scheduled_by: user.id,
+      },
+    });
+    return { round: await loadInterviewRound(tx, created.id) };
+  });
+}
+
 async function addInterviewRound(submissionId, data, user) {
   const userId = user.id;
   return prisma.$transaction(async (tx) => {
@@ -639,6 +677,7 @@ async function updateInterviewRound(id, patch, user) {
 }
 
 module.exports = {
+  skipFirstRound,
   list,
   getById,
   create,

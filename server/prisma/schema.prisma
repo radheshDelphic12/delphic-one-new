@@ -340,6 +340,8 @@ enum RoundResult {
   fail
   no_show
   rescheduled
+  // A bench profile's first round, waived instead of held (no interview, no score).
+  skipped
 }
 
 enum InterviewRoundStatus {
