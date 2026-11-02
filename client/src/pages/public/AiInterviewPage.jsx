@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Mic, MicOff, Video } from 'lucide-react';
+import { AlertTriangle, Clock, Mic, MicOff, Video } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 
 const SpeechRecognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 const RECORDER_TYPES = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 const SECTION_LABEL = { role: 'Role questions', aptitude: 'Aptitude' };
+const NO_ANSWER_TEXT = '[No answer - time ran out]';
+const GRACE_MS = 4000; // permission prompts and the start of the recording briefly take focus; those are not tab switches
+
+const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, '0')}`;
 
 function Shell({ children }) {
   return (
@@ -19,7 +23,9 @@ function Shell({ children }) {
 /**
  * The candidate's AI interview: opened from the link, no login. A mic test and consent first, then the AI asks one question at
  * a time; answers are spoken (live transcript) or typed. Closing the tab keeps progress (the link resumes where it stopped).
- * When the company records interviews and the candidate agrees, audio + video are sent to the server in small parts.
+ * When the company records interviews, the recording is mandatory: camera and microphone must stay on and audio + video are sent
+ * to the server in small parts. Every question has a countdown. Copying, pasting and right-click are blocked, and leaving the page
+ * is logged and warned about; too many tab switches end the interview for a person to review.
  */
 export default function AiInterviewPage() {
   const { token } = useParams();
@@ -27,13 +33,17 @@ export default function AiInterviewPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [endedByRules, setEndedByRules] = useState(false);
   const [consent, setConsent] = useState(false);
   const [recordConsent, setRecordConsent] = useState(false);
   const [mic, setMic] = useState('idle'); // idle | testing | ok | failed
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
-  const [notice, setNotice] = useState('');
   const [recording, setRecording] = useState(false);
+  const [recordingReady, setRecordingReady] = useState(false); // the server has stored the first chunk
+  const [cameraProblem, setCameraProblem] = useState('');
+  const [remaining, setRemaining] = useState(null); // seconds left on this question, null = no limit
+  const [warning, setWarning] = useState('');
   const recRef = useRef(null); // speech recognition
   const baseTextRef = useRef('');
   const recorderRef = useRef(null);
@@ -41,11 +51,26 @@ export default function AiInterviewPage() {
   const videoRef = useRef(null);
   const queueRef = useRef(Promise.resolve());
   const resumedRef = useRef(false);
+  const partRef = useRef({ part: 0, stored: false }); // the recording part in progress and whether the server has stored a chunk of it
+  const graceUntilRef = useRef(0);
+  const awayRef = useRef(null); // { at, kind } while the candidate is away from the page
+  const timedOutForRef = useRef(null); // the question turn already auto-submitted by the timer
+  const textRef = useRef('');
+  useEffect(() => { textRef.current = text; }, [text]);
 
   useEffect(() => {
     apiClient.get(`/public/ai-interviews/${token}`)
       .then(({ data }) => setView(data.data))
       .catch((err) => setError(apiErrorMessage(err, 'This link is not valid.')));
+  }, [token]);
+
+  // ---- integrity events (tab switch, copy / paste attempts, camera off) ----
+  const report = useCallback(async (type, secondsAway) => {
+    try {
+      const { data } = await apiClient.post(`/public/ai-interviews/${token}/event`, { type, ...(secondsAway != null ? { seconds_away: secondsAway } : {}) });
+      if (data.data?.ended) setEndedByRules(true);
+      return data.data;
+    } catch { return null; }
   }, [token]);
 
   // ---- recording: parts are uploaded one after another so the server can append them in order ----
@@ -54,19 +79,24 @@ export default function AiInterviewPage() {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           await apiClient.post(`/public/ai-interviews/${token}/recording?part=${part}&seq=${seq}`, blob, { headers: { 'Content-Type': type } });
+          if (partRef.current.part === part) partRef.current.stored = true;
+          setRecordingReady(true);
           return;
-        } catch { /* retry; a recording problem never stops the interview */ }
+        } catch { /* retry; a failed part never stops the interview, the next chunk tries again */ }
       }
     });
   }, [token]);
 
   // `part` is 0 for a first recording; a candidate who closed the page and came back records the next part (its own file).
   const startRecording = useCallback(async (part = 0) => {
+    graceUntilRef.current = Date.now() + GRACE_MS;
     try {
-      const stream = streamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+      let stream = streamRef.current;
+      if (!stream || stream.getTracks().some((t) => t.readyState === 'ended')) stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
       streamRef.current = stream;
       const type = RECORDER_TYPES.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
-      if (!type) return;
+      if (!type) throw new Error('unsupported');
       const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 500000, audioBitsPerSecond: 64000 });
       let seq = 0;
       recorder.ondataavailable = (e) => {
@@ -74,13 +104,20 @@ export default function AiInterviewPage() {
         uploadPart(e.data, part, seq, type.split(';')[0]);
         seq += 1;
       };
+      partRef.current = { part, stored: false };
       recorder.start(5000);
       recorderRef.current = recorder;
+      stream.getTracks().forEach((t) => { t.onended = () => { setRecording(false); setCameraProblem('Your camera or microphone was turned off.'); report('camera_off'); }; });
+      setCameraProblem('');
       setRecording(true);
     } catch {
-      setNotice('The camera could not be started, so this interview will continue without a recording.');
+      setRecording(false);
+      setCameraProblem('The camera and microphone could not be started. Allow them in the browser (the camera icon in the address bar) and try again.');
     }
-  }, [uploadPart]);
+  }, [uploadPart, report]);
+
+  // after the camera was off or refused: carry on as the next part (the same part again if nothing of the last one reached the server)
+  const retryCamera = () => { const p = partRef.current; startRecording(p.stored ? p.part + 1 : p.part); };
 
   const stopRecording = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -88,12 +125,12 @@ export default function AiInterviewPage() {
       await new Promise((resolve) => { recorder.addEventListener('stop', resolve, { once: true }); recorder.stop(); });
     }
     await queueRef.current;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
     setRecording(false);
   }, []);
 
   useEffect(() => { if (recording && videoRef.current) videoRef.current.srcObject = streamRef.current; }, [recording]);
-  useEffect(() => () => { recRef.current?.stop?.(); streamRef.current?.getTracks().forEach((t) => t.stop()); }, []);
+  useEffect(() => () => { recRef.current?.stop?.(); streamRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); }); }, []);
 
   // A reopened, recorded interview carries on recording as the next part (the same consent still applies).
   useEffect(() => {
@@ -103,10 +140,66 @@ export default function AiInterviewPage() {
     }
   }, [view, startRecording]);
 
+  // ---- no copying, pasting or leaving the page while the interview runs ----
+  const active = view?.status === 'started' && !finished && !endedByRules;
+  useEffect(() => {
+    if (!active) return undefined;
+    const block = (type) => (e) => { e.preventDefault(); report(type); setWarning('Copying, cutting and pasting are not allowed in this interview. Please type or speak your own answer.'); };
+    const onCopy = block('copy');
+    const onCut = block('cut');
+    const onPaste = block('paste');
+    const onMenu = (e) => { e.preventDefault(); report('context_menu'); };
+    const onSelect = (e) => { if (!['TEXTAREA', 'INPUT'].includes(e.target?.tagName)) e.preventDefault(); };
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && ['c', 'x', 'v', 'a', 'p', 's', 'u'].includes(String(e.key).toLowerCase()) && !(e.target?.tagName === 'TEXTAREA' && ['a'].includes(String(e.key).toLowerCase()))) {
+        e.preventDefault();
+        if (['c', 'x', 'v'].includes(String(e.key).toLowerCase())) return; // the copy / cut / paste event reports it
+        report('blocked_key');
+      }
+    };
+    const away = (kind) => { if (!awayRef.current && Date.now() > graceUntilRef.current) awayRef.current = { at: Date.now(), kind }; };
+    const back = async () => {
+      const gone = awayRef.current;
+      awayRef.current = null;
+      if (!gone || Date.now() < graceUntilRef.current) return;
+      const seconds = (Date.now() - gone.at) / 1000;
+      const res = await report(gone.kind, seconds);
+      if (res && !res.ended) {
+        const limit = view?.max_tab_switches;
+        setWarning(`You left the interview page. This has been recorded${limit ? ` (${res.tab_switches} of ${limit} allowed)` : ''}.${limit ? ' If it happens again too often, the interview ends automatically.' : ''} Please stay on this page until you finish.`);
+      }
+    };
+    const onVisibility = () => (document.hidden ? away('tab_hidden') : back());
+    const onBlur = () => away('window_blur');
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('cut', onCut);
+    document.addEventListener('paste', onPaste);
+    document.addEventListener('contextmenu', onMenu);
+    document.addEventListener('selectstart', onSelect);
+    document.addEventListener('dragstart', onSelect);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', back);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('cut', onCut);
+      document.removeEventListener('paste', onPaste);
+      document.removeEventListener('contextmenu', onMenu);
+      document.removeEventListener('selectstart', onSelect);
+      document.removeEventListener('dragstart', onSelect);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', back);
+    };
+  }, [active, report, view?.max_tab_switches]);
+
   // ---- microphone test ----
   async function testMic() {
     setMic('testing');
     try {
+      graceUntilRef.current = Date.now() + GRACE_MS;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = ctx.createAnalyser();
@@ -134,6 +227,16 @@ export default function AiInterviewPage() {
     setBusy(true);
     setError('');
     try {
+      // a recorded interview needs the camera before it begins, so a refusal is caught here and not halfway through
+      if (view.recording_required) {
+        graceUntilRef.current = Date.now() + GRACE_MS;
+        try {
+          streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
+        } catch {
+          setError('This interview is recorded, so the camera and microphone must be allowed. Allow them in the browser (the camera icon in the address bar) and press Start again.');
+          return;
+        }
+      }
       const { data } = await apiClient.post(`/public/ai-interviews/${token}/start`, { consent: true, recording_consent: recordConsent });
       setView((v) => ({ ...v, ...data.data }));
     } catch (err) {
@@ -163,12 +266,14 @@ export default function AiInterviewPage() {
     setListening(true);
   }
 
-  async function send() {
+  const send = useCallback(async ({ timedOut = false } = {}) => {
     recRef.current?.stop();
     setBusy(true);
     setError('');
     try {
-      const { data } = await apiClient.post(`/public/ai-interviews/${token}/answer`, { text });
+      const typed = textRef.current.trim();
+      const out = typed.length >= 2 ? typed : NO_ANSWER_TEXT;
+      const { data } = await apiClient.post(`/public/ai-interviews/${token}/answer`, { text: out, ...(timedOut && typed.length < 2 ? { timed_out: true } : {}) });
       setText('');
       setView((v) => ({ ...v, ...data.data }));
       if (data.data.done) {
@@ -178,11 +283,36 @@ export default function AiInterviewPage() {
       }
     } catch (err) {
       setError(apiErrorMessage(err, 'Your answer could not be sent. Please try again.'));
+      // an automatic send that failed is tried again a few seconds later; otherwise an empty box could never be sent
+      if (timedOut) setTimeout(() => { timedOutForRef.current = null; }, 5000);
     } finally {
       setBusy(false);
     }
-  }
+  }, [token, stopRecording]);
 
+  // ---- the countdown for the question on screen (from the server clock, so a reload cannot reset it) ----
+  const asked = view?.question_asked_at;
+  const limit = view?.answer_seconds;
+  const waiting = Boolean(view?.waiting_for_answer);
+  useEffect(() => {
+    if (!active || !waiting || !asked || !limit) { setRemaining(null); return undefined; }
+    const offset = new Date(view.server_now).getTime() - Date.now();
+    const tick = () => {
+      const left = Math.ceil(limit - (Date.now() + offset - new Date(asked).getTime()) / 1000);
+      setRemaining(left);
+      if (left <= 0 && timedOutForRef.current !== asked) {
+        timedOutForRef.current = asked;
+        send({ timedOut: true });
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [active, waiting, asked, limit, view?.server_now, send]);
+
+  if (endedByRules) {
+    return <Shell><h1 className="font-heading text-lg font-semibold">Interview ended</h1><p className="mt-2 text-sm text-tertiary-600">This interview was ended because the page was left too many times. The answers you gave have been saved and the team will review them and get in touch with you.</p></Shell>;
+  }
   if (finished || (view && !['invited', 'started'].includes(view.status))) {
     return <Shell><h1 className="font-heading text-lg font-semibold">Thank you</h1><p className="mt-2 text-sm text-tertiary-600">Your interview is complete. The team will get in touch with you.</p></Shell>;
   }
@@ -191,6 +321,7 @@ export default function AiInterviewPage() {
 
   // ---- before the start: what to expect, microphone test, consent ----
   if (view.status === 'invited') {
+    const mustRecord = Boolean(view.recording_required);
     return (
       <Shell>
         <h1 className="font-heading text-lg font-semibold text-tertiary-900">Interview for {view.role_title || 'the role'}</h1>
@@ -199,6 +330,9 @@ export default function AiInterviewPage() {
           <li>Use a quiet place and a recent Chrome or Edge browser for speaking; other browsers let you type.</li>
           <li>You can use this link once. If you close the page, open the same link to carry on where you stopped.</li>
           <li>There are a few short aptitude questions too. Work them out in your head and type the answer.</li>
+          {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have typed is sent and the next question comes.</li>}
+          <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; after ${view.max_tab_switches} times the interview ends automatically` : ''}.</li>
+          {mustRecord && <li>This interview is recorded (camera and microphone) and the recording is required. Keep them on until you finish.</li>}
           <li>The AI scores your answers; people at the company make the final decision.</li>
         </ul>
         <div className="mt-4 rounded-xl border border-tertiary-100 p-3">
@@ -208,7 +342,7 @@ export default function AiInterviewPage() {
           </div>
           {mic === 'ok' && <p className="mt-2 text-xs text-success-700">Your microphone works.</p>}
           {mic === 'quiet' && <p className="mt-2 text-xs text-warning-700">We could not hear you. Check your microphone, or you can type your answers instead.</p>}
-          {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. You can type your answers instead.</p>}
+          {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. {mustRecord ? 'It is needed for the recording, so please allow it.' : 'You can type your answers instead.'}</p>}
           {!SpeechRecognition && <p className="mt-2 text-xs text-tertiary-500">This browser cannot turn speech into text, so you will type your answers.</p>}
         </div>
         <label className="mt-4 flex items-start gap-2 text-sm text-tertiary-800">
@@ -219,14 +353,14 @@ export default function AiInterviewPage() {
           <label className="mt-2 flex items-start gap-2 text-sm text-tertiary-800">
             <input type="checkbox" className="mt-1" checked={recordConsent} onChange={(e) => setRecordConsent(e.target.checked)} />
             <span>
-              <span className="flex items-center gap-1 font-medium"><Video className="h-4 w-4" /> Record this interview (optional)</span>
-              <span className="block text-xs text-tertiary-500">The company may record your audio and video for review. The recording is kept for {view.recording_days || 2} days and then deleted automatically. You can untick this and still take the interview.</span>
+              <span className="flex items-center gap-1 font-medium"><Video className="h-4 w-4" /> I agree to be recorded{mustRecord ? ' (required)' : ''}</span>
+              <span className="block text-xs text-tertiary-500">The company records your audio and video for review. The recording is kept for {view.recording_days || 2} days and then deleted automatically. The interview cannot be taken without it.</span>
             </span>
           </label>
         )}
         {!view.ai_enabled && <p className="mt-3 text-xs text-warning-700">The interviewer is not switched on yet. Please try again later.</p>}
         {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
-        <button type="button" className="btn-primary mt-5" disabled={!consent || busy || !view.ai_enabled} onClick={start}>{busy ? 'Starting...' : 'Start interview'}</button>
+        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled} onClick={start}>{busy ? 'Starting...' : 'Start interview'}</button>
       </Shell>
     );
   }
@@ -235,53 +369,78 @@ export default function AiInterviewPage() {
   const turns = view.transcript || [];
   const current = view.waiting_for_answer ? turns[turns.length - 1] : null;
   const history = turns.slice(0, current ? -1 : undefined);
+  const mustRecord = Boolean(view.recording_required);
+  const blocked = mustRecord && (!recording || Boolean(cameraProblem));
+  const waitingForCamera = mustRecord && recording && !recordingReady;
+  const urgent = remaining != null && remaining <= 30;
   return (
     <Shell>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="font-heading text-base font-semibold text-tertiary-900">AI interview{view.role_title ? ` - ${view.role_title}` : ''}</h1>
-          {view.section && <p className="text-xs text-tertiary-500">{SECTION_LABEL[view.section] || ''}</p>}
-        </div>
-        <div className="flex items-center gap-2">
-          {recording && <span className="flex items-center gap-1 rounded-full bg-danger-50 px-2 py-0.5 text-xs text-danger-700"><span className="h-2 w-2 animate-pulse rounded-full bg-danger-600" />Recording</span>}
-          <span className="text-xs text-tertiary-500">{view.answered} of {view.total_questions || '?'} answered</span>
-        </div>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-tertiary-100">
-        <div className="h-full bg-primary-500 transition-all" style={{ width: `${Math.min(100, Math.round((view.answered / (view.total_questions || 1)) * 100))}%` }} />
-      </div>
-      {recording && <video ref={videoRef} autoPlay muted playsInline className="mt-3 h-24 w-32 rounded-lg bg-black object-cover" />}
-      {notice && <p className="mt-2 text-xs text-warning-700">{notice}</p>}
-
-      <div className="mt-4 max-h-64 space-y-2 overflow-y-auto text-sm">
-        {history.map((t, i) => (
-          <div key={i} className={t.role === 'ai' ? 'text-tertiary-700' : 'ml-6 rounded-lg bg-primary-50 px-3 py-2 text-tertiary-800'}>
-            {t.role === 'ai' ? <span><span className="font-medium">Interviewer:</span> {t.text}</span> : t.text}
+      <div className="select-none">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="font-heading text-base font-semibold text-tertiary-900">AI interview{view.role_title ? ` - ${view.role_title}` : ''}</h1>
+            {view.section && <p className="text-xs text-tertiary-500">{SECTION_LABEL[view.section] || ''}</p>}
           </div>
-        ))}
+          <div className="flex items-center gap-2">
+            {remaining != null && <span data-testid="question-timer" className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${urgent ? 'bg-danger-50 text-danger-700' : 'bg-tertiary-100 text-tertiary-700'}`}><Clock className="h-3.5 w-3.5" />{clock(Math.max(0, remaining))}</span>}
+            {recording && <span className="flex items-center gap-1 rounded-full bg-danger-50 px-2 py-0.5 text-xs text-danger-700"><span className="h-2 w-2 animate-pulse rounded-full bg-danger-600" />Recording</span>}
+            <span className="text-xs text-tertiary-500">{view.answered} of {view.total_questions || '?'} answered</span>
+          </div>
+        </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-tertiary-100">
+          <div className="h-full bg-primary-500 transition-all" style={{ width: `${Math.min(100, Math.round((view.answered / (view.total_questions || 1)) * 100))}%` }} />
+        </div>
+        {recording && <video ref={videoRef} autoPlay muted playsInline className="mt-3 h-24 w-32 rounded-lg bg-black object-cover" />}
+        {warning && (
+          <div role="alert" data-testid="integrity-warning" className="mt-3 flex items-start gap-2 rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span className="flex-1">{warning}</span>
+            <button type="button" className="font-medium underline" onClick={() => setWarning('')}>OK</button>
+          </div>
+        )}
+
+        <div className="mt-4 max-h-64 space-y-2 overflow-y-auto text-sm">
+          {history.map((t, i) => (
+            <div key={i} className={t.role === 'ai' ? 'text-tertiary-700' : 'ml-6 rounded-lg bg-primary-50 px-3 py-2 text-tertiary-800'}>
+              {t.role === 'ai' ? <span><span className="font-medium">Interviewer:</span> {t.text}</span> : t.text}
+            </div>
+          ))}
+        </div>
+
+        {current && (
+          <div className="mt-4 rounded-xl border border-primary-200 bg-primary-50/40 p-4">
+            <p className="text-sm font-medium text-tertiary-900">{current.kind === 'follow_up' ? 'Follow-up: ' : ''}{current.text}</p>
+            <textarea
+              className="mt-3 min-h-[110px] w-full select-text rounded-lg border border-tertiary-200 p-3 text-sm focus:border-primary-500 focus:outline-none"
+              placeholder={view.section === 'aptitude' ? 'Type your answer' : 'Speak using the microphone, or type your answer here'}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onPaste={(e) => e.preventDefault()}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+              disabled={busy || blocked}
+            />
+            {waitingForCamera && <p className="mt-2 text-xs text-tertiary-500">Waiting for the camera recording to start...</p>}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {SpeechRecognition && view.section !== 'aptitude' ? (
+                <button type="button" className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${listening ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-tertiary-200 text-tertiary-700'}`} onClick={toggleListening} disabled={busy || blocked}>
+                  {listening ? <><MicOff className="h-4 w-4" /> Stop speaking</> : <><Mic className="h-4 w-4" /> Speak your answer</>}
+                </button>
+              ) : <span />}
+              <button type="button" className="btn-primary" disabled={busy || blocked || waitingForCamera || text.trim().length < 2} onClick={() => send()}>{busy ? 'Please wait...' : 'Send answer'}</button>
+            </div>
+          </div>
+        )}
+        {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
       </div>
 
-      {current && (
-        <div className="mt-4 rounded-xl border border-primary-200 bg-primary-50/40 p-4">
-          <p className="text-sm font-medium text-tertiary-900">{current.kind === 'follow_up' ? 'Follow-up: ' : ''}{current.text}</p>
-          <textarea
-            className="mt-3 min-h-[110px] w-full rounded-lg border border-tertiary-200 p-3 text-sm focus:border-primary-500 focus:outline-none"
-            placeholder={view.section === 'aptitude' ? 'Type your answer' : 'Speak using the microphone, or type your answer here'}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            disabled={busy}
-          />
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            {SpeechRecognition && view.section !== 'aptitude' ? (
-              <button type="button" className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${listening ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-tertiary-200 text-tertiary-700'}`} onClick={toggleListening} disabled={busy}>
-                {listening ? <><MicOff className="h-4 w-4" /> Stop speaking</> : <><Mic className="h-4 w-4" /> Speak your answer</>}
-              </button>
-            ) : <span />}
-            <button type="button" className="btn-primary" disabled={busy || text.trim().length < 2} onClick={send}>{busy ? 'Please wait...' : 'Send answer'}</button>
-          </div>
+      {blocked && (
+        <div role="alertdialog" data-testid="camera-required" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">
+          <p className="font-medium">The camera and microphone are required for this interview.</p>
+          <p className="mt-1 text-xs">{cameraProblem || 'Starting the camera...'} The interview is paused until the recording is back on.</p>
+          <button type="button" className="btn-primary mt-3 text-xs" onClick={retryCamera}>Turn the camera on</button>
         </div>
       )}
-      {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
     </Shell>
   );
 }

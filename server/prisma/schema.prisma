@@ -8131,6 +8131,8 @@ model AiInterview {
   // Set when the company's auto-reject switch moved the candidate to Rejected after a below-pass result, or why it did not.
   auto_rejected_at     DateTime?
   auto_reject_note     String?
+  // Tab switches, copy / paste attempts and similar, logged by the candidate page: [{ type, at, seconds_away? }].
+  integrity_events     Json      @default("[]")
 
   @@index([submission_id])
   @@index([org_id, status])
@@ -8159,6 +8161,9 @@ model AiInterviewSettings {
   extra_instructions String?
   auto_reject        Boolean  @default(false)
   link_valid_days    Int      @default(7)
+  // Time allowed per question (seconds, 0 = no limit) and how many tab switches end the interview (0 = never ends it, only logs).
+  answer_time_seconds Int     @default(180)
+  max_tab_switches   Int      @default(3)
   updated_by         String?  @db.Uuid
   updated_at         DateTime @default(now()) @updatedAt
 

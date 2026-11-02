@@ -95,7 +95,9 @@ const tokenOf = (link) => link.split('/').pop();
 const pub = (path) => request(app).get(`/api/v1/public/ai-interviews/${path}`);
 const post = (path, body) => request(app).post(`/api/v1/public/ai-interviews/${path}`).send(body);
 
-async function runInterview(token, answerText = 'I built it with Apex and explained trade-offs.') {
+// a proper answer (over 20 words): short one-liners are capped on communication, which is tested on its own below
+const FULL_ANSWER = 'I built it with Apex and explained the trade-offs to the team, then I measured the result, fixed the slow queries and wrote the release notes for the client.';
+async function runInterview(token, answerText = FULL_ANSWER) {
   let view = (await post(`${token}/start`, { consent: true })).body.data;
   let last;
   while (view.waiting_for_answer) {
@@ -342,16 +344,30 @@ describe('optional recording (audio + video), deleted after the retention days',
   }
   const fileOf = async (token) => path.join(env.uploadDir, 'ai-interviews', (await prisma.aiInterview.findUnique({ where: { token } })).recording_path);
 
-  test('it is off by default, and a candidate who declines is still interviewed (nothing is stored)', async () => {
+  test('it is off by default; when the company turns it on, a candidate cannot start without agreeing, and cannot answer until the recording has started', async () => {
     const off = (await invite()).body.data;
     const offToken = tokenOf(off.link);
+    expect((await pub(offToken)).body.data).toMatchObject({ recording_offered: false, recording_required: false });
     expect((await post(`${offToken}/start`, { consent: true, recording_consent: true })).body.data.recording_on).toBe(false);
     expect((await chunk(offToken, 0)).status).toBe(404);
 
     await prisma.aiInterview.deleteMany();
-    const { token, started } = await startRecorded(false);
-    expect(started.body.data.recording_on).toBe(false);
-    expect((await chunk(token, 0)).status).toBe(404);
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ recording_enabled: true });
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    expect((await pub(token)).body.data).toMatchObject({ recording_offered: true, recording_required: true });
+    // declining is no longer an option: the interview does not start
+    expect((await post(`${token}/start`, { consent: true, recording_consent: false })).status).toBe(400);
+    expect((await post(`${token}/start`, { consent: true })).status).toBe(400);
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).status).toBe('invited');
+
+    const started = await post(`${token}/start`, { consent: true, recording_consent: true });
+    expect(started.status).toBe(200);
+    expect(started.body.data).toMatchObject({ recording_on: true, recording_required: true });
+    // no recording chunk has reached the server yet, so an answer is refused; after the first chunk it goes through
+    expect((await post(`${token}/answer`, { text: 'An answer before the camera started' })).status).toBe(409);
+    expect((await chunk(token, 0, 'AAAA')).status).toBe(200);
+    expect((await post(`${token}/answer`, { text: 'An answer once recording runs' })).status).toBe(200);
   });
 
   test('parts are saved in order, a retry is ignored, a gap and a wrong type are refused, and the team can play and download it', async () => {
@@ -530,5 +546,125 @@ describe('auto-reject, result notification, CV, per-requirement switch and analy
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ sent: 1, completed: 1, pass: 1, borderline: 0, below_pass: 0, overridden: 1, pending_review: 0, average_score: 90 });
     expect((await authed(request(app).get('/api/v1/ai-interviews/analytics?from=2020-01-01&to=2020-01-02'), recruiterToken)).body.data.sent).toBe(0);
+  });
+});
+
+describe('communication scoring facts', () => {
+  const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+  const settings = { weight_knowledge: 50, weight_communication: 25, weight_depth: 25, pass_percentage: 60, borderline_margin: 10, aptitude_enabled: false };
+  const raw = { parameters: ['knowledge', 'communication', 'depth'].map((key) => ({ key, score: 9, summary: 's', evidence: 'e' })) };
+  const answers = (texts, extra = {}) => texts.map((text) => ({ role: 'candidate', kind: 'answer', text, ...extra }));
+  const long = Array(30).fill('word').join(' ');
+  const comm = (transcript) => logic.buildScores(raw, settings, transcript).scores.parameters.find((p) => p.key === 'communication').score;
+
+  test('one-line or skipped answers cannot earn a high communication mark, however the AI scored them', () => {
+    expect(comm(answers([long, long, long]))).toBe(9); // full answers: the AI score stands
+    expect(comm(answers(['yes', 'no', 'maybe', 'ok']))).toBe(4); // under 10 words on average
+    expect(comm(answers(['I used Apex for this and a trigger for that part of it.', 'It was a flow plus a validation rule on the object here.']))).toBe(6); // under 20 words
+    const skipped = [...answers(['[No answer - time ran out]'], { timed_out: true }), ...answers([long])];
+    expect(comm(skipped)).toBe(2); // half of the answers not given
+    expect(logic.answerStats(skipped)).toMatchObject({ answers: 2, skipped: 1 });
+  });
+
+  test('tab switches and copy / paste attempts become red flags on the result', () => {
+    const flags = logic.buildScores(raw, settings, answers([long]), { tab_switches: 2, copy_paste: 1 }).scores.red_flags;
+    expect(flags.join(' ')).toMatch(/left the interview page 2 times/);
+    expect(flags.join(' ')).toMatch(/1 copy \/ paste attempt was blocked/);
+  });
+});
+
+describe('resend, restart, timer and page integrity', () => {
+  const event = (token, type, extra = {}) => post(`${token}/event`, { type, ...extra });
+
+  test('the same link can be sent again (email queued, expiry renewed); a finished interview cannot', async () => {
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await prisma.aiInterview.update({ where: { token }, data: { expires_at: new Date(Date.now() - 1000) } }); // an expired link
+    expect((await pub(token)).status).toBe(410);
+    const res = await authed(request(app).post(`/api/v1/ai-interviews/${created.id}/resend`), recruiterToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ emailed: true });
+    expect(res.body.data.link).toBe(created.link); // the SAME link, not a new one
+    expect((await pub(token)).status).toBe(200); // it works again
+    const mail = await prisma.emailOutbox.findFirst({ where: { to_email: 'cand@test.local', kind: 'ai_interview_invite' }, orderBy: { created_at: 'desc' } });
+    expect(mail.subject).toMatch(/link sent again/);
+
+    expect((await request(app).post(`/api/v1/ai-interviews/${created.id}/resend`)).status).toBe(401);
+    await runInterview(token);
+    expect((await authed(request(app).post(`/api/v1/ai-interviews/${created.id}/resend`), recruiterToken)).status).toBe(409);
+  });
+
+  test('an interview in progress is kept by a plain invite, and restarted only on request (audited)', async () => {
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await post(`${token}/start`, { consent: true });
+    expect((await invite()).status).toBe(409);
+    const again = await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, restart: true });
+    expect(again.status).toBe(201);
+    expect(again.body.data.superseded).toBe(1);
+    expect((await pub(token)).status).toBe(410); // the old link stops
+    expect((await pub(tokenOf(again.body.data.link))).status).toBe(200);
+    expect(await prisma.auditLog.count({ where: { action: 'restart_ai_interview' } })).toBe(1);
+  });
+
+  test('the candidate view carries the per-question timer; a timed-out answer is stored as not answered and gets no follow-up', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 90, max_tab_switches: 4 });
+    const token = tokenOf((await invite()).body.data.link);
+    const before = await pub(token);
+    expect(before.body.data).toMatchObject({ answer_seconds: 90, max_tab_switches: 4 });
+    const started = (await post(`${token}/start`, { consent: true })).body.data;
+    expect(started.answer_seconds).toBe(90);
+    expect(started.question_asked_at).toBeTruthy();
+    expect(Math.abs(new Date(started.server_now) - Date.now())).toBeLessThan(10000);
+
+    const calls0 = calls.followUp;
+    const res = await post(`${token}/answer`, { text: '[No answer - time ran out]', timed_out: true });
+    expect(res.status).toBe(200);
+    expect(calls.followUp).toBe(calls0); // no follow-up on an unanswered question
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    const answer = row.transcript.find((t) => t.role === 'candidate');
+    expect(answer).toMatchObject({ timed_out: true });
+    expect(typeof answer.seconds).toBe('number');
+    // the time limit and the tab-switch limit are admin settings with sane bounds
+    expect((await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 5000 })).status).toBe(422);
+    expect((await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 0, max_tab_switches: 0 })).status).toBe(200);
+  });
+
+  test('tab switches and copy attempts are logged; reaching the limit ends the interview for a person to review', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_tab_switches: 2 });
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    expect((await event(token, 'tab_hidden')).status).toBe(409); // not started yet
+    await post(`${token}/start`, { consent: true });
+    expect((await event(token, 'whatever')).status).toBe(400);
+    expect((await event(token, 'copy')).body.data).toMatchObject({ ended: false, tab_switches: 0 });
+    expect((await event(token, 'tab_hidden', { seconds_away: 12 })).body.data).toMatchObject({ ended: false, tab_switches: 1 });
+    const team = await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken);
+    expect(team.body.data.items[0].integrity).toMatchObject({ tab_switches: 1, copy_paste: 1 });
+
+    const last = await event(token, 'window_blur', { seconds_away: 3 });
+    expect(last.body.data).toMatchObject({ ended: true, tab_switches: 2 });
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(row.status).toBe('pending_review');
+    expect(row.scores.red_flags[0]).toMatch(/ended automatically.*2 times \(limit 2\)/);
+    expect((await pub(token)).status).toBe(410); // the link is finished
+    expect((await event(token, 'copy')).status).toBe(410);
+  });
+
+  test('with the limit at 0 tab switches are only logged, and the finished result carries the integrity red flags', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_tab_switches: 0 });
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await post(`${token}/start`, { consent: true });
+    for (let i = 0; i < 4; i += 1) expect((await event(token, 'tab_hidden')).body.data.ended).toBe(false);
+    await event(token, 'paste');
+    // a burst (a held-down Ctrl+V) must not lose events to overwriting
+    await Promise.all(Array.from({ length: 6 }, () => event(token, 'copy')));
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).integrity_events).toHaveLength(4 + 1 + 6);
+    followUps = false;
+    await runInterview(token);
+    const review = (await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken)).body.data;
+    expect(review.scores.red_flags.join(' ')).toMatch(/left the interview page 4 times/);
+    expect(review.scores.red_flags.join(' ')).toMatch(/copy \/ paste attempt/);
   });
 });

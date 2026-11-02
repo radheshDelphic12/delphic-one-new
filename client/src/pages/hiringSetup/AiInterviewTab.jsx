@@ -10,6 +10,8 @@ const NUMBER_FIELDS = [
   { key: 'pass_percentage', label: 'Pass mark %', hint: 'At or above this the candidate passes', min: 1, max: 100 },
   { key: 'borderline_margin', label: 'Borderline range (points)', hint: 'Just under the pass mark within this many points = borderline, a person decides', min: 0, max: 50 },
   { key: 'link_valid_days', label: 'Link valid for (days)', hint: 'One attempt per link', min: 1, max: 60 },
+  { key: 'answer_time_seconds', label: 'Time per question (seconds)', hint: 'A countdown on every question; when it ends the typed answer is sent. 0 = no limit', min: 0, max: 1800 },
+  { key: 'max_tab_switches', label: 'Tab switches allowed', hint: 'Leaving the interview page is logged and warned about; at this many the interview ends for a person to review. 0 = only log', min: 0, max: 20 },
 ];
 const WEIGHTS = [
   { key: 'weight_knowledge', label: 'Role knowledge' },
@@ -159,7 +161,7 @@ export default function AiInterviewTab({ isAdmin }) {
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
         <h3 className="text-sm font-semibold text-tertiary-900">Recording (audio + video)</h3>
         <div className="mt-3 space-y-3">
-          <Switch checked={form.recording_enabled} onChange={set('recording_enabled')} label="Offer to record the interview" hint="Off by default. When on, the candidate is asked for permission first and can still take the interview without being recorded. Recordings are deleted automatically after the days below; the transcript and scores stay." />
+          <Switch checked={form.recording_enabled} onChange={set('recording_enabled')} label="Record the interview (mandatory for the candidate)" hint="Off by default. When on, every candidate must allow the camera and microphone and agree to the recording before the interview starts, and the interview pauses if the camera is turned off. Recordings are deleted automatically after the days below; the transcript and scores stay." />
           {form.recording_enabled && (
             <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 30; 2 by default', min: 1, max: 30 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
           )}

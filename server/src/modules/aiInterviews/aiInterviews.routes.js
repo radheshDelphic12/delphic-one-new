@@ -26,6 +26,9 @@ const ERRORS = {
   not_waiting: [409, 'There is no question waiting for an answer'],
   empty_answer: [400, 'Please type or say your answer first'],
   busy: [409, 'Your last answer is still being processed. Please wait a moment'],
+  recording_required: [400, 'This interview is recorded: please allow your camera and microphone and tick the recording box to start'],
+  recording_missing: [409, 'Your camera recording has not started. Allow the camera, wait a few seconds and send the answer again'],
+  bad_event: [400, 'Unknown event'],
   bad_recording: [400, 'That recording part could not be accepted'],
   recording_gap: [409, 'A recording part is missing; send them in order'],
   recording_too_big: [413, 'The recording is too large'],
@@ -52,6 +55,8 @@ const settingsSchema = z.object({
   recording_retention_days: z.number().int().min(1).max(30).optional(),
   extra_instructions: z.string().trim().max(1500).nullable().optional(),
   link_valid_days: z.number().int().min(1).max(60).optional(),
+  answer_time_seconds: z.number().int().min(0).max(1800).optional(),
+  max_tab_switches: z.number().int().min(0).max(20).optional(),
 });
 
 // ---- team side (login) ----
@@ -60,9 +65,15 @@ router.use(authenticate, requireMasterWorkspace);
 
 router.get('/', asyncHandler(async (req, res) => ok(res, await service.list({ submissionId: z.string().uuid().parse(req.query.submission_id) }))));
 router.post('/', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
-  const body = z.object({ submission_id: z.string().uuid() }).parse(req.body);
-  const r = await service.invite({ submissionId: body.submission_id }, req.user);
+  const body = z.object({ submission_id: z.string().uuid(), restart: z.boolean().optional() }).parse(req.body);
+  const r = await service.invite({ submissionId: body.submission_id, restart: body.restart }, req.user);
   return r.error ? mapError(res, r.error) : created(res, { ...r.interview, link: r.link, superseded: r.superseded });
+}));
+
+// Send the same link again (email + link to copy); an expired link gets a new validity period.
+router.post('/:id/resend', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
+  const r = await service.resend(z.string().uuid().parse(req.params.id), req.user);
+  return r.error ? mapError(res, r.error) : ok(res, { ...r.interview, link: r.link, emailed: r.emailed });
 }));
 
 router.get('/settings', asyncHandler(async (req, res) => ok(res, await service.getSettings(req.user.org_id))));
@@ -135,9 +146,16 @@ publicRouter.post('/ai-interviews/:token/recording', express.raw({ type: () => t
   return r.error ? mapError(res, r.error) : ok(res, { saved: true });
 }));
 publicRouter.post('/ai-interviews/:token/answer', asyncHandler(async (req, res) => {
-  const body = z.object({ text: z.string().max(20000) }).parse(req.body);
-  const r = await service.answerForCandidate(req.params.token, body.text);
+  const body = z.object({ text: z.string().max(20000), timed_out: z.boolean().optional() }).parse(req.body);
+  const r = await service.answerForCandidate(req.params.token, body.text, { timedOut: Boolean(body.timed_out) });
   return r.error ? mapError(res, r.error) : ok(res, { ...r.view, done: Boolean(r.done) });
+}));
+
+// Tab switches, copy / paste attempts and camera-off events from the candidate's page (logged; too many tab switches end the interview).
+publicRouter.post('/ai-interviews/:token/event', asyncHandler(async (req, res) => {
+  const body = z.object({ type: z.string().max(30), seconds_away: z.number().min(0).max(86400).optional() }).parse(req.body);
+  const r = await service.recordEvent(req.params.token, { type: body.type, seconds_away: body.seconds_away });
+  return r.error ? mapError(res, r.error) : ok(res, r);
 }));
 
 module.exports = { router, publicRouter };

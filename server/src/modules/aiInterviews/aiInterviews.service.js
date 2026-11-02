@@ -17,7 +17,19 @@ const DEFAULTS = {
   is_enabled: false, question_count: 7, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
   weight_knowledge: 50, weight_communication: 25, weight_depth: 25, aptitude_enabled: true, aptitude_question_count: 4, weight_aptitude: 20,
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
+  answer_time_seconds: 180, max_tab_switches: 3,
 };
+const TAB_EVENTS = ['tab_hidden', 'window_blur']; // leaving the interview page; these count towards max_tab_switches
+const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off'];
+const EVENT_TYPES = [...TAB_EVENTS, ...OTHER_EVENTS];
+const eventsOf = (a) => (Array.isArray(a.integrity_events) ? a.integrity_events : []);
+const tabSwitchesOf = (a) => eventsOf(a).filter((e) => TAB_EVENTS.includes(e.type)).length;
+// { tab_switches, copy_paste, camera_off, total } for the team and for the scorer
+function integritySummary(a) {
+  const ev = eventsOf(a);
+  const n = (types) => ev.filter((e) => types.includes(e.type)).length;
+  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), total: ev.length };
+}
 const RECORDING_DIR = () => path.join(env.uploadDir, 'ai-interviews');
 const MAX_RECORDING_BYTES = 250 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 12 * 1024 * 1024;
@@ -87,6 +99,7 @@ function toTeamView(a, names = new Map()) {
     expires_at: a.expires_at,
     completed_at: a.completed_at,
     recording_on: a.recording_on,
+    integrity: integritySummary(a),
     has_recording: filesOf(a).length > 0 && !a.recording_deleted_at,
     recording_parts: a.recording_deleted_at ? [] : filesOf(a).map((p) => ({ bytes: p.bytes })),
     auto_rejected_at: a.auto_rejected_at,
@@ -158,7 +171,7 @@ async function loadResume(profileId) {
 }
 
 // ---- team side ----
-async function invite({ submissionId }, user) {
+async function invite({ submissionId, restart = false }, user) {
   const settings = await getSettings(user.org_id);
   if (!settings.is_enabled) return { error: 'disabled' };
   const ctx = await contextFor(submissionId);
@@ -171,11 +184,13 @@ async function invite({ submissionId }, user) {
   const existing = await prisma.aiInterview.findMany({ where: { submission_id: submissionId, deleted_at: null } });
   const live = existing.filter(isLive);
   if (live.some((a) => a.status === 'completed' || a.status === 'pending_review')) return { error: 'already_completed' };
-  if (live.some((a) => a.status === 'started')) return { error: 'in_progress' };
+  // a candidate in the middle of the interview keeps it, unless the sender chooses to restart it with a new link
+  if (live.some((a) => a.status === 'started') && !restart) return { error: 'in_progress' };
 
   const token = crypto.randomBytes(24).toString('hex');
   const row = await prisma.$transaction(async (tx) => {
     if (live.length) await tx.aiInterview.updateMany({ where: { id: { in: live.map((a) => a.id) } }, data: { superseded_at: new Date() } });
+    for (const a of live.filter((x) => x.status === 'started')) await audit(tx, user, 'restart_ai_interview', a, 'A new link replaced an interview in progress');
     return tx.aiInterview.create({
       data: {
         token, submission_id: submissionId, org_id: user.org_id || null, template_round_id: roundId,
@@ -262,11 +277,17 @@ async function load(token) {
 }
 
 // What the candidate may see: the conversation so far and the question waiting for an answer. Never scores or rubric.
-function candidateView(a) {
+function candidateView(a, settings = null) {
   const transcript = Array.isArray(a.transcript) ? a.transcript : [];
   const questions = Array.isArray(a.questions) ? a.questions : [];
   const last = transcript[transcript.length - 1];
   return {
+    // timer: the page counts down from the moment the question was asked (server clock, so a reload cannot reset it)
+    answer_seconds: settings ? settings.answer_time_seconds : null,
+    question_asked_at: last && last.role === 'ai' ? last.at || null : null,
+    server_now: new Date().toISOString(),
+    max_tab_switches: settings ? settings.max_tab_switches : null,
+    tab_switches: tabSwitchesOf(a),
     candidate_name: a.candidate_name,
     role_title: a.role_title,
     status: a.status,
@@ -286,19 +307,21 @@ async function openForCandidate(token) {
   if (r.error) return r;
   // before the start, tell the page whether this company records interviews, so it can ask for consent up front
   const settings = await getSettings(r.a.org_id);
-  return { view: { ...candidateView(r.a), recording_offered: Boolean(settings.recording_enabled), recording_days: settings.recording_retention_days } };
+  // recording is mandatory whenever the company has it on: the candidate must allow camera and microphone to take the interview
+  return { view: { ...candidateView(r.a, settings), recording_offered: Boolean(settings.recording_enabled), recording_required: Boolean(settings.recording_enabled), recording_days: settings.recording_retention_days } };
 }
 
 async function startForCandidate(token, { consent, recording_consent: recordingConsent }) {
   const r = await load(token);
   if (r.error) return r;
   let a = r.a;
-  if (a.status === 'started') return { view: candidateView(a) }; // reopened after a closed tab: carry on where it stopped
+  if (a.status === 'started') return { view: { ...candidateView(a, await getSettings(a.org_id)), recording_required: Boolean((await getSettings(a.org_id)).recording_enabled) } }; // reopened after a closed tab: carry on where it stopped
   if (!consent) return { error: 'consent_required' };
   if (busy.has(a.id)) return { error: 'busy' };
   busy.add(a.id);
   try {
     const settings = await getSettings(a.org_id);
+    if (settings.recording_enabled && !recordingConsent) return { error: 'recording_required' };
     const ctx = await contextFor(a.submission_id);
     ctx.resume = await loadResume(ctx.profile_id);
     const { questions, usage } = await logic.generateQuestions(ctx, { ...settings });
@@ -307,12 +330,12 @@ async function startForCandidate(token, { consent, recording_consent: recordingC
       where: { id: a.id },
       data: {
         status: 'started', started_at: new Date(), consented_at: new Date(), questions, transcript: [first],
-        // recorded only when the company has recording on AND this candidate agreed; declining never blocks the interview
+        // recording is mandatory when the company has it on (checked above); without it on, nothing is recorded
         recording_on: Boolean(settings.recording_enabled && recordingConsent),
         input_tokens: { increment: usage.input }, output_tokens: { increment: usage.output },
       },
     });
-    return { view: candidateView(a) };
+    return { view: { ...candidateView(a, settings), recording_required: Boolean(settings.recording_enabled) } };
   } catch (err) {
     if (err instanceof AiUnavailableError) { logger.warn({ err: err.message }, 'ai interview could not start'); return { error: 'ai_unavailable' }; }
     throw err;
@@ -368,8 +391,10 @@ async function finish(a, settings, ctx, transcript, tokens) {
   const retention = a.recording_on ? { recording_expires_at: new Date(Date.now() + settings.recording_retention_days * 86400000) } : {};
   const base = { transcript, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output }, completed_at: new Date(), ...retention };
   try {
+    const fresh = await prisma.aiInterview.findUnique({ where: { id: a.id }, select: { integrity_events: true } });
+    const integrity = integritySummary({ integrity_events: fresh?.integrity_events });
     const scored = await logic.scoreInterview(ctx, rubric, transcript, questions);
-    const { percent, outcome, scores } = logic.buildScores(scored.data, rubric, transcript);
+    const { percent, outcome, scores } = logic.buildScores(scored.data, rubric, transcript, integrity);
     let row = await prisma.aiInterview.update({
       where: { id: a.id },
       data: {
@@ -392,7 +417,7 @@ async function finish(a, settings, ctx, transcript, tokens) {
 
 const FINISH_WAIT_MS = 15000;
 
-async function answerForCandidate(token, rawText) {
+async function answerForCandidate(token, rawText, { timedOut = false } = {}) {
   const r = await load(token);
   if (r.error) return r;
   const a = r.a;
@@ -402,6 +427,8 @@ async function answerForCandidate(token, rawText) {
   const transcript = Array.isArray(a.transcript) ? [...a.transcript] : [];
   const last = transcript[transcript.length - 1];
   if (!last || last.role !== 'ai') return { error: 'not_waiting' };
+  // a recorded interview must actually be recording: the first chunk reaches the server a few seconds after the start
+  if (a.recording_on && !filesOf(a).length) return { error: 'recording_missing' };
   if (busy.has(a.id)) return { error: 'busy' };
   busy.add(a.id);
   let keepLocked = false;
@@ -411,14 +438,15 @@ async function answerForCandidate(token, rawText) {
     const questions = Array.isArray(a.questions) ? a.questions : [];
     const current = questions.find((q) => q.id === last.question_index);
     const now = () => new Date().toISOString();
-    transcript.push({ role: 'candidate', kind: 'answer', section: last.section, question_index: last.question_index, text, at: now() });
+    const seconds = last.at ? Math.max(0, Math.round((Date.now() - new Date(last.at).getTime()) / 1000)) : null;
+    transcript.push({ role: 'candidate', kind: 'answer', section: last.section, question_index: last.question_index, text, at: now(), ...(seconds != null ? { seconds } : {}), ...(timedOut ? { timed_out: true } : {}) });
     const tokens = { input: 0, output: 0 };
 
     // Save the answer first so a later AI failure can never lose it.
     let row = await prisma.aiInterview.update({ where: { id: a.id }, data: { transcript } });
 
     // One short follow-up at most per role question (never for aptitude), and a capped number per interview.
-    if (last.kind === 'question' && current?.kind === 'role' && row.followups_used < settings.max_followups) {
+    if (!timedOut && last.kind === 'question' && current?.kind === 'role' && row.followups_used < settings.max_followups) {
       try {
         const f = await logic.decideFollowUp(ctx, settings, last.text, text);
         tokens.input += f.usage.input; tokens.output += f.usage.output;
@@ -428,7 +456,7 @@ async function answerForCandidate(token, rawText) {
             where: { id: a.id },
             data: { transcript, followups_used: { increment: 1 }, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output } },
           });
-          return { view: candidateView(row) };
+          return { view: candidateView(row, settings) };
         }
       } catch (err) {
         if (!(err instanceof AiUnavailableError)) throw err; // a failed follow-up just moves on to the next question
@@ -441,18 +469,18 @@ async function answerForCandidate(token, rawText) {
       row = await prisma.aiInterview.update({
         where: { id: a.id }, data: { transcript, input_tokens: { increment: tokens.input }, output_tokens: { increment: tokens.output } },
       });
-      return { view: candidateView(row), done: false };
+      return { view: candidateView(row, settings), done: false };
     }
     // Scoring can take a minute (AI call, one retry), longer than a gateway waits. The answer is already saved, so after a
     // short wait the candidate is told they are done while scoring finishes in the background (the lock is held until then).
     const scoring = finish(a, settings, ctx, transcript, tokens);
     const settled = await Promise.race([scoring, new Promise((resolve) => { setTimeout(() => resolve(null), FINISH_WAIT_MS).unref?.(); })]);
-    if (settled) return { view: candidateView(settled), done: true };
+    if (settled) return { view: candidateView(settled, settings), done: true };
     keepLocked = true;
     scoring
       .catch((err) => logger.error({ err: err.message, id: a.id }, 'ai interview scoring failed after the candidate finished'))
       .finally(() => busy.delete(a.id));
-    return { view: { ...candidateView({ ...row, transcript }), status: 'completed', waiting_for_answer: false }, done: true };
+    return { view: { ...candidateView({ ...row, transcript }, settings), status: 'completed', waiting_for_answer: false }, done: true };
   } finally {
     if (!keepLocked) busy.delete(a.id);
   }
@@ -579,9 +607,68 @@ async function purgeExpiredRecordings(now = new Date()) {
   return { purged: due.length };
 }
 
+
+// Re-sends the SAME link (the candidate carries on where they stopped) by email, and gives the link back to copy. A link that has
+// expired or is about to is given a fresh validity period.
+async function resend(id, user) {
+  const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
+  if (!a || a.superseded_at) return { error: 'not_found' };
+  if (a.status === 'completed' || a.status === 'pending_review') return { error: 'already_completed' };
+  const settings = await getSettings(user.org_id);
+  let row = a;
+  if (a.expires_at.getTime() < Date.now() + 86400000) {
+    row = await prisma.aiInterview.update({ where: { id }, data: { expires_at: new Date(Date.now() + settings.link_valid_days * 86400000) } });
+  }
+  const link = attemptLink(row.token);
+  let emailed = false;
+  if (row.candidate_email) {
+    await enqueue(prisma, {
+      kind: 'ai_interview_invite',
+      to: { email: row.candidate_email, name: row.candidate_name },
+      subject: `Your interview for ${row.role_title || 'the role'} (link sent again)`,
+      text: `Hi ${row.candidate_name},\n\nHere is your interview link again: ${link}\n\nIf you had already started, open the same link to carry on where you stopped.`,
+    });
+    emailed = true;
+  }
+  await audit(prisma, user, 'resend_ai_interview', row, 'Interview link sent again', { emailed });
+  return { interview: toTeamView(row), link, emailed };
+}
+
+// One event from the candidate's page (tab switch, copy / paste attempt, camera turned off). Logged on the interview; when the
+// company limit of tab switches is reached the interview ends and a person reviews the answers given so far.
+async function recordEvent(token, { type, seconds_away: secondsAway }) {
+  if (!EVENT_TYPES.includes(type)) return { error: 'bad_event' };
+  const r = await load(token);
+  if (r.error) return r;
+  const a = r.a;
+  if (a.status !== 'started') return { error: 'not_started' };
+  // appended in one statement: a burst of events (a held-down Ctrl+V) must not overwrite each other, so no read-modify-write here
+  const event = { type, at: new Date().toISOString(), ...(Number.isFinite(secondsAway) ? { seconds_away: Math.round(secondsAway) } : {}) };
+  await prisma.$executeRaw`UPDATE "ai_interviews" SET "integrity_events" = COALESCE("integrity_events", '[]'::jsonb) || ${JSON.stringify([event])}::jsonb WHERE "id" = ${a.id}::uuid AND jsonb_array_length(COALESCE("integrity_events", '[]'::jsonb)) < 200`;
+  let row = await prisma.aiInterview.findUnique({ where: { id: a.id } });
+  const settings = await getSettings(a.org_id);
+  const switches = tabSwitchesOf(row);
+  if (settings.max_tab_switches > 0 && TAB_EVENTS.includes(type) && switches >= settings.max_tab_switches && !busy.has(a.id)) {
+    const summary = integritySummary(row);
+    const reason = `The interview was ended automatically: the candidate left the interview page ${switches} times (limit ${settings.max_tab_switches}).`;
+    const answered = (Array.isArray(row.transcript) ? row.transcript : []).filter((t) => t.role === 'candidate').length;
+    row = await prisma.aiInterview.update({
+      where: { id: a.id },
+      data: {
+        status: 'pending_review', outcome: 'pending_review', completed_at: new Date(),
+        scores: { parameters: [], summary: reason, strengths: [], red_flags: [reason], decision_reason: `${reason} ${answered} answer(s) were given before that; please read them and decide.` },
+        ...(a.recording_on ? { recording_expires_at: new Date(Date.now() + settings.recording_retention_days * 86400000) } : {}),
+      },
+    });
+    await announceResult(row, await contextFor(a.submission_id));
+    return { ended: true, tab_switches: switches, summary };
+  }
+  return { ended: false, tab_switches: switches };
+}
+
 module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
-  invite, list, review, override, remove, setRequirementSwitch, analytics,
+  invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics,
   openForCandidate, startForCandidate, answerForCandidate,
   saveRecordingChunk, recordingFor, purgeExpiredRecordings,
 };

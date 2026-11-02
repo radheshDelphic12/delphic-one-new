@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Download, Eye, Trash2 } from 'lucide-react';
+import { Copy, Download, Eye, RotateCcw, Send, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -64,6 +64,24 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     copy(data.data.link);
   }, 'Could not create the AI interview link');
 
+  // The same link again (email + copy); an expired link gets a new validity period. The candidate carries on where they stopped.
+  const resend = () => run(async () => {
+    const { data } = await apiClient.post(`/ai-interviews/${live.id}/resend`);
+    await load();
+    pushSuccess(data.data.emailed ? 'The link was sent to the candidate again and copied for you.' : 'This candidate has no email on file. The link was copied: send it yourself.', 'Link sent again');
+    navigator.clipboard?.writeText(data.data.link).catch(() => {});
+  }, 'Could not send the link again');
+
+  // A candidate in the middle of the interview keeps it; a new link starts it again from the first question.
+  const restart = () => {
+    if (!window.confirm('The candidate has already started. A new link starts the interview again from the first question and the current link stops working. Continue?')) return;
+    run(async () => {
+      const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId, restart: true });
+      await load();
+      copy(data.data.link);
+    }, 'Could not create the new AI interview link');
+  };
+
   async function openReview(item) {
     setVideo({ url: null, error: '' });
     await run(async () => {
@@ -119,6 +137,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   }, 'Could not change the setting for this requirement');
 
   const canSend = !locked && !switchedOff && (!live || ['not_opened', 'expired'].includes(live.view_status));
+  const canResend = !locked && !switchedOff && live && ['not_opened', 'in_progress', 'expired'].includes(live.view_status);
   return (
     <section className="rounded-2xl border border-violet-100 bg-violet-50/30 p-4 shadow-soft">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -132,6 +151,8 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
               {switchedOff ? 'Turn on for this requirement' : 'Turn off for this requirement'}
             </button>
           )}
+          {canResend && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={busy} onClick={resend}><Send className="h-3.5 w-3.5" />Resend link</button>}
+          {canResend && live.view_status === 'in_progress' && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={busy} onClick={restart}><RotateCcw className="h-3.5 w-3.5" />Restart with a new link</button>}
           {canSend && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={send}>{live ? 'Send a new link' : 'Send AI interview link'}</button>}
         </div>
       </div>
@@ -145,6 +166,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[i.view_status] || STATUS_TONE.not_opened}`}>{STATUS_LABEL[i.view_status] || i.view_status}</span>
                 {i.effective_outcome && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${OUTCOME_TONE[i.effective_outcome]}`}>{OUTCOME_LABEL[i.effective_outcome]}{i.override_outcome ? ' (decided by a person)' : ''}</span>}
+                {i.integrity?.total > 0 && <span className="rounded-full bg-warning-100 px-2 py-0.5 text-[11px] font-medium text-warning-800" title="Logged by the interview page">{[i.integrity.tab_switches ? `left the page ${i.integrity.tab_switches}x` : '', i.integrity.copy_paste ? `copy/paste blocked ${i.integrity.copy_paste}x` : '', i.integrity.camera_off ? `camera off ${i.integrity.camera_off}x` : ''].filter(Boolean).join(' · ')}</span>}
                 {i.score_percent != null && <span className="text-xs text-tertiary-700">AI score <strong>{i.score_percent}%</strong> (pass mark {i.pass_percentage}%)</span>}
                 <span className="text-xs text-tertiary-400">Sent {when(i.invited_at)}{i.created_by_name ? ` by ${i.created_by_name}` : ''}</span>
               </div>
