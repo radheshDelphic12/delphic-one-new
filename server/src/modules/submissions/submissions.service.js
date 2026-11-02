@@ -90,7 +90,8 @@ function serialize(row) {
     profile,
     submitted_by: submitted_by_user,
     interview_rounds: interview_rounds ? interview_rounds.map(serializeInterviewRound) : undefined,
-    missing_mandatory_rounds: interview_rounds ? computeMissingMandatoryRounds(interview_rounds) : undefined,
+    // Legacy (no template) warning only: a bench profile's first / last round are optional, so it never lists them as missing.
+    missing_mandatory_rounds: interview_rounds ? (profile?.source === 'direct' ? [] : computeMissingMandatoryRounds(interview_rounds)) : undefined,
     progress: interview_rounds ? computeClosureDetail(row.stage, interview_rounds) : null,
   };
 }
@@ -226,12 +227,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
     if (to_stage === 'offer_sent') {
       // Rounds are optional unless the template marks them mandatory (checked below): a ticket may go to offer with no round scheduled at all.
       // A cancelled (e.g. rescheduled) round never gets a result, so it must not hold the offer back; rounds that were never scheduled have no row.
-      // A round that IS scheduled still needs its result.
-      const rounds = await tx.interviewRound.findMany({ where: { submission_id: id, status: { not: 'cancelled' } } });
-      // A scheduled round the template marks optional may still be pending: only mandatory (or ad-hoc) rounds need their result.
-      const optionalIds = await templates.optionalTemplateRoundIds(tx, id);
-      const allResolved = rounds.every((r) => r.result !== 'pending' || (r.template_round_id && optionalIds.has(r.template_round_id)));
-      if (!allResolved) return { error: 'rounds_not_resolved' };
+      // A scheduled round that is still pending (optional or ad-hoc) never holds the offer back: only the template's mandatory rounds need a result.
       if (!(await templates.mandatoryRoundsDone(tx, id))) return { error: 'mandatory_rounds_pending' };
     }
     if (to_stage === 'closed') {

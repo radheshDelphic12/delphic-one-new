@@ -98,7 +98,8 @@ describe('template pick by service type', () => {
 describe('round order, feedback and ratings', () => {
   test('a mandatory round blocks the next until it has feedback and ratings', async () => {
     const requirement = await makeRequirement();
-    const submissionId = await makeSubmission(requirement.body.data.id);
+    // a market (non-bench) profile: the first round is mandatory, so it gates the next one
+    const submissionId = await makeSubmission(requirement.body.data.id, { source: 'linkedin' });
     let plan = await getPlan(submissionId);
     expect(plan.steps.map((s) => s.name)).toEqual([
       'Screening + Behavioural + Reasoning, Aptitude & Mind Test',
@@ -237,7 +238,9 @@ describe('bench profile skips the first round', () => {
     const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
     const submissionId = await makeSubmission(requirement.body.data.id);
     const before = await getPlan(submissionId);
-    expect(before.steps[1].can_start).toBe(false);
+    // a bench profile's first round is optional, so the next round is already open before the skip
+    expect(before.steps[0].is_mandatory).toBe(false);
+    expect(before.steps[1].can_start).toBe(true);
 
     const res = await skip(submissionId, { template_round_id: before.steps[0].template_round_id, reason: 'Already screened on the bench' });
     expect(res.status).toBe(201);
@@ -246,10 +249,38 @@ describe('bench profile skips the first round', () => {
     const after = await getPlan(submissionId);
     expect(after.steps[0]).toMatchObject({ state: 'completed', result: 'skipped', can_skip: false, below_pass: false });
     expect(after.steps[1].can_start).toBe(true);
-    expect(after.mandatory_pending).toBe(before.mandatory_pending - 1);
+    expect(after.mandatory_pending).toBe(before.mandatory_pending);
     const round = await prisma.interviewRound.findFirst({ where: { submission_id: submissionId } });
     expect(round).toMatchObject({ status: 'completed', result: 'skipped', feedback: 'Already screened on the bench' });
     expect((await schedule(submissionId, after.steps[1].template_round_id)).status).toBe(201);
+  });
+
+  test('first and last round are optional for a bench profile and mandatory for any other', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    const flags = (plan) => plan.steps.map((st) => st.is_mandatory);
+    const bench = await getPlan(await makeSubmission(requirement.body.data.id));
+    const market = await getPlan(await makeSubmission(requirement.body.data.id, { source: 'linkedin' }));
+    const last = bench.steps.length - 1;
+    expect(flags(bench).filter((_, i) => i !== 0 && i !== last)).toEqual(flags(market).filter((_, i) => i !== 0 && i !== last));
+    expect([flags(bench)[0], flags(bench)[last]]).toEqual([false, false]);
+    expect([flags(market)[0], flags(market)[last]]).toEqual([true, true]);
+  });
+
+  test('a bench ticket moves to offer without the first and last round; a market ticket does not', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    for (const [source, expected] of [[undefined, 200], ['linkedin', 400]]) {
+      const submissionId = await makeSubmission(requirement.body.data.id, source ? { source } : undefined);
+      const plan = await getPlan(submissionId);
+      const last = plan.steps.length - 1;
+      // finish every mandatory round except the last (a market profile also needs the first one done to open the next)
+      for (const step of plan.steps.filter((x, i) => x.is_mandatory && i !== last)) {
+        const done = await schedule(submissionId, step.template_round_id, { result: 'pass', feedback: 'ok', ...(step.rating_required ? { skill_ratings: skills(9) } : {}) });
+        expect(done.status).toBe(201);
+      }
+      await prisma.submission.update({ where: { id: submissionId }, data: { stage: 'interview_result' } });
+      const res = await authed(request(app).post(`/api/v1/submissions/${submissionId}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
+      expect(res.status).toBe(expected);
+    }
   });
 
   test('a market profile, a later round, a second skip and a plain sales user are refused', async () => {

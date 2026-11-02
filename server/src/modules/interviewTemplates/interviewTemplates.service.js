@@ -9,6 +9,21 @@ const ROUND_INCLUDE = { rounds: { orderBy: { sort_order: 'asc' } } };
 const DONE_RESULTS = ['pass', 'fail', 'skipped'];
 const isDone = (round) => Boolean(round) && round.status !== 'cancelled' && DONE_RESULTS.includes(round.result);
 
+// A bench profile (UI label for source "direct"): its first and last interview round are optional. For any other profile those two
+// rounds are mandatory whatever the template says; the rounds in between follow the template's own mandatory flag.
+async function isBenchSubmission(db, submissionId) {
+  const row = await db.submission.findUnique({ where: { id: submissionId }, select: { profile: { select: { source: true } } } });
+  return row?.profile?.source === 'direct';
+}
+function mandatoryIdSet(templateRounds, bench) {
+  const ids = new Set();
+  templateRounds.forEach((r, i) => {
+    const edge = i === 0 || i === templateRounds.length - 1;
+    if (edge ? !bench : r.is_mandatory) ids.add(r.id);
+  });
+  return ids;
+}
+
 // Overall % from per-skill ratings out of 10: sum / (skills * 10).
 function scorePercent(ratings) {
   if (!ratings || !ratings.length) return null;
@@ -87,8 +102,8 @@ async function getPlan(db, submissionId) {
   rounds.forEach((r) => byTemplateRound.set(r.template_round_id, r));
 
   // A bench profile (UI label for source "direct") may skip the first round of the template.
-  const profileRow = await db.submission.findUnique({ where: { id: submissionId }, select: { profile: { select: { source: true } } } });
-  const benchProfile = profileRow?.profile?.source === 'direct';
+  const benchProfile = await isBenchSubmission(db, submissionId);
+  const mandatoryIds = mandatoryIdSet(template.rounds, benchProfile);
   const firstRoundId = template.rounds[0]?.id || null;
 
   const passMark = passMarkFor(requirement);
@@ -104,7 +119,7 @@ async function getPlan(db, submissionId) {
       name: tr.name,
       conducted_by: tr.conducted_by,
       kind: tr.kind,
-      is_mandatory: tr.is_mandatory,
+      is_mandatory: mandatoryIds.has(tr.id),
       rating_required: tr.rating_required,
       assessment_test_id: tr.assessment_test_id,
       state,
@@ -115,7 +130,7 @@ async function getPlan(db, submissionId) {
       score_percent: round?.score_percent != null ? Number(round.score_percent) : null,
       below_pass,
     };
-    if (tr.is_mandatory && !done) blocked = true;
+    if (step.is_mandatory && !done) blocked = true;
     return step;
   });
 
@@ -144,7 +159,8 @@ async function checkCanStart(db, submissionId, templateRoundId) {
   });
   if (existing.some((r) => r.template_round_id === templateRoundId)) return { error: 'round_already_exists' };
   const doneIds = new Set(existing.filter(isDone).map((r) => r.template_round_id));
-  const pending = template.rounds.some((r) => r.sort_order < target.sort_order && r.is_mandatory && !doneIds.has(r.id));
+  const mandatoryIds = mandatoryIdSet(template.rounds, await isBenchSubmission(db, submissionId));
+  const pending = template.rounds.some((r) => r.sort_order < target.sort_order && mandatoryIds.has(r.id) && !doneIds.has(r.id));
   if (pending) return { error: 'previous_round_pending' };
   return { templateRound: target };
 }
@@ -158,7 +174,8 @@ async function mandatoryRoundsDone(db, submissionId) {
     where: { submission_id: submissionId, template_round_id: { not: null }, status: { not: 'cancelled' } },
   });
   const doneIds = new Set(rounds.filter(isDone).map((r) => r.template_round_id));
-  return template.rounds.filter((r) => r.is_mandatory).every((r) => doneIds.has(r.id));
+  const mandatoryIds = mandatoryIdSet(template.rounds, await isBenchSubmission(db, submissionId));
+  return template.rounds.filter((r) => mandatoryIds.has(r.id)).every((r) => doneIds.has(r.id));
 }
 
 // Ids of the template rounds that are optional. A scheduled optional round with no result yet must not hold a ticket back.
