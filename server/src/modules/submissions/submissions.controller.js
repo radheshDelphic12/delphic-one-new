@@ -29,7 +29,7 @@ const ERROR_STATUS = {
   reason_required: [400, 'A reason is required for this move'],
   backout_reason_required: [400, 'backout_reason is required'],
   rejection_reason_required: [400, 'rejection_reason is required'],
-  rounds_not_resolved: [400, 'All interview rounds must have a result before advancing to offer'],
+  rounds_not_resolved: [400, 'Every scheduled mandatory interview round must have a result before advancing to offer'],
   bgv_not_cleared: [400, 'bgv_status must be cleared before closing'],
   forbidden: [403, 'You are not allowed to manage this interview round'],
   forbidden_stage_change: [403, 'You are not allowed to make this stage change'],

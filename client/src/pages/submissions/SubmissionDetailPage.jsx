@@ -445,7 +445,7 @@ export default function SubmissionDetailPage() {
         )}
         {(submission.stage === 'interview_result' || nextSubmissionStages(submission.stage).includes('offer_sent')) && (
           <p className="mt-2 text-xs text-tertiary-400">
-            Moving to offer sent requires every interview round to have a non-pending result.
+            Moving to offer sent requires a result on every scheduled mandatory interview round. Optional rounds can stay pending.
           </p>
         )}
         {submission.stage === 'bgv' && (

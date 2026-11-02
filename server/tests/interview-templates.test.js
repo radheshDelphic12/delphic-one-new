@@ -198,6 +198,24 @@ describe('legacy requirements and the offer gate', () => {
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/mandatory interview rounds/i);
   });
+
+  test('a scheduled optional round with no result yet does not hold the offer back', async () => {
+    const requirement = await makeRequirement({ req_type: 'recruitment', hiring_track: undefined });
+    const submissionId = await makeSubmission(requirement.body.data.id);
+    const plan = await getPlan(submissionId);
+    for (const step of plan.steps.filter((x) => x.is_mandatory)) {
+      const done = await schedule(submissionId, step.template_round_id, { result: 'pass', feedback: 'ok', ...(step.rating_required ? { skill_ratings: skills(9) } : {}) });
+      expect(done.status).toBe(201);
+    }
+    const optional = plan.steps.find((x) => !x.is_mandatory);
+    expect(optional).toBeTruthy();
+    // scheduled, result still pending
+    expect((await schedule(submissionId, optional.template_round_id)).status).toBe(201);
+    await prisma.submission.update({ where: { id: submissionId }, data: { stage: 'interview_result' } });
+    const res = await authed(request(app).post(`/api/v1/submissions/${submissionId}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.stage).toBe('offer_sent');
+  });
 });
 
 describe('bench profile skips the first round', () => {

@@ -161,6 +161,12 @@ async function mandatoryRoundsDone(db, submissionId) {
   return template.rounds.filter((r) => r.is_mandatory).every((r) => doneIds.has(r.id));
 }
 
+// Ids of the template rounds that are optional. A scheduled optional round with no result yet must not hold a ticket back.
+async function optionalTemplateRoundIds(db, submissionId) {
+  const requirement = await loadRequirementForSubmission(db, submissionId);
+  return new Set((requirement?.interview_template?.rounds || []).filter((r) => !r.is_mandatory).map((r) => r.id));
+}
+
 // Replaces the skill ratings of a round and returns the overall %.
 async function saveSkillRatings(tx, roundId, skillRatings) {
   await tx.interviewRoundSkillRating.deleteMany({ where: { interview_round_id: roundId } });
@@ -248,6 +254,7 @@ module.exports = {
   skillOptions,
   checkCanStart,
   mandatoryRoundsDone,
+  optionalTemplateRoundIds,
   saveSkillRatings,
   passMarkFor,
   loadRequirementForSubmission,
