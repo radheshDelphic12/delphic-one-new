@@ -243,6 +243,35 @@ describe('submission stage machine', () => {
     expect(offer.body.data.stage).toBe('offer_sent');
   });
 
+  test('rounds are optional: a ticket with no round scheduled can go to offer (no mandatory template rounds)', async () => {
+    const sub = await createSubmission();
+    await advanceTo(sub.id, ['internal_screening', 'submitted_to_client', 'interview_scheduled', 'interview_result']);
+    const offer = await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
+    expect(offer.status).toBe(200);
+    expect(offer.body.data.stage).toBe('offer_sent');
+  });
+
+  test('a cancelled round does not hold the offer back, a pending scheduled one still does', async () => {
+    const sub = await createSubmission();
+    await advanceTo(sub.id, ['internal_screening', 'submitted_to_client']);
+    const first = await authed(request(app).post(`/api/v1/submissions/${sub.id}/interview-rounds`), recruiterToken).send({ round_type: 'client_r1', scheduled_at: new Date().toISOString() });
+    expect(first.status).toBe(201);
+    const cancel = await authed(request(app).post(`/api/v1/interviews/${first.body.data.id}/cancel`), recruiterToken).send({ reason: 'rescheduled' });
+    expect(cancel.status).toBe(200);
+    await advanceTo(sub.id, ['interview_result']);
+    expect((await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' })).status).toBe(200);
+
+    // back to results, schedule a live round: its pending result blocks the offer again
+    const sub2 = await createSubmission({ profile_id: (await createProfile(recruiterToken)).id });
+    await advanceTo(sub2.id, ['internal_screening', 'submitted_to_client']);
+    const live = await authed(request(app).post(`/api/v1/submissions/${sub2.id}/interview-rounds`), recruiterToken).send({ round_type: 'client_r1', scheduled_at: new Date().toISOString() });
+    expect(live.status).toBe(201);
+    await advanceTo(sub2.id, ['interview_result']);
+    const blocked = await authed(request(app).post(`/api/v1/submissions/${sub2.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/round/i);
+  });
+
   test('cannot close without bgv_status cleared; full happy path locks on close', async () => {
     const sub = await createSubmission();
     await advanceTo(sub.id, ['internal_screening', 'submitted_to_client']);
