@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, Building2, Landmark, MapPin, Users, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
+import { Banknote, Building2, Landmark, MapPin, PieChart, Users, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -22,6 +22,7 @@ import GroupLogsTab from './GroupLogsTab.jsx';
 import GroupDebtTab from './GroupDebtTab.jsx';
 import GroupHeadcountTab from './GroupHeadcountTab.jsx';
 import GroupOfficesTab from './GroupOfficesTab.jsx';
+import GroupCompaniesTab from './GroupCompaniesTab.jsx';
 import { GroupHero, GroupTabs } from './groupUi.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -158,6 +159,7 @@ const TABS = [
   { key: 'travel', label: 'Travel', icon: Plane },
   { key: 'org-chart', label: 'Org Chart', icon: Network },
   { key: 'headcount', label: 'Headcount & Hiring', icon: Users },
+  { key: 'companies', label: 'Companies & Stakes', icon: PieChart },
   { key: 'offices', label: 'Offices', icon: MapPin },
   { key: 'group-charges', label: 'Billing Charges', icon: Receipt },
   { key: 'logs', label: 'Logs', icon: ScrollText },
@@ -186,6 +188,7 @@ export default function GroupOverviewPage() {
       {section === 'org-chart' && <GroupOrgChartTab />}
       {section === 'headcount' && <GroupHeadcountTab />}
       {section === 'offices' && <GroupOfficesTab />}
+      {section === 'companies' && <GroupCompaniesTab />}
       {section === 'group-charges' && <GroupChargesTab />}
       {section === 'logs' && <GroupLogsTab />}
       {section === 'debt' && <GroupDebtTab />}

@@ -52,6 +52,7 @@ Internal requirement/recruitment pipeline dashboard for Delphic. Tracks client a
 - [HIRING-FUNNEL.md](features/HIRING-FUNNEL.md) - Reports > Hiring funnel: cohort = profiles sourced in the dates, per-round pass / drop for internal + client funnels, recruiter-wise, trend, avg days to join, clickable counts; read-only, generic `server/src/lib/funnel.js` (2026-10-30)
 - [BENCH-SKIP-FIRST-ROUND.md](features/BENCH-SKIP-FIRST-ROUND.md) - Bench profile can skip the first interview round (`skipped` result, migration 20261107100000) (2026-10-30)
 - [PER-TAB-COMPANY-SESSION.md](features/PER-TAB-COMPANY-SESSION.md) - per-tab login session (sessionStorage) so a super admin can use a different company in each tab (2026-10-30)
+- [GROUP-COMPANIES-STAKES.md](features/GROUP-COMPANIES-STAKES.md) - Group Dashboard > Companies & Stakes: register of every business (current + planned), sector, several holders per company, five views; new-business planner is phase 2 (2026-11-02)
 - [PROJECT-REQUIREMENT-LINK.md](features/PROJECT-REQUIREMENT-LINK.md) - Finance > Projects: link a project (accounts row) to a requirement, accounts.requirement_id, migration 20261109100000 (2026-11-02, built locally)
 - [GROUP-OFFICES.md](features/GROUP-OFFICES.md) - Group Dashboard > Offices: per-office headcount + employees for every company, add / edit / delete locations, group superadmin only (2026-11-02, built locally)
 - [OFFICE-CCTV-INTEGRATION.md](features/OFFICE-CCTV-INTEGRATION.md) - exploration only: live office cameras (CP PLUS EzyKam) under Offices (2026-11-02)

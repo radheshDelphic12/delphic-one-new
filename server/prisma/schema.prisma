@@ -1971,6 +1971,7 @@ model OrgGroup {
   group_company_days    GroupCompanyDay[]
   group_travel          GroupTravel[]
   legal_entities        LegalEntity[]
+  group_companies       GroupCompany[]
 
   @@map("org_groups")
 }
@@ -2048,6 +2049,7 @@ model Org {
   updated_at                 DateTime  @default(now()) @updatedAt
 
   lock_audits             LockAudit[]
+  group_company           GroupCompany?
   salary_adjustments      SalaryAdjustment[]
   salary_payments         SalaryPayment[]
   timesheet_month_locks   TimesheetMonthLock[]
@@ -8644,4 +8646,54 @@ model WhistleAttachment {
 
   @@index([case_id])
   @@map("whistle_attachments")
+}
+
+// Group Dashboard > Companies & Stakes: the register of every business of the group, current or planned. A row with org_id is a company
+// workspace of the group (rows are created for every workspace the first time the register is opened); a row without one is a business that
+// has no workspace here (a planned / future business, or an investee we hold a stake in). status: operational | planning | future.
+model GroupCompany {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id    String    @db.Uuid
+  org_group       OrgGroup  @relation(fields: [org_group_id], references: [id])
+  org_id          String?   @unique @db.Uuid
+  org             Org?      @relation(fields: [org_id], references: [id], onDelete: SetNull)
+  name            String
+  short_code      String?
+  sector          String?
+  tagline         String?
+  foundation_date DateTime? @db.Date
+  status          String    @default("operational")
+  notes           String?
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  holders GroupCompanyStake[] @relation("StakeHeld")
+  holdings GroupCompanyStake[] @relation("StakeHolder")
+
+  @@unique([org_group_id, name])
+  @@index([org_group_id, status])
+  @@map("group_companies")
+}
+
+// Who owns how much of a business: several holders per company. holder_kind: group (the holding company itself), company (another
+// business of the register) or external (a person / outside company named in holder_name). The percentages of one company add up to at most 100.
+model GroupCompanyStake {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id      String       @db.Uuid
+  held_company_id   String       @db.Uuid
+  held_company      GroupCompany @relation("StakeHeld", fields: [held_company_id], references: [id], onDelete: Cascade)
+  holder_kind       String
+  holder_company_id String?      @db.Uuid
+  holder_company    GroupCompany? @relation("StakeHolder", fields: [holder_company_id], references: [id], onDelete: Cascade)
+  holder_name       String?
+  pct               Decimal      @db.Decimal(7, 3)
+  notes             String?
+  created_at        DateTime     @default(now())
+  updated_at        DateTime     @default(now()) @updatedAt
+
+  @@index([held_company_id])
+  @@index([holder_company_id])
+  @@index([org_group_id])
+  @@map("group_company_stakes")
 }
