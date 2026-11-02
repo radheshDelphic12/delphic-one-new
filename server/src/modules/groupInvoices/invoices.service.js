@@ -2,6 +2,7 @@ const prisma = require('../../config/db');
 const env = require('../../config/env');
 const calc = require('../cashPosition/cash.calc');
 const invCalc = require('./invoices.calc');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const { D, money } = calc;
 
@@ -35,6 +36,27 @@ function view(inv, payments = []) {
 
 const scope = (groupIds) => ({ org_group_id: { in: groupIds } });
 
+/**
+ * What an invoice can be linked to: the group's contracts (the Contracts module) and its projects (Finance > Projects: active client
+ * accounts worked on as projects). contract_id holds either id, so it has no foreign key.
+ */
+async function linkTargets(groupIds) {
+  const orgs = await prisma.org.findMany({ where: { org_group_id: { in: groupIds } }, select: { id: true } });
+  const [contracts, projects] = await Promise.all([
+    prisma.contract.findMany({ where: { org: { org_group_id: { in: groupIds } }, status: { not: 'terminated' } }, select: { id: true, title: true, counterparty_name: true, org_id: true }, orderBy: [{ counterparty_name: 'asc' }, { title: 'asc' }], take: 1000 }),
+    prisma.account.findMany({ where: { OR: orgs.map((o) => projectListWhere(o.id)) }, select: { id: true, name: true, project_name: true, project_code: true, org_id: true }, orderBy: { name: 'asc' }, take: 1000 }),
+  ]);
+  return [
+    ...projects.map((p) => ({ id: p.id, kind: 'project', counterparty_name: p.name, title: [p.project_name, p.project_code].filter(Boolean).join(' - ') || 'Project', org_id: p.org_id })),
+    ...contracts.map((c) => ({ id: c.id, kind: 'contract', counterparty_name: c.counterparty_name, title: c.title, org_id: c.org_id })),
+  ];
+}
+
+async function linkTargetExists(groupId, id) {
+  if (await prisma.contract.findFirst({ where: { id, org: { org_group_id: groupId } }, select: { id: true } })) return true;
+  return Boolean(await prisma.account.findFirst({ where: { id, type: 'client', org: { org_group_id: groupId } }, select: { id: true } }));
+}
+
 /** Checks a body against the legal entity and works the totals out. Shared by issuing an invoice and by editing one. */
 async function build(entity, body, issuedSeller = null) {
   if (body.workspace_id && !(await prisma.org.findFirst({ where: { id: body.workspace_id, org_group_id: entity.org_group_id }, select: { id: true } }))) return { error: 'workspace_not_found' };
@@ -59,7 +81,7 @@ async function build(entity, body, issuedSeller = null) {
   let contractMonth = body.contract_month || null;
   let contractYear = body.contract_year || null;
   if (contractId) {
-    if (!(await prisma.contract.findFirst({ where: { id: contractId, org: { org_group_id: entity.org_group_id } }, select: { id: true } }))) return { error: 'contract_not_found' };
+    if (!(await linkTargetExists(entity.org_group_id, contractId))) return { error: 'contract_not_found' };
     if (Boolean(contractMonth) !== Boolean(contractYear)) return { error: 'contract_month_incomplete' };
   } else { contractMonth = null; contractYear = null; }
 
@@ -245,4 +267,4 @@ async function removePayment(groupIds, userId, id, paymentId) {
   return { invoice: await get(groupIds, id) };
 }
 
-module.exports = { create, update, get, list, cancel, addPayment, updatePayment, removePayment, view, uploadDir: () => env.uploadDir };
+module.exports = { linkTargets, create, update, get, list, cancel, addPayment, updatePayment, removePayment, view, uploadDir: () => env.uploadDir };

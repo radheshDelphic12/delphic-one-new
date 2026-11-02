@@ -104,12 +104,12 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
           </label>
         </div>
         <div className="rounded-xl border border-tertiary-100 p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Contract (optional)</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Contract or project (optional)</p>
           <div className="grid gap-3 sm:grid-cols-6">
-            <label className={`${labelCls} sm:col-span-3`}>Contract
+            <label className={`${labelCls} sm:col-span-3`}>Contract / project
               <select className={inputCls} value={v.contract_id} onChange={(e) => setV((c) => ({ ...c, contract_id: e.target.value, ...(e.target.value ? {} : { contract_month: '', contract_year: '' }) }))}>
                 <option value="">Not linked</option>
-                {(options?.contracts || []).filter((c) => !v.workspace_id || c.org_id === v.workspace_id).map((c) => <option key={c.id} value={c.id}>{c.counterparty_name} · {c.title}</option>)}
+                {(options?.contracts || []).filter((c) => !v.workspace_id || c.org_id === v.workspace_id).map((c) => <option key={c.id} value={c.id}>{c.counterparty_name} · {c.title}{c.kind === "project" ? " (project)" : ""}</option>)}
               </select>
             </label>
             <label className={`${labelCls} sm:col-span-2`}>Month

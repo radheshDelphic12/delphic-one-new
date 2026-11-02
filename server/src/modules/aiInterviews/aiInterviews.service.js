@@ -390,6 +390,8 @@ async function finish(a, settings, ctx, transcript, tokens) {
   }
 }
 
+const FINISH_WAIT_MS = 15000;
+
 async function answerForCandidate(token, rawText) {
   const r = await load(token);
   if (r.error) return r;
@@ -402,6 +404,7 @@ async function answerForCandidate(token, rawText) {
   if (!last || last.role !== 'ai') return { error: 'not_waiting' };
   if (busy.has(a.id)) return { error: 'busy' };
   busy.add(a.id);
+  let keepLocked = false;
   try {
     const settings = await getSettings(a.org_id);
     const ctx = await contextFor(a.submission_id);
@@ -440,10 +443,18 @@ async function answerForCandidate(token, rawText) {
       });
       return { view: candidateView(row), done: false };
     }
-    const done = await finish(a, settings, ctx, transcript, tokens);
-    return { view: candidateView(done), done: true };
+    // Scoring can take a minute (AI call, one retry), longer than a gateway waits. The answer is already saved, so after a
+    // short wait the candidate is told they are done while scoring finishes in the background (the lock is held until then).
+    const scoring = finish(a, settings, ctx, transcript, tokens);
+    const settled = await Promise.race([scoring, new Promise((resolve) => { setTimeout(() => resolve(null), FINISH_WAIT_MS).unref?.(); })]);
+    if (settled) return { view: candidateView(settled), done: true };
+    keepLocked = true;
+    scoring
+      .catch((err) => logger.error({ err: err.message, id: a.id }, 'ai interview scoring failed after the candidate finished'))
+      .finally(() => busy.delete(a.id));
+    return { view: { ...candidateView({ ...row, transcript }), status: 'completed', waiting_for_answer: false }, done: true };
   } finally {
-    busy.delete(a.id);
+    if (!keepLocked) busy.delete(a.id);
   }
 }
 

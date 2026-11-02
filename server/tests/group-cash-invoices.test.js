@@ -226,6 +226,10 @@ describe('group cash: invoices', () => {
     // a month needs a year (and the other way round); a contract of nobody's group is refused
     expect((await invoice({ contract_id: contract.id, contract_month: 10 })).status).toBe(422);
     expect((await invoice({ contract_id: '00000000-0000-4000-8000-000000000000' })).status).toBe(404);
+    // a Finance > Projects project is a link target too (the Contracts module may be off)
+    const project = await prisma.account.create({ data: { org_id: org.id, name: 'Acme Co', project_name: 'Acme Portal', type: 'client', stage: 'active', is_project: true, owner_id: owner.id, origin_owner_id: owner.id } });
+    expect(d(await get('/options')).contracts).toContainEqual(expect.objectContaining({ id: project.id, kind: 'project', counterparty_name: 'Acme Co' }));
+    expect(d(await invoice({ contract_id: project.id, contract_month: 11, contract_year: 2026 })).invoice).toMatchObject({ contract_id: project.id, contract_month: 11, contract_year: 2026 });
     // a month with no contract is dropped
     expect(d(await invoice({ contract_month: 3, contract_year: 2026 })).invoice).toMatchObject({ contract_id: null, contract_month: null });
     // filter the list by contract

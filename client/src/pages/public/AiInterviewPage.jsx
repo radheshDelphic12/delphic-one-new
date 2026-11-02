@@ -172,8 +172,9 @@ export default function AiInterviewPage() {
       setText('');
       setView((v) => ({ ...v, ...data.data }));
       if (data.data.done) {
-        await stopRecording();
+        // The answers are in: show the thank-you page at once; the last recording parts upload in the background (never block on them).
         setFinished(true);
+        stopRecording().catch(() => {});
       }
     } catch (err) {
       setError(apiErrorMessage(err, 'Your answer could not be sent. Please try again.'));
@@ -182,7 +183,7 @@ export default function AiInterviewPage() {
     }
   }
 
-  if (finished || view?.status === 'completed') {
+  if (finished || (view && !['invited', 'started'].includes(view.status))) {
     return <Shell><h1 className="font-heading text-lg font-semibold">Thank you</h1><p className="mt-2 text-sm text-tertiary-600">Your interview is complete. The team will get in touch with you.</p></Shell>;
   }
   if (error && !view) return <Shell><p className="text-sm text-danger-700">{error}</p></Shell>;

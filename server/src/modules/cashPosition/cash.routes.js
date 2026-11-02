@@ -51,7 +51,7 @@ const ERRORS = {
   has_payments: [409, 'Remove the payments first, then cancel the invoice'],
   cancelled: [409, 'A cancelled invoice takes no payments'],
   date_outside_series: [422, 'The invoice date must stay in the same financial year as its number (April to March)'],
-  contract_not_found: [404, 'That contract was not found in this group'],
+  contract_not_found: [404, 'That contract or project was not found in this group'],
   contract_month_incomplete: [422, 'Choose both the month and the year of the contract period, or neither'],
   number_taken:[409, 'That invoice number is already used by this legal entity'],
   has_payments_locked:[409, 'Payments are recorded on this invoice: its currency and receiving wallet cannot change'],
