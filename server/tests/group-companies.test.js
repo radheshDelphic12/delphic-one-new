@@ -86,6 +86,21 @@ describe('group companies register', () => {
     expect(byName(await get(), 'Future Foods')).toBeUndefined();
   });
 
+  test('a sector can be renamed or cleared for every business using it; only a group super admin, only its own group', async () => {
+    const sectorPatch = (body, token = superToken) => authed(request(app).patch(`${base}/sectors`), token).send(body);
+    const a = await post({ name: 'Sector Rename A', sector: 'Old Sector' });
+    const b = await post({ name: 'Sector Rename B', sector: 'Old Sector' });
+    expect((await sectorPatch({ from: 'Old Sector', to: 'New Sector' })).body.data.updated).toBe(2);
+    let res = await get();
+    expect(byName(res, 'Sector Rename A').sector).toBe('New Sector');
+    expect(byName(res, 'Sector Rename B').sector).toBe('New Sector');
+    expect((await sectorPatch({ from: 'New Sector', to: null })).body.data.updated).toBe(2);
+    res = await get();
+    expect(byName(res, 'Sector Rename A').sector).toBeNull();
+    expect((await sectorPatch({ from: 'x', to: 'y' }, adminToken)).status).toBe(403);
+    await prisma.groupCompany.deleteMany({ where: { id: { in: [a.body.data.id, b.body.data.id] } } });
+  });
+
   test('stakes: several holders, at most 100%, holders from the group, no self-holding or loops; holdings show on the holder', async () => {
     const list = await get();
     const a = byName(list, 'Alpha Global');

@@ -390,7 +390,7 @@ function employedOn(m, date) {
 }
 
 async function loadPeopleAndTeams(orgId) {
-  const [teams, periods, memberships] = await Promise.all([
+  const [teams, periods, rawMemberships] = await Promise.all([
     prisma.team.findMany({
       where: { org_id: orgId },
       orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
@@ -399,9 +399,11 @@ async function loadPeopleAndTeams(orgId) {
     prisma.teamMembershipPeriod.findMany({ where: { org_id: orgId }, select: { org_membership_id: true, team_id: true, start_date: true, end_date: true } }),
     prisma.orgMembership.findMany({
       where: { org_id: orgId },
-      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, employment_status: true, worker_type: true, vendor_rate: true, vendor_rate_currency: true, person: { select: { name: true } } },
+      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, notice_end_date: true, employment_status: true, worker_type: true, vendor_rate: true, vendor_rate_currency: true, person: { select: { name: true } } },
     }),
   ]);
+  // Someone serving notice has no left_at yet (the exit job sets it after the last working day): their notice end date is the day they leave.
+  const memberships = rawMemberships.map((m) => ({ ...m, left_at: m.left_at || (m.employment_status === 'notice_period' ? m.notice_end_date : null) }));
   const periodsBy = A.byMembership(periods);
   // Anyone on a team with no recorded period yet counts as on it all along.
   for (const m of memberships) if (m.team_id && !periodsBy.has(m.id)) periodsBy.set(m.id, [{ org_membership_id: m.id, team_id: m.team_id, start_date: null, end_date: null }]);

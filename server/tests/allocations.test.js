@@ -256,6 +256,19 @@ describe('Team capacity', () => {
     expect(soon[0]).toMatchObject({ days_remaining: daysToMonthEnd(), resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
   });
 
+  test('someone serving notice counts as leaving on their notice end date (no left_at yet)', async () => {
+    const ctx = await seed();
+    const { report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Notice' })).body.data;
+    const p = await person(ctx, 'Serving Notice');
+    await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    await prisma.orgMembership.update({ where: { id: p.membership.id }, data: { employment_status: 'notice_period', notice_end_date: new Date(`${inDays(10)}T00:00:00.000Z`) } });
+    const row = async (query = {}) => (await report('team-capacity', query)).body.data.teams.find((t) => t.team?.id === team.id);
+    expect(await row()).toMatchObject({ members: 1, members_leaving: 1 });
+    expect((await row()).leaving_list.map((m) => m.name)).toEqual(['Serving Notice']);
+    expect(await row({ window_days: 5 })).toMatchObject({ members_leaving: 0 });
+  });
+
   test('people joining or leaving inside the window change "can allocate"; those outside it do not', async () => {
     const ctx = await seed();
     const { report, teamChange } = api(ctx);

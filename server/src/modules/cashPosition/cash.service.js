@@ -415,7 +415,7 @@ async function options(groupIds) {
   const [entities, workspaces, accounts, wallets, contracts] = await Promise.all([
     prisma.legalEntity.findMany({ where: { org_group_id: { in: groupIds } }, select: { id: true, name: true, workspace_id: true, active: true }, orderBy: { name: 'asc' } }),
     prisma.org.findMany({ where: { org_group_id: { in: groupIds }, status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, minimum_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
+    prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, minimum_balance: true, opening_date: true, payment_instructions: true }, orderBy: { name: 'asc' } }),
     prisma.wallet.findMany({ where: { active: true, ...grp(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
     prisma.contract.findMany({ where: { org: { org_group_id: { in: groupIds } }, status: { not: 'terminated' } }, select: { id: true, title: true, counterparty_name: true, org_id: true, currency: true, status: true, start_date: true, end_date: true }, orderBy: [{ counterparty_name: 'asc' }, { title: 'asc' }], take: 1000 }),
   ]);

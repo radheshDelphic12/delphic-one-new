@@ -17,9 +17,19 @@ const scoped = (groupIds) => ({ org_group_id: { in: groupIds } });
 async function ensureRegister(groupIds) {
   const orgs = await prisma.org.findMany({ where: scoped(groupIds), select: { id: true, name: true, org_group_id: true, enabled_modules: true } });
   if (!orgs.length) return;
-  const have = new Set((await prisma.groupCompany.findMany({ where: { org_id: { in: orgs.map((o) => o.id) } }, select: { org_id: true } })).map((r) => r.org_id));
+  const have = new Map((await prisma.groupCompany.findMany({ where: { org_id: { in: orgs.map((o) => o.id) } }, select: { id: true, org_id: true, org_group_id: true } })).map((r) => [r.org_id, r]));
   for (const o of orgs) {
-    if (have.has(o.id)) continue;
+    const row = have.get(o.id);
+    if (row) {
+      // the workspace moved to another holding group after its row was made: the row and its stakes follow, or it could never be a holder here
+      if (row.org_group_id !== o.org_group_id) {
+        await prisma.$transaction([
+          prisma.groupCompany.update({ where: { id: row.id }, data: { org_group_id: o.org_group_id } }),
+          prisma.groupCompanyStake.updateMany({ where: { OR: [{ held_company_id: row.id }, { holder_company_id: row.id }] }, data: { org_group_id: o.org_group_id } }),
+        ]);
+      }
+      continue;
+    }
     try {
       // a business added by hand under the same name becomes this workspace's row instead of a duplicate
       const same = await prisma.groupCompany.findFirst({ where: { org_group_id: o.org_group_id, name: o.name, org_id: null } });
@@ -60,6 +70,7 @@ async function list(groupIds) {
     return {
       id: c.id,
       org_id: c.org_id,
+      org_group_id: c.org_group_id,
       is_current: Boolean(c.org_id),
       coming_soon: Boolean(c.org?.enabled_modules?.includes('coming_soon')),
       name: labelOf(c),
@@ -151,6 +162,13 @@ async function update(groupIds, id, patch) {
   return { company: saved };
 }
 
+/** Renames a sector for every business of the group that uses it; `to` null clears it (the businesses show as "Not set"). */
+async function renameSector(groupIds, from, to) {
+  const target = to ? to.trim() : null;
+  const result = await prisma.groupCompany.updateMany({ where: { ...scoped(groupIds), sector: { equals: from.trim(), mode: 'insensitive' } }, data: { sector: target || null } });
+  return { updated: result.count };
+}
+
 /** Only a business without a workspace can be removed here; its stakes (and the stakes it holds in others) go with it. */
 async function remove(groupIds, id) {
   const company = await prisma.groupCompany.findFirst({ where: { id, ...scoped(groupIds) }, include: { holdings: { select: { id: true } } } });
@@ -231,4 +249,4 @@ async function setGroupDefault(groupIds) {
   return { updated: open.length };
 }
 
-module.exports = { list, create, update, remove, setStakes, setGroupDefault, STATUSES };
+module.exports = { list, create, update, renameSector, remove, setStakes, setGroupDefault, STATUSES };

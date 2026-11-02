@@ -34,7 +34,8 @@ const updateSchema = z
     notes: text(2000).nullable().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Change at least one field' });
-const stakesSchema = z.object({
+const sectorSchema = z.object({ from: text(100).min(1), to: text(100).nullable().optional() });
+const stakesSchema =z.object({
   stakes: z
     .array(z.object({
       holder_kind: z.enum(['group', 'company', 'external']),
@@ -75,7 +76,12 @@ router.post('/', asyncHandler(async (req, res) => {
 
 router.post('/stakes/group-default', asyncHandler(async (req, res) => ok(res, await service.setGroupDefault(req.user.org_group_ids))));
 
-router.patch('/:id', asyncHandler(async (req, res) => {
+router.patch('/sectors', asyncHandler(async (req, res) => {
+  const { from, to } = sectorSchema.parse(req.body);
+  return ok(res, await service.renameSector(req.user.org_group_ids, from, to));
+}));
+
+router.patch('/:id',asyncHandler(async (req, res) => {
   const result = await service.update(req.user.org_group_ids, uuid.parse(req.params.id), updateSchema.parse(req.body));
   return result.error ? problem(res, result) : ok(res, result.company);
 }));

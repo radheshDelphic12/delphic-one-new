@@ -64,6 +64,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
     const accountIds = new Set((options?.accounts || []).filter((a) => a.legal_entity_id === v.legal_entity_id && a.currency === currency).map((a) => a.id));
     return (options?.wallets || []).filter((w) => accountIds.has(w.bank_account_id));
   }, [options, v.legal_entity_id, currency]);
+  const savedBank = (options?.accounts || []).find((a) => a.id === wallets.find((w) => w.id === v.receiving_wallet_id)?.bank_account_id)?.payment_instructions || '';
   const intra = Boolean(entity?.state_code && v.buyer_state_code && entity.state_code === v.buyer_state_code);
   const t = preview(v.type, lines, intra);
   async function submit(e) {
@@ -149,11 +150,11 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
         <label className={labelCls}>Money will be received in (wallet of this entity, {currency})
           <select required className={inputCls} value={v.receiving_wallet_id} onChange={set('receiving_wallet_id')}>
             <option value="">Choose a wallet…</option>
-            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ""}</option>)}
+            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name}{w.bank_account_name && w.bank_account_name !== w.name ? ` · ${w.bank_account_name}` : ""}</option>)}
           </select>
         </label>
         {v.legal_entity_id && !wallets.length && <p className="text-xs text-warning-700">This entity has no {currency} wallet yet. Add one under Setup.</p>}
-        {v.type === 'usd_export' && <label className={labelCls}>Bank and SWIFT details (printed on the invoice; leave empty to use the bank account&apos;s)<textarea rows={3} className={inputCls} maxLength={1000} value={v.payment_instructions} onChange={set('payment_instructions')} /></label>}
+        {v.type === 'usd_export' && <label className={labelCls}>Bank and SWIFT details (printed on the invoice; leave empty to use the bank account&apos;s)<textarea rows={3} className={inputCls} maxLength={1000} value={v.payment_instructions} onChange={set('payment_instructions')} placeholder={savedBank || ''} />{v.receiving_wallet_id && (savedBank ? <span className="text-[11px] font-normal text-tertiary-500">Empty = the saved details of this bank account (shown above). Change them under Book Keeping &gt; Setup &gt; Bank accounts.</span> : <span className="text-[11px] font-normal text-warning-700">This bank account has no payment details saved. Add them under Book Keeping &gt; Setup &gt; Bank accounts (Payment details printed on invoices), or type them here for this invoice only.</span>)}</label>}
         <label className={labelCls}>Notes<textarea rows={2} className={inputCls} maxLength={2000} value={v.notes} onChange={set('notes')} /></label>
         <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={busy || !v.legal_entity_id || !v.receiving_wallet_id}>{busy ? 'Saving…' : invoice ? 'Save changes' : 'Issue invoice'}</button></div>
       </form>
