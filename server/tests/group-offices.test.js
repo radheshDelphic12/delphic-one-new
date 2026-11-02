@@ -111,7 +111,7 @@ describe('group offices', () => {
 
     expect((await patch(nowhere.id, { location_id: bIndore.id })).status).toBe(400);
     expect((await patch(nowhere.id, { location_id: outsiderOffice.id })).status).toBe(400);
-    expect((await patch(nowhere.id, { location_id: 'none' })).status).toBe(400);
+    expect((await patch(nowhere.id, { location_id: 'none' })).status).toBe(422);
     expect((await prisma.orgMembership.findUnique({ where: { id: nowhere.id } })).location_id).toBeNull();
 
     const ok = await patch(nowhere.id, { location_id: aIndore.id });
