@@ -412,14 +412,17 @@ async function position(groupIds, q = {}) {
 
 /** Pick-lists for the forms: entities, workspaces, accounts and wallets. */
 async function options(groupIds) {
-  const [entities, workspaces, accounts, wallets] = await Promise.all([
+  const [entities, workspaces, accounts, wallets, contracts] = await Promise.all([
     prisma.legalEntity.findMany({ where: { org_group_id: { in: groupIds } }, select: { id: true, name: true, workspace_id: true, active: true }, orderBy: { name: 'asc' } }),
     prisma.org.findMany({ where: { org_group_id: { in: groupIds }, status: 'active' }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     prisma.bankAccount.findMany({ where: { active: true, ...grp(groupIds) }, select: { id: true, name: true, type: true, currency: true, legal_entity_id: true, declared_opening_balance: true, minimum_balance: true, opening_date: true }, orderBy: { name: 'asc' } }),
     prisma.wallet.findMany({ where: { active: true, ...grp(groupIds) }, include: walletInclude, orderBy: { name: 'asc' } }),
+    prisma.contract.findMany({ where: { org: { org_group_id: { in: groupIds } }, status: { not: 'terminated' } }, select: { id: true, title: true, counterparty_name: true, org_id: true, currency: true, status: true, start_date: true, end_date: true }, orderBy: [{ counterparty_name: 'asc' }, { title: 'asc' }], take: 1000 }),
   ]);
   return {
-    entities, workspaces, modes: calc.MODES, currencies: calc.CURRENCIES,
+    entities, workspaces,
+    contracts: contracts.map((c) => ({ ...c, start_date: ymd(c.start_date), end_date: ymd(c.end_date) })),
+ modes: calc.MODES, currencies: calc.CURRENCIES,
     accounts: accounts.map((a) => ({ ...a, declared_opening_balance: money(a.declared_opening_balance), minimum_balance: a.minimum_balance == null ? null : money(a.minimum_balance), opening_date: ymd(a.opening_date) })),
     wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account?.name || null, currency: w.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id })),
   };

@@ -59,7 +59,16 @@ const claimsPayoutQuerySchema = z.object({
   format: z.enum(['json', 'xlsx']).default('xlsx'),
 });
 
-const createVendorPaymentSchema = z.object({
+// Processed reimbursements: claims marked reimbursed between two dates (the day the payout was recorded); json previews, xlsx downloads.
+const dateDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const claimsProcessedQuerySchema = z.object({
+  from: dateDay.optional(),
+  to: dateDay.optional(),
+  org_membership_id: z.string().uuid().optional(),
+  format: z.enum(['json', 'xlsx']).default('json'),
+});
+
+const createVendorPaymentSchema =z.object({
   vendor_name: z.string().min(1).max(200),
   vendor_type: z.enum(['contractor', 'external_resource', 'third_party']),
   amount: z.coerce.number().positive(),
@@ -87,6 +96,7 @@ module.exports = {
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
   claimsPayoutQuerySchema,
+  claimsProcessedQuerySchema,
   createVendorPaymentSchema,
   decideVendorPaymentSchema,
   listVendorPaymentsQuerySchema,

@@ -105,6 +105,12 @@ function TeamDetailDrawer({ row, date, onClose }) {
             <section>
               <h3 className="mb-2 font-semibold text-tertiary-900">Members on {formatDay(date)}</h3>
               <p className="text-tertiary-600">{row.member_list.map((m) => m.name).join(', ') || '—'}</p>
+              {(row.joining_list?.length > 0 || row.leaving_list?.length > 0) && (
+                <ul className="mt-2 space-y-0.5 text-xs text-tertiary-600">
+                  {row.joining_list.map((m) => <li key={`j${m.id}`}>{m.name} joins on {m.date}</li>)}
+                  {row.leaving_list.map((m) => <li key={`l${m.id}`}>{m.name} last working day {m.date}</li>)}
+                </ul>
+              )}
             </section>
           )}
         </div>
@@ -158,6 +164,11 @@ function TeamCapacityReport() {
         {r.projects_ending_soon}
       </ProjectsHover>
     ) },
+    { key: 'moves', header: 'Joining / leaving', render: (r) => (r.team ? (
+      <span title={[...(r.joining_list || []).map((m) => `${m.name} joins ${m.date}`), ...(r.leaving_list || []).map((m) => `${m.name} last day ${m.date}`)].join('\n')}>
+        <span className="text-success-700">+{r.members_joining || 0}</span> / <span className="text-danger-700">−{r.members_leaving || 0}</span>
+      </span>
+    ) : '—') },
     { key: 'can', header: 'Can allocate', render: (r) => (r.team ? <span className="font-semibold">{num(r.can_allocate)}</span> : '—') },
     { key: 'billing', header: 'Total monthly billing', render: (r) => (r.team ? inr(r.monthly_billing) : '—') },
     { key: 'salary', header: 'Total team salary', render: (r) => (r.team ? inr(r.team_salary) : '—') },
@@ -190,7 +201,7 @@ function TeamCapacityReport() {
       <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpen} emptyLabel="No teams yet — add them under HR Settings → Teams." />
       {data && (
         <p className="text-xs text-tertiary-500">
-          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
+          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Team members are counted by joining date and last working day on the as-of date. Can allocate = current capability + projects ending within {data.window_days} days, after adding people who join and removing people whose last working day falls in those days (Joining / leaving column).
           {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)} · monthly billing {inr(data.totals.monthly_billing)} · team salary {inr(data.totals.team_salary)} · vendor cost {inr(data.totals.vendor_cost)} · profit {inr(data.totals.profit)}.
           {' '}Monthly billing = the contract monthly value of the team&apos;s running Managed Services projects (Fixed cost and Recruitment projects count as 0). Team salary = monthly CTC of employees; vendor cost = monthly vendor rate of contractors. Profit = total monthly billing − total team salary − total vendor cost.
         </p>

@@ -23,6 +23,13 @@ const invoiceBody = z.object({
   legal_entity_id: z.string().uuid(),
   workspace_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable().optional()),
   type: z.enum(TYPES),
+  // optional overrides: a hand-typed invoice number (blank = next in the series) and the issuing company's address for this invoice
+  number: text(50),
+  seller_address: text(500),
+  // optional: the contract (and month) this invoice bills
+  contract_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable().optional()),
+  contract_month: z.preprocess((v) => (v === '' ? null : v), z.coerce.number().int().min(1).max(12).nullable().optional()),
+  contract_year: z.preprocess((v) => (v === '' ? null : v), z.coerce.number().int().min(2000).max(2100).nullable().optional()),
   invoice_date: dateStr,
   due_date: z.preprocess((v) => (v === '' ? null : v), dateStr.nullable().optional()),
   buyer_name: z.string().trim().min(1).max(200),
@@ -42,6 +49,7 @@ const cancelBody = z.object({ reason: z.string().trim().min(3).max(500) });
 const listQuery = z.object({
   legal_entity_id: z.string().uuid().optional(),
   workspace_id: z.string().uuid().optional(),
+  contract_id: z.string().uuid().optional(),
   from: dateStr.optional(),
   to: dateStr.optional(),
   status: z.enum(['unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled']).optional(),

@@ -45,14 +45,14 @@ function preview(type, lines, intra) {
 
 function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, onClose, onSaved }) {
   const { pushSuccess, pushError } = useAlerts();
-  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
+  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
   const [v, setV] = useState(empty);
   const [lines, setLines] = useState([blankLine()]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
     if (invoice) {
-      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '' });
+      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', number: invoice.number, seller_address: invoice.seller?.address || '', contract_id: invoice.contract_id || '', contract_month: invoice.contract_month || '', contract_year: invoice.contract_year || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '' });
       setLines(invoice.lines.map((l) => ({ description: l.description, hsn_sac: l.hsn_sac || '', qty: String(l.qty), rate: String(l.rate), gst_rate: l.gst_rate })));
     } else { setV(empty); setLines([blankLine()]); }
   }, [open, invoice]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -70,7 +70,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
     e.preventDefault();
     setBusy(true);
     try {
-      const body = { ...v, workspace_id: v.workspace_id || null, due_date: v.due_date || null, lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
+      const body = { ...v, workspace_id: v.workspace_id || null, contract_id: v.contract_id || null, contract_month: v.contract_id && v.contract_month ? Number(v.contract_month) : null, contract_year: v.contract_id && v.contract_year ? Number(v.contract_year) : null, due_date: v.due_date || null, lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
       const { legal_entity_id: entityId, ...rest } = body;
       const res = invoice ? await apiClient.patch(`/group-cash/invoices/${invoice.id}`, rest) : await apiClient.post('/group-cash/invoices', body);
       pushSuccess(invoice ? `Invoice ${res.data.data.invoice.number} updated` : `Invoice ${res.data.data.invoice.number} issued`);
@@ -95,8 +95,32 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
           <label className={labelCls}>For company (optional tag)
             <select className={inputCls} value={v.workspace_id} onChange={set('workspace_id')}><option value="">None</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
           </label>
+          <label className={labelCls}>Invoice no.
+            <input className={inputCls} maxLength={50} placeholder={invoice ? '' : 'Leave blank for the next number'} value={v.number} onChange={set('number')} />
+          </label>
+          <label className={`${labelCls} sm:col-span-2`}>Issuer address (printed on the invoice)
+            <textarea rows={2} className={inputCls} maxLength={500} placeholder={entity?.address || 'Uses the legal entity address'} value={v.seller_address} onChange={set('seller_address')} />
+          </label>
         </div>
-        {entity && !entity.invoice_prefix && <p className="rounded-xl bg-warning-50 p-2 text-xs">This entity has no invoice prefix yet. Add one under Setup &gt; Legal entities.</p>}
+        <div className="rounded-xl border border-tertiary-100 p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Contract (optional)</p>
+          <div className="grid gap-3 sm:grid-cols-6">
+            <label className={`${labelCls} sm:col-span-3`}>Contract
+              <select className={inputCls} value={v.contract_id} onChange={(e) => setV((c) => ({ ...c, contract_id: e.target.value, ...(e.target.value ? {} : { contract_month: '', contract_year: '' }) }))}>
+                <option value="">Not linked</option>
+                {(options?.contracts || []).filter((c) => !v.workspace_id || c.org_id === v.workspace_id).map((c) => <option key={c.id} value={c.id}>{c.counterparty_name} · {c.title}</option>)}
+              </select>
+            </label>
+            <label className={`${labelCls} sm:col-span-2`}>Month
+              <select disabled={!v.contract_id} className={inputCls} value={v.contract_month} onChange={set('contract_month')}>
+                <option value="">-</option>
+                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+              </select>
+            </label>
+            <label className={labelCls}>Year<input disabled={!v.contract_id} type="number" min="2000" max="2100" className={inputCls} value={v.contract_year} onChange={set('contract_year')} /></label>
+          </div>
+        </div>
+        {entity && !entity.invoice_prefix && <pclassName="rounded-xl bg-warning-50 p-2 text-xs">This entity has no invoice prefix yet. Add one under Setup &gt; Legal entities.</p>}
         <div className="rounded-xl border border-tertiary-100 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Bill to</p>
           <div className="grid gap-3 sm:grid-cols-2">

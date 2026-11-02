@@ -123,6 +123,7 @@ export default function FilesPanel({
         )}
       </div>
 
+      <div className="overflow-x-auto">
       <table className="min-w-full text-left text-sm">
         <thead className="border-b text-xs uppercase text-tertiary-500">
           <tr>
@@ -197,6 +198,7 @@ export default function FilesPanel({
           )}
         </tbody>
       </table>
+      </div>
 
       <FileViewerModal open={Boolean(viewerDoc)} doc={viewerDoc} onClose={() => setViewerDoc(null)} />
     </section>

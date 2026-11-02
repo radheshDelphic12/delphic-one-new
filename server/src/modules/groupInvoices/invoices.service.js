@@ -23,6 +23,7 @@ function view(inv, payments = []) {
   return {
     id: inv.id, number: inv.number, series: inv.series, type: inv.type, status: inv.status, currency: inv.currency,
     invoice_date: ymd(inv.invoice_date), due_date: ymd(inv.due_date), legal_entity_id: inv.legal_entity_id, workspace_id: inv.workspace_id,
+    contract_id: inv.contract_id, contract_month: inv.contract_month, contract_year: inv.contract_year,
     seller: inv.seller, buyer_name: inv.buyer_name, buyer_gstin: inv.buyer_gstin, buyer_address: inv.buyer_address, buyer_state_code: inv.buyer_state_code, place_of_supply: inv.place_of_supply,
     lines: inv.lines, subtotal: money(inv.subtotal), cgst: money(inv.cgst), sgst: money(inv.sgst), igst: money(inv.igst), total: money(inv.total),
     receiving_wallet_id: inv.receiving_wallet_id, notes: inv.notes, payment_instructions: inv.payment_instructions, lut_note: inv.lut_note, cancelled_reason: inv.cancelled_reason,
@@ -53,8 +54,19 @@ async function build(entity, body, issuedSeller = null) {
   if (!wallet.active || (wallet.bank_account && !wallet.bank_account.active)) return { error: 'wallet_inactive' };
   if (wallet.currency !== currency) return { error: 'wallet_currency' };
 
+  // optional contract link: the contract must belong to a company of this group; a month needs a contract and a year
+  let contractId = body.contract_id || null;
+  let contractMonth = body.contract_month || null;
+  let contractYear = body.contract_year || null;
+  if (contractId) {
+    if (!(await prisma.contract.findFirst({ where: { id: contractId, org: { org_group_id: entity.org_group_id } }, select: { id: true } }))) return { error: 'contract_not_found' };
+    if (Boolean(contractMonth) !== Boolean(contractYear)) return { error: 'contract_month_incomplete' };
+  } else { contractMonth = null; contractYear = null; }
+
   // an invoice that is being edited keeps the seller details it was issued with
-  const seller = issuedSeller || { name: entity.name, gstin: entity.gstin, pan: entity.pan, address: entity.address, state_code: entity.state_code, logo_url: entity.logo_url };
+  const base = issuedSeller || { name: entity.name, gstin: entity.gstin, pan: entity.pan, address: entity.address, state_code: entity.state_code, logo_url: entity.logo_url };
+  // a typed address replaces the entity's for this invoice; leaving it blank keeps what the invoice already had
+  const seller = body.seller_address ? { ...base, address: body.seller_address } : base;
   let intraState = false;
   let placeOfSupply = body.place_of_supply || body.buyer_state_code || null;
   if (body.type === 'gst') {
@@ -72,7 +84,7 @@ async function build(entity, body, issuedSeller = null) {
     wallet,
     currency,
     data: {
-      workspace_id: body.workspace_id ?? null, type: body.type, invoice_date: toDate(body.invoice_date), due_date: body.due_date ? toDate(body.due_date) : null, currency, seller,
+      workspace_id: body.workspace_id ?? null, contract_id: contractId, contract_month: contractMonth, contract_year: contractYear, type: body.type, invoice_date: toDate(body.invoice_date), due_date: body.due_date ? toDate(body.due_date) : null, currency, seller,
       buyer_name: body.buyer_name, buyer_gstin: body.buyer_gstin ?? null, buyer_address: body.buyer_address ?? null, buyer_state_code: body.buyer_state_code ?? null, place_of_supply: placeOfSupply,
       lines: totals.lines, subtotal: totals.subtotal, cgst: totals.cgst, sgst: totals.sgst, igst: totals.igst, total: totals.total,
       receiving_wallet_id: wallet.id, notes: body.notes ?? null, payment_instructions: instructions,
@@ -89,12 +101,14 @@ async function create(groupIds, userId, body) {
   const built = await build(entity, body);
   if (built.error) return built;
   const series = invCalc.financialYear(body.invoice_date);
+  const typed = body.number || null;
+  if (typed && (await prisma.groupInvoice.findFirst({ where: { legal_entity_id: entity.id, number: typed }, select: { id: true } }))) return { error: 'number_taken' };
 
   const row = await prisma.$transaction(async (tx) => {
     // taking the next number locks the counter row until this transaction ends, so two invoices can never get the same one
     const [{ last_number: seq }] = await tx.$queryRaw`INSERT INTO invoice_counters (legal_entity_id, series, last_number) VALUES (${entity.id}::uuid, ${series}, 1) ON CONFLICT (legal_entity_id, series) DO UPDATE SET last_number = invoice_counters.last_number + 1 RETURNING last_number`;
     const inv = await tx.groupInvoice.create({
-      data: { org_group_id: entity.org_group_id, legal_entity_id: entity.id, series, seq, number: invCalc.invoiceNumber(entity.invoice_prefix, series, seq), ...built.data, created_by: userId },
+      data: { org_group_id: entity.org_group_id, legal_entity_id: entity.id, series, seq, number: typed || invCalc.invoiceNumber(entity.invoice_prefix, series, seq), ...built.data, created_by: userId },
     });
     await audit(tx, entity.org_group_id, inv.id, 'create', null, inv, userId);
     return inv;
@@ -118,8 +132,10 @@ async function update(groupIds, userId, id, body) {
   if (livePayments.length && (built.currency !== inv.currency || built.wallet.id !== inv.receiving_wallet_id)) return { error: 'has_payments_locked' };
   const paid = livePayments.reduce((acc, p) => acc.plus(D(p.amount)), calc.ZERO);
   if (D(built.data.total).lt(paid)) return { error: 'total_below_paid' };
+  const number = body.number && body.number !== inv.number ? body.number : null;
+  if (number && (await prisma.groupInvoice.findFirst({ where: { legal_entity_id: inv.legal_entity_id, number, id: { not: id } }, select: { id: true } }))) return { error: 'number_taken' };
   const row = await prisma.$transaction(async (tx) => {
-    const u = await tx.groupInvoice.update({ where: { id }, data: built.data, include: { payments: true } });
+    const u = await tx.groupInvoice.update({ where: { id }, data: { ...built.data, ...(number ? { number } : {}) }, include: { payments: true } });
     await audit(tx, inv.org_group_id, id, 'update', { ...inv, payments: undefined }, { ...u, payments: undefined }, userId);
     return u;
   });
@@ -142,6 +158,7 @@ async function list(groupIds, q = {}) {
   const rows = await prisma.groupInvoice.findMany({
     where: {
       ...scope(groupIds), ...(q.legal_entity_id ? { legal_entity_id: q.legal_entity_id } : {}), ...(q.workspace_id ? { workspace_id: q.workspace_id } : {}),
+      ...(q.contract_id ? { contract_id: q.contract_id } : {}),
       ...(q.from || q.to ? { invoice_date: date } : {}),
       ...(q.search ? { OR: [{ number: { contains: q.search, mode: 'insensitive' } }, { buyer_name: { contains: q.search, mode: 'insensitive' } }] } : {}),
     },

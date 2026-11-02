@@ -477,6 +477,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
         capacity_per_resource: team?.projects_per_resource !== null && team?.projects_per_resource !== undefined ? Number(team.projects_per_resource) : orgDefault,
         uses_org_default: !(team?.projects_per_resource !== null && team?.projects_per_resource !== undefined),
         members: [],
+        joining: [],
+        leaving: [],
         projects: new Map(),
       });
     }
@@ -484,10 +486,22 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
   };
   for (const t of ctx.teams) rowFor(t);
   for (const m of ctx.memberships) {
-    if (!employedOn(m, day)) continue;
+    if (!employedOn(m, day)) {
+      // Joining inside the window: counts towards what the team can take on once they are in (their team on the joining date).
+      const joins = m.joined_at ? A.toDate(m.joined_at) : null;
+      if (joins && joins > day && joins <= windowEnd && !(m.left_at && A.toDate(m.left_at) < joins) && m.employment_status !== 'terminated') {
+        const joinTeam = ctx.teamOf(m.id, joins);
+        if (joinTeam) rowFor(ctx.teamsById.get(joinTeam)).joining.push({ id: m.id, name: m.person.name, date: A.ymd(joins) });
+      }
+      continue;
+    }
     const teamId = ctx.teamOf(m.id, day);
     if (!teamId) continue;
-    rowFor(ctx.teamsById.get(teamId)).members.push({ id: m.id, name: m.person.name, contractor: m.worker_type === 'contractor' });
+    const row = rowFor(ctx.teamsById.get(teamId));
+    row.members.push({ id: m.id, name: m.person.name, contractor: m.worker_type === 'contractor' });
+    // Last working day inside the window: their capacity goes away.
+    const leaves = m.left_at ? A.toDate(m.left_at) : null;
+    if (leaves && leaves <= windowEnd) row.leaving.push({ id: m.id, name: m.person.name, date: A.ymd(leaves) });
   }
   for (const s of spans) {
     const m = ctx.membershipsById.get(s.org_membership_id);
@@ -521,6 +535,10 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       // Projects are whole units: a fractional remainder (0.5, 2.5) counts as one more project, so capability is a whole number.
       const available = Math.ceil(round2(Math.max(0, total - current)));
       const endingSoon = projects.filter((p) => p.ending_soon).length;
+      // People who join or leave (last working day) inside the window change what the team can take on.
+      const joining = r.team ? r.joining : [];
+      const leaving = r.team ? r.leaving : [];
+      const capacityDelta = round2((joining.length - leaving.length) * r.capacity_per_resource);
       const runningNow = projects.filter((p) => !p.not_started);
       const monthlyBilling = round2(runningNow.reduce((s, p) => s + billingOf(p.id), 0));
       const teamSalary = round2(r.members.reduce((s, mem) => s + (mem.contractor ? 0 : Number(salaryOf.get(mem.id)?.ctc || 0)), 0));
@@ -545,7 +563,12 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
         available_capability: available,
         over_capacity_by: round2(Math.max(0, current - total)),
         projects_ending_soon: endingSoon,
-        can_allocate: round2(available + endingSoon),
+        members_joining: joining.length,
+        members_leaving: leaving.length,
+        joining_list: joining,
+        leaving_list: leaving,
+        // capability after the window: capacity with joiners added and leavers removed, less the projects that stay, plus those that end
+        can_allocate: round2(Math.max(0, Math.ceil(round2(Math.max(0, total + capacityDelta - current))) + endingSoon)),
         status: r.team ? capacityStatus(members, total, current) : 'unassigned',
         projects,
       };
@@ -564,6 +587,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       current_allocation: sum('current_allocation'),
       available_capability: sum('available_capability'),
       projects_ending_soon: sum('projects_ending_soon'),
+      members_joining: sum('members_joining'),
+      members_leaving: sum('members_leaving'),
       can_allocate: sum('can_allocate'),
       monthly_billing: round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)),
       team_salary: sum('team_salary'),

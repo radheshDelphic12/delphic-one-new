@@ -7683,6 +7683,9 @@ model GroupInvoice {
   legal_entity_id      String      @db.Uuid
   legal_entity         LegalEntity @relation(fields: [legal_entity_id], references: [id])
   workspace_id         String?     @db.Uuid // optional tag: which company the work was for
+  contract_id          String?     @db.Uuid // optional: the contract (and month) this invoice bills; validated in the service, no FK
+  contract_month       Int?
+  contract_year        Int?
   series               String
   seq                  Int
   number               String
@@ -7717,6 +7720,7 @@ model GroupInvoice {
   @@unique([legal_entity_id, number])
   @@unique([legal_entity_id, series, seq])
   @@index([org_group_id, invoice_date])
+  @@index([contract_id])
   @@map("group_invoices")
 }
 

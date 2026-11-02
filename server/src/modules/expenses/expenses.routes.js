@@ -4,6 +4,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
 const payout = require('./expenses.payout');
+const processed = require('./expenses.processed');
 const {
   createClaimSchema,
   updateClaimSchema,
@@ -11,6 +12,7 @@ const {
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
   claimsPayoutQuerySchema,
+  claimsProcessedQuerySchema,
   createVendorPaymentSchema,
   decideVendorPaymentSchema,
   listVendorPaymentsQuerySchema,
@@ -120,6 +122,20 @@ router.get(
     const buffer = await payout.payoutWorkbook(req.user.org_id, query);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="reimbursement-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}-${query.status}.xlsx"`);
+    return res.send(Buffer.from(buffer));
+  })
+);
+
+// Processed reimbursements report: when each reimbursed claim was filed, approved and paid. `format=json` previews, otherwise Excel. Admin only.
+router.get(
+  '/claims/processed',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = claimsProcessedQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await processed.processedData(req.user.org_id, query));
+    const buffer = await processed.processedWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="processed-reimbursements-${query.from || 'start'}-to-${query.to || 'today'}.xlsx"`);
     return res.send(Buffer.from(buffer));
   })
 );

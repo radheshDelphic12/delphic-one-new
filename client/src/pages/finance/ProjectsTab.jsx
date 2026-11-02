@@ -417,6 +417,9 @@ export default function ProjectsTab() {
   const [category, setCategory] = useState('all');
   const [contract, setContract] = useState('all');
   const [search, setSearch] = useState('');
+  // Agreement period: keeps projects whose agreement overlaps [from, to]; an open start / end counts as unbounded.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const { rates, reload: reloadRates } = useExchangeRates();
 
   const matchesContract = (row, key) => key === 'all' || row.contract?.state === key;
@@ -424,8 +427,9 @@ export default function ProjectsTab() {
     const q = search.trim().toLowerCase();
     // Search by project name, project ID, client name or requirement.
     const matchesSearch = (row) => !q || [row.project_name, row.project_code, row.client_name, row.requirement].some((v) => String(v || '').toLowerCase().includes(q));
-    return rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract) && matchesSearch(row));
-  }, [rows, category, contract, search]);
+    const inPeriod = (row) => (!to || !row.agreement_start_date || row.agreement_start_date.slice(0, 10) <= to) && (!from || !row.agreement_end_date || row.agreement_end_date.slice(0, 10) >= from);
+    return rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract) && matchesSearch(row) && inPeriod(row));
+  }, [rows, category, contract, search, from, to]);
 
   // This month's CONTRACT billing of the filtered projects, in INR, from the
   // server: the fixed monthly fee, or contract hours (minimum, else benchmark)
@@ -486,6 +490,13 @@ export default function ProjectsTab() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tertiary-400" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search project, ID or client" aria-label="Search projects" className="w-64 max-w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
             </div>
+            <label className="flex items-center gap-1 text-xs text-tertiary-600">Agreement from
+              <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="rounded-xl border px-2 py-1.5 text-sm" />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-tertiary-600">to
+              <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-xl border px-2 py-1.5 text-sm" />
+            </label>
+            {(from || to) && <button type="button" className="btn-ghost text-xs" onClick={() => { setFrom(''); setTo(''); }}>Clear dates</button>}
             <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddOpen(true)}>
               <FolderPlus className="h-4 w-4" /> Add project
             </button>
