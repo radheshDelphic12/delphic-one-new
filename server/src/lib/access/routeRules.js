@@ -133,7 +133,7 @@ const RULES = [
   [/^\/(vendor-commissions|accounting|external-access|wallets)(\/|$)/, { GET: 'finance.view', POST: 'finance.create', DELETE: 'finance.delete', '*': 'finance.update' }],
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
-  [/^\/(group-cash|super-dashboard|hiring)(\/|$)/, 'admin'],
+  [/^\/(group-cash|super-dashboard|hiring|group-offices)(\/|$)/, 'admin'],
   // Project Management (Delphic Global only): the route limits it to the master workspace; admin / project lead / member rights are per record.
   [/^\/pm(\/|$)/, 'open'],
   [/^\/pm-guest(\/|$)/, 'open'], // bearer-token share link (no login); the route checks the token's scope
