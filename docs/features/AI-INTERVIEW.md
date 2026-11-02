@@ -1,6 +1,6 @@
 # AI interview (optional first-round screening)
 
-Built 2026-11-05 on branch `feature/ai-interview` (local, not pushed). An **optional, separate link** for a candidate's first
+Built on branch `feature/ai-interview`; **shipped to `super_admin_branch`, `staging` and `main` (production) on 2026-10-30** (commits up to `b9f039c`, 4 additive migrations `20261105*`). Prod `.env` has `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` (user-level key) and `AI_INTERVIEW_MODEL` (quoted, picked up by the next server recreate). **Not yet verified end to end** (browser microphone / speech, recording, the live Anthropic call): trial it on a dummy candidate first. An **optional, separate link** for a candidate's first
 round. It is **off by default** and nothing in the existing flow (screening test, interview plan, stage rules, offer gate)
 depends on it or waits for it.
 
