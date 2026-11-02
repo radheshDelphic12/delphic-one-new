@@ -68,10 +68,10 @@ async function list(orgId, { role, active, search, department_id, page = 1, limi
 }
 
 // Full lightweight roster for pickers/filters — no secrets, no pagination.
-async function listDirectory(orgId, { role, active } = {}) {
+async function listDirectory(orgId, { role, active, include_former } = {}) {
   return prisma.user.findMany({
     where: {
-      ...activeOrgMembership(orgId),
+      ...(include_former && orgId ? { org_memberships: { some: { org_id: orgId } } } : activeOrgMembership(orgId)),
       ...(role ? { role } : {}),
       ...(active !== undefined ? { active } : {}),
     },

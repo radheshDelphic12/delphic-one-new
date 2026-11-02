@@ -177,7 +177,7 @@ export default function AccountsListPage() {
     // the Owner / Brought-by filters show the whole roster (BDAs included) no
     // matter who is signed in.
     apiClient
-      .get('/users/directory')
+      .get('/users/directory', { params: { include_former: true } })
       .then(({ data }) =>
         setPeople(
           (data.data || []).map((u) => ({
