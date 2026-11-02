@@ -583,7 +583,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.requirement_id !== undefined) {
     if (patch.requirement_id) {
       const requirement = await prisma.requirement.findFirst({ where: { id: patch.requirement_id, org_id: orgId }, select: { id: true } });
-      if (!requirement) return { error: 'requirement_not_found' };
+      if (!requirement) return { error: 'project_requirement_not_found' };
     }
     data.requirement_id = patch.requirement_id || null;
   }
