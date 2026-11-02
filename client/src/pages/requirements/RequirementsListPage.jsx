@@ -43,14 +43,18 @@ function RequirementPeek({ row, onClose, onAssign }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState(row);
   const [loading, setLoading] = useState(true);
-  // A recruiter opens only requirements they are assigned to; the TAT tab also lists the ones still open for pick-up.
-  const canOpen = user?.role !== 'recruiter' || (row.assigned_recruiters || []).some((r) => r.id === user.id);
+  // The API decides who may read a requirement; the screen follows it. A recruiter opens only requirements they are assigned to, but
+  // someone whose access comes from the permission model (e.g. an HR lead) may read more than their plain role suggests: if the
+  // detail loads, the person may open it. The role rule below only covers the moment before it has loaded.
+  const [readable, setReadable] = useState(false);
+  const canOpen = readable || user?.role !== 'recruiter' || (row.assigned_recruiters || []).some((r) => r.id === user.id);
 
   useEffect(() => {
     setLoading(true);
+    setReadable(false);
     apiClient
       .get(`/requirements/${row.id}`)
-      .then(({ data }) => setDetail(data.data || row))
+      .then(({ data }) => { setDetail(data.data || row); setReadable(true); })
       .catch(() => setDetail(row))
       .finally(() => setLoading(false));
   }, [row]);
