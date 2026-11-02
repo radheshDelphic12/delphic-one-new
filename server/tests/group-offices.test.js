@@ -99,6 +99,40 @@ describe('group offices', () => {
     expect((await get(`/people?org_id=${outsider.id}`)).status).toBe(403);
   });
 
+  test('assigning an office to an employee: own-company office only, by id, counts follow, group scope and role enforced', async () => {
+    const aIndore = await loc(alpha, 'Indore');
+    const bIndore = await loc(beta, 'Indore'); // same name, other company: must be refused for an Alpha person
+    const outsiderOffice = await loc(outsider, 'Indore');
+    const nowhere = await person(alpha, null, 'Nowhere');
+    const patch = (membershipId, body, token = superToken) => authed(request(app).patch(`${base}/memberships/${membershipId}/location`), token).send(body);
+
+    const before = (await get('')).body.data;
+    const noOfficeBefore = before.companies.find((c) => c.org.id === alpha.id).no_office_count;
+
+    expect((await patch(nowhere.id, { location_id: bIndore.id })).status).toBe(400);
+    expect((await patch(nowhere.id, { location_id: outsiderOffice.id })).status).toBe(400);
+    expect((await patch(nowhere.id, { location_id: 'none' })).status).toBe(400);
+    expect((await prisma.orgMembership.findUnique({ where: { id: nowhere.id } })).location_id).toBeNull();
+
+    const ok = await patch(nowhere.id, { location_id: aIndore.id });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data).toMatchObject({ membership_id: nowhere.id, location_id: aIndore.id, office: 'Indore' });
+
+    const after = (await get('')).body.data;
+    const a = after.companies.find((c) => c.org.id === alpha.id);
+    expect(a.no_office_count).toBe(noOfficeBefore - 1);
+    expect(a.locations.find((l) => l.id === aIndore.id).people_count).toBe(1);
+    expect(after.totals.no_office).toBe(before.totals.no_office - 1);
+    const none = await get(`/people?org_id=${alpha.id}&location_id=none`);
+    expect(none.body.data.items.map((i) => i.name)).not.toContain('Nowhere');
+
+    // a person of another holding group, a plain company admin, and no login
+    const stranger = await person(outsider, null, 'Stranger');
+    expect((await patch(stranger.id, { location_id: outsiderOffice.id })).status).toBe(404);
+    expect((await patch(nowhere.id, { location_id: aIndore.id }, adminToken)).status).toBe(403);
+    expect((await request(app).patch(`${base}/memberships/${nowhere.id}/location`).send({ location_id: aIndore.id })).status).toBe(401);
+  });
+
   test('the group superadmin adds, edits and deletes a company location; another group and plain admins are refused', async () => {
     const add = await authed(request(app).post(`${base}/locations`), superToken).send({ org_id: beta.id, name: 'Pune', city: 'Pune', country: 'India', is_default: true });
     expect(add.status).toBe(201);

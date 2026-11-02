@@ -50,18 +50,39 @@ export default function GroupOfficesTab() {
   const [editor, setEditor] = useState(null); // { orgId, id?, form }
   const [removing, setRemoving] = useState(null); // { orgId, location }
   const [busy, setBusy] = useState(false);
+  const [assign, setAssign] = useState(null); // { membershipId, locationId } while one employee's office is being chosen
+  const [assigning, setAssigning] = useState(false);
 
   const params = useMemo(() => Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), [filters]);
   const load = useCallback(() => apiClient.get('/group-offices', { params }).then(({ data: res }) => setData(res.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load the offices'), 'Something went wrong')), [params, pushError]);
   useEffect(() => { load(); }, [load]);
 
   async function showPeople(title, query) {
-    setPeople({ title, loading: true });
+    setPeople({ title, query, loading: true });
+    setAssign(null);
     try {
       const { data: res } = await apiClient.get('/group-offices/people', { params: { ...params, ...query } });
-      setPeople({ title, data: res.data });
+      setPeople({ title, query, data: res.data });
     } catch (err) {
-      setPeople({ title, error: apiErrorMessage(err, 'Failed to load the employees') });
+      setPeople({ title, query, error: apiErrorMessage(err, 'Failed to load the employees') });
+    }
+  }
+
+  // Place one employee in an office of their own company (by office id, never by name), then refresh the drawer list and every count.
+  async function saveAssign() {
+    if (!assign?.locationId) return pushError('Choose an office, or cancel.', 'Office needed');
+    setAssigning(true);
+    try {
+      await apiClient.patch(`/group-offices/memberships/${assign.membershipId}/location`, { location_id: assign.locationId });
+      const { title, query } = people;
+      const [{ data: res }] = await Promise.all([apiClient.get('/group-offices/people', { params: { ...params, ...query } }), load()]);
+      setPeople({ title, query, data: res.data });
+      setAssign(null);
+      pushSuccess('Office assigned.', 'Saved');
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to assign the office'), 'Could not save');
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -201,17 +222,34 @@ export default function GroupOfficesTab() {
             <p className="text-xs text-tertiary-500">{people.data.total} employee{people.data.total === 1 ? '' : 's'}</p>
             <div className="overflow-x-auto rounded-xl border border-tertiary-100">
               <table className="min-w-full text-sm">
-                <thead className="bg-canvas-muted"><tr><th className={th}>Name</th><th className={th}>Code</th><th className={th}>Company</th><th className={th}>Office</th><th className={th}>Designation</th><th className={th}>Department</th><th className={th}>Status</th><th className={th}>Work mode</th></tr></thead>
+                <thead className="bg-canvas-muted"><tr><th className={th}>Name</th><th className={th}>Code</th><th className={th}>Company</th><th className={th}>Office</th><th className={th}>Designation</th><th className={th}>Department</th><th className={th}>Status</th><th className={th}>Work mode</th><th className={th}>Actions</th></tr></thead>
                 <tbody>
-                  {people.data.items.map((p) => (
+                  {!people.data.items.length && <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-tertiary-500" data-testid="office-people-empty">No employees here{people.query?.location_id === 'none' ? ' - everyone has been placed in an office' : ''}.</td></tr>}
+                  {people.data.items.map((p) => {
+                    const offices = companies.find((c) => c.org.id === p.org_id)?.locations || [];
+                    const editing = assign?.membershipId === p.membership_id;
+                    return (
                     <tr key={p.membership_id} className="border-t border-tertiary-100" data-testid="office-person-row">
                       <td className={`${td} font-medium text-tertiary-900`}>{p.name}<span className="block text-[11px] font-normal text-tertiary-500">{p.email}</span></td>
                       <td className={td}>{p.employee_code || '—'}</td><td className={td}>{p.company}</td><td className={td}>{p.office || '—'}</td>
                       <td className={td}>{p.designation || '—'}</td><td className={td}>{p.department || '—'}</td>
                       <td className={td}>{STATUS_TEXT[p.employment_status] || p.employment_status}{p.worker_type === 'contractor' && <span className="ml-1 text-[11px] text-tertiary-500">(contractor)</span>}</td>
                       <td className={td}>{MODE_TEXT[p.work_mode] || '—'}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        {editing ? (
+                          <div className="flex items-center gap-1.5" data-testid="assign-office">
+                            <SearchableSelect className="w-44" ariaLabel={`Office for ${p.name}`} value={assign.locationId} onChange={(v) => setAssign((a) => ({ ...a, locationId: v }))} placeholder="Choose an office" searchPlaceholder="Search offices…" options={offices.map((o) => ({ value: o.id, label: o.name }))} />
+                            <button type="button" className="btn-primary text-xs" data-testid="assign-office-save" disabled={assigning || !assign.locationId} onClick={saveAssign}>{assigning ? 'Saving…' : 'Save'}</button>
+                            <button type="button" className="btn-secondary text-xs" disabled={assigning} onClick={() => setAssign(null)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button type="button" aria-label={`Assign office to ${p.name}`} title={offices.length ? 'Assign office' : 'Add an office to this company first'} disabled={!offices.length || assigning} className="rounded p-1.5 text-tertiary-500 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => setAssign({ membershipId: p.membership_id, locationId: '' })}><Pencil className="h-4 w-4" /></button>
+                        )}
+                        {!editing && !offices.length && <span className="ml-1 text-[11px] text-tertiary-500">Add an office first</span>}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -60,7 +60,15 @@ router.post('/locations', asyncHandler(async (req, res) => {
   return result.error ? problem(res, result.error, result) : created(res, result.location);
 }));
 
-router.patch('/:orgId/locations/:id', asyncHandler(async (req, res) => {
+router.patch('/memberships/:membershipId/location', asyncHandler(async (req, res) => {
+  const { location_id } = z.object({ location_id: uuid }).parse(req.body);
+  const result = await service.assignOffice(req.user.org_group_ids, uuid.parse(req.params.membershipId), location_id);
+  if (result.error === 'membership_not_found') return fail(res, 404, 'Employee not found in your group');
+  if (result.error === 'location_mismatch') return fail(res, 400, 'Choose an office that belongs to the employee\'s company');
+  return ok(res, result);
+}));
+
+router.patch('/:orgId/locations/:id',asyncHandler(async (req, res) => {
   const result = await service.editLocation(req.user.org_group_ids, uuid.parse(req.params.orgId), uuid.parse(req.params.id), updateSchema.parse(req.body));
   return result.error ? problem(res, result.error, result) : ok(res, result.location);
 }));

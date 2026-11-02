@@ -103,6 +103,7 @@ async function people(groupIds, { org_id, location_id, office_name, ...filters }
     total: rows.length,
     items: rows.map((m) => ({
       membership_id: m.id,
+      org_id: m.org_id,
       user_id: m.person.id,
       name: m.person.name,
       email: m.person.email,
@@ -138,4 +139,17 @@ async function removeLocation(groupIds, orgId, locationId) {
   return orgs.deleteLocation(orgId, locationId);
 }
 
-module.exports = { overview, people, addLocation, editLocation, removeLocation };
+/** Place one person (one membership, so one company) in an office of that same company. */
+async function assignOffice(groupIds, membershipId, locationId) {
+  const membership = await prisma.orgMembership.findFirst({
+    where: { id: membershipId, org: { org_group_id: { in: groupIds } } },
+    select: { id: true, org_id: true },
+  });
+  if (!membership) return { error: 'membership_not_found' };
+  const location = await prisma.location.findFirst({ where: { id: locationId, org_id: membership.org_id }, select: { id: true, name: true } });
+  if (!location) return { error: 'location_mismatch' };
+  await prisma.orgMembership.update({ where: { id: membership.id }, data: { location_id: location.id } });
+  return { membership_id: membership.id, location_id: location.id, office: location.name };
+}
+
+module.exports = { overview, people, addLocation, editLocation, removeLocation, assignOffice };
