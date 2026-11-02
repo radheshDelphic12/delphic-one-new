@@ -188,6 +188,56 @@ describe('group cash: invoices', () => {
     expect((await patch(inv.id, body)).status).toBe(409); // cancelled stays cancelled
   });
 
+  test('invoice number and issuer address can be typed; a taken number is refused; edits may change both', async () => {
+    const typed = await invoice({ number: 'DG/2026-27/0100', seller_address: 'Dehradun, Uttarakhand' });
+    expect(typed.status).toBe(201);
+    expect(d(typed).invoice).toMatchObject({ number: 'DG/2026-27/0100', seller: { name: 'Delphic Global', address: 'Dehradun, Uttarakhand' } });
+    // the entity's own address is untouched, and a blank number still takes the next in the series
+    const next = d(await invoice()).invoice;
+    expect(next.number).toMatch(/^DG\/2026-27\/\d{4}$/);
+    expect(next.seller.address).toBe('Indore, MP');
+    // a number already used by this entity is refused, on create and on edit
+    expect((await invoice({ number: 'DG/2026-27/0100' })).status).toBe(409);
+    const body = { type: 'gst', invoice_date: '2026-05-10', buyer_name: 'Acme Pvt Ltd', buyer_gstin: '23AAACA1234A1Z5', buyer_state_code: '23', lines: [line()], receiving_wallet_id: inrWallet.id };
+    const patch = (id, over) => authed(request(app).patch(`${G}/invoices/${id}`), superToken).send({ ...body, ...over });
+    expect((await patch(next.id, { number: 'DG/2026-27/0100' })).status).toBe(409);
+    // edit: new number and address; leaving them out keeps what the invoice has
+    const edited = await patch(next.id, { number: 'DG/2026-27/0200', seller_address: 'Mumbai, MH' });
+    expect(edited.status).toBe(200);
+    expect(d(edited).invoice).toMatchObject({ number: 'DG/2026-27/0200', seller: { address: 'Mumbai, MH' } });
+    const kept = await patch(next.id, { buyer_name: 'Acme 2' });
+    expect(d(kept).invoice).toMatchObject({ number: 'DG/2026-27/0200', seller: { address: 'Mumbai, MH' } });
+    // another entity may use the same number
+    expect((await post('/invoices', { legal_entity_id: other.id, type: 'gst', invoice_date: '2026-05-10', number: 'DG/2026-27/0100', buyer_name: 'X', buyer_gstin: '23AAACA1234A1Z5', buyer_state_code: '23', lines: [line()], receiving_wallet_id: otherWallet.id })).status).toBe(201);
+  });
+
+  test('an invoice can be linked to a contract and a month (optional); the contract must be in the group', async () => {
+    const owner = await prisma.user.findFirst();
+    const contract = await prisma.contract.create({ data: { org_id: org.id, kind: 'service', title: 'Managed team', counterparty_name: 'Acme', start_date: new Date('2026-04-01T00:00:00Z'), created_by: owner.id } });
+    // not linked by default
+    const plain = d(await invoice()).invoice;
+    expect(plain).toMatchObject({ contract_id: null, contract_month: null, contract_year: null });
+    // options list the contracts of the group
+    expect(d(await get('/options')).contracts.map((c) => c.id)).toContain(contract.id);
+
+    const linked = await invoice({ contract_id: contract.id, contract_month: 10, contract_year: 2026 });
+    expect(linked.status).toBe(201);
+    expect(d(linked).invoice).toMatchObject({ contract_id: contract.id, contract_month: 10, contract_year: 2026 });
+    // a month needs a year (and the other way round); a contract of nobody's group is refused
+    expect((await invoice({ contract_id: contract.id, contract_month: 10 })).status).toBe(422);
+    expect((await invoice({ contract_id: '00000000-0000-4000-8000-000000000000' })).status).toBe(404);
+    // a month with no contract is dropped
+    expect(d(await invoice({ contract_month: 3, contract_year: 2026 })).invoice).toMatchObject({ contract_id: null, contract_month: null });
+    // filter the list by contract
+    const rows = d(await get(`/invoices?contract_id=${contract.id}`)).rows;
+    expect(rows.map((r) => r.id)).toEqual([d(linked).invoice.id]);
+    // edit: change the month, then clear the link
+    const body = { type: 'gst', invoice_date: '2026-05-10', buyer_name: 'Acme Pvt Ltd', buyer_gstin: '23AAACA1234A1Z5', buyer_state_code: '23', lines: [line()], receiving_wallet_id: inrWallet.id };
+    const edit = (over) => authed(request(app).patch(`${G}/invoices/${d(linked).invoice.id}`), superToken).send({ ...body, ...over });
+    expect(d(await edit({ contract_id: contract.id, contract_month: 11, contract_year: 2026 })).invoice).toMatchObject({ contract_month: 11 });
+    expect(d(await edit({ contract_id: '' })).invoice).toMatchObject({ contract_id: null, contract_month: null, contract_year: null });
+  });
+
   test('a recorded payment can be corrected; the wallet entry follows; never above what is due', async () => {
     const inv = d(await invoice()).invoice;
     const pay = d(await post(`/invoices/${inv.id}/payments`, { date: '2026-05-15', amount: '5000', mode: 'upi' })).invoice.payments[0];

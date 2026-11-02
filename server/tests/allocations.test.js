@@ -19,6 +19,9 @@ const today = () => {
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 };
 const inDays = (n) => ymd(new Date(today().getTime() + n * DAY));
+// Last day of the current month: a project ending then is billed in full for this month (no proration), yet is still inside the 30-day ending-soon window.
+const monthEnd = () => ymd(new Date(Date.UTC(today().getUTCFullYear(), today().getUTCMonth() + 1, 0)));
+const daysToMonthEnd = () => Math.round((new Date(`${monthEnd()}T00:00:00Z`) - today()) / DAY);
 
 async function seed() {
   const org = await createOrg({ name: 'Delphic', slug: unique('delphic-') });
@@ -206,7 +209,7 @@ describe('Team capacity', () => {
       people.push(p);
     }
     await authed(request(app).patch(`/api/v1/teams/${team.id}`), ctx.adminToken).send({ lead_membership_id: people[0].membership.id });
-    const a = await project(ctx, 'Project A', { end: inDays(10) });
+    const a = await project(ctx, 'Project A', { end: monthEnd() });
     const b = await project(ctx, 'Project B', { end: inDays(60) });
     await assign({ account_id: a.id, org_membership_id: people[0].membership.id }); // Harshit → A
     await assign({ account_id: a.id, org_membership_id: people[1].membership.id }); // Ankita → A
@@ -247,10 +250,41 @@ describe('Team capacity', () => {
     await authed(request(app).patch(`/api/v1/teams/${team.id}`), ctx.adminToken).send({ projects_per_resource: 2 });
     expect(await row()).toMatchObject({ capacity_per_resource: 2, total_capacity: 8, uses_org_default: false });
 
-    // Ending soon: A (ends in 10 days) is inside the 30-day window, B (60) is not.
+    // Ending soon: A (ends this month) is inside the 30-day window, B (60) is not.
     const soon = (await report('ending-soon', {})).body.data.projects;
     expect(soon.map((p) => p.project.name)).toEqual(['Project A']);
-    expect(soon[0]).toMatchObject({ days_remaining: 10, resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
+    expect(soon[0]).toMatchObject({ days_remaining: daysToMonthEnd(), resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
+  });
+
+  test('people joining or leaving inside the window change "can allocate"; those outside it do not', async () => {
+    const ctx = await seed();
+    const { report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Moves' })).body.data;
+    const mk = async (name, patch = {}) => {
+      const p = await person(ctx, name);
+      await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+      await prisma.orgMembership.update({ where: { id: p.membership.id }, data: patch });
+      return p;
+    };
+    await mk('Stay1');
+    await mk('Stay2');
+    await mk('Leaver', { left_at: new Date(`${inDays(10)}T00:00:00.000Z`) }); // last working day inside the 30-day window
+    await mk('JoinsSoon1', { joined_at: new Date(`${inDays(8)}T00:00:00.000Z`) });
+    await mk('JoinsSoon2', { joined_at: new Date(`${inDays(15)}T00:00:00.000Z`) });
+    await mk('JoinsLater', { joined_at: new Date(`${inDays(60)}T00:00:00.000Z`) }); // outside the window
+    await mk('Gone', { left_at: new Date('2026-08-05T00:00:00.000Z') }); // already left: never counted
+
+    const row = async (query = {}) => (await report('team-capacity', query)).body.data.teams.find((t) => t.team?.id === team.id);
+    // today: Stay1, Stay2 and the Leaver are in the team (3 x 1.5 = 4.5); nobody allocated
+    expect(await row()).toMatchObject({ members: 3, total_capacity: 4.5, members_joining: 2, members_leaving: 1, current_allocation: 0 });
+    // after the window: +2 joiners, -1 leaver = +1.5 capacity -> ceil(6) = 6 can be taken on (without the moves it would be 5)
+    expect((await row()).can_allocate).toBe(6);
+    expect((await row()).joining_list.map((m) => m.name).sort()).toEqual(['JoinsSoon1', 'JoinsSoon2']);
+    expect((await row()).leaving_list.map((m) => m.name)).toEqual(['Leaver']);
+    // a 5-day window sees none of them: back to today's capability
+    expect(await row({ window_days: 5 })).toMatchObject({ members_joining: 0, members_leaving: 0, can_allocate: 5 });
+    // totals carry the counts
+    expect((await report('team-capacity', {})).body.data.totals).toMatchObject({ members_joining: 2, members_leaving: 1 });
   });
 
   test('a signed project that has not started yet still reserves its team (shown as not started)', async () => {
