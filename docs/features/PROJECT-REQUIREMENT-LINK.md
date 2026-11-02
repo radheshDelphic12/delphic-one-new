@@ -1,6 +1,6 @@
 # Link a requirement to a project (Finance > Projects)
 
-Built 2026-11-02 on branch `project-req-link` (from `super_admin_branch` `b91d334`). **Local only until pushed.** One additive migration.
+Built 2026-11-02. Live on staging (Render, 2026-11-02, commit `6a9de4c`) and tested there with Playwright; **not on main / production yet**. One additive migration (applied on staging boot).
 
 ## Problem
 In Finance > Projects, a project's drawer showed a disabled **Requirement (not linked yet)** field. The server deliberately returned an empty
@@ -37,7 +37,7 @@ string ("linking a requirement comes later").
   the client's requirements, closed one labelled, link + open link, save, list column, reopen, unrelated save does not resend, clear unlinks) - all pass.
 
 ## Notes
-- Not on staging / main yet. Release order when asked: `super_admin_branch` -> `staging` (Render auto-deploys; the migration applies on boot) -> `main`
+- Staging check (pw/staging-project-req.js, dummy "ZZ PW Project P0115" - there is no project delete, so it stays): picker lists the company's requirements, link + save, list column, unlink - all pass. Not on main yet. Release order when asked: `super_admin_branch` -> `staging` (Render auto-deploys; the migration applies on boot) -> `main`
   (the deploy script rehearses migrations on a DB copy).
 - The link is informational for now: it does not change billing, P&L or timesheets. Possible next steps: show the linked requirement's
   submissions / joined resources on the project, or filter requirements by project.

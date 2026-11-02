@@ -1,6 +1,6 @@
 # Group Dashboard > Companies & Stakes (+ new-business planner, phase 2)
 
-Phase 1 built 2026-11-02. Owner request (screenshot of a Notion "Gulati Industries Group" table): stake management of all companies along with
+Phase 1 built 2026-11-02, live on staging (Render, 2026-11-02, commit `6a9de4c`) and tested there with Playwright; **not on main / production yet**. Owner request (screenshot of a Notion "Gulati Industries Group" table): stake management of all companies along with
 sectors, and a new-businesses planner that collects and analyses data in one place, for current and planned companies.
 
 Decisions (owner, 2026-11-02): **register first, planner next**; a planned business is a **light group record** (no workspace); ownership has
@@ -33,6 +33,9 @@ New Group Dashboard tab **Companies & Stakes** (group superadmin only). One row 
 - Server: `server/src/modules/groupCompanies/`; client: `client/src/pages/groupOverview/GroupCompaniesTab.jsx`, tab added in `GroupOverviewPage.jsx`.
 - `server/tests/group-companies.test.js` (5): register of the group's workspaces only, add / edit / sector roll-up / workspace name locked, stakes
   (several holders, over 100%, self, duplicate, unnamed, other group's business, loop, clear, cascade), quick start, access.
+
+### Staging check
+`pw/staging-today.js` (dummy "ZZ PW" businesses, cleaned up): the register lists all 8 workspaces, the five views, add a planned business, status moves it between views, the stake editor totals live and refuses over 100%, ownership saves and shows both holders, Group Sector card, Overall "who holds what", remove, and a workspace has no Remove button - all pass. Opening the tab on staging created the 8 `group_companies` rows (one per workspace); none have ownership yet ("Ownership not set" = 8).
 
 ## Phase 2 - new-business planner (not built; plan)
 Built on the same `group_companies` rows (status planning / future), one workspace-free record per idea, "all data in one place":

@@ -1,6 +1,6 @@
 # Group Dashboard > Offices
 
-Built 2026-11-02 on `super_admin_branch`. **Local only until pushed** (not on staging / main yet). Read-mostly: **no migration, no new table**
+Built 2026-11-02 on `super_admin_branch`. Live on staging (Render, 2026-11-02, commit `6a9de4c`) and tested there with Playwright; **not on main / production yet**. Read-mostly: **no migration, no new table**
 (it uses the existing `locations` and `org_memberships`).
 
 Owner request: on the Group Dashboard add a section that shows, for every company, the count and the employees at each office location, and
@@ -36,4 +36,5 @@ let the admin add office locations for all companies from there.
 ## Notes / not done
 - No change-log / audit entry for a location added from here (the per-company screens do not write one either).
 - Placing people in an office is still done on the employee profile; a bulk "assign office" is not built.
-- Not yet pushed / deployed. Release order when asked: `super_admin_branch` -> `staging` -> `main`.
+- Staging check (pw/staging-today.js, dummy "ZZ PW" office, cleaned up): tab opens with all 8 companies, roll-up, a count lists exactly that many employees, add / edit / delete an office - all pass.
+- Not on main yet. Release order when asked: `super_admin_branch` -> `staging` -> `main`.
