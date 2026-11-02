@@ -120,7 +120,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
             <label className={labelCls}>Year<input disabled={!v.contract_id} type="number" min="2000" max="2100" className={inputCls} value={v.contract_year} onChange={set('contract_year')} /></label>
           </div>
         </div>
-        {entity && !entity.invoice_prefix && <pclassName="rounded-xl bg-warning-50 p-2 text-xs">This entity has no invoice prefix yet. Add one under Setup &gt; Legal entities.</p>}
+        {entity && !entity.invoice_prefix && <p className="rounded-xl bg-warning-50 p-2 text-xs">This entity has no invoice prefix yet. Add one under Setup &gt; Legal entities.</p>}
         <div className="rounded-xl border border-tertiary-100 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Bill to</p>
           <div className="grid gap-3 sm:grid-cols-2">
