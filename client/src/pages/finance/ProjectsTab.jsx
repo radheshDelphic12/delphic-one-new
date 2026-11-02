@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import EntityHistory from '../../components/EntityHistory.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
@@ -110,6 +111,7 @@ function emptyForm(profile) {
   return {
     project_name: profile.project_name || '',
     client_account_id: profile.client_account_id || '',
+    requirement_id: profile.requirement_id || '',
     service_category: profile.service_category || '',
     agreement_start_date: profile.agreement_start_date || '',
     agreement_end_date: profile.agreement_end_date || '',
@@ -127,6 +129,37 @@ function emptyForm(profile) {
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
   };
+}
+
+// Pick the requirement a project is for: the client's requirements when a client is chosen, otherwise every requirement of the company.
+// The linked one is always in the list (it may be closed or belong to another client), so it never disappears from the field.
+function RequirementSelect({ value, onChange, clientAccountId, current, disabled }) {
+  const [rows, setRows] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get('/requirements', { params: { limit: 100, sort_by: 'created_at', sort_order: 'desc', ...(clientAccountId ? { account_id: clientAccountId } : {}) } })
+      .then(({ data }) => { if (!cancelled) setRows(data.data || []); })
+      .catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+  }, [clientAccountId]);
+  const options = useMemo(() => {
+    const list = rows.map((r) => ({ value: r.id, label: `${r.title}${r.account?.name && !clientAccountId ? ` · ${r.account.name}` : ''}${r.status && r.status !== 'open' ? ` (${String(r.status).replace(/_/g, ' ')})` : ''}` }));
+    if (value && !list.some((o) => o.value === value) && current) list.unshift({ value, label: current.title });
+    return list;
+  }, [rows, value, current, clientAccountId]);
+  return (
+    <SearchableSelect
+      ariaLabel="Requirement"
+      value={value}
+      onChange={(v) => onChange(v || '')}
+      options={options}
+      allowClear
+      disabled={disabled}
+      placeholder={clientAccountId ? "Link one of this client's requirements" : 'Link a requirement'}
+      searchPlaceholder="Search requirements…"
+    />
+  );
 }
 
 /**
@@ -170,6 +203,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
     if (hourly) patch.minimum_monthly_hours = Number(form.minimum_monthly_hours) > 0 ? Number(form.minimum_monthly_hours) : null;
     // Only send the client when it changed, so a legacy free-text client isn't wiped by an unrelated edit.
     if (form.client_account_id !== (project.client_account_id || '')) patch.client_account_id = form.client_account_id || null;
+    // Only send the requirement when it changed (an empty value unlinks it).
+    if (form.requirement_id !== (project.requirement_id || '')) patch.requirement_id = form.requirement_id || null;
     if (form.service_category) patch.service_category = form.service_category;
     const billingChanged =
       form.billing_type && form.rate !== '' &&
@@ -227,10 +262,17 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 <span className="mt-1 block font-normal text-tertiary-500">Saved as text: &ldquo;{project.client_name}&rdquo;. Pick the matching client to link it.</span>
               )}
             </div>
-            <label className="block text-xs font-medium text-tertiary-600">
-              Requirement <span className="font-normal text-tertiary-400">(not linked yet)</span>
-              <input disabled value="" placeholder="—" className="mt-1 w-full rounded-xl border bg-tertiary-50 px-3 py-2 text-sm" />
-            </label>
+            <div className="block text-xs font-medium text-tertiary-600" data-testid="project-requirement">
+              Requirement
+              <div className="mt-1 font-normal">
+                <RequirementSelect value={form.requirement_id} onChange={(v) => set('requirement_id', v)} clientAccountId={form.client_account_id} current={project.requirement_link} disabled={!project.editable} />
+              </div>
+              {form.requirement_id ? (
+                <Link to={`/requirements/${form.requirement_id}`} className="mt-1 inline-block font-normal text-primary-700 hover:underline">Open this requirement</Link>
+              ) : (
+                <span className="mt-1 block font-normal text-tertiary-400">Optional. Link the requirement this project is for.</span>
+              )}
+            </div>
             <label className="block text-xs font-medium text-tertiary-600">
               Category
               <select value={form.service_category} onChange={(e) => { set('service_category', e.target.value); if (e.target.value === 'project') set('billing_type', 'one_time'); else if (form.billing_type === 'one_time') set('billing_type', ''); }} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">

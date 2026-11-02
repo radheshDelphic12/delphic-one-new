@@ -302,6 +302,8 @@ const updateProjectProfileSchema = z
     project_name: z.string().trim().min(1).max(200).optional(),
     // A Lead account of this org (validated in the service); null unlinks.
     client_account_id: z.string().uuid().nullable().optional(),
+    // A requirement of this org (validated in the service); null unlinks.
+    requirement_id: z.string().uuid().nullable().optional(),
     service_category: z.enum(['managed_services', 'project']).optional(),
     agreement_start_date: optionalDate.nullable(),
     agreement_end_date: optionalDate.nullable(),

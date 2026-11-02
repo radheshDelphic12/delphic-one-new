@@ -95,6 +95,7 @@ const ERRORS = {
   hold_periods_invalid: [422, 'A hold period needs a valid start date'],
   hold_resume_before_from: [422, 'A hold period must resume after the day it starts'],
   hold_periods_overlap: [422, 'Hold periods cannot overlap - leave only the last one without a resume date'],
+  requirement_not_found: [400, 'That requirement was not found in this company'],
   catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
 };

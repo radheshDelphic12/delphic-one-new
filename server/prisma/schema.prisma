@@ -2574,6 +2574,9 @@ model Account {
   client_account_id       String?                @db.Uuid
   client_account          Account?               @relation("ProjectClientAccount", fields: [client_account_id], references: [id], onDelete: SetNull)
   client_projects         Account[]              @relation("ProjectClientAccount")
+  // The requirement this project (contract) is for, picked in Finance > Projects. Optional; several projects may point at one requirement.
+  requirement_id          String?                @db.Uuid
+  requirement             Requirement?           @relation("ProjectRequirement", fields: [requirement_id], references: [id], onDelete: SetNull)
   service_category        ReqType?
   agreement_start_date    DateTime?              @db.Date
   benchmark_hours         Int                    @default(160)
@@ -2646,7 +2649,7 @@ model Account {
   org_id String? @db.Uuid
   org    Org?    @relation(fields: [org_id], references: [id])
 
-  requirements               Requirement[]
+  requirements               Requirement[]             @relation("RequirementClient")
   vendor_profiles            Profile[]                       @relation("ProfileVendorAccount")
   meeting_attendees          AccountMeetingAttendee[]
   client_meetings            ClientMeeting[]
@@ -2667,6 +2670,7 @@ model Account {
   assets_at_client           Asset[]                         @relation("AssetClient")
 
   @@unique([org_id, project_code])
+  @@index([requirement_id])
   @@index([type, stage])
   @@index([owner_id])
   @@index([origin_owner_id])
@@ -2737,7 +2741,7 @@ model ClientMeetingAttendee {
 model Requirement {
   id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   account_id String            @db.Uuid
-  account    Account           @relation(fields: [account_id], references: [id])
+  account    Account           @relation("RequirementClient", fields: [account_id], references: [id])
   title      String
   req_type   ReqType
   status     RequirementStatus @default(open)
@@ -2807,6 +2811,7 @@ model Requirement {
   assignments            RequirementAssignment[]
   timesheet_entries      TimesheetEntry[]        @relation("TimesheetRequirement")
   billing_rates          BillingRate[]           @relation("BillingRateRequirement")
+  linked_projects        Account[]               @relation("ProjectRequirement")
   daily_project_revenues DailyProjectRevenue[]   @relation("DailyRevenueRequirement")
   applicants             JobApplicant[]
   website_posting        WebsiteJobPosting?

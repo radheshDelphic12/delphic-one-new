@@ -430,8 +430,10 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     project_code: account.project_code || null,
     project_name: calendarsService.projectName(account),
     ...calendarsService.clientFields(account),
-    // Left blank on purpose (client brief) — linking a requirement comes later.
-    requirement: '',
+    // The requirement this project is linked to (Finance picks it in the project drawer): its title for lists, the full link for the picker.
+    requirement: account.requirement?.title || '',
+    requirement_id: account.requirement_id || null,
+    requirement_link: account.requirement ? { id: account.requirement.id, title: account.requirement.title, status: account.requirement.status, client: account.requirement.account?.name || null } : null,
     service_category: account.service_category,
     billing_type: rate ? rate.rate_type : null,
     rate: rate ? Number(rate.rate) : null,
@@ -486,6 +488,8 @@ const PROFILE_SELECT = {
   client_name: true,
   client_account_id: true,
   client_account: calendarsService.CLIENT_ACCOUNT_SELECT,
+  requirement_id: true,
+  requirement: { select: { id: true, title: true, status: true, account: { select: { name: true } } } },
   service_category: true,
   agreement_start_date: true,
   agreement_end_date: true,
@@ -574,6 +578,14 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.client_account_id !== undefined) {
     data.client_account_id = client?.id || null;
     data.client_name = client?.name || null;
+  }
+  // null unlinks; an id must be a requirement of this company.
+  if (patch.requirement_id !== undefined) {
+    if (patch.requirement_id) {
+      const requirement = await prisma.requirement.findFirst({ where: { id: patch.requirement_id, org_id: orgId }, select: { id: true } });
+      if (!requirement) return { error: 'requirement_not_found' };
+    }
+    data.requirement_id = patch.requirement_id || null;
   }
   if (patch.service_category !== undefined) data.service_category = patch.service_category;
   if (patch.agreement_start_date !== undefined) data.agreement_start_date = patch.agreement_start_date;
