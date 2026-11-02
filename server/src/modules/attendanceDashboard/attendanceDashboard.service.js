@@ -174,12 +174,18 @@ async function calendar(orgId, orgMembershipId, { year, month }) {
 // Admin: this person reports to `location_id` from `effective_from` onward (earlier days keep the earlier office).
 async function setOffice(orgId, actorUserId, { org_membership_id, location_id, effective_from }) {
   const [member, location] = await Promise.all([
-    prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true } }),
+    prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true, location_id: true, joined_at: true } }),
     prisma.location.findFirst({ where: { id: location_id, org_id: orgId }, select: { id: true } }),
   ]);
   if (!member) return { error: 'member_not_found' };
   if (!location) return { error: 'location_not_found' };
   const when = dateOnly(effective_from);
+  // The first change records where the person was until now, so days before `effective_from` keep that office even when the
+  // change starts today or earlier (the membership's current office, the fallback for days with no assignment, moves below).
+  if (member.location_id && member.location_id !== location_id && !(await prisma.employeeOfficeAssignment.count({ where: { org_membership_id } }))) {
+    const since = member.joined_at ? dateOnly(ymd(member.joined_at)) : dateOnly('2000-01-01');
+    if (since < when) await prisma.employeeOfficeAssignment.create({ data: { org_id: orgId, org_membership_id, location_id: member.location_id, effective_from: since, created_by: actorUserId } });
+  }
   const row = await prisma.employeeOfficeAssignment.upsert({
     where: { org_membership_id_effective_from: { org_membership_id, effective_from: when } },
     create: { org_id: orgId, org_membership_id, location_id, effective_from: when, created_by: actorUserId },

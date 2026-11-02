@@ -126,7 +126,9 @@ describe('group tasks and the weekly company table', () => {
     list = (await get(`/group/tasks?month=${month}`)).body.data;
     expect(list.items.find((i) => i.key === first.key).done).toBe(false);
     // a date the task does not fall on cannot be ticked
-    expect((await put(`/group/tasks/${t.id}/occurrences/${dayInMonth(2)}`, { done: true })).status).toBe(422);
+    // (the task falls on Mondays and Wednesdays, so pick a Tuesday of the month, whatever month the suite runs in)
+    const tuesday = [1, 2, 3, 4, 5, 6, 7].find((n) => new Date(`${dayInMonth(n)}T00:00:00Z`).getUTCDay() === 2);
+    expect((await put(`/group/tasks/${t.id}/occurrences/${dayInMonth(tuesday)}`, { done: true })).status).toBe(422);
 
     expect((await authed(request(app).patch(`${base}/group/tasks/${t.id}`), superToken).send({ title: 'Weekly review (renamed)', priority: 'high' })).body.data.title).toBe('Weekly review (renamed)');
     await authed(request(app).patch(`${base}/group/tasks/${t.id}`), superToken).send({ status: 'paused' });

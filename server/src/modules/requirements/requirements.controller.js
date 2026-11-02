@@ -53,7 +53,9 @@ function assertCanViewRequirement(user, requirement) {
   if (user.role === 'admin') return null;
   if (user.role === 'recruiter') {
     const assigned = (requirement.assigned_recruiters || []).some((row) => row.id === user.id);
-    if (!assigned) return 'You do not own this record';
+    // A requirement still open for pick-up (its TAT clock is running: the TAT Active tab) can be read by any recruiter, to decide on it.
+    const openForPickup = Boolean(requirement.tat?.tag);
+    if (!assigned && !openForPickup) return 'You do not own this record';
   }
   return null;
 }

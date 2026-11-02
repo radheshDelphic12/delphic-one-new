@@ -32,6 +32,22 @@ describe('requirement TAT', () => {
     expect((await get(rToken)).body.data).toEqual([]);
   });
 
+  test('a recruiter can read the job details of a requirement open for pick-up, but not of an unassigned one that is no longer', async () => {
+    const detail = (id) => authed(request(app).get(`/api/v1/requirements/${id}`), rToken);
+    const open = await detail(req.id);
+    expect(open.status).toBe(200);
+    expect(open.body.data.id).toBe(req.id);
+    expect((await authed(request(app).get(`/api/v1/requirements/${req.id}/seats`), rToken)).status).toBe(200);
+    // an unassigned requirement whose TAT ran out is not theirs to open
+    const other = await createRequirement(sToken, (await createActiveClientAccount((await prisma.user.findFirst({ where: { role: 'sales' } })).id)).id);
+    await prisma.requirement.update({ where: { id: other.id }, data: { tat_ends_at: new Date(Date.now() - 3600000) } });
+    expect((await detail(other.id)).status).toBe(403);
+    // ...until it is assigned to them
+    const rUser = await prisma.user.findFirst({ where: { role: 'recruiter' } });
+    await prisma.requirementAssignment.create({ data: { requirement_id: other.id, user_id: rUser.id, role_on_req: 'recruiter', assigned_by: rUser.id } });
+    expect((await detail(other.id)).status).toBe(200);
+  });
+
   test('Sales picks the TAT; changing it restarts the clock, resaving with the same value does not', async () => {
     const before = (await prisma.requirement.findUnique({ where: { id: req.id } })).tat_ends_at;
     expect((await authed(request(app).patch(`/api/v1/requirements/${req.id}`), sToken).send({ tat_hours: 24 })).status).toBe(200);

@@ -43,7 +43,7 @@ function RequirementPeek({ row, onClose, onAssign }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState(row);
   const [loading, setLoading] = useState(true);
-  // A recruiter opens only requirements they are assigned to; the TAT tab also lists the ones still open for pick-up.
+  // A recruiter opens the candidate board only of requirements they are assigned to; the TAT tab also lists the ones still open for pick-up.
   const canOpen = user?.role !== 'recruiter' || (row.assigned_recruiters || []).some((r) => r.id === user.id);
 
   useEffect(() => {
@@ -98,15 +98,14 @@ function RequirementPeek({ row, onClose, onAssign }) {
         </div>
       </dl>
       <PeekActions>
+        {/* Anyone who can see the requirement can read its job details (the API allows it); the candidate board stays with the assigned recruiters. */}
+        <Link to={`/requirements/${detail.id}`} className="btn-primary">
+          Job details
+        </Link>
         {canOpen && (
-          <>
-            <Link to={`/requirements/${detail.id}`} className="btn-primary">
-              Job details
-            </Link>
-            <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
-              Open board
-            </Link>
-          </>
+          <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
+            Open board
+          </Link>
         )}
         <button
           type="button"
