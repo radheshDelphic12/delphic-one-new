@@ -1,36 +1,33 @@
 {
   "default_branch": "main",
   "branches": [
-    "delphic-one-bugFix-and-newImplementation",
     "dev",
-    "dev-deep",
-    "feature/header-attendance",
-    "feature/simple-login",
-    "fix/ci-green",
+    "dev-deepanshu",
+    "feature/ai-interview",
+    "fix/requirement-template-backfill",
     "main",
     "origin",
-    "staging"
+    "staging",
+    "super_admin_branch"
   ],
   "parent": {
-    "delphic-one-bugFix-and-newImplementation": "main",
     "dev": "main",
-    "dev-deep": "dev",
-    "feature/header-attendance": "main",
-    "feature/simple-login": "main",
-    "fix/ci-green": "main",
+    "dev-deepanshu": "dev",
+    "feature/ai-interview": "main",
+    "fix/requirement-template-backfill": "main",
     "main": null,
     "origin": "main",
-    "staging": "main"
+    "staging": "main",
+    "super_admin_branch": "main"
   },
   "order": [
     "main",
-    "delphic-one-bugFix-and-newImplementation",
     "dev",
-    "feature/header-attendance",
-    "feature/simple-login",
-    "fix/ci-green",
+    "feature/ai-interview",
+    "fix/requirement-template-backfill",
     "origin",
     "staging",
-    "dev-deep"
+    "super_admin_branch",
+    "dev-deepanshu"
   ]
 }
