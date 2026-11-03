@@ -47,6 +47,8 @@ export default function AiInterviewPage() {
   const [stalled, setStalled] = useState(false); // the first recording chunk has not reached the server for a while
   const recRef = useRef(null); // speech recognition
   const baseTextRef = useRef('');
+  const wantListenRef = useRef(false); // the candidate pressed "Speak" and has not pressed "Stop" yet
+  const [speechNote, setSpeechNote] = useState('');
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -189,6 +191,8 @@ export default function AiInterviewPage() {
       awayRef.current = null;
       if (!gone || Date.now() < graceUntilRef.current) return;
       const seconds = (Date.now() - gone.at) / 1000;
+      // a few seconds away is a browser prompt, a notification or the address bar, not a visit to another page: not counted
+      if (seconds < (gone.kind === 'window_blur' ? 5 : 2)) return;
       const res = await report(gone.kind, seconds);
       if (res && !res.ended) {
         const limit = view?.max_tab_switches;
@@ -273,28 +277,68 @@ export default function AiInterviewPage() {
   }
 
   // ---- speaking: live transcript into the answer box (browsers without it simply type) ----
-  function toggleListening() {
-    if (listening) { recRef.current?.stop(); return; }
+  const SPEECH_PROBLEMS = {
+    'not-allowed': 'The browser is not allowing the microphone for speech. Allow it (the lock icon in the address bar), or just type your answer.',
+    'service-not-allowed': 'Speech to text is blocked on this browser. Please type your answer.',
+    'audio-capture': 'No microphone was found for speech. Please type your answer.',
+    network: 'Speech to text needs a working internet connection and could not reach its service. Please type your answer.',
+    'language-not-supported': 'Speech to text does not support this language here. Please type your answer.',
+  };
+
+  function stopListening() {
+    wantListenRef.current = false;
+    recRef.current?.stop?.();
+    setListening(false);
+  }
+
+  // Speaking fills the answer box live. The browser stops listening by itself after a pause, so it is started again until the candidate
+  // presses Stop; a problem is explained on the page, and typing always works.
+  function startRecognition() {
     const rec = new SpeechRecognition();
     rec.lang = 'en-IN';
     rec.continuous = true;
     rec.interimResults = true;
-    baseTextRef.current = text ? `${text.trim()} ` : '';
     rec.onresult = (e) => {
       let spoken = '';
       for (let i = 0; i < e.results.length; i += 1) spoken += e.results[i][0].transcript;
       setText(baseTextRef.current + spoken);
+      setSpeechNote('');
     };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
+    rec.onerror = (e) => {
+      const code = e?.error;
+      if (code === 'no-speech' || code === 'aborted') return; // a pause; onend restarts it
+      wantListenRef.current = false;
+      setListening(false);
+      setSpeechNote(SPEECH_PROBLEMS[code] || 'Speech to text stopped working. Please type your answer.');
+    };
+    rec.onend = () => {
+      if (wantListenRef.current && !busyRef.current) {
+        baseTextRef.current = `${(textRef.current || '').trim()} `.trimStart();
+        try { startRecognition(); return; } catch { /* fall through to stopped */ }
+      }
+      setListening(false);
+    };
     recRef.current = rec;
     rec.start();
-    setListening(true);
+  }
+
+  function toggleListening() {
+    if (listening) { stopListening(); return; }
+    setSpeechNote('');
+    baseTextRef.current = text ? `${text.trim()} ` : '';
+    wantListenRef.current = true;
+    try {
+      startRecognition();
+      setListening(true);
+    } catch {
+      wantListenRef.current = false;
+      setSpeechNote('Speech to text could not start. Please type your answer.');
+    }
   }
 
   const send = useCallback(async ({ timedOut = false } = {}) => {
     if (busyRef.current) return; // one send at a time: a double click, or the timer firing while an answer is on its way
-    recRef.current?.stop();
+    stopListening();
     const answeredBefore = viewRef.current?.answered ?? 0;
     busyRef.current = true;
     setBusy(true);
@@ -316,7 +360,8 @@ export default function AiInterviewPage() {
       // real state before complaining, so the candidate is never left on a question that was already answered.
       let fresh = await refreshView();
       // "still being processed": give the server a moment, then look again
-      for (let i = 0; i < 10 && err?.response?.status === 409 && fresh && !fresh.gone && fresh.answered <= answeredBefore; i += 1) {
+      const cameraNotStarted = /camera recording/i.test(String(err?.response?.data?.message || '')); // not "still processing": tell the candidate at once
+      for (let i = 0; i < 10 && err?.response?.status === 409 && !cameraNotStarted && fresh && !fresh.gone && fresh.answered <= answeredBefore; i += 1) {
         await new Promise((resolve) => { setTimeout(resolve, 3000); });
         fresh = await refreshView();
       }
@@ -502,6 +547,7 @@ export default function AiInterviewPage() {
               onDrop={(e) => e.preventDefault()}
               disabled={busy || blocked}
             />
+            {speechNote && <p data-testid="speech-note" className="mt-2 text-xs text-warning-800">{speechNote}</p>}
             {waitingForCamera && !stalled && <p className="mt-2 text-xs text-tertiary-500">Waiting for the camera recording to start...</p>}
             {waitingForCamera && stalled && (
               <p className="mt-2 text-xs text-warning-800" data-testid="recording-stalled">The recording could not be saved yet. Check your internet connection and <button type="button" className="font-medium underline" onClick={retryCamera}>try again</button>.</p>
