@@ -127,6 +127,21 @@ describe('zephyr properties (R3)', () => {
     expect(list[0].units).toMatchObject({ total: 1, available: 1 });
   });
 
+  test('the summary also counts open Debt Management loans tagged to this company, and ignores closed ones', async () => {
+    const { org, token } = await setupZephyr('zephyr-debt');
+    const group = await prisma.orgGroup.create({ data: { name: 'Debt Group' } });
+    await prisma.org.update({ where: { id: org.id }, data: { org_group_id: group.id } });
+    const a = api(token);
+    expect((await a.get('/properties/summary')).body.data).toMatchObject({ outstanding_loans: 0, monthly_emi: 0 });
+    const base = { org_group_id: group.id, org_id: org.id, lender: 'HDFC', start_date: new Date('2026-01-01T00:00:00Z'), emi_frequency: 'monthly' };
+    await prisma.groupLoan.create({ data: { ...base, name: 'Open loan', principal: 1200000, emi_amount: 100000, status: 'active' } });
+    await prisma.groupLoan.create({ data: { ...base, name: 'Closed loan', principal: 500000, emi_amount: 50000, status: 'closed' } });
+    await prisma.groupLoan.create({ data: { ...base, org_id: null, name: 'Group level loan', principal: 900000, emi_amount: 70000, status: 'active' } });
+    const after = (await a.get('/properties/summary')).body.data;
+    expect(after.monthly_emi).toBe(100000); // only the open loan of this company
+    expect(after.outstanding_loans).toBe(1200000);
+  });
+
   test('loans track monthly financing; valuation and costs are finance-only', async () => {
     const { org, token } = await setupZephyr();
     const manager = await addMember(org, 'manager');

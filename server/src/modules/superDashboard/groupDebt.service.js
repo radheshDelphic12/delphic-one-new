@@ -191,6 +191,29 @@ function bucket(list, keyOf) {
   return [...m.values()].sort((a, b) => b.outstanding - a.outstanding);
 }
 
+// monthly instalment of one group loan, as the Debt Management tab counts it
+function monthlyOf(l, s) {
+  if (s.summary.closed || l.status === 'closed') return 0;
+  return s.emi_amount != null ? s.emi_amount * perMonth[l.emi_frequency] : s.installments[0] ? s.installments[0].amount * perMonth[l.emi_frequency] : 0;
+}
+
+/** Open loans tagged to one company: the same outstanding and monthly figures as the Debt Management tab (no group finance work). */
+async function companyTotals(groupIds, orgId) {
+  const today = todayIst();
+  const loans = await prisma.groupLoan.findMany({ where: { org_group_id: { in: groupIds }, org_id: orgId, deleted_at: null }, include: { installments: { orderBy: { seq: 'asc' } } } });
+  let outstanding = 0;
+  let monthly = 0;
+  let count = 0;
+  for (const l of loans) {
+    const s = shape(l, null, today);
+    if (s.summary.closed || l.status === 'closed') continue;
+    count += 1;
+    outstanding += s.summary.outstanding;
+    monthly += monthlyOf(l, s);
+  }
+  return { loans: count, outstanding: calc.round2(outstanding), monthly_emi: calc.round2(monthly) };
+}
+
 /** Everything the Debt Management tab shows. */
 async function overview(groupIds, query = {}) {
   const today = todayIst();
@@ -202,8 +225,7 @@ async function overview(groupIds, query = {}) {
   const orgName = (id) => orgs.find((o) => o.id === id)?.name;
   const list = loans.map((l) => {
     const s = shape(l, orgName(l.org_id), today);
-    const monthly = s.summary.closed || l.status === 'closed' ? 0 : s.emi_amount != null ? s.emi_amount * perMonth[l.emi_frequency] : s.installments[0] ? s.installments[0].amount * perMonth[l.emi_frequency] : 0;
-    return { ...s, monthly_emi: calc.round2(monthly) };
+    return { ...s, monthly_emi: calc.round2(monthlyOf(l, s)) };
   });
 
   // property loans kept inside Zephyr are part of the group's debt too (read only here; edit them in Zephyr)
@@ -267,4 +289,4 @@ async function overview(groupIds, query = {}) {
   };
 }
 
-module.exports = { LOAN_TYPES, createSchema, updateSchema, installmentSchema, settingsSchema, create, update, remove, setInstallment, get, overview, saveSettings };
+module.exports = { LOAN_TYPES, createSchema, updateSchema, installmentSchema, settingsSchema, create, update, remove, setInstallment, get, overview, companyTotals, saveSettings };
