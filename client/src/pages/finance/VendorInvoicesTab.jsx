@@ -6,6 +6,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
+import VendorPayoutPanel from './VendorPayoutPanel.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -57,6 +58,7 @@ export default function VendorInvoicesTab() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [rows, setRows] = useState(null);
   const [traceId, setTraceId] = useState(null);
+  const [view, setView] = useState('invoices');
 
   const load = useCallback(() => {
     setRows(null);
@@ -114,8 +116,20 @@ export default function VendorInvoicesTab() {
     },
   ];
 
+  const tabs = (
+    <div className="flex gap-2" role="tablist" aria-label="Vendor invoices views">
+      {[['invoices', 'Invoices'], ['payout', 'Bank payout']].map(([key, label]) => (
+        <button key={key} type="button" role="tab" aria-selected={view === key} data-testid={`vendor-view-${key}`} onClick={() => setView(key)}
+          className={`rounded-xl px-4 py-2 text-sm font-medium ${view === key ? 'bg-primary-600 text-white' : 'border bg-white text-tertiary-700 hover:bg-primary-50'}`}>{label}</button>
+      ))}
+    </div>
+  );
+
+  if (view === 'payout') return <div className="space-y-4">{tabs}<VendorPayoutPanel /></div>;
+
   return (
     <div className="space-y-4">
+      {tabs}
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Finance</p>

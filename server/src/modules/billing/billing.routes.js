@@ -7,6 +7,7 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
+const vendorPayout = require('./vendorPayout');
 const invoicePdf = require('./invoices.pdf');
 const adjustments = require('./adjustments.service');
 const resourceBilling = require('./resourceBilling.service');
@@ -58,6 +59,13 @@ const {
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
 } = require('./billing.validation');
+
+const vendorPayoutQuerySchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  sent_only: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  format: z.enum(['json', 'xlsx']).default('xlsx'),
+});
 
 const router = express.Router();
 router.use(authenticate);
@@ -183,6 +191,22 @@ router.get(
   requireOrgMembership,
   canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
+);
+
+// Vendor bank payout: the unpaid vendor invoices of a month added up per vendor with the bank details on the vendor record.
+// `format=json` previews it, otherwise an Excel file downloads. Same access as the vendor invoices (finance / admin).
+router.get(
+  '/vendor-invoices/payout',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = vendorPayoutQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await vendorPayout.payoutData(req.user.org_id, query));
+    const buffer = await vendorPayout.payoutWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="vendor-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}.xlsx"`);
+    return res.send(Buffer.from(buffer));
+  })
 );
 
 router.get(
