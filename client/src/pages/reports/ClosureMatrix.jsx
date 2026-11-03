@@ -94,7 +94,7 @@ export default function ClosureMatrix({ kind }) {
   const { pushError } = useAlerts();
   const isVendor = kind === 'vendor';
   const now = new Date();
-  const [from, setFrom] = useState(monthValue(new Date(now.getFullYear(), now.getMonth() - 11, 1)));
+  const [from, setFrom] = useState(monthValue(new Date(now.getFullYear(), now.getMonth() - 5, 1)));
   const [to, setTo] = useState(monthValue(now));
   const [measure, setMeasure] = useState('projects');
   const [reqType, setReqType] = useState('');
