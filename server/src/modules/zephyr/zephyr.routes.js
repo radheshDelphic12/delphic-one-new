@@ -642,6 +642,8 @@ const PROPERTY_ERRORS = {
   has_active_leases: [409, 'End the active leases in this property first'],
   bad_dates: [422, 'The end date must be on or after the start date'],
   future_valuation: [422, 'A valuation cannot be dated in the future'],
+  future_cost: [422, 'A cost cannot be dated in the future'],
+  period_closed: [409, 'That month is closed. An admin must reopen it first'],
 };
 function failProperty(res, result) {
   const mapped = PROPERTY_ERRORS[result.error];
@@ -674,6 +676,8 @@ router.post('/properties/:id/loans', pFin, asyncHandler(async (req, res) => send
 router.patch('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.updateLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid, properties.loanUpdateSchema.parse(req.body)))));
 router.delete('/properties/:id/loans/:lid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeLoan(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.lid))));
 router.post('/properties/:id/valuations', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.addValuation(orgId(req), req.user.id, pCtx(req), req.params.id, properties.valuationSchema.parse(req.body)), 201)));
+router.post('/properties/:id/acquisition-costs', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.addAcquisitionCost(orgId(req), req.user.id, pCtx(req), req.params.id, properties.acquisitionSchema.parse(req.body)), 201)));
+router.delete('/properties/:id/acquisition-costs/:eid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeAcquisitionCost(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid))));
 router.patch('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.updateValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid, properties.valuationSchema.omit({ unit_id: true }).partial().parse(req.body)))));
 router.delete('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid))));
 router.patch('/properties/:id/events/:eid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.updateEvent(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid, properties.eventSchema.omit({ unit_id: true }).partial().parse(req.body)))));

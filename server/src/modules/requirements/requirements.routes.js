@@ -12,6 +12,7 @@ router.use(authenticate, requireMasterWorkspace);
 router.get('/', controller.list);
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
+router.get('/:id/rate-changes', controller.rateChanges);
 router.get('/:id/activity', controller.activity);
 router.get('/:id/assignments', controller.assignments);
 router.get('/:id/seats', controller.getSeats);

@@ -26,6 +26,7 @@ const updateSchema = z.object({
   vendor_rate_currency: currency.optional(),
   final_agreed_rate: z.number().optional(),
   final_agreed_rate_type: rateType.optional(),
+  rate_change_reason: z.string().trim().min(3).max(500).optional(),
   submission_notes: z.string().optional(),
   client_feedback: z.string().optional(),
   relevancy_score: z.number().int().min(1).max(10).optional(),

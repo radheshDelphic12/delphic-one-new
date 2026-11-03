@@ -5,7 +5,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 
 const NUMBER_FIELDS = [
-  { key: 'question_count', label: 'Role questions', hint: '3 to 15 questions built from the job and the candidate\'s profile', min: 3, max: 15 },
+  { key: 'question_count', label: 'Role questions', hint: '3 to 15 (12 by default), built from the job and the candidate\'s profile', min: 3, max: 15 },
   { key: 'max_followups', label: 'Follow-ups (most per interview)', hint: 'Short follow-ups on vague answers; 0 turns them off', min: 0, max: 10 },
   { key: 'pass_percentage', label: 'Pass mark %', hint: 'At or above this the candidate passes', min: 1, max: 100 },
   { key: 'borderline_margin', label: 'Borderline range (points)', hint: 'Just under the pass mark within this many points = borderline, a person decides', min: 0, max: 50 },
@@ -156,7 +156,7 @@ export default function AiInterviewTab({ isAdmin }) {
         <div className="mt-3 space-y-3">
           <Switch checked={form.aptitude_enabled} onChange={set('aptitude_enabled')} label="Add an aptitude section" hint="The AI writes a few logic, number and pattern questions with their expected answers and marks the candidate's answers against them." />
           {form.aptitude_enabled && (
-            <div className="max-w-xs"><NumberField field={{ label: 'Aptitude questions', hint: '2 to 10', min: 2, max: 10 }} value={form.aptitude_question_count} onChange={set('aptitude_question_count')} disabled={off} /></div>
+            <div className="max-w-xs"><NumberField field={{ label: 'Aptitude questions', hint: '2 to 15; 12 by default', min: 2, max: 15 }} value={form.aptitude_question_count} onChange={set('aptitude_question_count')} disabled={off} /></div>
           )}
         </div>
       </div>

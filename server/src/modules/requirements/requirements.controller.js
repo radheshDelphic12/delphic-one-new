@@ -1,5 +1,6 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
+const prisma = require('../../config/db');
 const service = require('./requirements.service');
 const websitePostings = require('../website/postings.service');
 const {
@@ -18,6 +19,7 @@ const {
 const ERROR_STATUS = {
   not_found: [404, 'Not found'],
   locked: [403, 'Record is locked'],
+  rate_reason_required: [422, 'Give a reason for changing the budget (rate_change_reason)'],
   forbidden: [403, 'You do not own this record'],
   invalid_transition: [400, 'Invalid status transition'],
   reason_required: [400, 'reason is required for this transition'],
@@ -143,6 +145,12 @@ const remove = asyncHandler(async (req, res) => {
   return ok(res, { id: req.params.id });
 });
 
+const rateChanges = asyncHandler(async (req, res) => {
+  const row = await prisma.requirement.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!row) return fail(res, 404, 'Not found');
+  return ok(res, await require('../rateChanges/rateChanges.service').list('requirement', req.params.id));
+});
+
 const history = asyncHandler(async (req, res) => {
   const requirement = await service.getById(req.params.id);
   if (!requirement) return fail(res, 404, 'Not found');
@@ -191,6 +199,7 @@ module.exports = {
   unassign,
   assignments,
   history,
+  rateChanges,
   getSeats,
   addSeat,
   changeSeatStatus,

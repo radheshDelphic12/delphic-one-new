@@ -49,7 +49,7 @@ const settingsSchema = z.object({
   weight_communication: z.number().int().min(0).max(100).optional(),
   weight_depth: z.number().int().min(0).max(100).optional(),
   aptitude_enabled: z.boolean().optional(),
-  aptitude_question_count: z.number().int().min(2).max(10).optional(),
+  aptitude_question_count: z.number().int().min(2).max(15).optional(),
   weight_aptitude: z.number().int().min(0).max(100).optional(),
   recording_enabled: z.boolean().optional(),
   auto_reject: z.boolean().optional(),
@@ -99,7 +99,7 @@ router.get('/report', asyncHandler(async (req, res) => {
   const empty = (s) => z.preprocess((v) => (v === '' ? undefined : v), s.optional());
   const q = z.object({
     from: empty(day), to: empty(day), requirement_id: empty(z.string().uuid()), client_id: empty(z.string().uuid()),
-    status: empty(z.enum(service.REPORT_STATUSES)), outcome: empty(z.enum(service.REPORT_OUTCOMES)), attempted: empty(z.enum(['yes'])), q: empty(z.string().trim().max(100)),
+    status: empty(z.enum(service.REPORT_STATUSES)), outcome: empty(z.enum(service.REPORT_OUTCOMES)), submission_stage: empty(z.enum(service.REPORT_SUBMISSION_STAGES)), attempted: empty(z.enum(['yes'])), q: empty(z.string().trim().max(100)),
   }).parse(req.query);
   return ok(res, await service.report(q, req.user));
 }));
@@ -139,9 +139,14 @@ const publicRouter = express.Router();
 // Recording sends a chunk every 5 seconds (about 720 an hour), so it has its own, much higher budget; sharing the 240/hour limit of
 // the interview calls would cut a recording off a few minutes in.
 const isRecording = (req) => req.path.endsWith('/recording');
+// The budget is kept PER INTERVIEW LINK, not per IP address: candidates who take the interview from the same office or network share one
+// address, and an address-wide limit cut their answers and their camera uploads off (the answer box then stayed inactive). The link is a
+// 48-character secret, so a second, much higher limit per address still stops anyone trying to guess links.
+const linkKey = (req) => `link:${req.path.split('/')[1] || req.ip}`;
 if (env.nodeEnv !== 'test') {
-  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 240, skip: isRecording, standardHeaders: true, legacyHeaders: false }));
-  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 2500, skip: (req) => !isRecording(req), standardHeaders: true, legacyHeaders: false }));
+  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 5000, skip: isRecording, standardHeaders: true, legacyHeaders: false })); // per address, generous
+  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 600, skip: isRecording, keyGenerator: linkKey, standardHeaders: true, legacyHeaders: false }));
+  publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 3000, skip: (req) => !isRecording(req), keyGenerator: linkKey, standardHeaders: true, legacyHeaders: false }));
 }
 
 publicRouter.get('/ai-interviews/:token', asyncHandler(async (req, res) => {

@@ -14,8 +14,8 @@ const logic = require('./aiInterviews.logic');
 const OUTCOMES = ['pass', 'borderline', 'below_pass'];
 // is_enabled starts false: the AI interview is an optional, separate link and nothing in the existing flow depends on it.
 const DEFAULTS = {
-  is_enabled: false, question_count: 7, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
-  weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 4, weight_aptitude: 10,
+  is_enabled: false, question_count: 12, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
+  weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 12, weight_aptitude: 10,
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com',
@@ -313,11 +313,57 @@ function candidateView(a, settings = null) {
   };
 }
 
+const NO_ANSWER_TEXT = '[No answer - time ran out]';
+const OVERDUE_GRACE_SECONDS = 20; // the page sends "no answer" itself at 0; the server steps in only when that did not happen
+
+// A request can die after the answer was saved (a restart, a gateway timeout). The transcript then ends with the candidate's answer and no
+// question is waiting, so the page would sit there for ever. Any later look at the interview carries it on: the next question, or the scoring.
+async function resumeStalled(a, settings) {
+  const transcript = Array.isArray(a.transcript) ? [...a.transcript] : [];
+  const last = transcript[transcript.length - 1];
+  if (a.status !== 'started' || !last || last.role !== 'candidate' || busy.has(a.id)) return a;
+  busy.add(a.id);
+  let keepLocked = false;
+  try {
+    const questions = Array.isArray(a.questions) ? a.questions : [];
+    const next = questions.find((q) => q.id === last.question_index + 1);
+    if (next) {
+      transcript.push({ role: 'ai', kind: 'question', section: next.kind, question_index: next.id, text: next.text, at: new Date().toISOString() });
+      return await prisma.aiInterview.update({ where: { id: a.id }, data: { transcript } });
+    }
+    const ctx = await contextFor(a.submission_id);
+    const scoring = finish(a, settings, ctx, transcript, { input: 0, output: 0 });
+    const settled = await Promise.race([scoring, new Promise((resolve) => { setTimeout(() => resolve(null), FINISH_WAIT_MS).unref?.(); })]);
+    if (settled) return settled;
+    keepLocked = true; // scoring goes on in the background; the lock is held until it ends
+    scoring.catch((err) => logger.error({ err: err.message, id: a.id }, 'ai interview scoring failed after the interview was resumed')).finally(() => busy.delete(a.id));
+    return { ...a, transcript, status: 'completed' };
+  } finally {
+    if (!keepLocked) busy.delete(a.id);
+  }
+}
+
+// A question that stayed unanswered well past its time (the page was closed or frozen) is recorded as not answered, so the time limit holds
+// whether or not the page was open, and the interview moves on instead of waiting on a question nobody is looking at.
+async function expireOverdue(a, settings) {
+  const limit = settings.answer_time_seconds;
+  const transcript = Array.isArray(a.transcript) ? [...a.transcript] : [];
+  const last = transcript[transcript.length - 1];
+  if (a.status !== 'started' || !limit || !last || last.role !== 'ai' || !last.at || busy.has(a.id)) return a;
+  const elapsed = (Date.now() - new Date(last.at).getTime()) / 1000;
+  if (elapsed <= limit + OVERDUE_GRACE_SECONDS) return a;
+  transcript.push({ role: 'candidate', kind: 'answer', section: last.section, question_index: last.question_index, text: NO_ANSWER_TEXT, at: new Date().toISOString(), seconds: Math.round(elapsed), timed_out: true });
+  const row = await prisma.aiInterview.update({ where: { id: a.id }, data: { transcript } });
+  return resumeStalled(row, settings);
+}
+
 async function openForCandidate(token) {
   const r = await load(token);
   if (r.error) return r;
   // before the start, tell the page whether this company records interviews, so it can ask for consent up front
   const settings = await getSettings(r.a.org_id);
+  r.a = await resumeStalled(r.a, settings); // an interrupted request must not leave the candidate with no question
+  r.a = await expireOverdue(r.a, settings);
   // recording is mandatory whenever the company has it on: the candidate must allow camera and microphone to take the interview
   return { view: { ...candidateView(r.a, settings), recording_offered: Boolean(settings.recording_enabled), recording_required: Boolean(settings.recording_enabled), recording_days: settings.recording_retention_days } };
 }
@@ -547,13 +593,17 @@ async function analytics({ from, to }, user) {
 // and client, how it went, with the submission to open. view_status: not_opened | in_progress | scored | pending_review | expired.
 const REPORT_STATUSES = ['not_opened', 'in_progress', 'scored', 'pending_review', 'expired'];
 const REPORT_OUTCOMES = ['pass', 'borderline', 'below_pass', 'none'];
+// Submission status filter: any pipeline stage, or "not_submitted" = the candidate has not been put forward to the client yet (sourced / internal screening).
+const SUBMISSION_STAGES = ['sourced', 'internal_screening', 'submitted_to_client', 'interview_scheduled', 'interview_result', 'offer_sent', 'bgv', 'closed', 'backout', 'rejected'];
+const REPORT_SUBMISSION_STAGES = [...SUBMISSION_STAGES, 'not_submitted'];
+const NOT_SUBMITTED = ['sourced', 'internal_screening'];
 async function report(q, user) {
   const where = { deleted_at: null, superseded_at: null, org_id: user.org_id || null };
   if (q.from || q.to) where.invited_at = { ...(q.from ? { gte: new Date(`${q.from}T00:00:00+05:30`) } : {}), ...(q.to ? { lte: new Date(`${q.to}T23:59:59.999+05:30`) } : {}) };
   const interviews = await prisma.aiInterview.findMany({ where, orderBy: { invited_at: 'desc' }, take: 5000 });
   const subs = await prisma.submission.findMany({
     where: { id: { in: [...new Set(interviews.map((i) => i.submission_id))] } },
-    select: { id: true, stage: true, profile_id: true, seat: { select: { requirement: { select: { id: true, title: true, account: { select: { id: true, name: true } } } } } } },
+    select: { id: true, stage: true, is_locked: true, profile_id: true, seat: { select: { requirement: { select: { id: true, title: true, account: { select: { id: true, name: true } } } } } } },
   });
   const subById = new Map(subs.map((s) => [s.id, s]));
   const names = await userNames(interviews.map((i) => i.invited_by));
@@ -566,6 +616,7 @@ async function report(q, user) {
       submission_id: a.submission_id,
       profile_id: s?.profile_id || null,
       submission_stage: s?.stage || null,
+      submission_locked: Boolean(s?.is_locked),
       candidate_name: a.candidate_name,
       candidate_email: a.candidate_email,
       requirement_id: r?.id || null,
@@ -593,6 +644,7 @@ async function report(q, user) {
   if (q.status) rows = rows.filter((r) => r.view_status === q.status);
   if (q.outcome) rows = rows.filter((r) => (q.outcome === 'none' ? !r.outcome : r.outcome === q.outcome));
   if (q.attempted === 'yes') rows = rows.filter((r) => r.attempted);
+  if (q.submission_stage) rows = rows.filter((r) => (q.submission_stage === 'not_submitted' ? NOT_SUBMITTED.includes(r.submission_stage) : r.submission_stage === q.submission_stage));
   if (q.q) {
     const needle = q.q.toLowerCase();
     rows = rows.filter((r) => [r.candidate_name, r.candidate_email, r.requirement_title, r.client_name].some((v) => v && v.toLowerCase().includes(needle)));
@@ -772,7 +824,7 @@ async function recordEvent(token, { type, seconds_away: secondsAway }) {
 
 module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
-  invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics, report, REPORT_STATUSES, REPORT_OUTCOMES,
+  invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics, report, REPORT_STATUSES, REPORT_OUTCOMES, REPORT_SUBMISSION_STAGES,
   openForCandidate, startForCandidate, answerForCandidate,
   saveRecordingChunk, recordingFor, purgeExpiredRecordings,
 };

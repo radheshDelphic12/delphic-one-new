@@ -47,6 +47,7 @@ const createSchema = z.object({
 }).refine((d) => d.req_type !== 'internal_hiring' || d.hiring_track, { message: 'Choose Technical or Non-Technical for Internal Hiring', path: ['hiring_track'] });
 
 const updateSchema = z.object({
+  rate_change_reason: z.string().trim().min(3).max(500).optional(),
   title: z.string().min(1).optional(),
   req_type: z.enum(['managed_services', 'recruitment', 'project', 'internal_hiring']).optional(),
   sales_owner_id: z.string().uuid().optional(),

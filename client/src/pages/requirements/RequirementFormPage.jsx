@@ -160,6 +160,7 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState(null);
+  const [budgetReason, setBudgetReason] = useState('');
   const accountLocked = Boolean(initialAccountId) && !isEdit;
 
   useEffect(() => {
@@ -208,10 +209,15 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (budgetChanged && budgetReason.trim().length < 3) {
+      pushError('Write a reason for the budget change (at least 3 characters).', 'Reason needed');
+      return;
+    }
     setSaving(true);
     try {
       const payload = buildPayload(form, { isCreate: !isEdit });
       if (isEdit) {
+        if (budgetChanged) payload.rate_change_reason = budgetReason.trim();
         await apiClient.patch(`/requirements/${id}`, payload);
         if (asPanel && onDone) onDone(id);
         else navigate(`/requirements/${id}`);
@@ -239,6 +245,8 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
     );
   }
 
+  // A budget that was already set and is now different needs a reason; the server keeps it in the budget history.
+  const budgetChanged = Boolean(isEdit && existing && ['budget_min', 'budget_max'].some((k) => existing[k] != null && toOptionalNumber(form[k]) !== undefined && Number(form[k]) !== Number(existing[k])));
   const blocked = isEdit && existing && !canMutateRequirement(existing, user);
 
   function handleCancel() {
@@ -610,6 +618,12 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 className={FIELD_INPUT}
               />
             </div>
+            {budgetChanged && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <label className="mb-1 block text-xs font-medium text-tertiary-600">Reason for changing the budget (required)</label>
+                <input data-testid="budget-reason" value={budgetReason} onChange={(e) => setBudgetReason(e.target.value)} maxLength={500} placeholder="e.g. Client approved a higher budget" className={FIELD_INPUT} />
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-tertiary-600">Currency</label>
               <SearchableSelect

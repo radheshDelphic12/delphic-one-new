@@ -15,6 +15,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+const mkWon = (client, day, reqType, title) => prisma.requirement.create({ data: { org_id: org.id, account_id: client.id, title: title || unique('Won '), req_type: reqType, sales_owner_id: admin.id, status: 'closed', closed_at: new Date(`${day}T06:00:00Z`) } });
 const get = (path) => authed(request(app).get(`/api/v1${path}`), adminToken);
 const mkAccount = (over = {}) => prisma.account.create({ data: { org_id: org.id, type: 'client', name: unique('Client '), stage: 'active', owner_id: admin.id, origin_owner_id: admin.id, ...over } });
 
@@ -31,11 +32,13 @@ describe('GET /reports/closure-matrix', () => {
     const acme = await mkAccount({ name: 'Acme', stage: 'active' });
     const beta = await mkAccount({ name: 'Beta', stage: 'lead' });
     await mkAccount({ name: 'Gamma', stage: 'dropped' });
-    const mkProject = (client, start, category) => mkAccount({ name: unique('P '), is_project: true, client_account_id: client.id, agreement_start_date: new Date(`${start}T00:00:00Z`), service_category: category });
-    await mkProject(acme, '2026-01-10', 'managed_services');
-    await mkProject(acme, '2026-01-20', 'project');
-    await mkProject(acme, '2026-03-05', 'managed_services');
-    await mkProject(beta, '2026-02-01', 'project');
+    await mkWon(acme, '2026-01-10', 'managed_services');
+    await mkWon(acme, '2026-01-20', 'project');
+    await mkWon(acme, '2026-03-05', 'managed_services');
+    await mkWon(beta, '2026-02-01', 'project');
+    // a Finance project and an open requirement are not wins
+    await mkAccount({ name: unique('P '), is_project: true, client_account_id: acme.id, agreement_start_date: new Date('2026-01-12T00:00:00Z'), service_category: 'project' });
+    await prisma.requirement.create({ data: { org_id: org.id, account_id: acme.id, title: 'Still open', req_type: 'project', sales_owner_id: admin.id } });
 
     const res = await get('/reports/closure-matrix?kind=client&date_from=2026-01-01&date_to=2026-03-31');
     expect(res.status).toBe(200);
@@ -129,29 +132,25 @@ describe('GET /reports/closure-matrix/records (every number is clickable)', () =
   test('projects: a cell, a row total, a column total and the grand total list exactly the records behind the number', async () => {
     const acme = await mkAccount({ name: 'Acme', stage: 'active' });
     const beta = await mkAccount({ name: 'Beta', stage: 'lead' });
-    const mkProject = (client, start, category, name) => mkAccount({ name, is_project: true, client_account_id: client ? client.id : null, agreement_start_date: new Date(`${start}T00:00:00Z`), service_category: category });
-    const p1 = await mkProject(acme, '2026-01-10', 'managed_services', 'Alpha build');
-    await mkProject(acme, '2026-01-20', 'project', 'Alpha two');
-    await mkProject(acme, '2026-03-05', 'managed_services', 'Alpha three');
-    await mkProject(beta, '2026-02-01', 'project', 'Beta one');
-    await mkProject(null, '2026-02-15', 'project', 'Orphan');
+    const p1 = await mkWon(acme, '2026-01-10', 'managed_services', 'Alpha build');
+    await mkWon(acme, '2026-01-20', 'project', 'Alpha two');
+    await mkWon(acme, '2026-03-05', 'managed_services', 'Alpha three');
+    await mkWon(beta, '2026-02-01', 'project', 'Beta one');
     const m = await matrix('client');
 
     const cell = (await get(base('client', `&account_id=${acme.id}&month=2026-01`))).body.data;
     expect(cell.total).toBe(2);
     expect(cell.total).toBe(m.rows.find((r) => r.name === 'Acme').counts['2026-01']);
     expect(cell.records.map((r) => r.title).sort()).toEqual(['Alpha build', 'Alpha two']);
-    expect(cell.records.find((r) => r.id === p1.id)).toMatchObject({ kind: 'project', party: 'Acme', date: '2026-01-10', date_label: 'Agreement start', path: `/projects/${p1.id}` });
+    expect(cell.records.find((r) => r.id === p1.id)).toMatchObject({ kind: 'requirement', party: 'Acme', date: '2026-01-10', date_label: 'Won on', path: `/requirements/${p1.id}` });
 
     const row = (await get(base('client', `&account_id=${acme.id}`))).body.data;
     expect(row.total).toBe(m.rows.find((r) => r.name === 'Acme').total); // 3
     const column = (await get(base('client', '&month=2026-02'))).body.data;
-    expect(column.total).toBe(m.totals['2026-02']); // Beta one + the project with no client
+    expect(column.total).toBe(m.totals['2026-02']); // Beta one
     const all = (await get(base('client'))).body.data;
     expect(all.total).toBe(m.grand_total);
-    expect(all.records).toHaveLength(5);
-    // the "not linked to a client" row
-    expect((await get(base('client', '&account_id=none'))).body.data.records.map((r) => r.title)).toEqual(['Orphan']);
+    expect(all.records).toHaveLength(4);
     // the filters of the report carry into the list: the same type narrows both
     const typed = (await get(base('client', `&account_id=${acme.id}&month=2026-01&req_type=managed_services`))).body.data;
     expect(typed.records.map((r) => r.title)).toEqual(['Alpha build']);
@@ -179,7 +178,7 @@ describe('GET /reports/closure-matrix/records (every number is clickable)', () =
     expect(vendors.total).toBe((await matrix('vendor')).rows.find((r) => r.name === 'Vend Co').total);
 
     const reqs = (await get(base('client', `&measure=requirements&account_id=${client.id}&month=2026-03`))).body.data;
-    expect(reqs.records).toEqual([expect.objectContaining({ kind: 'requirement', id: closed.id, title: 'Closed role', path: `/requirements/${closed.id}`, date_label: 'Closed on' })]);
+    expect(reqs.records).toEqual([expect.objectContaining({ kind: 'requirement', id: closed.id, title: 'Closed role', path: `/requirements/${closed.id}`, date_label: 'Won on' })]);
   });
 
   test('bad input and no login are refused', async () => {

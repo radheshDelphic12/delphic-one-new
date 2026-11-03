@@ -21,6 +21,8 @@ const calls = { questions: 0, followUp: 0, score: 0 };
 let scoreOf = () => 8; // every rubric parameter score, 0-10
 let followUps = true;
 let failOn = null; // 'questions' | 'score' | null
+let shortBy = 0; // the AI writes this many questions fewer than asked in its first answer
+let topUpFails = false; // ... and cannot answer the request for the missing ones
 const seenDocuments = []; // CV documents the AI was given
 
 const seenPrompts = []; // [{ kind, user, system, webSearchDomains }] for the question-writing calls
@@ -32,11 +34,15 @@ function stubProvider({ system, messages, documents = [], webSearchDomains = [] 
     if (failOn === 'questions') throw new (require('../src/modules/aiInterviews/aiClient').AiUnavailableError)('down');
     calls.questions += 1;
     seenPrompts.push({ user, system, webSearchDomains });
+    const firstCall = calls.questions === 1;
+    if (!firstCall && topUpFails) throw new (require('../src/modules/aiInterviews/aiClient').AiUnavailableError)('down');
+    const cut = firstCall ? shortBy : 0;
+    const tag = firstCall ? '' : 'More ';
     const n = Number(user.match(/Write exactly (\d+) interview questions/)[1]);
     const m = Number((user.match(/exactly (\d+) aptitude questions/) || [])[1] || 0);
     return reply({
-      questions: Array.from({ length: n }, (_, i) => ({ text: `Question ${i + 1}?` })),
-      ...(m ? { aptitude: Array.from({ length: m }, (_, i) => ({ text: `What is ${i + 2} + ${i + 2}?`, expected_answer: String((i + 2) * 2) })) } : {}),
+      questions: Array.from({ length: Math.max(0, n - cut) }, (_, i) => ({ text: `${tag}Question ${i + 1}?` })),
+      ...(m ? { aptitude: Array.from({ length: Math.max(0, m - cut) }, (_, i) => ({ text: `${tag}What is ${i + 2} + ${i + 2}?`, expected_answer: String((i + 2) * 2) })) } : {}),
     });
   }
   if (user.includes('Decide if one short follow-up') || user.includes('Ask a follow-up only when')) {
@@ -67,6 +73,8 @@ beforeEach(async () => {
   scoreOf = () => 8;
   followUps = true;
   failOn = null;
+  shortBy = 0;
+  topUpFails = false;
   setProvider(stubProvider);
   const sales = await createUser({ role: 'sales' });
   const recruiter = await createUser({ role: 'recruiter' });
@@ -839,5 +847,201 @@ describe('Reports > AI interviews (dashboard data)', () => {
     expect((await report('?from=2020-01-01&to=2020-01-02')).body.data.rows).toHaveLength(0);
     expect((await report('?status=nonsense')).status).toBe(422);
     expect((await request(app).get('/api/v1/ai-interviews/report')).status).toBe(401);
+  });
+});
+
+describe('Reports > AI interviews: submission status, filters and submit / reject from a row', () => {
+  const report = (qs = '', token = recruiterToken) => authed(request(app).get(`/api/v1/ai-interviews/report${qs}`), token);
+  const stageOf = async (id) => (await prisma.submission.findUnique({ where: { id } })).stage;
+
+  // the beforeEach submission plus three more, each with an AI interview, at different pipeline stages (fake people only)
+  async function setup() {
+    const seat = await prisma.requirementSeat.findFirst({ where: { requirement_id: requirementId } });
+    const mk = async (label, stage, extra = {}) => {
+      const profile = await prisma.profile.create({ data: { org_id: (await prisma.requirement.findUnique({ where: { id: requirementId } })).org_id, name: `Fake ${label}`, source: 'direct', added_by: recruiterId, total_experience_years: 2, primary_skills: ['x'] } });
+      const sub = await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: profile.id, submitted_by: recruiterId, stage, ...extra } });
+      await prisma.aiInterview.create({ data: { token: `t-${label}-${Date.now()}`, submission_id: sub.id, org_id: profile.org_id, candidate_name: `Fake ${label}`, status: 'completed', outcome: 'pass', score_percent: 80, pass_percentage: 60, expires_at: new Date(Date.now() + 86400000), invited_at: new Date(), started_at: new Date(), completed_at: new Date() } });
+      return sub.id;
+    };
+    return { screening: await mk('screening', 'internal_screening'), sourced: await mk('sourced', 'sourced'), submitted: await mk('submitted', 'submitted_to_client'), rejected: await mk('rejected', 'rejected'), locked: await mk('locked', 'sourced', { is_locked: true }) };
+  }
+
+  test('every row carries the submission status; the filter works on one stage, on "not yet submitted", and with the other filters', async () => {
+    const ids = await setup();
+    const all = (await report()).body.data;
+    expect(all.rows).toHaveLength(5);
+    const byName = Object.fromEntries(all.rows.map((r) => [r.candidate_name, r]));
+    expect(byName['Fake screening']).toMatchObject({ submission_stage: 'internal_screening', submission_locked: false, submission_id: ids.screening });
+    expect(byName['Fake locked'].submission_locked).toBe(true);
+
+    const names = async (qs) => (await report(qs)).body.data.rows.map((r) => r.candidate_name).sort();
+    expect(await names('?submission_stage=submitted_to_client')).toEqual(['Fake submitted']);
+    expect(await names('?submission_stage=rejected')).toEqual(['Fake rejected']);
+    expect(await names('?submission_stage=not_submitted')).toEqual(['Fake locked', 'Fake screening', 'Fake sourced']); // sourced + internal screening
+    // together with the existing filters, and the summary counts follow the filtered rows
+    expect(await names('?submission_stage=not_submitted&outcome=pass&status=scored')).toHaveLength(3);
+    expect(await names('?submission_stage=not_submitted&outcome=below_pass')).toEqual([]);
+    expect(await names('?submission_stage=not_submitted&q=sourced')).toEqual(['Fake sourced']);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(await names(`?submission_stage=not_submitted&from=${today}&to=${today}`)).toHaveLength(3);
+    expect(await names('?submission_stage=not_submitted&from=2020-01-01&to=2020-01-02')).toEqual([]);
+    const filtered = (await report('?submission_stage=not_submitted')).body.data;
+    expect(filtered.summary).toMatchObject({ sent: 3, scored: 3, pass: 3 });
+    expect(filtered.by_requirement[0]).toMatchObject({ sent: 3, pass: 3 });
+    expect((await report('?submission_stage=nonsense')).status).toBe(422);
+    expect((await report('?submission_stage=')).body.data.rows).toHaveLength(5); // empty = no filter
+  });
+
+  test('submit from a row (the same stage moves as the Submissions page), reject needs a reason, and the report shows the new status', async () => {
+    const ids = await setup();
+    const stage = (id, body, token = recruiterToken) => authed(request(app).post(`/api/v1/submissions/${id}/stage`), token).send(body);
+    // a candidate still at Sourced goes through Internal screening to Submitted to client
+    expect((await stage(ids.sourced, { to_stage: 'submitted_to_client' })).status).toBe(400); // not in one jump: the report does it in two steps
+    expect((await stage(ids.sourced, { to_stage: 'internal_screening' })).status).toBe(200);
+    expect((await stage(ids.sourced, { to_stage: 'submitted_to_client' })).status).toBe(200);
+    expect(await stageOf(ids.sourced)).toBe('submitted_to_client');
+    expect((await stage(ids.screening, { to_stage: 'submitted_to_client' })).status).toBe(200);
+    // an already submitted candidate cannot be submitted again
+    expect((await stage(ids.screening, { to_stage: 'submitted_to_client' })).status).toBe(400);
+    // reject: a reason is required, and the reason is saved with the submission
+    expect((await stage(ids.submitted, { to_stage: 'rejected' })).status).toBe(400);
+    expect((await stage(ids.submitted, { to_stage: 'rejected', rejection_reason: 'Not a fit for the client' })).status).toBe(200);
+    expect(await prisma.submission.findUnique({ where: { id: ids.submitted } })).toMatchObject({ stage: 'rejected', rejection_reason: 'Not a fit for the client', rejection_stage: 'submitted_to_client' });
+    // a locked submission cannot be moved
+    expect((await stage(ids.locked, { to_stage: 'internal_screening' })).status).toBeGreaterThanOrEqual(400);
+    expect(await stageOf(ids.locked)).toBe('sourced');
+    // the report (and its summary) show the new state straight away
+    const now = (await report('?submission_stage=not_submitted')).body.data;
+    expect(now.rows.map((r) => r.candidate_name)).toEqual(['Fake locked']);
+    expect(now.summary.sent).toBe(1);
+    expect((await report('?submission_stage=rejected')).body.data.rows.map((r) => r.candidate_name).sort()).toEqual(['Fake rejected', 'Fake submitted']);
+    // the interview result is untouched by what is done with the candidate
+    expect((await report('?submission_stage=rejected')).body.data.rows.every((r) => r.outcome === 'pass' && r.score_percent === 80)).toBe(true);
+  });
+});
+
+describe('an interrupted or abandoned interview carries on instead of leaving the candidate stuck', () => {
+  const FULL = 'I built the integration with Apex, explained the trade-offs to the team, measured the result, fixed the slow queries and wrote the release notes for the client.';
+  const startIt = async () => {
+    followUps = false;
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await post(`${token}/start`, { consent: true });
+    return { created, token };
+  };
+
+  test('the answer was saved but the request died: the next look at the interview brings the next question', async () => {
+    const { token } = await startIt();
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    // what a crash after the save leaves behind: the transcript ends with the candidate's answer, no question is waiting
+    await prisma.aiInterview.update({ where: { token }, data: { transcript: [...row.transcript, { role: 'candidate', kind: 'answer', section: 'role', question_index: 1, text: FULL, at: new Date().toISOString() }] } });
+    const view = (await pub(token)).body.data;
+    expect(view.waiting_for_answer).toBe(true);
+    expect(view.answered).toBe(1);
+    expect(view.transcript[view.transcript.length - 1]).toMatchObject({ role: 'ai', kind: 'question' });
+    // and it asks the SECOND question, not the first again
+    expect(view.transcript.filter((t) => t.role === 'ai')).toHaveLength(2);
+    // looking again does not add another question
+    expect((await pub(token)).body.data.transcript).toHaveLength(view.transcript.length);
+    const done = await runInterview(token);
+    expect(done.done).toBe(true);
+  });
+
+  test('the last answer was saved but the scoring never ran: looking again finishes the interview', async () => {
+    const { token } = await startIt();
+    // answer everything but leave the very last answer saved without any scoring
+    let view = (await pub(token)).body.data;
+    while (view.total_questions && view.answered < view.total_questions - 1) view = (await post(`${token}/answer`, { text: FULL })).body.data;
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    await prisma.aiInterview.update({ where: { token }, data: { transcript: [...row.transcript, { role: 'candidate', kind: 'answer', section: 'aptitude', question_index: row.questions.length, text: '8', at: new Date().toISOString() }] } });
+    const after = await pub(token);
+    expect([200, 410]).toContain(after.status);
+    const finished = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(['completed', 'pending_review']).toContain(finished.status);
+    expect(finished.completed_at).toBeTruthy();
+  });
+
+  test('a question left unanswered well past its time is recorded as not answered when the interview is opened again', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 30 });
+    const { token } = await startIt();
+    const fresh = (await pub(token)).body.data;
+    expect(fresh.answered).toBe(0); // within its time: nothing changes
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    const aged = row.transcript.map((t, i) => (i === row.transcript.length - 1 ? { ...t, at: new Date(Date.now() - 10 * 60000).toISOString() } : t));
+    await prisma.aiInterview.update({ where: { token }, data: { transcript: aged } });
+    const view = (await pub(token)).body.data;
+    expect(view.answered).toBe(1);
+    expect(view.waiting_for_answer).toBe(true); // the next question, with a fresh clock
+    const saved = (await prisma.aiInterview.findUnique({ where: { token } })).transcript.find((t) => t.role === 'candidate');
+    expect(saved).toMatchObject({ timed_out: true, text: '[No answer - time ran out]' });
+    expect(new Date(view.server_now) - new Date(view.question_asked_at)).toBeLessThan(15000);
+    // with the time limit switched off nothing expires
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 0 });
+    const row2 = await prisma.aiInterview.findUnique({ where: { token } });
+    await prisma.aiInterview.update({ where: { token }, data: { transcript: row2.transcript.map((t, i) => (i === row2.transcript.length - 1 ? { ...t, at: new Date(Date.now() - 3600000).toISOString() } : t)) } });
+    expect((await pub(token)).body.data.answered).toBe(1);
+  });
+});
+
+describe('12 role and 12 aptitude questions in every interview', () => {
+  const FULL = 'I built the integration with Apex, explained the trade-offs to the team, measured the result, fixed the slow queries and wrote the release notes for the client.';
+  const put = (body) => authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send(body);
+  const begin = async () => {
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    const started = await post(`${token}/start`, { consent: true });
+    return { token, started };
+  };
+  const kinds = async (token) => (await prisma.aiInterview.findUnique({ where: { token } })).questions.map((q) => q.kind);
+
+  test('the default is 12 role + 12 aptitude questions (admin editable up to 15 each)', async () => {
+    await prisma.aiInterviewSettings.deleteMany();
+    const d = (await authed(request(app).get('/api/v1/ai-interviews/settings'), recruiterToken)).body.data;
+    expect(d).toMatchObject({ question_count: 12, aptitude_question_count: 12 });
+    expect((await put({ is_enabled: true })).body.data).toMatchObject({ question_count: 12, aptitude_question_count: 12 }); // a new row gets the same
+    expect((await put({ aptitude_question_count: 15 })).status).toBe(200);
+    expect((await put({ aptitude_question_count: 16 })).status).toBe(422);
+    expect((await put({ question_count: 16 })).status).toBe(422);
+  });
+
+  test('an interview asks exactly 12 questions in each section (24 in all), and the page is told the total', async () => {
+    await put({ question_count: 12, aptitude_question_count: 12, max_followups: 0 });
+    const { token, started } = await begin();
+    expect(started.status).toBe(200);
+    expect(started.body.data.total_questions).toBe(24);
+    const k = await kinds(token);
+    expect(k.filter((x) => x === 'role')).toHaveLength(12);
+    expect(k.filter((x) => x === 'aptitude')).toHaveLength(12);
+    expect(k.indexOf('aptitude')).toBe(12); // the role section first, then the aptitude section
+    followUps = false;
+    const done = await runInterview(token);
+    expect(done.done).toBe(true);
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).transcript.filter((t) => t.role === 'candidate')).toHaveLength(24);
+  });
+
+  test('when the AI writes fewer, it is asked once for the missing questions (no repeats) and the interview still has 12 + 12', async () => {
+    await put({ question_count: 12, aptitude_question_count: 12 });
+    shortBy = 4;
+    const { token } = await begin();
+    expect(calls.questions).toBe(2); // the first answer and one top-up
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    const k = row.questions.map((q) => q.kind);
+    expect(k.filter((x) => x === 'role')).toHaveLength(12);
+    expect(k.filter((x) => x === 'aptitude')).toHaveLength(12);
+    const texts = row.questions.map((q) => q.text.toLowerCase());
+    expect(new Set(texts).size).toBe(texts.length); // nothing asked twice
+    expect(seenPrompts[1].user).toMatch(/Do not repeat or rephrase any of them/);
+    expect(seenPrompts[1].user).toMatch(/Question 1\?/); // it is shown what was already written
+  });
+
+  test('if the top-up request fails, the interview starts with the questions it has instead of not starting', async () => {
+    await put({ question_count: 12, aptitude_question_count: 12 });
+    shortBy = 4;
+    topUpFails = true;
+    const { token, started } = await begin();
+    expect(started.status).toBe(200);
+    const k = await kinds(token);
+    expect(k.filter((x) => x === 'role')).toHaveLength(8);
+    expect(k.filter((x) => x === 'aptitude')).toHaveLength(8);
   });
 });

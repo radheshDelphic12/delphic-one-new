@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const rateLog = require('../rateChanges/rateChanges.service');
 const { decide } = require('../../lib/permissions');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { notify, requirementParticipants, admins } = require('../../lib/notifications');
@@ -251,10 +252,13 @@ function changedFields(before, after, patch) {
   return out;
 }
 
-async function update(id, patch, user) {
+async function update(id, input, user) {
+  const { rate_change_reason, ...patch } = input;
   const existing = await prisma.requirement.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
   if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  const budgetChanges = rateLog.diff(existing, patch, rateLog.REQUIREMENT_FIELDS);
+  if (rateLog.needsReason(budgetChanges) && !rate_change_reason) return { error: 'rate_reason_required' };
 
   if (patch.sales_owner_id && patch.sales_owner_id !== existing.sales_owner_id) {
     if (user.role !== 'admin') return { error: 'forbidden_owner_change' };
@@ -277,6 +281,7 @@ async function update(id, patch, user) {
     data.interview_template_id = (await resolveTemplate(prisma, reqType, track))?.id || null;
   }
   const row = await prisma.requirement.update({ where: { id }, data, include: DECORATE_INCLUDE });
+  await rateLog.record(prisma, { entityType: 'requirement', entityId: id, orgId: existing.org_id, userId: user?.id, currency: patch.budget_currency || existing.budget_currency, reason: rate_change_reason, changes: budgetChanges });
   const changes = changedFields(existing, row, patch);
   if (Object.keys(changes).length) await logActivity(user, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
   return { requirement: serialize(row) };

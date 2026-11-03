@@ -18,6 +18,7 @@ const {
 const ERROR_STATUS = {
   not_found: [404, 'Not found'],
   locked: [403, 'Record is locked'],
+  rate_reason_required: [422, 'Give a reason for changing the rate (rate_change_reason)'],
   seat_not_found: [404, 'Seat not found'],
   seat_locked: [403, 'Seat is locked'],
   profile_inactive: [400, 'Profile is not active'],
@@ -76,8 +77,9 @@ const create = asyncHandler(async (req, res) => {
 
 const update = asyncHandler(async (req, res) => {
   const body = updateSchema.parse(req.body);
-  const submission = await service.update(req.params.id, body);
-  return ok(res, submission);
+  const result = await service.update(req.params.id, body, req.user);
+  if (result.error) return mapError(res, result.error);
+  return ok(res, result.submission);
 });
 
 const changeStage = asyncHandler(async (req, res) => {
@@ -105,6 +107,13 @@ const interviewPlan = asyncHandler(async (req, res) => {
   const result = await getPlan(prisma, req.params.id);
   if (result.error) return mapError(res, result.error);
   return ok(res, result.plan);
+});
+
+const rateChanges = asyncHandler(async (req, res) => {
+  const submission = await service.getById(req.params.id);
+  if (!submission) return fail(res, 404, 'Not found');
+  if (req.user.role === 'recruiter' && submission.submitted_by?.id !== req.user.id) return fail(res, 403, 'You do not own this record');
+  return ok(res, await require('../rateChanges/rateChanges.service').list('submission', req.params.id));
 });
 
 const history = asyncHandler(async (req, res) => {
@@ -141,4 +150,4 @@ const updateRound = asyncHandler(async (req, res) => {
   return ok(res, result.round);
 });
 
-module.exports = { candidateFeedbackMessage, interviewPlan, list, getOne, create, update, changeStage, changeStageOverride, history, addRound, skipRound, updateRound };
+module.exports = { candidateFeedbackMessage, interviewPlan, list, getOne, create, update, changeStage, changeStageOverride, history, rateChanges, addRound, skipRound, updateRound };

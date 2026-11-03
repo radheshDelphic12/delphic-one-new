@@ -13,6 +13,7 @@ router.use(authenticate, requireMasterWorkspace);
 router.get('/', controller.list);
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
+router.get('/:id/rate-changes', controller.rateChanges);
 router.get('/:id/interview-plan', controller.interviewPlan);
 
 router.post('/', can('submissions.create', 'recruiter', 'sales', 'admin'), controller.create);

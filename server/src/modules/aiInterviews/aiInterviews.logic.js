@@ -128,26 +128,43 @@ async function generateQuestions(ctx, settings) {
     system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}${reference}`,
     webSearchDomains: sites,
     user: `${contextBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role, pitched at the ${level.label} level (${level.guidance}) - neither easier nor harder than that level, and the later questions should rise in difficulty within it. Start with a short, easy opening question about their work, then move to role-specific questions built from the required skills and the candidate's own background. Each question must be answerable in 1 to 3 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
-    maxTokens: 3000,
+    maxTokens: 7000, // up to 12 + 12 questions, the aptitude ones with their expected answers
     documents: ctx.resume ? [ctx.resume] : [],
   });
-  const role = (Array.isArray(data.questions) ? data.questions : [])
-    .map((q) => bounded(typeof q === 'string' ? q : q?.text, 600).trim())
-    .filter(Boolean)
-    .slice(0, n);
+  const clean = (t) => bounded(typeof t === 'string' ? t : t?.text, 600).trim();
+  const parseRole = (d) => (Array.isArray(d?.questions) ? d.questions : []).map(clean).filter(Boolean);
+  const parseApt = (d) => (Array.isArray(d?.aptitude) ? d.aptitude : [])
+    .map((q) => ({ text: bounded(q?.text, 600).trim(), expected: bounded(q?.expected_answer, 300).trim() }))
+    .filter((q) => q.text && q.expected);
+  const norm = (t) => t.toLowerCase().replace(/\W+/g, ' ').trim();
+  let role = parseRole(data).slice(0, n);
+  let aptitude = m ? parseApt(data).slice(0, m) : [];
+  let totalUsage = usage;
+  // The company asked for exactly n role and m aptitude questions. When the AI wrote fewer, it is asked once for the missing ones (and not
+  // to repeat what it already wrote); if that fails the interview starts with what there is instead of not starting.
+  if (role.length < n || aptitude.length < m) {
+    const missingRole = n - role.length;
+    const missingApt = m - aptitude.length;
+    try {
+      const more = await askJson({
+        system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}`,
+        user: `${contextBlock(ctx)}\n\nYou already wrote these questions. Do not repeat or rephrase any of them:\n${[...role, ...aptitude.map((q) => q.text)].map((t) => `- ${t}`).join('\n')}\n\nWrite exactly ${missingRole} interview questions for this candidate for this role, at the same ${level.label} level, each answerable in 1 to 3 minutes by speaking.${missingApt ? `\nAlso write exactly ${missingApt} aptitude questions (logical reasoning, numbers or patterns) of easy to medium level that can be solved in your head in 1 to 2 minutes. Give each one's correct answer as expected_answer.` : ''}\nReturn {"questions":[{"text":"..."}]${missingApt ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
+        maxTokens: 4000,
+      });
+      role = [...role, ...parseRole(more.data).filter((t) => !role.some((r) => norm(r) === norm(t)))].slice(0, n);
+      aptitude = [...aptitude, ...parseApt(more.data).filter((q) => !aptitude.some((a) => norm(a.text) === norm(q.text)))].slice(0, m);
+      totalUsage = { input: usage.input + more.usage.input, output: usage.output + more.usage.output };
+    } catch (err) {
+      if (!(err instanceof AiUnavailableError)) throw err;
+    }
+  }
   if (role.length < Math.min(3, n)) throw new AiUnavailableError('AI returned too few questions');
-  const aptitude = m
-    ? (Array.isArray(data.aptitude) ? data.aptitude : [])
-      .map((q) => ({ text: bounded(q?.text, 600).trim(), expected: bounded(q?.expected_answer, 300).trim() }))
-      .filter((q) => q.text && q.expected)
-      .slice(0, m)
-    : [];
   if (m && aptitude.length < Math.min(2, m)) throw new AiUnavailableError('AI returned too few aptitude questions');
   const questions = [
     ...role.map((text) => ({ kind: 'role', text })),
     ...aptitude.map((q) => ({ kind: 'aptitude', text: q.text, expected: q.expected })),
   ].map((q, i) => ({ id: i + 1, ...q }));
-  return { questions, usage };
+  return { questions, usage: totalUsage };
 }
 
 // ---- follow-up (role questions only; an aptitude answer is marked against its expected answer) ----

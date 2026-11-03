@@ -8163,7 +8163,7 @@ model AiInterviewSettings {
   org_id             String   @unique @db.Uuid
   // Off until an admin turns it on: the AI interview is an optional, separate link and never part of the existing flow.
   is_enabled         Boolean  @default(false)
-  question_count     Int      @default(7)
+  question_count     Int      @default(12)
   max_followups      Int      @default(3)
   pass_percentage    Int      @default(60)
   borderline_margin  Int      @default(10)
@@ -8171,7 +8171,7 @@ model AiInterviewSettings {
   weight_communication Int    @default(20)
   weight_depth       Int      @default(15)
   aptitude_enabled   Boolean  @default(true)
-  aptitude_question_count Int @default(4)
+  aptitude_question_count Int @default(12)
   weight_aptitude    Int      @default(10)
   recording_enabled  Boolean  @default(false)
   recording_retention_days Int @default(2)
@@ -8831,4 +8831,24 @@ model ZxWagePayout {
   @@index([org_id, paid_on])
   @@index([worker_id])
   @@map("zx_wage_payouts")
+}
+
+// Rate change history: every time a submission's proposed / vendor / final-agreed rate or a requirement's budget
+// is changed, one row per changed value with who, when, old -> new and the reason. entity_id is polymorphic (no FK),
+// like stage_history. Additive; existing rows are untouched.
+model RateChange {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String?  @db.Uuid
+  entity_type String // submission | requirement
+  entity_id   String   @db.Uuid
+  field       String // proposed_rate | vendor_rate | final_agreed_rate | budget_min | budget_max
+  old_value   Decimal? @db.Decimal(14, 2)
+  new_value   Decimal? @db.Decimal(14, 2)
+  currency    String?
+  reason      String?
+  changed_by  String?  @db.Uuid
+  changed_at  DateTime @default(now())
+
+  @@index([entity_type, entity_id, changed_at])
+  @@map("rate_changes")
 }

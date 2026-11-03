@@ -59,7 +59,7 @@ function monthsBetween(from, to) {
 
 // Reads everything the matrix and its records are built from: the row owners and one event per counted item.
 async function collect(orgId, q) {
-  const measure = q.kind === 'vendor' ? 'joinings' : q.measure || 'projects';
+  const measure = q.kind === 'vendor' ? 'joinings' : q.measure === 'requirements' ? 'projects' : q.measure || 'projects';
   const months = monthsBetween(q.date_from, q.date_to);
   const first = new Date(`${months[0].key}-01T00:00:00.000+05:30`);
   const lastKey = months[months.length - 1].key;
@@ -90,25 +90,14 @@ async function collect(orgId, q) {
     events.push({ account_id: accountId || null, month: monthKey, record: { ...record, party: row.name, party_id: row.id } });
   };
 
-  if (measure === 'projects') {
-    const projects = await prisma.account.findMany({
-      where: { org_id: orgId, type: 'client', is_project: true, ...(q.req_type ? { service_category: q.req_type } : {}) },
-      select: { id: true, name: true, project_name: true, project_code: true, service_category: true, client_account_id: true, agreement_start_date: true, created_at: true },
-    });
-    for (const p of projects) {
-      const when = p.agreement_start_date ? plainMonth(p.agreement_start_date) : istMonth(p.created_at);
-      add(p.client_account_id, when, {
-        kind: 'project', id: p.id, title: p.project_name || p.name, subtitle: [p.project_code, p.service_category && p.service_category.replace(/_/g, ' ')].filter(Boolean).join(' · ') || null,
-        date: p.agreement_start_date ? plainDay(p.agreement_start_date) : istDay(p.created_at), date_label: p.agreement_start_date ? 'Agreement start' : 'Added on', path: `/projects/${p.id}`,
-      });
-    }
-  } else if (measure === 'requirements') {
+  if (measure === 'projects' || measure === 'requirements') {
+    // "Projects won" = requirement tickets marked Won (closed), counted in the month they were closed
     const reqs = await prisma.requirement.findMany({
       where: { status: 'closed', closed_at: inRange, account: { org_id: orgId }, ...(q.req_type ? { req_type: q.req_type } : {}) },
       select: { id: true, title: true, req_type: true, account_id: true, closed_at: true },
     });
     for (const r of reqs) {
-      add(r.account_id, istMonth(r.closed_at), { kind: 'requirement', id: r.id, title: r.title, subtitle: r.req_type ? r.req_type.replace(/_/g, ' ') : null, date: istDay(r.closed_at), date_label: 'Closed on', path: `/requirements/${r.id}` });
+      add(r.account_id, istMonth(r.closed_at), { kind: 'requirement', id: r.id, title: r.title, subtitle: r.req_type ? r.req_type.replace(/_/g, ' ') : null, date: istDay(r.closed_at), date_label: 'Won on', path: `/requirements/${r.id}` });
     }
   } else {
     const subs = await prisma.submission.findMany({

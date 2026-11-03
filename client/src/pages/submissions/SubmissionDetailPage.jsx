@@ -116,6 +116,8 @@ export default function SubmissionDetailPage() {
   const [form, setForm] = useState(null);
   const [stageModal, setStageModal] = useState(null);
   const [stageReason, setStageReason] = useState('');
+  const [rateReason, setRateReason] = useState('');
+  const [rateHistory, setRateHistory] = useState([]);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const canOverrideStage = canOverrideSubmissionStage(user);
 
@@ -172,6 +174,10 @@ export default function SubmissionDetailPage() {
         setHistory([]);
         setHistoryError(apiErrorMessage(err, 'Could not load stage history'));
       });
+    apiClient
+      .get(`/submissions/${id}/rate-changes`)
+      .then((r) => setRateHistory(r.data.data || []))
+      .catch(() => setRateHistory([]));
     try {
       const subRes = await apiClient.get(`/submissions/${id}`);
       const sub = subRes.data.data;
@@ -214,12 +220,23 @@ export default function SubmissionDetailPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  // A rate that was already set and is now different needs a reason; the server records it in the rate history.
+  const rateChangedFields = submission && form
+    ? ['proposed_rate', 'vendor_rate', 'final_agreed_rate'].filter((k) => submission[k] != null && toOptionalNumber(form[k]) !== undefined && Number(form[k]) !== Number(submission[k]))
+    : [];
+  const needsRateReason = rateChangedFields.length > 0;
+
   async function handleSave(e) {
     e.preventDefault();
     if (!canEdit) return;
+    if (needsRateReason && rateReason.trim().length < 3) {
+      pushError('Write a reason for the rate change (at least 3 characters).', 'Reason needed');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
+        ...(needsRateReason ? { rate_change_reason: rateReason.trim() } : {}),
         proposed_rate: toOptionalNumber(form.proposed_rate),
         proposed_rate_type: form.proposed_rate_type || undefined,
         proposed_rate_currency: form.proposed_rate_currency || undefined,
@@ -242,6 +259,7 @@ export default function SubmissionDetailPage() {
         bgv_notes: form.bgv_notes.trim() || undefined,
       };
       await apiClient.patch(`/submissions/${id}`, payload);
+      setRateReason('');
       await load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to save changes'), 'Something went wrong');
@@ -805,6 +823,34 @@ export default function SubmissionDetailPage() {
             </div>
           </fieldset>
         </section>
+
+        {canEdit && needsRateReason && (
+          <div data-testid="rate-reason-box" className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <label className="mb-1 block text-xs font-medium text-tertiary-700">Reason for changing the rate (required)</label>
+            <input
+              data-testid="rate-reason"
+              value={rateReason}
+              onChange={(e) => setRateReason(e.target.value)}
+              maxLength={500}
+              placeholder="e.g. Vendor renegotiated, client approved new rate"
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            />
+          </div>
+        )}
+
+        {rateHistory.length > 0 && (
+          <section data-testid="rate-history" className="rounded-md border p-3">
+            <h3 className="mb-2 text-sm font-semibold text-tertiary-900">Rate change history</h3>
+            <ul className="divide-y text-sm">
+              {rateHistory.map((h) => (
+                <li key={h.id} className="py-1.5">
+                  <span className="font-medium">{h.field.replace(/_/g, ' ')}</span>: {h.old_value ?? '—'} → {h.new_value ?? '—'} {h.currency || ''}
+                  <span className="block text-xs text-tertiary-500">{h.reason || 'No reason recorded'} · {h.changed_by || 'Unknown'} · {new Date(h.changed_at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {canEdit && (
           <button type="submit" disabled={saving} className="btn-primary">

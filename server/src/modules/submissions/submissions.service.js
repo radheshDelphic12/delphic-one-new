@@ -4,6 +4,7 @@ const env = require('../../config/env');
 const { SUBMISSION_STAGE_TRANSITIONS, CLIENT_ROUND_TYPES, INTERNAL_ROUND_TYPES, computeMargin, computeMissingMandatoryRounds, isBackwardTransition, roundTypeLabel } = require('./stageMachines');
 const { computeClosureDetail } = require('../../utils/closureProgress');
 const templates = require('../interviewTemplates/interviewTemplates.service');
+const rateLog = require('../rateChanges/rateChanges.service');
 const { notify, interviewRoundParticipants, submissionParticipants, admins } = require('../../lib/notifications');
 const { interviewRoundInvite } = require('../../lib/email/invites');
 
@@ -183,8 +184,11 @@ async function create(data, user) {
   return { submission: serialize(row) };
 }
 
-async function update(id, patch) {
+async function update(id, input, user) {
+  const { rate_change_reason, ...patch } = input;
   const existing = await prisma.submission.findUnique({ where: { id } });
+  const rateChanges = rateLog.diff(existing, patch, rateLog.SUBMISSION_FIELDS);
+  if (rateLog.needsReason(rateChanges) && !rate_change_reason) return { error: 'rate_reason_required' };
   const proposed_rate = patch.proposed_rate ?? existing.proposed_rate;
   const proposed_rate_currency = patch.proposed_rate_currency ?? existing.proposed_rate_currency;
   const vendor_rate = patch.vendor_rate ?? existing.vendor_rate;
@@ -196,10 +200,11 @@ async function update(id, patch) {
     data: { ...patch, margin, margin_percentage },
     include: INCLUDE,
   });
+  await rateLog.record(prisma, { entityType: 'submission', entityId: id, orgId: existing.org_id, userId: user?.id, currency: patch.vendor_rate_currency || existing.vendor_rate_currency || existing.proposed_rate_currency, reason: rate_change_reason, changes: rateChanges });
   if (existing.stage === 'closed' && 'actual_joining_date' in patch) {
     await prisma.requirementSeat.update({ where: { id: existing.requirement_seat_id }, data: { joined_at: row.actual_joining_date } });
   }
-  return serialize(row);
+  return { submission: serialize(row) };
 }
 
 async function changeStage(id, { to_stage, reason, backout_reason, rejection_reason }, user) {

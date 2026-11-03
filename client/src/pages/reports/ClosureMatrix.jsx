@@ -8,9 +8,8 @@ import Pill from '../../components/ui/Pill.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 
 const MEASURES = [
-  { value: 'projects', label: 'Projects won', hint: 'Projects added in Finance > Projects, by agreement start date' },
+  { value: 'projects', label: 'Projects won', hint: 'Requirement tickets marked Won (closed), by the date they were won' },
   { value: 'joinings', label: 'Candidates joined', hint: 'Candidates who joined on the client’s requirements, by joining date' },
-  { value: 'requirements', label: 'Requirements closed', hint: 'Requirements marked closed, by closing date' },
 ];
 const TYPES = [
   { value: '', label: 'All project types' },
@@ -69,7 +68,7 @@ function RecordsDrawer({ request, onClose, noun }) {
           <p className="text-xs text-tertiary-500">{data.total} record{data.total === 1 ? '' : 's'}{data.truncated ? ' (the first 1000 are shown)' : ''}. Click a name to open it.</p>
           <div className="overflow-x-auto rounded-xl border border-tertiary-100">
             <table className="min-w-full text-sm">
-              <thead className="bg-tertiary-50"><tr><th className={th}>{data.measure === 'joinings' ? 'Candidate' : data.measure === 'requirements' ? 'Requirement' : 'Project'}</th><th className={th}>Details</th><th className={th}>{noun}</th><th className={th}>Date</th></tr></thead>
+              <thead className="bg-tertiary-50"><tr><th className={th}>{data.measure === 'joinings' ? 'Candidate' : 'Requirement'}</th><th className={th}>Details</th><th className={th}>{noun}</th><th className={th}>Date</th></tr></thead>
               <tbody>
                 {data.records.map((r) => (
                   <tr key={`${r.kind}-${r.id}`} className="border-t border-tertiary-100">

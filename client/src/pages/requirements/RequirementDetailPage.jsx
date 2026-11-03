@@ -61,6 +61,7 @@ export default function RequirementDetailPage() {
   const [seatLabel, setSeatLabel] = useState('');
   const [assignRole, setAssignRole] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [budgetHistory, setBudgetHistory] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,6 +77,7 @@ export default function RequirementDetailPage() {
       setSeats(seatsRes.data.data || []);
       setAssignments(assignRes.data.data || []);
       setHistory(histRes.data.data || []);
+      apiClient.get(`/requirements/${id}/rate-changes`).then((r) => setBudgetHistory(r.data.data || [])).catch(() => setBudgetHistory([]));
       apiClient.get(`/requirements/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
       setTaggedProfiles(subsRes.data.data || []);
     } catch (err) {
@@ -473,6 +475,13 @@ export default function RequirementDetailPage() {
             <dd>
               {requirement.budget_min ?? '—'}–{requirement.budget_max ?? '—'} {requirement.budget_currency || ''}{' '}
               {requirement.budget_type ? `(${requirement.budget_type.replace(/_/g, ' ')})` : ''}
+              {budgetHistory.length > 0 && (
+                <ul data-testid="budget-history" className="mt-1 space-y-0.5 text-xs text-tertiary-500">
+                  {budgetHistory.slice(0, 5).map((h) => (
+                    <li key={h.id}>{h.field === 'budget_min' ? 'Min' : 'Max'}: {h.old_value ?? '—'} → {h.new_value ?? '—'} · {h.reason || 'No reason'} · {h.changed_by || 'Unknown'}, {new Date(h.changed_at).toLocaleDateString()}</li>
+                  ))}
+                </ul>
+              )}
             </dd>
             <dt className="text-tertiary-500">TAT</dt>
             <dd className="flex min-w-0 flex-wrap items-center gap-2">
