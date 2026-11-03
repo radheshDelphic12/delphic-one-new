@@ -7,6 +7,7 @@ const ZEPHYR_TITLES = {
   '/zephyr/projects': ['Projects', 'Own and client projects, milestones and work orders.'],
   '/zephyr/properties': ['Properties', 'Properties and units: investment, valuation, loans, tenants and sales.'],
   '/zephyr/rent': ['Rent', 'Monthly rent due, collected, pending and overdue.'],
+  '/zephyr/wages': ['Daily Wages', 'Attendance and payouts of daily-wage workers, by project.'],
   '/zephyr/tasks': ['Tasks', 'Operational tasks for employees and contractors.'],
   '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
   '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],

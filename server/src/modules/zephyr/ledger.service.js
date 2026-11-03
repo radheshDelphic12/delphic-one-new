@@ -401,6 +401,9 @@ async function projectMoney(orgId, ctx, projectId) {
   if (ctx.isAdmin) {
     const slipRows = await prisma.zxSalaryRecord.findMany({ where: { org_id: orgId, status: { in: ['approved', 'paid'] } }, select: { project_split: true } });
     salaries = slipRows.reduce((a, s) => a + (Array.isArray(s.project_split) ? s.project_split.filter((p) => p.project_id === projectId).reduce((x, p) => x + num(p.amount), 0) : 0), 0);
+    // Daily-wage days worked on this project count as people cost too.
+    const wageSum = await prisma.zxWageAttendance.aggregate({ where: { org_id: orgId, project_id: projectId }, _sum: { amount: true } });
+    salaries += num(wageSum._sum.amount);
   }
   const profit = acc.revenue - acc.expense - (salaries || 0);
   const cost = project.budget == null ? null : num(project.budget);

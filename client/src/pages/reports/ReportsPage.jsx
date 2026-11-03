@@ -45,6 +45,9 @@ import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
 import DrilldownDrawer from './DrilldownDrawer.jsx';
 import MonthlyReview from './MonthlyReview.jsx';
 import HiringFunnel from './HiringFunnel.jsx';
+import ClosureMatrix from './ClosureMatrix.jsx';
+import AiInterviewReport from './AiInterviewReport.jsx';
+import DaySchedule from './DaySchedule.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -310,6 +313,16 @@ function CoveragePersonCell({ row, field, people, saving, onSave }) {
     </select>
   );
 }
+
+// Reports that are whole screens of their own (own filters, own data) rather than the shared table.
+const OWN_SCREENS = {
+  'monthly-review': MonthlyReview,
+  'hiring-funnel': HiringFunnel,
+  'client-wins': () => <ClosureMatrix kind="client" />,
+  'vendor-joinings': () => <ClosureMatrix kind="vendor" />,
+  'ai-interviews': AiInterviewReport,
+  'day-schedule': DaySchedule,
+};
 
 export default function ReportsPage() {
   const { user } = useAuth();
@@ -664,7 +677,7 @@ export default function ReportsPage() {
 
   // silent = a background refresh: no spinner, and a failed refresh keeps what is on screen instead of blanking it.
   async function runReport({ silent = false } = {}) {
-    if (active === 'monthly-review' || active === 'hiring-funnel') return; // their own screens load their own data
+    if (OWN_SCREENS[active]) return; // their own screens load their own data
     const requestId = ++reportRequestId.current;
     if (!silent) setLoading(true);
     try {
@@ -946,7 +959,8 @@ export default function ReportsPage() {
     drawerRow?.group_label ||
     'Row details';
 
-  if (active === 'monthly-review' || active === 'hiring-funnel') {
+  if (OWN_SCREENS[active]) {
+    const Screen = OWN_SCREENS[active];
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -959,7 +973,7 @@ export default function ReportsPage() {
             options={available.map((r) => ({ value: r.key, label: r.label }))}
           />
         </div>
-        {active === 'hiring-funnel' ? <HiringFunnel /> : <MonthlyReview />}
+        <Screen />
       </div>
     );
   }

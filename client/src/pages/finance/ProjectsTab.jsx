@@ -118,6 +118,8 @@ function emptyForm(profile) {
     contract_status: profile.contract_status || '',
     contract_hold_periods: (profile.contract_hold_periods || []).map((p) => ({ from: p.from || '', resume: p.resume || '' })),
     benchmark_hours: profile.benchmark_hours ?? 160,
+    work_start_time: profile.work_start_time || '',
+    work_end_time: profile.work_end_time || '',
     overtime_billable: Boolean(profile.overtime_billable),
     overtime_multiplier: profile.overtime_multiplier ?? 1,
     estimated_monthly_hours: profile.estimated_monthly_hours ?? '',
@@ -190,6 +192,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
       agreement_end_date: form.agreement_end_date || null,
       contract_status: form.contract_status || null,
       benchmark_hours: Number(form.benchmark_hours) || 160,
+      work_start_time: form.work_start_time || null,
+      work_end_time: form.work_end_time || null,
       overtime_billable: form.overtime_billable,
       overtime_multiplier: Number(form.overtime_multiplier) || 1,
       client_billing_basis: form.client_billing_basis,
@@ -321,6 +325,15 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
               <label className="block text-xs font-medium text-tertiary-600">
                 Agreement end date
                 <input type="date" min={form.agreement_start_date || undefined} value={form.agreement_end_date} onChange={(e) => set('agreement_end_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Work start time
+                <input type="time" value={form.work_start_time} onChange={(e) => set('work_start_time', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" data-testid="work-start-time" />
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Work end time
+                <input type="time" value={form.work_end_time} onChange={(e) => set('work_end_time', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" data-testid="work-end-time" />
+                <span className="mt-0.5 block font-normal text-tertiary-400">For reporting and the 24-hour day schedule only. An end before the start means the day runs past midnight.</span>
               </label>
               {(monthly || hourly) && (
                 <label className="block text-xs font-medium text-tertiary-600">

@@ -64,6 +64,7 @@ import ZephyrSettingsPage from '../pages/zephyr/ZephyrSettingsPage.jsx';
 import ZephyrPropertiesPage from '../pages/zephyr/ZephyrPropertiesPage.jsx';
 import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.jsx';
 import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
+import ZephyrWagesPage from '../pages/zephyr/ZephyrWagesPage.jsx';
 import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
 import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
 import GulatiHomePage from '../pages/gulati/GulatiHomePage.jsx';
@@ -431,6 +432,7 @@ export default function App() {
         <Route path="zephyr/properties" element={<RequireZephyr><ZephyrPropertiesPage /></RequireZephyr>} />
         <Route path="zephyr/properties/:id" element={<RequireZephyr><ZephyrPropertyDetailPage /></RequireZephyr>} />
         <Route path="zephyr/rent" element={<RequireZephyr><ZephyrRentPage /></RequireZephyr>} />
+        <Route path="zephyr/wages" element={<RequireZephyr><ZephyrWagesPage /></RequireZephyr>} />
         <Route path="zephyr/tasks" element={<RequireZephyr><ZephyrTasksPage /></RequireZephyr>} />
         <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
         <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />

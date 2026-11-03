@@ -10,6 +10,8 @@ const explorerService = require('./explorer.service');
 const drilldownService = require('./drilldown.service');
 const monthlyReview = require('./monthlyReview.service');
 const hiringFunnelService = require('./hiringFunnel.service');
+const closureMatrixService = require('./closureMatrix.service');
+const dayScheduleService = require('./daySchedule.service');
 const {
   drilldownSchema,
   dateRangeSchema,
@@ -248,6 +250,18 @@ router.get(
     const data = await hiringFunnelService.hiringFunnelDetails(query);
     return ok(res, data);
   })
+);
+
+router.get(
+  '/closure-matrix',
+  authorize('admin', 'sales', 'bda'),
+  asyncHandler(async (req, res) => ok(res, await closureMatrixService.closureMatrix(req.user.org_id, req.query)))
+);
+
+router.get(
+  '/day-schedule',
+  authorize('admin', 'sales', 'bda', 'recruiter'),
+  asyncHandler(async (req, res) => ok(res, await dayScheduleService.daySchedule(req.user.org_id)))
 );
 
 router.get(

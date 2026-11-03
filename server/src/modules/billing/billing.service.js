@@ -451,6 +451,8 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     contract_hold_periods: Array.isArray(account.contract_hold_periods) ? account.contract_hold_periods : [],
     contract: contractState(account),
     benchmark_hours: account.benchmark_hours,
+    work_start_time: account.work_start_time || null,
+    work_end_time: account.work_end_time || null,
     overtime_billable: account.overtime_billable,
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
@@ -496,6 +498,8 @@ const PROFILE_SELECT = {
   contract_status: true,
   contract_hold_periods: true,
   benchmark_hours: true,
+  work_start_time: true,
+  work_end_time: true,
   client_billing_currency: true,
   project_calendar: { select: { calendar: { select: { id: true, name: true, kind: true } } } },
 };
@@ -600,6 +604,8 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   const end = patch.agreement_end_date !== undefined ? patch.agreement_end_date : existing.agreement_end_date;
   if (start && end && end < start) return { error: 'end_before_start' };
   if (patch.benchmark_hours !== undefined) data.benchmark_hours = patch.benchmark_hours;
+  if (patch.work_start_time !== undefined) data.work_start_time = patch.work_start_time;
+  if (patch.work_end_time !== undefined) data.work_end_time = patch.work_end_time;
   if (patch.overtime_billable !== undefined) data.overtime_billable = patch.overtime_billable;
   if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
   if (patch.estimated_monthly_hours !== undefined) data.estimated_monthly_hours = patch.estimated_monthly_hours;

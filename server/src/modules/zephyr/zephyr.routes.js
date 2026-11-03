@@ -824,6 +824,50 @@ const reports = require('./reports.service');
 router.get('/dashboard', asyncHandler(async (req, res) => ok(res, await reports.dashboard(orgId(req), { ...mctx(req), ...pCtx(req), personId: req.zx.person_id }, req.zx.caps))));
 router.get('/reports/services', zxAuthorize('overview'), asyncHandler(async (req, res) => ok(res, await reports.serviceReport(orgId(req), { ...mctx(req), ...pCtx(req) }, reports.servicesQuerySchema.parse(req.query)))));
 
+// --- Daily-wage earners: attendance by project and payouts ---
+const wages = require('./wages.service');
+const WAGE_ERRORS = {
+  not_found: [404, 'Record not found'],
+  project_not_found: [422, 'Choose a project of this company'],
+  worker_not_found: [422, 'That worker was not found'],
+  duplicate_worker: [422, 'A worker appears twice in the attendance sheet'],
+  over_one_day: [422, 'That worker is already marked for more than one day in total on that date'],
+  worker_has_history: [409, 'This worker has attendance on record; mark them inactive instead of deleting'],
+  paid_locked: [409, 'That day is already paid; void the payout first'],
+  nothing_to_pay: [422, 'There are no unpaid days to pay for that worker'],
+  advance_exceeds_outstanding: [422, 'The advance recovery is more than the advance outstanding'],
+  advance_already_recovered: [422, 'That advance has already been partly recovered in a payout'],
+  deductions_exceed: [422, 'Deductions cannot be more than the gross wage'],
+  changed_meanwhile: [409, 'The attendance changed while paying; review and try again'],
+  already_voided: [409, 'That payout is already voided'],
+};
+const failWage = (res, result) => {
+  const mapped = WAGE_ERRORS[result.error];
+  return mapped ? fail(res, mapped[0], mapped[1]) : fail(res, 500, 'Unexpected error');
+};
+const sendWage = (res, result, status = 200) => (result.error ? failWage(res, result) : ok(res, result, {}, status));
+const wagesView = zxAuthorize('wagesView');
+const wagesCap = zxAuthorize('wages');
+const wagesPayCap = zxAuthorize('wagesPay');
+router.get('/wages/workers', wagesView, asyncHandler(async (req, res) => ok(res, await wages.listWorkers(orgId(req), wages.workerListSchema.parse(req.query)))));
+router.post('/wages/workers', wagesCap, asyncHandler(async (req, res) => sendWage(res, await wages.createWorker(orgId(req), req.user.id, wages.createWorkerSchema.parse(req.body)), 201)));
+router.patch('/wages/workers/:id', wagesCap, asyncHandler(async (req, res) => sendWage(res, await wages.updateWorker(orgId(req), req.user.id, req.params.id, wages.updateWorkerSchema.parse(req.body)))));
+router.delete('/wages/workers/:id', wagesCap, asyncHandler(async (req, res) => sendWage(res, await wages.removeWorker(orgId(req), req.user.id, req.params.id))));
+router.get('/wages/sheet', wagesView, asyncHandler(async (req, res) => ok(res, await wages.daySheet(orgId(req), wages.sheetQuerySchema.parse(req.query)))));
+router.put('/wages/attendance', wagesCap, asyncHandler(async (req, res) => sendWage(res, await wages.markDay(orgId(req), req.user.id, wages.bulkSchema.parse(req.body)))));
+router.get('/wages/attendance', wagesView, asyncHandler(async (req, res) => ok(res, await wages.listAttendance(orgId(req), wages.attendanceQuerySchema.parse(req.query)))));
+router.delete('/wages/attendance/:id', wagesCap, asyncHandler(async (req, res) => sendWage(res, await wages.removeAttendance(orgId(req), req.user.id, req.params.id))));
+router.get('/wages/summary', wagesView, asyncHandler(async (req, res) => ok(res, await wages.summary(orgId(req), wages.rangeSchema.parse(req.query)))));
+router.get('/wages/advances', wagesView, asyncHandler(async (req, res) => ok(res, await wages.listAdvances(orgId(req), wages.advanceQuerySchema.parse(req.query)))));
+router.post('/wages/advances', wagesPayCap, asyncHandler(async (req, res) => sendWage(res, await wages.createAdvance(orgId(req), req.user.id, wages.advanceSchema.parse(req.body)), 201)));
+router.patch('/wages/advances/:id', wagesPayCap, asyncHandler(async (req, res) => sendWage(res, await wages.updateAdvance(orgId(req), req.user.id, req.params.id, wages.advanceUpdateSchema.parse(req.body)))));
+router.delete('/wages/advances/:id', wagesPayCap, asyncHandler(async (req, res) => sendWage(res, await wages.removeAdvance(orgId(req), req.user.id, req.params.id))));
+router.get('/wages/payable', wagesView, asyncHandler(async (req, res) => sendWage(res, await wages.payable(orgId(req), wages.payableQuerySchema.parse(req.query)))));
+router.get('/wages/payouts', wagesView, asyncHandler(async (req, res) => ok(res, await wages.listPayouts(orgId(req), wages.payoutQuerySchema.parse(req.query)))));
+router.get('/wages/payouts/:id', wagesView, asyncHandler(async (req, res) => sendWage(res, await wages.payoutDetail(orgId(req), req.params.id))));
+router.post('/wages/payouts', wagesPayCap, asyncHandler(async (req, res) => sendWage(res, await wages.pay(orgId(req), req.user.id, wages.payoutSchema.parse(req.body)), 201)));
+router.post('/wages/payouts/:id/void', wagesPayCap, asyncHandler(async (req, res) => sendWage(res, await wages.voidPayout(orgId(req), req.user.id, req.params.id, wages.voidSchema.parse(req.body).reason))));
+
 router.get(
   '/audit',
   zxAuthorize('audit'),

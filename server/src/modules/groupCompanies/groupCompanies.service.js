@@ -179,8 +179,8 @@ async function remove(groupIds, id) {
 }
 
 // Ownership must not loop: A cannot hold B when B (directly or through others) already holds A.
-async function loops(groupId, companyId, holderIds) {
-  const edges = await prisma.groupCompanyStake.findMany({ where: { org_group_id: groupId, holder_company_id: { not: null }, held_company_id: { not: companyId } }, select: { holder_company_id: true, held_company_id: true } });
+async function loops(groupIds, companyId, holderIds) {
+  const edges = await prisma.groupCompanyStake.findMany({ where: { ...scoped(groupIds), holder_company_id: { not: null }, held_company_id: { not: companyId } }, select: { holder_company_id: true, held_company_id: true } });
   const holdersOf = new Map();
   for (const e of edges) holdersOf.set(e.held_company_id, [...(holdersOf.get(e.held_company_id) || []), e.holder_company_id]);
   for (const start of holderIds) {
@@ -218,9 +218,9 @@ async function setStakes(groupIds, id, stakes) {
   }
   if (round3(total) > 100) return { error: 'over_100', total: round3(total) };
   if (holderCompanies.length) {
-    const found = await prisma.groupCompany.count({ where: { id: { in: holderCompanies }, org_group_id: company.org_group_id } });
+    const found = await prisma.groupCompany.count({ where: { id: { in: holderCompanies }, ...scoped(groupIds) } });
     if (found !== new Set(holderCompanies).size) return { error: 'holder_not_found' };
-    if (await loops(company.org_group_id, id, holderCompanies)) return { error: 'ownership_loop' };
+    if (await loops(groupIds, id, holderCompanies)) return { error: 'ownership_loop' };
   }
   await prisma.$transaction(async (tx) => {
     await tx.groupCompanyStake.deleteMany({ where: { held_company_id: id } });

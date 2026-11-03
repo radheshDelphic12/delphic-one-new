@@ -2,6 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const { writeAudit } = require('./audit');
 const propertyCalc = require('./property.calc');
+const wages = require('./wages.service');
 
 // One place that turns ledger entries and pay slips into figures, so the Overview (Z6) and
 // Financials (Z7) never disagree.
@@ -102,10 +103,17 @@ async function slips(orgId, from, to) {
   });
 }
 
+// Daily-wage cost (days worked, by project) counts with salaries; it follows the same project filters.
+async function wageCosts(orgId, from, to, scope) {
+  if (scope.mode === 'none') return [];
+  const rows = await wages.costRows(orgId, from, to);
+  return scope.mode === 'all' ? rows : rows.filter((r) => scope.ids.has(r.project_id));
+}
+
 async function summary(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows] = await Promise.all([actualEntries(orgId, from, to, {}, filters), includeSalaries ? slips(orgId, from, to) : []]);
+  const [entries, slipRows, wageRows] = await Promise.all([actualEntries(orgId, from, to, {}, filters), includeSalaries ? slips(orgId, from, to) : [], includeSalaries ? wageCosts(orgId, from, to, scope) : []]);
   let revenue = 0;
   let expense = 0;
   let taxIn = 0;
@@ -119,7 +127,7 @@ async function summary(orgId, from, to, { includeSalaries = true, filters = {} }
       taxOut += num(e.tax);
     }
   }
-  const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0);
+  const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0) + wageRows.reduce((a, w) => a + w.amount, 0);
   const profit = revenue - expense - salaries;
   return {
     from,
@@ -139,9 +147,10 @@ async function summary(orgId, from, to, { includeSalaries = true, filters = {} }
 async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows] = await Promise.all([
+  const [entries, slipRows, wageRows] = await Promise.all([
     actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth), {}, filters),
     includeSalaries ? slips(orgId, monthStart(fromMonth), monthEnd(toMonth)) : [],
+    includeSalaries ? wageCosts(orgId, monthStart(fromMonth), monthEnd(toMonth), scope) : [],
   ]);
   const rows = new Map(monthsBetween(fromMonth, toMonth).map((m) => [m, { month: m, revenue: 0, expense: 0, salaries: 0 }]));
   for (const e of entries) {
@@ -151,6 +160,10 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filt
   for (const s of slipRows) {
     const row = rows.get(s.month);
     if (row) row.salaries += slipPortion(s, scope);
+  }
+  for (const w of wageRows) {
+    const row = rows.get(w.month);
+    if (row) row.salaries += w.amount;
   }
   return [...rows.values()].map((r) => ({
     month: r.month,
@@ -165,9 +178,10 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filt
 async function byProject(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows, projects] = await Promise.all([
+  const [entries, slipRows, wageRows, projects] = await Promise.all([
     actualEntries(orgId, from, to, {}, filters),
     includeSalaries ? slips(orgId, from, to) : [],
+    includeSalaries ? wageCosts(orgId, from, to, scope) : [],
     prisma.zxProject.findMany({ where: { org_id: orgId, deleted_at: null }, select: { id: true, code: true, name: true, kind: true } }),
   ]);
   const rows = new Map();
@@ -182,6 +196,7 @@ async function byProject(orgId, from, to, { includeSalaries = true, filters = {}
       if (scope.mode === 'all') row(null).salaries += num(s.net);
     } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(part.project_id).salaries += num(part.amount);
   }
+  for (const w of wageRows) row(w.project_id).salaries += w.amount;
   const meta = new Map(projects.map((p) => [p.id, p]));
   return [...rows.values()]
     .map((r) => ({
@@ -202,9 +217,10 @@ async function byProject(orgId, from, to, { includeSalaries = true, filters = {}
 async function byDimension(orgId, from, to, dim, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   const withSalaries = includeSalaries && scope.mode !== 'none' && dim === 'service';
-  const [entries, slipRows, projects] = await Promise.all([
+  const [entries, slipRows, wageRows, projects] = await Promise.all([
     actualEntries(orgId, from, to, {}, filters),
     withSalaries ? slips(orgId, from, to) : [],
+    withSalaries ? wageCosts(orgId, from, to, scope) : [],
     withSalaries ? prisma.zxProject.findMany({ where: { org_id: orgId }, select: { id: true, service_type: true } }) : [],
   ]);
   const rows = new Map();
@@ -222,6 +238,7 @@ async function byDimension(orgId, from, to, dim, { includeSalaries = true, filte
         if (scope.mode === 'all') row(null).salaries += num(s.net);
       } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(serviceOf.get(part.project_id) || null).salaries += num(part.amount);
     }
+    for (const w of wageRows) row(serviceOf.get(w.project_id) || null).salaries += w.amount;
   }
   return [...rows.values()].map((r) => ({
     key: r.key,
@@ -234,9 +251,10 @@ async function byDimension(orgId, from, to, dim, { includeSalaries = true, filte
 
 // Month-by-month figures for one project (salaries come from the slips' project split).
 async function byProjectMonthly(orgId, fromMonth, toMonth, projectId) {
-  const [entries, slipRows] = await Promise.all([
+  const [entries, slipRows, wageRows] = await Promise.all([
     actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth), { project_id: projectId }),
     slips(orgId, monthStart(fromMonth), monthEnd(toMonth)),
+    wages.costRows(orgId, monthStart(fromMonth), monthEnd(toMonth)),
   ]);
   const rows = new Map(monthsBetween(fromMonth, toMonth).map((m) => [m, { month: m, revenue: 0, expense: 0, salaries: 0 }]));
   for (const e of entries) {
@@ -247,6 +265,10 @@ async function byProjectMonthly(orgId, fromMonth, toMonth, projectId) {
     const row = rows.get(s.month);
     const split = Array.isArray(s.project_split) ? s.project_split : [];
     if (row) row.salaries += split.filter((p) => p.project_id === projectId).reduce((a, p) => a + num(p.amount), 0);
+  }
+  for (const w of wageRows) {
+    const row = rows.get(w.month);
+    if (row && w.project_id === projectId) row.salaries += w.amount;
   }
   return [...rows.values()].map((r) => ({ month: r.month, revenue: round2(r.revenue), expense: round2(r.expense), salaries: round2(r.salaries), profit: round2(r.revenue - r.expense - r.salaries) }));
 }

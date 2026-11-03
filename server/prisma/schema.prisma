@@ -2209,6 +2209,10 @@ model Org {
   zx_ledger_entries          ZxLedgerEntry[]
   zx_plans                   ZxPlan[]
   zx_period_closes           ZxPeriodClose[]
+  zx_wage_workers            ZxWageWorker[]
+  zx_wage_attendance         ZxWageAttendance[]
+  zx_wage_advances           ZxWageAdvance[]
+  zx_wage_payouts            ZxWagePayout[]
 
   // Backfilled onto every existing tenant-scoped table in this same
   // migration (nullable — Phase 1 flips these to NOT NULL once app code
@@ -2582,6 +2586,9 @@ model Account {
   service_category        ReqType?
   agreement_start_date    DateTime?              @db.Date
   benchmark_hours         Int                    @default(160)
+  // Working hours of the project (HH:MM, 24-hour), for reporting and the 24-hour day schedule only; nothing is billed or paid from them. End before start = the day runs past midnight.
+  work_start_time         String?
+  work_end_time           String?
   // Finance's internal project/contract id (P0001, P0002 …), unique per org.
   // The project NAME is only a label — two contracts with the same name (the
   // same client taking a second resource later) are separate projects with
@@ -4187,6 +4194,7 @@ model ZxProject {
   assignments     ZxAssignment[]
   ledger_entries  ZxLedgerEntry[]
   plans           ZxPlan[]
+  wage_attendance ZxWageAttendance[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -8150,12 +8158,12 @@ model AiInterviewSettings {
   max_followups      Int      @default(3)
   pass_percentage    Int      @default(60)
   borderline_margin  Int      @default(10)
-  weight_knowledge   Int      @default(50)
-  weight_communication Int    @default(25)
-  weight_depth       Int      @default(25)
+  weight_knowledge   Int      @default(30)
+  weight_communication Int    @default(20)
+  weight_depth       Int      @default(15)
   aptitude_enabled   Boolean  @default(true)
   aptitude_question_count Int @default(4)
-  weight_aptitude    Int      @default(20)
+  weight_aptitude    Int      @default(10)
   recording_enabled  Boolean  @default(false)
   recording_retention_days Int @default(2)
   extra_instructions String?
@@ -8164,6 +8172,11 @@ model AiInterviewSettings {
   // Time allowed per question (seconds, 0 = no limit) and how many tab switches end the interview (0 = never ends it, only logs).
   answer_time_seconds Int     @default(180)
   max_tab_switches   Int      @default(3)
+  // More rubric parameters, each with its own weight, and the reference sites the interviewer may read (through the AI web search) to ground its questions.
+  weight_problem_solving Int  @default(15)
+  weight_experience_fit  Int  @default(10)
+  use_reference_sites    Boolean @default(true)
+  reference_sites        String  @default("w3schools.com,javatpoint.com")
   updated_by         String?  @db.Uuid
   updated_at         DateTime @default(now()) @updatedAt
 
@@ -8701,4 +8714,112 @@ model GroupCompanyStake {
   @@index([holder_company_id])
   @@index([org_group_id])
   @@map("group_company_stakes")
+}
+
+// Daily-wage earners of Zephyr: site labour paid per day worked, tracked by project. Kept apart from ZxPerson / salary slips on purpose
+// (no monthly slip, no login). daily_rate is the default wage; each attendance row snapshots the rate it was marked with.
+model ZxWageWorker {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name        String
+  phone       String?
+  trade       String?
+  daily_rate  Decimal   @db.Decimal(12, 2)
+  joined_on   DateTime? @db.Date
+  active      Boolean   @default(true)
+  notes       String?
+  created_by  String?   @db.Uuid
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+  deleted_at  DateTime?
+
+  attendance  ZxWageAttendance[]
+  advances    ZxWageAdvance[]
+  payouts     ZxWagePayout[]
+
+  @@index([org_id, active])
+  @@map("zx_wage_workers")
+}
+
+// One worker, one project, one day. status: present (full day) | half | absent. day_fraction 1 / 0.5 / 0. amount = rate x day_fraction + ot_hours x rate / 8.
+// payout_id is set once the row is paid; a paid row is locked until its payout is voided.
+model ZxWageAttendance {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String        @db.Uuid
+  org          Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  worker_id    String        @db.Uuid
+  worker       ZxWageWorker  @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  project_id   String        @db.Uuid
+  project      ZxProject     @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  work_date    DateTime      @db.Date
+  status       String
+  day_fraction Decimal       @default(0) @db.Decimal(3, 2)
+  ot_hours     Decimal       @default(0) @db.Decimal(4, 1)
+  rate         Decimal       @db.Decimal(12, 2)
+  amount       Decimal       @default(0) @db.Decimal(14, 2)
+  notes        String?
+  payout_id    String?       @db.Uuid
+  payout       ZxWagePayout? @relation(fields: [payout_id], references: [id], onDelete: SetNull)
+  marked_by    String?       @db.Uuid
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @default(now()) @updatedAt
+
+  @@unique([worker_id, project_id, work_date])
+  @@index([org_id, work_date])
+  @@index([org_id, project_id, work_date])
+  @@index([worker_id, payout_id])
+  @@map("zx_wage_attendance")
+}
+
+// Money handed to a worker before the wage is earned; recovered through payouts (advance_recovered).
+model ZxWageAdvance {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String       @db.Uuid
+  org          Org          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  worker_id    String       @db.Uuid
+  worker       ZxWageWorker @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  given_on     DateTime     @db.Date
+  amount       Decimal      @db.Decimal(14, 2)
+  payment_mode String?
+  notes        String?
+  created_by   String?      @db.Uuid
+  created_at   DateTime     @default(now())
+  updated_at   DateTime     @default(now()) @updatedAt
+
+  @@index([org_id, worker_id])
+  @@map("zx_wage_advances")
+}
+
+// A payout settles every unpaid attendance row of one worker up to to_date (optionally one project). net = gross - advance_recovered - other_deductions.
+// status: paid | voided (voiding frees the attendance rows and returns the advance recovery).
+model ZxWagePayout {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String             @db.Uuid
+  org               Org                @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  worker_id         String             @db.Uuid
+  worker            ZxWageWorker       @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  project_id        String?            @db.Uuid
+  from_date         DateTime           @db.Date
+  to_date           DateTime           @db.Date
+  days              Decimal            @default(0) @db.Decimal(6, 2)
+  ot_hours          Decimal            @default(0) @db.Decimal(6, 1)
+  gross             Decimal            @default(0) @db.Decimal(14, 2)
+  advance_recovered Decimal            @default(0) @db.Decimal(14, 2)
+  other_deductions  Decimal            @default(0) @db.Decimal(14, 2)
+  net               Decimal            @default(0) @db.Decimal(14, 2)
+  paid_on           DateTime           @db.Date
+  payment_mode      String?
+  reference         String?
+  status            String             @default("paid")
+  notes             String?
+  voided_reason     String?
+  paid_by           String?            @db.Uuid
+  created_at        DateTime           @default(now())
+  updated_at        DateTime           @default(now()) @updatedAt
+  attendance        ZxWageAttendance[]
+
+  @@index([org_id, paid_on])
+  @@index([worker_id])
+  @@map("zx_wage_payouts")
 }

@@ -315,6 +315,9 @@ const updateProjectProfileSchema = z
       .max(50)
       .optional(),
     benchmark_hours: z.coerce.number().int().min(1).max(744).optional(),
+    // Reporting only: HH:MM (24-hour); null clears.
+    work_start_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM').nullable().optional(),
+    work_end_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM').nullable().optional(),
     // Whether this client pays overtime, and at what multiple of the
     // hourly-equivalent rate. Admin-only (the route is).
     overtime_billable: z.boolean().optional(),
