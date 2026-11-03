@@ -8186,6 +8186,8 @@ model AiInterviewSettings {
   weight_experience_fit  Int  @default(10)
   use_reference_sites    Boolean @default(true)
   reference_sites        String  @default("w3schools.com,javatpoint.com")
+  // People (besides admins) who can open every candidate's recording, whoever sent the link. Everyone else sees only the ones they sent.
+  recording_viewer_ids   String[] @default([]) @db.Uuid
   updated_by         String?  @db.Uuid
   updated_at         DateTime @default(now()) @updatedAt
 

@@ -62,13 +62,14 @@ const settingsSchema = z.object({
   weight_experience_fit: z.number().int().min(0).max(100).optional(),
   use_reference_sites: z.boolean().optional(),
   reference_sites: z.string().trim().max(300).optional(),
+  recording_viewer_ids: z.array(z.string().uuid()).max(50).optional(),
 });
 
 // ---- team side (login) ----
 const router = express.Router();
 router.use(authenticate, requireMasterWorkspace);
 
-router.get('/', asyncHandler(async (req, res) => ok(res, await service.list({ submissionId: z.string().uuid().parse(req.query.submission_id) }))));
+router.get('/', asyncHandler(async (req, res) => ok(res, await service.list({ submissionId: z.string().uuid().parse(req.query.submission_id) }, req.user))));
 router.post('/', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
   const body = z.object({ submission_id: z.string().uuid(), restart: z.boolean().optional(), retake: z.boolean().optional() }).parse(req.body);
   const r = await service.invite({ submissionId: body.submission_id, restart: body.restart, retake: body.retake }, req.user);
@@ -110,13 +111,13 @@ router.put('/requirements/:id/switch', authorize('admin', 'recruiter', 'sales'),
   return r.error ? mapError(res, r.error) : ok(res, r);
 }));
 router.get('/:id/review', asyncHandler(async (req, res) => {
-  const r = await service.review(z.string().uuid().parse(req.params.id));
+  const r = await service.review(z.string().uuid().parse(req.params.id), req.user);
   return r.error ? mapError(res, r.error) : ok(res, r.review);
 }));
-// The stored recording (audio + video), for the team only; it is deleted automatically after the retention days.
+// The stored recording (audio + video), for admins and whoever sent that interview link; it is deleted automatically after the retention days.
 router.get('/:id/recording', asyncHandler(async (req, res) => {
   const part = z.coerce.number().int().min(0).max(20).default(0).parse(req.query.part);
-  const r = await service.recordingFor(z.string().uuid().parse(req.params.id), part);
+  const r = await service.recordingFor(z.string().uuid().parse(req.params.id), part, req.user);
   if (r.error) return mapError(res, r.error);
   res.setHeader('Content-Type', r.mime);
   res.setHeader('Cache-Control', 'private, no-store');

@@ -87,8 +87,10 @@ export default function AiInterviewTab({ isAdmin }) {
   const { pushError, pushSuccess } = useAlerts();
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [people, setPeople] = useState([]);
 
   useEffect(() => {
+    apiClient.get('/users/directory', { params: { active: 'true' } }).then(({ data }) => setPeople(data.data || [])).catch(() => setPeople([]));
     apiClient.get('/ai-interviews/settings').then(({ data }) => setForm(data.data)).catch((err) => pushError(apiErrorMessage(err, 'Could not load the AI interview settings'), 'Something went wrong'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -112,7 +114,7 @@ export default function AiInterviewTab({ isAdmin }) {
     try {
       const body = {
         ...Object.fromEntries([...NUMBER_FIELDS, ...WEIGHTS, { key: 'aptitude_question_count' }, { key: 'recording_retention_days' }].map((f) => [f.key, Number(form[f.key])])),
-        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(),
+        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(), recording_viewer_ids: form.recording_viewer_ids || [],
         extra_instructions: (form.extra_instructions || '').trim() || null,
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
@@ -195,6 +197,25 @@ export default function AiInterviewTab({ isAdmin }) {
           {form.recording_enabled && (
             <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 30; 2 by default', min: 1, max: 30 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
           )}
+          <div>
+            <p className="text-sm font-medium text-tertiary-900">Who can watch every recording</p>
+            <p className="mt-0.5 text-xs text-tertiary-500">Admins always can. Anyone you add here can also open all candidates&apos; recordings; everyone else sees only the recordings of interviews they sent themselves.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(form.recording_viewer_ids || []).map((id) => (
+                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-xs text-primary-700">
+                  {people.find((u) => u.id === id)?.name || 'Team member'}
+                  {isAdmin && <button type="button" aria-label="Remove" className="hover:text-danger-600" onClick={() => set('recording_viewer_ids')((form.recording_viewer_ids || []).filter((x) => x !== id))}>&times;</button>}
+                </span>
+              ))}
+              {!(form.recording_viewer_ids || []).length && <span className="text-xs text-tertiary-400">Nobody added.</span>}
+            </div>
+            {isAdmin && (
+              <select className={`${FIELD_INPUT} mt-2 max-w-xs`} value="" onChange={(e) => e.target.value && set('recording_viewer_ids')([...(form.recording_viewer_ids || []), e.target.value])}>
+                <option value="">Add a person...</option>
+                {people.filter((u) => !(form.recording_viewer_ids || []).includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            )}
+          </div>
         </div>
       </div>
 

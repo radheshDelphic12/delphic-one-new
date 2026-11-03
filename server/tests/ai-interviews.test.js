@@ -408,6 +408,20 @@ describe('optional recording (audio + video), deleted after the retention days',
     expect(dl.headers['content-disposition']).toMatch(/attachment/);
     const review = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken);
     expect(review.body.data.has_recording).toBe(true);
+
+    // an admin sees it too; another recruiter who did not send the link does not
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording`), adminToken).buffer(true).parse(binary)).status).toBe(200);
+    const { access_token: otherToken } = await loginAs(await createUser({ role: 'recruiter' }));
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording`), otherToken)).status).toBe(403);
+    const otherReview = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), otherToken);
+    expect(otherReview.body.data.has_recording).toBe(false);
+    expect(otherReview.body.data.recording_parts).toEqual([]);
+
+    // an admin names that recruiter in the settings: now they see every recording, whoever sent the link
+    const viewer = await prisma.user.findFirst({ where: { email: { contains: '@' }, role: 'recruiter', id: { not: recruiterId } }, orderBy: { created_at: 'desc' } });
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ recording_viewer_ids: [viewer.id] });
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording`), otherToken).buffer(true).parse(binary)).status).toBe(200);
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), otherToken)).body.data.has_recording).toBe(true);
   });
 
   test('once the retention time has passed the hourly job deletes the file; the interview and its scores stay', async () => {

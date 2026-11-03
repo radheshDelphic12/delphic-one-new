@@ -18,7 +18,7 @@ const DEFAULTS = {
   weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 12, weight_aptitude: 10,
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
-  weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com',
+  weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
 };
 const TAB_EVENTS = ['tab_hidden', 'window_blur']; // leaving the interview page; these count towards max_tab_switches
 const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off'];
@@ -39,6 +39,14 @@ const SETTING_KEYS = Object.keys(DEFAULTS);
 const attemptLink = (token) => `${env.corsOrigin.replace(/\/$/, '')}/ai-interview/${token}`;
 const isLive = (a) => !a.deleted_at && !a.superseded_at;
 const adminOf = (user) => user?.role === 'admin' || Boolean(user?.is_superadmin);
+// The recording is for admins, the people an admin named in the settings (all recordings), and the team member who sent that candidate's link.
+const canSeeRecording = (a, user, seesAll = false) => Boolean(user) && (seesAll || adminOf(user) || (a.invited_by != null && a.invited_by === user.id));
+async function seesAllRecordings(user) {
+  if (!user) return false;
+  if (adminOf(user)) return true;
+  if (!user.org_id) return false;
+  return (await getSettings(user.org_id)).recording_viewer_ids.includes(user.id);
+}
 const effectiveOutcome = (a) => a.override_outcome || a.outcome || null;
 
 // ---- settings (admin editable; defaults until a row exists) ----
@@ -86,7 +94,8 @@ function viewStatus(a) {
   return a.status === 'started' ? 'in_progress' : 'not_opened';
 }
 
-function toTeamView(a, names = new Map()) {
+function toTeamView(a, names = new Map(), user = null, seesAll = false) {
+  const seeRecording = canSeeRecording(a, user, seesAll);
   return {
     id: a.id,
     submission_id: a.submission_id,
@@ -107,8 +116,8 @@ function toTeamView(a, names = new Map()) {
     completed_at: a.completed_at,
     recording_on: a.recording_on,
     integrity: integritySummary(a),
-    has_recording: filesOf(a).length > 0 && !a.recording_deleted_at,
-    recording_parts: a.recording_deleted_at ? [] : filesOf(a).map((p) => ({ bytes: p.bytes })),
+    has_recording: seeRecording && filesOf(a).length > 0 && !a.recording_deleted_at,
+    recording_parts: !seeRecording || a.recording_deleted_at ? [] : filesOf(a).map((p) => ({ bytes: p.bytes })),
     auto_rejected_at: a.auto_rejected_at,
     auto_reject_note: a.auto_reject_note,
     recording_expires_at: a.recording_expires_at,
@@ -222,25 +231,26 @@ async function invite({ submissionId, restart = false, retake = false }, user) {
       text: `Hi ${row.candidate_name},\n\nPlease complete this short online interview: ${link}\n\nIt is a conversation with an AI interviewer; you can speak or type your answers, and it takes about 15 to 20 minutes. The link is valid for ${settings.link_valid_days} days and can be used once.\n\nThank you,\nDelphic Team`,
     });
   }
-  return { interview: toTeamView(row), link, superseded: live.length };
+  return { interview: toTeamView(row, new Map(), user, await seesAllRecordings(user)), link, superseded: live.length };
 }
 
-async function list({ submissionId }) {
+async function list({ submissionId }, user) {
   const rows = await prisma.aiInterview.findMany({ where: { submission_id: submissionId, deleted_at: null }, orderBy: { invited_at: 'desc' } });
   const names = await userNames(rows.map((r) => r.invited_by));
-  const items = rows.map((r) => toTeamView(r, names));
+  const seesAll = await seesAllRecordings(user);
+  const items = rows.map((r) => toTeamView(r, names, user, seesAll));
   const ctx = await contextFor(submissionId);
   return { items, live_id: rows.find(isLive)?.id || null, requirement_id: ctx?.requirement_id || null, requirement_switch: ctx?.requirement_switch ?? null };
 }
 
-async function review(id) {
+async function review(id, user) {
   const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
   if (!a) return { error: 'not_found' };
   if (!['completed', 'pending_review'].includes(a.status)) return { error: 'not_finished' };
   const names = await userNames([a.invited_by, a.override_by]);
   return {
     review: {
-      ...toTeamView(a, names),
+      ...toTeamView(a, names, user, await seesAllRecordings(user)),
       transcript: a.transcript,
       scores: a.scores,
       override_by_name: names.get(a.override_by) || null,
@@ -260,7 +270,7 @@ async function override(id, { outcome, reason }, user) {
     await audit(tx, user, 'override_ai_interview', updated, reason, { ai_outcome: a.outcome, override_outcome: outcome });
     return updated;
   });
-  return { interview: toTeamView(row) };
+  return { interview: toTeamView(row, new Map(), user, await seesAllRecordings(user)) };
 }
 
 async function remove(id, { reason }, user) {
@@ -736,10 +746,11 @@ async function saveRecordingChunk(token, { part = 0, seq, buffer, mime }) {
   }
 }
 
-// For the team: one stored part, while it exists. Authorization is done by the route.
-async function recordingFor(id, part = 0) {
+// For the team: one stored part, while it exists. Only admins and the team member who sent the link may open it.
+async function recordingFor(id, part = 0, user = null) {
   const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
   if (!a) return { error: 'not_found' };
+  if (!canSeeRecording(a, user, await seesAllRecordings(user))) return { error: 'forbidden' };
   if (a.recording_deleted_at) return { error: 'recording_expired' };
   const entry = filesOf(a)[part];
   if (!entry) return { error: 'no_recording' };
@@ -787,7 +798,7 @@ async function resend(id, user) {
     emailed = true;
   }
   await audit(prisma, user, 'resend_ai_interview', row, 'Interview link sent again', { emailed });
-  return { interview: toTeamView(row), link, emailed };
+  return { interview: toTeamView(row, new Map(), user, await seesAllRecordings(user)), link, emailed };
 }
 
 // One event from the candidate's page (tab switch, copy / paste attempt, camera turned off). Logged on the interview; when the
