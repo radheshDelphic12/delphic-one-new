@@ -8556,6 +8556,25 @@ model LocationCheckinShiftRule {
   @@map("location_checkin_shift_rules")
 }
 
+// Contractor check-in / check-out (Delphic Global). A plain in/out clock for contractors: no location, no selfie, no late rule, and
+// never read by attendance, payroll or the project timesheet. A day may hold several pairs; an open row (out_at null) is "in now".
+model ContractorCheckin {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  org_membership_id String    @db.Uuid
+  date              DateTime  @db.Date
+  in_at             DateTime
+  out_at            DateTime?
+  edited_by         String?   @db.Uuid
+  edited_at         DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  @@index([org_membership_id, date])
+  @@index([org_id, date])
+  @@map("contractor_checkins")
+}
+
 // ===================== Speak Up - Confidential Reporting (internally 'whistleblower') =====================
 // A confidential channel: any employee raises a concern, it is routed to the handlers an admin set for its category.
 // Kept apart from every other module: no foreign keys to people, never read by attendance / payroll / HR records, and

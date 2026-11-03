@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, MapPin, UserCheck, Lock, Users, FileClock } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, LogIn, MapPin, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
@@ -9,6 +9,7 @@ import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
 import AttendanceDashboard from './AttendanceDashboard.jsx';
 import LocationCheckinTab from './LocationCheckinTab.jsx';
+import ContractorCheckinTab from './ContractorCheckinTab.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
@@ -38,6 +39,8 @@ const BASE_TABS = [
 ];
 // Where people check in from (office, home, away) and who is late: a separate record, never feeds attendance or pay. Delphic Global only.
 const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Workplace Check-in', icon: MapPin, need: 'basic.attendance' };
+// Contractors' plain check-in / check-out (no location): report for HR / admin. Delphic Global only.
+const CONTRACTOR_CHECKIN_TAB = { key: 'contractor-checkin', label: 'Contractor Check-in', icon: LogIn, need: 'basic.attendance' };
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
 const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.timesheet' };
 // Admin: the client project timesheet (IT and contractors).
@@ -66,7 +69,7 @@ export default function TimeAttendanceHubPage() {
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
     // Employees check in from the dashboard; this tab is only the report / settings for those who manage it.
-    ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB] : []),
+    ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB, CONTRACTOR_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
     ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
   ].filter((t) => t.need == null || allowed(user, t.need, true));
@@ -107,6 +110,7 @@ export default function TimeAttendanceHubPage() {
       {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}
       {section === 'location-checkin' && has('location-checkin') && <LocationCheckinTab />}
+      {section === 'contractor-checkin' && has('contractor-checkin') && <ContractorCheckinTab canEdit={allowed(user, 'hr_settings.update', isAdmin)} />}
       {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}

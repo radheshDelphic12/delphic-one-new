@@ -34,7 +34,7 @@ const OPEN_MODULES = [
   [/^\/timesheets/, ['timesheets', 'overtime', 'regularization', 'project_team']],
   [/^\/leave/, ['leave']],
   [/^\/attendance/, ['attendance', 'attendance_dashboard', 'regularization']],
-  [/^\/location-checkin/, ['location_checkin']],
+  [/^\/(location|contractor)-checkin/, ['location_checkin']],
   [/^\/whistleblower/, ['whistleblower']],
   [/^\/calendars/, ['holidays', 'project_calendar']],
   [/^\/(documents|comments|interviews|seats|interview-rounds)/, ['accounts', 'requirements', 'profiles', 'submissions', 'applicants', 'pipeline', 'meetings']],

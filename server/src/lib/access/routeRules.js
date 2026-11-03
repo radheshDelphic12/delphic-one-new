@@ -85,6 +85,12 @@ const RULES = [
   [/^\/location-checkin\/(offices|shifts)\/[^/]+$/, { '*': 'hr_settings.update' }],
   [/^\/location-checkin(\/|$)/, 'location_checkin.view'],
 
+  // Contractor check-in (Delphic Global, no location): the contractor's own clock is open; the report needs the same permission as the
+  // location check-in report, and a correction needs HR settings.
+  [/^\/contractor-checkin\/(today|check-in|check-out|mine)$/, 'open'],
+  [/^\/contractor-checkin\/sessions\/[^/]+$/, { '*': 'hr_settings.update' }],
+  [/^\/contractor-checkin(\/|$)/, 'location_checkin.view'],
+
   // Whistleblower (Delphic Global): everyone may raise and follow their own concerns; who sees which case is decided in the service
   // from the handlers an admin set for each category. Settings and categories need Whistleblower > manage.
   [/^\/whistleblower\/settings$/, { GET: 'basic.whistleblower', '*': 'whistleblower.manage' }],
