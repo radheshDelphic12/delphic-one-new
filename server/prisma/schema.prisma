@@ -2542,6 +2542,15 @@ model Account {
   vendor_rate_range      Json?
   vendor_payment_terms   String?
   vendor_agreement_url   String?
+  // Where the vendor is paid. The account number is shown masked everywhere; the full number is read through the bank-details route by
+  // people who may edit the account, and it never goes into the audit log.
+  vendor_bank_holder         String?
+  vendor_bank_name           String?
+  vendor_bank_account_number String?
+  vendor_bank_ifsc           String?
+  vendor_bank_branch         String?
+  vendor_bank_swift          String?
+  vendor_upi_id              String?
 
   client_billing_currency Currency?
   client_payment_terms    String?

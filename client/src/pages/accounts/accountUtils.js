@@ -87,6 +87,15 @@ export const EMPTY_FORM = {
   vendor_rate_currency: 'INR',
   vendor_payment_terms: '',
   vendor_agreement_url: '',
+  vendor_bank_holder: '',
+  vendor_bank_name: '',
+  vendor_bank_branch: '',
+  vendor_bank_account_number: '', // never prefilled: the saved number is masked, a new value replaces it
+  vendor_bank_account_masked: '',
+  clear_bank_account_number: false,
+  vendor_bank_ifsc: '',
+  vendor_bank_swift: '',
+  vendor_upi_id: '',
   client_billing_currency: 'INR',
   client_payment_terms: '',
   client_agreement_url: '',
@@ -127,6 +136,10 @@ export function formFromAccount(account) {
       ? contacts.map((contact) => ({ ...EMPTY_CONTACT, ...sanitizeContact(contact) }))
       : [{ ...EMPTY_CONTACT }],
     vendor_specializations: (account.vendor_specializations || []).join(', '),
+    // the account number arrives masked: keep it only as a hint, so the masked text is never saved back
+    vendor_bank_account_masked: account.vendor_bank_account_number || '',
+    vendor_bank_account_number: '',
+    clear_bank_account_number: false,
     vendor_rate_min: rateRange.min ?? '',
     vendor_rate_max: rateRange.max ?? '',
     vendor_rate_currency: rateRange.currency || 'INR',
@@ -174,6 +187,10 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
     body.vendor_specializations = str(form.vendor_specializations).split(',').map((value) => value.trim()).filter(Boolean);
     body.vendor_payment_terms = str(form.vendor_payment_terms);
     body.vendor_agreement_url = str(form.vendor_agreement_url);
+    for (const key of ['vendor_bank_holder', 'vendor_bank_name', 'vendor_bank_branch', 'vendor_bank_ifsc', 'vendor_bank_swift', 'vendor_upi_id']) body[key] = str(form[key]);
+    // a typed number replaces the saved one; empty keeps it, unless it is being removed on purpose
+    if (str(form.vendor_bank_account_number)) body.vendor_bank_account_number = str(form.vendor_bank_account_number);
+    else if (form.clear_bank_account_number) body.vendor_bank_account_number = '';
     if (form.vendor_rate_min !== '' && form.vendor_rate_max !== '') {
       body.vendor_rate_range = {
         min: Number(form.vendor_rate_min),

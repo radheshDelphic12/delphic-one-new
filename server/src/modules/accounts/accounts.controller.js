@@ -48,6 +48,15 @@ const getOne = asyncHandler(async (req, res) => {
   return ok(res, account);
 });
 
+// The full bank details of a vendor, for people who may edit the account (the list and detail responses carry the account number masked).
+const bankDetails = asyncHandler(async (req, res) => {
+  const result = await accountsService.getBankDetails(req.params.id, req.user);
+  if (result.error === 'not_found') return fail(res, 404, 'Vendor not found');
+  if (result.error === 'forbidden') return fail(res, 403, 'You cannot see the bank details of this vendor');
+  res.setHeader('Cache-Control', 'private, no-store');
+  return ok(res, result.details);
+});
+
 const create = asyncHandler(async (req, res) => {
   const body = createSchema.parse(req.body);
   const account = await accountsService.create(body, req.user.id);
@@ -146,6 +155,7 @@ const history = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  bankDetails,
   activity,
   list,
   listSpecializations,

@@ -13,6 +13,7 @@ router.get('/', controller.list);
 router.get('/specializations', controller.listSpecializations);
 router.get('/:id', controller.getOne);
 router.get('/:id/history', controller.history);
+router.get('/:id/bank-details', controller.bankDetails);
 router.get('/:id/activity', controller.activity);
 router.post('/', can('accounts.create', 'bda', 'admin'), controller.create);
 router.patch('/:id', can('accounts.update', 'bda', 'admin'), loadSuperadminFlag, lockCheck('accounts'), controller.update);

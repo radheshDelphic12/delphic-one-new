@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Pencil } from 'lucide-react';
+import { Eye, EyeOff, Pencil } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -39,6 +39,47 @@ function DetailSection({ title, actions, children }) {
       </div>
       <dl className="grid gap-x-5 gap-y-3 p-3.5 sm:grid-cols-2 lg:grid-cols-3">{children}</dl>
     </section>
+  );
+}
+
+/** A vendor's bank details. The account number is masked; people who may edit the vendor can reveal the full number (every reveal is logged). */
+function VendorBankDetails({ account, canMutate }) {
+  const { pushError } = useAlerts();
+  const [full, setFull] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const any = ['vendor_bank_holder', 'vendor_bank_name', 'vendor_bank_branch', 'vendor_bank_ifsc', 'vendor_bank_swift', 'vendor_upi_id'].some((k) => account[k]) || account.has_bank_account_number;
+  useEffect(() => { setFull(null); }, [account.id, account.vendor_bank_account_number]);
+  async function reveal() {
+    setBusy(true);
+    try {
+      const { data } = await apiClient.get(`/accounts/${account.id}/bank-details`);
+      setFull(data.data.account_number || '');
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not show the account number'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!any) return <DetailField label="Bank details" value={null} />;
+  return (
+    <>
+      {/* shown exactly as saved (the detail screen would otherwise capitalise a UPI ID or a bank name) */}
+      <DetailField label="Account holder"><span className="normal-case">{account.vendor_bank_holder || '—'}</span></DetailField>
+      <DetailField label="Bank"><span className="normal-case">{[account.vendor_bank_name, account.vendor_bank_branch].filter(Boolean).join(' - ') || '—'}</span></DetailField>
+      <DetailField label="Account number">
+        {account.has_bank_account_number ? (
+          <span className="inline-flex items-center gap-2 normal-case" data-testid="vendor-account-number">
+            <span className="font-mono">{full ?? account.vendor_bank_account_number}</span>
+            {canMutate && (full === null
+              ? <button type="button" className="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline" disabled={busy} onClick={reveal}><Eye className="h-3.5 w-3.5" />Show</button>
+              : <button type="button" className="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline" onClick={() => setFull(null)}><EyeOff className="h-3.5 w-3.5" />Hide</button>)}
+          </span>
+        ) : '—'}
+      </DetailField>
+      <DetailField label="IFSC"><span className="normal-case">{account.vendor_bank_ifsc || '—'}</span></DetailField>
+      <DetailField label="SWIFT / BIC"><span className="normal-case">{account.vendor_bank_swift || '—'}</span></DetailField>
+      <DetailField label="UPI ID"><span className="normal-case">{account.vendor_upi_id || '—'}</span></DetailField>
+    </>
   );
 }
 
@@ -314,6 +355,7 @@ export default function AccountDetailPage() {
                   value={account.vendor_rate_range ? `${account.vendor_rate_range.currency} ${account.vendor_rate_range.min}–${account.vendor_rate_range.max}` : null}
                 />
                 <DetailField label="Payment terms" value={account.vendor_payment_terms} />
+                <VendorBankDetails account={account} canMutate={canMutate} />
                 <DetailField label="Agreement URL">
                   {account.vendor_agreement_url ? (
                     <a href={account.vendor_agreement_url} target="_blank" rel="noreferrer" className="normal-case text-primary-700 hover:underline">

@@ -15,11 +15,16 @@ const TRANSITIONS = {
   dropped: ['active'],
 };
 
+// The account number is shown masked (last 4 only) in every response; the full number comes from getBankDetails().
+const maskAccountNumber = (value) => (value ? `${'•'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}` : null);
+
 function serialize(row) {
   if (!row) return null;
   const { owner_id, owner, origin_owner_id, origin_owner, classified_by, classified_by_user, meeting_attendees, ...rest } = row;
   return {
     ...rest,
+    vendor_bank_account_number: maskAccountNumber(rest.vendor_bank_account_number),
+    has_bank_account_number: Boolean(rest.vendor_bank_account_number),
     owner: owner ? { id: owner.id, name: owner.name } : null,
     origin_owner: origin_owner ? { id: origin_owner.id, name: origin_owner.name } : null,
     classified_by: classified_by_user ? { id: classified_by_user.id, name: classified_by_user.name } : null,
@@ -106,6 +111,23 @@ async function listSpecializations() {
   return [...tags].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The full bank details of a vendor, for the people who may edit that account (admin, BDA, or the account's own permissions).
+ * Every read is written to the audit log, so there is a record of who looked at the account number.
+ */
+async function getBankDetails(id, user) {
+  const row = await prisma.account.findUnique({ where: { id } });
+  if (!row || row.type !== 'vendor') return { error: 'not_found' };
+  if (!canMutateAccount(row, user)) return { error: 'forbidden' };
+  await logActivity(user.id, id, 'view_bank_details', 'Viewed the full bank details', {});
+  return {
+    details: {
+      holder: row.vendor_bank_holder, bank_name: row.vendor_bank_name, account_number: row.vendor_bank_account_number, ifsc: row.vendor_bank_ifsc,
+      branch: row.vendor_bank_branch, swift: row.vendor_bank_swift, upi_id: row.vendor_upi_id,
+    },
+  };
+}
+
 async function getById(id) {
   const row = await prisma.account.findUnique({ where: { id }, include: ACCOUNT_INCLUDE });
   return serialize(row);
@@ -140,7 +162,8 @@ function changedFields(before, after, patch) {
     const b = plainValue(after[key]) ?? null;
     if (JSON.stringify(a) === JSON.stringify(b)) continue;
     const simple = (x) => x === null || ['string', 'number', 'boolean'].includes(typeof x);
-    out[key.replace(/_/g, ' ')] = simple(a) && simple(b) ? { from: a, to: b } : { changed: true };
+    // the full account number is never written to the audit log: only that it changed
+    out[key.replace(/_/g, ' ')] = key === 'vendor_bank_account_number' ? { changed: true } : simple(a) && simple(b) ? { from: a, to: b } : { changed: true };
   }
   return out;
 }
@@ -452,6 +475,7 @@ module.exports = {
   list,
   listSpecializations,
   getById,
+  getBankDetails,
   create,
   update,
   changeStage,

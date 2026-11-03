@@ -1,5 +1,11 @@
 const { z } = require('zod');
 
+// A trimmed text field of the vendor's bank details: empty clears it (null); when a pattern is given the normalised value must match it.
+const bankText = (max, pattern, message, normalise = (v) => v) => z.preprocess(
+  (v) => (typeof v === 'string' ? (v.trim() === '' ? null : normalise(v.replace(/[ \t]+/g, ' ').trim())) : v),
+  (pattern ? z.string().regex(pattern, message) : z.string()).max(max).nullable().optional()
+);
+
 const contactSchema = z.object({
   name: z.string(),
   email: z.string().email().optional().or(z.literal('')),
@@ -35,6 +41,15 @@ const baseFields = {
   vendor_rate_range: z.object({ min: z.number(), max: z.number(), currency: z.string() }).optional(),
   vendor_payment_terms: z.string().optional(),
   vendor_agreement_url: z.string().optional(),
+
+  // Vendor bank details. Empty clears a field; the formats are checked so a typo is caught before a payment is made.
+  vendor_bank_holder: bankText(120),
+  vendor_bank_name: bankText(120),
+  vendor_bank_branch: bankText(120),
+  vendor_bank_account_number: bankText(34, /^[A-Za-z0-9]{5,34}$/, 'Account number: 5 to 34 letters or digits', (v) => v.replace(/[\s-]/g, '')),
+  vendor_bank_ifsc: bankText(11, /^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC: 4 letters, a zero, then 6 letters or digits (for example HDFC0001234)', (v) => v.toUpperCase()),
+  vendor_bank_swift: bankText(11, /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/, 'SWIFT / BIC: 8 or 11 characters (for example HDFCINBB)', (v) => v.toUpperCase()),
+  vendor_upi_id: bankText(80, /^[A-Za-z0-9._-]{2,}@[A-Za-z0-9]{2,}$/, 'UPI ID looks like name@bank'),
 
   client_billing_currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional(),
   client_payment_terms: z.string().optional(),
