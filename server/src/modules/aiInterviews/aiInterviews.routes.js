@@ -18,6 +18,7 @@ const ERRORS = {
   no_org: [400, 'Choose a company workspace first'],
   requirement_off: [409, 'The AI interview is turned off for this requirement'],
   weights_zero: [400, 'At least one rubric weight must be above 0'],
+  bad_sites: [400, 'Enter reference sites as domain names, for example w3schools.com, javatpoint.com'],
   already_submitted: [410, 'This interview is already complete'],
   expired: [410, 'This link has expired. Ask the recruiter for a new one'],
   superseded: [410, 'This link was replaced by a newer one. Ask the recruiter for the latest link'],
@@ -57,6 +58,10 @@ const settingsSchema = z.object({
   link_valid_days: z.number().int().min(1).max(60).optional(),
   answer_time_seconds: z.number().int().min(0).max(1800).optional(),
   max_tab_switches: z.number().int().min(0).max(20).optional(),
+  weight_problem_solving: z.number().int().min(0).max(100).optional(),
+  weight_experience_fit: z.number().int().min(0).max(100).optional(),
+  use_reference_sites: z.boolean().optional(),
+  reference_sites: z.string().trim().max(300).optional(),
 });
 
 // ---- team side (login) ----
@@ -65,8 +70,8 @@ router.use(authenticate, requireMasterWorkspace);
 
 router.get('/', asyncHandler(async (req, res) => ok(res, await service.list({ submissionId: z.string().uuid().parse(req.query.submission_id) }))));
 router.post('/', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
-  const body = z.object({ submission_id: z.string().uuid(), restart: z.boolean().optional() }).parse(req.body);
-  const r = await service.invite({ submissionId: body.submission_id, restart: body.restart }, req.user);
+  const body = z.object({ submission_id: z.string().uuid(), restart: z.boolean().optional(), retake: z.boolean().optional() }).parse(req.body);
+  const r = await service.invite({ submissionId: body.submission_id, restart: body.restart, retake: body.retake }, req.user);
   return r.error ? mapError(res, r.error) : created(res, { ...r.interview, link: r.link, superseded: r.superseded });
 }));
 
@@ -87,6 +92,16 @@ router.get('/analytics', asyncHandler(async (req, res) => {
   const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
   const q = z.object({ from: day.optional(), to: day.optional() }).parse(req.query);
   return ok(res, await service.analytics(q, req.user));
+}));
+// Report + dashboard: who attempted the AI interview, for which requirement, with what result and a link to the submission.
+router.get('/report', asyncHandler(async (req, res) => {
+  const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  const empty = (s) => z.preprocess((v) => (v === '' ? undefined : v), s.optional());
+  const q = z.object({
+    from: empty(day), to: empty(day), requirement_id: empty(z.string().uuid()), client_id: empty(z.string().uuid()),
+    status: empty(z.enum(service.REPORT_STATUSES)), outcome: empty(z.enum(service.REPORT_OUTCOMES)), attempted: empty(z.enum(['yes'])), q: empty(z.string().trim().max(100)),
+  }).parse(req.query);
+  return ok(res, await service.report(q, req.user));
 }));
 // Per requirement: false = no AI interview for this requirement, null = follow the company setting.
 router.put('/requirements/:id/switch', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {

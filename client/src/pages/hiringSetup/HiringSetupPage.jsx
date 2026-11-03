@@ -103,7 +103,7 @@ function TemplatesTab({ isAdmin, tests }) {
           </div>
           <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-sm text-tertiary-700">
             {(t.rounds || []).map((r, i, all) => (
-              <li key={r.id}>{r.name} <span className="text-xs text-tertiary-500">({r.conducted_by === 'client' ? 'Client' : 'Delphic'}, {i === 0 || i === all.length - 1 ? 'optional for bench, mandatory otherwise' : r.is_mandatory ? 'mandatory' : 'optional'}{r.rating_required ? ', rating required' : ''})</span></li>
+              <li key={r.id}>{r.name} <span className="text-xs text-tertiary-500">({r.conducted_by === 'client' ? 'Client' : 'Delphic'}, {i === 0 || i === all.length - 1 ? 'optional' : r.is_mandatory ? 'mandatory' : 'optional'}{r.rating_required ? ', rating required' : ''})</span></li>
             ))}
           </ol>
         </div>
@@ -132,7 +132,7 @@ function TemplatesTab({ isAdmin, tests }) {
                     <select className={`${FIELD_INPUT} !w-auto`} value={r.conducted_by} onChange={(e) => patchRound(i, { conducted_by: e.target.value })}><option value="delphic">Delphic</option><option value="client">Client</option></select>
                     <select className={`${FIELD_INPUT} !w-auto`} value={r.kind} onChange={(e) => patchRound(i, { kind: e.target.value })}><option value="interview">Interview</option><option value="screening_test">Screening + test</option></select>
                     {i === 0 || i === edit.rounds.length - 1 ? (
-                      <span className="rounded bg-sky-50 px-2 py-0.5 text-sky-800" title="The first and last round depend on the candidate's profile, not on this template">Bench profile: optional · Other profiles: mandatory</span>
+                      <span className="rounded bg-sky-50 px-2 py-0.5 text-sky-800" title="The first and last round are optional for every profile">Optional for all profiles</span>
                     ) : (
                       <label className="flex items-center gap-1"><input type="checkbox" checked={!!r.is_mandatory} onChange={(e) => patchRound(i, { is_mandatory: e.target.checked })} /> Mandatory</label>
                     )}

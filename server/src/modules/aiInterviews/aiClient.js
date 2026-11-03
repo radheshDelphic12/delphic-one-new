@@ -3,6 +3,8 @@ const env = require('../../config/env');
 // One thin wrapper around the Anthropic Messages API (plain fetch, no SDK). Tests swap the provider with setProvider().
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const TIMEOUT_MS = 45000;
+const SEARCH_TIMEOUT_MS = 90000; // a reply that reads reference pages first takes longer
+const MAX_SEARCHES = 3;
 
 class AiUnavailableError extends Error {
   constructor(message) {
@@ -19,11 +21,24 @@ function withDocuments(messages, documents) {
   return [{ ...first, content: [...blocks, { type: 'text', text: first.content }] }, ...rest];
 }
 
-async function anthropicProvider({ system, messages, maxTokens, documents = [] }) {
+// `webSearchDomains`: the AI may search ONLY these sites (the Anthropic web search tool with allowed_domains). If the account or
+// model does not allow the tool, the same request is sent again without it, so the interview never depends on it.
+async function anthropicProvider({ system, messages, maxTokens, documents = [], webSearchDomains = [] }) {
+  if (webSearchDomains.length) {
+    try {
+      return await callAnthropic({ system, messages, maxTokens, documents, webSearchDomains });
+    } catch (err) {
+      if (!(err instanceof AiUnavailableError)) throw err; // fall through: ask again without the search tool
+    }
+  }
+  return callAnthropic({ system, messages, maxTokens, documents, webSearchDomains: [] });
+}
+
+async function callAnthropic({ system, messages, maxTokens, documents, webSearchDomains }) {
   const { apiKey, model, workspaceId } = env.aiInterview;
   if (!apiKey) throw new AiUnavailableError('ANTHROPIC_API_KEY is not set');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), webSearchDomains.length ? SEARCH_TIMEOUT_MS : TIMEOUT_MS);
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -32,7 +47,10 @@ async function anthropicProvider({ system, messages, maxTokens, documents = [] }
         'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
         ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}),
       },
-      body: JSON.stringify({ model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages: withDocuments(messages, documents) }),
+      body: JSON.stringify({
+        model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages: withDocuments(messages, documents),
+        ...(webSearchDomains.length ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: MAX_SEARCHES, allowed_domains: webSearchDomains }] } : {}),
+      }),
     });
     if (!res.ok) throw new AiUnavailableError(`AI provider answered ${res.status}`);
     const body = await res.json();
@@ -62,8 +80,8 @@ async function askJson(args) {
   }
 }
 
-async function askJsonOnce({ system, user, maxTokens, documents }) {
-  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents });
+async function askJsonOnce({ system, user, maxTokens, documents, webSearchDomains }) {
+  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents, webSearchDomains: webSearchDomains || [] });
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');

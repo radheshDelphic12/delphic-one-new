@@ -5,21 +5,17 @@ const DEFAULT_PASS_PERCENTAGE = 60;
 const ROUND_INCLUDE = { rounds: { orderBy: { sort_order: 'asc' } } };
 
 // A round counts as done once the interviewer recorded a verdict (pass / fail). Feedback (and ratings where required) are
-// enforced when that verdict is saved, so a verdict implies them. A skipped round (bench profile's first round) counts as done too.
+// enforced when that verdict is saved, so a verdict implies them. A skipped round (the optional first round) counts as done too.
 const DONE_RESULTS = ['pass', 'fail', 'skipped'];
 const isDone = (round) => Boolean(round) && round.status !== 'cancelled' && DONE_RESULTS.includes(round.result);
 
-// A bench profile (UI label for source "direct"): its first and last interview round are optional. For any other profile those two
-// rounds are mandatory whatever the template says; the rounds in between follow the template's own mandatory flag.
-async function isBenchSubmission(db, submissionId) {
-  const row = await db.submission.findUnique({ where: { id: submissionId }, select: { profile: { select: { source: true } } } });
-  return row?.profile?.source === 'direct';
-}
-function mandatoryIdSet(templateRounds, bench) {
+// The first and last interview round of a template are optional for EVERY profile (bench or not), whatever the template's flag says;
+// the rounds in between follow the template's own mandatory flag.
+function mandatoryIdSet(templateRounds) {
   const ids = new Set();
   templateRounds.forEach((r, i) => {
     const edge = i === 0 || i === templateRounds.length - 1;
-    if (edge ? !bench : r.is_mandatory) ids.add(r.id);
+    if (!edge && r.is_mandatory) ids.add(r.id);
   });
   return ids;
 }
@@ -101,9 +97,8 @@ async function getPlan(db, submissionId) {
   const byTemplateRound = new Map();
   rounds.forEach((r) => byTemplateRound.set(r.template_round_id, r));
 
-  // A bench profile (UI label for source "direct") may skip the first round of the template.
-  const benchProfile = await isBenchSubmission(db, submissionId);
-  const mandatoryIds = mandatoryIdSet(template.rounds, benchProfile);
+  // The first round is optional, so it may be skipped (any profile).
+  const mandatoryIds = mandatoryIdSet(template.rounds);
   const firstRoundId = template.rounds[0]?.id || null;
 
   const passMark = passMarkFor(requirement);
@@ -124,7 +119,7 @@ async function getPlan(db, submissionId) {
       assessment_test_id: tr.assessment_test_id,
       state,
       can_start: !round && !blocked,
-      can_skip: benchProfile && tr.id === firstRoundId && !round,
+      can_skip: tr.id === firstRoundId && !round,
       interview_round_id: round?.id || null,
       result: round?.result || null,
       score_percent: round?.score_percent != null ? Number(round.score_percent) : null,
@@ -138,7 +133,6 @@ async function getPlan(db, submissionId) {
     plan: {
       template: { id: template.id, name: template.name },
       pass_percentage: passMark,
-      bench_profile: benchProfile,
       steps,
       // The JD's primary / secondary stack: pre-fills the skill rows of a round that needs skill ratings.
       jd_skills: jdSkills(requirement),
@@ -159,7 +153,7 @@ async function checkCanStart(db, submissionId, templateRoundId) {
   });
   if (existing.some((r) => r.template_round_id === templateRoundId)) return { error: 'round_already_exists' };
   const doneIds = new Set(existing.filter(isDone).map((r) => r.template_round_id));
-  const mandatoryIds = mandatoryIdSet(template.rounds, await isBenchSubmission(db, submissionId));
+  const mandatoryIds = mandatoryIdSet(template.rounds);
   const pending = template.rounds.some((r) => r.sort_order < target.sort_order && mandatoryIds.has(r.id) && !doneIds.has(r.id));
   if (pending) return { error: 'previous_round_pending' };
   return { templateRound: target };
@@ -174,7 +168,7 @@ async function mandatoryRoundsDone(db, submissionId) {
     where: { submission_id: submissionId, template_round_id: { not: null }, status: { not: 'cancelled' } },
   });
   const doneIds = new Set(rounds.filter(isDone).map((r) => r.template_round_id));
-  const mandatoryIds = mandatoryIdSet(template.rounds, await isBenchSubmission(db, submissionId));
+  const mandatoryIds = mandatoryIdSet(template.rounds);
   return template.rounds.filter((r) => mandatoryIds.has(r.id)).every((r) => doneIds.has(r.id));
 }
 

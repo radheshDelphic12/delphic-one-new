@@ -327,7 +327,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                     </button>
                   )}
                   {step.can_skip && canManage(step) && (
-                    <button type="button" className="btn-secondary text-xs" data-testid="skip-first-round" disabled={busy} onClick={() => setSkipping({ step, reason: '' })} title="This is a bench profile, so the first round can be skipped">
+                    <button type="button" className="btn-secondary text-xs" data-testid="skip-first-round" disabled={busy} onClick={() => setSkipping({ step, reason: '' })} title="The first round is optional, so it can be skipped">
                       Skip round
                     </button>
                   )}

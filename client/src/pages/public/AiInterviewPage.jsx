@@ -44,6 +44,7 @@ export default function AiInterviewPage() {
   const [cameraProblem, setCameraProblem] = useState('');
   const [remaining, setRemaining] = useState(null); // seconds left on this question, null = no limit
   const [warning, setWarning] = useState('');
+  const [stalled, setStalled] = useState(false); // the first recording chunk has not reached the server for a while
   const recRef = useRef(null); // speech recognition
   const baseTextRef = useRef('');
   const recorderRef = useRef(null);
@@ -290,6 +291,13 @@ export default function AiInterviewPage() {
     }
   }, [token, stopRecording]);
 
+  const needsFirstChunk = Boolean(view?.recording_on) && recording && !recordingReady && !(view?.recording_parts > 0);
+  useEffect(() => {
+    if (!needsFirstChunk) { setStalled(false); return undefined; }
+    const id = setTimeout(() => setStalled(true), 30000);
+    return () => clearTimeout(id);
+  }, [needsFirstChunk]);
+
   // ---- the countdown for the question on screen (from the server clock, so a reload cannot reset it) ----
   const asked = view?.question_asked_at;
   const limit = view?.answer_seconds;
@@ -369,9 +377,11 @@ export default function AiInterviewPage() {
   const turns = view.transcript || [];
   const current = view.waiting_for_answer ? turns[turns.length - 1] : null;
   const history = turns.slice(0, current ? -1 : undefined);
-  const mustRecord = Boolean(view.recording_required);
+  // Only an interview that is really being recorded pauses without the camera. One that was started before recording was switched on
+  // (recording_on false) carries on without it; otherwise it would wait for a camera that is never started.
+  const mustRecord = Boolean(view.recording_on);
   const blocked = mustRecord && (!recording || Boolean(cameraProblem));
-  const waitingForCamera = mustRecord && recording && !recordingReady;
+  const waitingForCamera = needsFirstChunk;
   const urgent = remaining != null && remaining <= 30;
   return (
     <Shell>
@@ -420,7 +430,10 @@ export default function AiInterviewPage() {
               onDrop={(e) => e.preventDefault()}
               disabled={busy || blocked}
             />
-            {waitingForCamera && <p className="mt-2 text-xs text-tertiary-500">Waiting for the camera recording to start...</p>}
+            {waitingForCamera && !stalled && <p className="mt-2 text-xs text-tertiary-500">Waiting for the camera recording to start...</p>}
+            {waitingForCamera && stalled && (
+              <p className="mt-2 text-xs text-warning-800" data-testid="recording-stalled">The recording could not be saved yet. Check your internet connection and <button type="button" className="font-medium underline" onClick={retryCamera}>try again</button>.</p>
+            )}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               {SpeechRecognition && view.section !== 'aptitude' ? (
                 <button type="button" className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${listening ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-tertiary-200 text-tertiary-700'}`} onClick={toggleListening} disabled={busy || blocked}>

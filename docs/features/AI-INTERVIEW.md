@@ -68,6 +68,31 @@ hourly job `jobs/aiInterviewRecordings.js`; the interview, transcript and scores
   those facts: skipped half or more = max 2, a quarter = 4, under 10 words on average = 4, under 20 = 6.
 - Migration `20261112100000_ai_interview_timer_and_integrity` (additive: 2 settings columns + the events column).
 
+## Marking scheme, level and reference sites (2026-11-03)
+- **Marking scheme out of 100:** every section carries marks (Hiring setup > AI interview > Marking scheme). Defaults: role knowledge 30, communication 20,
+  depth 15, problem solving 15, experience fit 10, aptitude 10. Each section is scored 0-10 and earns score/10 of its marks. A scheme that does
+  not add up to 100 still works (the result is always worked out out of 100 from the shares) but is flagged, with a **Scale to 100** button.
+  Aptitude off = its marks are left out and the rest scale. The result stores per section `weight`, `max_points`, `points`; the review drawer shows a
+  **Marks sheet** (section, score, maximum marks, marks obtained, total, pass mark).
+- **Communication** is the average of five judged parts (clarity, structure, relevance, completeness, professionalism, each 0-10 with a note), then
+  capped by plain answer facts (skipped / very short answers). Shown under "How communication was judged".
+- **Level:** questions and scoring follow the candidate's years: fresher (<1), junior (1-3), mid (3-6), senior (6-10), lead (10+); the requirement's
+  experience range is used when the profile has none. Stored on the result (`scores.level`) and shown as a badge.
+- **Two more weighted parameters:** problem solving and experience fit (does the answer match the claimed years and level).
+- **Reference sites:** setting `use_reference_sites` + `reference_sites` (default w3schools.com, javatpoint.com, max 5 domains). When the questions are
+  written the AI may use the Anthropic web search tool limited to those domains (`allowed_domains`, 3 searches) to get syntax and definitions right;
+  it writes its own questions and never copies from the pages. If the tool is not available for the key / model the same request is sent again
+  without it. **Not verified against the live API** (needs the production key with web search enabled).
+- Migrations `20261113100000_ai_interview_weights_and_reference_sites` and `20261113110000_ai_interview_marks_defaults` (additive; only the defaults of NEW
+  settings rows change).
+
+## Flow check 2026-11-03 (HR and candidate, end to end) and fixes
+- **Re-take:** a finished interview (scored / needs review) now offers **Send again (re-take)** on the card (`POST /ai-interviews` with `retake: true`, confirmed, audited as `retake_ai_interview`). The first result stays in the list as "Replaced" and stays readable; a plain invite on a finished interview is still refused.
+- **Candidate stuck:** an interview started before recording was switched on (`recording_on` false) no longer waits for a camera that is never started (the page used the company setting, not the interview's own); the wait for the first recording chunk now offers "try again" after 30 s.
+- **Link copy:** the HR card no longer fails when the browser clipboard is unavailable; it shows the link instead.
+- **A section the AI does not score** is marked "Not scored", left out of the total and flagged (it used to count as 0); if nothing was scored the interview goes to a person (pending review).
+- Checked with Playwright on a local stack (fake AI, fake camera): send link, candidate answers all questions, result with marks sheet, re-take, resend, restart, recording switched on mid-way, reload and resume, recorded interview with copy / paste / tab-switch rules.
+
 ## Never blocks the candidate
 - AI down when starting: "try again later"; the link is not used up.
 - AI down while scoring: every answer is saved and the interview becomes **pending human review**.

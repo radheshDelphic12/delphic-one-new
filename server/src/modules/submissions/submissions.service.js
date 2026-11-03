@@ -420,13 +420,12 @@ function ratingFields(skillRatings) {
   return { score_percent: templates.scorePercent(skillRatings), rating: Math.min(10, Math.max(1, Math.round(avg))) };
 }
 
-// A bench profile (source "direct") may skip the first round of its interview plan: recorded as a completed round with result
+// The first round of an interview plan is optional for every profile and may be skipped: recorded as a completed round with result
 // "skipped" (no interview, no score) so the next round opens and the offer gate counts it as done.
 async function skipFirstRound(submissionId, { template_round_id, reason }, user) {
   return prisma.$transaction(async (tx) => {
     const submission = await tx.submission.findUnique({ where: { id: submissionId }, include: { profile: { select: { source: true } } } });
     if (!submission) return { error: 'not_found' };
-    if (submission.profile?.source !== 'direct') return { error: 'skip_bench_only' };
 
     const requirement = await templates.loadRequirementForSubmission(tx, submissionId);
     const first = requirement?.interview_template?.rounds?.[0];
@@ -449,7 +448,7 @@ async function skipFirstRound(submissionId, { template_round_id, reason }, user)
         template_round_id,
         status: 'completed',
         result: 'skipped',
-        feedback: (reason && reason.trim()) || 'Skipped: bench profile',
+        feedback: (reason && reason.trim()) || 'Skipped: optional round',
         completed_at: new Date(),
         scheduled_by: user.id,
       },

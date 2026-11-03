@@ -15,9 +15,10 @@ const OUTCOMES = ['pass', 'borderline', 'below_pass'];
 // is_enabled starts false: the AI interview is an optional, separate link and nothing in the existing flow depends on it.
 const DEFAULTS = {
   is_enabled: false, question_count: 7, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
-  weight_knowledge: 50, weight_communication: 25, weight_depth: 25, aptitude_enabled: true, aptitude_question_count: 4, weight_aptitude: 20,
+  weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 4, weight_aptitude: 10,
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
+  weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com',
 };
 const TAB_EVENTS = ['tab_hidden', 'window_blur']; // leaving the interview page; these count towards max_tab_switches
 const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off'];
@@ -50,8 +51,14 @@ async function updateSettings(orgId, patch, user) {
   if (!orgId) return { error: 'no_org' };
   const data = Object.fromEntries(Object.entries(patch).filter(([k, v]) => SETTING_KEYS.includes(k) && v !== undefined));
   const merged = { ...(await getSettings(orgId)), ...data };
-  const weightTotal = merged.weight_knowledge + merged.weight_communication + merged.weight_depth + (merged.aptitude_enabled ? merged.weight_aptitude : 0);
+  const weightTotal = merged.weight_knowledge + merged.weight_communication + merged.weight_depth + merged.weight_problem_solving + merged.weight_experience_fit + (merged.aptitude_enabled ? merged.weight_aptitude : 0);
   if (weightTotal <= 0) return { error: 'weights_zero' };
+  if (data.reference_sites !== undefined) {
+    // stored as a clean, comma separated list of bare domains; a typed list with nothing usable in it is refused
+    const sites = logic.normaliseSites(data.reference_sites);
+    if (String(data.reference_sites).trim() && !sites.length) return { error: 'bad_sites' };
+    data.reference_sites = sites.join(',');
+  }
   await prisma.aiInterviewSettings.upsert({
     where: { org_id: orgId },
     create: { org_id: orgId, ...data, updated_by: user?.id || null },
@@ -143,6 +150,8 @@ async function contextFor(submissionId) {
     primary_skills: r?.primary_tech_stack || [],
     secondary_skills: r?.secondary_tech_stack || [],
     experience_range: min != null || max != null ? `${min ?? 0} to ${max ?? 'any'} years` : null,
+    experience_min: min,
+    experience_max: max,
     candidate_designation: p?.current_designation || null,
     candidate_company: p?.current_company || null,
     candidate_experience: p?.total_experience_years != null ? Number(p.total_experience_years) : null,
@@ -171,7 +180,7 @@ async function loadResume(profileId) {
 }
 
 // ---- team side ----
-async function invite({ submissionId, restart = false }, user) {
+async function invite({ submissionId, restart = false, retake = false }, user) {
   const settings = await getSettings(user.org_id);
   if (!settings.is_enabled) return { error: 'disabled' };
   const ctx = await contextFor(submissionId);
@@ -183,7 +192,8 @@ async function invite({ submissionId, restart = false }, user) {
 
   const existing = await prisma.aiInterview.findMany({ where: { submission_id: submissionId, deleted_at: null } });
   const live = existing.filter(isLive);
-  if (live.some((a) => a.status === 'completed' || a.status === 'pending_review')) return { error: 'already_completed' };
+  // A finished interview keeps its result; a new link is sent only when the sender asks for a re-take (the old result stays in the history).
+  if (live.some((a) => a.status === 'completed' || a.status === 'pending_review') && !retake) return { error: 'already_completed' };
   // a candidate in the middle of the interview keeps it, unless the sender chooses to restart it with a new link
   if (live.some((a) => a.status === 'started') && !restart) return { error: 'in_progress' };
 
@@ -191,6 +201,7 @@ async function invite({ submissionId, restart = false }, user) {
   const row = await prisma.$transaction(async (tx) => {
     if (live.length) await tx.aiInterview.updateMany({ where: { id: { in: live.map((a) => a.id) } }, data: { superseded_at: new Date() } });
     for (const a of live.filter((x) => x.status === 'started')) await audit(tx, user, 'restart_ai_interview', a, 'A new link replaced an interview in progress');
+    for (const a of live.filter((x) => x.status === 'completed' || x.status === 'pending_review')) await audit(tx, user, 'retake_ai_interview', a, 'A new link was sent after the interview was finished (re-take)');
     return tx.aiInterview.create({
       data: {
         token, submission_id: submissionId, org_id: user.org_id || null, template_round_id: roundId,
@@ -394,7 +405,7 @@ async function finish(a, settings, ctx, transcript, tokens) {
     const fresh = await prisma.aiInterview.findUnique({ where: { id: a.id }, select: { integrity_events: true } });
     const integrity = integritySummary({ integrity_events: fresh?.integrity_events });
     const scored = await logic.scoreInterview(ctx, rubric, transcript, questions);
-    const { percent, outcome, scores } = logic.buildScores(scored.data, rubric, transcript, integrity);
+    const { percent, outcome, scores } = logic.buildScores(scored.data, rubric, transcript, integrity, logic.levelFor(ctx));
     let row = await prisma.aiInterview.update({
       where: { id: a.id },
       data: {
@@ -529,6 +540,99 @@ async function analytics({ from, to }, user) {
     average_score: scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null,
     average_minutes: minutes.length ? Math.round(minutes.reduce((a, b) => a + b, 0) / minutes.length) : null,
     tokens: rows.reduce((s, r) => s + r.input_tokens + r.output_tokens, 0),
+  };
+}
+
+// Report + dashboard: every AI interview (the live link of each candidate and requirement), who attempted it, for which requirement
+// and client, how it went, with the submission to open. view_status: not_opened | in_progress | scored | pending_review | expired.
+const REPORT_STATUSES = ['not_opened', 'in_progress', 'scored', 'pending_review', 'expired'];
+const REPORT_OUTCOMES = ['pass', 'borderline', 'below_pass', 'none'];
+async function report(q, user) {
+  const where = { deleted_at: null, superseded_at: null, org_id: user.org_id || null };
+  if (q.from || q.to) where.invited_at = { ...(q.from ? { gte: new Date(`${q.from}T00:00:00+05:30`) } : {}), ...(q.to ? { lte: new Date(`${q.to}T23:59:59.999+05:30`) } : {}) };
+  const interviews = await prisma.aiInterview.findMany({ where, orderBy: { invited_at: 'desc' }, take: 5000 });
+  const subs = await prisma.submission.findMany({
+    where: { id: { in: [...new Set(interviews.map((i) => i.submission_id))] } },
+    select: { id: true, stage: true, profile_id: true, seat: { select: { requirement: { select: { id: true, title: true, account: { select: { id: true, name: true } } } } } } },
+  });
+  const subById = new Map(subs.map((s) => [s.id, s]));
+  const names = await userNames(interviews.map((i) => i.invited_by));
+  let rows = interviews.map((a) => {
+    const s = subById.get(a.submission_id);
+    const r = s?.seat?.requirement;
+    const outcome = effectiveOutcome(a);
+    return {
+      id: a.id,
+      submission_id: a.submission_id,
+      profile_id: s?.profile_id || null,
+      submission_stage: s?.stage || null,
+      candidate_name: a.candidate_name,
+      candidate_email: a.candidate_email,
+      requirement_id: r?.id || null,
+      requirement_title: r?.title || a.role_title || null,
+      client_id: r?.account?.id || null,
+      client_name: r?.account?.name || null,
+      view_status: viewStatus(a),
+      attempted: a.status !== 'invited',
+      score_percent: a.score_percent != null ? Number(a.score_percent) : null,
+      pass_percentage: a.pass_percentage,
+      outcome,
+      ai_outcome: a.outcome,
+      overridden: Boolean(a.override_outcome),
+      auto_rejected: Boolean(a.auto_rejected_at),
+      tab_switches: tabSwitchesOf(a),
+      recording: Boolean(a.recording_on && a.recording_path && !a.recording_deleted_at),
+      invited_by_name: names.get(a.invited_by) || null,
+      invited_at: a.invited_at,
+      started_at: a.started_at,
+      completed_at: a.completed_at,
+    };
+  });
+  if (q.requirement_id) rows = rows.filter((r) => r.requirement_id === q.requirement_id);
+  if (q.client_id) rows = rows.filter((r) => r.client_id === q.client_id);
+  if (q.status) rows = rows.filter((r) => r.view_status === q.status);
+  if (q.outcome) rows = rows.filter((r) => (q.outcome === 'none' ? !r.outcome : r.outcome === q.outcome));
+  if (q.attempted === 'yes') rows = rows.filter((r) => r.attempted);
+  if (q.q) {
+    const needle = q.q.toLowerCase();
+    rows = rows.filter((r) => [r.candidate_name, r.candidate_email, r.requirement_title, r.client_name].some((v) => v && v.toLowerCase().includes(needle)));
+  }
+  const count = (fn) => rows.filter(fn).length;
+  const scores = rows.map((r) => r.score_percent).filter((n) => n != null);
+  const byReq = new Map();
+  for (const r of rows) {
+    const key = r.requirement_id || 'none';
+    const g = byReq.get(key) || { requirement_id: r.requirement_id, requirement_title: r.requirement_title || 'No requirement', client_name: r.client_name, sent: 0, attempted: 0, scored: 0, pass: 0, borderline: 0, below_pass: 0, scoreSum: 0, scoreN: 0 };
+    g.sent += 1;
+    if (r.attempted) g.attempted += 1;
+    if (r.view_status === 'scored') g.scored += 1;
+    if (r.outcome === 'pass') g.pass += 1;
+    if (r.outcome === 'borderline') g.borderline += 1;
+    if (r.outcome === 'below_pass') g.below_pass += 1;
+    if (r.score_percent != null) {
+      g.scoreSum += r.score_percent;
+      g.scoreN += 1;
+    }
+    byReq.set(key, g);
+  }
+  return {
+    summary: {
+      sent: rows.length,
+      attempted: count((r) => r.attempted),
+      not_opened: count((r) => r.view_status === 'not_opened'),
+      in_progress: count((r) => r.view_status === 'in_progress'),
+      scored: count((r) => r.view_status === 'scored'),
+      pending_review: count((r) => r.view_status === 'pending_review'),
+      expired: count((r) => r.view_status === 'expired'),
+      pass: count((r) => r.outcome === 'pass'),
+      borderline: count((r) => r.outcome === 'borderline'),
+      below_pass: count((r) => r.outcome === 'below_pass'),
+      average_score: scores.length ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : null,
+    },
+    by_requirement: [...byReq.values()]
+      .map(({ scoreSum, scoreN, ...g }) => ({ ...g, average_score: scoreN ? Math.round((scoreSum / scoreN) * 10) / 10 : null }))
+      .sort((a, b) => b.sent - a.sent),
+    rows,
   };
 }
 
@@ -668,7 +772,7 @@ async function recordEvent(token, { type, seconds_away: secondsAway }) {
 
 module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
-  invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics,
+  invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics, report, REPORT_STATUSES, REPORT_OUTCOMES,
   openForCandidate, startForCandidate, answerForCandidate,
   saveRecordingChunk, recordingFor, purgeExpiredRecordings,
 };

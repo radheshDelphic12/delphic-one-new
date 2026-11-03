@@ -23,13 +23,15 @@ let followUps = true;
 let failOn = null; // 'questions' | 'score' | null
 const seenDocuments = []; // CV documents the AI was given
 
-function stubProvider({ system, messages, documents = [] }) {
+const seenPrompts = []; // [{ kind, user, system, webSearchDomains }] for the question-writing calls
+function stubProvider({ system, messages, documents = [], webSearchDomains = [] }) {
   if (documents.length) seenDocuments.push(...documents);
   const user = messages[0].content;
   const reply = (obj) => ({ text: JSON.stringify(obj), usage: { input: 100, output: 50 } });
   if (user.includes('Write exactly')) {
     if (failOn === 'questions') throw new (require('../src/modules/aiInterviews/aiClient').AiUnavailableError)('down');
     calls.questions += 1;
+    seenPrompts.push({ user, system, webSearchDomains });
     const n = Number(user.match(/Write exactly (\d+) interview questions/)[1]);
     const m = Number((user.match(/exactly (\d+) aptitude questions/) || [])[1] || 0);
     return reply({
@@ -45,7 +47,8 @@ function stubProvider({ system, messages, documents = [] }) {
     if (failOn === 'score') throw new (require('../src/modules/aiInterviews/aiClient').AiUnavailableError)('down');
     calls.score += 1;
     return reply({
-      parameters: ['knowledge', 'communication', 'depth', ...(user.includes('- aptitude:') ? ['aptitude'] : [])].map((key) => ({ key, score: scoreOf(key), summary: `${key} summary`, evidence: 'said so' })),
+      parameters: ['knowledge', 'communication', 'depth', 'problem_solving', 'experience_fit', ...(user.includes('- aptitude:') ? ['aptitude'] : [])].map((key) => ({ key, score: scoreOf(key), summary: `${key} summary`, evidence: 'said so' })),
+      communication_detail: ['clarity', 'structure', 'relevance', 'completeness', 'professionalism'].map((key) => ({ key, score: scoreOf('communication'), note: `${key} note` })),
       summary: 'Solid candidate.', strengths: ['Clear'], red_flags: [], instruction_attempt: false,
     });
   }
@@ -60,6 +63,7 @@ beforeEach(async () => {
   await prisma.aiInterviewSettings.deleteMany();
   Object.assign(calls, { questions: 0, followUp: 0, score: 0 });
   seenDocuments.length = 0;
+  seenPrompts.length = 0;
   scoreOf = () => 8;
   followUps = true;
   failOn = null;
@@ -228,7 +232,7 @@ describe('routing and review', () => {
   test('weights from settings change the total', async () => {
     followUps = false;
     scoreOf = (key) => (key === 'knowledge' ? 10 : 0);
-    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ weight_knowledge: 100, weight_communication: 0, weight_depth: 0, weight_aptitude: 0 });
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ weight_knowledge: 100, weight_communication: 0, weight_depth: 0, weight_problem_solving: 0, weight_experience_fit: 0, weight_aptitude: 0 });
     const token = tokenOf((await invite()).body.data.link);
     await runInterview(token);
     expect(Number((await prisma.aiInterview.findUnique({ where: { token } })).score_percent)).toBe(100);
@@ -244,7 +248,7 @@ describe('routing and review', () => {
 
     const review = await authed(request(app).get(`/api/v1/ai-interviews/${id}/review`), recruiterToken);
     expect(review.status).toBe(200);
-    expect(review.body.data.scores.parameters).toHaveLength(4); // 3 interview parameters + aptitude
+    expect(review.body.data.scores.parameters).toHaveLength(6); // 5 interview parameters + aptitude
     expect(review.body.data.transcript.length).toBeGreaterThan(3);
     expect(review.body.data.effective_outcome).toBe('below_pass');
 
@@ -279,7 +283,7 @@ describe('settings', () => {
     expect((await authed(request(app).put('/api/v1/ai-interviews/settings'), recruiterToken).send({ pass_percentage: 70 })).status).toBe(403);
     const ok = await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ pass_percentage: 70, extra_instructions: 'Ask about Apex.' });
     expect(ok.body.data.pass_percentage).toBe(70);
-    const bad = await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ weight_knowledge: 0, weight_communication: 0, weight_depth: 0, weight_aptitude: 0 });
+    const bad = await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ weight_knowledge: 0, weight_communication: 0, weight_depth: 0, weight_problem_solving: 0, weight_experience_fit: 0, weight_aptitude: 0 });
     expect(bad.status).toBe(400);
   });
 });
@@ -296,7 +300,7 @@ describe('aptitude section and the reason for a result', () => {
     await runInterview(token);
     expect(calls.followUp).toBe(3); // the three role questions only
     const row = await prisma.aiInterview.findUnique({ where: { token } });
-    expect(row.scores.parameters.map((p) => p.key)).toEqual(['knowledge', 'communication', 'depth', 'aptitude']);
+    expect(row.scores.parameters.map((p) => p.key)).toEqual(['knowledge', 'communication', 'depth', 'problem_solving', 'experience_fit', 'aptitude']);
     expect(row.transcript.filter((t) => t.role === 'ai' && t.section === 'aptitude')).toHaveLength(2);
   });
 
@@ -307,7 +311,7 @@ describe('aptitude section and the reason for a result', () => {
     await runInterview(token);
     const row = await prisma.aiInterview.findUnique({ where: { token } });
     expect(row.questions).toHaveLength(3);
-    expect(row.scores.parameters.map((p) => p.key)).toEqual(['knowledge', 'communication', 'depth']);
+    expect(row.scores.parameters.map((p) => p.key)).toEqual(['knowledge', 'communication', 'depth', 'problem_solving', 'experience_fit']);
   });
 
   test('a below-pass result explains why, naming the weakest parts; a pass says how it passed', async () => {
@@ -551,7 +555,7 @@ describe('auto-reject, result notification, CV, per-requirement switch and analy
 
 describe('communication scoring facts', () => {
   const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
-  const settings = { weight_knowledge: 50, weight_communication: 25, weight_depth: 25, pass_percentage: 60, borderline_margin: 10, aptitude_enabled: false };
+  const settings = { weight_knowledge: 50, weight_communication: 25, weight_depth: 25, weight_problem_solving: 0, weight_experience_fit: 0, pass_percentage: 60, borderline_margin: 10, aptitude_enabled: false };
   const raw = { parameters: ['knowledge', 'communication', 'depth'].map((key) => ({ key, score: 9, summary: 's', evidence: 'e' })) };
   const answers = (texts, extra = {}) => texts.map((text) => ({ role: 'candidate', kind: 'answer', text, ...extra }));
   const long = Array(30).fill('word').join(' ');
@@ -666,5 +670,174 @@ describe('resend, restart, timer and page integrity', () => {
     const review = (await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken)).body.data;
     expect(review.scores.red_flags.join(' ')).toMatch(/left the interview page 4 times/);
     expect(review.scores.red_flags.join(' ')).toMatch(/copy \/ paste attempt/);
+  });
+});
+
+describe('level, weights, communication detail and reference sites', () => {
+  const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+  const settings = { weight_knowledge: 40, weight_communication: 20, weight_depth: 15, weight_problem_solving: 15, weight_experience_fit: 10, pass_percentage: 60, borderline_margin: 10, aptitude_enabled: false };
+  const long = Array(30).fill('word').join(' ');
+  const answers = [{ role: 'candidate', kind: 'answer', text: long }, { role: 'candidate', kind: 'answer', text: long }];
+  const raw = (over = {}) => ({
+    parameters: [['knowledge', 8], ['communication', 5], ['depth', 6], ['problem_solving', 7], ['experience_fit', 9]].map(([key, score]) => ({ key, score, summary: 's', evidence: 'e' })),
+    ...over,
+  });
+
+  test('the level follows the candidate\'s years (the requirement\'s range when the profile has none)', () => {
+    expect(logic.levelFor({ candidate_experience: 0.5 }).key).toBe('fresher');
+    expect(logic.levelFor({ candidate_experience: 2 }).key).toBe('junior');
+    expect(logic.levelFor({ candidate_experience: 4.5 }).key).toBe('mid');
+    expect(logic.levelFor({ candidate_experience: 7 })).toMatchObject({ key: 'senior', label: 'Senior', years: 7 });
+    expect(logic.levelFor({ candidate_experience: 14 }).key).toBe('lead');
+    expect(logic.levelFor({ experience_min: 6, experience_max: 10 }).key).toBe('senior'); // no profile years: the role's middle (8)
+    expect(logic.levelFor({}).key).toBe('mid');
+  });
+
+  test('communication is the average of its five parts; every parameter shows its points and they add up to the total', () => {
+    const detail = [['clarity', 9], ['structure', 7], ['relevance', 8], ['completeness', 6], ['professionalism', 10]].map(([key, score]) => ({ key, score, note: `${key} note` }));
+    const built = logic.buildScores(raw({ communication_detail: detail }), settings, answers, null, logic.levelFor({ candidate_experience: 7 }));
+    const byKey = Object.fromEntries(built.scores.parameters.map((p) => [p.key, p]));
+    expect(byKey.communication.score).toBe(8); // (9+7+8+6+10)/5, not the 5 the AI gave on top
+    expect(built.scores.communication_detail).toHaveLength(5);
+    // total = (8*40 + 8*20 + 6*15 + 7*15 + 9*10) / 100 * 10 = 7.65 -> 76.5 of 100
+    expect(built.percent).toBe(76.5);
+    const points = built.scores.parameters.reduce((s, p) => s + p.points, 0);
+    expect(Math.round(points * 100) / 100).toBe(76.5);
+    expect(built.scores.parameters.reduce((s, p) => s + p.max_points, 0)).toBeCloseTo(100, 1);
+    expect(built.scores.level).toMatchObject({ key: 'senior', years: 7 });
+    expect(built.scores.decision_reason).toMatch(/Interviewed at Senior level \(7 years of experience\)\./);
+    // without the five parts the AI's own communication score is used
+    expect(logic.buildScores(raw(), settings, answers).scores.parameters.find((p) => p.key === 'communication').score).toBe(5);
+  });
+
+  test('reference sites are cleaned to bare domains, at most five', () => {
+    expect(logic.normaliseSites('https://www.W3Schools.com/js/, javatpoint.com; javatpoint.com bad_site')).toEqual(['w3schools.com', 'javatpoint.com']);
+    expect(logic.normaliseSites('a.io b.io c.io d.io e.io f.io')).toHaveLength(5);
+    expect(logic.normaliseSites('')).toEqual([]);
+  });
+
+  test('settings: the two new weights and the reference sites are admin editable; nonsense sites are refused', async () => {
+    const put = (body, token = adminToken) => authed(request(app).put('/api/v1/ai-interviews/settings'), token).send(body);
+    const defaults = (await authed(request(app).get('/api/v1/ai-interviews/settings'), recruiterToken)).body.data;
+    expect(defaults).toMatchObject({ weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com' });
+    const res = await put({ weight_problem_solving: 30, weight_experience_fit: 5, reference_sites: 'https://www.javatpoint.com/java-tutorial, mdn.dev' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ weight_problem_solving: 30, weight_experience_fit: 5, reference_sites: 'javatpoint.com,mdn.dev' });
+    expect((await put({ reference_sites: '???, not a domain' })).status).toBe(400);
+    expect((await put({ use_reference_sites: false })).status).toBe(200);
+    expect((await put({ weight_problem_solving: 30 }, recruiterToken)).status).toBe(403);
+  });
+
+  test('questions are written at the candidate\'s level and, when switched on, with the reference sites; the result records the level', async () => {
+    await prisma.profile.update({ where: { id: profileId }, data: { total_experience_years: 8 } });
+    const token = tokenOf((await invite()).body.data.link);
+    await post(`${token}/start`, { consent: true });
+    const asked = seenPrompts[0];
+    expect(asked.user).toMatch(/Interview level: Senior \(8 years of experience\)/);
+    expect(asked.user).toMatch(/pitched at the Senior level/);
+    expect(asked.webSearchDomains).toEqual(['w3schools.com', 'javatpoint.com']);
+    expect(asked.system).toMatch(/ONLY these reference sites: w3schools\.com, javatpoint\.com/);
+    expect(asked.system).toMatch(/never copy text from those sites/);
+
+    followUps = false;
+    await runInterview(token);
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(row.scores.level).toMatchObject({ key: 'senior', years: 8 });
+    expect(row.scores.communication_detail).toHaveLength(5);
+    expect(row.scores.parameters.every((p) => typeof p.points === 'number' && p.max_points > 0)).toBe(true);
+
+    // switched off: no search, no reference text, and a fresher gets fresher questions
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ use_reference_sites: false });
+    await prisma.profile.update({ where: { id: profileId }, data: { total_experience_years: 0.5 } });
+    await prisma.aiInterview.deleteMany();
+    const second = tokenOf((await invite()).body.data.link);
+    seenPrompts.length = 0;
+    await post(`${second}/start`, { consent: true });
+    expect(seenPrompts[0].webSearchDomains).toEqual([]);
+    expect(seenPrompts[0].system).not.toMatch(/reference sites/);
+    expect(seenPrompts[0].user).toMatch(/Interview level: Fresher/);
+  });
+});
+
+describe('a section the AI does not score', () => {
+  const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+  const settings = { weight_knowledge: 40, weight_communication: 20, weight_depth: 15, weight_problem_solving: 15, weight_experience_fit: 10, pass_percentage: 60, borderline_margin: 10, aptitude_enabled: false };
+  const answers = [{ role: 'candidate', kind: 'answer', text: Array(30).fill('word').join(' ') }];
+
+  test('it is left out of the total and flagged, not counted as zero', () => {
+    const raw = { parameters: [{ key: 'knowledge', score: 8 }, { key: 'communication', score: 8 }, { key: 'depth', score: 8 }] }; // problem solving and experience fit missing
+    const built = logic.buildScores(raw, settings, answers);
+    expect(built.percent).toBe(80); // 8/10 on every section that was scored, not dragged down by two zeros
+    const byKey = Object.fromEntries(built.scores.parameters.map((p) => [p.key, p]));
+    expect(byKey.problem_solving).toMatchObject({ scored: false, points: 0, max_points: 0 });
+    expect(byKey.knowledge.scored).toBe(true);
+    expect(built.scores.parameters.reduce((s, p) => s + p.max_points, 0)).toBeCloseTo(100, 1);
+    expect(built.scores.red_flags.join(' ')).toMatch(/Not scored by the AI: Problem solving, Experience fit\./);
+  });
+
+  test('when nothing at all was scored the result is not made up: the interview goes to a person', () => {
+    expect(() => logic.buildScores({}, settings, answers)).toThrow(/did not score any section/);
+  });
+});
+
+describe('re-take after a finished interview', () => {
+  test('a plain invite is still refused; an explicit re-take keeps the first result as history and is audited', async () => {
+    const first = (await invite()).body.data;
+    await post(`${tokenOf(first.link)}/start`, { consent: true });
+    followUps = false;
+    await runInterview(tokenOf(first.link));
+    expect((await invite()).status).toBe(409); // already finished: no silent second interview
+    const again = await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, retake: true });
+    expect(again.status).toBe(201);
+    expect(again.body.data.superseded).toBe(1);
+    const items = (await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken)).body.data.items;
+    expect(items.map((i) => i.view_status).sort()).toEqual(['not_opened', 'superseded']);
+    // the first result is still readable
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${first.id}/review`), recruiterToken)).status).toBe(200);
+    expect(await prisma.auditLog.count({ where: { action: 'retake_ai_interview' } })).toBe(1);
+    expect((await pub(tokenOf(first.link))).status).toBe(410);
+    expect((await pub(tokenOf(again.body.data.link))).status).toBe(200);
+  });
+});
+
+describe('Reports > AI interviews (dashboard data)', () => {
+  const report = (qs = '', token = recruiterToken) => authed(request(app).get(`/api/v1/ai-interviews/report${qs}`), token);
+
+  test('who got a link, who attempted, when, with what status and score, and where to open the submission', async () => {
+    const sent = (await invite()).body.data; // sent, never opened
+    const before = (await report()).body.data;
+    expect(before.summary).toMatchObject({ sent: 1, attempted: 0, not_opened: 1 });
+    expect(before.rows[0]).toMatchObject({ view_status: 'not_opened', attempted: false, started_at: null, completed_at: null, submission_id: submissionId, candidate_name: expect.any(String) });
+    expect(before.rows[0].invited_at).toBeTruthy();
+
+    const token = tokenOf(sent.link);
+    await post(`${token}/start`, { consent: true });
+    const midway = (await report()).body.data;
+    expect(midway.summary).toMatchObject({ attempted: 1, in_progress: 1 });
+    expect(midway.rows[0].started_at).toBeTruthy(); // the time the candidate began
+
+    followUps = false;
+    await runInterview(token);
+    const done = (await report()).body.data;
+    expect(done.summary).toMatchObject({ sent: 1, attempted: 1, scored: 1, pass: 1 });
+    const row = done.rows[0];
+    expect(row).toMatchObject({ view_status: 'scored', outcome: 'pass', submission_id: submissionId });
+    expect(row.score_percent).toBeGreaterThan(0);
+    expect(row.started_at).toBeTruthy();
+    expect(row.completed_at).toBeTruthy();
+    expect(new Date(row.completed_at) >= new Date(row.started_at)).toBe(true);
+    expect(done.by_requirement[0]).toMatchObject({ sent: 1, attempted: 1, pass: 1 });
+  });
+
+  test('filters: attempted only, status, outcome, search; a link nobody opened is listed but not counted as attempted', async () => {
+    await invite();
+    expect((await report('?attempted=yes')).body.data.rows).toHaveLength(0);
+    expect((await report('?status=not_opened')).body.data.rows).toHaveLength(1);
+    expect((await report('?status=scored')).body.data.rows).toHaveLength(0);
+    expect((await report('?q=zzz-nobody')).body.data.rows).toHaveLength(0);
+    expect((await report('?outcome=none')).body.data.rows).toHaveLength(1);
+    expect((await report('?from=2020-01-01&to=2020-01-02')).body.data.rows).toHaveLength(0);
+    expect((await report('?status=nonsense')).status).toBe(422);
+    expect((await request(app).get('/api/v1/ai-interviews/report')).status).toBe(401);
   });
 });

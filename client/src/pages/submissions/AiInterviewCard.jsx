@@ -23,6 +23,17 @@ const OUTCOME_TONE = {
   pending_review: 'bg-warning-100 text-warning-800',
 };
 const SECTION_LABEL = { role: 'Role', aptitude: 'Aptitude' };
+// The marks sheet of a result: per section the score out of 10, the share of the paper, the marks obtained and the maximum marks.
+function marksSheet(parameters = []) {
+  const weightSum = parameters.reduce((sum, p) => sum + (Number(p.weight) || 0), 0) || 1;
+  const rows = parameters.map((p) => {
+    const max = p.max_points != null ? p.max_points : Math.round(((Number(p.weight) || 0) / weightSum) * 10000) / 100;
+    const got = p.points != null ? p.points : Math.round(((p.score / 10) * max) * 100) / 100;
+    return { key: p.key, label: p.label, score: p.score, max, got, scored: p.scored !== false };
+  });
+  const round = (n) => Math.round(n * 100) / 100;
+  return { rows, got: round(rows.reduce((a, r) => a + r.got, 0)), max: round(rows.reduce((a, r) => a + r.max, 0)) };
+}
 const when = (value) => (value ? new Date(value).toLocaleString() : '-');
 
 /**
@@ -56,7 +67,12 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     setBusy(true);
     try { await fn(); } catch (err) { pushError(apiErrorMessage(err, errorMessage), 'Something went wrong'); } finally { setBusy(false); }
   }
-  const copy = (link) => navigator.clipboard?.writeText(link).then(() => pushSuccess('Link copied. Send it to the candidate.', 'Copied')).catch(() => pushError('Could not copy the link', 'Something went wrong'));
+  // The clipboard is not always available (an insecure page, a blocked permission): then the link is shown instead of failing, because it exists either way.
+  const writeClipboard = async (link) => { try { await navigator.clipboard.writeText(link); return true; } catch { return false; } };
+  const copy = async (link) => {
+    if (await writeClipboard(link)) pushSuccess('Link copied. Send it to the candidate.', 'Copied');
+    else pushSuccess(`Link ready (copy it from here or use Copy link): ${link}`, 'Link created');
+  };
 
   const send = () => run(async () => {
     const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId });
@@ -69,7 +85,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     const { data } = await apiClient.post(`/ai-interviews/${live.id}/resend`);
     await load();
     pushSuccess(data.data.emailed ? 'The link was sent to the candidate again and copied for you.' : 'This candidate has no email on file. The link was copied: send it yourself.', 'Link sent again');
-    navigator.clipboard?.writeText(data.data.link).catch(() => {});
+    writeClipboard(data.data.link);
   }, 'Could not send the link again');
 
   // A candidate in the middle of the interview keeps it; a new link starts it again from the first question.
@@ -77,6 +93,16 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     if (!window.confirm('The candidate has already started. A new link starts the interview again from the first question and the current link stops working. Continue?')) return;
     run(async () => {
       const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId, restart: true });
+      await load();
+      copy(data.data.link);
+    }, 'Could not create the new AI interview link');
+  };
+
+  // A finished interview can be sent again (a re-take). The first result stays in the list as "Replaced"; nothing is deleted.
+  const retake = () => {
+    if (!window.confirm('This candidate has already finished the AI interview. A new link lets them take it again. The first result stays in the history as "Replaced". Send a new link?')) return;
+    run(async () => {
+      const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId, retake: true });
       await load();
       copy(data.data.link);
     }, 'Could not create the new AI interview link');
@@ -137,6 +163,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   }, 'Could not change the setting for this requirement');
 
   const canSend = !locked && !switchedOff && (!live || ['not_opened', 'expired'].includes(live.view_status));
+  const canRetake = !locked && !switchedOff && live && ['scored', 'pending_review'].includes(live.view_status);
   const canResend = !locked && !switchedOff && live && ['not_opened', 'in_progress', 'expired'].includes(live.view_status);
   return (
     <section className="rounded-2xl border border-violet-100 bg-violet-50/30 p-4 shadow-soft">
@@ -153,6 +180,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
           )}
           {canResend && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={busy} onClick={resend}><Send className="h-3.5 w-3.5" />Resend link</button>}
           {canResend && live.view_status === 'in_progress' && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={busy} onClick={restart}><RotateCcw className="h-3.5 w-3.5" />Restart with a new link</button>}
+          {canRetake && <button type="button" className="btn-primary inline-flex items-center gap-1 text-xs" data-testid="ai-retake" disabled={busy} onClick={retake}><RotateCcw className="h-3.5 w-3.5" />Send again (re-take)</button>}
           {canSend && <button type="button" className="btn-primary text-xs" disabled={busy} onClick={send}>{live ? 'Send a new link' : 'Send AI interview link'}</button>}
         </div>
       </div>
@@ -190,6 +218,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                 {review.score_percent != null ? <span className="text-2xl font-semibold text-tertiary-900">{review.score_percent}%</span> : <span className="text-tertiary-600">No AI score</span>}
                 <span className="text-xs text-tertiary-500">pass mark {review.pass_percentage}%</span>
                 {review.outcome && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${OUTCOME_TONE[review.outcome]}`}>AI: {OUTCOME_LABEL[review.outcome]}</span>}
+                {review.scores?.level && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800" title="The questions and the scoring were pitched at this level">Level: {review.scores.level.label}{review.scores.level.years != null ? ` (${review.scores.level.years} yrs)` : ''}</span>}
                 {review.override_outcome && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${OUTCOME_TONE[review.override_outcome]}`}>Decided: {OUTCOME_LABEL[review.override_outcome]}</span>}
               </div>
               {review.scores?.decision_reason && <p className="mt-2 rounded-lg bg-tertiary-50 px-3 py-2 text-tertiary-800"><strong>Why:</strong> {review.scores.decision_reason}</p>}
@@ -197,15 +226,51 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
               {review.scores?.summary && <p className="mt-2 text-tertiary-700">{review.scores.summary}</p>}
             </div>
 
+            {review.scores?.parameters?.length > 0 && (() => {
+              const sheet = marksSheet(review.scores.parameters);
+              return (
+                <div data-testid="marks-sheet">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Marks sheet</h3>
+                  <div className="overflow-x-auto rounded-xl border border-tertiary-100">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-tertiary-50 text-left text-xs uppercase tracking-wide text-tertiary-500">
+                        <tr><th className="px-3 py-2">Section</th><th className="px-3 py-2 text-right">Score</th><th className="px-3 py-2 text-right">Maximum marks</th><th className="px-3 py-2 text-right">Marks obtained</th></tr>
+                      </thead>
+                      <tbody>
+                        {sheet.rows.map((r) => (
+                          <tr key={r.key} className="border-t border-tertiary-100">
+                            <td className="px-3 py-2 font-medium text-tertiary-900">{r.label}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{r.scored ? `${r.score} / 10` : 'Not scored'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{r.scored ? r.max : '-'}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{r.scored ? r.got : '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 border-tertiary-200 bg-tertiary-50 font-semibold">
+                          <td className="px-3 py-2" colSpan={2}>Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{sheet.max}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{sheet.got}</td>
+                        </tr>
+                        <tr className="bg-tertiary-50/60 text-xs text-tertiary-600">
+                          <td className="px-3 py-2" colSpan={4}>Pass mark {review.pass_percentage} out of 100 &middot; {review.outcome ? OUTCOME_LABEL[review.outcome] : 'Not scored'}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
             {review.scores?.parameters?.length > 0 && (
               <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Score breakdown</h3>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Section-wise remarks</h3>
                 <div className="space-y-2">
                   {review.scores.parameters.map((p) => (
                     <div key={p.key} className="rounded-lg border border-tertiary-100 px-3 py-2">
                       <div className="flex items-center justify-between">
                         <span className="font-medium text-tertiary-900">{p.label} <span className="text-xs font-normal text-tertiary-400">weight {p.weight}</span></span>
-                        <span className="font-semibold">{p.score}/10</span>
+                        <span className="font-semibold">{p.score}/10{p.points != null && <span className="ml-2 text-xs font-normal text-tertiary-500">{p.points} of {p.max_points} points</span>}</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-tertiary-100"><div className={`h-full ${p.score >= 6 ? 'bg-success-500' : p.score >= 4 ? 'bg-warning-500' : 'bg-danger-500'}`} style={{ width: `${p.score * 10}%` }} /></div>
                       {p.summary && <p className="mt-1 text-xs text-tertiary-700">{p.summary}</p>}
@@ -213,6 +278,21 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {review.scores?.communication_detail?.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">How communication was judged</h3>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {review.scores.communication_detail.map((d) => (
+                    <div key={d.key} className="rounded-lg border border-tertiary-100 px-3 py-2">
+                      <div className="flex items-center justify-between"><span className="font-medium capitalize text-tertiary-900">{d.key}</span><span className="font-semibold">{d.score}/10</span></div>
+                      {d.note && <p className="mt-0.5 text-xs text-tertiary-600">{d.note}</p>}
+                    </div>
+                  ))}
+                </div>
+                {review.scores.answer_facts && <p className="mt-2 text-xs text-tertiary-500">Counted from the answers: {review.scores.answer_facts.answers} answers, {review.scores.answer_facts.average_words} words on average, {review.scores.answer_facts.very_short} very short, {review.scores.answer_facts.skipped} not answered in time.</p>}
               </div>
             )}
 

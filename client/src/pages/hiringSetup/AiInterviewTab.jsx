@@ -17,6 +17,8 @@ const WEIGHTS = [
   { key: 'weight_knowledge', label: 'Role knowledge' },
   { key: 'weight_communication', label: 'Communication' },
   { key: 'weight_depth', label: 'Depth' },
+  { key: 'weight_problem_solving', label: 'Problem solving' },
+  { key: 'weight_experience_fit', label: 'Experience fit' },
   { key: 'weight_aptitude', label: 'Aptitude' },
 ];
 
@@ -94,13 +96,23 @@ export default function AiInterviewTab({ isAdmin }) {
   const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
   const weights = WEIGHTS.filter((w) => w.key !== 'weight_aptitude' || form.aptitude_enabled);
   const total = weights.reduce((s, w) => s + (Number(form[w.key]) || 0), 0);
+  // The marking scheme is out of 100, like an exam paper: each section carries a number of marks. A scheme that does not add up to 100
+  // still works (the result is always worked out out of 100), but is flagged and can be scaled to 100 with one click.
+  function scaleTo100() {
+    if (total <= 0) return;
+    const raw = weights.map((w) => ((Number(form[w.key]) || 0) / total) * 100);
+    const marks = raw.map(Math.floor);
+    let left = 100 - marks.reduce((a, b) => a + b, 0);
+    raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { marks[i] += 1; left -= 1; } });
+    setForm((f) => ({ ...f, ...Object.fromEntries(weights.map((w, i) => [w.key, marks[i]])) }));
+  }
 
   async function save() {
     setBusy(true);
     try {
       const body = {
         ...Object.fromEntries([...NUMBER_FIELDS, ...WEIGHTS, { key: 'aptitude_question_count' }, { key: 'recording_retention_days' }].map((f) => [f.key, Number(form[f.key])])),
-        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject,
+        is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(),
         extra_instructions: (form.extra_instructions || '').trim() || null,
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
@@ -150,12 +162,30 @@ export default function AiInterviewTab({ isAdmin }) {
       </div>
 
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
-        <h3 className="text-sm font-semibold text-tertiary-900">Score weights</h3>
-        <p className="text-xs text-tertiary-500">Each part is scored 0 to 10. The total is the weighted average, so the weights are shares: they need not add to 100.</p>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {weights.map((w) => <NumberField key={w.key} field={{ label: `${w.label} weight`, min: 0, max: 100 }} value={form[w.key]} onChange={set(w.key)} disabled={off} />)}
+        <h3 className="text-sm font-semibold text-tertiary-900">Marking scheme (marks out of 100)</h3>
+        <p className="text-xs text-tertiary-500">Like an exam paper, every section carries marks. Each section is scored 0 to 10 and earns that share of its marks; the total out of 100 is compared with the pass mark. {form.aptitude_enabled ? '' : 'Aptitude is switched off, so its marks are left out and the rest are scaled to 100.'}</p>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {weights.map((w) => <NumberField key={w.key} field={{ label: `${w.label} (marks)`, min: 0, max: 100 }} value={form[w.key]} onChange={set(w.key)} disabled={off} />)}
         </div>
-        <p className="mt-2 text-xs text-tertiary-500">{total > 0 ? weights.map((w) => `${w.label} ${Math.round(((Number(form[w.key]) || 0) / total) * 100)}%`).join(' · ') : 'At least one weight must be above 0.'}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+          <span className={`rounded-full px-2.5 py-1 font-semibold ${total === 100 ? 'bg-success-100 text-success-800' : 'bg-warning-100 text-warning-800'}`} data-testid="marks-total">Total: {total} / 100</span>
+          {total > 0 && total !== 100 && <button type="button" className="text-primary-700 underline" disabled={off} onClick={scaleTo100}>Scale to 100</button>}
+          {total <= 0 && <span className="text-danger-700">At least one section needs marks.</span>}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
+        <h3 className="text-sm font-semibold text-tertiary-900">Questions at the candidate&apos;s level</h3>
+        <p className="text-xs text-tertiary-500">Questions are pitched at the candidate&apos;s own experience: fresher (under 1 year), junior (1 to 3), mid-level (3 to 6), senior (6 to 10) and lead (10 or more). The same level is used when the answers are scored.</p>
+        <div className="mt-3 space-y-3">
+          <Switch checked={form.use_reference_sites} onChange={set('use_reference_sites')} label="Check reference sites while writing questions" hint="The interviewer reads only the sites below (through the AI web search) to get syntax and definitions right. It writes its own questions and never copies from them. If the web search is not available the interview works exactly the same without it." />
+          {form.use_reference_sites && (
+            <div className="max-w-xl">
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Reference sites (domain names, up to 5)</label>
+              <input className={FIELD_INPUT} value={form.reference_sites || ''} disabled={off} maxLength={300} placeholder="w3schools.com, javatpoint.com" onChange={(e) => set('reference_sites')(e.target.value)} />
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
