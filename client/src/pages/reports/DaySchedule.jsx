@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const toMin = (hhmm) => {
@@ -53,7 +54,9 @@ export default function DaySchedule() {
   const [shownProjects, setShownProjects] = useState(null); // null = all with hours
   const [shownShifts, setShownShifts] = useState(null);
   const [showPeople, setShowPeople] = useState(true);
-  const [q, setQ] = useState('');
+  // Two multi-select filters that work together: the projects to draw and the employees to show under their shifts (empty = everyone).
+  const [selProjects, setSelProjects] = useState([]);
+  const [selPeople, setSelPeople] = useState([]);
 
   useEffect(() => {
     apiClient.get('/reports/day-schedule').then((res) => setData(res.data.data), (e) => pushError(apiErrorMessage(e, 'Could not load the schedule'), 'Load failed'));
@@ -69,7 +72,15 @@ export default function DaySchedule() {
     else next.add(id);
     setSet(next);
   };
-  const needle = q.trim().toLowerCase();
+  const projectOptions = useMemo(() => withHours.map((p) => ({ id: p.id, label: `${p.code ? `${p.code} ` : ''}${p.name}`, hint: p.client || undefined })), [withHours]);
+  const peopleOptions = useMemo(() => {
+    const seen = new Map();
+    (data?.shifts || []).forEach((sh) => sh.people.forEach((p) => { if (!seen.has(p.id)) seen.set(p.id, { id: p.id, label: p.name, hint: [p.employee_code, sh.name].filter(Boolean).join(' · ') }); }));
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [data]);
+  const projectFilter = selProjects.length > 0;
+  const peopleFilter = selPeople.length > 0;
+  const projectVisible = (id) => (!projectFilter || selProjects.includes(id)) && pOn(id);
   const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
 
   if (!data) return <div className="py-10 text-center text-sm text-tertiary-500">Loading…</div>;
@@ -79,13 +90,15 @@ export default function DaySchedule() {
   return (
     <div className="space-y-4" data-testid="day-schedule">
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card">
+        <div className="w-64"><MultiSelectDropdown value={selProjects} onChange={setSelProjects} options={projectOptions} placeholder="All projects" searchPlaceholder="Search projects…" emptyMessage="No project has working hours yet." /></div>
+        <div className="w-64"><MultiSelectDropdown value={selPeople} onChange={setSelPeople} options={peopleOptions} placeholder="All employees" searchPlaceholder="Search employees…" emptyMessage="No employee is on a shift yet." /></div>
+        {(projectFilter || peopleFilter) && <button type="button" className="text-xs text-primary-700 underline" onClick={() => { setSelProjects([]); setSelPeople([]); }}>Clear filters</button>}
         <span className="text-sm font-medium text-tertiary-800">Show:</span>
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownProjects(new Set(allProjectIds))}>All projects</button>
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownProjects(new Set())}>No projects</button>
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownShifts(new Set(allShiftIds))}>All shifts</button>
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownShifts(new Set())}>No shifts</button>
         <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={showPeople} onChange={(e) => setShowPeople(e.target.checked)} />Show employees under each shift</label>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an employee…" aria-label="Find an employee" className="ml-auto rounded-xl border px-3 py-1.5 text-sm" />
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
@@ -102,23 +115,24 @@ export default function DaySchedule() {
 
             <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Projects — working hours</h3>
             {withHours.length === 0 && <p className="py-2 text-sm text-tertiary-500">No project has working hours yet. Set Work start / end time in Finance &gt; Projects.</p>}
-            {withHours.map((p) => (
-              <Row key={p.id} name={`${p.code ? `${p.code} ` : ''}${p.name}`} sub={`${p.client || 'No client'} · ${p.start}–${p.end} (${span(p.start, p.end)})`} checked={pOn(p.id)} onToggle={() => toggle(shownProjects, setShownProjects, allProjectIds, p.id)}>
-                <Track segs={pOn(p.id) ? segments(p.start, p.end) : []} tone={p.on_hold ? 'bg-amber-400/80' : 'bg-primary-500'} label={`${p.name} ${p.start} to ${p.end}`} />
+            {withHours.filter((p) => !projectFilter || selProjects.includes(p.id)).map((p) => (
+              <Row key={p.id} name={`${p.code ? `${p.code} ` : ''}${p.name}`} sub={`${p.client || 'No client'} · ${p.start}–${p.end} (${span(p.start, p.end)})`} checked={projectVisible(p.id)} onToggle={() => toggle(shownProjects, setShownProjects, allProjectIds, p.id)}>
+                <Track segs={projectVisible(p.id) ? segments(p.start, p.end) : []} tone={p.on_hold ? 'bg-amber-400/80' : 'bg-primary-500'} label={`${p.name} ${p.start} to ${p.end}`} />
               </Row>
             ))}
 
             <h3 className="mb-1 mt-5 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Employee shifts</h3>
             {data.shifts.length === 0 && <p className="py-2 text-sm text-tertiary-500">No shifts are set up yet (HR settings).</p>}
+            {peopleFilter && data.shifts.length > 0 && !data.shifts.some((sh) => sh.people.some((p) => selPeople.includes(p.id))) && <p className="py-2 text-sm text-tertiary-500">None of the selected employees is on a shift.</p>}
             {data.shifts.map((s) => {
-              const people = needle ? s.people.filter((p) => p.name.toLowerCase().includes(needle)) : s.people;
-              if (needle && people.length === 0) return null;
+              const people = peopleFilter ? s.people.filter((p) => selPeople.includes(p.id)) : s.people;
+              if (peopleFilter && people.length === 0) return null;
               return (
                 <div key={s.id}>
                   <Row name={s.name} sub={`${s.start}–${s.end} (${span(s.start, s.end)}) · ${s.people.length} ${s.people.length === 1 ? 'person' : 'people'}`} checked={sOn(s.id)} onToggle={() => toggle(shownShifts, setShownShifts, allShiftIds, s.id)}>
                     <Track segs={sOn(s.id) ? segments(s.start, s.end) : []} tone="bg-emerald-500" label={`${s.name} ${s.start} to ${s.end}`} />
                   </Row>
-                  {sOn(s.id) && (showPeople || needle) && people.map((p) => (
+                  {sOn(s.id) && (showPeople || peopleFilter) && people.map((p) => (
                     <Row key={p.id} indent name={p.name} sub={[p.employee_code, p.team].filter(Boolean).join(' · ')}>
                       <Track segs={segments(s.start, s.end)} tone="bg-emerald-300" label={`${p.name} ${s.start} to ${s.end}`} />
                     </Row>

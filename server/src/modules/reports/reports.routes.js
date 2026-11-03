@@ -258,6 +258,13 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await closureMatrixService.closureMatrix(req.user.org_id, req.query)))
 );
 
+// The records behind one number of the closure matrix (a cell, a row or column total, the grand total): the same filters plus ?account_id= and ?month=.
+router.get(
+  '/closure-matrix/records',
+  authorize('admin', 'sales', 'bda'),
+  asyncHandler(async (req, res) => ok(res, await closureMatrixService.closureRecords(req.user.org_id, req.query)))
+);
+
 router.get(
   '/day-schedule',
   authorize('admin', 'sales', 'bda', 'recruiter'),

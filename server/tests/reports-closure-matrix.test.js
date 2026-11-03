@@ -121,3 +121,70 @@ describe('GET /ai-interviews/report', () => {
     expect((await get(`/ai-interviews/report?requirement_id=${reqA.id}&q=ben`)).body.data.rows).toHaveLength(1);
   });
 });
+
+describe('GET /reports/closure-matrix/records (every number is clickable)', () => {
+  const base = (kind, extra = '') => `/reports/closure-matrix/records?kind=${kind}&date_from=2026-01-01&date_to=2026-03-31${extra}`;
+  const matrix = async (kind, extra = '') => (await get(`/reports/closure-matrix?kind=${kind}&date_from=2026-01-01&date_to=2026-03-31${extra}`)).body.data;
+
+  test('projects: a cell, a row total, a column total and the grand total list exactly the records behind the number', async () => {
+    const acme = await mkAccount({ name: 'Acme', stage: 'active' });
+    const beta = await mkAccount({ name: 'Beta', stage: 'lead' });
+    const mkProject = (client, start, category, name) => mkAccount({ name, is_project: true, client_account_id: client ? client.id : null, agreement_start_date: new Date(`${start}T00:00:00Z`), service_category: category });
+    const p1 = await mkProject(acme, '2026-01-10', 'managed_services', 'Alpha build');
+    await mkProject(acme, '2026-01-20', 'project', 'Alpha two');
+    await mkProject(acme, '2026-03-05', 'managed_services', 'Alpha three');
+    await mkProject(beta, '2026-02-01', 'project', 'Beta one');
+    await mkProject(null, '2026-02-15', 'project', 'Orphan');
+    const m = await matrix('client');
+
+    const cell = (await get(base('client', `&account_id=${acme.id}&month=2026-01`))).body.data;
+    expect(cell.total).toBe(2);
+    expect(cell.total).toBe(m.rows.find((r) => r.name === 'Acme').counts['2026-01']);
+    expect(cell.records.map((r) => r.title).sort()).toEqual(['Alpha build', 'Alpha two']);
+    expect(cell.records.find((r) => r.id === p1.id)).toMatchObject({ kind: 'project', party: 'Acme', date: '2026-01-10', date_label: 'Agreement start', path: `/projects/${p1.id}` });
+
+    const row = (await get(base('client', `&account_id=${acme.id}`))).body.data;
+    expect(row.total).toBe(m.rows.find((r) => r.name === 'Acme').total); // 3
+    const column = (await get(base('client', '&month=2026-02'))).body.data;
+    expect(column.total).toBe(m.totals['2026-02']); // Beta one + the project with no client
+    const all = (await get(base('client'))).body.data;
+    expect(all.total).toBe(m.grand_total);
+    expect(all.records).toHaveLength(5);
+    // the "not linked to a client" row
+    expect((await get(base('client', '&account_id=none'))).body.data.records.map((r) => r.title)).toEqual(['Orphan']);
+    // the filters of the report carry into the list: the same type narrows both
+    const typed = (await get(base('client', `&account_id=${acme.id}&month=2026-01&req_type=managed_services`))).body.data;
+    expect(typed.records.map((r) => r.title)).toEqual(['Alpha build']);
+    expect(typed.total).toBe((await matrix('client', '&req_type=managed_services')).rows.find((r) => r.name === 'Acme').counts['2026-01']);
+    // newest first
+    expect(all.records.map((r) => r.date)).toEqual([...all.records.map((r) => r.date)].sort().reverse());
+  });
+
+  test('joinings and closed requirements link to the candidate / requirement; vendors work the same way', async () => {
+    const client = await mkAccount({ name: 'Acme' });
+    const vendor = await mkAccount({ name: 'Vend Co', type: 'vendor' });
+    const requirement = await mkJoining(client.id, vendor.id, '2026-02-12');
+    await mkJoining(client.id, null, '2026-02-20');
+    const closed = await prisma.requirement.create({ data: { org_id: org.id, account_id: client.id, title: 'Closed role', req_type: 'recruitment', sales_owner_id: admin.id, status: 'closed', closed_at: new Date('2026-03-10T05:00:00Z') } });
+
+    const joined = (await get(base('client', `&measure=joinings&account_id=${client.id}&month=2026-02`))).body.data;
+    expect(joined.total).toBe(2);
+    expect(joined.records[0]).toMatchObject({ kind: 'joining', party: 'Acme', date_label: 'Joined on' });
+    expect(joined.records[0].path).toMatch(/^\/submissions\/[0-9a-f-]{36}$/);
+    expect(joined.records.map((r) => r.subtitle)).toContain(requirement.title);
+
+    const vendors = (await get(base('vendor', `&account_id=${vendor.id}`))).body.data;
+    expect(vendors.total).toBe(1);
+    expect(vendors.records[0]).toMatchObject({ party: 'Vend Co', date: '2026-02-12' });
+    expect(vendors.total).toBe((await matrix('vendor')).rows.find((r) => r.name === 'Vend Co').total);
+
+    const reqs = (await get(base('client', `&measure=requirements&account_id=${client.id}&month=2026-03`))).body.data;
+    expect(reqs.records).toEqual([expect.objectContaining({ kind: 'requirement', id: closed.id, title: 'Closed role', path: `/requirements/${closed.id}`, date_label: 'Closed on' })]);
+  });
+
+  test('bad input and no login are refused', async () => {
+    expect((await get(base('client', '&month=2026-13x'))).status).toBe(422);
+    expect((await get(base('client', '&account_id=not-a-uuid'))).status).toBe(422);
+    expect((await request(app).get(`/api/v1${base('client')}`)).status).toBe(401);
+  });
+});
