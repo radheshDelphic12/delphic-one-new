@@ -8,7 +8,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 
 const MEASURES = [
-  { value: 'projects', label: 'Projects won', hint: 'Requirement tickets marked Won (closed), by the date they were won' },
+  { value: 'projects', label: 'Projects won', hint: 'Requirements with a closed candidate, counted once per requirement in the month the seat was closed (same as the Monthly Performance Review)' },
   { value: 'joinings', label: 'Candidates joined', hint: 'Candidates who joined on the client’s requirements, by joining date' },
 ];
 const TYPES = [

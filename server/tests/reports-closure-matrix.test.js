@@ -15,7 +15,16 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-const mkWon = (client, day, reqType, title) => prisma.requirement.create({ data: { org_id: org.id, account_id: client.id, title: title || unique('Won '), req_type: reqType, sales_owner_id: admin.id, status: 'closed', closed_at: new Date(`${day}T06:00:00Z`) } });
+// A won project = a requirement with a closed candidate (seat closed on `day`), as the Monthly Performance Review counts it.
+async function mkWon(client, day, reqType, title, { candidates = 1 } = {}) {
+  const requirement = await prisma.requirement.create({ data: { org_id: org.id, account_id: client.id, title: title || unique('Won '), req_type: reqType, sales_owner_id: admin.id, status: 'closed', closed_at: new Date(`${day}T06:00:00Z`) } });
+  for (let i = 0; i < candidates; i += 1) {
+    const seat = await prisma.requirementSeat.create({ data: { requirement_id: requirement.id, closed_at: new Date(`${day}T06:00:00Z`) } });
+    const profile = await prisma.profile.create({ data: { org_id: org.id, name: unique('Won cand '), source: 'direct', added_by: admin.id, total_experience_years: 3, primary_skills: ['x'] } });
+    await prisma.submission.create({ data: { requirement_seat_id: seat.id, profile_id: profile.id, stage: 'closed', submitted_by: admin.id } });
+  }
+  return requirement;
+}
 const get = (path) => authed(request(app).get(`/api/v1${path}`), adminToken);
 const mkAccount = (over = {}) => prisma.account.create({ data: { org_id: org.id, type: 'client', name: unique('Client '), stage: 'active', owner_id: admin.id, origin_owner_id: admin.id, ...over } });
 
@@ -71,7 +80,7 @@ describe('GET /reports/closure-matrix', () => {
     expect(joinings.rows[0]).toMatchObject({ name: 'Acme', total: 2, counts: { '2026-02': 2 } });
     expect((await get('/reports/closure-matrix?kind=client&measure=joinings&req_type=managed_services&date_from=2026-01-01&date_to=2026-02-28')).body.data.grand_total).toBe(1);
     const closed = (await get('/reports/closure-matrix?kind=client&measure=requirements&date_from=2026-01-01&date_to=2026-02-28')).body.data;
-    expect(closed.rows[0]).toMatchObject({ name: 'Acme', total: 1 });
+    expect(closed.rows[0]).toMatchObject({ name: 'Acme', total: 2 }); // both requirements have a closed candidate in February
 
     const vendors = (await get('/reports/closure-matrix?kind=vendor&date_from=2026-01-01&date_to=2026-02-28')).body.data;
     expect(vendors.measure).toBe('joinings');
@@ -159,12 +168,23 @@ describe('GET /reports/closure-matrix/records (every number is clickable)', () =
     expect(all.records.map((r) => r.date)).toEqual([...all.records.map((r) => r.date)].sort().reverse());
   });
 
+  test('projects won match the Monthly Performance Review: once per requirement, month of the seat closing, a closed ticket alone does not count', async () => {
+    const acme = await mkAccount({ name: 'Acme' });
+    await mkWon(acme, '2026-01-31', 'recruitment', 'Two hires', { candidates: 2 });
+    // requirement marked closed in March but no candidate closed: not a project won
+    await prisma.requirement.create({ data: { org_id: org.id, account_id: acme.id, title: 'No hire', req_type: 'recruitment', sales_owner_id: admin.id, status: 'closed', closed_at: new Date('2026-03-05T06:00:00Z') } });
+    // closed candidate with no seat closing date: counted in the joining month
+    await mkJoining(acme.id, null, '2026-02-12');
+    const d = (await get('/reports/closure-matrix?kind=client&date_from=2026-01-01&date_to=2026-03-31')).body.data;
+    expect(d.rows[0]).toMatchObject({ name: 'Acme', total: 2, counts: { '2026-01': 1, '2026-02': 1 } });
+  });
+
   test('joinings and closed requirements link to the candidate / requirement; vendors work the same way', async () => {
     const client = await mkAccount({ name: 'Acme' });
     const vendor = await mkAccount({ name: 'Vend Co', type: 'vendor' });
     const requirement = await mkJoining(client.id, vendor.id, '2026-02-12');
     await mkJoining(client.id, null, '2026-02-20');
-    const closed = await prisma.requirement.create({ data: { org_id: org.id, account_id: client.id, title: 'Closed role', req_type: 'recruitment', sales_owner_id: admin.id, status: 'closed', closed_at: new Date('2026-03-10T05:00:00Z') } });
+    const closed = await mkWon(client, '2026-03-10', 'recruitment', 'Closed role');
 
     const joined = (await get(base('client', `&measure=joinings&account_id=${client.id}&month=2026-02`))).body.data;
     expect(joined.total).toBe(2);

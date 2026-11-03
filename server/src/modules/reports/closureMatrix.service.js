@@ -2,13 +2,12 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 
 // Client-wise / vendor-wise matrix: one row per client (or vendor) of every stage, one column per month, a count in each cell.
-//   Client measures: projects (a project won = a contract added in Finance > Projects, by its agreement start date, else the day it was
-//   created), joinings (candidates who joined on the client's requirements, by joining date), requirements (requirements closed).
+//   Client measures: projects (a project won = a requirement with a closed candidate, once per requirement and month, as in the Monthly
+//   Performance Review), joinings (candidates who joined on the client's requirements, by joining date), requirements (same as projects).
 //   Vendor measure: joinings (candidates sourced from the vendor who joined, by joining date).
 // Every count is clickable: closureRecords() returns the records behind a cell, a row total, a column total or the grand total, built
 // from the very same events as the counts, so the list always agrees with the number that was clicked.
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const IST_OFFSET_MS = 330 * 60 * 1000;
 const RECORDS_LIMIT = 1000;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const optionalEnum = (values) => z.preprocess((v) => (v === '' ? undefined : v), z.enum(values).optional());
@@ -33,11 +32,6 @@ const recordsSchema = matrixSchema.extend({
   month: z.preprocess((v) => (v === '' ? undefined : v), z.string().regex(/^\d{4}-\d{2}$/).optional()),
 });
 
-const istMonth = (value) => {
-  const d = new Date(new Date(value).getTime() + IST_OFFSET_MS);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-};
-const istDay = (value) => new Date(new Date(value).getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 const plainMonth = (value) => new Date(value).toISOString().slice(0, 7);
 const plainDay = (value) => new Date(value).toISOString().slice(0, 10);
 
@@ -61,11 +55,8 @@ function monthsBetween(from, to) {
 async function collect(orgId, q) {
   const measure = q.kind === 'vendor' ? 'joinings' : q.measure === 'requirements' ? 'projects' : q.measure || 'projects';
   const months = monthsBetween(q.date_from, q.date_to);
-  const first = new Date(`${months[0].key}-01T00:00:00.000+05:30`);
   const lastKey = months[months.length - 1].key;
   const [ly, lm] = lastKey.split('-').map(Number);
-  const end = new Date(new Date(`${ly + (lm === 12 ? 1 : 0)}-${String(lm === 12 ? 1 : lm + 1).padStart(2, '0')}-01T00:00:00.000+05:30`).getTime() - 1);
-  const inRange = { gte: first, lte: end };
 
   // Row owners: every client (or vendor) of the company, whatever its stage. Projects themselves are listed through their client.
   const accountWhere = {
@@ -91,13 +82,25 @@ async function collect(orgId, q) {
   };
 
   if (measure === 'projects' || measure === 'requirements') {
-    // "Projects won" = requirement tickets marked Won (closed), counted in the month they were closed
-    const reqs = await prisma.requirement.findMany({
-      where: { status: 'closed', closed_at: inRange, account: { org_id: orgId }, ...(q.req_type ? { req_type: q.req_type } : {}) },
-      select: { id: true, title: true, req_type: true, account_id: true, closed_at: true },
+    // "Projects won" follows the Monthly Performance Review: a requirement is won when a candidate on it is closed, counted once per
+    // requirement in the month that seat was closed (else the candidate's joining date). Months are UTC months, as in that report.
+    const utcRange = { gte: new Date(`${months[0].key}-01T00:00:00.000Z`), lte: new Date(Date.UTC(ly, lm, 0, 23, 59, 59, 999)) };
+    const won = await prisma.submission.findMany({
+      where: {
+        stage: 'closed',
+        OR: [{ seat: { closed_at: utcRange } }, { seat: { closed_at: null }, actual_joining_date: utcRange }],
+        seat: { requirement: { deleted_at: null, account: { deleted_at: null, org_id: orgId }, ...(q.req_type ? { req_type: q.req_type } : {}) } },
+      },
+      select: { actual_joining_date: true, seat: { select: { closed_at: true, requirement: { select: { id: true, title: true, req_type: true, account_id: true } } } } },
     });
-    for (const r of reqs) {
-      add(r.account_id, istMonth(r.closed_at), { kind: 'requirement', id: r.id, title: r.title, subtitle: r.req_type ? r.req_type.replace(/_/g, ' ') : null, date: istDay(r.closed_at), date_label: 'Won on', path: `/requirements/${r.id}` });
+    const seen = new Set();
+    for (const s of won) {
+      const r = s.seat?.requirement;
+      const when = s.seat.closed_at || s.actual_joining_date;
+      const key = `${r?.id}|${plainMonth(when)}`;
+      if (!r || seen.has(key)) continue;
+      seen.add(key);
+      add(r.account_id, plainMonth(when), { kind: 'requirement', id: r.id, title: r.title, subtitle: r.req_type ? r.req_type.replace(/_/g, ' ') : null, date: plainDay(when), date_label: 'Won on', path: `/requirements/${r.id}` });
     }
   } else {
     const subs = await prisma.submission.findMany({
