@@ -52,7 +52,7 @@ export default function AiInterviewReport() {
   const [requirementId, setRequirementId] = useState('');
   const [status, setStatus] = useState('');
   const [outcome, setOutcome] = useState('');
-  const [attempted, setAttempted] = useState(true);
+  const [attempted, setAttempted] = useState(false); // every link that was sent is listed; tick to see only those who started
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [requirements, setRequirements] = useState([]);
@@ -163,7 +163,7 @@ export default function AiInterviewReport() {
                 <td className="px-3 py-2 text-right"><Link to={`/submissions/${r.submission_id}`} className="text-sm font-medium text-primary-700 hover:underline">Open submission</Link></td>
               </tr>
             ))}
-            {data && data.rows.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-tertiary-500">No one has attempted an AI interview in this selection.</td></tr>}
+            {data && data.rows.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-tertiary-500">No AI interview matches this selection.</td></tr>}
           </tbody>
         </table>
       </div>
