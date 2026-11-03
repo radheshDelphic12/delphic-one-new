@@ -39,3 +39,11 @@ Won requirements (Sales) count in the month the candidate was **closed** (the da
 - **Joining status** (derived, no column): `joining_status` on every submission = `pending` (closed, no actual joining date), `set`, or null (not closed). Badge "Joining date pending" on the candidate pipeline card, Submissions list and detail page; filter `joining=pending|set` on Submissions and the candidate pipeline.
 - **Joining date can be cleared:** date fields on a submission use `nullableDate` (null or empty clears; a missing field leaves it alone). A closed (locked) ticket accepts a PATCH carrying only `actual_joining_date` (lockCheck `allowFields`); the detail page has a "Joining date" panel for it. Closing no longer stamps today on the seat's `joined_at`; it follows the actual joining date.
 - **Premium customer:** the flag lives on the client account. Shown as a "Premium" tag and filtered (`premium=yes|no`) on Accounts, Requirements list, the requirement board and matrix, the lead pipeline, the job pipeline, the candidate pipeline and the Submissions list.
+
+## Client-wise closures "Projects won" uses the same rule (2026-11-03, commit 1fe6e5c)
+Reports > Client-wise closures > measure "Projects won" (and "Requirements") counts exactly like Won (brought / owned) above: a requirement is won when a
+candidate on it is closed, counted once per requirement in the month the seat was closed (else the joining date), UTC months, requirements and
+accounts not deleted. A requirement only marked closed, with no closed candidate, is not counted. The report is per client (every requirement),
+the review is per person, so compare totals: the sum of everyone's Won (brought) equals the closures total when every client has an origin owner;
+Won (owned) can be lower where a requirement has no sales owner. Code: `server/src/modules/reports/closureMatrix.service.js` (`collect`); test
+`server/tests/reports-closure-matrix.test.js`. Staging check 2026-11-03: Sep 2026 closures 4 = Won (brought) 4, Won (owned) 3.
