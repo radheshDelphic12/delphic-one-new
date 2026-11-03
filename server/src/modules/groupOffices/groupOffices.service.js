@@ -18,10 +18,13 @@ const groupOrgs = (groupIds) => prisma.org.findMany({
 });
 
 // The people counted: by default everyone still working (active, serving notice, on leave), narrowed like the Offices page.
+// The group superadmin has a membership in every company only to open it; they belong to the group, not to a company's headcount
+// (the same rule as the org chart and the group finance headcount), so they are left out of every count here.
 function peopleWhere(orgIds, f = {}) {
   const status = STATUSES.includes(f.status) ? f.status : 'working';
   return {
     org_id: { in: orgIds },
+    person: { is_group_superadmin: false },
     ...(status === 'all' ? {} : { employment_status: status === 'working' ? { in: WORKING_STATUSES } : status }),
     ...(WORK_MODES.includes(f.work_mode) ? { work_mode: f.work_mode === 'not_set' ? null : f.work_mode } : {}),
     ...(USER_TYPES.includes(f.user_type) ? { worker_type: f.user_type } : {}),
@@ -32,11 +35,28 @@ function peopleWhere(orgIds, f = {}) {
 async function overview(groupIds, filters = {}) {
   const companies = await groupOrgs(groupIds);
   const orgIds = companies.map((o) => o.id);
-  const [locations, counts] = await Promise.all([
+  const [locations, members] = await Promise.all([
     prisma.location.findMany({ where: { org_id: { in: orgIds } }, orderBy: [{ is_default: 'desc' }, { name: 'asc' }] }),
-    prisma.orgMembership.groupBy({ by: ['org_id', 'location_id'], where: peopleWhere(orgIds, filters), _count: { _all: true } }),
+    prisma.orgMembership.findMany({ where: peopleWhere(orgIds, filters), select: { person_id: true, org_id: true, location_id: true } }),
   ]);
-  const count = new Map(counts.map((c) => [`${c.org_id}|${c.location_id || 'none'}`, c._count._all]));
+  // A company's own table counts its memberships. The group-wide numbers count each PERSON once: someone who is a member of several
+  // companies (an admin, a shared employee) is one person in the group, not one per company.
+  const count = new Map();
+  const allPeople = new Set();
+  const noOfficePeople = new Set();
+  const officePeople = new Map(); // office name (lower case) -> Set of person ids
+  const nameOf = new Map(locations.map((l) => [l.id, l.name.trim().toLowerCase()]));
+  members.forEach((m) => {
+    const key = `${m.org_id}|${m.location_id || 'none'}`;
+    count.set(key, (count.get(key) || 0) + 1);
+    allPeople.add(m.person_id);
+    if (!m.location_id) noOfficePeople.add(m.person_id);
+    else if (nameOf.has(m.location_id)) {
+      const name = nameOf.get(m.location_id);
+      if (!officePeople.has(name)) officePeople.set(name, new Set());
+      officePeople.get(name).add(m.person_id);
+    }
+  });
 
   const rollup = new Map(); // office name (case-insensitive) -> { name, people_count, companies: [{ org, people_count }] }
   const rows = companies.map((org) => {
@@ -45,7 +65,6 @@ async function overview(groupIds, filters = {}) {
       const key = l.name.trim().toLowerCase();
       if (!rollup.has(key)) rollup.set(key, { name: l.name, people_count: 0, companies: [] });
       const r = rollup.get(key);
-      r.people_count += people_count;
       r.companies.push({ org_id: org.id, org: org.name, people_count });
       return { id: l.id, name: l.name, city: l.city, country: l.country, address: l.address, is_default: l.is_default, people_count };
     });
@@ -58,12 +77,14 @@ async function overview(groupIds, filters = {}) {
     };
   });
 
+  rollup.forEach((r, key) => { r.people_count = officePeople.get(key)?.size || 0; });
+
   return {
     totals: {
       companies: rows.length,
       offices: rows.reduce((s, c) => s + c.locations.length, 0),
-      people: rows.reduce((s, c) => s + c.total_people, 0),
-      no_office: rows.reduce((s, c) => s + c.no_office_count, 0),
+      people: allPeople.size,
+      no_office: noOfficePeople.size,
     },
     by_office: [...rollup.values()].sort((a, b) => b.people_count - a.people_count || a.name.localeCompare(b.name)),
     companies: rows,
@@ -99,24 +120,34 @@ async function people(groupIds, { org_id, location_id, office_name, ...filters }
       location: { select: { name: true } },
     },
   });
-  return {
-    total: rows.length,
-    items: rows.map((m) => ({
-      membership_id: m.id,
-      org_id: m.org_id,
-      user_id: m.person.id,
-      name: m.person.name,
-      email: m.person.email,
-      company: names.get(m.org_id) || '',
-      employee_code: m.employee_code,
-      designation: m.designation?.name || null,
-      department: m.department?.name || m.person.department?.name || null,
-      office: m.location?.name || null,
-      employment_status: m.employment_status,
-      work_mode: m.work_mode,
-      worker_type: m.worker_type,
-    })),
-  };
+  const mapped = rows.map((m) => ({
+    membership_id: m.id,
+    org_id: m.org_id,
+    user_id: m.person.id,
+    name: m.person.name,
+    email: m.person.email,
+    company: names.get(m.org_id) || '',
+    employee_code: m.employee_code,
+    designation: m.designation?.name || null,
+    department: m.department?.name || m.person.department?.name || null,
+    office: m.location?.name || null,
+    employment_status: m.employment_status,
+    work_mode: m.work_mode,
+    worker_type: m.worker_type,
+  }));
+  // Across the whole group a person who belongs to several companies is listed once (with every company), so the list matches the
+  // count it was opened from. Inside one company each membership is already one person.
+  let items = mapped;
+  if (!org_id) {
+    const byPerson = new Map();
+    mapped.forEach((m) => {
+      const seen = byPerson.get(m.user_id);
+      if (!seen) byPerson.set(m.user_id, { ...m, companies: [m.company] });
+      else if (!seen.companies.includes(m.company)) seen.companies.push(m.company);
+    });
+    items = [...byPerson.values()].map(({ companies, ...m }) => ({ ...m, company: companies.join(', ') }));
+  }
+  return { total: items.length, items };
 }
 
 // A company must belong to the caller's group before anything is written to it.

@@ -65,9 +65,9 @@ describe('group offices', () => {
     const a = companies.find((c) => c.org.name === 'Alpha Global');
     expect(a.locations.find((l) => l.name === 'Indore').people_count).toBe(2); // the exited person is not counted
     expect(a.locations.find((l) => l.name === 'Gurgaon').people_count).toBe(1);
-    // no office: the group superadmin, the company admin and 'No Office Person'
-    expect(a.no_office_count).toBe(3);
-    expect(a.total_people).toBe(2 + 1 + 3);
+    // no office: the company admin and 'No Office Person'; the group superadmin is not part of a company's headcount
+    expect(a.no_office_count).toBe(2);
+    expect(a.total_people).toBe(2 + 1 + 2);
     expect(totals).toMatchObject({ companies: 2, offices: 3 });
     // one row per office name across the group: Indore = 2 (Alpha) + 1 (Beta)
     const indore = by_office.find((o) => o.name.toLowerCase() === 'indore');
@@ -78,6 +78,42 @@ describe('group offices', () => {
     expect(all.body.data.companies.find((c) => c.org.name === 'Alpha Global').locations.find((l) => l.name === 'Indore').people_count).toBe(3);
     const hybrid = await get('?work_mode=onsite');
     expect(hybrid.body.data.totals.people).toBe(0);
+  });
+
+  test('group-wide counts count each person once: the group superadmin is left out and a person in several companies is one', async () => {
+    const aGurugram = await loc(alpha, 'Gurugram');
+    const bGurugram = await loc(beta, 'Gurugram');
+    await person(alpha, aGurugram, 'Solo Asha');
+    // one admin who is a member of BOTH companies, placed in Gurugram in each
+    const shared = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: shared.id }, data: { name: 'Shared Admin' } });
+    for (const [org, office] of [[alpha, aGurugram], [beta, bGurugram]]) {
+      const m = await createOrgMembership(shared.id, org.id, { role: 'admin' });
+      await prisma.orgMembership.update({ where: { id: m.id }, data: { location_id: office.id } });
+    }
+    // the group superadmin also has a membership in each company, in Gurugram
+    const su = await prisma.user.findFirst({ where: { is_group_superadmin: true } });
+    for (const [org, office] of [[alpha, aGurugram], [beta, bGurugram]]) {
+      const have = await prisma.orgMembership.findFirst({ where: { person_id: su.id, org_id: org.id } });
+      const m = have || await createOrgMembership(su.id, org.id, { role: 'admin' });
+      await prisma.orgMembership.update({ where: { id: m.id }, data: { location_id: office.id } });
+    }
+
+    const { totals, by_office, companies } = (await get('')).body.data;
+    const row = by_office.find((o) => o.name === 'Gurugram');
+    expect(row.people_count).toBe(2); // Solo Asha + Shared Admin, once each; not the group superadmin, not the admin twice
+    // each company's own table still shows who sits in it
+    expect(companies.find((c) => c.org.id === alpha.id).locations.find((l) => l.name === 'Gurugram').people_count).toBe(2);
+    expect(companies.find((c) => c.org.id === beta.id).locations.find((l) => l.name === 'Gurugram').people_count).toBe(1);
+    // headcount: Solo Asha, Shared Admin and the plain company admin of Alpha (no office) = 3 people, not 5
+    expect(totals.people).toBe(3);
+    expect(totals.no_office).toBe(1);
+
+    const drawer = await get('/people?office_name=gurugram');
+    expect(drawer.body.data.total).toBe(2);
+    const names = drawer.body.data.items.map((i) => i.name).sort();
+    expect(names).toEqual(['Shared Admin', 'Solo Asha']);
+    expect(drawer.body.data.items.find((i) => i.name === 'Shared Admin').company).toMatch(/Alpha Global.*Beta Trading|Beta Trading.*Alpha Global/);
   });
 
   test('the people behind a count: one office, no office, or one office name across the group', async () => {

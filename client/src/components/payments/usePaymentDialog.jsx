@@ -34,6 +34,9 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
     setError('');
     setV({ amount: config.initialAmount !== undefined ? String(config.initialAmount) : config.amount ? String(config.amount) : '', date: today(), exchange_rate: '', bank_charges: '', other_deductions: '', deduction_notes: '', notes: '', track: false, wallet_id: '', mode: 'neft', ...(config.initial || {}) });
     setSaving(false);
+    // The wallets belong to the company the popup is opened in. This popup is mounted once for the whole app, so a list kept from
+    // an earlier opening (another company, before a switch) must never be reused: load it again on every opening.
+    setWallets(null);
     if (foreign) {
       apiClient.get('/billing/exchange-rates').then((r) => {
         const row = (r.data.data || []).find((x) => x.currency === currency);
@@ -44,7 +47,10 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
   }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (open && v.track && wallets === null) apiClient.get('/wallets/mine').then((r) => setWallets(r.data.data || [])).catch(() => setWallets([]));
+    if (!open || !v.track || wallets !== null) return undefined;
+    let current = true; // a slow answer for an earlier opening must not overwrite this one
+    apiClient.get('/wallets/mine').then((r) => { if (current) setWallets(r.data.data || []); }).catch(() => { if (current) setWallets([]); });
+    return () => { current = false; };
   }, [open, v.track, wallets]);
 
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));

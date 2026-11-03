@@ -119,7 +119,7 @@ export default function GroupCompaniesTab() {
   const setRow = (i, patch) => setStakeEditor((p) => ({ ...p, rows: p.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) }));
   const holderOptions = (company) => [
     { value: 'group', label: `${data.groups.find((g) => g.id === company.org_group_id)?.name || data.groups[0]?.name || 'The group'} (the group itself)` },
-    ...companies.filter((c) => c.id !== company.id && c.org_group_id === company.org_group_id).map((c) => ({ value: `company:${c.id}`, label: c.name })),
+    ...companies.filter((c) => c.id !== company.id).map((c) => ({ value: `company:${c.id}`, label: data.groups.length > 1 && c.org_group_id !== company.org_group_id ? `${c.name} (${data.groups.find((g) => g.id === c.org_group_id)?.name || 'other group'})` : c.name })),
     { value: 'external', label: 'Someone outside the group' },
   ];
   const rowValue = (r) => (r.kind === 'company' ? `company:${r.holder_company_id}` : r.kind);
@@ -168,7 +168,7 @@ export default function GroupCompaniesTab() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Views">
           {VIEWS.map((v) => (
-            <button key={v.key} type="button" role="tab" aria-selected={view === v.key} data-testid={`view-${v.key}`} onClick={() => setView(v.key)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${view === v.key ? 'border-[#105AA9] bg-[#105AA9] text-white shadow-sm' : 'border-tertiary-100 bg-canvas-muted text-tertiary-600 hover:border-tertiary-200 hover:bg-tertiary-50'}`}>
+            <button key={v.key} type="button" role="tab" aria-selected={view === v.key} data-testid={`view-${v.key}`} onClick={() => setView(v.key)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${view === v.key ? 'border-yellow-300 bg-yellow-100 text-yellow-900 shadow-sm' : 'border-tertiary-100 bg-canvas-muted text-tertiary-600 hover:border-tertiary-200 hover:bg-tertiary-50'}`}>
               {v.label} <span className="ml-0.5 opacity-70">{countOf(v.key)}</span>
             </button>
           ))}

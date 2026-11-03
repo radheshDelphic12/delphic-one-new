@@ -50,7 +50,7 @@ async function lockOrderBlockers(orgId, kind, scopeKey, period) {
   if (where !== undefined || ['salary', 'resource_revenue', 'financials'].includes(kind)) {
     const open = await unlockedMembers(orgId, period, where || {});
     if (open.length) {
-      blockers.push({ code: 'timesheets_not_locked', count: open.length, message: `Stage 1 first: ${open.length} timesheet${open.length === 1 ? ' is' : 's are'} not locked for this month (Time & Attendance > Timesheet Locks).` });
+      blockers.push({ code: 'timesheets_not_locked', count: open.length, message: `Stage 1 first: ${open.length} timesheet${open.length === 1 ? ' is' : 's are'} not locked for this month (Time & Attendance > Attendance Locks).` });
     }
   }
   if (kind === 'financials') {
