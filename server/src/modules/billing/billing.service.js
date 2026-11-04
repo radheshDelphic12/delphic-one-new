@@ -619,6 +619,9 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   // Setup, or before the start date was corrected) would then outrank it for ever and the edit would change nothing: start it
   // from that rate's date instead (rates sharing a date resolve to the one added last). A contract that has not started keeps its start.
   let defaultFrom = effectiveStart || todayUtc();
+  // A contract that has not started yet bills nothing before its start, so the saved rate governs from today: starting it on the
+  // future start date would leave an older rate (from before the start date was moved) in force, and the edit would not show.
+  if (patch.billing && !patch.billing.effective_from && defaultFrom > todayUtc()) defaultFrom = todayUtc();
   if (patch.billing && !patch.billing.effective_from && defaultFrom <= todayUtc()) {
     const latest = await prisma.billingRate.findFirst({
       where: { org_id: orgId, account_id: accountId, requirement_id: null, effective_from: { gt: defaultFrom, lte: todayUtc() } },

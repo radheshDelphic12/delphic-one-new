@@ -43,6 +43,24 @@ describe('editing a project rate', () => {
     expect(await prisma.billingRate.count({ where: { account_id: project.id } })).toBe(2);
   });
 
+  test('a project that has not started yet: the saved rate shows straight away, over an older rate from before the start date was moved', async () => {
+    const { org, token } = await seedOrgAdmin();
+    await prisma.calendar.create({ data: { org_id: org.id, name: 'Calendar', kind: 'internal' } });
+    const project = (await addProject(token, { name: 'Not started', service_category: 'project' })).body.data;
+
+    // the first rate was saved when the agreement started in the past; the start date is then moved to the future
+    await patch(token, project.id, { agreement_start_date: '2026-10-01', billing: { rate_type: 'monthly', rate: 100000, currency: 'INR' } });
+    expect((await profile(token, project.id)).rate).toBe(100000);
+    const moved = await patch(token, project.id, { agreement_start_date: '2099-01-01', billing: { rate_type: 'monthly', rate: 120000, currency: 'INR' } });
+    expect(moved.status).toBe(200);
+    expect(moved.body.data.rate).toBe(120000);
+    expect(await profile(token, project.id)).toMatchObject({ rate: 120000 });
+
+    // and again, with no date change
+    const again = await patch(token, project.id, { billing: { rate_type: 'monthly', rate: 130000, currency: 'INR' } });
+    expect(again.body.data.rate).toBe(130000);
+  });
+
   test('a later scheduled rate is left alone; the edit applies from the agreement start / today', async () => {
     const { org, token } = await seedOrgAdmin();
     await prisma.calendar.create({ data: { org_id: org.id, name: 'Calendar', kind: 'internal' } });
