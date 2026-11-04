@@ -18,6 +18,7 @@ import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
 // import TimesheetDashboard from './TimesheetDashboard.jsx';
 import ProjectCalendarDashboard from './ProjectCalendarDashboard.jsx';
 import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
+import MyDeployments, { useDeploymentAccess } from './MyDeployments.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 import RegularizationAdminTab from './RegularizationAdminTab.jsx';
 
@@ -51,6 +52,8 @@ const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock, need: '
 const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock, need: ['regularization.view', 'regularization.approve'] };
 // Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
+// People deployed at a client site log their days and expenses here; their managers and Finance act on deployment approvals and expenses.
+const DEPLOYMENTS_TAB = { key: 'deployments', label: 'Client deployments', icon: MapPin };
 
 /** Time & Attendance hub: Attendance + Leave + Timesheets (+ IT Timesheet — logging for IT staff, records view for admins — + Team Monitoring for admins) under one sidebar entry. */
 export default function TimeAttendanceHubPage() {
@@ -60,6 +63,7 @@ export default function TimeAttendanceHubPage() {
   const modern = !isGroupSuperadmin;
   const isIt = user?.department?.name?.toLowerCase() === 'it';
   const [isApprover, setIsApprover] = useState(false);
+  const deployments = useDeploymentAccess();
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
@@ -71,6 +75,7 @@ export default function TimeAttendanceHubPage() {
     // Employees check in from the dashboard; this tab is only the report / settings for those who manage it.
     ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB, CONTRACTOR_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
+    ...(deployments.any ? [DEPLOYMENTS_TAB] : []),
     ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
   ].filter((t) => t.need == null || allowed(user, t.need, true));
   const has = (key) => TABS.some((t) => t.key === key);
@@ -99,6 +104,7 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
+      {section === 'deployments' && has('deployments') && <MyDeployments />}
       {section === 'log' && isIt && (
         <div className="space-y-3">
           <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Log hours against a project you are assigned to. These hours are for client billing. Your salary still comes from attendance.</p>

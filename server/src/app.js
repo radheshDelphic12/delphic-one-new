@@ -171,6 +171,8 @@ app.use('/api/v1/hiring', hiringRoutes);
 app.use('/api/v1/group-cash', groupCashRoutes.group);
 app.use('/api/v1/payments', require('./modules/payments/payments.routes'));
 app.use('/api/v1/wallets', groupCashRoutes.company);
+// Group Travel > Deployments: a person's own deployments, onsite logs, expenses, approval steps and the Finance queue.
+app.use('/api/v1/deployments', require('./modules/deployments/deployments.routes').router);
 // Finance scope reduction — see middleware/financeScope.js. Expense claims stay
 // on; only the vendor-payment sub-routes of /expenses are switched off.
 app.use('/api/v1/expenses/vendor-payments', requireFinanceModule('vendor_payments'));

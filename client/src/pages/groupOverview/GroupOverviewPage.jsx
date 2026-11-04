@@ -16,7 +16,7 @@ import GroupFinanceTab from './GroupFinanceTab.jsx';
 import GroupDashboardTab from './GroupDashboardTab.jsx';
 import GroupSettingsTab from './GroupSettingsTab.jsx';
 import GroupTasksTab from './GroupTasksTab.jsx';
-import GroupTravelTab from './GroupTravelTab.jsx';
+import GroupTravelHub from './GroupTravelHub.jsx';
 import GroupCashTab from './GroupCashTab.jsx';
 import GroupLogsTab from './GroupLogsTab.jsx';
 import GroupDebtTab from './GroupDebtTab.jsx';
@@ -184,7 +184,7 @@ export default function GroupOverviewPage() {
       {section === 'cash' && <GroupCashTab />}
       {section === 'projections' && <ProjectionsTab />}
       {section === 'tasks' && <GroupTasksTab />}
-      {section === 'travel' && <GroupTravelTab />}
+      {section === 'travel' && <GroupTravelHub />}
       {section === 'org-chart' && <GroupOrgChartTab />}
       {section === 'headcount' && <GroupHeadcountTab />}
       {section === 'offices' && <GroupOfficesTab />}

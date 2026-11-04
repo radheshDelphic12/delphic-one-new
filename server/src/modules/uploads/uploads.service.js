@@ -98,6 +98,15 @@ async function resolveFile(filename, user) {
     if (access) return finish(filename, access.label);
   }
 
+  // Deployment expenses: the bill of an expense, for the group admin, Finance, whoever submitted it and the deployment's managers.
+  if (filename.startsWith('deployment-')) {
+    const deployments = require('../deployments/deployments.service');
+    const ctx = await deployments.ctxOf(user);
+    const access = await deployments.canReadBill(user, fileUrl, ctx);
+    if (access === false) return { error: 'forbidden' };
+    if (access) return finish(filename, access.label);
+  }
+
   return { error: 'not_found' };
 }
 

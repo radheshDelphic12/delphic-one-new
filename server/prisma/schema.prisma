@@ -1970,6 +1970,8 @@ model OrgGroup {
   group_debt_setting    GroupDebtSetting?
   group_company_days    GroupCompanyDay[]
   group_travel          GroupTravel[]
+  group_deployments     GroupDeployment[]
+  group_deployment_setting GroupDeploymentSetting?
   legal_entities        LegalEntity[]
   group_companies       GroupCompany[]
 
@@ -6019,6 +6021,269 @@ model GroupTravelMeeting {
   @@unique([travel_id, meeting_key])
   @@index([meeting_key])
   @@map("group_travel_meetings")
+}
+
+// ===================== Group Dashboard > Travel > Deployments =====================
+// Client onsite travel and resource deployment: a deployment record (visit / assignment / long-term deployment) with its people, estimated budget
+// lines, travel arrangements, approval requests, actual expenses, onsite logs and reviews. People / users are plain uuids (the group spans companies).
+model GroupDeployment {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id              String    @db.Uuid
+  org_group                 OrgGroup  @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  org_id                    String?   @db.Uuid // the company whose people are deployed / that carries the cost; null = the group
+  code                      String
+  title                     String
+  kind                      String    @default("deployment") // visit | assignment | deployment (short, medium, long term)
+  client_name               String
+  client_account_id         String?   @db.Uuid
+  client_location           String?
+  client_supervisor_name    String?
+  client_supervisor_phone   String?
+  client_supervisor_email   String?
+  pm_project_id             String?   @db.Uuid // optional: allocate the cost to a Project Management project
+  purpose                   String?
+  start_date                DateTime  @db.Date
+  expected_end_date         DateTime  @db.Date
+  actual_end_date           DateTime? @db.Date
+  working_arrangement       String    @default("client_office") // client_office | remote | hybrid
+  reporting_manager_user_id String?   @db.Uuid
+  reporting_manager_name    String?
+  delivery_manager_user_id  String?   @db.Uuid
+  delivery_manager_name     String?
+  currency                  String    @default("INR")
+  status                    String    @default("draft") // draft | pending_approval | approved | active | closed | cancelled
+  emergency                 Boolean   @default(false)
+  emergency_reason          String?
+  started_at                DateTime?
+  closed_at                 DateTime?
+  close_reason              String?
+  notes                     String?
+  created_by                String?   @db.Uuid
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @default(now()) @updatedAt
+  deleted_at                DateTime?
+
+  people       GroupDeploymentPerson[]
+  budget_lines GroupDeploymentBudgetLine[]
+  travel       GroupDeploymentTravel[]
+  events       GroupDeploymentEvent[]
+  requests     GroupDeploymentRequest[]
+  expenses     GroupDeploymentExpense[]
+  logs         GroupDeploymentLog[]
+  reviews      GroupDeploymentReview[]
+
+  @@unique([org_group_id, code])
+  @@index([org_group_id, status])
+  @@map("group_deployments")
+}
+
+model GroupDeploymentPerson {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id  String          @db.Uuid
+  deployment     GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  user_id        String?         @db.Uuid
+  name           String
+  org_id         String?         @db.Uuid
+  role           String?
+  arrangement    String          @default("inherit") // inherit | client_office | remote | hybrid
+  start_date     DateTime?       @db.Date
+  end_date       DateTime?       @db.Date
+  status         String          @default("active") // active | released | replaced
+  released_on    DateTime?       @db.Date
+  release_reason String?
+  replaces_id    String?         @db.Uuid
+  created_at     DateTime        @default(now())
+
+  @@index([deployment_id])
+  @@index([user_id])
+  @@map("group_deployment_people")
+}
+
+// One line of the estimated budget. Monthly lines recur for every month of the deployment; funding says who bears the cost.
+model GroupDeploymentBudgetLine {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id    String          @db.Uuid
+  deployment       GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  category         String // travel_ticket | accommodation | food | local_conveyance | other
+  description      String?
+  amount           Decimal         @db.Decimal(14, 2)
+  frequency        String          @default("one_time") // one_time | monthly
+  funding          String          @default("company") // company | client | shared | client_reimbursable
+  client_share_pct Decimal?        @db.Decimal(5, 2) // shared: the client's part
+  billable         Boolean         @default(false)
+  created_at       DateTime        @default(now())
+
+  @@index([deployment_id])
+  @@map("group_deployment_budget_lines")
+}
+
+model GroupDeploymentTravel {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id  String          @db.Uuid
+  deployment     GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  person_id      String?         @db.Uuid
+  mode           String // flight | train | bus | local_transport | accommodation | other
+  from_place     String?
+  to_place       String?
+  start_date     DateTime?       @db.Date
+  end_date       DateTime?       @db.Date
+  vendor         String?
+  booking_ref    String?
+  estimated_cost Decimal?        @db.Decimal(14, 2)
+  status         String          @default("planned") // planned | booked | completed | cancelled
+  notes          String?
+  created_at     DateTime        @default(now())
+
+  @@index([deployment_id])
+  @@map("group_deployment_travel")
+}
+
+// The history of a deployment: created, submitted, approved, started, extended, replaced, released, closed ...
+model GroupDeploymentEvent {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id String          @db.Uuid
+  deployment    GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  kind          String
+  reason        String?
+  detail        Json?
+  by_user       String?         @db.Uuid
+  by_name       String?
+  created_at    DateTime        @default(now())
+
+  @@index([deployment_id, created_at])
+  @@map("group_deployment_events")
+}
+
+// An approval request (the deployment itself, an extension, an allocation change, a budget overrun) with its ordered steps.
+model GroupDeploymentRequest {
+  id                String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id     String                       @db.Uuid
+  deployment        GroupDeployment              @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  kind              String // deployment | extension | allocation | budget_overrun
+  payload           Json?
+  status            String                       @default("pending") // pending | approved | rejected | cancelled
+  emergency         Boolean                      @default(false)
+  emergency_reason  String?
+  requested_by      String?                      @db.Uuid
+  requested_by_name String?
+  decision_note     String?
+  created_at        DateTime                     @default(now())
+  decided_at        DateTime?
+  steps             GroupDeploymentRequestStep[]
+
+  @@index([deployment_id, status])
+  @@map("group_deployment_requests")
+}
+
+model GroupDeploymentRequestStep {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  request_id      String                 @db.Uuid
+  request         GroupDeploymentRequest @relation(fields: [request_id], references: [id], onDelete: Cascade)
+  seq             Int
+  role            String // reporting_manager | delivery_manager | finance | admin
+  status          String                 @default("pending") // pending | approved | rejected
+  decided_by      String?                @db.Uuid
+  decided_by_name String?
+  decided_at      DateTime?
+  comment         String?
+
+  @@unique([request_id, seq])
+  @@map("group_deployment_request_steps")
+}
+
+// Actual expenses: submitted with a bill, verified and settled by Finance; the client's part is tracked until it is recovered.
+model GroupDeploymentExpense {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id      String          @db.Uuid
+  deployment         GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  person_id          String?         @db.Uuid
+  expense_date       DateTime        @db.Date
+  month              String // YYYY-MM
+  category           String
+  description        String?
+  amount             Decimal         @db.Decimal(14, 2)
+  funding            String          @default("company")
+  client_share_pct   Decimal?        @db.Decimal(5, 2)
+  billable           Boolean         @default(false)
+  client_amount      Decimal         @default(0) @db.Decimal(14, 2) // the part the client bears or must reimburse
+  bill_url           String?
+  bill_name          String?
+  status             String          @default("submitted") // submitted | verified | rejected | settled
+  submitted_by       String?         @db.Uuid
+  submitted_by_name  String?
+  verified_by        String?         @db.Uuid
+  verified_by_name   String?
+  verified_at        DateTime?
+  verify_note        String?
+  settled_on         DateTime?       @db.Date
+  settlement_ref     String?
+  recovery_status    String          @default("none") // none | pending | partial | recovered
+  recovered_amount   Decimal         @default(0) @db.Decimal(14, 2)
+  recovered_on       DateTime?       @db.Date
+  over_budget        Boolean         @default(false)
+  overrun_request_id String?         @db.Uuid
+  created_at         DateTime        @default(now())
+  deleted_at         DateTime?
+
+  @@index([deployment_id, month])
+  @@map("group_deployment_expenses")
+}
+
+// Onsite attendance and daily work of a deployed person: where they worked, hours, what was done and what is pending.
+model GroupDeploymentLog {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id String          @db.Uuid
+  deployment    GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  person_id     String          @db.Uuid
+  user_id       String?         @db.Uuid
+  log_date      DateTime        @db.Date
+  location_mode String          @default("client_office") // client_office | remote
+  hours         Decimal         @default(0) @db.Decimal(5, 2)
+  activities    String
+  deliverables  String?
+  pending_tasks String?
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @default(now()) @updatedAt
+
+  @@unique([person_id, log_date])
+  @@index([deployment_id, log_date])
+  @@map("group_deployment_logs")
+}
+
+// A weekly progress review (period_start = the Monday) or the monthly client feedback (period_start = the 1st).
+model GroupDeploymentReview {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deployment_id   String          @db.Uuid
+  deployment      GroupDeployment @relation(fields: [deployment_id], references: [id], onDelete: Cascade)
+  person_id       String?         @db.Uuid
+  kind            String // weekly | client_feedback
+  period_start    DateTime        @db.Date
+  rating          Int?
+  summary         String
+  client_contact  String?
+  created_by      String?         @db.Uuid
+  created_by_name String?
+  created_at      DateTime        @default(now())
+
+  @@index([deployment_id, kind, period_start])
+  @@map("group_deployment_reviews")
+}
+
+// Per group: the approval chain (in order) and the rules around it. Admin-editable in Travel > Deployments > Settings.
+model GroupDeploymentSetting {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id              String   @unique @db.Uuid
+  org_group                 OrgGroup @relation(fields: [org_group_id], references: [id], onDelete: Cascade)
+  approval_steps            String[] @default(["reporting_manager", "delivery_manager", "finance", "admin"])
+  emergency_allowed         Boolean  @default(true)
+  extension_needs_approval  Boolean  @default(true)
+  allocation_needs_approval Boolean  @default(true)
+  overrun_tolerance_pct     Decimal  @default(0) @db.Decimal(5, 2)
+  ending_soon_days          Int      @default(14)
+  updated_by                String?  @db.Uuid
+  updated_at                DateTime @default(now()) @updatedAt
+
+  @@map("group_deployment_settings")
 }
 
 // ===================== Zklyrera Spirits (Zk) =====================

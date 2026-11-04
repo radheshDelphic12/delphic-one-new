@@ -20,6 +20,8 @@ const { fail } = require('../../utils/response');
 // profitability.service.rollup, never live OLTP tables directly.
 const router = express.Router();
 router.use(authenticate, authorizeGroupSuperadmin);
+// Group travel > deployments (client onsite deployments, budgets, approvals, expenses): its own module
+router.use('/group/deployments', require('../deployments/deployments.routes').groupRouter);
 
 router.post(
   '/compute',
