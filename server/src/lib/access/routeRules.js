@@ -140,6 +140,10 @@ const RULES = [
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
   [/^\/(group-cash|super-dashboard|hiring|group-offices|group-companies)(\/|$)/, 'admin'],
+  // Group Travel > client deployments, the door for everyone else (/deployments): a person's own deployments, onsite logs and expenses,
+  // the approval steps that name them, and the Finance queue. The service limits each call to what the person is part of (and the
+  // Finance routes to people who hold Finance work); the group admin's door is /super-dashboard/group/deployments (admin above).
+  [/^\/deployments(\/|$)/, 'open'],
   // Project Management (Delphic Global only): the route limits it to the master workspace; admin / project lead / member rights are per record.
   [/^\/pm(\/|$)/, 'open'],
   [/^\/pm-guest(\/|$)/, 'open'], // bearer-token share link (no login); the route checks the token's scope
