@@ -137,6 +137,7 @@ export default function DaySchedule() {
 
             <h3 className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Projects — working hours</h3>
             {withHours.length === 0 && <p className="py-2 text-sm text-tertiary-500">No project has working hours yet. Set Work start / end time in Finance &gt; Projects.</p>}
+            {withHours.length > 0 && projectFilter && !withHours.some((p) => selProjects.includes(p.id)) && <p className="py-2 text-sm text-tertiary-500" data-testid="picked-no-hours">The picked {selProjects.length === 1 ? 'project has' : 'projects have'} no working hours set (Finance &gt; Projects), so there is no bar to draw. The people allocated to {selProjects.length === 1 ? 'it' : 'them'} are shown under their shifts.</p>}
             {withHours.filter((p) => !projectFilter || selProjects.includes(p.id)).map((p) => (
               <Row key={p.id} name={`${p.code ? `${p.code} ` : ''}${p.name}`} sub={`${p.client || 'No client'} · ${p.start}–${p.end} (${span(p.start, p.end)})`} checked={projectVisible(p.id)} onToggle={() => toggle(shownProjects, setShownProjects, allProjectIds, p.id)}>
                 <Track segs={projectVisible(p.id) ? segments(p.start, p.end) : []} tone={p.on_hold ? 'bg-amber-400/80' : 'bg-primary-500'} label={`${p.name} ${p.start} to ${p.end}`} />
