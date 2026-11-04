@@ -11,6 +11,7 @@ import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 import ProjectDayHint from '../../components/finance/ProjectDayHint.jsx';
 import RegularisationSection from './RegularisationSection.jsx';
+import ProjectTimesheetDownload from './ProjectTimesheetDownload.jsx';
 import NoteText, { MarkupPreview } from '../../components/NoteText.jsx';
 import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
@@ -352,6 +353,8 @@ export default function ItTimesheetPage() {
           </div>
         </form>
       </section>
+
+      <ProjectTimesheetDownload month={period.month} year={period.year} />
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">

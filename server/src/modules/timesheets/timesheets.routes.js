@@ -51,6 +51,7 @@ const monthLocks = require('./monthLocks.service');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
+router.use('/project-timesheet', require('./projectTimesheet.routes'));
 
 const ENTRY_ERRORS = {
   day_locked: [409, 'That day is locked (weekly auto-lock) — submit a Timesheet Regularisation request instead'],
