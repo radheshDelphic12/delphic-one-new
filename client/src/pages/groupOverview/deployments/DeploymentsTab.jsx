@@ -19,6 +19,8 @@ const BASE = '/super-dashboard/group/deployments';
 /** The list filters a dashboard count opens: each one is exactly the set of records behind the number. */
 function matches(d, f) {
   if (!f) return true;
+  // the dashboard counts leave cancelled deployments out, so the records behind a count do too (unless a status is asked for)
+  if (!f.status && d.status === 'cancelled') return false;
   if (f.status && d.status !== f.status) return false;
   if (f.client !== undefined && (d.client_name || '').toLowerCase() !== f.client) return false;
   if (f.org !== undefined && (d.org_id || 'group') !== f.org) return false;
