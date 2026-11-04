@@ -22,7 +22,7 @@ function Shell({ children }) {
 
 /**
  * The candidate's AI interview: opened from the link, no login. A mic test and consent first, then the AI asks one question at
- * a time; answers are spoken (live transcript) or typed. Closing the tab keeps progress (the link resumes where it stopped).
+ * a time; answers are spoken (live transcript); only the aptitude / numerical questions are typed. Closing the tab keeps progress (the link resumes where it stopped).
  * When the company records interviews, the recording is mandatory: camera and microphone must stay on and audio + video are sent
  * to the server in small parts. Every question has a countdown. Copying, pasting and right-click are blocked, and leaving the page
  * is logged and warned about; too many tab switches end the interview for a person to review.
@@ -172,7 +172,7 @@ export default function AiInterviewPage() {
   const active = view?.status === 'started' && !finished && !endedByRules;
   useEffect(() => {
     if (!active) return undefined;
-    const block = (type) => (e) => { e.preventDefault(); report(type); setWarning('Copying, cutting and pasting are not allowed in this interview. Please type or speak your own answer.'); };
+    const block = (type) => (e) => { e.preventDefault(); report(type); setWarning('Copying, cutting and pasting are not allowed in this interview. Please answer in your own words, by speaking.'); };
     const onCopy = block('copy');
     const onCut = block('cut');
     const onPaste = block('paste');
@@ -276,13 +276,13 @@ export default function AiInterviewPage() {
     }
   }
 
-  // ---- speaking: live transcript into the answer box (browsers without it simply type) ----
+  // ---- speaking: live transcript into the answer box. Only aptitude / numerical answers may be typed; the box is read-only otherwise. ----
   const SPEECH_PROBLEMS = {
-    'not-allowed': 'The browser is not allowing the microphone for speech. Allow it (the lock icon in the address bar), or just type your answer.',
-    'service-not-allowed': 'Speech to text is blocked on this browser. Please type your answer.',
-    'audio-capture': 'No microphone was found for speech. Please type your answer.',
-    network: 'Speech to text needs a working internet connection and could not reach its service. Please type your answer.',
-    'language-not-supported': 'Speech to text does not support this language here. Please type your answer.',
+    'not-allowed': 'The browser is not allowing the microphone for speech. Allow it (the lock icon in the address bar) and press Speak again.',
+    'service-not-allowed': 'Speech to text is blocked on this browser. Please open the interview in a recent Chrome or Edge.',
+    'audio-capture': 'No microphone was found for speech. Connect one and press Speak again.',
+    network: 'Speech to text needs a working internet connection and could not reach its service. Check your connection and press Speak again.',
+    'language-not-supported': 'Speech to text does not support this language here. Please use a recent Chrome or Edge.',
   };
 
   function stopListening() {
@@ -292,7 +292,7 @@ export default function AiInterviewPage() {
   }
 
   // Speaking fills the answer box live. The browser stops listening by itself after a pause, so it is started again until the candidate
-  // presses Stop; a problem is explained on the page, and typing always works.
+  // presses Stop; a problem is explained on the page.
   function startRecognition() {
     const rec = new SpeechRecognition();
     rec.lang = 'en-IN';
@@ -309,7 +309,7 @@ export default function AiInterviewPage() {
       if (code === 'no-speech' || code === 'aborted') return; // a pause; onend restarts it
       wantListenRef.current = false;
       setListening(false);
-      setSpeechNote(SPEECH_PROBLEMS[code] || 'Speech to text stopped working. Please type your answer.');
+      setSpeechNote(SPEECH_PROBLEMS[code] || 'Speech to text stopped working. Press Speak again.');
     };
     rec.onend = () => {
       if (wantListenRef.current && !busyRef.current) {
@@ -332,7 +332,7 @@ export default function AiInterviewPage() {
       setListening(true);
     } catch {
       wantListenRef.current = false;
-      setSpeechNote('Speech to text could not start. Please type your answer.');
+      setSpeechNote('Speech to text could not start. Press Speak again.');
     }
   }
 
@@ -441,12 +441,12 @@ export default function AiInterviewPage() {
     return (
       <Shell>
         <h1 className="font-heading text-lg font-semibold text-tertiary-900">Interview for {view.role_title || 'the role'}</h1>
-        <p className="mt-1 text-sm text-tertiary-600">Hello {view.candidate_name}. An AI interviewer will ask you questions one at a time. It takes about 15 to 20 minutes. You can speak or type your answers.</p>
+        <p className="mt-1 text-sm text-tertiary-600">Hello {view.candidate_name}. An AI interviewer will ask you questions one at a time. It takes about 15 to 20 minutes. You answer the interview questions by speaking; typing is not possible. Only the aptitude / numerical questions are typed.</p>
         <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-tertiary-700">
-          <li>Use a quiet place and a recent Chrome or Edge browser for speaking; other browsers let you type.</li>
+          <li>Use a quiet place and a recent Chrome or Edge browser. Speaking is required, so a browser that cannot turn speech into text cannot be used.</li>
           <li>You can use this link once. If you close the page, open the same link to carry on where you stopped.</li>
           <li>There are a few short aptitude questions too. Work them out in your head and type the answer.</li>
-          {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have typed is sent and the next question comes.</li>}
+          {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have typed or said so far is sent and the next question comes.</li>}
           <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; after ${view.max_tab_switches} times the interview ends automatically` : ''}.</li>
           {mustRecord && <li>This interview is recorded (camera and microphone) and the recording is required. Keep them on until you finish.</li>}
           <li>The AI scores your answers; people at the company make the final decision.</li>
@@ -457,9 +457,9 @@ export default function AiInterviewPage() {
             <button type="button" className="btn-secondary text-xs" disabled={mic === 'testing'} onClick={testMic}>{mic === 'testing' ? 'Listening... say something' : 'Test microphone'}</button>
           </div>
           {mic === 'ok' && <p className="mt-2 text-xs text-success-700">Your microphone works.</p>}
-          {mic === 'quiet' && <p className="mt-2 text-xs text-warning-700">We could not hear you. Check your microphone, or you can type your answers instead.</p>}
-          {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. {mustRecord ? 'It is needed for the recording, so please allow it.' : 'You can type your answers instead.'}</p>}
-          {!SpeechRecognition && <p className="mt-2 text-xs text-tertiary-500">This browser cannot turn speech into text, so you will type your answers.</p>}
+          {mic === 'quiet' && <p className="mt-2 text-xs text-warning-700">We could not hear you. Check your microphone and test again; speaking is required to start.</p>}
+          {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. Speaking is required, so please allow it.</p>}
+          {!SpeechRecognition && <p className="mt-2 text-xs text-tertiary-500">This browser cannot turn speech into text. Please open this link in a recent Chrome or Edge on a computer or an Android phone.</p>}
         </div>
         <label className="mt-4 flex items-start gap-2 text-sm text-tertiary-800">
           <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
@@ -476,7 +476,7 @@ export default function AiInterviewPage() {
         )}
         {!view.ai_enabled && <p className="mt-3 text-xs text-warning-700">The interviewer is not switched on yet. Please try again later.</p>}
         {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
-        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
+        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok'} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
         {busy && <p data-testid="start-working" className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />The interviewer is writing your questions. This can take up to a minute - please keep this page open.</p>}
       </Shell>
     );
@@ -489,6 +489,7 @@ export default function AiInterviewPage() {
   // Only an interview that is really being recorded pauses without the camera. One that was started before recording was switched on
   // (recording_on false) carries on without it; otherwise it would wait for a camera that is never started.
   const mustRecord = Boolean(view.recording_on);
+  const typedAnswer = view.section === 'aptitude'; // aptitude / numerical answers are typed; every other answer is spoken
   const blocked = mustRecord && (!recording || Boolean(cameraProblem));
   const waitingForCamera = needsFirstChunk;
   const urgent = remaining != null && remaining <= 30;
@@ -537,10 +538,11 @@ export default function AiInterviewPage() {
           <div ref={questionRef} className="mt-4 rounded-xl border border-primary-200 bg-primary-50/40 p-4">
             <p className="text-sm font-medium text-tertiary-900">{current.kind === 'follow_up' ? 'Follow-up: ' : ''}{current.text}</p>
             <textarea
-              className="mt-3 min-h-[110px] w-full select-text rounded-lg border border-tertiary-200 p-3 text-sm focus:border-primary-500 focus:outline-none"
-              placeholder={view.section === 'aptitude' ? 'Type your answer' : 'Speak using the microphone, or type your answer here'}
+              className={`mt-3 min-h-[110px] w-full select-text rounded-lg border border-tertiary-200 p-3 text-sm focus:outline-none ${typedAnswer ? 'focus:border-primary-500' : 'bg-tertiary-50'}`}
+              placeholder={typedAnswer ? 'Type your answer' : "Press 'Speak your answer' and talk. Your words appear here. Typing is not possible."}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              readOnly={!typedAnswer}
+              onChange={(e) => { if (typedAnswer) setText(e.target.value); }}
               onPaste={(e) => e.preventDefault()}
               onCopy={(e) => e.preventDefault()}
               onCut={(e) => e.preventDefault()}
@@ -554,11 +556,12 @@ export default function AiInterviewPage() {
             )}
             {busy && <p data-testid="interviewer-working" className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />The interviewer is reading your answer. This can take up to a minute - please keep this page open.</p>}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              {SpeechRecognition && view.section !== 'aptitude' ? (
-                <button type="button" className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${listening ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-tertiary-200 text-tertiary-700'}`} onClick={toggleListening} disabled={busy || blocked}>
+              {typedAnswer ? <span /> : <div className="flex items-center gap-2">
+                <button type="button" className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${listening ? 'border-danger-300 bg-danger-50 text-danger-700' : 'border-primary-300 bg-primary-50 text-primary-800'}`} onClick={toggleListening} disabled={busy || blocked || !SpeechRecognition}>
                   {listening ? <><MicOff className="h-4 w-4" /> Stop speaking</> : <><Mic className="h-4 w-4" /> Speak your answer</>}
                 </button>
-              ) : <span />}
+                {text && !listening && <button type="button" className="text-xs text-tertiary-600 underline" disabled={busy || blocked} onClick={() => setText('')}>Clear and speak again</button>}
+              </div>}
               <button type="button" className="btn-primary" disabled={busy || blocked || waitingForCamera || text.trim().length < 2} onClick={() => send()}>{busy ? 'Please wait...' : 'Send answer'}</button>
             </div>
           </div>

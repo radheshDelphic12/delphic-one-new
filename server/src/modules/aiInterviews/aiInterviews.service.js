@@ -228,7 +228,7 @@ async function invite({ submissionId, restart = false, retake = false }, user) {
       kind: 'ai_interview_invite',
       to: { email: row.candidate_email, name: row.candidate_name },
       subject: `Your interview for ${ctx.role_title || 'the role'}`,
-      text: `Hi ${row.candidate_name},\n\nPlease complete this short online interview: ${link}\n\nIt is a conversation with an AI interviewer; you can speak or type your answers, and it takes about 15 to 20 minutes. The link is valid for ${settings.link_valid_days} days and can be used once.\n\nThank you,\nDelphic Team`,
+      text: `Hi ${row.candidate_name},\n\nPlease complete this short online interview: ${link}\n\nIt is a conversation with an AI interviewer; you answer by speaking, except the aptitude / numerical questions which are typed (a microphone is required; use Chrome or Edge), and it takes about 15 to 20 minutes. The link is valid for ${settings.link_valid_days} days and can be used once.\n\nThank you,\nDelphic Team`,
     });
   }
   return { interview: toTeamView(row, new Map(), user, await seesAllRecordings(user)), link, superseded: live.length };

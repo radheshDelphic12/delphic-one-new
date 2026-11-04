@@ -13,7 +13,7 @@ depends on it or waits for it.
      (designation, company, skills, experience, education, and the CV when a PDF is stored);
    - up to 3 short **follow-ups** on vague answers (never on aptitude);
    - an **aptitude section** (default 4): AI-written logic / number / pattern questions, each with an expected answer that stays on the server.
-   Answers are spoken (browser speech-to-text, Chrome/Edge) or typed. Closing the tab keeps progress; the same link resumes.
+   Answers are spoken (browser speech-to-text, Chrome/Edge); only the aptitude / numerical answers are typed, everywhere else the answer box is read-only, and the candidate must pass the microphone test and use a browser that supports speech-to-text before Start is enabled. Closing the tab keeps progress; the same link resumes.
 4. At the end the AI scores a rubric: **Role knowledge, Communication, Depth, Aptitude** (0-10 each, with summary + evidence). The
    total is the weighted average using the admin's weights. Outcome: **pass** (>= pass mark, default 60), **borderline**
    (within 10 points below), **below pass**.
