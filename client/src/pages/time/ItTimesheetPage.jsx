@@ -328,7 +328,7 @@ export default function ItTimesheetPage() {
                       </button>
                     ))}
                   </div>
-                  <textarea id={`desc-${row.key}`} placeholder="Description (supports **bold**, *italic*, - bullets, links)" rows={2} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} onKeyDown={(e) => descriptionKeyDown(e, row.key)} className="min-h-[2.5rem] w-full resize-y rounded-xl border px-3 py-2 text-sm" />
+                  <textarea id={`desc-${row.key}`} placeholder="Description (supports **bold**, *italic*, - bullets, links)" rows={2} maxLength={5000} value={row.notes} onChange={(e) => setRow(row.key, 'notes', e.target.value)} onKeyDown={(e) => descriptionKeyDown(e, row.key)} className="min-h-[2.5rem] w-full resize-y rounded-xl border px-3 py-2 text-sm" />
                   {/(\*|`|\[.+\]\(|https?:\/\/|^\s*-\s)/m.test(row.notes) && (
                     <div className="mt-1.5 rounded-lg border border-dashed border-primary-200 bg-white px-3 py-2 text-sm text-tertiary-700">
                       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-primary-600">Preview</span>
