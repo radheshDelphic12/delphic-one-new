@@ -223,6 +223,25 @@ describe('tracking any company payment in a wallet (POST /payments/track)', () =
     expect(await walletTx()).toHaveLength(0);
     expect((await authed(request(app).delete(`${P}/${id}`), superToken).send({ reason: 'again' })).status).toBe(409);
   });
+
+  test('a group admin paying another company\'s EMI sees and uses that company\'s wallets, not the active company\'s', async () => {
+    const zephyr = await createOrg({ name: 'Zephyr Infrastructure', slug: 'zephyr', org_group_id: org.org_group_id });
+    const bank = (await authed(request(app).post(`${G}/accounts`), superToken).send({ name: 'ICICI', type: 'current', currency: 'INR', opening_date: '2026-04-01' })).body.data.account;
+    const zWallet = (await authed(request(app).post(`${G}/wallets`), superToken).send({ bank_account_id: bank.id, owner_org_id: zephyr.id, name: 'Zephyr INR' })).body.data.wallet;
+    const W = `${P}/wallets`;
+    // active company = Delphic
+    expect((await authed(request(app).get(W), superToken)).body.data.map((w) => w.name)).toEqual(['Delphic INR', 'Delphic USD']);
+    expect((await authed(request(app).get(W).query({ org_id: zephyr.id }), superToken)).body.data.map((w) => w.name)).toEqual(['Zephyr INR']);
+    const emi = (body) => track({ kind: 'debt_emi', amount: '300', org_id: zephyr.id, ...body }, superToken);
+    const made = await emi({ wallet_payment: { wallet_id: zWallet.id, mode: 'neft' } });
+    expect(made.status).toBe(201);
+    expect((await prisma.paymentRecord.findUnique({ where: { id: made.body.data.id } })).org_id).toBe(zephyr.id);
+    expect((await walletTx({ wallet_id: zWallet.id }))).toHaveLength(1);
+    // a company admin cannot name another company, and a company outside the group is refused
+    expect((await authed(request(app).get(W).query({ org_id: zephyr.id }), adminToken)).status).toBe(403);
+    const other = await createOrg({ name: 'Other group co', slug: 'other' });
+    expect((await authed(request(app).get(W).query({ org_id: other.id }), superToken)).status).toBe(403);
+  });
 });
 
 describe('the group payments report (Group Dashboard > Book Keeping > Payments)', () => {

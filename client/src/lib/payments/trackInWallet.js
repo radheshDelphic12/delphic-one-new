@@ -11,7 +11,8 @@ export function registerTrackHandler(fn) {
 }
 
 /**
- * cfg = { kind, reference_id, amount, currency ('INR'), title, party, category }  (kind: see TRACK_KINDS in the payments service)
+ * cfg = { kind, reference_id, amount, currency ('INR'), title, party, category, org_id }  (kind: see TRACK_KINDS in the payments service)
+ * org_id = the company the record belongs to when it is not the active one (group screens such as Group Debt); wallets and entry are that company's.
  * Resolves with the payment record, or null when it was skipped.
  */
 export async function trackInWallet(cfg) {

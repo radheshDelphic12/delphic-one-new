@@ -1,3 +1,4 @@
+const prisma = require('../../config/db');
 const { fail } = require('../../utils/response');
 
 // Who may record a payment against the central Book Keeping (POST /payments/track) and read what was recorded:
@@ -43,4 +44,23 @@ const trackAccess = async (req, res, next) => {
   }
 };
 
-module.exports = { trackAccess, canTrack, workspaceMoneyRole };
+/**
+ * The company a payment is recorded for. Normally the active company; the group admin may name another company of their group
+ * (a loan of Zephyr paid from the Group Debt screen while Delphic is active), so the wallets offered and the entry posted are that company's.
+ * Returns { orgId } or { error } (a message for a 403).
+ */
+async function resolveTargetOrg(user, requestedOrgId) {
+  if (!requestedOrgId || requestedOrgId === user.org_id) return { orgId: user.org_id };
+  const u = await prisma.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true, org_group_memberships: { select: { org_group_id: true } } } });
+  if (!u?.active || !u.is_group_superadmin) return { error: 'Only the group admin can record a payment for another company' };
+  const target = await prisma.org.findUnique({ where: { id: requestedOrgId }, select: { id: true, org_group_id: true } });
+  if (!target) return { error: 'That company was not found' };
+  let groupIds = u.org_group_memberships.map((m) => m.org_group_id);
+  if (!groupIds.length) {
+    const own = await prisma.org.findUnique({ where: { id: user.org_id }, select: { org_group_id: true } });
+    groupIds = own ? [own.org_group_id] : [];
+  }
+  return groupIds.includes(target.org_group_id) ? { orgId: target.id } : { error: 'That company is not in your group' };
+}
+
+module.exports = { trackAccess, canTrack, workspaceMoneyRole, resolveTargetOrg };

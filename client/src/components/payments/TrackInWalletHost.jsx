@@ -13,8 +13,8 @@ export default function TrackInWalletHost() {
     const direction = IN_KINDS.has(cfg.kind) ? 'in' : 'out';
     const currency = cfg.currency || 'INR';
     const record = await pay(
-      { title: cfg.title || (direction === 'in' ? 'Payment received' : 'Payment made'), direction, currency, amount: String(cfg.amount), fixedAmount: true, party: cfg.party, track: false },
-      (body) => apiClient.post('/payments/track', { kind: cfg.kind, reference_id: cfg.reference_id, currency, party: cfg.party, category: cfg.category, ...body, amount: String(cfg.amount) }).then((r) => r.data.data),
+      { title: cfg.title || (direction === 'in' ? 'Payment received' : 'Payment made'), direction, currency, amount: String(cfg.amount), fixedAmount: true, party: cfg.party, track: false, orgId: cfg.org_id },
+      (body) => apiClient.post('/payments/track', { kind: cfg.kind, reference_id: cfg.reference_id, currency, party: cfg.party, category: cfg.category, ...(cfg.org_id ? { org_id: cfg.org_id } : {}), ...body, amount: String(cfg.amount) }).then((r) => r.data.data),
     );
     pushInfo(record?.wallet ? `Tracked in wallet ${record.wallet.name}` : 'Payment details saved (no wallet)');
     return record;

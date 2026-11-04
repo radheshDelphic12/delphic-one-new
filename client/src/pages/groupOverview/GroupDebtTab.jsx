@@ -117,7 +117,7 @@ function LoanDrawer({ loan, onClose, onEdit, onChanged, onDelete }) {
     setBusy(true);
     try {
       await apiClient.put(`/super-dashboard/group/debt/loans/${loan.id}/installments/${seq}`, { paid });
-      if (paid) await trackInWallet({ kind: 'debt_emi', reference_id: loan.id, amount: (loan.installments || []).find((i) => i.seq === seq)?.amount, title: `EMI ${seq} paid`, party: loan.lender || loan.name, category: 'Debt EMI' });
+      if (paid) await trackInWallet({ kind: 'debt_emi', reference_id: loan.id, amount: (loan.installments || []).find((i) => i.seq === seq)?.amount, title: `EMI ${seq} paid`, party: loan.lender || loan.name, category: 'Debt EMI', org_id: loan.company?.id });
       await onChanged(loan.id);
     } catch (err) { pushError(apiErrorMessage(err, 'Could not update the instalment'), 'Something went wrong'); } finally { setBusy(false); }
   }

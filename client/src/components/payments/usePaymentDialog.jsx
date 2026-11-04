@@ -49,9 +49,10 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
   useEffect(() => {
     if (!open || !v.track || wallets !== null) return undefined;
     let current = true; // a slow answer for an earlier opening must not overwrite this one
-    apiClient.get('/wallets/mine').then((r) => { if (current) setWallets(r.data.data || []); }).catch(() => { if (current) setWallets([]); });
+    // the company the payment belongs to (a group admin paying another company's EMI), else the active company
+    apiClient.get('/payments/track/wallets', { params: config?.orgId ? { org_id: config.orgId } : {} }).then((r) => { if (current) setWallets(r.data.data || []); }).catch(() => { if (current) setWallets([]); });
     return () => { current = false; };
-  }, [open, v.track, wallets]);
+  }, [open, v.track, wallets, config?.orgId]);
 
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   const amount = config?.fixedAmount ? num(config.amount) : num(v.amount);

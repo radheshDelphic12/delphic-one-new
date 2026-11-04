@@ -5,7 +5,8 @@ const { authenticate, authorizeGroupSuperadmin, requireOrgMembership } = require
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const payments = require('./payments.service');
-const { trackAccess } = require('./payments.access');
+const { trackAccess, resolveTargetOrg } = require('./payments.access');
+const cashService = require('../cashPosition/cash.service');
 const cashCalc = require('../cashPosition/cash.calc');
 
 // One way to link a payment of ANY company's own module (rent, deal payments, salaries, funding, invoices ...) to the central Book
@@ -22,13 +23,24 @@ const trackSchema = payments.paymentInputSchema.extend({
   currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).default('INR'),
   party: z.string().trim().max(200).nullish(),
   category: z.string().trim().max(120).nullish(),
+  org_id: z.string().uuid().optional(), // the company the payment belongs to, when it is not the active one (group admin only)
 });
+
+// The wallets a payment of one company can be tracked in (the active company, or - group admin - the company the record belongs to).
+router.get('/track/wallets', trackAccess, asyncHandler(async (req, res) => {
+  const q = z.object({ org_id: z.string().uuid().optional() }).parse(req.query);
+  const target = await resolveTargetOrg(req.user, q.org_id);
+  if (target.error) return fail(res, 403, target.error);
+  return ok(res, await cashService.myWallets(target.orgId));
+}));
 
 router.post('/track', trackAccess, asyncHandler(async (req, res) => {
   const body = trackSchema.parse(req.body || {});
-  const input = await payments.withSavedRate(req.user.org_id, body.currency, body);
+  const target = await resolveTargetOrg(req.user, body.org_id);
+  if (target.error) return fail(res, 403, target.error);
+  const input = await payments.withSavedRate(target.orgId, body.currency, body);
   const prepared = await payments.prepare({
-    orgId: req.user.org_id, user: req.user, input, fixedAmount: body.amount,
+    orgId: target.orgId, user: req.user, input, fixedAmount: body.amount,
     record: { kind: body.kind, id: body.reference_id, currency: body.currency, pending: cashCalc.D(body.amount), party: body.party || null, category: body.category || null },
   });
   if (prepared.error) { const m = payments.PAYMENT_ERRORS[prepared.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
