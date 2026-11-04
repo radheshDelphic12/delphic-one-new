@@ -707,8 +707,7 @@ async function listAudit(groupIds, { entity_type, entity_id, limit = 50 } = {}) 
 
 /** A workspace admin sees only the wallets their workspace owns: the parent account's name, never its total or other owners' wallets. */
 async function myWallets(orgId) {
-  // the company's own wallets, and those of a legal entity that is this workspace (the same two ways a payment may use a wallet)
-  const wallets = await prisma.wallet.findMany({ where: { active: true, OR: [{ owner_org_id: orgId }, { owner_legal_entity: { workspace_id: orgId } }] }, include: walletInclude, orderBy: { name: 'asc' } });
+  const wallets = await prisma.wallet.findMany({ where: { owner_org_id: orgId, active: true }, include: walletInclude, orderBy: { name: 'asc' } });
   const net = await netByWallet(prisma, wallets.map((w) => w.id));
   return wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null, legal_entity_name: w.bank_account?.legal_entity?.name || null, bank_account_type: w.bank_account?.type || null }));
 }
