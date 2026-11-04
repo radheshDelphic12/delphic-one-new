@@ -19,6 +19,7 @@ const DEFAULTS = {
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
+  difficulty: 'easy', marking: 'lenient',
 };
 const TAB_EVENTS = ['tab_hidden', 'window_blur']; // leaving the interview page; these count towards max_tab_switches
 const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off'];

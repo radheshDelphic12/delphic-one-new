@@ -64,6 +64,8 @@ const settingsSchema = z.object({
   use_reference_sites: z.boolean().optional(),
   reference_sites: z.string().trim().max(300).optional(),
   recording_viewer_ids: z.array(z.string().uuid()).max(50).optional(),
+  difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
+  marking: z.enum(['lenient', 'balanced', 'strict']).optional(),
 });
 
 // ---- team side (login) ----

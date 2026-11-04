@@ -8190,6 +8190,10 @@ model AiInterviewSettings {
   reference_sites        String  @default("w3schools.com,javatpoint.com")
   // People (besides admins) who can open every candidate's recording, whoever sent the link. Everyone else sees only the ones they sent.
   recording_viewer_ids   String[] @default([]) @db.Uuid
+  // How hard the questions are (easy | medium | hard) and how strictly answers are marked (lenient | balanced | strict). Admin-editable;
+  // easy + lenient by default so an average competent candidate reaches the pass mark.
+  difficulty             String   @default("easy")
+  marking                String   @default("lenient")
   updated_by         String?  @db.Uuid
   updated_at         DateTime @default(now()) @updatedAt
 

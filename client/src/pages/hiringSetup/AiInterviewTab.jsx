@@ -4,6 +4,9 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 
+const DIFFICULTY_OPTIONS = [['easy', 'Easy (everyday work questions)'], ['medium', 'Medium (typical for the level)'], ['hard', 'Hard (probes edge cases and trade-offs)']];
+const MARKING_OPTIONS = [['lenient', 'Lenient (average candidate about 60-70%)'], ['balanced', 'Balanced (average candidate about 50-60%)'], ['strict', 'Strict (average candidate about 40-50%)']];
+
 const NUMBER_FIELDS = [
   { key: 'question_count', label: 'Role questions', hint: '3 to 15 (12 by default), built from the job and the candidate\'s profile', min: 3, max: 15 },
   { key: 'max_followups', label: 'Follow-ups (most per interview)', hint: 'Short follow-ups on vague answers; 0 turns them off', min: 0, max: 10 },
@@ -116,6 +119,7 @@ export default function AiInterviewTab({ isAdmin }) {
         ...Object.fromEntries([...NUMBER_FIELDS, ...WEIGHTS, { key: 'aptitude_question_count' }, { key: 'recording_retention_days' }].map((f) => [f.key, Number(form[f.key])])),
         is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(), recording_viewer_ids: form.recording_viewer_ids || [],
         extra_instructions: (form.extra_instructions || '').trim() || null,
+        difficulty: form.difficulty || 'easy', marking: form.marking || 'lenient',
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
       setForm(data.data);
@@ -137,7 +141,23 @@ export default function AiInterviewTab({ isAdmin }) {
 
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-soft">
         <h3 className="text-sm font-semibold text-tertiary-900">Interview</h3>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-tertiary-600" htmlFor="ai-difficulty">Question difficulty</label>
+            <select id="ai-difficulty" className={FIELD_INPUT} disabled={off} value={form.difficulty || 'easy'} onChange={(e) => set('difficulty')(e.target.value)}>
+              {DIFFICULTY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-tertiary-500">How hard the AI makes the questions for the candidate&apos;s level. Easy by default.</p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-tertiary-600" htmlFor="ai-marking">Marking</label>
+            <select id="ai-marking" className={FIELD_INPUT} disabled={off} value={form.marking || 'lenient'} onChange={(e) => set('marking')(e.target.value)}>
+              {MARKING_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-tertiary-500">How strictly answers are scored. Lenient by default, so an average candidate lands at about 60-70%.</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {NUMBER_FIELDS.map((f) => <NumberField key={f.key} field={f} value={form[f.key]} onChange={set(f.key)} disabled={off} />)}
         </div>
         <div className="mt-4">

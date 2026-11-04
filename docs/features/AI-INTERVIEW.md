@@ -125,6 +125,16 @@ tab switches allowed.
   Settings start with the feature **off**.
 - Recording storage lives in `UPLOAD_DIR/ai-interviews`; keep disk headroom (a 20-minute interview is roughly 70 MB).
 
+## Difficulty and marking (2026-11-04)
+Average candidates were scoring below average, so both are now admin settings (Hiring setup > AI interview > Interview), default **Easy + Lenient**
+(migration `20261117100000_ai_interview_difficulty`: `ai_interview_settings.difficulty` easy|medium|hard, `marking` lenient|balanced|strict; existing companies get the defaults).
+- **Question difficulty**: Easy = everyday-work questions a competent average person at the level can answer, even difficulty, one thing per question, no trick questions;
+  Medium = typical for the level; Hard = upper end of the level, rising difficulty, probing edge cases. The level (fresher ... lead) still follows the candidate’s years, one step easier than before.
+- **Marking**: tells the scorer where an average competent candidate should land: Lenient 6-7 (about 60-70%, passes), Balanced 5-6, Strict 4-5. The rubric now says what 9-10 / 7-8 / 6 / 4-5 / below mean,
+  no longer "use the full range", and does not mark down short spoken answers, wording or details nobody asked about. Depth, Problem solving and Experience fit were softened (a bonus, not a requirement).
+- Aptitude questions are easy (school-level arithmetic, simple series), about a minute each.
+- Pass mark (60) and the borderline range (10 points) are unchanged and still editable.
+
 ## Still manual / known limits
 - Needs the Anthropic key and a real run on staging with a real camera + mic. Playwright with a fake camera (2026-11-02) covered the
   start gating, countdown, auto-submit on timeout, recording, copy / paste / right-click blocks and the tab-switch warning and ending;

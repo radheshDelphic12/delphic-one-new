@@ -294,6 +294,35 @@ describe('settings', () => {
     const bad = await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ weight_knowledge: 0, weight_communication: 0, weight_depth: 0, weight_problem_solving: 0, weight_experience_fit: 0, weight_aptitude: 0 });
     expect(bad.status).toBe(400);
   });
+
+  test('question difficulty and marking default to easy / lenient, an admin can change them, and the AI prompts follow them', async () => {
+    const S = '/api/v1/ai-interviews/settings';
+    const first = (await authed(request(app).get(S), recruiterToken)).body.data;
+    expect(first).toMatchObject({ difficulty: 'easy', marking: 'lenient' });
+    expect((await authed(request(app).put(S), recruiterToken).send({ difficulty: 'hard' })).status).toBe(403);
+    expect((await authed(request(app).put(S), adminToken).send({ difficulty: 'impossible' })).status).toBe(422);
+    expect((await authed(request(app).put(S), adminToken).send({ marking: 'brutal' })).status).toBe(422);
+    const saved = await authed(request(app).put(S), adminToken).send({ difficulty: 'hard', marking: 'strict' });
+    expect(saved.body.data).toMatchObject({ difficulty: 'hard', marking: 'strict' });
+    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ difficulty: 'hard', marking: 'strict' });
+
+    // the prompts carry the chosen wording (the stub provider records the question-writing prompt)
+    const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+    const base = { question_count: 3, aptitude_enabled: false, aptitude_question_count: 0, use_reference_sites: false, reference_sites: '' };
+    const ctx = { role_title: 'QA engineer', candidate_experience: 5 };
+    const asked = async (difficulty) => { seenPrompts.length = 0; await logic.generateQuestions(ctx, { ...base, difficulty }); return seenPrompts[0].user; };
+    expect(await asked('easy')).toContain(logic.DIFFICULTY_TEXT.easy);
+    expect(await asked('hard')).toContain(logic.DIFFICULTY_TEXT.hard);
+    expect(await asked('hard')).not.toContain('no trick questions');
+    let scorePrompt = '';
+    setProvider(async ({ messages }) => { scorePrompt = messages[0].content; return { text: JSON.stringify({ parameters: [] }), usage: { input: 1, output: 1 } }; });
+    const settings = { ...base, weight_knowledge: 30, weight_communication: 20, weight_depth: 15, weight_problem_solving: 15, weight_experience_fit: 10, weight_aptitude: 10 };
+    await logic.scoreInterview(ctx, { ...settings, marking: 'lenient' }, [], []);
+    expect(scorePrompt).toContain(logic.MARKING_TEXT.lenient);
+    await logic.scoreInterview(ctx, { ...settings, marking: 'strict' }, [], []);
+    expect(scorePrompt).toContain(logic.MARKING_TEXT.strict);
+    setProvider(stubProvider);
+  });
 });
 
 describe('aptitude section and the reason for a result', () => {
