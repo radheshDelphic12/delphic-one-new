@@ -553,18 +553,18 @@ export default function ZephyrPropertyDetailPage() {
                 <tbody className="divide-y">
                   {p.loans.map((l) => (
                     <tr key={l.id}>
-                      <td className="py-2 font-medium text-tertiary-900">{l.lender || FINANCING_TYPES.find((t) => t.value === l.financing_type)?.label}{l.interest_rate != null && <span className="block text-xs font-normal text-tertiary-500">{l.interest_rate}% interest</span>}</td>
+                      <td className="py-2 font-medium text-tertiary-900">{l.lender || FINANCING_TYPES.find((t) => t.value === l.financing_type)?.label}{l.interest_rate != null && <span className="block text-xs font-normal text-tertiary-500">{l.interest_rate}% interest</span>}{l.source === 'group_debt' && <span className="block text-xs font-normal text-primary-700" data-testid="group-debt-loan">From Group Debt · {l.name}{l.next_due ? ` · next EMI ${dateLabel(l.next_due.due_date)}` : ''}{l.emis_overdue > 0 ? ` · ${l.emis_overdue} overdue` : ''}</span>}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.loan_amount)}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.outstanding_amount)}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.emi_amount)} <span className="text-xs text-tertiary-400">{l.emi_frequency}</span></td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.monthly_cost)}</td>
                       <td className="py-2"><Pill tone={l.status === 'active' ? 'green' : 'gray'}>{l.status === 'active' ? 'Active' : 'Closed'}</Pill></td>
-                      <td className="py-2 text-right"><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit loan" onClick={() => setDrawer({ kind: 'loan', loan: l })}><Pencil className="h-4 w-4" /></button><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove loan" onClick={() => removeLoan(l)}><Trash2 className="h-4 w-4" /></button></td>
+                      <td className="py-2 text-right">{l.read_only ? <span className="text-xs text-tertiary-400">Edit in Group Debt</span> : (<><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit loan" onClick={() => setDrawer({ kind: 'loan', loan: l })}><Pencil className="h-4 w-4" /></button><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove loan" onClick={() => removeLoan(l)}><Trash2 className="h-4 w-4" /></button></>)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table></div>
-            ) : <Empty>No loan or financing recorded for this property.</Empty>}
+            ) : <Empty>No loan or financing recorded for this property. A loan entered under Group Dashboard &gt; Debt Management &quot;against&quot; this property shows here too.</Empty>}
             {p.loans?.length > 0 && <p className="mt-2 text-xs text-tertiary-500">Outstanding {rupees(p.outstanding_loan)} · monthly financing cost {rupees(p.monthly_financing)}.</p>}
           </section>
 

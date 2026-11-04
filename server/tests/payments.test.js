@@ -229,9 +229,15 @@ describe('tracking any company payment in a wallet (POST /payments/track)', () =
     const bank = (await authed(request(app).post(`${G}/accounts`), superToken).send({ name: 'ICICI', type: 'current', currency: 'INR', opening_date: '2026-04-01' })).body.data.account;
     const zWallet = (await authed(request(app).post(`${G}/wallets`), superToken).send({ bank_account_id: bank.id, owner_org_id: zephyr.id, name: 'Zephyr INR' })).body.data.wallet;
     const W = `${P}/wallets`;
-    // active company = Delphic
-    expect((await authed(request(app).get(W), superToken)).body.data.map((w) => w.name)).toEqual(['Delphic INR', 'Delphic USD']);
-    expect((await authed(request(app).get(W).query({ org_id: zephyr.id }), superToken)).body.data.map((w) => w.name)).toEqual(['Zephyr INR']);
+    // active company = Delphic: its own wallets first, then the group's other wallets (the group admin may use any of them)
+    const mine = (await authed(request(app).get(W), superToken)).body.data;
+    expect(mine.map((w) => [w.name, w.own])).toEqual([['Delphic INR', true], ['Delphic USD', true], ['Zephyr INR', false]]);
+    // for a Zephyr payment: Zephyr's wallets first, the others after with their owner named
+    const forZephyr = (await authed(request(app).get(W).query({ org_id: zephyr.id }), superToken)).body.data;
+    expect(forZephyr.map((w) => [w.name, w.own])).toEqual([['Zephyr INR', true], ['Delphic INR', false], ['Delphic USD', false]]);
+    expect(forZephyr.find((w) => w.name === 'Delphic INR').owner_name).toBe('Delphic Global');
+    // a company admin sees only the company's own wallets
+    expect((await authed(request(app).get(W), adminToken)).body.data.map((w) => w.name)).toEqual(['Delphic INR', 'Delphic USD']);
     const emi = (body) => track({ kind: 'debt_emi', amount: '300', org_id: zephyr.id, ...body }, superToken);
     const made = await emi({ wallet_payment: { wallet_id: zWallet.id, mode: 'neft' } });
     expect(made.status).toBe(201);

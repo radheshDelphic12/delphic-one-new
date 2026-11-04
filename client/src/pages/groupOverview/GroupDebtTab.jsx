@@ -1,6 +1,6 @@
 import { trackInWallet } from '../../lib/payments/trackInWallet.js';
 import TrackedPaymentsPanel from '../../components/payments/TrackedPaymentsPanel.jsx';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CalendarClock, Landmark, Percent, Plus, Settings2, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
@@ -19,12 +19,21 @@ const BASIS_LABEL = { valuation: 'group valuation', assets: 'group assets', reve
 const FREQ_LABEL = { monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly' };
 const RATIO_TONE = { ok: 'green', warning: 'amber', over: 'red', unknown: 'gray' };
 const dateText = (s) => (s ? new Date(`${s}T00:00:00Z`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '-');
-const BLANK = { name: '', lender: '', loan_type: 'bank_loan', org_id: '', collateral: '', principal: '', interest_rate: '', rate_type: 'fixed', start_date: '', tenure_months: '', emi_amount: '', emi_frequency: 'monthly', sanctioned_limit: '', emis_paid: '0', notes: '' };
+const BLANK = { name: '', lender: '', loan_type: 'bank_loan', org_id: '', linked_type: '', linked_id: '', collateral: '', principal: '', interest_rate: '', rate_type: 'fixed', start_date: '', tenure_months: '', emi_amount: '', emi_frequency: 'monthly', sanctioned_limit: '', emis_paid: '0', notes: '' };
 
 function LoanForm({ initial, companies, onSubmit, onCancel, saving }) {
   const [v, setV] = useState(() => (initial ? { ...BLANK, ...Object.fromEntries(Object.entries(initial).filter(([k]) => k in BLANK).map(([k, x]) => [k, x ?? ''])) } : BLANK));
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   const limit = v.loan_type === 'credit_limit';
+  // what the loan can be against inside the chosen company (its properties, its deals); empty = the company as a whole
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    if (!v.org_id) { setOptions([]); return undefined; }
+    let current = true;
+    apiClient.get('/super-dashboard/group/debt/link-options', { params: { org_id: v.org_id } }).then(({ data }) => { if (current) setOptions(data.data || []); }).catch(() => { if (current) setOptions([]); });
+    return () => { current = false; };
+  }, [v.org_id]);
+  const linkValue = v.linked_type && v.linked_id ? `${v.linked_type}:${v.linked_id}` : '';
   return (
     <form
       className="space-y-3"
@@ -45,8 +54,17 @@ function LoanForm({ initial, companies, onSubmit, onCancel, saving }) {
           <select className={inputCls} value={v.loan_type} onChange={set('loan_type')}>{Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
         </label>
         <label className={labelCls}>Company that owes it
-          <select className={inputCls} value={v.org_id} onChange={set('org_id')}><option value="">The group itself</option>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select className={inputCls} value={v.org_id} onChange={(e) => setV((c) => ({ ...c, org_id: e.target.value, linked_type: '', linked_id: '' }))}><option value="">The group itself</option>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         </label>
+        {options.length > 0 && (
+          <label className={labelCls}>Against (optional)
+            <select className={inputCls} value={linkValue} onChange={(e) => { const [type, id] = e.target.value.split(':'); setV((c) => ({ ...c, linked_type: type || '', linked_id: id || '' })); }}>
+              <option value="">The company as a whole</option>
+              {['zephyr_property', 'gulati_deal', 'acconcy_deal'].map((t) => { const group = options.filter((o) => o.type === t); return group.length ? <optgroup key={t} label={group[0].label === 'Property' ? 'Properties' : 'Deals'}>{group.map((o) => <option key={o.id} value={`${o.type}:${o.id}`}>{o.name}</option>)}</optgroup> : null; })}
+            </select>
+            <span className="mt-0.5 block text-[11px] text-tertiary-500">The company then shows this loan too: on the property, or on the deal.</span>
+          </label>
+        )}
         <label className={labelCls}>Collateral / security<input className={inputCls} value={v.collateral} onChange={set('collateral')} maxLength={300} /></label>
         <label className={labelCls}>{limit ? 'Amount drawn now' : 'Loan amount (principal)'}<input required type="number" min="0.01" step="any" className={inputCls} value={v.principal} onChange={set('principal')} /></label>
         {limit && <label className={labelCls}>Sanctioned limit<input type="number" min="0" step="any" className={inputCls} value={v.sanctioned_limit} onChange={set('sanctioned_limit')} /></label>}
@@ -132,7 +150,7 @@ function LoanDrawer({ loan, onClose, onEdit, onChanged, onDelete }) {
       </div>
       {readOnly && <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-xs text-tertiary-600">This loan is managed in the company&apos;s own module and is shown here read only.</p>}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        {[['Lender', loan.lender], ['Company', loan.company?.name || 'The group'], ['Principal', money(loan.principal)], ['Interest', `${loan.interest_rate}% ${loan.rate_type}`], ['Start', dateText(loan.start_date)], ['Ends', dateText(s.end_date)],
+        {[['Lender', loan.lender], ['Company', loan.company?.name || 'The group'], ['Against', loan.link?.name ? `${loan.link.label}: ${loan.link.name}` : 'The company as a whole'], ['Principal', money(loan.principal)], ['Interest', `${loan.interest_rate}% ${loan.rate_type}`], ['Start', dateText(loan.start_date)], ['Ends', dateText(s.end_date)],
           ['Outstanding', money(s.outstanding)], ['Principal paid', money(s.principal_paid)], ['Interest paid', money(s.interest_paid)], ['Interest still to pay', money(s.interest_remaining)],
           ['EMIs', s.emis_total ? `${s.emis_paid} paid, ${s.emis_pending} to go` : '-'], ['Next due', s.next_due ? `${dateText(s.next_due.due_date)} · ${money(s.next_due.amount)}` : '-'],
           ...(loan.sanctioned_limit ? [['Sanctioned limit', money(loan.sanctioned_limit)]] : []), ...(loan.collateral ? [['Collateral', loan.collateral]] : [])].map(([k, x]) => (
@@ -258,7 +276,7 @@ export default function GroupDebtTab() {
             <tbody>
               {d.loans.map((l) => (
                 <tr key={l.id} className="cursor-pointer border-t border-tertiary-100 hover:bg-primary-50/40" data-testid="loan-row" onClick={() => open(l)}>
-                  <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{l.name}</span><span className="block text-xs text-tertiary-500">{l.lender} · {TYPE_LABEL[l.loan_type]}{l.source !== 'group' ? ' · Zephyr' : ''}</span></td>
+                  <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{l.name}</span><span className="block text-xs text-tertiary-500">{l.lender} · {TYPE_LABEL[l.loan_type]}{l.source !== 'group' ? ' · Zephyr' : ''}</span>{l.link?.name && <span className="block text-xs text-primary-700" data-testid="loan-link">Against {l.link.label.toLowerCase()}: {l.link.name}</span>}</td>
                   <td className="px-3">{l.company?.name || 'Group'}</td>
                   <td className="px-3 text-right tabular-nums">{compact(l.principal)}</td>
                   <td className="px-3 text-right">{l.interest_rate}%</td>

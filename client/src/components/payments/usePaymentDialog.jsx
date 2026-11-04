@@ -140,7 +140,12 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
                 <label className={labelCls}>Wallet
                   <select className={inputCls} value={v.wallet_id || ''} onChange={set('wallet_id')}>
                     <option value="">Choose a wallet…</option>
-                    {(wallets || []).map((w) => <option key={w.id} value={w.id}>{w.name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ''} ({w.currency})</option>)}
+                    {(wallets || []).filter((w) => w.own !== false).map((w) => <option key={w.id} value={w.id}>{w.name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ''} ({w.currency})</option>)}
+                    {(wallets || []).some((w) => w.own === false) && (
+                      <optgroup label="Other wallets of the group">
+                        {wallets.filter((w) => w.own === false).map((w) => <option key={w.id} value={w.id}>{w.name} · {w.owner_name}{w.bank_account_name ? ` · ${w.bank_account_name}` : ''} ({w.currency})</option>)}
+                      </optgroup>
+                    )}
                   </select>
                 </label>
                 <label className={labelCls}>How was it paid

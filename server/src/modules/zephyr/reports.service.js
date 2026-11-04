@@ -55,7 +55,9 @@ async function serviceReport(orgId, ctx, query) {
   const mgmt = fin.property_management || { revenue: 0, expense: 0, profit: 0 };
   const loans = ctx.canFinance ? await prisma.zxPropertyLoan.findMany({ where: { org_id: orgId, deleted_at: null, status: 'active' } }) : [];
   const months = Math.max(1, (Number(range.to.slice(0, 4)) - Number(range.from.slice(0, 4))) * 12 + (Number(range.to.slice(5, 7)) - Number(range.from.slice(5, 7))) + 1);
-  const financing = r2(loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) * months);
+  // loans entered under Group Dashboard > Debt Management against a property count as property financing too
+  const linkedDebt = ctx.canFinance ? await require('../superDashboard/groupDebt.service').linkedTotals(orgId, 'zephyr_property') : { monthly_emi: 0 };
+  const financing = r2((loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + linkedDebt.monthly_emi) * months);
   out.property_management = {
     label: labels.get('property_management'),
     properties: propRows.filter((p) => p.status !== 'sold').length,

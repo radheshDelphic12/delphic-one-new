@@ -8,6 +8,13 @@ const groupFinance = require('./groupFinance.service');
 
 const LOAN_TYPES = ['bank_loan', 'business_loan', 'property_loan', 'vehicle_loan', 'credit_limit', 'other'];
 const BASES = ['valuation', 'assets', 'revenue'];
+// What a loan can be against, and where that record lives. The record must belong to the loan's company.
+const LINK_TYPES = ['zephyr_property', 'gulati_deal', 'acconcy_deal'];
+const LINK_SOURCES = {
+  zephyr_property: { label: 'Property', find: (args) => prisma.zxProperty.findMany(args) },
+  gulati_deal: { label: 'Deal', find: (args) => prisma.gxDeal.findMany(args) },
+  acconcy_deal: { label: 'Deal', find: (args) => prisma.axDeal.findMany(args) },
+};
 
 const text = (max) => z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(max).nullable().optional());
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -32,6 +39,9 @@ const loanFields = {
   status: z.enum(['active', 'closed']),
   notes: text(4000),
   first_due_date: dateOrNull,
+  // what the loan is against inside the borrowing company (a Zephyr property, a Gulati / Acconcy deal); both or neither
+  linked_type: z.preprocess((v) => (v === '' ? null : v), z.enum(LINK_TYPES).nullable().optional()),
+  linked_id: uuidOrNull,
 };
 const createSchema = z.object({
   ...loanFields,
@@ -72,9 +82,44 @@ const rowData = (loanId, r, paid) => ({
   ...(paid ? { status: 'paid', paid_on: paid.paid_on ? toDate(paid.paid_on) : toDate(r.due_date), paid_amount: paid.paid_amount ?? r.amount } : {}),
 });
 
+// What the loan is against: both a type and a record of the loan's own company, or neither. Returns { type, id } or { error, message }.
+async function checkLink(orgId, type, id) {
+  if (!type && !id) return { type: null, id: null };
+  if (!type || !id) return { error: 'invalid', message: 'Choose what the loan is against, or leave it empty' };
+  if (!orgId) return { error: 'invalid', message: 'Choose the company first: a loan is against a record of one company' };
+  const found = await LINK_SOURCES[type].find({ where: { id, org_id: orgId, deleted_at: null }, select: { id: true }, take: 1 });
+  if (!found.length) return { error: 'invalid', message: 'That record does not belong to the chosen company' };
+  return { type, id };
+}
+
+// Names of the records the loans are against, as a Map keyed "type:id".
+async function linkNamesOf(loans) {
+  const wanted = new Map();
+  for (const l of loans) if (l.linked_type && l.linked_id) wanted.set(l.linked_type, [...(wanted.get(l.linked_type) || []), l.linked_id]);
+  const names = new Map();
+  await Promise.all([...wanted].map(async ([type, ids]) => {
+    const rows = await LINK_SOURCES[type].find({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    rows.forEach((r) => names.set(`${type}:${r.id}`, r.name));
+  }));
+  return names;
+}
+
+/** What a loan of this company can be against: its properties (Zephyr) and deals (Gulati, Acconcy). Feeds the "Against" picker. */
+async function linkOptions(groupIds, orgId) {
+  const { ok } = await companyIds(groupIds, orgId);
+  if (!ok || !orgId) return { error: 'company_not_in_group' };
+  const where = { org_id: orgId, deleted_at: null };
+  const [props, gx, ax] = await Promise.all(LINK_TYPES.map((t) => LINK_SOURCES[t].find({ where, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 })));
+  const pick = (type, rows) => rows.map((r) => ({ type, id: r.id, name: r.name, label: LINK_SOURCES[type].label }));
+  return { options: [...pick('zephyr_property', props), ...pick('gulati_deal', gx), ...pick('acconcy_deal', ax)] };
+}
+
 async function create(groupIds, actorId, input) {
   const { orgs, ok } = await companyIds(groupIds, input.org_id);
   if (!ok) return { error: 'company_not_in_group' };
+  const link = await checkLink(input.org_id, input.linked_type, input.linked_id);
+  if (link.error) return link;
+  input = { ...input, linked_type: link.type, linked_id: link.id };
   const { emis_paid: emisPaid, first_due_date: firstDue, ...rest } = input;
   const rows = scheduleOf({ ...rest, start_date: input.start_date }, firstDue);
   if (emisPaid > rows.length) return { error: 'invalid', message: `Only ${rows.length} instalments exist for this tenure` };
@@ -93,7 +138,20 @@ async function update(groupIds, actorId, id, input) {
   if (!before) return { error: 'not_found' };
   const { ok } = await companyIds(groupIds, input.org_id);
   if (!ok) return { error: 'company_not_in_group' };
-  const { first_due_date: firstDue, ...rest } = input;
+  // the link: changed on purpose (validated against the loan's company), cleared with null, or dropped when the company changes
+  const orgNow = input.org_id !== undefined ? input.org_id : before.org_id;
+  const linkTouched = input.linked_type !== undefined || input.linked_id !== undefined;
+  let linkPatch = {};
+  if (linkTouched) {
+    const cleared = input.linked_type === null || input.linked_id === null;
+    const link = cleared ? { type: null, id: null } : await checkLink(orgNow, input.linked_type !== undefined ? input.linked_type : before.linked_type, input.linked_id !== undefined ? input.linked_id : before.linked_id);
+    if (link.error) return link;
+    linkPatch = { linked_type: link.type, linked_id: link.id };
+  } else if (input.org_id !== undefined && input.org_id !== before.org_id && before.linked_id) {
+    linkPatch = { linked_type: null, linked_id: null };
+  }
+  const { first_due_date: firstDue, ...restInput } = input;
+  const rest = { ...restInput, ...linkPatch };
   const changed = (k) => input[k] !== undefined && String(input[k] ?? '') !== String(k === 'start_date' ? day(before.start_date) : before[k] ?? '');
   const termsChanged = SCHEDULE_FIELDS.filter((k) => k !== 'interest_rate').some(changed) || (input.first_due_date !== undefined);
   const rateChanged = changed('interest_rate');
@@ -145,7 +203,7 @@ async function setInstallment(groupIds, id, seq, input) {
   return get(groupIds, id);
 }
 
-function shape(loan, orgName, today) {
+function shape(loan, orgName, today, linkNames) {
   const rows = (loan.installments || []).map((r) => ({ ...r, due_date: day(r.due_date), paid_on: day(r.paid_on), amount: n(r.amount), principal_part: n(r.principal_part), interest_part: n(r.interest_part), balance_after: n(r.balance_after), paid_amount: n(r.paid_amount) }));
   const { installments, ...rest } = loan;
   void installments;
@@ -154,6 +212,7 @@ function shape(loan, orgName, today) {
   return {
     ...rest, source: 'group', principal: n(loan.principal), interest_rate: n(loan.interest_rate), emi_amount: n(loan.emi_amount), sanctioned_limit: n(loan.sanctioned_limit),
     start_date: day(loan.start_date), company: loan.org_id ? { id: loan.org_id, name: orgName || null } : null,
+    link: loan.linked_type && loan.linked_id ? { type: loan.linked_type, id: loan.linked_id, label: LINK_SOURCES[loan.linked_type]?.label || 'Record', name: linkNames?.get(`${loan.linked_type}:${loan.linked_id}`) || null } : null,
     summary: { ...summary, outstanding: closed ? 0 : summary.outstanding, closed },
     installments: rows,
   };
@@ -165,7 +224,7 @@ async function get(groupIds, id, orgsKnown) {
   const loan = await prisma.groupLoan.findFirst({ where: { id, org_group_id: { in: groupIds }, deleted_at: null }, include: { installments: { orderBy: { seq: 'asc' } } } });
   if (!loan) return { error: 'not_found' };
   const orgs = orgsKnown || (await companyIds(groupIds)).orgs;
-  return { loan: shape(loan, orgs.find((o) => o.id === loan.org_id)?.name, todayIst()) };
+  return { loan: shape(loan, orgs.find((o) => o.id === loan.org_id)?.name, todayIst(), await linkNamesOf([loan])) };
 }
 
 async function settingsOf(groupIds) {
@@ -214,6 +273,41 @@ async function companyTotals(groupIds, orgId) {
   return { loans: count, outstanding: calc.round2(outstanding), monthly_emi: calc.round2(monthly) };
 }
 
+/**
+ * The Debt Management loans of one company that are against the given records (for example the properties of Zephyr), keyed by record id,
+ * shaped exactly as the Debt Management tab shows them (schedule, outstanding, monthly EMI). The company screens show these same rows.
+ */
+async function linkedLoans(orgId, type, ids) {
+  const out = new Map();
+  if (!orgId || !ids.length) return out;
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true, name: true } });
+  if (!org) return out;
+  const loans = await prisma.groupLoan.findMany({
+    where: { org_group_id: org.org_group_id, org_id: orgId, linked_type: type, linked_id: { in: ids }, deleted_at: null },
+    include: { installments: { orderBy: { seq: 'asc' } } },
+    orderBy: { start_date: 'asc' },
+  });
+  const today = todayIst();
+  const names = await linkNamesOf(loans);
+  for (const l of loans) {
+    const s = shape(l, org.name, today, names);
+    out.set(l.linked_id, [...(out.get(l.linked_id) || []), { ...s, monthly_emi: calc.round2(monthlyOf(l, s)) }]);
+  }
+  return out;
+}
+
+/** Open loans of one company that are against any record of this type (all its properties, say): outstanding and monthly EMI. */
+async function linkedTotals(orgId, type) {
+  const org = orgId ? await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true } }) : null;
+  if (!org) return { loans: 0, outstanding: 0, monthly_emi: 0 };
+  const today = todayIst();
+  const loans = await prisma.groupLoan.findMany({ where: { org_group_id: org.org_group_id, org_id: orgId, linked_type: type, deleted_at: null }, include: { installments: { orderBy: { seq: 'asc' } } } });
+  let outstanding = 0;
+  let monthly = 0;
+  for (const l of loans) { const s = shape(l, null, today); outstanding += s.summary.outstanding; monthly += monthlyOf(l, s); }
+  return { loans: loans.length, outstanding: calc.round2(outstanding), monthly_emi: calc.round2(monthly) };
+}
+
 /** Everything the Debt Management tab shows. */
 async function overview(groupIds, query = {}) {
   const today = todayIst();
@@ -223,8 +317,9 @@ async function overview(groupIds, query = {}) {
     settingsOf(groupIds),
   ]);
   const orgName = (id) => orgs.find((o) => o.id === id)?.name;
+  const linkNames = await linkNamesOf(loans);
   const list = loans.map((l) => {
-    const s = shape(l, orgName(l.org_id), today);
+    const s = shape(l, orgName(l.org_id), today, linkNames);
     return { ...s, monthly_emi: calc.round2(monthlyOf(l, s)) };
   });
 
@@ -235,7 +330,8 @@ async function overview(groupIds, query = {}) {
     list.push({
       id: `zx-${p.id}`, source: 'zephyr_property', name: `${p.property?.name || 'Property'} loan`, lender: p.lender || '-', loan_type: 'property_loan', rate_type: 'fixed',
       principal: n(p.loan_amount), interest_rate: n(p.interest_rate) ?? 0, emi_amount: n(p.emi_amount), emi_frequency: p.emi_frequency || 'monthly', start_date: day(p.start_date), status: 'active',
-      company: { id: p.org_id, name: orgName(p.org_id) || null }, collateral: p.property?.name || null, notes: 'Managed in the Zephyr property module (read only here).', installments: [],
+      company: { id: p.org_id, name: orgName(p.org_id) || null }, collateral: p.property?.name || null,
+      link: { type: 'zephyr_property', id: p.property_id, label: 'Property', name: p.property?.name || null }, notes: 'Managed in the Zephyr property module (read only here).', installments: [],
       summary: { emis_total: 0, emis_paid: 0, emis_pending: 0, emis_overdue: 0, outstanding: n(p.outstanding_amount) || 0, principal_paid: calc.round2(Math.max(0, n(p.loan_amount) - (n(p.outstanding_amount) || 0))), interest_paid: 0, interest_remaining: 0, total_remaining: 0, next_due: null, end_date: day(p.end_date), progress_pct: null, closed: false },
       monthly_emi: calc.round2(monthly),
     });
@@ -289,4 +385,4 @@ async function overview(groupIds, query = {}) {
   };
 }
 
-module.exports = { LOAN_TYPES, createSchema, updateSchema, installmentSchema, settingsSchema, create, update, remove, setInstallment, get, overview, companyTotals, saveSettings };
+module.exports = { LOAN_TYPES, LINK_TYPES, linkOptions, linkedLoans, linkedTotals, createSchema, updateSchema, installmentSchema, settingsSchema, create, update, remove, setInstallment, get, overview, companyTotals, saveSettings };

@@ -172,13 +172,21 @@ async function list(orgId, ctx, query) {
   const rows = await prisma.zxProperty.findMany({ where, orderBy: [{ created_at: 'desc' }], take: 300 });
   const counts = await unitCounts(orgId, rows.map((r) => r.id));
   const loans = ctx.canFinance && rows.length ? await prisma.zxPropertyLoan.findMany({ where: { org_id: orgId, property_id: { in: rows.map((r) => r.id) }, deleted_at: null } }) : [];
+  // loans entered under Group Dashboard > Debt Management against a property count on that property too
+  const linked = ctx.canFinance && rows.length ? await groupLoansFor(orgId, rows.map((r) => r.id)) : new Map();
   return rows.map((r) => {
     const mine = loans.filter((l) => l.property_id === r.id);
+    const gd = linked.get(r.id) || [];
     return propertyOut(r, ctx, {
       units: counts.get(r.id) || { total: 0 },
-      ...(ctx.canFinance ? { outstanding_loan: mine.reduce((a, l) => a + (l.status === 'closed' ? 0 : num(l.outstanding_amount)), 0), monthly_emi: calc.round2(mine.reduce((a, l) => a + calc.monthlyFinancing(l), 0)) } : {}),
+      ...(ctx.canFinance ? { outstanding_loan: calc.round2(mine.reduce((a, l) => a + (l.status === 'closed' ? 0 : num(l.outstanding_amount)), 0) + gd.reduce((a, l) => a + l.summary.outstanding, 0)), monthly_emi: calc.round2(mine.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + gd.reduce((a, l) => a + (l.monthly_emi || 0), 0)) } : {}),
     });
   });
+}
+
+// Debt Management loans that are against these properties, keyed by property id (the same rows the Debt Management tab shows).
+async function groupLoansFor(orgId, propertyIds) {
+  return require('../superDashboard/groupDebt.service').linkedLoans(orgId, 'zephyr_property', propertyIds);
 }
 
 // Debt Management loans tagged to this company (outstanding follows each loan's schedule). Required late: the debt module reads Zephyr too.
@@ -218,14 +226,16 @@ async function summary(orgId, ctx) {
 // Income, operating expenses and financing for one property over a period; rent and expenses come
 // from the money ledger so they match every other report.
 async function cashFlowFor(orgId, propertyId, from, to) {
-  const [entries, loans] = await Promise.all([
+  const [entries, loans, linked] = await Promise.all([
     prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, property_id: propertyId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) } }, select: { type: true, amount: true, source_type: true } }),
     prisma.zxPropertyLoan.findMany({ where: { org_id: orgId, property_id: propertyId, deleted_at: null } }),
+    groupLoansFor(orgId, [propertyId]),
   ]);
   const months = Math.max(1, (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1);
   const income = entries.filter((e) => e.type === 'revenue' && e.source_type === 'rent_payment').reduce((a, e) => a + num(e.amount), 0);
   const expenses = entries.filter((e) => e.type === 'expense').reduce((a, e) => a + num(e.amount), 0);
-  const financing = calc.round2(loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) * months);
+  const monthly = loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + (linked.get(propertyId) || []).reduce((a, l) => a + (l.monthly_emi || 0), 0);
+  const financing = calc.round2(monthly * months);
   return { from, to, months, ...calc.cashFlow({ income, expenses, financing }) };
 }
 
@@ -233,7 +243,7 @@ async function get(orgId, ctx, id) {
   const p = await prisma.zxProperty.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
   if (!p) return { error: 'not_found' };
   const month = todayStr().slice(0, 7);
-  const [units, loans, valuations, events, cash, acquisitions] = await Promise.all([
+  const [units, loans, valuations, events, cash, acquisitions, linkedMap] = await Promise.all([
     prisma.zxPropertyUnit.findMany({
       where: { property_id: id, org_id: orgId, deleted_at: null },
       orderBy: [{ building: 'asc' }, { floor: 'asc' }, { name: 'asc' }],
@@ -244,6 +254,7 @@ async function get(orgId, ctx, id) {
     prisma.zxPropertyEvent.findMany({ where: { property_id: id, org_id: orgId }, orderBy: [{ event_date: 'desc' }, { created_at: 'desc' }], take: 200 }),
     ctx.canFinance ? cashFlowFor(orgId, id, `${month}-01`, todayStr()) : null,
     ctx.canFinance ? prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, property_id: id, source_type: 'property_acquisition', deleted_at: null }, orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }] }) : [],
+    ctx.canFinance ? groupLoansFor(orgId, [id]) : new Map(),
   ]);
   const unitOut = units.map((u) => {
     const lease = u.leases[0] || null;
@@ -253,7 +264,14 @@ async function get(orgId, ctx, id) {
       tenant: lease ? { id: lease.tenant.id, name: lease.tenant.name, company_name: lease.tenant.company_name, lease_id: lease.id, monthly_rent: num(lease.monthly_rent) } : null,
     };
   });
-  const loanOut = loans.map((l) => ({ ...l, loan_amount: num(l.loan_amount), outstanding_amount: num(l.outstanding_amount), emi_amount: num(l.emi_amount), interest_rate: num(l.interest_rate), monthly_cost: calc.monthlyFinancing(l) }));
+  // the loans kept here, and the Debt Management loans against this property (read only here: one schedule, edited and paid under Group Dashboard > Debt Management)
+  const ownLoans = loans.map((l) => ({ ...l, source: 'property', loan_amount: num(l.loan_amount), outstanding_amount: num(l.outstanding_amount), emi_amount: num(l.emi_amount), interest_rate: num(l.interest_rate), monthly_cost: calc.monthlyFinancing(l) }));
+  const debtLoans = (linkedMap.get(id) || []).map((l) => ({
+    id: `gd-${l.id}`, source: 'group_debt', loan_id: l.id, read_only: true, name: l.name, financing_type: l.loan_type, lender: l.lender, loan_amount: l.principal, outstanding_amount: l.summary.outstanding,
+    emi_amount: l.emi_amount || 0, emi_frequency: l.emi_frequency, interest_rate: l.interest_rate, start_date: l.start_date, end_date: l.summary.end_date || null, status: l.summary.closed ? 'closed' : 'active',
+    notes: l.notes, monthly_cost: l.monthly_emi || 0, emis_paid: l.summary.emis_paid, emis_pending: l.summary.emis_pending, emis_overdue: l.summary.emis_overdue, next_due: l.summary.next_due || null,
+  }));
+  const loanOut = [...ownLoans, ...debtLoans];
   const extra = {
     units: unitOut,
     events: events.map((e) => ({ ...e, amount: num(e.amount) })),

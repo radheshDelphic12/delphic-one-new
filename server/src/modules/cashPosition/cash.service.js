@@ -712,6 +712,20 @@ async function myWallets(orgId) {
   return wallets.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null, legal_entity_name: w.bank_account?.legal_entity?.name || null, bank_account_type: w.bank_account?.type || null }));
 }
 
+/**
+ * The wallets a payment of one company can be tracked in: the company's own first. The group admin may also use any other wallet of the
+ * group (a loan of one company repaid from money kept in another company's account), each with its owner shown; others see only their own.
+ */
+async function paymentWallets(orgId, { allInGroup = false } = {}) {
+  const own = (await myWallets(orgId)).map((w) => ({ ...w, own: true }));
+  if (!allInGroup) return own;
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true } });
+  if (!org) return own;
+  const others = await prisma.wallet.findMany({ where: { org_group_id: org.org_group_id, active: true, id: { notIn: own.map((w) => w.id) } }, include: walletInclude, orderBy: { name: 'asc' } });
+  const net = await netByWallet(prisma, others.map((w) => w.id));
+  return [...own, ...others.map((w) => ({ ...walletView(w, net.get(w.id)), bank_account_name: w.bank_account?.name || null, legal_entity_name: w.bank_account?.legal_entity?.name || null, bank_account_type: w.bank_account?.type || null, own: false }))];
+}
+
 async function myWalletEntries(orgId, walletId, q) {
   const wallet = await prisma.wallet.findFirst({ where: { id: walletId, owner_org_id: orgId }, include: walletInclude });
   return wallet ? entriesFor(wallet, q) : null;
@@ -737,4 +751,4 @@ module.exports = {
   createTransfer, updateTransfer, removeTransfer,
   updateReconciliation, removeReconciliation, setupLists, removeEntity, removeAccount, removeWallet, accountEntries,
   position, options, walletEntries, receipts, previewReconciliation, createReconciliation, listReconciliations, listAudit,
-  myWallets, myWalletEntries, canReadAttachment, statement };
+  myWallets, paymentWallets, myWalletEntries, canReadAttachment, statement };

@@ -31,7 +31,7 @@ router.get('/track/wallets', trackAccess, asyncHandler(async (req, res) => {
   const q = z.object({ org_id: z.string().uuid().optional() }).parse(req.query);
   const target = await resolveTargetOrg(req.user, q.org_id);
   if (target.error) return fail(res, 403, target.error);
-  return ok(res, await cashService.myWallets(target.orgId));
+  return ok(res, await cashService.paymentWallets(target.orgId, { allInGroup: target.groupAdmin }));
 }));
 
 router.post('/track', trackAccess, asyncHandler(async (req, res) => {

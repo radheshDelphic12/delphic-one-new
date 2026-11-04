@@ -141,4 +141,32 @@ describe('group debt management', () => {
     expect(row.summary.outstanding).toBe(1500000);
     expect(ov.totals.outstanding).toBe(1500000);
   });
+
+  test("a loan can be against a property of its own company; the picker, the checks and the move with the company", async () => {
+    const zeph = await createOrg({ name: "Zephyr Infra", org_group_id: group.id });
+    const villa = await prisma.zxProperty.create({ data: { org_id: zeph.id, code: "P-6", name: "Villa A-6" } });
+    const deal = await prisma.gxDeal.create({ data: { org_id: b.id, name: "Steel deal", trading_type: "buy_sell" } });
+    const options = (await get(`/group/debt/link-options?org_id=${zeph.id}`)).body.data;
+    expect(options).toEqual([{ type: "zephyr_property", id: villa.id, name: "Villa A-6", label: "Property" }]);
+    expect((await get(`/group/debt/link-options?org_id=${b.id}`)).body.data).toEqual([{ type: "gulati_deal", id: deal.id, name: "Steel deal", label: "Deal" }]);
+    expect((await get("/group/debt/link-options")).status).toBe(422);
+    expect((await get(`/group/debt/link-options?org_id=${zeph.id}`, adminToken)).status).toBe(403);
+
+    const loan = { name: "Villa A-6 loan", lender: "ICICI Bank", loan_type: "property_loan", principal: 1000000, interest_rate: 10, start_date: "2026-09-01", tenure_months: 12 };
+    // a record of another company, one half of the pair, and a link with no company are refused
+    expect((await post("/group/debt/loans", { ...loan, org_id: b.id, linked_type: "zephyr_property", linked_id: villa.id })).status).toBe(422);
+    expect((await post("/group/debt/loans", { ...loan, org_id: zeph.id, linked_type: "zephyr_property" })).status).toBe(422);
+    expect((await post("/group/debt/loans", { ...loan, linked_type: "zephyr_property", linked_id: villa.id })).status).toBe(422);
+    const made = await post("/group/debt/loans", { ...loan, org_id: zeph.id, linked_type: "zephyr_property", linked_id: villa.id });
+    expect(made.status).toBe(201);
+    expect(made.body.data.link).toEqual({ type: "zephyr_property", id: villa.id, label: "Property", name: "Villa A-6" });
+    const list = (await get("/group/debt")).body.data.loans;
+    expect(list.find((l) => l.id === made.body.data.id).link.name).toBe("Villa A-6");
+
+    // clearing it, and moving the loan to another company drops a link that no longer fits
+    const id = made.body.data.id;
+    expect((await patch(`/group/debt/loans/${id}`, { linked_type: null, linked_id: null })).body.data.link).toBeNull();
+    await patch(`/group/debt/loans/${id}`, { linked_type: "zephyr_property", linked_id: villa.id });
+    expect((await patch(`/group/debt/loans/${id}`, { org_id: b.id })).body.data.link).toBeNull();
+  });
 });

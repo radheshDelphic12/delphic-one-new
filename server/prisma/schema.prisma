@@ -7835,9 +7835,13 @@ model GroupLoan {
   created_at       DateTime               @default(now())
   updated_at       DateTime               @default(now()) @updatedAt
   deleted_at       DateTime?
+  // What the loan is against, in the borrowing company: zephyr_property | gulati_deal | acconcy_deal (null = the company as a whole). Plain ids, checked by the service.
+  linked_type      String?
+  linked_id        String?                @db.Uuid
   installments     GroupLoanInstallment[]
 
   @@index([org_group_id, status])
+  @@index([linked_type, linked_id])
   @@map("group_loans")
 }
 

@@ -30,3 +30,14 @@ One table for the whole group, next to Org Chart: every company with its teams, 
 
 ## 5. Offices: headcount filters (2026-10-26)
 The Offices page (`/offices`, group superadmin) has filters for Work mode (on-site / remote / hybrid / not set), Employee status (working now by default, active, serving notice, on leave, new hire, exited, all), User type (employee / contractor) and Department; the "people" count on every office card and a total follow them. API: `GET /orgs/locations/overview?work_mode=&status=&user_type=&department_id=` (orgs.service.js `officePeopleWhere`; the department is the membership's, else the person's). Test: internal-jobs-offices.test.js.
+
+## Loans against a property or a deal (2026-11-04)
+A Debt Management loan can be **against** a record of its own company: a Zephyr property, a Gulati Industries deal or an Acconcy deal
+(`group_loans.linked_type` + `linked_id`, migration `20261117110000_group_loan_links`). In the loan form, once a company is chosen, an "Against (optional)" picker lists that
+company’s properties and deals (`GET /super-dashboard/group/debt/link-options?org_id=`); the record must belong to the loan’s company, both fields or neither, and moving the loan to
+another company drops the link. One schedule, shown in both places:
+- Group Dashboard > Debt Management: "Against property: Villa A-6" on the loan row and in its detail.
+- Zephyr > Properties > the property > Financing: the same loans (lender, loan, outstanding, EMI, per month, next EMI, overdue) marked "From Group Debt", read only (edit and pay under Debt Management);
+  the property’s outstanding loan and monthly financing, the properties list and the property cash flow / property report financing include them. The company total on the Properties page already
+  counted every Debt Management loan of the company, so nothing is counted twice. Zephyr’s own property loans (`zx_property_loans`) are unchanged.
+- Paying an EMI of another company (group admin): the wallet list is that company’s wallets first, then the group’s other wallets with their owner named (`GET /payments/track/wallets`).

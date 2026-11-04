@@ -1,4 +1,5 @@
 const express = require('express');
+const { z } = require('zod');
 const { authenticate, authorizeGroupSuperadmin } = require('../../middleware/auth');
 const { ok } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -117,6 +118,11 @@ const debtResult = (res, r, key, status = 200) => {
   if (r.error) { const m = DEBT_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
   return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
 };
+// what a loan of one company can be against (its properties and deals); feeds the "Against" picker
+router.get('/group/debt/link-options', asyncHandler(async (req, res) => {
+  const { org_id: orgId } = z.object({ org_id: z.string().uuid() }).parse(req.query);
+  return debtResult(res, await groupDebt.linkOptions(req.user.org_group_ids, orgId), 'options');
+}));
 router.get('/group/debt', asyncHandler(async (req, res) => ok(res, await groupDebt.overview(req.user.org_group_ids, req.query))));
 router.get('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.get(req.user.org_group_ids, req.params.id), 'loan')));
 router.post('/group/debt/loans', asyncHandler(async (req, res) => debtResult(res, await groupDebt.create(req.user.org_group_ids, req.user.id, groupDebt.createSchema.parse(req.body)), 'loan', 201)));
