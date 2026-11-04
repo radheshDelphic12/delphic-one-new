@@ -15,6 +15,7 @@ const ERRORS = {
   in_progress: [409, 'The candidate is in the middle of the interview. Wait for it to finish, or ask an admin to delete it'],
   not_finished: [409, 'The candidate has not finished the interview yet'],
   forbidden: [403, 'Only an admin can do this'],
+  recording_forbidden: [403, 'You cannot view this recording. It is for admins, the person who sent the interview link, and people an admin has added in Hiring setup as recording viewers'],
   no_org: [400, 'Choose a company workspace first'],
   requirement_off: [409, 'The AI interview is turned off for this requirement'],
   weights_zero: [400, 'At least one rubric weight must be above 0'],

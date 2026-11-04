@@ -118,12 +118,21 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   }
 
   // A candidate who closed the tab and came back has more than one part; each is its own file.
+  // A blob request returns its error body as a Blob too, so read the server's message out of it.
+  async function recordingError(err, fallback) {
+    const body = err?.response?.data;
+    if (body instanceof Blob) {
+      try { return JSON.parse(await body.text())?.message || fallback; } catch { return fallback; }
+    }
+    return apiErrorMessage(err, fallback);
+  }
+
   async function loadVideo(part = 0) {
     try {
       const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { part }, responseType: 'blob' });
       setVideo({ url: URL.createObjectURL(res.data), part, error: '' });
     } catch (err) {
-      setVideo({ url: null, part, error: apiErrorMessage(err, 'The recording is not available') });
+      setVideo({ url: null, part, error: await recordingError(err, 'The recording is not available') });
     }
   }
 
@@ -137,7 +146,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
       a.click();
       URL.revokeObjectURL(href);
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Could not download the recording'), 'Something went wrong');
+      pushError(await recordingError(err, 'Could not download the recording'), 'Something went wrong');
     }
   }
 

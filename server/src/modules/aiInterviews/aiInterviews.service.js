@@ -750,7 +750,7 @@ async function saveRecordingChunk(token, { part = 0, seq, buffer, mime }) {
 async function recordingFor(id, part = 0, user = null) {
   const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
   if (!a) return { error: 'not_found' };
-  if (!canSeeRecording(a, user, await seesAllRecordings(user))) return { error: 'forbidden' };
+  if (!canSeeRecording(a, user, await seesAllRecordings(user))) return { error: 'recording_forbidden' };
   if (a.recording_deleted_at) return { error: 'recording_expired' };
   const entry = filesOf(a)[part];
   if (!entry) return { error: 'no_recording' };
