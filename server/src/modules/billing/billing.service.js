@@ -615,6 +615,18 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.billable_day_hours !== undefined) data.billable_day_hours = patch.billable_day_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
+  // A rate saved with no date normally starts on the agreement start. A rate already in force from a LATER date (added in Billing
+  // Setup, or before the start date was corrected) would then outrank it for ever and the edit would change nothing: start it
+  // from that rate's date instead (rates sharing a date resolve to the one added last). A contract that has not started keeps its start.
+  let defaultFrom = effectiveStart || todayUtc();
+  if (patch.billing && !patch.billing.effective_from && defaultFrom <= todayUtc()) {
+    const latest = await prisma.billingRate.findFirst({
+      where: { org_id: orgId, account_id: accountId, requirement_id: null, effective_from: { gt: defaultFrom, lte: todayUtc() } },
+      orderBy: { effective_from: 'desc' },
+      select: { effective_from: true },
+    });
+    if (latest) defaultFrom = latest.effective_from;
+  }
   await prisma.$transaction(async (tx) => {
     if (Object.keys(data).length) await tx.account.update({ where: { id: accountId }, data });
     if (patch.billing) {
@@ -628,7 +640,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
           rate_type,
           rate,
           currency,
-          effective_from: patch.billing.effective_from || effectiveStart || todayUtc(),
+          effective_from: patch.billing.effective_from || defaultFrom,
           created_by: actorUserId,
         },
       });

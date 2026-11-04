@@ -890,6 +890,26 @@ describe('re-take after a finished interview', () => {
     expect((await pub(tokenOf(first.link))).status).toBe(410);
     expect((await pub(tokenOf(again.body.data.link))).status).toBe(200);
   });
+
+  test('a new link or a re-take never repeats a question an earlier link asked, even when the AI writes the same ones again', async () => {
+    const first = (await invite()).body.data;
+    await post(`${tokenOf(first.link)}/start`, { consent: true });
+    const before = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(first.link) } })).questions.map((q) => q.text);
+    expect(before.length).toBeGreaterThan(0);
+
+    // the sender restarts the one in progress with a new link; the stub AI answers with the very same questions first
+    const promptsBefore = seenPrompts.length;
+    const again = await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, restart: true });
+    expect(again.status).toBe(201);
+    await post(`${tokenOf(again.body.data.link)}/start`, { consent: true });
+    const after = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(again.body.data.link) } })).questions.map((q) => q.text);
+
+    expect(after.length).toBe(before.length);
+    expect(after.filter((t) => before.includes(t))).toEqual([]);
+    // the AI was told what was asked before
+    expect(seenPrompts[promptsBefore].user).toContain(before[0]);
+    expect(seenPrompts[promptsBefore].user).toContain('Do NOT ask any of them again');
+  });
 });
 
 describe('Reports > AI interviews (dashboard data)', () => {

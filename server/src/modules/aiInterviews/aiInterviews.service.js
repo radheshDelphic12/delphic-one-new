@@ -397,6 +397,9 @@ async function startForCandidate(token, { consent, recording_consent: recordingC
     if (settings.recording_enabled && !recordingConsent) return { error: 'recording_required' };
     const ctx = await contextFor(a.submission_id);
     ctx.resume = await loadResume(ctx.profile_id);
+    // a re-take or a new link for the same submission gets different questions: what every earlier link of it asked is passed on to avoid
+    const earlier = await prisma.aiInterview.findMany({ where: { submission_id: a.submission_id, id: { not: a.id } }, select: { questions: true } });
+    ctx.previous_questions = earlier.flatMap((e) => (Array.isArray(e.questions) ? e.questions : []).map((q) => q?.text)).filter(Boolean);
     const { questions, usage } = await logic.generateQuestions(ctx, { ...settings });
     const first = { role: 'ai', kind: 'question', section: questions[0].kind, question_index: 1, text: questions[0].text, at: new Date().toISOString() };
     a = await prisma.aiInterview.update({

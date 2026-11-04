@@ -130,6 +130,14 @@ const extra = (settings) => (settings.extra_instructions ?`\nExtra instructions 
 // ---- questions ----
 // Role questions come first, then (when switched on) the AI-written aptitude questions. Each aptitude question carries its
 // expected answer for the scorer; that field is never sent to the candidate.
+// Questions an earlier link / re-take of the same interview already asked (ctx.previous_questions): a new link must not repeat them.
+const avoidList = (ctx) => (Array.isArray(ctx.previous_questions) ? ctx.previous_questions : []).map((t) => bounded(t, 600).trim()).filter(Boolean);
+function avoidBlock(ctx) {
+  const list = avoidList(ctx);
+  if (!list.length) return '';
+  return `\n\nThis candidate was already sent these questions in an earlier link of the same interview. Do NOT ask any of them again, and do not merely rephrase them: write entirely different questions (different topics, scenarios and numbers).\n${list.map((t) => `- ${t}`).join('\n')}`;
+}
+
 async function generateQuestions(ctx, settings) {
   const n = settings.question_count;
   const m = settings.aptitude_enabled ? settings.aptitude_question_count : 0;
@@ -144,16 +152,19 @@ async function generateQuestions(ctx, settings) {
   const { data, usage } = await askJson({
     system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}${reference}`,
     webSearchDomains: sites,
-    user: `${contextBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role, pitched at the ${level.label} level (${level.guidance}) - ${DIFFICULTY_TEXT[difficultyOf(settings)]}. Start with a short, easy opening question about their work, then role-specific questions built from the required skills and the candidate's own background. Each question must be answerable in 1 to 2 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
+    user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role, pitched at the ${level.label} level (${level.guidance}) - ${DIFFICULTY_TEXT[difficultyOf(settings)]}. Start with a short, easy opening question about their work, then role-specific questions built from the required skills and the candidate's own background. Each question must be answerable in 1 to 2 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
     maxTokens: 7000, // up to 12 + 12 questions, the aptitude ones with their expected answers
     documents: ctx.resume ? [ctx.resume] : [],
   });
   const clean = (t) => bounded(typeof t === 'string' ? t : t?.text, 600).trim();
-  const parseRole = (d) => (Array.isArray(d?.questions) ? d.questions : []).map(clean).filter(Boolean);
+  const norm = (t) => t.toLowerCase().replace(/\W+/g, ' ').trim();
+  // questions this candidate already got in an earlier link / re-take of the same interview are never asked again
+  const asked = new Set(avoidList(ctx).map(norm));
+  const fresh = (t) => !asked.has(norm(t));
+  const parseRole = (d) => (Array.isArray(d?.questions) ? d.questions : []).map(clean).filter(Boolean).filter(fresh);
   const parseApt = (d) => (Array.isArray(d?.aptitude) ? d.aptitude : [])
     .map((q) => ({ text: bounded(q?.text, 600).trim(), expected: bounded(q?.expected_answer, 300).trim() }))
-    .filter((q) => q.text && q.expected);
-  const norm = (t) => t.toLowerCase().replace(/\W+/g, ' ').trim();
+    .filter((q) => q.text && q.expected && fresh(q.text));
   let role = parseRole(data).slice(0, n);
   let aptitude = m ? parseApt(data).slice(0, m) : [];
   let totalUsage = usage;
@@ -165,7 +176,7 @@ async function generateQuestions(ctx, settings) {
     try {
       const more = await askJson({
         system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}`,
-        user: `${contextBlock(ctx)}\n\nYou already wrote these questions. Do not repeat or rephrase any of them:\n${[...role, ...aptitude.map((q) => q.text)].map((t) => `- ${t}`).join('\n')}\n\nWrite exactly ${missingRole} interview questions for this candidate for this role, at the same ${level.label} level and the same difficulty (${DIFFICULTY_TEXT[difficultyOf(settings)]}), each answerable in 1 to 2 minutes by speaking.${missingApt ? `\nAlso write exactly ${missingApt} aptitude questions (logical reasoning, numbers or patterns) of easy level (school-level arithmetic, simple series and everyday logic, no tricks) that can be solved in your head in about 1 minute. Give each one's correct answer as expected_answer.` : ''}\nReturn {"questions":[{"text":"..."}]${missingApt ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
+        user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nYou already wrote these questions. Do not repeat or rephrase any of them:\n${[...role, ...aptitude.map((q) => q.text)].map((t) => `- ${t}`).join('\n')}\n\nWrite exactly ${missingRole} interview questions for this candidate for this role, at the same ${level.label} level and the same difficulty (${DIFFICULTY_TEXT[difficultyOf(settings)]}), each answerable in 1 to 2 minutes by speaking.${missingApt ? `\nAlso write exactly ${missingApt} aptitude questions (logical reasoning, numbers or patterns) of easy level (school-level arithmetic, simple series and everyday logic, no tricks) that can be solved in your head in about 1 minute. Give each one's correct answer as expected_answer.` : ''}\nReturn {"questions":[{"text":"..."}]${missingApt ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
         maxTokens: 4000,
       });
       role = [...role, ...parseRole(more.data).filter((t) => !role.some((r) => norm(r) === norm(t)))].slice(0, n);
