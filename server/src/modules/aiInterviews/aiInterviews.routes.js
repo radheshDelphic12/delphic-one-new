@@ -58,7 +58,7 @@ const settingsSchema = z.object({
   extra_instructions: z.string().trim().max(1500).nullable().optional(),
   link_valid_days: z.number().int().min(1).max(60).optional(),
   answer_time_seconds: z.number().int().min(0).max(1800).optional(),
-  max_tab_switches: z.number().int().min(0).max(20).optional(),
+  max_tab_switches: z.number().int().min(0).max(20).refine((n) => n === 0 || n >= 3, { message: 'Use 0 (only log) or at least 3: two warnings come before the interview ends' }).optional(),
   weight_problem_solving: z.number().int().min(0).max(100).optional(),
   weight_experience_fit: z.number().int().min(0).max(100).optional(),
   use_reference_sites: z.boolean().optional(),
@@ -66,6 +66,7 @@ const settingsSchema = z.object({
   recording_viewer_ids: z.array(z.string().uuid()).max(50).optional(),
   difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
   marking: z.enum(['lenient', 'balanced', 'strict']).optional(),
+  require_fullscreen: z.boolean().optional(),
 });
 
 // ---- team side (login) ----

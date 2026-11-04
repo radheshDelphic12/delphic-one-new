@@ -19,10 +19,11 @@ const DEFAULTS = {
   recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
-  difficulty: 'easy', marking: 'lenient',
+  difficulty: 'easy', marking: 'lenient', require_fullscreen: true,
 };
-const TAB_EVENTS = ['tab_hidden', 'window_blur']; // leaving the interview page; these count towards max_tab_switches
-const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off'];
+const MIN_TAB_LIMIT = 3;
+const TAB_EVENTS = ['tab_hidden', 'window_blur', 'fullscreen_exit']; // leaving the interview page; these count towards max_tab_switches
+const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off', 'multiple_displays'];
 const EVENT_TYPES = [...TAB_EVENTS, ...OTHER_EVENTS];
 const eventsOf = (a) => (Array.isArray(a.integrity_events) ? a.integrity_events : []);
 const tabSwitchesOf = (a) => eventsOf(a).filter((e) => TAB_EVENTS.includes(e.type)).length;
@@ -30,7 +31,7 @@ const tabSwitchesOf = (a) => eventsOf(a).filter((e) => TAB_EVENTS.includes(e.typ
 function integritySummary(a) {
   const ev = eventsOf(a);
   const n = (types) => ev.filter((e) => types.includes(e.type)).length;
-  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), total: ev.length };
+  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), fullscreen_exits: n(['fullscreen_exit']), multiple_displays: n(['multiple_displays']), total: ev.length };
 }
 const RECORDING_DIR = () => path.join(env.uploadDir, 'ai-interviews');
 const MAX_RECORDING_BYTES = 250 * 1024 * 1024;
@@ -53,7 +54,10 @@ const effectiveOutcome = (a) => a.override_outcome || a.outcome || null;
 // ---- settings (admin editable; defaults until a row exists) ----
 async function getSettings(orgId) {
   const row = orgId ? await prisma.aiInterviewSettings.findUnique({ where: { org_id: orgId } }) : null;
-  return Object.fromEntries(SETTING_KEYS.map((k) => [k, row ? row[k] : DEFAULTS[k]]));
+  const settings = Object.fromEntries(SETTING_KEYS.map((k) => [k, row ? row[k] : DEFAULTS[k]]));
+  // the limit is the Nth leave that ends the interview, so two warnings always come first: never lower than 3 (0 = only log)
+  if (settings.max_tab_switches > 0 && settings.max_tab_switches < MIN_TAB_LIMIT) settings.max_tab_switches = MIN_TAB_LIMIT;
+  return settings;
 }
 
 async function updateSettings(orgId, patch, user) {
@@ -309,6 +313,7 @@ function candidateView(a, settings = null) {
     question_asked_at: last && last.role === 'ai' ? last.at || null : null,
     server_now: new Date().toISOString(),
     max_tab_switches: settings ? settings.max_tab_switches : null,
+    require_fullscreen: settings ? Boolean(settings.require_fullscreen) : false,
     tab_switches: tabSwitchesOf(a),
     candidate_name: a.candidate_name,
     role_title: a.role_title,

@@ -685,8 +685,8 @@ describe('resend, restart, timer and page integrity', () => {
     expect((await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ answer_time_seconds: 0, max_tab_switches: 0 })).status).toBe(200);
   });
 
-  test('tab switches and copy attempts are logged; reaching the limit ends the interview for a person to review', async () => {
-    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_tab_switches: 2 });
+  test('tab switches and copy attempts are logged; two warnings come first, the third leave ends the interview for a person to review', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_tab_switches: 3 });
     const created = (await invite()).body.data;
     const token = tokenOf(created.link);
     expect((await event(token, 'tab_hidden')).status).toBe(409); // not started yet
@@ -697,13 +697,54 @@ describe('resend, restart, timer and page integrity', () => {
     const team = await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken);
     expect(team.body.data.items[0].integrity).toMatchObject({ tab_switches: 1, copy_paste: 1 });
 
+    expect((await event(token, 'window_blur', { seconds_away: 6 })).body.data).toMatchObject({ ended: false, tab_switches: 2 }); // the second warning
     const last = await event(token, 'window_blur', { seconds_away: 3 });
-    expect(last.body.data).toMatchObject({ ended: true, tab_switches: 2 });
+    expect(last.body.data).toMatchObject({ ended: true, tab_switches: 3 });
     const row = await prisma.aiInterview.findUnique({ where: { token } });
     expect(row.status).toBe('pending_review');
-    expect(row.scores.red_flags[0]).toMatch(/ended automatically.*2 times \(limit 2\)/);
+    expect(row.scores.red_flags[0]).toMatch(/ended automatically.*3 times \(limit 3\)/);
     expect((await pub(token)).status).toBe(410); // the link is finished
     expect((await event(token, 'copy')).status).toBe(410);
+  });
+
+  test('full screen is required by default (an admin can switch it off); leaving it counts like leaving the page, a second display is logged', async () => {
+    const S = '/api/v1/ai-interviews/settings';
+    expect((await authed(request(app).get(S), recruiterToken)).body.data.require_fullscreen).toBe(true);
+    await authed(request(app).put(S), adminToken).send({ max_tab_switches: 3 });
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    const started = await post(`${token}/start`, { consent: true });
+    expect(started.body.data.require_fullscreen).toBe(true); // the candidate page enforces it
+    expect((await pub(token)).body.data.require_fullscreen).toBe(true);
+    // a second display is only logged (the page blocks it); leaving full screen is a counted event
+    expect((await event(token, 'multiple_displays')).body.data).toMatchObject({ ended: false, tab_switches: 0 });
+    expect((await event(token, 'fullscreen_exit', { seconds_away: 30 })).body.data).toMatchObject({ ended: false, tab_switches: 1 });
+    const team = await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken);
+    expect(team.body.data.items[0].integrity).toMatchObject({ tab_switches: 1, fullscreen_exits: 1, multiple_displays: 1 });
+    expect((await event(token, 'fullscreen_exit')).body.data).toMatchObject({ ended: false, tab_switches: 2 });
+    expect((await event(token, 'fullscreen_exit')).body.data).toMatchObject({ ended: true, tab_switches: 3 });
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).status).toBe('pending_review');
+
+    // switched off: the candidate page is told so
+    await authed(request(app).put(S), adminToken).send({ require_fullscreen: false, max_tab_switches: 3 });
+    const second = (await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, retake: true })).body.data;
+    const token2 = tokenOf(second.link);
+    expect((await post(`${token2}/start`, { consent: true })).body.data.require_fullscreen).toBe(false);
+  });
+
+  test('the leave limit is 0 (only log) or at least 3, so two warnings always come first; an old lower value is raised to 3', async () => {
+    const S = '/api/v1/ai-interviews/settings';
+    for (const bad of [1, 2]) expect((await authed(request(app).put(S), adminToken).send({ max_tab_switches: bad })).status).toBe(422);
+    expect((await authed(request(app).put(S), adminToken).send({ max_tab_switches: 0 })).body.data.max_tab_switches).toBe(0);
+    expect((await authed(request(app).put(S), adminToken).send({ max_tab_switches: 5 })).body.data.max_tab_switches).toBe(5);
+    await prisma.aiInterviewSettings.updateMany({ data: { max_tab_switches: 1 } }); // saved before the rule
+    expect((await authed(request(app).get(S), recruiterToken)).body.data.max_tab_switches).toBe(3);
+    const created = (await invite()).body.data;
+    const token = tokenOf(created.link);
+    await post(`${token}/start`, { consent: true });
+    expect((await event(token, 'tab_hidden')).body.data).toMatchObject({ ended: false, tab_switches: 1 });
+    expect((await event(token, 'tab_hidden')).body.data).toMatchObject({ ended: false, tab_switches: 2 });
+    expect((await event(token, 'tab_hidden')).body.data).toMatchObject({ ended: true, tab_switches: 3 });
   });
 
   test('with the limit at 0 tab switches are only logged, and the finished result carries the integrity red flags', async () => {

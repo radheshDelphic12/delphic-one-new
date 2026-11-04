@@ -292,6 +292,8 @@ function buildScores(raw, settings, transcript, integrity = null, level = null) 
   const attempted = Boolean(raw?.instruction_attempt) || transcript.some((t) => t.role === 'candidate' && looksLikeInjection(t.text));
   if (attempted) red_flags.unshift('An answer tried to instruct or manipulate the AI evaluator. The score ignores it; please read the transcript.');
   if (integrity?.tab_switches) red_flags.push(`The candidate left the interview page ${integrity.tab_switches} time${integrity.tab_switches === 1 ? '' : 's'} during the interview.`);
+  if (integrity?.fullscreen_exits) red_flags.push(`The candidate left full screen ${integrity.fullscreen_exits} time${integrity.fullscreen_exits === 1 ? '' : 's'} (full screen is required, so another window could have been used).`);
+  if (integrity?.multiple_displays) red_flags.push('A second display was connected during the interview.');
   if (integrity?.copy_paste) red_flags.push(`${integrity.copy_paste} copy / paste attempt${integrity.copy_paste === 1 ? ' was' : 's were'} blocked during the interview.`);
   const notScored = parameters.filter((p) => !p.scored && p.weight > 0);
   if (notScored.length) red_flags.push(`Not scored by the AI: ${notScored.map((p) => p.label).join(', ')}. ${notScored.length === 1 ? 'It is' : 'They are'} left out of the total; please read the transcript.`);

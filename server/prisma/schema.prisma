@@ -8463,6 +8463,8 @@ model AiInterviewSettings {
   // easy + lenient by default so an average competent candidate reaches the pass mark.
   difficulty             String   @default("easy")
   marking                String   @default("lenient")
+  // The candidate must stay in full screen (a split screen next to another window is then impossible) and use a single display; leaving it is counted like leaving the page.
+  require_fullscreen     Boolean  @default(true)
   updated_by         String?  @db.Uuid
   updated_at         DateTime @default(now()) @updatedAt
 

@@ -135,6 +135,18 @@ Average candidates were scoring below average, so both are now admin settings (H
 - Aptitude questions are easy (school-level arithmetic, simple series), about a minute each.
 - Pass mark (60) and the borderline range (10 points) are unchanged and still editable.
 
+## Full screen, one display, and two warnings (2026-11-04)
+A candidate ran another window (Claude) in a split screen next to the interview; the page could not see it. Now (setting **Require full screen and a single
+display**, on by default, migration `20261118110000_ai_interview_fullscreen`):
+- **Start** puts the page in full screen (from the click). A browser that cannot do it cannot start the interview. In full screen no other window can sit beside it.
+- Leaving full screen while the interview runs is a counted event (`fullscreen_exit`, counted like leaving the page), once per exit. The page is covered by a
+  "Return to full screen" dialog until the candidate is back; the question timer keeps running. A link reopened from a closed tab gets 10 seconds to press the button first.
+- A **second display** (`screen.isExtended`, Chrome / Edge) stops Start and covers a running interview until it is gone; logged as `multiple_displays` (a red flag, not counted).
+- **Two warnings, then end:** every leave of the page / full screen shows "Warning 1 of 2", then "final warning", and the third one ends the interview for a person to read.
+  The limit (Hiring setup > AI interview > "Leaves before the interview ends", default 3) is 0 (only log) or at least 3; an older lower value is raised to 3.
+- Not possible from a web page: seeing what is on another screen or in another window. For that the interview would have to share and record the candidate's screen
+  (not built yet) or be taken in a controlled place.
+
 ## Still manual / known limits
 - Needs the Anthropic key and a real run on staging with a real camera + mic. Playwright with a fake camera (2026-11-02) covered the
   start gating, countdown, auto-submit on timeout, recording, copy / paste / right-click blocks and the tab-switch warning and ending;

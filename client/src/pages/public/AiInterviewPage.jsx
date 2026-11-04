@@ -8,6 +8,13 @@ const SpeechRecognition = typeof window !== 'undefined' ? window.SpeechRecogniti
 const RECORDER_TYPES = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 const SECTION_LABEL = { role: 'Role questions', aptitude: 'Aptitude' };
 const NO_ANSWER_TEXT = '[No answer - time ran out]';
+/** What the candidate is told after leaving: warning 1 of N-1, the final warning, then the interview ends on the next one. */
+function leaveWarning(what, tabSwitches, limit) {
+  if (!limit) return `${what} This has been recorded. Please stay on the interview until you finish.`;
+  const warnings = Math.max(1, limit - 1);
+  const n = Math.min(tabSwitches, warnings);
+  return `${what} Warning ${n} of ${warnings}${n >= warnings ? ' - this is the final warning: the next time the interview ends automatically' : ''}. Please stay on the interview until you finish.`;
+}
 const GRACE_MS = 4000; // permission prompts and the start of the recording briefly take focus; those are not tab switches
 
 const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, '0')}`;
@@ -56,6 +63,11 @@ export default function AiInterviewPage() {
   const resumedRef = useRef(false);
   const partRef = useRef({ part: 0, stored: false }); // the recording part in progress and whether the server has stored a chunk of it
   const graceUntilRef = useRef(0);
+  // Full screen and one display: with the interview in full screen no other window can sit next to it, so the rule is enforced on the page.
+  const [fsOk, setFsOk] = useState(() => Boolean(document.fullscreenElement));
+  const [multiDisplay, setMultiDisplay] = useState(false);
+  const fsAwayRef = useRef(null); // since when the candidate has been out of full screen
+  const hadFsRef = useRef(false);
   const awayRef = useRef(null); // { at, kind } while the candidate is away from the page
   const timedOutForRef = useRef(null); // the question turn already auto-submitted by the timer
   const textRef = useRef('');
@@ -185,7 +197,7 @@ export default function AiInterviewPage() {
         report('blocked_key');
       }
     };
-    const away = (kind) => { if (!awayRef.current && Date.now() > graceUntilRef.current) awayRef.current = { at: Date.now(), kind }; };
+    const away = (kind) => { if (fsAwayRef.current) return; if (!awayRef.current && Date.now() > graceUntilRef.current) awayRef.current = { at: Date.now(), kind }; };
     const back = async () => {
       const gone = awayRef.current;
       awayRef.current = null;
@@ -196,7 +208,7 @@ export default function AiInterviewPage() {
       const res = await report(gone.kind, seconds);
       if (res && !res.ended) {
         const limit = view?.max_tab_switches;
-        setWarning(`You left the interview page. This has been recorded${limit ? ` (${res.tab_switches} of ${limit} allowed)` : ''}.${limit ? ' If it happens again too often, the interview ends automatically.' : ''} Please stay on this page until you finish.`);
+        setWarning(leaveWarning('You left the interview page.', res.tab_switches, limit));
       }
     };
     const onVisibility = () => (document.hidden ? away('tab_hidden') : back());
@@ -224,6 +236,43 @@ export default function AiInterviewPage() {
       window.removeEventListener('focus', back);
     };
   }, [active, report, view?.max_tab_switches]);
+
+  // ---- full screen and a single display ----
+  const needFullscreen = Boolean(view?.require_fullscreen);
+  async function enterFullscreen() {
+    graceUntilRef.current = Date.now() + GRACE_MS;
+    try { await document.documentElement.requestFullscreen(); return true; } catch { return false; }
+  }
+  useEffect(() => {
+    const sync = () => setFsOk(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  // Chrome and Edge say when a second display is connected
+  useEffect(() => {
+    const check = () => setMultiDisplay(Boolean(window.screen?.isExtended));
+    check();
+    const timer = setInterval(check, 3000);
+    window.screen?.addEventListener?.('change', check);
+    return () => { clearInterval(timer); window.screen?.removeEventListener?.('change', check); };
+  }, []);
+  useEffect(() => { if (active && multiDisplay) report('multiple_displays'); }, [active, multiDisplay, report]);
+  // Leaving full screen while the interview runs is counted once (a warning, like leaving the page); the screen stays covered until the
+  // candidate is back, and the question timer keeps running. (An interview reopened from the link gets 10 seconds to press the button first.)
+  useEffect(() => {
+    if (!active || !needFullscreen) return undefined;
+    if (fsOk) { hadFsRef.current = true; fsAwayRef.current = null; return undefined; }
+    fsAwayRef.current = fsAwayRef.current || Date.now();
+    awayRef.current = null;
+    let timer = null;
+    const count = async () => {
+      const res = await report('fullscreen_exit', (Date.now() - fsAwayRef.current) / 1000);
+      if (res && !res.ended) setWarning(leaveWarning('You left full screen, which is required.', res.tab_switches, view?.max_tab_switches));
+    };
+    timer = setTimeout(count, hadFsRef.current ? 500 : 10000);
+    return () => clearTimeout(timer);
+  }, [active, needFullscreen, fsOk, report, view?.max_tab_switches]);
+  useEffect(() => { if ((finished || endedByRules) && document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); }, [finished, endedByRules]);
 
   // ---- microphone test ----
   async function testMic() {
@@ -257,6 +306,10 @@ export default function AiInterviewPage() {
     setBusy(true);
     setError('');
     try {
+      if (view.require_fullscreen && !(await enterFullscreen())) {
+        setError('This interview must be taken in full screen on a single display, and this browser would not allow it. Please open the link in a recent Chrome or Edge on a computer.');
+        return;
+      }
       // a recorded interview needs the camera before it begins, so a refusal is caught here and not halfway through
       if (view.recording_required) {
         graceUntilRef.current = Date.now() + GRACE_MS;
@@ -447,7 +500,8 @@ export default function AiInterviewPage() {
           <li>You can use this link once. If you close the page, open the same link to carry on where you stopped.</li>
           <li>There are a few short aptitude questions too. Work them out in your head and type the answer.</li>
           {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have typed or said so far is sent and the next question comes.</li>}
-          <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; after ${view.max_tab_switches} times the interview ends automatically` : ''}.</li>
+          {view.require_fullscreen && <li>The interview runs in full screen on a single display. Leaving full screen, or connecting a second display, is recorded and counted like leaving the page.</li>}
+          <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; you get ${view.max_tab_switches - 1} warnings, and the next time the interview ends automatically` : ''}.</li>
           {mustRecord && <li>This interview is recorded (camera and microphone) and the recording is required. Keep them on until you finish.</li>}
           <li>The AI scores your answers; people at the company make the final decision.</li>
         </ul>
@@ -476,7 +530,8 @@ export default function AiInterviewPage() {
         )}
         {!view.ai_enabled && <p className="mt-3 text-xs text-warning-700">The interviewer is not switched on yet. Please try again later.</p>}
         {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
-        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok'} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
+        {view.require_fullscreen && multiDisplay && <p className="mt-3 text-sm text-danger-700" data-testid="multi-display-note">A second display is connected. Please use one screen only (disconnect or switch off the other) to start.</p>}
+        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok' || (view.require_fullscreen && multiDisplay)} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
         {busy && <p data-testid="start-working" className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />The interviewer is writing your questions. This can take up to a minute - please keep this page open.</p>}
       </Shell>
     );
@@ -495,6 +550,20 @@ export default function AiInterviewPage() {
   const urgent = remaining != null && remaining <= 30;
   return (
     <Shell>
+      {active && ((needFullscreen && !fsOk) || multiDisplay) && (
+        <div role="alertdialog" data-testid="screen-rules" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6">
+          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-soft">
+            <AlertTriangle className="mx-auto h-8 w-8 text-warning-600" />
+            <h2 className="mt-2 font-heading text-lg font-semibold text-tertiary-900">{multiDisplay ? 'Use one screen only' : 'Full screen is required'}</h2>
+            <p className="mt-2 text-sm text-tertiary-700">
+              {multiDisplay
+                ? 'A second display is connected. Please disconnect it or switch it off; the interview continues once only one screen is in use. This has been recorded.'
+                : 'This interview runs in full screen so that nothing else is open next to it. Leaving full screen is recorded as a warning. The interview stays covered until you return, and the question timer keeps running.'}
+            </p>
+            {!multiDisplay && <button type="button" className="btn-primary mt-4" onClick={enterFullscreen}>Return to full screen</button>}
+          </div>
+        </div>
+      )}
       <div className="select-none">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>

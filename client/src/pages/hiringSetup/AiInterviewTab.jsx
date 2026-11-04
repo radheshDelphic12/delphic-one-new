@@ -14,7 +14,7 @@ const NUMBER_FIELDS = [
   { key: 'borderline_margin', label: 'Borderline range (points)', hint: 'Just under the pass mark within this many points = borderline, a person decides', min: 0, max: 50 },
   { key: 'link_valid_days', label: 'Link valid for (days)', hint: 'One attempt per link', min: 1, max: 60 },
   { key: 'answer_time_seconds', label: 'Time per question (seconds)', hint: 'A countdown on every question; when it ends the typed answer is sent. 0 = no limit', min: 0, max: 1800 },
-  { key: 'max_tab_switches', label: 'Tab switches allowed', hint: 'Leaving the interview page is logged and warned about; at this many the interview ends for a person to review. 0 = only log', min: 0, max: 20 },
+  { key: 'max_tab_switches', label: 'Leaves before the interview ends', hint: 'Leaving the interview page (or full screen) is warned about; the interview ends on this many. 3 = two warnings, then it ends on the third. 0 = only log', min: 0, max: 20 },
 ];
 const WEIGHTS = [
   { key: 'weight_knowledge', label: 'Role knowledge' },
@@ -119,7 +119,7 @@ export default function AiInterviewTab({ isAdmin }) {
         ...Object.fromEntries([...NUMBER_FIELDS, ...WEIGHTS, { key: 'aptitude_question_count' }, { key: 'recording_retention_days' }].map((f) => [f.key, Number(form[f.key])])),
         is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(), recording_viewer_ids: form.recording_viewer_ids || [],
         extra_instructions: (form.extra_instructions || '').trim() || null,
-        difficulty: form.difficulty || 'easy', marking: form.marking || 'lenient',
+        difficulty: form.difficulty || 'easy', marking: form.marking || 'lenient', require_fullscreen: form.require_fullscreen !== false,
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
       setForm(data.data);
@@ -159,6 +159,9 @@ export default function AiInterviewTab({ isAdmin }) {
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {NUMBER_FIELDS.map((f) => <NumberField key={f.key} field={f} value={form[f.key]} onChange={set(f.key)} disabled={off} />)}
+        </div>
+        <div className="mt-4">
+          <Switch checked={form.require_fullscreen !== false} onChange={set('require_fullscreen')} disabled={off} label="Require full screen and a single display" hint="On by default. The candidate must stay in full screen (nothing else can sit next to the interview) and use one display. Leaving full screen is counted like leaving the page, again every 20 seconds until they return, and too many ends the interview for review." />
         </div>
         <div className="mt-4">
           <label className="mb-1 block text-xs font-medium text-tertiary-600">Extra instructions for the AI (optional)</label>
