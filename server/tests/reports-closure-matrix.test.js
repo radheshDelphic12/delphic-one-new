@@ -104,6 +104,29 @@ describe('project working hours and the day schedule', () => {
     expect(d.projects.find((p) => p.code === 'P0001')).toMatchObject({ name: 'Night desk', start: '21:00', end: '06:00', client: 'Acme' });
     expect(d.shifts).toEqual([expect.objectContaining({ name: 'General', start: '09:00', end: '18:00', people: [expect.objectContaining({ name: admin.name })] })]);
   });
+
+  test('every project lists the people allocated to it today (open or running allocations; ended or future ones are not)', async () => {
+    const client = await mkAccount({ name: 'Acme' });
+    const mkProject = (code) => mkAccount({ name: unique('Proj '), is_project: true, client_account_id: client.id, project_code: code, project_name: code });
+    const live = await mkProject('P0010');
+    const ended = await mkProject('P0011');
+    const future = await mkProject('P0012');
+    const empty = await mkProject('P0013');
+    const membership = await prisma.orgMembership.findFirst({ where: { person_id: admin.id, org_id: org.id } });
+    const day = (offset) => new Date(Date.now() + offset * 86400000);
+    const base = { org_id: org.id, org_membership_id: membership.id, created_by: admin.id };
+    await prisma.projectMemberAssignment.create({ data: { ...base, account_id: live.id, start_date: day(-30), end_date: null } });
+    await prisma.projectMemberAssignment.create({ data: { ...base, account_id: ended.id, start_date: day(-60), end_date: day(-3) } });
+    await prisma.projectMemberAssignment.create({ data: { ...base, account_id: future.id, start_date: day(10), end_date: null } });
+    const d = (await get('/reports/day-schedule')).body.data;
+    const allocated = (code) => d.projects.find((p) => p.code === code).allocated.map((p) => p.name);
+    expect(allocated('P0010')).toEqual([admin.name]);
+    expect(d.projects.find((p) => p.code === 'P0010').allocated[0].id).toBe(admin.id); // the person id, as the shift lists use
+    expect(allocated('P0011')).toEqual([]);
+    expect(allocated('P0012')).toEqual([]);
+    expect(allocated('P0013')).toEqual([]);
+    void empty;
+  });
 });
 
 describe('GET /ai-interviews/report', () => {

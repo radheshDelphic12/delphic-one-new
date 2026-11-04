@@ -57,6 +57,8 @@ export default function DaySchedule() {
   // Two multi-select filters that work together: the projects to draw and the employees to show under their shifts (empty = everyone).
   const [selProjects, setSelProjects] = useState([]);
   const [selPeople, setSelPeople] = useState([]);
+  // Picking projects also picks the people allocated to them today (switch off to choose the employees by hand).
+  const [autoPeople, setAutoPeople] = useState(true);
 
   useEffect(() => {
     apiClient.get('/reports/day-schedule').then((res) => setData(res.data.data), (e) => pushError(apiErrorMessage(e, 'Could not load the schedule'), 'Load failed'));
@@ -72,14 +74,26 @@ export default function DaySchedule() {
     else next.add(id);
     setSet(next);
   };
-  const projectOptions = useMemo(() => withHours.map((p) => ({ id: p.id, label: `${p.code ? `${p.code} ` : ''}${p.name}`, hint: p.client || undefined })), [withHours]);
+  const projectOptions = useMemo(() => (data?.projects || []).map((p) => ({ id: p.id, label: `${p.code ? `${p.code} ` : ''}${p.name}`, hint: [p.client, p.start && p.end ? null : 'no working hours'].filter(Boolean).join(' · ') || undefined })), [data]);
   const peopleOptions = useMemo(() => {
     const seen = new Map();
     (data?.shifts || []).forEach((sh) => sh.people.forEach((p) => { if (!seen.has(p.id)) seen.set(p.id, { id: p.id, label: p.name, hint: [p.employee_code, sh.name].filter(Boolean).join(' · ') }); }));
     return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [data]);
+  // the people allocated today to the picked projects (only those who are on a shift can be drawn)
+  const onShift = useMemo(() => new Set(peopleOptions.map((p) => p.id)), [peopleOptions]);
+  const pickProjects = (ids) => {
+    setSelProjects(ids);
+    if (!autoPeople) return;
+    const chosen = new Set();
+    (data?.projects || []).filter((p) => ids.includes(p.id)).forEach((p) => (p.allocated || []).forEach((a) => { if (onShift.has(a.id)) chosen.add(a.id); }));
+    setSelPeople([...chosen]);
+  };
+  const allocatedAway = (data?.projects || []).filter((p) => selProjects.includes(p.id)).flatMap((p) => (p.allocated || []).filter((a) => !onShift.has(a.id)).map((a) => a.name));
   const projectFilter = selProjects.length > 0;
   const peopleFilter = selPeople.length > 0;
+  // picked projects with nobody on a shift allocated: show no employees (an empty pick would otherwise mean everyone)
+  const noPeople = autoPeople && selProjects.length > 0 && !peopleFilter;
   const projectVisible = (id) => (!projectFilter || selProjects.includes(id)) && pOn(id);
   const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
 
@@ -90,8 +104,9 @@ export default function DaySchedule() {
   return (
     <div className="space-y-4" data-testid="day-schedule">
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card">
-        <div className="w-64"><MultiSelectDropdown value={selProjects} onChange={setSelProjects} options={projectOptions} placeholder="All projects" searchPlaceholder="Search projects…" emptyMessage="No project has working hours yet." /></div>
+        <div className="w-64"><MultiSelectDropdown value={selProjects} onChange={pickProjects} options={projectOptions} placeholder="All projects" searchPlaceholder="Search projects…" emptyMessage="No project yet." /></div>
         <div className="w-64"><MultiSelectDropdown value={selPeople} onChange={setSelPeople} options={peopleOptions} placeholder="All employees" searchPlaceholder="Search employees…" emptyMessage="No employee is on a shift yet." /></div>
+        <label className="flex items-center gap-2 text-sm text-tertiary-700" title="When you pick projects, the people allocated to them today are picked too"><input type="checkbox" checked={autoPeople} onChange={(e) => setAutoPeople(e.target.checked)} data-testid="auto-people" />Pick allocated people</label>
         {(projectFilter || peopleFilter) && <button type="button" className="text-xs text-primary-700 underline" onClick={() => { setSelProjects([]); setSelPeople([]); }}>Clear filters</button>}
         <span className="text-sm font-medium text-tertiary-800">Show:</span>
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownProjects(new Set(allProjectIds))}>All projects</button>
@@ -100,6 +115,13 @@ export default function DaySchedule() {
         <button type="button" className="btn-secondary text-xs" onClick={() => setShownShifts(new Set())}>No shifts</button>
         <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={showPeople} onChange={(e) => setShowPeople(e.target.checked)} />Show employees under each shift</label>
       </div>
+
+      {autoPeople && projectFilter && (
+        <p className="text-xs text-tertiary-500" data-testid="auto-people-note">
+          {peopleFilter ? `${selPeople.length} ${selPeople.length === 1 ? 'person' : 'people'} allocated to the picked ${selProjects.length === 1 ? 'project' : 'projects'} today.` : 'Nobody on a shift is allocated to the picked projects today.'}
+          {allocatedAway.length > 0 && ` Allocated but not on a shift (so not drawn): ${[...new Set(allocatedAway)].join(', ')}.`}
+        </p>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
         <div className="min-w-[920px]">
@@ -125,8 +147,8 @@ export default function DaySchedule() {
             {data.shifts.length === 0 && <p className="py-2 text-sm text-tertiary-500">No shifts are set up yet (HR settings).</p>}
             {peopleFilter && data.shifts.length > 0 && !data.shifts.some((sh) => sh.people.some((p) => selPeople.includes(p.id))) && <p className="py-2 text-sm text-tertiary-500">None of the selected employees is on a shift.</p>}
             {data.shifts.map((s) => {
-              const people = peopleFilter ? s.people.filter((p) => selPeople.includes(p.id)) : s.people;
-              if (peopleFilter && people.length === 0) return null;
+              const people = noPeople ? [] : peopleFilter ? s.people.filter((p) => selPeople.includes(p.id)) : s.people;
+              if ((peopleFilter || noPeople) && people.length === 0) return null;
               return (
                 <div key={s.id}>
                   <Row name={s.name} sub={`${s.start}–${s.end} (${span(s.start, s.end)}) · ${s.people.length} ${s.people.length === 1 ? 'person' : 'people'}`} checked={sOn(s.id)} onToggle={() => toggle(shownShifts, setShownShifts, allShiftIds, s.id)}>
