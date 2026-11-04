@@ -1,6 +1,10 @@
 const { z } = require('zod');
 const { requiredDate, optionalDate } = require('../../lib/zodDate');
 
+const mailingListSchema = z.object({
+  emails: z.array(z.string().trim().toLowerCase().email().max(200)).max(50),
+});
+
 const createLeaveTypeSchema = z.object({
   name: z.string().min(1).max(100),
   paid: z.boolean().default(true),
@@ -105,6 +109,7 @@ const setEntitlementSchema = z.object({
 const revokeSchema = z.object({ reason: z.string().max(500).optional() });
 
 module.exports = {
+  mailingListSchema,
   createLeaveTypeSchema,
   updateLeaveTypeSchema,
   createLeaveRequestSchema,

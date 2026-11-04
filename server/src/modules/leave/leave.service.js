@@ -881,10 +881,80 @@ async function leaveDayFor(orgId, orgMembershipId, date) {
   return halves.length >= 2 ? { leave_type: halves[0].leave_type.name, from_date: halves[0].from_date, to_date: halves[0].to_date } : null;
 }
 
+// ---- Leave mailing list: mailed (with the reporting manager) whenever someone applies for leave.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function getMailingList(orgId) {
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { leave_mailing_list: true } });
+  return org?.leave_mailing_list || [];
+}
+
+// Lower-cased, trimmed, de-duplicated; anything that is not an address is dropped.
+function cleanEmails(list) {
+  return [...new Set((list || []).map((e) => String(e || '').trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)))];
+}
+
+async function setMailingList(orgId, adminUser, emails) {
+  const before = await getMailingList(orgId);
+  const after = cleanEmails(emails);
+  await prisma.org.update({ where: { id: orgId }, data: { leave_mailing_list: after } });
+  await prisma.auditLog.create({ data: { org_id: orgId, actor_id: adminUser.id, action: 'leave_mailing_list_set', entity_type: 'org', entity_id: orgId, reason: 'Leave mailing list changed', snapshot: { before, after } } });
+  return after;
+}
+
+const fmtDay = (d) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * Tell the reporting manager and the leave mailing list that someone applied for leave. One mail per address
+ * (an address that is both the manager and on the list gets one). Never throws: a mail problem must not undo the
+ * leave request. `requests` is the request plus the unpaid overflow part, when the balance ran out part-way.
+ */
+async function notifyApplied(orgId, requests, { appliedBy = null } = {}) {
+  try {
+    const list = (requests || []).filter(Boolean);
+    if (list.length === 0) return;
+    const first = list[0];
+    const member = await prisma.orgMembership.findFirst({
+      where: { id: first.org_membership_id, org_id: orgId },
+      select: { person: { select: { name: true, email: true } }, manager: { select: { person: { select: { name: true, email: true } } } } },
+    });
+    if (!member) return;
+    const mailingList = await getMailingList(orgId);
+    const recipients = new Map();
+    const managerEmail = member.manager?.person?.email;
+    if (managerEmail) recipients.set(managerEmail.toLowerCase(), member.manager.person.name);
+    for (const email of cleanEmails(mailingList)) if (!recipients.has(email)) recipients.set(email, null);
+    // the employee already knows they applied
+    if (member.person?.email) recipients.delete(member.person.email.toLowerCase());
+    if (recipients.size === 0) return;
+
+    const types = await prisma.leaveType.findMany({ where: { id: { in: list.map((r) => r.leave_type_id) } }, select: { id: true, name: true } });
+    const typeName = new Map(types.map((t) => [t.id, t.name]));
+    const who = member.person?.name || 'An employee';
+    const lines = list.map((r) => {
+      const range = ymd(r.from_date) === ymd(r.to_date) ? fmtDay(r.from_date) : `${fmtDay(r.from_date)} to ${fmtDay(r.to_date)}`;
+      const half = r.is_half_day ? ` (half day${r.half_day_session ? `, ${String(r.half_day_session).toLowerCase()}` : ''})` : '';
+      return `${typeName.get(r.leave_type_id) || 'Leave'}: ${range}${half}`;
+    });
+    const reason = first.reason ? `\nReason: ${first.reason}` : '';
+    const by = appliedBy ? `\nApplied by: ${appliedBy}` : '';
+    const text = `${who} has applied for leave.\n\n${lines.join('\n')}${reason}${by}\n\nOpen Leave > Team requests in Delphic One to approve or reject it.`;
+    const emailOutbox = require('../../lib/email/outbox');
+    for (const [email, name] of recipients) {
+      await emailOutbox.enqueue(prisma, { orgId, kind: 'leave_applied', to: { email, name }, subject: `Leave request: ${who}`, text });
+    }
+  } catch (err) {
+    logger.error('leave_applied_email_failed', { org_id: orgId, err });
+  }
+}
+
 const LEAVE_DAY_MESSAGE = (leave) =>
   `You're on approved ${leave.leave_type} leave on that date — attendance, timesheet and project hours are disabled for leave days`;
 
 module.exports = {
+  getMailingList,
+  setMailingList,
+  notifyApplied,
   isLeaveManager,
   listLeaveManagers,
   setLeaveManager,
