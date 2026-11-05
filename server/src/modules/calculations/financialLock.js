@@ -25,10 +25,15 @@ async function assertOpen(orgId, month, year) {
 }
 
 // Memberships with timesheet entries in the month that are not locked (month lock, or every day locked).
-async function unlockedMembers(orgId, period, entryWhere) {
+// `onlyIt` leaves out people outside the IT department: their salary comes from attendance and their general
+// (no-project) time never feeds salary or billing, so an unapproved or unlocked one must not stop a lock.
+const IT_MEMBER = { OR: [{ department: { name: { equals: 'IT', mode: 'insensitive' } } }, { person: { department: { name: { equals: 'IT', mode: 'insensitive' } } } }] };
+
+async function unlockedMembers(orgId, period, entryWhere, { onlyIt = false } = {}) {
   const { start, end } = monthBounds(period.period_month, period.period_year);
+  const itWhere = onlyIt ? { org_membership: IT_MEMBER } : {};
   const [entries, monthLocks, dayLocks] = await Promise.all([
-    prisma.timesheetEntry.findMany({ where: { org_id: orgId, date: { gte: start, lte: end }, status: { not: 'rejected' }, ...entryWhere }, select: { org_membership_id: true }, distinct: ['org_membership_id'] }),
+    prisma.timesheetEntry.findMany({ where: { org_id: orgId, date: { gte: start, lte: end }, status: { not: 'rejected' }, ...entryWhere, ...itWhere }, select: { org_membership_id: true }, distinct: ['org_membership_id'] }),
     prisma.timesheetMonthLock.findMany({ where: { org_id: orgId, period_month: period.period_month, period_year: period.period_year }, select: { org_membership_id: true } }),
     prisma.timesheetLock.count({ where: { org_id: orgId, date: { gte: start, lte: end } } }),
   ]);
@@ -48,7 +53,7 @@ async function lockOrderBlockers(orgId, kind, scopeKey, period) {
     vendor_payment: { org_membership: { worker_type: 'contractor' } },
   }[kind];
   if (where !== undefined || ['salary', 'resource_revenue', 'financials'].includes(kind)) {
-    const open = await unlockedMembers(orgId, period, where || {});
+    const open = await unlockedMembers(orgId, period, where || {}, { onlyIt: ['salary', 'salary_employee', 'financials'].includes(kind) });
     if (open.length) {
       blockers.push({ code: 'timesheets_not_locked', count: open.length, message: `Stage 1 first: ${open.length} timesheet${open.length === 1 ? ' is' : 's are'} not locked for this month (Time & Attendance > Attendance Locks).` });
     }
