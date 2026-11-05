@@ -105,8 +105,11 @@ jobs:
 
       - name: Install Postgres 16 client tools
         run: |
+          # The runner's own apt index has no postgresql-client-16: add the PostgreSQL project's apt repository first.
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-16 || true
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-16
           ls /usr/lib/postgresql/16/bin/pg_restore
 
       - name: Install dependencies
