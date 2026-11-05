@@ -12,6 +12,11 @@ const WHERE = {
   salary: { to: '/analytics?section=salary', label: 'Salary' },
   resource_revenue: { to: '/analytics?section=resources', label: 'Resource revenue' },
   vendor_payment: { to: '/analytics?section=vendors', label: 'Vendors' },
+  // Per-record locks (Live Analytics) and Financials, which sums the locked ones.
+  salary_employee: { to: '/analytics?section=salary', label: 'Salary' },
+  vendor_bill: { to: '/analytics?section=vendors', label: 'Vendors' },
+  expense: { to: '/analytics?section=expenses', label: 'Expenses' },
+  financials: { to: '/analytics?section=locked', label: 'Locked' },
 };
 
 /**
