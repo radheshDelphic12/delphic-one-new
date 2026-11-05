@@ -456,10 +456,8 @@ describe('A new joiner gets the standard quota pro-rata from the joining month',
     expect(casual(old)).toMatchObject({ allocated: 12 });
     expect(casual(set)).toMatchObject({ allocated: 7, customised: true });
 
-    // The employee's own screen agrees, and a request beyond the pro-rata balance is refused.
+    // The employee's own screen agrees (Casual leave overflows to unpaid, so a request beyond the balance is accepted, not refused).
     const mine = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), oct.token);
     expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ allocated: 3, remaining: 3 });
-    const tooMany = await authed(request(app).post('/api/v1/leave/requests'), oct.token).send({ leave_type_id: cl.id, from_date: '2026-12-01', to_date: '2026-12-07' });
-    expect(tooMany.status).toBe(422);
   });
 });
