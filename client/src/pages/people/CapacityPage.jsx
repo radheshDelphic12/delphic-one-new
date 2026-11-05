@@ -150,17 +150,17 @@ function TeamCapacityReport() {
         {r.lead && <span className="block text-xs text-tertiary-500">Lead: {r.lead.name}</span>}
       </span>
     ) },
-    { key: 'members', header: 'Team members', render: (r) => (r.team ? r.members : '—') },
+    { key: 'members', header: 'Team members', render: (r) => (r.team ? <CountButton label={`${r.team.name}: ${r.members} members`} onClick={() => setOpen(r)}>{r.members}</CountButton> : '—') },
     { key: 'per', header: 'Capacity / person', render: (r) => (r.team ? <span title={r.uses_org_default ? 'Company default' : 'Team override'}>{num(r.capacity_per_resource)}{r.uses_org_default ? '' : ' *'}</span> : '—') },
     { key: 'max', header: 'Max possible allocation', render: (r) => (r.team ? num(r.total_capacity) : '—') },
     { key: 'current', header: 'Current allocation', render: (r) => (
-      <ProjectsHover projects={r.projects} title={`${r.team?.name || 'No team'} · running projects`}>
+      <ProjectsHover projects={r.projects} title={`${r.team?.name || 'No team'} · running projects`} onOpen={() => setOpen(r)}>
         <span className={r.over_capacity_by > 0 ? 'font-medium text-danger-700' : ''}>{r.current_allocation}</span>
       </ProjectsHover>
     ) },
     { key: 'available', header: 'Current capability', render: (r) => (r.team ? num(r.available_capability) : '—') },
     { key: 'ending', header: "Projects ending soon", render: (r) => (
-      <ProjectsHover projects={(r.projects || []).filter((p) => p.ending_soon)} title={`${r.team?.name || 'No team'} · ending soon`}>
+      <ProjectsHover projects={(r.projects || []).filter((p) => p.ending_soon)} title={`${r.team?.name || 'No team'} · ending soon`} onOpen={() => setOpen(r)}>
         {r.projects_ending_soon}
       </ProjectsHover>
     ) },
@@ -212,7 +212,43 @@ function TeamCapacityReport() {
 }
 
 /** Every employee with the projects they are allocated to; empty = no project. */
+/** A number that opens the records behind it. */
+function CountButton({ children, onClick, label }) {
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} aria-label={label} className="rounded px-1 font-medium text-primary-700 underline decoration-dotted underline-offset-4 hover:bg-primary-50 focus-visible:ring-2 focus-visible:ring-primary-300">
+      {children}
+    </button>
+  );
+}
+
+/** One employee's projects on the chosen date: each project with its client, share, status and dates. */
+function EmployeeProjectsDrawer({ row, date, onClose }) {
+  return (
+    <Drawer open={Boolean(row)} title={row ? `${row.name} · projects on ${formatDay(date)}` : ''} onClose={onClose} size="lg">
+      {row && (
+        <div className="space-y-3 text-sm">
+          <p className="text-tertiary-600">{row.team?.name || 'No team'} · {row.project_count} project{row.project_count === 1 ? '' : 's'}</p>
+          {row.projects.length === 0 ? <p className="text-tertiary-500">No running or upcoming project allocation on this date.</p> : (
+            <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100">
+              {row.projects.map((p) => (
+                <li key={p.id} className="px-4 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-tertiary-900">{p.name}<span className="ml-2 text-xs font-normal text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span>
+                    <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.status === 'upcoming' ? 'Upcoming' : 'Running'}{p.allocation_percent != null ? ` · ${p.allocation_percent}%` : ''}</Pill>
+                  </div>
+                  <p className="mt-1 text-xs text-tertiary-600">{p.agreement_start_date ? `Starts ${formatDay(p.agreement_start_date)}` : 'No start date'} · {p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
 function EmployeeProjectsReport() {
+  const [openRow, setOpenRow] = useState(null);
   const teams = useTeamOptions(true);
   const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [] }));
   const [assignment, setAssignment] = useState('all'); // all | with | without
@@ -235,7 +271,7 @@ function EmployeeProjectsReport() {
   const columns = [
     { key: 'name', header: 'Employee', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span>{r.employee_code && <span className="block text-xs text-tertiary-500">{r.employee_code}</span>}</span> },
     { key: 'team', header: 'Team', render: (r) => r.team?.name || <span className="text-tertiary-400">No team</span> },
-    { key: 'count', header: 'Projects', render: (r) => r.project_count },
+    { key: 'count', header: 'Projects', render: (r) => <CountButton label={`${r.name}: ${r.project_count} projects`} onClick={() => setOpenRow(r)}>{r.project_count}</CountButton> },
     { key: 'projects', header: 'Assigned projects', render: (r) => (r.projects.length === 0 ? <Pill tone="gray">No project assigned</Pill> : (
       <div className="flex flex-wrap gap-1.5">
         {r.projects.map((p) => (
@@ -268,13 +304,34 @@ function EmployeeProjectsReport() {
           </div>
         </Filter>
       </div>
-      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No employees match the current filters." />
-      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees · {data.unassigned} with no project on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
+      <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpenRow} emptyLabel="No employees match the current filters." />
+      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees · <CountButton label="Show employees with no project" onClick={() => setAssignment('without')}>{data.unassigned} with no project</CountButton> on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
+      <EmployeeProjectsDrawer row={openRow} date={data?.date} onClose={() => setOpenRow(null)} />
     </div>
   );
 }
 
+/** One ending project: its dates, client and the people on it. */
+function EndingProjectDrawer({ row, onClose }) {
+  return (
+    <Drawer open={Boolean(row)} title={row ? `${row.project.name}${row.project.code ? ` · ${row.project.code}` : ''}` : ''} onClose={onClose} size="lg">
+      {row && (
+        <div className="space-y-3 text-sm">
+          <p className="text-tertiary-600">Client: {row.project.client_name || '—'} · Ends {formatDay(row.end_date)} ({row.days_remaining} days left)</p>
+          <h3 className="font-semibold text-tertiary-900">People on it ({row.resource_count})</h3>
+          {row.resources.length === 0 ? <p className="text-tertiary-500">Nobody is allocated.</p> : (
+            <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100">
+              {row.resources.map((x) => <li key={x.id || x.name} className="px-4 py-2">{x.name}{x.allocation_percent != null ? <span className="ml-2 text-xs text-tertiary-500">{x.allocation_percent}%</span> : null}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
 function EndingSoonReport() {
+  const [openRow, setOpenRow] = useState(null);
   const teams = useTeamOptions(true);
   const clients = useLeadClientOptions(true);
   const [filters, setFilters] = useState(() => ({ from: localToday(), to: localToday(30), team_id: '', client_account_id: '' }));
@@ -287,7 +344,7 @@ function EndingSoonReport() {
     { key: 'team', header: 'Team', render: (r) => (r.teams.length ? r.teams.map((t) => t.name).join(', ') : <span className="text-tertiary-400">No team</span>) },
     { key: 'end', header: 'End date', render: (r) => formatDay(r.end_date) },
     { key: 'days', header: 'Days remaining', render: (r) => <Pill tone={r.days_remaining <= 7 ? 'red' : r.days_remaining <= 15 ? 'amber' : 'blue'}>{r.days_remaining} days</Pill> },
-    { key: 'resources', header: 'Resources', render: (r) => <span title={r.resources.map((x) => x.name).join(', ')}>{r.resource_count}{r.resource_count ? <span className="block text-xs text-tertiary-500">{r.resources.map((x) => x.name).join(', ')}</span> : null}</span> },
+    { key: 'resources', header: 'Resources', render: (r) => <span title={r.resources.map((x) => x.name).join(', ')}><CountButton label={`${r.project.name}: ${r.resource_count} resources`} onClick={() => setOpenRow(r)}>{r.resource_count}</CountButton>{r.resource_count ? <span className="block text-xs text-tertiary-500">{r.resources.map((x) => x.name).join(', ')}</span> : null}</span> },
   ];
   return (
     <div className="space-y-4">
@@ -297,7 +354,8 @@ function EndingSoonReport() {
         <Filter label="Team"><SearchableSelect value={filters.team_id} onChange={(v) => set('team_id', v)} options={teams} placeholder="All teams" allowClear /></Filter>
         <Filter label="Client"><SearchableSelect value={filters.client_account_id} onChange={(v) => set('client_account_id', v)} options={clients} placeholder="All clients" allowClear /></Filter>
       </div>
-      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No running project/contract ends in this window." />
+      <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpenRow} emptyLabel="No running project/contract ends in this window." />
+      <EndingProjectDrawer row={openRow} onClose={() => setOpenRow(null)} />
       <p className="text-xs text-tertiary-500">Uses each project&apos;s agreement end date (Finance → Projects). Team = the teams of the people allocated to it.</p>
     </div>
   );
