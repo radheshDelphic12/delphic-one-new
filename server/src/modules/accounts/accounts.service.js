@@ -2,6 +2,7 @@ const prisma = require('../../config/db');
 const { decide } = require('../../lib/permissions');
 const { notify, accountParticipants, admins } = require('../../lib/notifications');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const STUCK_LEAD_STAGES = ['lead', 'meeting_scheduled', 'rescheduled'];
 const stuckLeadCutoff = () => new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
@@ -131,6 +132,26 @@ async function getBankDetails(id, user) {
 async function getById(id) {
   const row = await prisma.account.findUnique({ where: { id }, include: ACCOUNT_INCLUDE });
   return serialize(row);
+}
+
+// The projects still running under a client: the client's own row when it doubles as a project (older
+// projects), plus its project rows. Dropping the client in Sales does not stop them billing, so the drop
+// screen warns with this list. Completed projects are not live.
+async function liveProjects(account) {
+  if (!account) return [];
+  const rows = await prisma.account.findMany({
+    where: {
+      AND: [
+        projectListWhere(account.org_id),
+        { deleted_at: null },
+        { OR: [{ id: account.id }, { client_account_id: account.id }] },
+        { OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+      ],
+    },
+    select: { id: true, project_code: true, project_name: true, name: true, contract_status: true, agreement_end_date: true },
+    orderBy: { project_code: 'asc' },
+  });
+  return rows.map((r) => ({ id: r.id, project_code: r.project_code, project_name: r.project_name || r.name, contract_status: r.contract_status, agreement_end_date: r.agreement_end_date }));
 }
 
 // `perms`: what a custom role needs for this action (any one of them); a plain role keeps the old rule.
@@ -475,6 +496,7 @@ module.exports = {
   list,
   listSpecializations,
   getById,
+  liveProjects,
   getBankDetails,
   create,
   update,

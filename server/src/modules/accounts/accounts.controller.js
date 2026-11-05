@@ -45,7 +45,7 @@ const listSpecializations = asyncHandler(async (req, res) => {
 const getOne = asyncHandler(async (req, res) => {
   const account = await accountsService.getById(req.params.id);
   if (!account) return fail(res, 404, 'Not found');
-  return ok(res, account);
+  return ok(res, { ...account, live_projects: await accountsService.liveProjects(account) });
 });
 
 // The full bank details of a vendor, for people who may edit the account (the list and detail responses carry the account number masked).

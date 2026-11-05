@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Drawer from '../../components/ui/Drawer.jsx';
+import apiClient from '../../lib/apiClient.js';
 import AccountAttendeesPicker from './AccountAttendeesPicker.jsx';
 import { ACCOUNT_TRANSITIONS, formatAccountValue } from './accountUtils.js';
 
@@ -49,6 +50,17 @@ export default function AccountStageMoveDrawer({
 
   // Dropping, and reactivating a dropped account, both need a reason (written to stage history).
   const needsReason = toStage === 'dropped' || account?.stage === 'dropped';
+  // The projects still running under this client (GET /accounts/:id). Fetched here because the list and board rows do not carry it.
+  const [fetchedProjects, setFetchedProjects] = useState([]);
+  const accountId = account?.id;
+  useEffect(() => {
+    if (!open || !accountId) return undefined;
+    let current = true;
+    setFetchedProjects([]);
+    apiClient.get(`/accounts/${accountId}`).then((r) => { if (current) setFetchedProjects(r.data.data?.live_projects || []); }).catch(() => {});
+    return () => { current = false; };
+  }, [open, accountId]);
+  const liveProjects = fetchedProjects.length ? fetchedProjects : account?.live_projects || [];
 
   function submit(event) {
     event.preventDefault();
@@ -163,6 +175,13 @@ export default function AccountStageMoveDrawer({
             </label>
             <AccountAttendeesPicker open={open} value={attendeeIds} onChange={setAttendeeIds} />
           </>
+        )}
+        {toStage === 'dropped' && liveProjects.length > 0 && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            This client has {liveProjects.length} live project{liveProjects.length === 1 ? '' : 's'} (
+            {liveProjects.map((p) => `${p.project_name}${p.project_code ? ` – ${p.project_code}` : ''}`).join(', ')}). Dropping the client only
+            affects Sales; the projects keep billing. To stop a project, Finance marks it Completed / On hold.
+          </p>
         )}
         {needsReason && (
           <label className="block text-xs font-medium text-tertiary-600">

@@ -17,6 +17,7 @@ const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const A = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const DEFAULT_ENDING_WINDOW = 30;
 // Flag "from the beginning" spans (null start) against every locked month.
@@ -608,7 +609,13 @@ async function endingSoon(orgId, { from, to, team_id, client_account_id } = {}) 
   const end = A.toDate(to) || A.addDays(start, DEFAULT_ENDING_WINDOW);
   const [accounts, ctx] = await Promise.all([
     prisma.account.findMany({
-      where: { org_id: orgId, type: 'client', stage: 'active', agreement_end_date: { gte: start, lte: end }, ...(client_account_id ? { client_account_id } : {}), OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+      where: {
+        AND: [
+          projectListWhere(orgId),
+          { agreement_end_date: { gte: start, lte: end }, ...(client_account_id ? { client_account_id } : {}) },
+          { OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+        ],
+      },
       select: { ...ACCOUNT_SELECT, project_cost_rates: { select: { org_membership_id: true, start_date: true, end_date: true } } },
       orderBy: { agreement_end_date: 'asc' },
     }),
