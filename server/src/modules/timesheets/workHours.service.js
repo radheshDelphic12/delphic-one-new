@@ -237,6 +237,7 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
     const leaveHrs = leaveHoursForDay(approvedLeaves.map((l) => ({ is_half_day: l.is_half_day, paid: l.leave_type.paid })), info.expected);
     const leaveRow = (l) => ({
       request_id: l.id,
+      leave_type_id: l.leave_type_id,
       name: l.leave_type.name,
       paid: l.leave_type.paid,
       is_half_day: l.is_half_day,

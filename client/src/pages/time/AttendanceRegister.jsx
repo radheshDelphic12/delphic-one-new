@@ -197,7 +197,7 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
 
       {mode === 'attendance' ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary-500" data-testid="register-legend">
-          {LEGEND.map(([code, kind, label]) => (
+          {[...LEGEND, ...(data?.leave_codes || []).filter((t) => !LEGEND.some(([c]) => c === t.code)).map((t) => [t.code, 'leave', t.name])].map(([code, kind, label]) => (
             <span key={code} className="inline-flex items-center gap-1"><span className={`inline-block min-w-[1.75rem] rounded px-1 text-center font-semibold ${TONE[kind]}`}>{code}</span>{label}</span>
           ))}
           <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-amber-500" />Working away from the base office (project site / travel)</span>
@@ -233,7 +233,7 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
                     <span className="block font-normal">{WEEKDAYS[d.weekday]}</span>
                   </th>
                 ))}
-                {mode === 'attendance' ? [...['Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Absent'], ...(overlay ? ['Checked in', 'Not checked in'] : [])].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
+                {mode === 'attendance' ? [...['Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Weekly offs', 'Absent'], ...(overlay ? ['Checked in', 'Not checked in'] : [])].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
               </tr>
             </thead>
             {mode === 'hours' && group === 'project' ? (
@@ -306,6 +306,7 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-800" title="Office + work from home + half days">{p.totals.worked}</td>
                           {leaveCodes.map((c) => <td key={c} className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-blue-700">{p.totals.leave_by_code?.[c] || 0}</td>)}
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-violet-700">{p.totals.holidays}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-tertiary-500">{p.totals.weekly_offs}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-red-700">{p.totals.absent}</td>
                           {overlay && (
                             <>

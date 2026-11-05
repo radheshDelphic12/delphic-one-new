@@ -388,7 +388,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
       // What the day editor starts from: the leave type (full day / the half), and office or home as the register shows it.
       const leaveRows = d.leaves || [];
       const place = homeByDay.has(d.date) || workType === 'remote' || d.attendance_status === 'wfh' ? 'home' : 'office';
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null, leave_request_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.request_id || null, half_day_session: leaveRows.find((l) => l.is_half_day)?.half_day_session || null, unspecified_leave: c.kind === 'leave' && c.code === 'L', away: awayDays.get(d.date) || null };
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null, leave_request_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.request_id || null, leave_type_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.leave_type_id || null, half_day_session: leaveRows.find((l) => l.is_half_day)?.half_day_session || null, unspecified_leave: c.kind === 'leave' && c.code === 'L', away: awayDays.get(d.date) || null };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
     totals.worked = totals.present;
@@ -438,7 +438,10 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
     });
     return { org_membership_id: m.id, name: m.person?.name || 'Unknown', employee_code: m.employee_code || null, worker_type: m.worker_type, status: employmentState(m, todayDate), days };
   }).sort((a, b) => a.name.localeCompare(b.name));
-  return { year, month, status, today, days: dayList, people, projects, project_people };
+  // Each leave code with its type's name, for the register legend (the codes shown in the totals columns).
+  const leaveTypes = await prisma.leaveType.findMany({ where: { org_id: orgId, is_applicable: true }, select: { name: true }, orderBy: { name: 'asc' } });
+  const leave_codes = leaveTypes.map((t) => ({ code: leaveCode(t.name), name: t.name }));
+  return { year, month, status, today, days: dayList, people, projects, project_people, leave_codes };
 }
 
 // One person's month for the Monthly performance review: working days (not a holiday or weekly off, inside the employment span),

@@ -144,6 +144,49 @@ describe('Admin day editor', () => {
     expect(totals.leave_by_code).toEqual({ CL: 1 });
   });
 
+  test('Casual lowers the balance, Unpaid shows as UL, Comp Off uses its credit, and the monthly review figures match the register', async () => {
+    const ctx = await seed();
+    const eve = await ctx.person('Eve');
+    const eveToken = (await loginAs(eve.user)).access_token;
+    const balanceOf = async (name) => (await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), eveToken)).body.data.find((b) => b.leave_type_name === name);
+    const day = (n) => `2026-10-${String(n).padStart(2, '0')}`;
+    const setOn = (date, body) => authed(request(app).post('/api/v1/attendance/day'), ctx.adminToken).send({ reason: 'checked with the manager', org_membership_id: eve.membership.id, date, ...body });
+
+    expect((await balanceOf('Casual Leave')).remaining).toBe(12);
+    expect((await setOn(day(14), { status: 'leave', leave_type_id: ctx.type('Casual Leave').id })).status).toBe(200);
+    expect((await balanceOf('Casual Leave')).remaining).toBe(11);
+
+    expect((await setOn(day(15), { status: 'leave', leave_type_id: ctx.type('Unpaid Leave').id })).status).toBe(200);
+
+    await prisma.timesheetDayOvertime.create({ data: { org_id: ctx.org.id, org_membership_id: eve.membership.id, date: new Date('2026-08-01T00:00:00Z'), hours: 4, status: 'comp_off' } });
+    expect((await balanceOf('Comp Off')).remaining).toBe(1);
+    expect((await setOn(day(16), { status: 'leave', leave_type_id: ctx.type('Comp Off').id })).status).toBe(200);
+    expect((await balanceOf('Comp Off')).remaining).toBe(0);
+
+    await prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: eve.membership.id, date: new Date(`${day(12)}T00:00:00.000Z`), status: 'present', source: 'manual' } });
+    const register = (await authed(request(app).get('/api/v1/attendance-dashboard/register?year=2026&month=10'), ctx.adminToken)).body.data;
+    const totals = register.people.find((p) => p.name === 'Eve').totals;
+    expect(totals.leave_by_code).toEqual({ CL: 1, UL: 1, CO: 1 });
+    expect(totals).toMatchObject({ office: 1, worked: 1, present: 1, leave: 3 });
+    expect(register.leave_codes.map((t) => t.code)).toEqual(expect.arrayContaining(['CL', 'UL', 'CO']));
+
+    // The monthly review reads memberMonth: its present / leave / absent are what the register totals say.
+    const attendance = require('../src/modules/attendanceDashboard/attendanceDashboard.service');
+    const member = await prisma.orgMembership.findUnique({ where: { id: eve.membership.id } });
+    const month = await attendance.memberMonth(ctx.org.id, member, { year: 2026, month: 10 });
+    expect(month).toMatchObject({ present: totals.present, wfh: totals.wfh, leave: totals.leave });
+  });
+
+  test('revoking a leave and then setting Present works', async () => {
+    const ctx = await seed();
+    const eve = await ctx.person('Eve');
+    await setDay(ctx.adminToken, { org_membership_id: eve.membership.id, status: 'leave', leave_type_id: ctx.type('Casual Leave').id });
+    const request_ = await prisma.leaveRequest.findFirst({ where: { org_membership_id: eve.membership.id, status: 'approved' } });
+    expect((await authed(request(app).post(`/api/v1/leave/requests/${request_.id}/revoke`), ctx.adminToken).send({ reason: 'plans changed' })).status).toBe(200);
+    expect((await setDay(ctx.adminToken, { org_membership_id: eve.membership.id, status: 'present' })).status).toBe(200);
+    expect((await recordOf(eve.membership)).status).toBe('present');
+  });
+
   test('a reason is required and a plain employee cannot use it', async () => {
     const ctx = await seed();
     const eve = await ctx.person('Eve');

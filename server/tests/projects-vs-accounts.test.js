@@ -107,6 +107,16 @@ describe('A sales drop never removes a project from billing', () => {
     expect(profiles.map((p) => p.id)).toContain(legacy.id);
     expect(profiles.map((p) => p.id)).not.toContain(plain.id);
 
+    // Every other path that lists projects keeps it too: the billing engine, the P&L table and the timesheet project list.
+    const engine = require('../src/modules/calculations/engines/billing.engine');
+    expect((await engine.listProjects(ctx.org.id)).map((p) => p.id)).toContain(legacy.id);
+    expect((await engine.listProjects(ctx.org.id)).map((p) => p.id)).not.toContain(plain.id);
+    const pnl = await authed(request(app).get('/api/v1/billing/projects-pnl?period_month=10&period_year=2026'), ctx.token);
+    expect(JSON.stringify(pnl.body.data)).toContain(legacy.id);
+    expect(JSON.stringify(pnl.body.data)).not.toContain(plain.id);
+    const teamProjects = await authed(request(app).get('/api/v1/timesheets/project-team/projects?year=2026&month=10'), ctx.token);
+    expect(JSON.stringify(teamProjects.body.data)).toContain(legacy.id);
+
     const detail = (await authed(request(app).get(`/api/v1/accounts/${legacy.id}`), ctx.token)).body.data;
     expect(detail.live_projects).toEqual([expect.objectContaining({ id: legacy.id, project_code: 'P9001' })]);
     const plainDetail = (await authed(request(app).get(`/api/v1/accounts/${plain.id}`), ctx.token)).body.data;
