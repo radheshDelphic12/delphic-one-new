@@ -52,7 +52,8 @@ const trackAccess = async (req, res, next) => {
 async function resolveTargetOrg(user, requestedOrgId) {
   const u = await prisma.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true, org_group_memberships: { select: { org_group_id: true } } } });
   const groupAdmin = Boolean(u?.active && u.is_group_superadmin);
-  if (!requestedOrgId || requestedOrgId === user.org_id) return { orgId: user.org_id, groupAdmin };
+  const memberGroups = u ? u.org_group_memberships.map((m) => m.org_group_id) : [];
+  if (!requestedOrgId || requestedOrgId === user.org_id) return { orgId: user.org_id, groupAdmin, groupIds: memberGroups };
   if (!groupAdmin) return { error: 'Only the group admin can record a payment for another company' };
   const target = await prisma.org.findUnique({ where: { id: requestedOrgId }, select: { id: true, org_group_id: true } });
   if (!target) return { error: 'That company was not found' };
@@ -61,7 +62,7 @@ async function resolveTargetOrg(user, requestedOrgId) {
     const own = await prisma.org.findUnique({ where: { id: user.org_id }, select: { org_group_id: true } });
     groupIds = own ? [own.org_group_id] : [];
   }
-  return groupIds.includes(target.org_group_id) ? { orgId: target.id, groupAdmin } : { error: 'That company is not in your group' };
+  return groupIds.includes(target.org_group_id) ? { orgId: target.id, groupAdmin, groupIds } : { error: 'That company is not in your group' };
 }
 
 module.exports = { trackAccess, canTrack, workspaceMoneyRole, resolveTargetOrg };

@@ -52,12 +52,16 @@ async function setGoLive(groupIds, userId, date) {
   return { go_live_date: row.go_live_date ? ymd(row.go_live_date) : null };
 }
 
-/** Can this person put this wallet on a payment of this company? Its own wallets, or anything in the group for the group superadmin. */
+/**
+ * Can this person put this wallet on a payment of this company? A wallet the company owns is its own wherever the Book Keeping group of that
+ * wallet sits (the wallets are kept in one group while each company can belong to another). Anything else: the group superadmin, for a wallet in
+ * the company's group or in any group they belong to.
+ */
 async function walletAllowed(client, user, orgId, groupId, wallet) {
-  if (wallet.org_group_id !== groupId) return false;
   if (wallet.owner_org_id === orgId || (wallet.owner_legal_entity && wallet.owner_legal_entity.workspace_id === orgId)) return true;
-  const u = await client.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true } });
-  return Boolean(u?.is_group_superadmin && u.active);
+  const u = await client.user.findUnique({ where: { id: user.id }, select: { is_group_superadmin: true, active: true, org_group_memberships: { select: { org_group_id: true } } } });
+  if (!u?.is_group_superadmin || !u.active) return false;
+  return wallet.org_group_id === groupId || u.org_group_memberships.some((m) => m.org_group_id === wallet.org_group_id);
 }
 
 /**
@@ -85,7 +89,7 @@ async function prepare({ orgId, user, kind, record, walletPayment }) {
       };
       const existing = await client.walletTransaction.findFirst({ where: { reference_type: kind, reference_id: referenceId, deleted_at: null } });
       const row = existing ? await client.walletTransaction.update({ where: { id: existing.id }, data }) : await client.walletTransaction.create({ data });
-      await client.walletAudit.create({ data: { org_group_id: org.org_group_id, entity_type: 'transaction', entity_id: row.id, action: existing ? 'update' : 'create', before: existing ? plain(existing) : undefined, after: plain(row), actor_id: user.id } });
+      await client.walletAudit.create({ data: { org_group_id: wallet.org_group_id, entity_type: 'transaction', entity_id: row.id, action: existing ? 'update' : 'create', before: existing ? plain(existing) : undefined, after: plain(row), actor_id: user.id } });
       return row;
     },
   };

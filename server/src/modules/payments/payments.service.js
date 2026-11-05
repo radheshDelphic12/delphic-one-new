@@ -78,7 +78,7 @@ async function resolveWallet({ orgId, user, walletPayment, currency, net, rate }
   else if (wallet.currency === 'INR' && rate) amount = D(net).mul(rate).toDecimalPlaces(2);
   else return { error: 'wallet_currency' };
   if (!D(amount).gt(0)) return { error: 'wallet_amount_zero' };
-  return { wallet, amount: D(amount), groupId: org.org_group_id };
+  return { wallet, amount: D(amount), groupId: wallet.org_group_id }; // the wallet's own Book Keeping group (it can differ from the company's)
 }
 
 /**
