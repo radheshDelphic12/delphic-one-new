@@ -50,6 +50,10 @@ const setDaySchema = z.object({
   leave_type_id: z.string().uuid().nullable().optional(),
   half_day_session: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional(),
   work_place: z.enum(['office', 'home']).optional(),
+  // Setting a day that has approved leave to present / half day / absent / holiday: withdraw that leave first.
+  cancel_leave: z.boolean().optional(),
+  // The leave runs over several days: withdraw it and re-apply the other days with the same type (asked after a confirm).
+  confirm_span: z.boolean().optional(),
   reason: z.string().trim().min(3).max(500),
 });
 

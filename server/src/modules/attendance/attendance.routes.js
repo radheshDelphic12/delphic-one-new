@@ -157,7 +157,8 @@ router.post(
     if (result.error === 'leave_spans_days') {
       const from = result.leave.from_date.toISOString().slice(0, 10);
       const to = result.leave.to_date.toISOString().slice(0, 10);
-      return fail(res, 409, `This leave runs from ${from} to ${to}. Change that leave in Leave (withdraw it and apply again) - the type cannot be changed for one day of it`);
+      const message = `This leave runs from ${from} to ${to}. Changing this day withdraws the whole leave and puts the other days back with the same type`;
+      return fail(res, 409, message, [{ message, code: 'leave_spans_days', from, to }]);
     }
     if (result.error === 'timesheet_conflict' || result.error === 'half_day_hours_exceeded') return fail(res, 409, leaveService.conflictMessage(result.detail || result));
     if (result.error === 'insufficient_balance') return fail(res, 422, `Not enough leave balance - ${result.detail?.needed} day(s) requested, ${Math.max(result.detail?.remaining ?? 0, 0)} remaining`);

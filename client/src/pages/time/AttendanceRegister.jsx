@@ -24,7 +24,7 @@ const TONE = {
 };
 const LEGEND = [
   ['P', 'present', 'Present (office)'], ['WFH', 'present', 'Work from home'], ['HD', 'half_day', 'Half day'],
-  ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['UL', 'leave', 'Unpaid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Other leave'],
+  ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['UL', 'leave', 'Unpaid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Leave, type not set (open the day and pick the real leave type)'],
   ['H', 'holiday', 'Holiday'], ['WO', 'weekly_off', 'Weekly off'], ['A', 'absent', 'Absent (working day, nothing recorded)'],
 ];
 const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
@@ -133,13 +133,16 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
   const toggleProject = (name) => setOpenProjects((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
   const toggle = (id) => setOpen((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
+  // One column per leave code that appears this month (CL, SL, CO, UL ...), in a steady order.
+  const leaveCodes = [...new Set((data?.people || []).flatMap((p) => Object.keys(p.totals.leave_by_code || {})))].sort();
+
   function exportCsv() {
     if (!data) return;
     const dayHeads = data.days.map((d) => String(Number(d.date.slice(8))));
     const file = `${mode === 'attendance' ? 'attendance-register' : 'project-hours-register'}-${year}-${String(month).padStart(2, '0')}.csv`;
     if (mode === 'attendance') {
-      downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Present', 'WFH', 'Leave', 'Holidays', 'Weekly offs', 'Absent'],
-        data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => d.code), p.totals.present, p.totals.wfh, p.totals.leave, p.totals.holidays, p.totals.weekly_offs, p.totals.absent]));
+      downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Weekly offs', 'Absent'],
+        data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => d.code), p.totals.office, p.totals.wfh, p.totals.worked, ...leaveCodes.map((c) => p.totals.leave_by_code?.[c] || 0), p.totals.holidays, p.totals.weekly_offs, p.totals.absent]));
     } else if (group === 'project') {
       downloadCsv(file, ['Project', 'Employee', 'Code', 'Department', ...dayHeads, 'Total hours'],
         projectGroups.flatMap((g) => g.rows.map((r) => [g.name, r.person.name, r.person.employee_code || '', r.person.department || '', ...r.perDay.map(hoursLabel), r.total])));
@@ -226,7 +229,7 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
                     <span className="block font-normal">{WEEKDAYS[d.weekday]}</span>
                   </th>
                 ))}
-                {mode === 'attendance' ? [...['Present', 'WFH', 'Leave', 'Holidays', 'Absent'], ...(overlay ? ['Checked in', 'Not checked in'] : [])].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
+                {mode === 'attendance' ? [...['Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Absent'], ...(overlay ? ['Checked in', 'Not checked in'] : [])].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
               </tr>
             </thead>
             {mode === 'hours' && group === 'project' ? (
@@ -294,9 +297,10 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
                       })}
                       {mode === 'attendance' ? (
                         <>
-                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700" title={`${p.totals.wfh} of these from home`}>{p.totals.present}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.totals.office}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.totals.wfh}</td>
-                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-blue-700">{p.totals.leave}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-800" title="Office + work from home + half days">{p.totals.worked}</td>
+                          {leaveCodes.map((c) => <td key={c} className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-blue-700">{p.totals.leave_by_code?.[c] || 0}</td>)}
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-violet-700">{p.totals.holidays}</td>
                           <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-red-700">{p.totals.absent}</td>
                           {overlay && (
@@ -390,8 +394,11 @@ function DayEditor({ editing, onClose, onSaved }) {
   const reasonOk = form.reason.trim().length >= 3;
   const canSave = reasonOk && (!needsType || Boolean(form.leaveTypeId));
 
-  async function save(event) {
-    event.preventDefault();
+  // The day has a full-day leave and is being set to something that is not leave: that leave is cancelled first.
+  const cancelsLeave = Boolean(day?.leave_name) && form.status !== 'leave';
+
+  async function save(event, confirmSpan = false) {
+    event?.preventDefault?.();
     setBusy(true);
     try {
       await apiClient.post('/attendance/day', {
@@ -402,11 +409,19 @@ function DayEditor({ editing, onClose, onSaved }) {
         // Half day: the leave covering the other half (none = it simply stays unpaid).
         ...(form.status === 'half_day' ? { leave_type_id: form.leaveTypeId || null } : {}),
         ...(worked ? { work_place: form.place } : {}),
+        ...(cancelsLeave ? { cancel_leave: true } : {}),
+        ...(confirmSpan ? { confirm_span: true } : {}),
         reason: form.reason.trim(),
       });
       const type = leaveTypes.find((t) => t.id === form.leaveTypeId);
       onSaved(`${person.name}: ${day.date} set to ${ATTENDANCE_LABEL[form.status]}${form.status === 'leave' && type ? ` (${type.name})` : ''}${worked ? `, ${form.place === 'home' ? 'work from home' : 'office'}` : ''}`);
-    } catch (err) { pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved'); } finally { setBusy(false); }
+    } catch (err) {
+      const span = err?.response?.data?.errors?.[0];
+      if (span?.code === 'leave_spans_days' && !confirmSpan) {
+        // A several-day leave: name every day it covers before withdrawing it whole.
+        if (window.confirm(`This leave covers ${span.from} to ${span.to}. Saving withdraws the whole leave and puts back the other days with the same leave type. Continue?`)) { setBusy(false); return save(null, true); }
+      } else pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved');
+    } finally { setBusy(false); }
   }
   async function remove() {
     if (!day.record_id || !reasonOk) return;
@@ -435,6 +450,7 @@ function DayEditor({ editing, onClose, onSaved }) {
       {editing && (
         <form id="register-day-editor" onSubmit={save} className="space-y-4">
           <p className="text-sm text-tertiary-600">Now shown as <b>{day.code || 'blank'}</b>{day.label ? ` (${day.label})` : ''}{day.recorded_status ? ` · recorded as ${STATUS_LABEL[day.recorded_status] || day.recorded_status}` : ' · nothing recorded for this day'}.</p>
+          {cancelsLeave && <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">This day has approved {day.leave_name}. Saving cancels that leave (the balance is given back) and sets the day to {ATTENDANCE_LABEL[form.status]}.</p>}
 
           <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">1. Attendance</legend>

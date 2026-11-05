@@ -315,7 +315,7 @@ function registerCode(d, { today, inEmployment, workType, homeByDay }) {
   if (status === 'present') return { code: homeByDay.has(d.date) || workType === 'remote' ? 'WFH' : 'P', kind: 'present', days: 1 };
   if (status === 'wfh') return { code: 'WFH', kind: 'present', days: 1 };
   if (status === 'half_day') return { code: 'HD', kind: 'half_day', days: 0.5 };
-  if (status === 'leave') return { code: 'L', kind: 'leave', label: d.attendance_label || 'Leave', days: 1 };
+  if (status === 'leave') return { code: 'L', kind: 'leave', label: d.attendance_label || 'Leave (type not set)', days: 1 };
   if (status === 'holiday') return { code: 'H', kind: 'holiday' };
   if (status === 'absent') return { code: 'A', kind: 'absent' };
   // an approved work-from-home day that is still to come (or today, before check-in) shows as WFH, but is not counted until it is worked
@@ -358,14 +358,21 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
     const end = lastDay ? ymd(lastDay) : null;
     const workType = workTypeOf(m);
     const homeByDay = homeBy.get(m.id) || new Set();
-    const totals = { present: 0, wfh: 0, half_day: 0, leave: 0, holidays: 0, weekly_offs: 0, absent: 0, hours: 0 };
+    // present = every day worked (office + WFH + half days + the worked half of a half-day leave) and keeps that meaning for the
+    // monthly review; office / wfh split it, and leave_by_code splits leave by type code (CL, SL, CO, UL, L = unspecified).
+    const totals = { present: 0, office: 0, wfh: 0, worked: 0, half_day: 0, leave: 0, leave_by_code: {}, holidays: 0, weekly_offs: 0, absent: 0, hours: 0 };
     const days = cal.days.map((d) => {
       const inEmployment = (!start || d.date >= start) && (!end || d.date <= end);
       const c = registerCode(d, { today, inEmployment, workType, homeByDay });
       const hours = Math.round((d.project_hours || []).reduce((s, p) => s + p.hours, 0) * 100) / 100;
-      if (c.kind === 'present') { totals.present += 1; if (c.code === 'WFH') totals.wfh += 1; }
+      if (c.kind === 'present') { totals.present += 1; if (c.code === 'WFH') totals.wfh += 1; else totals.office += 1; }
       else if (c.kind === 'half_day') { totals.present += 0.5; totals.half_day += 1; }
-      else if (c.kind === 'leave') { totals.leave += c.days; totals.present += c.worked || 0; }
+      else if (c.kind === 'leave') {
+        totals.leave += c.days;
+        totals.present += c.worked || 0;
+        const code = c.code.replace('½', '');
+        totals.leave_by_code[code] = (totals.leave_by_code[code] || 0) + c.days;
+      }
       else if (c.kind === 'holiday') totals.holidays += 1;
       else if (c.kind === 'weekly_off') totals.weekly_offs += 1;
       else if (c.kind === 'absent') totals.absent += 1;
@@ -374,9 +381,10 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
       // What the day editor starts from: the leave type (full day / the half), and office or home as the register shows it.
       const leaveRows = d.leaves || [];
       const place = homeByDay.has(d.date) || workType === 'remote' || d.attendance_status === 'wfh' ? 'home' : 'office';
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null };
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null, leave_request_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.request_id || null, half_day_session: leaveRows.find((l) => l.is_half_day)?.half_day_session || null, unspecified_leave: c.kind === 'leave' && c.code === 'L' };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
+    totals.worked = totals.present;
     return {
       org_membership_id: m.id,
       name: m.person?.name || 'Unknown',

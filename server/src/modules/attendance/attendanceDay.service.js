@@ -49,14 +49,14 @@ async function applyLeave(orgId, actor, { org_membership_id, date, leave_type_id
 }
 
 // Replaces the day's leave (full or half) with `leave_type_id`, or removes it when null. Returns { changed } or { error }.
-async function setLeave(orgId, actor, { org_membership_id, date, leave_type_id, half, half_day_session, reason }) {
+async function setLeave(orgId, actor, { org_membership_id, date, leave_type_id, half, half_day_session, reason, confirm_span = false }) {
   const leaves = (await approvedLeavesOn(orgId, org_membership_id, date)).filter((l) => Boolean(l.is_half_day) === Boolean(half));
   const same = leave_type_id ? leaves.find((l) => l.leave_type_id === leave_type_id) : null;
   if (same && leaves.length === 1) return { changed: false };
 
-  // A leave that runs over several days cannot be changed for one day from here.
+  // A leave that runs over several days is withdrawn whole only after the admin confirmed it names all its days.
   const wide = leaves.find((l) => ymd(l.from_date) !== ymd(l.to_date));
-  if (wide) return { error: 'leave_spans_days', leave: wide };
+  if (wide && !confirm_span) return { error: 'leave_spans_days', leave: wide };
 
   const withdrawn = [];
   for (const leave of leaves) {
@@ -64,15 +64,33 @@ async function setLeave(orgId, actor, { org_membership_id, date, leave_type_id, 
     if (done.error) { for (const w of withdrawn) await restoreLeave(w); return { error: done.error }; }
     withdrawn.push(leave);
   }
-  if (!leave_type_id) return { changed: withdrawn.length > 0 };
 
-  const created = await applyLeave(orgId, actor, { org_membership_id, date, leave_type_id, is_half_day: half, half_day_session, reason });
-  if (created.error) { for (const w of withdrawn) await restoreLeave(w); return { error: created.error, detail: created }; }
-  return { changed: true };
+  const reapplied = [];
+  const undo = async () => {
+    for (const r of reapplied) await leaveService.revoke(orgId, r.id, actor.org_membership_id, { reason: 'Undone: the day change failed' }, actor.id);
+    for (const w of withdrawn) await restoreLeave(w);
+  };
+  if (leave_type_id) {
+    const created = await applyLeave(orgId, actor, { org_membership_id, date, leave_type_id, is_half_day: half, half_day_session, reason });
+    if (created.error) { await undo(); return { error: created.error, detail: created }; }
+  }
+  // The other days of the withdrawn several-day leave go back on, with the type they had.
+  if (wide) {
+    const day = (dt, n) => new Date(dt.getTime() + n * 86400000);
+    const ranges = [[wide.from_date, day(date, -1)], [day(date, 1), wide.to_date]].filter(([a, b]) => ymd(a) <= ymd(b));
+    for (const [from, to] of ranges) {
+      const back = await leaveService.createRequestForEmployee(orgId, { org_membership_id: actor.org_membership_id, user_id: actor.id }, {
+        org_membership_id, auto_approve: true, override_attendance: true, leave_type_id: wide.leave_type_id, from_date: from, to_date: to, is_half_day: false, reason: `Rest of the leave of ${ymd(wide.from_date)} to ${ymd(wide.to_date)}: ${reason}`,
+      });
+      if (back.error && back.error !== 'no_working_days') { await undo(); return { error: back.error, detail: back }; }
+      if (back.request) reapplied.push(back.request);
+    }
+  }
+  return { changed: withdrawn.length > 0 || Boolean(leave_type_id) };
 }
 
 async function setDay(orgId, actor, body) {
-  const { org_membership_id, date, status, leave_type_id, half_day_session, work_place, reason } = body;
+  const { org_membership_id, date, status, leave_type_id, half_day_session, work_place, reason, cancel_leave, confirm_span } = body;
   const member = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true } });
   if (!member) return { error: 'membership_not_found' };
   const changes = [];
@@ -85,11 +103,16 @@ async function setDay(orgId, actor, body) {
       const done = await withdraw(orgId, actor, half, `Replaced by a full day of leave: ${reason}`);
       if (done.error) return { error: done.error };
     }
-    const result = await setLeave(orgId, actor, { org_membership_id, date, leave_type_id, half: false, reason });
+    const result = await setLeave(orgId, actor, { org_membership_id, date, leave_type_id, half: false, reason, confirm_span });
     if (result.error) return result;
     changes.push(result.changed ? 'leave' : 'leave unchanged');
   } else {
-    // Present / half day / absent / holiday: attendance itself. A full-day leave must be changed to Leave first (existing rule).
+    // Present / half day / absent / holiday: attendance itself. A full-day leave is withdrawn first when the admin asked for that.
+    if (cancel_leave) {
+      const cancelled = await setLeave(orgId, actor, { org_membership_id, date, leave_type_id: null, half: false, reason, confirm_span });
+      if (cancelled.error) return cancelled;
+      if (cancelled.changed) changes.push('leave cancelled');
+    }
     const marked = await attendance.recordManualDay(orgId, actor.id, { org_membership_id, date, status, reason });
     if (marked.error) return marked;
     changes.push(`attendance ${marked.action}`);
