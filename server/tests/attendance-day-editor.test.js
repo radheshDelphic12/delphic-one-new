@@ -119,7 +119,7 @@ describe('Admin day editor', () => {
     ]);
   });
 
-  test('cancel_leave withdraws the day's leave and then records the attendance', async () => {
+  test('cancel_leave withdraws the leave of that day and then records the attendance', async () => {
     const ctx = await seed();
     const eve = await ctx.person('Eve');
     await setDay(ctx.adminToken, { org_membership_id: eve.membership.id, status: 'leave', leave_type_id: ctx.type('Casual Leave').id });
