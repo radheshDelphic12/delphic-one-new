@@ -27,6 +27,9 @@ const LEGEND = [
   ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['UL', 'leave', 'Unpaid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Leave, type not set (open the day and pick the real leave type)'],
   ['H', 'holiday', 'Holiday'], ['WO', 'weekly_off', 'Weekly off'], ['A', 'absent', 'Absent (working day, nothing recorded)'],
 ];
+// "Pune – Client site (By.u,Tsel)": where a person is working on a day inside a work location assignment.
+const AWAY_PURPOSE = { project: 'Project site', travel: 'Travel', other: 'Away' };
+const awayLabel = (a) => `${a.city ? `${a.city} – ` : ''}${a.place_name || 'Away'}${a.kind === 'site' ? ' (client site)' : ''} · ${AWAY_PURPOSE[a.purpose] || 'Away'}${a.project_name ? ` (${a.project_name})` : ''}`;
 const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
 const NO_PROJECT = 'No project';
 const STATUS_OPTIONS = [['present', 'Present'], ['wfh', 'Work from home'], ['half_day', 'Half day'], ['absent', 'Absent'], ['leave', 'Leave'], ['holiday', 'Holiday']];
@@ -197,6 +200,7 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
           {LEGEND.map(([code, kind, label]) => (
             <span key={code} className="inline-flex items-center gap-1"><span className={`inline-block min-w-[1.75rem] rounded px-1 text-center font-semibold ${TONE[kind]}`}>{code}</span>{label}</span>
           ))}
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-amber-500" />Working away from the base office (project site / travel)</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block min-w-[1.75rem] rounded border border-dashed border-tertiary-300 px-1 text-center">&nbsp;</span>Blank = future day / not employed</span>
         </p>
       ) : (
@@ -287,10 +291,10 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
                       {p.days.map((d) => {
                         const lines = overlay ? checkinLines(d) : [];
                         const tip = mode === 'attendance'
-                          ? [`${dayLabel(d)}: ${d.label || d.code || 'No record'}`, ...lines].join('\n')
+                          ? [`${dayLabel(d)}: ${d.label || d.code || 'No record'}`, ...(d.away ? [awayLabel(d.away)] : []), ...lines].join('\n')
                           : `${dayLabel(d)}: ${d.hours ? `${hoursLabel(d.hours)} h${d.projects.length ? ` — ${d.projects.map((x) => `${x.project} ${hoursLabel(x.hours)}h`).join(', ')}` : ''}` : 'No hours'}`;
                         return mode === 'attendance' ? (
-                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to edit)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'attendance', person: p, day: d }) : undefined} className={`relative border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] font-semibold ${TONE[d.kind] || ''} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`} style={overlay ? (d.checkin_state === 'missing' ? NOT_CHECKED_STYLE : d.checkin?.late_minutes > 0 ? { boxShadow: 'inset 0 -2px 0 #ef4444' } : undefined) : undefined} data-editable={canEdit && d.date <= data.today ? 'true' : undefined} data-checkin={overlay ? d.checkin_state || undefined : undefined}>{d.code}{overlay && d.checkin && <span aria-hidden="true" className={`absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ${DOT[d.checkin.result] || 'bg-tertiary-400'}`} />}</td>
+                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to edit)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'attendance', person: p, day: d }) : undefined} className={`relative border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] font-semibold ${TONE[d.kind] || ''} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`} style={overlay ? (d.checkin_state === 'missing' ? NOT_CHECKED_STYLE : d.checkin?.late_minutes > 0 ? { boxShadow: 'inset 0 -2px 0 #ef4444' } : undefined) : undefined} data-editable={canEdit && d.date <= data.today ? 'true' : undefined} data-checkin={overlay ? d.checkin_state || undefined : undefined}>{d.code}{d.away && <span aria-hidden="true" data-away="true" className="absolute left-0.5 top-0.5 h-1.5 w-1.5 rounded-sm bg-amber-500" />}{overlay && d.checkin && <span aria-hidden="true" className={`absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ${DOT[d.checkin.result] || 'bg-tertiary-400'}`} />}</td>
                         ) : (
                           <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to add hours)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'hours', person: p, day: d }) : undefined} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${d.hours ? 'bg-primary-50 font-semibold text-primary-800' : d.kind === 'weekly_off' || d.kind === 'holiday' ? 'bg-tertiary-50 text-tertiary-300' : 'text-tertiary-300'} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`}>{hoursLabel(d.hours)}</td>
                         );

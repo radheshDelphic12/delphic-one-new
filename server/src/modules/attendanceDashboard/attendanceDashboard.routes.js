@@ -6,6 +6,7 @@ const prisma = require('../../config/db');
 const service = require('./attendanceDashboard.service');
 const v = require('./attendanceDashboard.validation');
 const projectCalendar = require('./projectCalendar.service');
+const workLocation = require('./workLocation.service');
 const locationCheckin = require('../locationCheckin/locationCheckin.service');
 const { hasPermission } = require('../../lib/permissions');
 const { isMasterWorkspace } = require('../../middleware/requireMasterWorkspace');
@@ -26,6 +27,14 @@ const ERRORS = {
   too_far: [422, 'You can apply for work from home up to 3 months ahead'],
   end_before_start: [422, 'The end date cannot be before the start date'],
   no_working_days: [422, 'There is no working day in that range'],
+  bad_dates: [422, 'The end date cannot be before the start date'],
+  one_place: [422, 'Pick either one of our offices or a work site'],
+  membership_not_found: [404, 'Employee not found in this organization'],
+  place_not_found: [404, 'That office or site was not found'],
+  project_not_found: [404, 'Project not found'],
+  overlaps: [409, 'This person already has a work location in those dates'],
+  already_cancelled: [409, 'This work location was already cancelled'],
+  client_not_found: [404, 'Client not found'],
 };
 const failFor = (res, code) => fail(res, ...(ERRORS[code] || [400, code]));
 
@@ -77,6 +86,53 @@ router.post(
     const result = await service.setOffice(req.user.org_id, req.user.id, v.setOfficeSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
     return created(res, result.row);
+  })
+);
+
+// Work locations away from the base office: a project site or travel, dated, per person.
+router.get(
+  '/work-locations/:membershipId',
+  asyncHandler(async (req, res) => {
+    if (!(await canOpen(req, req.params.membershipId))) return failFor(res, 'forbidden');
+    return ok(res, await workLocation.history(req.user.org_id, req.params.membershipId));
+  })
+);
+router.post(
+  '/work-locations',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await workLocation.create(req.user.org_id, req.user, v.workLocationSchema.parse(req.body));
+    if (result.error === 'overlaps') return fail(res, 409, `This person already has a work location from ${result.clash.from_date} to ${result.clash.to_date}`);
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.assignment);
+  })
+);
+router.post(
+  '/work-locations/:id/cancel',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await workLocation.cancel(req.user.org_id, req.user, req.params.id, v.cancelWorkLocationSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.assignment);
+  })
+);
+router.get('/work-sites', authorize('admin'), asyncHandler(async (req, res) => ok(res, await workLocation.listSites(req.user.org_id))));
+router.post(
+  '/work-sites',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await workLocation.createSite(req.user.org_id, req.user, v.workSiteSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.site);
+  })
+);
+router.patch(
+  '/work-sites/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await workLocation.updateSite(req.user.org_id, req.params.id, v.workSitePatchSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.site);
   })
 );
 

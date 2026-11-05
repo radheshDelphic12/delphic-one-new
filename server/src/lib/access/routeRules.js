@@ -75,6 +75,9 @@ const RULES = [
   [/^\/attendance\/?$/, 'attendance.view'],
   [/^\/attendance(\/|$)/, 'attendance.update'],
   [/^\/attendance-dashboard\/offices$/, { GET: 'open', '*': 'hr_settings.update' }],
+  // Work locations away from the base office: anyone may read their own / their reports' (the service checks), admin / HR write.
+  [/^\/attendance-dashboard\/work-locations(\/|$)/, { GET: 'open', '*': 'hr_settings.update' }],
+  [/^\/attendance-dashboard\/work-sites(\/|$)/, 'hr_settings.update'],
   // Their own record, or their reports': the service limits it. Holding the Attendance dashboard permission widens it to everyone (see modulesOf).
   [/^\/attendance-dashboard(\/|$)/, 'open'],
 

@@ -117,6 +117,7 @@ function DayPanel({ day, member, canAct, onApply }) {
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-tertiary-600">
         <dt>Present</dt><dd className="text-tertiary-900">{dayStatus(day) || 'Not marked'}{day.attendance_conflict ? ' · approved leave also exists - needs review' : ''}</dd>
         <dt>Reporting office</dt><dd className="text-tertiary-900">{day.reporting_office?.name || 'Not set'}</dd>
+        {day.away && (<><dt>Working at</dt><dd className="text-tertiary-900">{day.away.place_name}{day.away.city ? `, ${day.away.city}` : ''}{day.away.project_name ? ` (${day.away.project_name})` : ''}</dd></>)}
         <dt>Work type</dt><dd className="text-tertiary-900">{remote ? 'Remote' : 'Onsite'}</dd>
         <dt>Today at</dt><dd className="text-tertiary-900">{PLACE_LABEL[day.work_place]}{day.place_is_default && !day.requested_place ? ' (default)' : ''}</dd>
         {day.requested_place && <><dt>Request</dt><dd className="text-tertiary-900">{PLACE_LABEL[day.requested_place]} · {day.place_status}{day.place_decision_reason ? ` · ${day.place_decision_reason}` : ''}</dd></>}
@@ -190,6 +191,100 @@ function OfficeChanger({ member, onSaved }) {
       </select>
       <label className="block text-tertiary-600">From<input type="date" className="mt-0.5 w-full rounded-lg border px-2 py-1" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
       <button type="button" className="btn-secondary w-full" disabled={!locationId || !from} onClick={save}>Save office</button>
+    </div>
+  );
+}
+
+const PURPOSE_LABEL = { project: 'Project site', travel: 'Travel', other: 'Other' };
+
+// Working away from the base office: dated project-site / travel assignments. On those days check-in is measured against the place.
+function WorkingAway({ member, canEdit, onSaved }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const [rows, setRows] = useState([]);
+  const [offices, setOffices] = useState([]);
+  const [sites, setSites] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const blank = { from_date: '', to_date: '', place: '', purpose: 'project', account_id: '', note: '' };
+  const [form, setForm] = useState(blank);
+  const id = member.org_membership_id;
+  const load = useCallback(() => apiClient.get(`/attendance-dashboard/work-locations/${id}`).then(({ data }) => setRows(data.data || [])).catch(() => setRows([])), [id]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!canEdit) return;
+    apiClient.get('/orgs/locations').then(({ data }) => setOffices(data.data || [])).catch(() => setOffices([]));
+    apiClient.get('/attendance-dashboard/work-sites').then(({ data }) => setSites(data.data || [])).catch(() => setSites([]));
+    apiClient.get('/billing/projects').then(({ data }) => setProjects(data.data || [])).catch(() => setProjects([]));
+  }, [canEdit]);
+
+  const save = async () => {
+    const [kind, placeId] = form.place.split(':');
+    try {
+      await apiClient.post('/attendance-dashboard/work-locations', {
+        org_membership_id: id, from_date: form.from_date, to_date: form.to_date, purpose: form.purpose,
+        ...(kind === 'site' ? { work_site_id: placeId } : { location_id: placeId }),
+        ...(form.account_id ? { account_id: form.account_id } : {}), note: form.note,
+      });
+      pushSuccess('Work location saved');
+      setForm(blank);
+      setAdding(false);
+      load();
+      onSaved();
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not save the work location'), 'Not saved'); }
+  };
+  const cancel = async (row) => {
+    const reason = window.prompt('Why is this work location being cancelled?');
+    if (!reason || reason.trim().length < 3) return;
+    try {
+      await apiClient.post(`/attendance-dashboard/work-locations/${row.id}/cancel`, { reason: reason.trim() });
+      pushSuccess('Work location cancelled');
+      load();
+      onSaved();
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not cancel'), 'Not saved'); }
+  };
+  const input = 'mt-0.5 w-full rounded-lg border px-2 py-1';
+  if (!rows.length && !canEdit) return null;
+  return (
+    <div className="space-y-1 rounded-xl bg-tertiary-50 p-2 text-xs">
+      <p className="font-medium text-tertiary-700">Working away</p>
+      {!rows.length && <p className="text-tertiary-500">At the base office. Add a project site or travel to measure check-in against another place on those days.</p>}
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={r.id} className={`rounded-lg bg-white px-2 py-1 ${r.cancelled ? 'opacity-50 line-through' : ''}`}>
+            <b>{r.place_name || 'Place'}</b>{r.city ? `, ${r.city}` : ''} · {PURPOSE_LABEL[r.purpose]}{r.project_name ? ` · ${r.project_name}` : ''}
+            <span className="block text-tertiary-500">{r.from_date} to {r.to_date}{r.note ? ` · ${r.note}` : ''}</span>
+            {canEdit && !r.cancelled && <button type="button" className="text-danger-600 underline" onClick={() => cancel(r)}>Cancel</button>}
+          </li>
+        ))}
+      </ul>
+      {canEdit && !adding && <button type="button" className="btn-secondary w-full" onClick={() => setAdding(true)}>Add working away</button>}
+      {canEdit && adding && (
+        <div className="space-y-1">
+          <label className="block text-tertiary-600">From<input type="date" className={input} value={form.from_date} onChange={(e) => setForm({ ...form, from_date: e.target.value })} /></label>
+          <label className="block text-tertiary-600">To<input type="date" className={input} value={form.to_date} onChange={(e) => setForm({ ...form, to_date: e.target.value })} /></label>
+          <label className="block text-tertiary-600">Place
+            <select className={input} value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })}>
+              <option value="">Choose a place</option>
+              <optgroup label="Our offices">{offices.map((o) => <option key={o.id} value={`office:${o.id}`}>{o.name}</option>)}</optgroup>
+              <optgroup label="Client / work sites">{sites.map((x) => <option key={x.id} value={`site:${x.id}`}>{x.name}{x.city ? `, ${x.city}` : ''}</option>)}</optgroup>
+            </select>
+          </label>
+          <label className="block text-tertiary-600">Purpose
+            <select className={input} value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}>{Object.entries(PURPOSE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          </label>
+          <label className="block text-tertiary-600">Project (optional)
+            <select className={input} value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+              <option value="">None</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.project_name || p.name}</option>)}
+            </select>
+          </label>
+          <label className="block text-tertiary-600">Note<input className={input} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+          <div className="flex gap-1">
+            <button type="button" className="btn-secondary flex-1" onClick={() => setAdding(false)}>Close</button>
+            <button type="button" className="btn-primary flex-1" disabled={!form.from_date || !form.to_date || !form.place} onClick={save}>Save</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -361,6 +456,7 @@ export default function AttendanceDashboard() {
               <LeaveBalance rows={data.leave_balances} />
             </div>
             {isAdmin && <OfficeChanger member={data.member} onSaved={refresh} />}
+            <WorkingAway member={data.member} canEdit={isAdmin} onSaved={refresh} />
           </aside>
         </div>
       )}

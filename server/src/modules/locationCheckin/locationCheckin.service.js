@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../../config/db');
+const workLocation = require('../attendanceDashboard/workLocation.service');
 const env = require('../../config/env');
 const { todayIst, dayKeyIst } = require('../../lib/istDate');
 const attendanceDashboard = require('../attendanceDashboard/attendanceDashboard.service');
@@ -154,26 +155,29 @@ async function shiftRuleFor(orgId, member) {
   return rule ? rule.late_after_minutes : null;
 }
 
-// The office a person reports to on a day: the latest assignment on or before it, else their current office.
-async function officeOn(orgId, member, date) {
-  const row = await prisma.employeeOfficeAssignment.findFirst({
-    where: { org_id: orgId, org_membership_id: member.id, effective_from: { lte: date } },
-    orderBy: { effective_from: 'desc' },
-    select: { location_id: true },
-  });
-  return row ? row.location_id : member.location_id;
-}
+// The place a day is measured against (the base office, or a work location assignment) comes from workLocation.placeOn.
 
 // Where the person is meant to work on a day: an approved office / home choice wins; otherwise a remote person works from home, and a
 // day recorded as work from home counts as home. Read only.
-async function plannedPlace(orgId, member, date) {
+// `away`: the day is inside a work location assignment, where the default is the office (a remote person is on site there, not at home).
+async function plannedPlace(orgId, member, date, { away = false } = {}) {
   const [choice, attendance] = await Promise.all([
     prisma.workPlaceDay.findFirst({ where: { org_membership_id: member.id, date, status: 'approved' }, select: { work_place: true } }),
     prisma.attendanceRecord.findFirst({ where: { org_membership_id: member.id, date }, select: { status: true } }),
   ]);
   if (choice) return choice.work_place;
+  if (away) return 'office';
   if (member.work_mode === 'remote' || (attendance && attendance.status === 'wfh')) return 'home';
   return 'office';
+}
+
+// The map point of a stored check-in's place (a work site, else the office it was measured against).
+async function fenceOf(orgId, record) {
+  if (record.work_site_id) {
+    const site = await prisma.workSite.findFirst({ where: { id: record.work_site_id, org_id: orgId } });
+    return site && site.latitude != null ? { latitude: site.latitude, longitude: site.longitude, radius_m: site.radius_m } : null;
+  }
+  return record.location_id ? prisma.officeGeofence.findUnique({ where: { org_id_location_id: { org_id: orgId, location_id: record.location_id } } }) : null;
 }
 
 // Measure a point against the person's office. `at_office` is null when there is no location or no office map point to compare with.
@@ -264,15 +268,17 @@ async function today(user) {
   const [member, settings] = await Promise.all([memberFor(user.org_id, user.org_membership_id), getSettings(user.org_id)]);
   if (!isEligible(member, settings)) return { eligible: false };
   const date = todayIst();
-  const [record, planned, locationId, ruleCutoff] = await Promise.all([
+  const place = await workLocation.placeOn(user.org_id, member, date);
+  const [record, planned, ruleCutoff] = await Promise.all([
     prisma.locationCheckin.findUnique({ where: { org_membership_id_date: { org_membership_id: member.id, date } }, include: withSessions }),
-    plannedPlace(user.org_id, member, date),
-    officeOn(user.org_id, member, date),
+    plannedPlace(user.org_id, member, date, { away: Boolean(place.assignment_id) }),
     shiftRuleFor(user.org_id, member),
   ]);
-  const fence = locationId ? await prisma.officeGeofence.findUnique({ where: { org_id_location_id: { org_id: user.org_id, location_id: locationId } } }) : null;
-  const office = locationId ? await prisma.location.findUnique({ where: { id: locationId }, select: { name: true } }) : null;
+  const fence = place.fence;
+  const office = place.name ? { name: place.name } : null;
   return {
+    // Where today is measured: the base office, or a work location (client site / another office) with its purpose.
+    place: { kind: place.kind, name: place.name, city: place.city, purpose: place.purpose },
     eligible: true,
     date: date.toISOString().slice(0, 10),
     planned_place: planned,
@@ -308,9 +314,11 @@ async function checkIn(user, { latitude, longitude, accuracy_m }, uploaded) {
     file = null;
   }
 
-  const planned = existing ? existing.planned_place : await plannedPlace(user.org_id, member, date);
-  const locationId = existing ? existing.location_id : await officeOn(user.org_id, member, date);
-  const fence = locationId ? await prisma.officeGeofence.findUnique({ where: { org_id_location_id: { org_id: user.org_id, location_id: locationId } } }) : null;
+  // The day is measured against its work location when one covers it, else the base office; later check-ins keep the first one's place.
+  const place = existing ? null : await workLocation.placeOn(user.org_id, member, date);
+  const planned = existing ? existing.planned_place : await plannedPlace(user.org_id, member, date, { away: Boolean(place.assignment_id) });
+  const locationId = existing ? existing.location_id : place.location_id;
+  const fence = existing ? await fenceOf(user.org_id, existing) : place.fence;
   const { distance_m, at_office } = measure(fence, latitude, longitude);
   const now = new Date();
   const result = resultFor(planned, latitude, longitude, at_office);
@@ -346,6 +354,8 @@ async function checkIn(user, { latitude, longitude, accuracy_m }, uploaded) {
         org_membership_id: member.id,
         date,
         location_id: locationId || null,
+        work_site_id: place.work_site_id || null,
+        assignment_id: place.assignment_id || null,
         planned_place: planned,
         check_in_at: now,
         check_in_lat: latitude ?? null,
@@ -377,7 +387,7 @@ async function checkOut(user, { latitude, longitude, accuracy_m, reason }) {
   if (!record) return { error: 'not_checked_in' };
   const open = [...record.sessions].reverse().find((s) => !s.out_at);
   if (!open) return { error: 'already_checked_out' };
-  const fence = record.location_id ? await prisma.officeGeofence.findUnique({ where: { org_id_location_id: { org_id: user.org_id, location_id: record.location_id } } }) : null;
+  const fence = await fenceOf(user.org_id, record);
   const { distance_m, at_office } = measure(fence, latitude, longitude);
   const out = {
     out_at: new Date(),

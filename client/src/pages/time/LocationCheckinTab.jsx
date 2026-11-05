@@ -183,7 +183,7 @@ function MyCheckin({ showHistory = true }) {
       <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-tertiary-600">
           <span>Today: <b className="text-tertiary-900">{PLACE[today.planned_place]}</b></span>
-          <span>Office: <b className="text-tertiary-900">{today.office_name || 'Not set'}</b></span>
+          <span>{today.place && today.place.kind !== 'base' ? 'Checked against' : 'Office'}: <b className="text-tertiary-900">{today.office_name || 'Not set'}</b>{today.place && today.place.kind !== 'base' ? <span className="ml-1 text-xs">({today.place.kind === 'site' ? 'work site' : 'other office'}{today.place.purpose ? `, ${today.place.purpose}` : ''})</span> : null}</span>
           <span>Late after: <b className="text-tertiary-900">{minutesToTime(today.late_after_minutes)}</b>{today.shift ? <span className="ml-1 text-xs">({today.shift.name})</span> : null}</span>
         </div>
         {today.planned_place === 'office' && !today.office_configured && <p className="mt-2 text-xs text-amber-700">Your office has no map point yet, so your location cannot be compared. Ask an admin to set it.</p>}
@@ -780,6 +780,70 @@ function OfficeRow({ office, onSaved }) {
   );
 }
 
+// A client / project site that is not one of our offices: the place a person on a work location assignment is measured against.
+function SiteRow({ site, onSaved }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const isNew = !site.id;
+  const [v, setV] = useState({ name: site.name || '', city: site.city || '', latitude: site.latitude ?? '', longitude: site.longitude ?? '', radius_m: site.radius_m ?? 150 });
+  const field = 'w-28 rounded-lg border border-tertiary-200 px-2 py-1.5 text-sm';
+  function useHere() {
+    navigator.geolocation?.getCurrentPosition(
+      (p) => setV((x) => ({ ...x, latitude: Number(p.coords.latitude.toFixed(6)), longitude: Number(p.coords.longitude.toFixed(6)) })),
+      () => pushError('Could not read your location', 'No location'),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+  async function save() {
+    const body = { name: v.name.trim(), city: v.city.trim() || null, latitude: v.latitude === '' ? null : Number(v.latitude), longitude: v.longitude === '' ? null : Number(v.longitude), radius_m: Number(v.radius_m) || 150 };
+    try {
+      if (isNew) await apiClient.post('/attendance-dashboard/work-sites', body);
+      else await apiClient.patch(`/attendance-dashboard/work-sites/${site.id}`, body);
+      pushSuccess(`${body.name} saved`);
+      if (isNew) setV({ name: '', city: '', latitude: '', longitude: '', radius_m: 150 });
+      onSaved();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not save the site'), 'Not saved');
+    }
+  }
+  return (
+    <tr className="border-t border-tertiary-100">
+      <td className="px-3 py-2"><input className={`${field} w-40`} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} placeholder={isNew ? 'New site name' : 'Name'} /></td>
+      <td className="px-3 py-2"><input className={field} value={v.city} onChange={(e) => setV({ ...v, city: e.target.value })} placeholder="City" /></td>
+      <td className="px-3 py-2"><input className={field} value={v.latitude} onChange={(e) => setV({ ...v, latitude: e.target.value })} placeholder="18.5204" /></td>
+      <td className="px-3 py-2"><input className={field} value={v.longitude} onChange={(e) => setV({ ...v, longitude: e.target.value })} placeholder="73.8567" /></td>
+      <td className="px-3 py-2"><input type="number" className="w-20 rounded-lg border border-tertiary-200 px-2 py-1.5 text-sm" value={v.radius_m} onChange={(e) => setV({ ...v, radius_m: e.target.value })} /></td>
+      <td className="px-3 py-2"><span className="flex gap-2"><button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={useHere}>Use my location</button><button type="button" className="btn-primary px-3 py-1 text-xs" disabled={!v.name.trim()} onClick={save}>{isNew ? 'Add site' : 'Save'}</button></span></td>
+    </tr>
+  );
+}
+
+function WorkSites() {
+  const { pushError } = useAlerts();
+  const [sites, setSites] = useState([]);
+  const load = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get('/attendance-dashboard/work-sites');
+      setSites(data.data || []);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not load the work sites'), 'Something went wrong');
+    }
+  }, [pushError]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
+      <p className="px-3 pt-3 text-sm font-medium text-tertiary-900">Work sites (client offices and other places)</p>
+      <p className="px-3 text-xs text-tertiary-500">A person working at a client site or travelling is given one of these in their Attendance dashboard profile (Working away). On those days check-in is measured against the site, not their office.</p>
+      <table className="min-w-full text-sm">
+        <thead className="text-left text-xs uppercase text-tertiary-500"><tr><th className="px-3 py-2">Site</th><th className="px-3 py-2">City</th><th className="px-3 py-2">Latitude</th><th className="px-3 py-2">Longitude</th><th className="px-3 py-2">Radius (m)</th><th className="px-3 py-2" /></tr></thead>
+        <tbody>
+          {sites.map((x) => <SiteRow key={`${x.id}-${x.latitude}-${x.longitude}-${x.radius_m}-${x.name}`} site={x} onSaved={load} />)}
+          <SiteRow key={`new-${sites.length}`} site={{}} onSaved={load} />
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Settings() {
   const { pushError, pushSuccess } = useAlerts();
   const [settings, setSettings] = useState(null);
@@ -863,6 +927,7 @@ function Settings() {
           <tbody>{offices.map((o) => <OfficeRow key={`${o.location_id}-${o.latitude}-${o.longitude}-${o.radius_m}`} office={o} onSaved={load} />)}</tbody>
         </table>
       </div>
+      <WorkSites />
     </div>
   );
 }

@@ -8735,6 +8735,52 @@ model OfficeGeofence {
   @@map("office_geofences")
 }
 
+// A place that is not one of our offices: a client site or any other work site. A separate table from locations so client
+// sites never leak into office lists, headcount, calendars, expense or group charges.
+model WorkSite {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  name              String
+  city              String?
+  address           String?
+  latitude          Decimal? @db.Decimal(9, 6)
+  longitude         Decimal? @db.Decimal(9, 6)
+  radius_m          Int      @default(150)
+  client_account_id String?  @db.Uuid
+  created_by        String?  @db.Uuid
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  @@index([org_id])
+  @@map("work_sites")
+}
+
+// A dated work location away from the base office (a project site or travel). On those days check-in is measured against this
+// place and the register shows it. Exactly one of location_id (another of our offices) / work_site_id is set.
+model WorkLocationAssignment {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id               String    @db.Uuid
+  org_membership_id    String    @db.Uuid
+  from_date            DateTime  @db.Date
+  to_date              DateTime  @db.Date
+  location_id          String?   @db.Uuid
+  work_site_id         String?   @db.Uuid
+  purpose              String    @default("project") // project | travel | other
+  account_id           String?   @db.Uuid // the project
+  deployment_person_id String?   @db.Uuid
+  note                 String?
+  created_by           String?   @db.Uuid
+  cancelled_at         DateTime?
+  cancelled_by         String?   @db.Uuid
+  cancel_reason        String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  @@index([org_membership_id, from_date])
+  @@index([org_id, from_date])
+  @@map("work_location_assignments")
+}
+
 // One row per company: whether a selfie is needed at check-in, and the cutoff used for someone with no shift (minutes from midnight).
 model LocationCheckinSetting {
   id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -8757,6 +8803,8 @@ model LocationCheckin {
   org_membership_id    String    @db.Uuid
   date                 DateTime  @db.Date
   location_id          String?   @db.Uuid // the office the person was measured against
+  work_site_id         String?   @db.Uuid // the client / project site the person was measured against (a work location assignment)
+  assignment_id        String?   @db.Uuid // the work location assignment that day was measured against
   planned_place        String // office | home: the approved arrangement for the day
   check_in_at          DateTime
   check_in_lat         Decimal?  @db.Decimal(9, 6)

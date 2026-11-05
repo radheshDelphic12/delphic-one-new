@@ -34,6 +34,8 @@ const TRACKED = {
   Policy: 'policy',
   PermissionGrant: 'permission_grant', // who was given or lost which permission (Settings > Permissions)
   CustomRole: 'permission_set', // a permission set: its ticks and who holds it
+  WorkSite: 'work_site', // a client / project site used for check-in
+  WorkLocationAssignment: 'work_location', // a dated work location away from the base office
 };
 
 // Models that carry deleted_at: reading them through the global filter hides deleted rows, so the "before" read must opt out.

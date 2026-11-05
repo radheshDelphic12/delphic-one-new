@@ -10,6 +10,7 @@ const dashboard = require('../timesheets/dashboard.service');
 const leave = require('../leave/leave.service');
 const { todayIst } = require('../../lib/istDate');
 const { projectListWhere } = require('../../lib/projectScope');
+const workLocation = require('./workLocation.service');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 const monthBounds = (year, month) => ({ from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) });
@@ -123,13 +124,15 @@ async function calendar(orgId, orgMembershipId, { year, month }) {
   if (!member) return { error: 'member_not_found' };
   if (member.worker_type === 'contractor' || member.vendor_account_id) return { error: 'no_attendance' };
 
-  const [timesheetCal, assignments, places, balances] = await Promise.all([
+  const [timesheetCal, assignments, places, balances, awayBy] = await Promise.all([
     // reuses the existing day builder for attendance status, holidays, leave and pending leave; hours are dropped below
     dashboard.monthCalendar(orgId, orgMembershipId, { year, month }),
     prisma.employeeOfficeAssignment.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, effective_from: { lte: to } }, select: { effective_from: true, location: { select: { id: true, name: true } } } }),
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, date: { gte: from, lte: to } } }),
     leaveSummary(orgId, orgMembershipId, year, month),
+    workLocation.awayByPerson(orgId, [orgMembershipId], from, to),
   ]);
+  const away = awayBy.get(orgMembershipId) || new Map();
   const officeOn = officeResolver(assignments, member.location ? { id: member.location.id, name: member.location.name } : null);
   const placeByDay = new Map(places.map((p) => [ymd(p.date), p]));
   const workType = workTypeOf(member);
@@ -151,6 +154,8 @@ async function calendar(orgId, orgMembershipId, { year, month }) {
       leaves: d.leaves,
       pending_leaves: d.pending_leaves,
       reporting_office: officeOn(d.date),
+      // inside a work location assignment (a project site or travel): where they are working instead of the base office
+      away: away.get(d.date) || null,
       work_type: workType,
       work_place: place,
       // a stored row is a request; the default needs no decision and counts as approved
@@ -333,7 +338,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
   const today = ymd(todayDate);
   const visible = await dashboard.visibleMembers(orgId, user, { includeExited: true });
   const ids = visible.filter((m) => m.worker_type !== 'contractor' && !m.vendor_account_id).map((m) => m.id);
-  const [members, homeRows, recordRows] = await Promise.all([
+  const [members, homeRows, recordRows, awayBy] = await Promise.all([
     prisma.orgMembership.findMany({
       where: { id: { in: ids } },
       select: { id: true, work_mode: true, location_id: true, joined_at: true, employment_status: true, left_at: true, notice_end_date: true, employee_code: true, person: { select: { name: true, department: { select: { name: true } } } } },
@@ -342,6 +347,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
     // the recorded attendance rows themselves: the register's edit drawer changes or removes one
     prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, select: { id: true, org_membership_id: true, date: true, status: true } }),
+    workLocation.awayByPerson(orgId, ids, from, to),
   ]);
   const recordBy = new Map(recordRows.map((r) => [`${r.org_membership_id}|${ymd(r.date)}`, r]));
   const homeBy = new Map();
@@ -358,6 +364,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
     const end = lastDay ? ymd(lastDay) : null;
     const workType = workTypeOf(m);
     const homeByDay = homeBy.get(m.id) || new Set();
+    const awayDays = awayBy.get(m.id) || new Map();
     // present = every day worked (office + WFH + half days + the worked half of a half-day leave) and keeps that meaning for the
     // monthly review; office / wfh split it, and leave_by_code splits leave by type code (CL, SL, CO, UL, L = unspecified).
     const totals = { present: 0, office: 0, wfh: 0, worked: 0, half_day: 0, leave: 0, leave_by_code: {}, holidays: 0, weekly_offs: 0, absent: 0, hours: 0 };
@@ -381,7 +388,7 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
       // What the day editor starts from: the leave type (full day / the half), and office or home as the register shows it.
       const leaveRows = d.leaves || [];
       const place = homeByDay.has(d.date) || workType === 'remote' || d.attendance_status === 'wfh' ? 'home' : 'office';
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null, leave_request_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.request_id || null, half_day_session: leaveRows.find((l) => l.is_half_day)?.half_day_session || null, unspecified_leave: c.kind === 'leave' && c.code === 'L' };
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null, leave_request_id: (leaveRows.find((l) => !l.is_half_day) || leaveRows[0])?.request_id || null, half_day_session: leaveRows.find((l) => l.is_half_day)?.half_day_session || null, unspecified_leave: c.kind === 'leave' && c.code === 'L', away: awayDays.get(d.date) || null };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
     totals.worked = totals.present;
