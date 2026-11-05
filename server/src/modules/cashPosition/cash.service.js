@@ -424,7 +424,7 @@ async function options(groupIds) {
     contracts,
  modes: calc.MODES, currencies: calc.CURRENCIES,
     accounts: accounts.map((a) => ({ ...a, declared_opening_balance: money(a.declared_opening_balance), minimum_balance: a.minimum_balance == null ? null : money(a.minimum_balance), opening_date: ymd(a.opening_date) })),
-    wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account?.name || null, currency: w.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id })),
+    wallets: wallets.map((w) => ({ id: w.id, name: w.name, purpose: w.purpose, bank_account_id: w.bank_account_id, bank_account_name: w.bank_account?.name || null, currency: w.currency, owner_name: ownerLabel(w), owner_org_id: w.owner_org_id, owner_legal_entity_id: w.owner_legal_entity_id || null, account_legal_entity_id: w.bank_account?.legal_entity_id || null })),
   };
 }
 

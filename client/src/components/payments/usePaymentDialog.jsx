@@ -134,7 +134,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
             </div>
             {!v.track && <p className="mt-1.5 text-xs text-tertiary-500">No: the payment is recorded, but no wallet is touched (for example, the money went to another account).</p>}
             {v.track && (wallets && !wallets.length ? (
-              <p className="mt-2 rounded-lg bg-warning-50 p-2 text-xs">This company has no wallet yet. Ask the group admin to add one under Group Overview &gt; Book Keeping &gt; Setup.</p>
+              <p className="mt-2 rounded-lg bg-warning-50 p-2 text-xs">No wallet is set up for this company yet. The group admin adds one under Group Dashboard &gt; Book Keeping &gt; Setup (owner: this company), or picks a wallet of the group here.</p>
             ) : (
               <div className="mt-2 grid grid-cols-2 gap-3">
                 <label className={labelCls}>Wallet

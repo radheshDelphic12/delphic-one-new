@@ -60,10 +60,12 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
   const setLine = (i, k) => (e) => setLines((c) => c.map((l, j) => (j === i ? { ...l, [k]: e.target.value } : l)));
   const entity = entities.find((x) => x.id === v.legal_entity_id);
   const currency = v.type === 'usd_export' ? 'USD' : 'INR';
-  const wallets = useMemo(() => {
-    const accountIds = new Set((options?.accounts || []).filter((a) => a.legal_entity_id === v.legal_entity_id && a.currency === currency).map((a) => a.id));
-    return (options?.wallets || []).filter((w) => accountIds.has(w.bank_account_id));
-  }, [options, v.legal_entity_id, currency]);
+  // Every wallet this entity can receive into, whatever its type (current, savings, advance ...): the same rule the server applies - not tied
+  // to another legal entity (by its bank account or as owner) - and in the invoice's currency. A wallet with no bank account yet counts too.
+  const allEntityWallets = useMemo(() => (options?.wallets || []).filter((w) => (!w.account_legal_entity_id || w.account_legal_entity_id === v.legal_entity_id) && (!w.owner_legal_entity_id || w.owner_legal_entity_id === v.legal_entity_id)), [options, v.legal_entity_id]);
+  const wallets = useMemo(() => allEntityWallets.filter((w) => w.currency === currency), [allEntityWallets, currency]);
+  const otherCurrency = allEntityWallets.length - wallets.length;
+  const accountType = (w) => (options?.accounts || []).find((a) => a.id === w.bank_account_id)?.type || '';
   const savedBank = (options?.accounts || []).find((a) => a.id === wallets.find((w) => w.id === v.receiving_wallet_id)?.bank_account_id)?.payment_instructions || '';
   const intra = Boolean(entity?.state_code && v.buyer_state_code && entity.state_code === v.buyer_state_code);
   const t = preview(v.type, lines, intra);
@@ -150,10 +152,11 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
         <label className={labelCls}>Money will be received in (wallet of this entity, {currency})
           <select required className={inputCls} value={v.receiving_wallet_id} onChange={set('receiving_wallet_id')}>
             <option value="">Choose a wallet…</option>
-            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name}{w.bank_account_name && w.bank_account_name !== w.name ? ` · ${w.bank_account_name}` : ""}</option>)}
+            {wallets.map((w) => <option key={w.id} value={w.id}>{w.owner_name} · {w.name}{w.bank_account_name && w.bank_account_name !== w.name ? ` · ${w.bank_account_name}` : ""}{accountType(w) ? ` (${accountType(w)})` : ""}</option>)}
           </select>
         </label>
         {v.legal_entity_id && !wallets.length && <p className="text-xs text-warning-700">This entity has no {currency} wallet yet. Add one under Setup.</p>}
+        {v.legal_entity_id && wallets.length > 0 && otherCurrency > 0 && <p className="text-xs text-tertiary-500">{otherCurrency} more wallet{otherCurrency === 1 ? '' : 's'} of this entity {otherCurrency === 1 ? 'is' : 'are'} not in {currency} and cannot receive this invoice.</p>}
         {v.type === 'usd_export' && <label className={labelCls}>Bank and SWIFT details (printed on the invoice; leave empty to use the bank account&apos;s)<textarea rows={3} className={inputCls} maxLength={1000} value={v.payment_instructions} onChange={set('payment_instructions')} placeholder={savedBank || ''} />{v.receiving_wallet_id && (savedBank ? <span className="text-[11px] font-normal text-tertiary-500">Empty = the saved details of this bank account (shown above). Change them under Book Keeping &gt; Setup &gt; Bank accounts.</span> : <span className="text-[11px] font-normal text-warning-700">This bank account has no payment details saved. Add them under Book Keeping &gt; Setup &gt; Bank accounts (Payment details printed on invoices), or type them here for this invoice only.</span>)}</label>}
         <label className={labelCls}>Notes<textarea rows={2} className={inputCls} maxLength={2000} value={v.notes} onChange={set('notes')} /></label>
         <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={busy || !v.legal_entity_id || !v.receiving_wallet_id}>{busy ? 'Saving…' : invoice ? 'Save changes' : 'Issue invoice'}</button></div>
