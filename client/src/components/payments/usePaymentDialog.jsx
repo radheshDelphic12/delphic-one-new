@@ -20,6 +20,11 @@ export const isPaymentCancelled = (err) => err?.message === PAYMENT_CANCELLED;
  * config = { title, direction ('in' | 'out'), currency, amount (pending, or the fixed amount), fixedAmount (no part payment), party,
  *             cap (the most that may be entered, default amount), initialAmount, initial (field values to prefill: an edit), note, submitLabel }
  */
+// The wallet last used for a company's payments (the popup that follows a saved rent / EMI / salary ...), so the next one is one click.
+const lastWalletKey = (orgId) => `payment.lastWallet.${orgId || 'active'}`;
+const readLastWallet = (orgId) => { try { return window.localStorage.getItem(lastWalletKey(orgId)) || ''; } catch { return ''; } };
+const rememberWallet = (orgId, id) => { try { window.localStorage.setItem(lastWalletKey(orgId), id); } catch { /* private window: nothing to remember */ } };
+
 function PaymentDialog({ config, onSubmit, onCancel }) {
   const open = Boolean(config);
   const currency = config?.currency || 'INR';
@@ -32,7 +37,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
   useEffect(() => {
     if (!config) return;
     setError('');
-    setV({ amount: config.initialAmount !== undefined ? String(config.initialAmount) : config.amount ? String(config.amount) : '', date: today(), exchange_rate: '', bank_charges: '', other_deductions: '', deduction_notes: '', notes: '', track: false, wallet_id: '', mode: 'neft', ...(config.initial || {}) });
+    setV({ amount: config.initialAmount !== undefined ? String(config.initialAmount) : config.amount ? String(config.amount) : '', date: today(), exchange_rate: '', bank_charges: '', other_deductions: '', deduction_notes: '', notes: '', track: Boolean(config.defaultTrack), wallet_id: '', mode: 'neft', ...(config.initial || {}) });
     setSaving(false);
     // The wallets belong to the company the popup is opened in. This popup is mounted once for the whole app, so a list kept from
     // an earlier opening (another company, before a switch) must never be reused: load it again on every opening.
@@ -50,9 +55,23 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
     if (!open || !v.track || wallets !== null) return undefined;
     let current = true; // a slow answer for an earlier opening must not overwrite this one
     // the company the payment belongs to (a group admin paying another company's EMI), else the active company
-    apiClient.get('/payments/track/wallets', { params: config?.orgId ? { org_id: config.orgId } : {} }).then((r) => { if (current) setWallets(r.data.data || []); }).catch(() => { if (current) setWallets([]); });
+    apiClient.get('/payments/track/wallets', { params: config?.orgId ? { org_id: config.orgId } : {} }).then((r) => {
+      if (!current) return;
+      const list = r.data.data || [];
+      setWallets(list);
+      // A popup that starts on "Yes": pick the wallet used last time (or the company's only one); a company with no wallet falls back to "No".
+      if (config?.defaultTrack) {
+        setV((c) => {
+          if (!c.track || c.wallet_id) return c;
+          if (!list.length) return { ...c, track: false };
+          const own = list.filter((w) => w.own !== false);
+          const pick = list.find((w) => w.id === readLastWallet(config?.orgId)) || (own.length === 1 ? own[0] : null);
+          return pick ? { ...c, wallet_id: pick.id } : c;
+        });
+      }
+    }).catch(() => { if (current) setWallets([]); });
     return () => { current = false; };
-  }, [open, v.track, wallets, config?.orgId]);
+  }, [open, v.track, wallets, config?.orgId, config?.defaultTrack]);  
 
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   const amount = config?.fixedAmount ? num(config.amount) : num(v.amount);
@@ -79,7 +98,7 @@ function PaymentDialog({ config, onSubmit, onCancel }) {
       ...(v.track ? { wallet_payment: { wallet_id: v.wallet_id, mode: v.mode, ...(v.date ? { date: v.date } : {}) } } : {}),
     };
     setError('');
-    try { await onSubmit(body); } catch (err) { setError(apiErrorMessage(err, 'Could not save the payment')); } finally { setSaving(false); }
+    try { await onSubmit(body); if (v.track && v.wallet_id) rememberWallet(config?.orgId, v.wallet_id); } catch (err) { setError(apiErrorMessage(err, 'Could not save the payment')); } finally { setSaving(false); }
   }
 
   return (
