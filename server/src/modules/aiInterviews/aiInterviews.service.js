@@ -610,14 +610,18 @@ async function analytics({ from, to }, user) {
 
 // Report + dashboard: every AI interview (the live link of each candidate and requirement), who attempted it, for which requirement
 // and client, how it went, with the submission to open. view_status: not_opened | in_progress | scored | pending_review | expired.
-const REPORT_STATUSES = ['not_opened', 'in_progress', 'scored', 'pending_review', 'expired'];
+const REPORT_STATUSES = ['not_opened', 'in_progress', 'scored', 'pending_review', 'expired', 'superseded'];
 const REPORT_OUTCOMES = ['pass', 'borderline', 'below_pass', 'none'];
 // Submission status filter: any pipeline stage, or "not_submitted" = the candidate has not been put forward to the client yet (sourced / internal screening).
 const SUBMISSION_STAGES = ['sourced', 'internal_screening', 'submitted_to_client', 'interview_scheduled', 'interview_result', 'offer_sent', 'bgv', 'closed', 'backout', 'rejected'];
 const REPORT_SUBMISSION_STAGES = [...SUBMISSION_STAGES, 'not_submitted'];
 const NOT_SUBMITTED = ['sourced', 'internal_screening'];
 async function report(q, user) {
-  const where = { deleted_at: null, superseded_at: null, org_id: user.org_id || null };
+  // A new link replaces the earlier one, but a finished attempt keeps its score and result: it is listed (old and new alike) as "Replaced".
+  // include_replaced=no hides those and lists only each candidate's live link. A replaced link nobody completed is never listed.
+  const where = { deleted_at: null, org_id: user.org_id || null };
+  if (q.include_replaced === 'no') where.superseded_at = null;
+  else where.OR = [{ superseded_at: null }, { status: { in: ['completed', 'pending_review'] } }];
   if (q.from || q.to) where.invited_at = { ...(q.from ? { gte: new Date(`${q.from}T00:00:00+05:30`) } : {}), ...(q.to ? { lte: new Date(`${q.to}T23:59:59.999+05:30`) } : {}) };
   const interviews = await prisma.aiInterview.findMany({ where, orderBy: { invited_at: 'desc' }, take: 5000 });
   const subs = await prisma.submission.findMany({
@@ -695,6 +699,7 @@ async function report(q, user) {
       scored: count((r) => r.view_status === 'scored'),
       pending_review: count((r) => r.view_status === 'pending_review'),
       expired: count((r) => r.view_status === 'expired'),
+      replaced: count((r) => r.view_status === 'superseded'),
       pass: count((r) => r.outcome === 'pass'),
       borderline: count((r) => r.outcome === 'borderline'),
       below_pass: count((r) => r.outcome === 'below_pass'),

@@ -910,6 +910,36 @@ describe('re-take after a finished interview', () => {
     expect(seenPrompts[promptsBefore].user).toContain(before[0]);
     expect(seenPrompts[promptsBefore].user).toContain('Do NOT ask any of them again');
   });
+
+  test('after a re-take the first finished result is still shown on the submission and is listed in the report as Replaced', async () => {
+    const first = (await invite()).body.data;
+    await post(`${tokenOf(first.link)}/start`, { consent: true });
+    followUps = false;
+    await runInterview(tokenOf(first.link));
+    await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, retake: true });
+
+    // the submission card keeps the old attempt as "Replaced" with its finished status, so its result can be opened
+    const items = (await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken)).body.data.items;
+    const old = items.find((i) => i.id === first.id);
+    expect(old).toMatchObject({ view_status: 'superseded', status: 'completed' });
+    expect(old.score_percent).toBeGreaterThan(0);
+    const review = (await authed(request(app).get(`/api/v1/ai-interviews/${first.id}/review`), recruiterToken)).body.data;
+    expect(review.scores).toBeTruthy();
+
+    // the report lists the finished earlier attempt as Replaced by default (never an unopened replaced one); include_replaced=no hides it
+    const report = (qs = '') => authed(request(app).get(`/api/v1/ai-interviews/report${qs}`), recruiterToken);
+    const live = (await report('?include_replaced=no')).body.data;
+    expect(live.rows.map((r) => r.view_status)).toEqual(['not_opened']);
+    const all = (await report()).body.data;
+    expect(all.rows.map((r) => r.view_status).sort()).toEqual(['not_opened', 'superseded']);
+    expect(all.summary.replaced).toBe(1);
+    expect(all.rows.find((r) => r.id === first.id).score_percent).toBeGreaterThan(0);
+    expect((await report('?status=superseded')).body.data.rows).toHaveLength(1);
+
+    // a replaced link nobody finished is not listed
+    await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, restart: true, retake: true });
+    expect((await report()).body.data.rows.map((r) => r.view_status).sort()).toEqual(['not_opened', 'superseded']);
+  });
 });
 
 describe('Reports > AI interviews (dashboard data)', () => {

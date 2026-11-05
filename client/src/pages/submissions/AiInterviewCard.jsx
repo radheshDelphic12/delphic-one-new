@@ -210,7 +210,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
               {i.auto_reject_note && <p className={`basis-full text-xs ${i.auto_rejected_at ? 'font-medium text-danger-700' : 'text-tertiary-500'}`}>{i.auto_reject_note}</p>}
               <div className="flex items-center gap-1">
                 {i.link && i.is_live && <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs text-tertiary-700 hover:bg-tertiary-50" onClick={() => copy(i.link)}><Copy className="h-3.5 w-3.5" /> Copy link</button>}
-                {['scored', 'pending_review'].includes(i.view_status) && <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs text-tertiary-700 hover:bg-tertiary-50" onClick={() => openReview(i)}><Eye className="h-3.5 w-3.5" /> View result</button>}
+                {(['scored', 'pending_review'].includes(i.view_status) || (i.view_status === 'superseded' && ['completed', 'pending_review'].includes(i.status))) && <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-tertiary-200 px-2 py-1 text-xs text-tertiary-700 hover:bg-tertiary-50" onClick={() => openReview(i)}><Eye className="h-3.5 w-3.5" /> View result</button>}
                 {isAdmin && <button type="button" aria-label="Delete AI interview" className="rounded p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => remove(i)}><Trash2 className="h-4 w-4" /></button>}
               </div>
             </div>

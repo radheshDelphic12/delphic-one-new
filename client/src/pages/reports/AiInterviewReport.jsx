@@ -16,6 +16,7 @@ const STATUS = {
   scored: { label: 'Completed', tone: 'green' },
   pending_review: { label: 'Needs review', tone: 'amber' },
   expired: { label: 'Link expired', tone: 'red' },
+  superseded: { label: 'Replaced by a newer link', tone: 'gray' },
 };
 const OUTCOME = {
   pass: { label: 'Pass', tone: 'green' },
@@ -77,6 +78,7 @@ export default function AiInterviewReport() {
   const [reloadKey, setReloadKey] = useState(0);
   const [busyIds, setBusyIds] = useState(() => new Set()); // rows with a submit / reject in flight (a second click does nothing)
   const [rejecting, setRejecting] = useState(null); // { row, reason }
+  const [hideReplaced, setHideReplaced] = useState(false); // finished attempts that a newer link replaced are listed unless hidden
   const [attempted, setAttempted] = useState(false); // every link that was sent is listed; tick to see only those who started
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
@@ -87,9 +89,9 @@ export default function AiInterviewReport() {
       ...(from ? { from } : {}), ...(to ? { to } : {}),
       ...(requirementId ? { requirement_id: requirementId } : {}),
       ...(status ? { status } : {}), ...(outcome ? { outcome } : {}), ...(submissionStage ? { submission_stage: submissionStage } : {}),
-      ...(attempted ? { attempted: 'yes' } : {}), ...(q.trim() ? { q: q.trim() } : {}),
+      ...(attempted ? { attempted: 'yes' } : {}), ...(hideReplaced ? { include_replaced: 'no' } : {}), ...(q.trim() ? { q: q.trim() } : {}),
     }),
-    [from, to, requirementId, status, outcome, submissionStage, attempted, q]
+    [from, to, requirementId, status, outcome, submissionStage, attempted, hideReplaced, q]
   );
 
   useEffect(() => {
@@ -115,8 +117,8 @@ export default function AiInterviewReport() {
   };
 
   const canAct = canMoveSubmissionStage(user);
-  const canSubmit = (r) => canAct && !r.submission_locked && SUBMIT_FROM.includes(r.submission_stage);
-  const canReject = (r) => canAct && !r.submission_locked && r.submission_stage && !NO_REJECT_FROM.includes(r.submission_stage);
+  const canSubmit = (r) => canAct && r.view_status !== 'superseded' && !r.submission_locked && SUBMIT_FROM.includes(r.submission_stage);
+  const canReject = (r) => canAct && r.view_status !== 'superseded' && !r.submission_locked && r.submission_stage && !NO_REJECT_FROM.includes(r.submission_stage);
   const setBusy = (id, on) => setBusyIds((cur) => { const next = new Set(cur); if (on) next.add(id); else next.delete(id); return next; });
   // The row shows the new status at once; the list and the summary are then read again so every count agrees.
   const showStage = (id, stage) => setData((d) => (d ? { ...d, rows: d.rows.map((r) => (r.id === id ? { ...r, submission_stage: stage } : r)) } : d));
@@ -175,6 +177,7 @@ export default function AiInterviewReport() {
         <label className="text-xs font-medium text-tertiary-600">Result<select className={`${field} mt-1 block`} value={outcome} onChange={(e) => setOutcome(e.target.value)}><option value="">All</option>{Object.entries(OUTCOME).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}<option value="none">No result yet</option></select></label>
         <label className="text-xs font-medium text-tertiary-600">Search<input className={`${field} mt-1 block w-44`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Candidate, requirement…" /></label>
         <label className="flex items-center gap-2 pb-2 text-sm text-tertiary-700"><input type="checkbox" checked={attempted} onChange={(e) => setAttempted(e.target.checked)} />Only those who attempted</label>
+        <label className="flex items-center gap-2 pb-2 text-sm text-tertiary-700" title="A new link replaces the earlier one, but a finished attempt keeps its result and is listed as Replaced. Tick to hide those."><input type="checkbox" checked={hideReplaced} onChange={(e) => setHideReplaced(e.target.checked)} />Hide replaced results</label>
         <button type="button" className="btn-secondary ml-auto" onClick={exportCsv} disabled={!data}>Export CSV</button>
       </div>
 

@@ -104,7 +104,7 @@ router.get('/report', asyncHandler(async (req, res) => {
   const empty = (s) => z.preprocess((v) => (v === '' ? undefined : v), s.optional());
   const q = z.object({
     from: empty(day), to: empty(day), requirement_id: empty(z.string().uuid()), client_id: empty(z.string().uuid()),
-    status: empty(z.enum(service.REPORT_STATUSES)), outcome: empty(z.enum(service.REPORT_OUTCOMES)), submission_stage: empty(z.enum(service.REPORT_SUBMISSION_STAGES)), attempted: empty(z.enum(['yes'])), q: empty(z.string().trim().max(100)),
+    status: empty(z.enum(service.REPORT_STATUSES)), outcome: empty(z.enum(service.REPORT_OUTCOMES)), submission_stage: empty(z.enum(service.REPORT_SUBMISSION_STAGES)), attempted: empty(z.enum(['yes'])), include_replaced: empty(z.enum(['yes', 'no'])), q: empty(z.string().trim().max(100)),
   }).parse(req.query);
   return ok(res, await service.report(q, req.user));
 }));
