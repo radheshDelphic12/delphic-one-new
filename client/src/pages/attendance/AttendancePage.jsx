@@ -10,6 +10,8 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
 import { AttendanceDays, AttendanceHeader } from './AttendanceModern.jsx';
 import AttendanceRegularizationRequests from './AttendanceRegularizationRequests.jsx';
@@ -112,12 +114,14 @@ export default function AttendancePage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
+  const [employeeId, setEmployeeId] = useState(''); // Team attendance: one employee (everyone when empty)
+  const people = useOrgMembershipOptions(isAdmin && tab === 'team', { includeExited: true }); // someone who has left still has days to correct
 
   async function loadAttendance() {
     setLoading(true);
     try {
       const endpoint = tab === 'team' ? '/attendance' : '/attendance/me';
-      const { data } = await apiClient.get(endpoint, { params: { from, to } });
+      const { data } = await apiClient.get(endpoint, { params: { from, to, ...(tab === 'team' ? { limit: 100, ...(employeeId ? { org_membership_id: employeeId } : {}) } : {}) } });
       // My attendance: holidays on my calendar and approved leave show as rows
       // too, on days with no attendance record.
       const recorded = new Set((data.data || []).map((r) => String(attendanceDate(r)).slice(0, 10)));
@@ -134,7 +138,7 @@ export default function AttendancePage() {
 
   useEffect(() => {
     loadAttendance();
-  }, [tab, from, to]);
+  }, [tab, from, to, employeeId]);
 
   // Admin: remove a wrong record at any stage (a finalized month is flagged
   // for recalculation rather than rewritten).
@@ -193,10 +197,15 @@ export default function AttendancePage() {
         </>
       )}
       {tab === 'team' && (
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <label className="block w-72 text-xs font-medium text-tertiary-600">Employee
+            <div className="mt-1"><SearchableSelect value={employeeId} onChange={setEmployeeId} options={people} placeholder="All employees" allowClear /></div>
+          </label>
+          <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setMonthOpen(true)}><History className="h-4 w-4" /> Backfill previous month</button>
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setManualOpen(true)}><CalendarPlus className="h-4 w-4" /> Add past attendance</button>
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setBulkOpen(true)}><Upload className="h-4 w-4" /> Bulk upload</button>
+          </div>
         </div>
       )}
       {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}

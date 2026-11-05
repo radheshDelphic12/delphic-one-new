@@ -153,6 +153,9 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState(null);
   const [adminModal, setAdminModal] = useState(null); // { mode: 'apply' } | { mode: 'edit', ticket }
+  const [picked, setPicked] = useState(() => new Set()); // ticket ids ticked in "Waiting for your approval"
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [queueName, setQueueName] = useState('');
 
   const fail = (err, text) => pushError(apiErrorMessage(err, text), 'Something went wrong');
 
@@ -195,6 +198,32 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const showHistory = (t) => apiClient.get(`/timesheets/overtime-tickets/${t.id}/history`).then(({ data }) => setHistory({ ticket: t, events: data.data.events })).catch((e) => fail(e, 'Failed to load the history'));
   const historyButton = (t) => <button type="button" className="btn-ghost text-xs" onClick={() => showHistory(t)}>History</button>;
   const cancel = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/cancel`), 'Ticket cancelled');
+  // Several tickets at once: one decision each (the same rules and audit as one by one), and what did not go through is listed.
+  const shownQueue = queueName.trim() ? queue.filter((t) => (t.employee || '').toLowerCase().includes(queueName.trim().toLowerCase())) : queue;
+  const pickedTickets = shownQueue.filter((t) => picked.has(t.id));
+  const togglePick = (id) => setPicked((cur) => { const next = new Set(cur); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const allShownPicked = shownQueue.length > 0 && pickedTickets.length === shownQueue.length;
+  const togglePickAll = () => setPicked(allShownPicked ? new Set() : new Set(shownQueue.map((t) => t.id)));
+  async function decideMany(status) {
+    if (!pickedTickets.length) return;
+    let reason;
+    if (status === 'rejected') {
+      reason = window.prompt(`Reject ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}? Give the reason (required, kept on each ticket):`);
+      if (reason === null) return;
+      if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return; }
+    } else if (!window.confirm(`Approve ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy(true);
+    const failed = [];
+    for (const t of pickedTickets) {
+      try { await apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status, ...(reason ? { reason: reason.trim() } : {}) }); } catch (err) { failed.push(`${t.employee} ${t.date}: ${apiErrorMessage(err, 'not decided')}`); }
+    }
+    setBulkBusy(false);
+    setPicked(new Set());
+    const done = pickedTickets.length - failed.length;
+    if (failed.length) pushError(`${done} ${status === 'approved' ? 'approved' : 'rejected'}; ${failed.length} skipped - ${failed.slice(0, 3).join('; ')}${failed.length > 3 ? '; ...' : ''}`, 'Some tickets were skipped');
+    else pushSuccess(`${done} ticket${done === 1 ? '' : 's'} ${status === 'approved' ? 'approved' : 'rejected'}`);
+    load();
+  }
   const adminEdit = (t) => setAdminModal({ mode: 'edit', ticket: t });
   const adminDelete = (t) => {
     const reason = window.prompt(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
@@ -212,7 +241,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decided_by?.name ? `${t.decided_by.name}: ` : ''}{t.decision_reason}</span>}</span> },
   ];
   const mineColumns = [...base.filter((c) => c.key !== 'employee'), { key: 'actions', header: '', render: (t) => <span className="flex gap-1">{t.status === 'pending' && <button type="button" className="btn-ghost text-xs" onClick={() => cancel(t)}>Cancel</button>}{historyButton(t)}</span> }];
-  const queueColumns = [...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
+  const queueColumns = [{ key: 'pick', header: <input type="checkbox" checked={allShownPicked} onChange={togglePickAll} aria-label="Select all waiting tickets" />, render: (t) => <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePick(t.id)} aria-label={`Select ${t.employee} ${t.date}`} /> }, ...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
   const allColumns = [...base, {
     key: 'actions',
     header: '',
@@ -260,7 +289,12 @@ export default function OvertimeTicketsTab({ isAdmin }) {
       {queue.length > 0 && (
         <section className="space-y-3 border-t border-tertiary-100 pt-6">
           <h2 className="font-heading text-sm font-semibold text-tertiary-900">Waiting for your approval <span className="font-normal text-tertiary-500">({queue.length})</span></h2>
-          <DataTable columns={queueColumns} rows={queue} emptyLabel="Nothing waiting" />
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs font-medium text-tertiary-600">Employee<input value={queueName} onChange={(e) => setQueueName(e.target.value)} placeholder="Search by name" className="mt-1 block w-56 rounded-xl border px-3 py-2 text-sm" /></label>
+            <button type="button" className="btn-primary" disabled={bulkBusy || pickedTickets.length === 0} onClick={() => decideMany('approved')}>{bulkBusy ? 'Working…' : `Approve selected (${pickedTickets.length})`}</button>
+            <button type="button" className="btn-secondary" disabled={bulkBusy || pickedTickets.length === 0} onClick={() => decideMany('rejected')}>Reject selected ({pickedTickets.length})</button>
+          </div>
+          <DataTable columns={queueColumns} rows={shownQueue} emptyLabel={queueName.trim() ? 'No waiting ticket matches that name' : 'Nothing waiting'} />
         </section>
       )}
 
