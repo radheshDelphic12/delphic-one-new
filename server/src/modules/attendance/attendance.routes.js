@@ -6,7 +6,9 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./attendance.service');
 const regularization = require('./attendanceRegularization.service');
 const autoAttendance = require('./autoAttendance.service');
-const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, backfillMonthSchema, regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema } = require('./attendance.validation');
+const attendanceDay = require('./attendanceDay.service');
+const leaveService = require('../leave/leave.service');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, backfillMonthSchema, regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -126,6 +128,44 @@ router.post(
       return fail(res, code, message);
     }
     return result.action === 'created' ? created(res, result.record) : ok(res, result.record);
+  })
+);
+
+const DAY_ERRORS = {
+  ...BACKFILL_ERRORS,
+  leave_day: [422, 'This day has approved leave. Set it to Leave and pick the leave type to change which leave it is'],
+  leave_type_required: [422, 'Pick the leave type'],
+  leave_type_not_found: [404, 'Leave type not found'],
+  type_not_applicable: [422, 'That leave type is not applicable - pick another type'],
+  overlaps_existing: [409, 'The employee already has a pending or approved leave covering this day'],
+  no_working_days: [422, 'This day is a weekend or holiday on the employee calendar, so there is no leave to record'],
+  membership_left: [422, 'That employee has left the organization'],
+  not_revocable: [409, 'The existing leave cannot be changed from here'],
+  place_remote_is_home: [422, 'This employee works remotely, so every day is already work from home'],
+  place_too_far: [422, 'Office / home can only be set up to three months ahead'],
+  place_forbidden: [403, 'Only an admin can set office / home'],
+  place_no_attendance: [422, 'Contractors and vendor resources have no attendance'],
+};
+
+// One day edited as two things: attendance (present / half day / absent / leave + which leave) and, separately, office / home.
+router.post(
+  '/day',
+  can('attendance.approve', 'admin'),
+  asyncHandler(async (req, res) => {
+    const body = setDaySchema.parse(req.body);
+    const result = await attendanceDay.setDay(req.user.org_id, req.user, body);
+    if (result.error === 'leave_spans_days') {
+      const from = result.leave.from_date.toISOString().slice(0, 10);
+      const to = result.leave.to_date.toISOString().slice(0, 10);
+      return fail(res, 409, `This leave runs from ${from} to ${to}. Change that leave in Leave (withdraw it and apply again) - the type cannot be changed for one day of it`);
+    }
+    if (result.error === 'timesheet_conflict' || result.error === 'half_day_hours_exceeded') return fail(res, 409, leaveService.conflictMessage(result.detail || result));
+    if (result.error === 'insufficient_balance') return fail(res, 422, `Not enough leave balance - ${result.detail?.needed} day(s) requested, ${Math.max(result.detail?.remaining ?? 0, 0)} remaining`);
+    if (result.error) {
+      const [code, message] = DAY_ERRORS[result.error] || [500, 'Unexpected error'];
+      return fail(res, code, message);
+    }
+    return ok(res, result);
   })
 );
 

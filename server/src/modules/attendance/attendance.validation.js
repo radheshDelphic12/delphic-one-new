@@ -41,6 +41,18 @@ const manualEntrySchema = z.object({
   reason: z.string().trim().min(1).max(500),
 });
 
+// The admin day editor: attendance (did they work / which leave) and, separately, where they worked.
+// leave_type_id: for status 'leave' the leave type; for 'half_day' the leave covering the other half (null = none, omitted = leave as is).
+const setDaySchema = z.object({
+  org_membership_id: z.string().uuid(),
+  date: requiredDate,
+  status: z.enum(['present', 'half_day', 'absent', 'leave', 'holiday']),
+  leave_type_id: z.string().uuid().nullable().optional(),
+  half_day_session: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional(),
+  work_place: z.enum(['office', 'home']).optional(),
+  reason: z.string().trim().min(3).max(500),
+});
+
 // Bulk backfill from an uploaded sheet. Rows are validated one by one in the
 // service so a bad row is reported back instead of rejecting the whole file.
 const importSchema = z.object({
@@ -94,5 +106,5 @@ const regularizationListQuerySchema = z.object({ status: z.enum(['pending', 'app
 
 module.exports = {
   backfillMonthSchema, listQuerySchema, regularizeSchema,
-  deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS,
+  deleteRecordSchema, createShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, STATUS,
   regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema };

@@ -371,7 +371,10 @@ async function register(orgId, user, { year, month, status = 'current', work_mod
       else if (c.kind === 'absent') totals.absent += 1;
       totals.hours += hours;
       const rec = recordBy.get(`${m.id}|${d.date}`);
-      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null };
+      // What the day editor starts from: the leave type (full day / the half), and office or home as the register shows it.
+      const leaveRows = d.leaves || [];
+      const place = homeByDay.has(d.date) || workType === 'remote' || d.attendance_status === 'wfh' ? 'home' : 'office';
+      return { date: d.date, weekday: d.weekday, code: c.code, kind: c.kind, label: c.label || null, day_type: d.day_type, in_employment: inEmployment, hours, projects: d.project_hours || [], record_id: rec?.id || null, recorded_status: rec?.status || null, place, leave_name: leaveRows.find((l) => !l.is_half_day)?.name || null, half_leave_name: leaveRows.find((l) => l.is_half_day)?.name || null };
     });
     totals.hours = Math.round(totals.hours * 100) / 100;
     return {

@@ -336,28 +336,80 @@ export default function AttendanceRegister({ year, month, status, workMode = '',
   );
 }
 
-/** Admin: set one person's attendance for one day (status + reason), or remove the day's record. Both are audit-logged. */
+/**
+ * Admin: edit one person's one day as two separate things.
+ *   1. Attendance - did they work (present / half day), were they absent, on leave (and which leave) or on a holiday.
+ *   2. Where they worked - office or work from home (only a day they worked).
+ * A leave type is a real approved leave (balance and unpaid overflow included). Everything needs a reason and is audit-logged;
+ * a locked month is flagged for review instead of being rewritten.
+ */
+const ATTENDANCE_OPTIONS = [
+  ['present', 'Present (worked the full day)'],
+  ['half_day', 'Half day (worked half)'],
+  ['leave', 'Leave (did not work)'],
+  ['absent', 'Absent'],
+  ['holiday', 'Holiday'],
+];
+const ATTENDANCE_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent', holiday: 'Holiday' };
+
+// What the editor starts from, read off the register day.
+function initialDay(day, leaveTypes) {
+  const typeId = (name) => leaveTypes.find((t) => t.name === name)?.id || '';
+  const recorded = day.recorded_status === 'wfh' ? 'present' : day.recorded_status;
+  let status = 'present';
+  if (day.leave_name) status = 'leave';
+  else if (day.half_leave_name && recorded === 'half_day') status = 'half_day';
+  else if (recorded && ATTENDANCE_LABEL[recorded]) status = recorded;
+  else if (day.kind === 'absent') status = 'absent';
+  else if (day.kind === 'holiday') status = 'holiday';
+  return { status, leaveTypeId: status === 'leave' ? typeId(day.leave_name) : typeId(day.half_leave_name), place: day.place === 'home' ? 'home' : 'office' };
+}
+
 function DayEditor({ editing, onClose, onSaved }) {
   const { pushError } = useAlerts();
-  const [form, setForm] = useState({ status: 'present', reason: '' });
+  const [form, setForm] = useState({ status: 'present', leaveTypeId: '', place: 'office', reason: '' });
+  const [leaveTypes, setLeaveTypes] = useState([]);
   const [busy, setBusy] = useState(false);
   const day = editing?.day;
   const person = editing?.person;
+
   useEffect(() => {
-    if (editing) setForm({ status: day.recorded_status || (day.kind === 'leave' ? 'leave' : 'present'), reason: '' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!editing) return undefined;
+    let current = true;
+    apiClient.get('/leave/types').then((r) => { if (current) setLeaveTypes((r.data.data || []).filter((t) => t.is_applicable !== false)); }).catch(() => { if (current) setLeaveTypes([]); });
+    return () => { current = false; };
   }, [editing]);
+  useEffect(() => {
+    if (editing) setForm({ ...initialDay(day, leaveTypes), reason: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, leaveTypes]);
+
+  const worked = form.status === 'present' || form.status === 'half_day';
+  const needsType = form.status === 'leave';
+  const typeLabel = (t) => `${t.name}${t.paid ? '' : ' (unpaid)'}`;
+  const reasonOk = form.reason.trim().length >= 3;
+  const canSave = reasonOk && (!needsType || Boolean(form.leaveTypeId));
 
   async function save(event) {
     event.preventDefault();
     setBusy(true);
     try {
-      await apiClient.post('/attendance/manual', { org_membership_id: person.org_membership_id, date: day.date, status: form.status, reason: form.reason.trim() });
-      onSaved(`${person.name}: ${day.date} set to ${STATUS_LABEL[form.status] || form.status}`);
+      await apiClient.post('/attendance/day', {
+        org_membership_id: person.org_membership_id,
+        date: day.date,
+        status: form.status,
+        ...(form.status === 'leave' ? { leave_type_id: form.leaveTypeId } : {}),
+        // Half day: the leave covering the other half (none = it simply stays unpaid).
+        ...(form.status === 'half_day' ? { leave_type_id: form.leaveTypeId || null } : {}),
+        ...(worked ? { work_place: form.place } : {}),
+        reason: form.reason.trim(),
+      });
+      const type = leaveTypes.find((t) => t.id === form.leaveTypeId);
+      onSaved(`${person.name}: ${day.date} set to ${ATTENDANCE_LABEL[form.status]}${form.status === 'leave' && type ? ` (${type.name})` : ''}${worked ? `, ${form.place === 'home' ? 'work from home' : 'office'}` : ''}`);
     } catch (err) { pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved'); } finally { setBusy(false); }
   }
   async function remove() {
-    if (!day.record_id || form.reason.trim().length < 3) return;
+    if (!day.record_id || !reasonOk) return;
     setBusy(true);
     try {
       await apiClient.delete(`/attendance/${day.record_id}`, { data: { reason: form.reason.trim() } });
@@ -365,7 +417,6 @@ function DayEditor({ editing, onClose, onSaved }) {
     } catch (err) { pushError(apiErrorMessage(err, 'Could not remove the record'), 'Not removed'); } finally { setBusy(false); }
   }
 
-  const reasonOk = form.reason.trim().length >= 3;
   return (
     <Drawer
       open={Boolean(editing)}
@@ -377,22 +428,48 @@ function DayEditor({ editing, onClose, onSaved }) {
         <>
           {day?.record_id && <button type="button" className="btn-ghost mr-auto text-danger-600" disabled={busy || !reasonOk} onClick={remove} title={reasonOk ? 'Delete the recorded attendance for this day' : 'Give a reason first'}>Remove record</button>}
           <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="submit" form="register-day-editor" className="btn-primary" disabled={busy || !reasonOk}>{busy ? 'Saving…' : 'Save'}</button>
+          <button type="submit" form="register-day-editor" className="btn-primary" disabled={busy || !canSave}>{busy ? 'Saving…' : 'Save'}</button>
         </>
       )}
     >
       {editing && (
-        <form id="register-day-editor" onSubmit={save} className="space-y-3">
+        <form id="register-day-editor" onSubmit={save} className="space-y-4">
           <p className="text-sm text-tertiary-600">Now shown as <b>{day.code || 'blank'}</b>{day.label ? ` (${day.label})` : ''}{day.recorded_status ? ` · recorded as ${STATUS_LABEL[day.recorded_status] || day.recorded_status}` : ' · nothing recorded for this day'}.</p>
-          <label className="block text-xs font-medium text-tertiary-600">Status
-            <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className={inputClass}>
-              {STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
+
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">1. Attendance</legend>
+            <label className="block text-xs font-medium text-tertiary-600">Did they work?
+              <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className={inputClass} aria-label="Attendance">
+                {ATTENDANCE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            {form.status === 'absent' && <p className="text-xs text-tertiary-500">Absent: a working day with no attendance and no leave. It is unpaid. If they were on leave, choose Leave and pick the type.</p>}
+            {(needsType || form.status === 'half_day') && (
+              <label className="block text-xs font-medium text-tertiary-600">{needsType ? 'Which leave?' : 'Leave for the other half (optional)'}
+                <select value={form.leaveTypeId} onChange={(e) => setForm((f) => ({ ...f, leaveTypeId: e.target.value }))} className={inputClass} aria-label="Leave type">
+                  <option value="">{needsType ? 'Choose the leave type' : 'No leave (the other half stays unpaid)'}</option>
+                  {leaveTypes.map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
+                </select>
+              </label>
+            )}
+          </fieldset>
+
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3" disabled={!worked}>
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">2. Where did they work?</legend>
+            <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Work mode">
+              {[['office', 'Office'], ['home', 'Work from home']].map(([value, label]) => (
+                <label key={value} className={`inline-flex items-center gap-1.5 ${worked ? '' : 'opacity-50'}`}>
+                  <input type="radio" name="work-place" value={value} checked={form.place === value} onChange={() => setForm((f) => ({ ...f, place: value }))} /> {label}
+                </label>
+              ))}
+            </div>
+            {!worked && <p className="text-xs text-tertiary-500">Only for a day they worked (present or half day).</p>}
+          </fieldset>
+
           <label className="block text-xs font-medium text-tertiary-600">Reason (kept in the audit log)
             <input value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Marked present after checking with the manager" className={inputClass} maxLength={500} />
           </label>
-          <p className="text-xs text-tertiary-500">Replaces anything already recorded for that day. A day with approved leave can only be set to Leave (change the leave first). If the month is locked, the change is flagged for review instead of altering locked salary.</p>
+          <p className="text-xs text-tertiary-500">Replaces anything already recorded for that day. A day with approved leave can only be changed through Leave (pick the leave type above). If the month is locked, the change is flagged for review instead of altering locked salary.</p>
         </form>
       )}
     </Drawer>
