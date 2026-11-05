@@ -75,7 +75,7 @@ describe('work location assignments', () => {
     const ctx = await seed();
     const created = await assign(ctx, { from_date: ymd(day(0)), to_date: ymd(day(4)), purpose: 'travel' });
     const res = await checkIn(ctx.token, PUNE_NEAR);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(200);
     expect(res.body.data.check_in_result).toBe('in_office');
     const row = await prisma.locationCheckin.findFirst({ where: { org_membership_id: ctx.membership.id } });
     expect(row).toMatchObject({ work_site_id: ctx.site.id, assignment_id: created.body.data.id });

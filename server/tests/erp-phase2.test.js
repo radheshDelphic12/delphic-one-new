@@ -26,9 +26,10 @@ async function seedOrgAdmin() {
   return { org, admin, access_token };
 }
 
+// joined long ago: a new joiner's leave balance is pro-rata from the joining month, which would make these tests depend on today's date
 async function seedOrgEmployee(org, role = 'recruiter') {
   const user = await createUser({ role });
-  const membership = await createOrgMembership(user.id, org.id, { role });
+  const membership = await createOrgMembership(user.id, org.id, { role, joined_at: new Date('2020-01-01T00:00:00Z') });
   const { access_token } = await loginAs(user);
   return { user, membership, access_token };
 }
