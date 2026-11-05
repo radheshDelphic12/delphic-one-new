@@ -369,18 +369,20 @@ function describeProject(a) {
   };
 }
 
-// A signed client contract (active, not completed) whose start date is still ahead: its people are reserved for it.
+// A signed client contract (not completed) whose start date is still ahead: its people are reserved for it.
+// The client's sales stage is not part of this: a project runs by its own contract status and dates, so a client
+// dropped in Sales does not take its people off the project.
 function contractUpcoming(a, date) {
   const d = A.toDate(date);
-  return a.type === 'client' && a.stage === 'active' && a.contract_status !== 'completed'
+  return a.type === 'client' && a.contract_status !== 'completed'
     && Boolean(a.agreement_start_date) && A.toDate(a.agreement_start_date) > d
     && (!a.agreement_end_date || A.toDate(a.agreement_end_date) >= d);
 }
 
-// A client contract that is running on `date` (the thing capacity counts).
+// A client contract that is running on `date` (the thing capacity counts). Same rule: its own status and dates only.
 function contractRunning(a, date) {
   const d = A.toDate(date);
-  return a.type === 'client' && a.stage === 'active' && a.contract_status !== 'completed'
+  return a.type === 'client' && a.contract_status !== 'completed'
     && (!a.agreement_start_date || A.toDate(a.agreement_start_date) <= d)
     && (!a.agreement_end_date || A.toDate(a.agreement_end_date) >= d);
 }

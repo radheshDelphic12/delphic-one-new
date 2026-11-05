@@ -197,6 +197,29 @@ describe('Employees & Projects report', () => {
   });
 });
 
+describe('A client dropped in Sales keeps its project allocations', () => {
+  test('people stay on the project in Employees & Projects and Team capacity after the client is dropped', async () => {
+    const ctx = await seed();
+    const dev = await person(ctx, 'Dev Dropped');
+    const proj = await project(ctx, 'Project Kept', { end: inDays(60) });
+    await api(ctx).assign({ account_id: proj.id, org_membership_id: dev.membership.id });
+    const before = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(before.rows.find((r) => r.name === 'Dev Dropped').project_count).toBe(1);
+
+    // Sales drops the client: only the sales stage changes, the project's contract status and dates do not.
+    await prisma.account.update({ where: { id: ctx.client.id }, data: { stage: 'dropped' } });
+    await prisma.account.update({ where: { id: proj.id }, data: { stage: 'dropped' } });
+    const after = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(after.rows.find((r) => r.name === 'Dev Dropped').projects.map((p) => p.name)).toEqual(['Project Kept']);
+    expect(after.unassigned).toBe(before.unassigned);
+
+    // Finance marking it Completed is what takes the people off.
+    await prisma.account.update({ where: { id: proj.id }, data: { contract_status: 'completed' } });
+    const done = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(done.rows.find((r) => r.name === 'Dev Dropped').project_count).toBe(0);
+  });
+});
+
 describe('Team capacity', () => {
   test('same-team members on one project count once; capacity = members × projects per resource; never below zero', async () => {
     const ctx = await seed();
