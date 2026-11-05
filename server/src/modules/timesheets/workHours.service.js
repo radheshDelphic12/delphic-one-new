@@ -211,7 +211,7 @@ async function daySummaries(orgId, orgMembershipId, from, to) {
     prisma.leaveRequest.findMany({
       // Approved leave drives hours; pending is only shown (no effect on hours or pay).
       where: { org_membership_id: orgMembershipId, status: { in: ['approved', 'pending'] }, from_date: { lte: end }, to_date: { gte: start } },
-      select: { id: true, status: true, from_date: true, to_date: true, is_half_day: true, half_day_session: true, leave_type: { select: { name: true, paid: true } } },
+      select: { id: true, status: true, from_date: true, to_date: true, is_half_day: true, half_day_session: true, leave_type_id: true, leave_type: { select: { name: true, paid: true } } },
     }),
   ]);
   const accountIds = [...new Set(entries.map((e) => e.account_id).filter(Boolean))];
