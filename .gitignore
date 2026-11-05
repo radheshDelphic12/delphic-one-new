@@ -25,3 +25,9 @@ temp_interactive_push.bat
 
 # Git Bash crash dumps
 *.stackdump
+
+# weekly docker builder prune marker (start-delphic.sh)
+.last-builder-prune
+
+# dbviewer test fixtures (tiny dumps made by dbviewer/test/make-fixtures.sh)
+!dbviewer/test/fixtures/*.dump

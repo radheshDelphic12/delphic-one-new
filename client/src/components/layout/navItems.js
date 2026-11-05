@@ -25,6 +25,7 @@ import {
   UserX,
   ClipboardList,
   KanbanSquare,
+  DatabaseBackup,
 } from 'lucide-react';
 
 /**
@@ -71,3 +72,9 @@ export const NAV_ITEMS = [
   { to: '/group-overview', label: 'Group Overview', icon: Network, groupSuperadminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, need: 'basic.settings' },
 ];
+
+/**
+ * Database snapshot viewer (dbviewer/): a separate app served under /dbviewer/ by the host nginx, super admin only.
+ * `external` items are plain links (not router routes) and open in a new tab; AppLayout adds this one for is_superadmin.
+ */
+export const DB_SNAPSHOTS_NAV_ITEM = { to: '/dbviewer/', label: 'Database snapshots', icon: DatabaseBackup, external: true };

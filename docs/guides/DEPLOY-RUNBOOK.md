@@ -102,14 +102,22 @@ WantedBy=timers.target
 sudo systemctl enable --now delphic-backup.timer
 ```
 
-Retention (count-based, not age-based — disk will not grow without bound):
+Retention (tiered by age, with a hard disk cap - `scripts/backup-prune.sh`, called after every dump by `db-backup.sh` and by each deploy):
 
-| Source | Files | Kept |
-|---|---|---|
-| Each `./start-delphic.sh --prod` (every push/deploy) | `backups/predeploy-*.dump` | newest **7** (`BACKUP_KEEP`) |
-| Cron / systemd timer | `backups/auto-*.dump` | newest **7** (`BACKUP_KEEP`) |
+| Files | Kept |
+|---|---|
+| `backups/auto-*.dump` | every dump for the last 6 h, then one per hour up to 48 h, one per day up to 30 days, one per month up to 12 months |
+| `backups/predeploy-*.dump` | 30 days |
+| `backups/viewer/now-*.dump` (snapshot viewer "compare with now") | newest 5 |
 
-Each run writes one new dump, then deletes anything past the 7 newest of that family. Override with `BACKUP_KEEP=N` if you need more. Both scripts also abort when the backups volume has less than `BACKUP_MIN_FREE_GB` (default **2**) free.
+The newest **7** auto and the newest **7** predeploy dumps are never pruned. Caps (env): `BACKUP_MAX_TOTAL_MB` (default **1500**) and `BACKUP_MIN_FREE_GB` (default **3**; both backup scripts also refuse to write a dump below it). When either is breached the oldest dumps go first - hourly, then daily, then predeploy, then monthly - and every deletion is logged as `rotated out ...` (see `/var/log/delphic-backup.log`). Preview what a run would delete with `scripts/backup-prune.sh --dry-run`. Files with other names (`pre-restore-safety-*`, `*.sql`) are never touched. Self-test: `bash scripts/test-backup-prune.sh`.
+
+Database snapshot viewer (`/dbviewer/`, super admin only; [features/DB-SNAPSHOT-VIEWER.md](../features/DB-SNAPSHOT-VIEWER.md)): a separate `dbviewer` container that opens these dumps read-only. One-time steps on the box, in this order:
+
+1. Disk check before enabling the tiered retention: `docker system df` and `sudo du -sh /var/lib/docker /var/log /home/ubuntu /opt/delphic` (22 GB was in use for a database of about 6 MB). Clean old images / build cache only after confirming the running images are kept. Target at least 8 GB free. Each deploy now also prunes build cache older than 7 days, once a week.
+2. `bash scripts/create-dump-reader-role.sh` (read-only `dump_reader` role, password goes to `.env` as `DUMP_READER_PASSWORD`), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d dbviewer`. Not a Prisma migration: it needs a password.
+3. Add the `location /dbviewer/` block from `nginx.conf.example` to the live nginx site, `sudo nginx -t && sudo systemctl reload nginx`.
+4. `docker stats` while running a compare and an XLSX export: stays under 192 MB.
 
 - `./backups/` is git-ignored.
 - **Copy them off the box.** Set `BACKUP_OFFSITE_CMD` (e.g. `BACKUP_OFFSITE_CMD='aws s3 cp "$1" s3://delphic-backups/'`) in the service environment.

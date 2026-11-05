@@ -12,7 +12,7 @@ import { hasNeed, isAdminUser, isPermissionMode } from '../../lib/access.js';
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
-import { NAV_ITEMS } from './navItems.js';
+import { DB_SNAPSHOTS_NAV_ITEM, NAV_ITEMS } from './navItems.js';
 import { useSpeakUpSummary } from '../../pages/speakup/speakUp.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
@@ -187,12 +187,14 @@ export default function AppLayout() {
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
   const navItems = useMemo(
     () => {
-      if (!isGroupSuperadmin || isContractor) return navBase;
+      // The database snapshot viewer is a separate app (/dbviewer/), shown to a super admin in every workspace view.
+      const viewer = user?.is_superadmin && !isContractor ? [DB_SNAPSHOTS_NAV_ITEM] : [];
+      if (!isGroupSuperadmin || isContractor) return [...navBase, ...viewer];
       // In group view the sidebar is the group's, not whichever company happens to be active underneath.
-      if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }];
-      return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview')];
+      if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }, ...viewer];
+      return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview'), ...viewer];
     },
-    [navBase, isGroupSuperadmin, isContractor, isGroupPath]
+    [navBase, isGroupSuperadmin, isContractor, isGroupPath, user?.is_superadmin]
   );
 
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
@@ -401,6 +403,21 @@ export default function AppLayout() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const showInterviewDot = item.to === '/calendar' && interviewUnread > 0;
+          if (item.external) {
+            return (
+              <a
+                key={item.to}
+                href={item.to}
+                target="_blank"
+                rel="noreferrer"
+                title={collapsed ? item.label : undefined}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-tertiary-600 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900 ${collapsed ? 'justify-center px-2' : ''}`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>{item.label}</span>}
+              </a>
+            );
+          }
           return (
             <NavLink
               key={item.to}

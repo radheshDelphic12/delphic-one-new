@@ -142,6 +142,7 @@ const RULES = [
   [/^\/(vendor-commissions|accounting|external-access|wallets)(\/|$)/, { GET: 'finance.view', POST: 'finance.create', DELETE: 'finance.delete', '*': 'finance.update' }],
   [/^\/finance-categories(\/|$)/, mutating('finance.update')],
   [/^\/(trading|contracts|projects)(\/|$)/, { GET: 'business.view', POST: 'business.create', DELETE: 'business.delete', '*': 'business.update' }],
+  [/^\/superadmin\/whoami$/, 'open'], // the route itself is Super Admin only (authorizeSuperadmin); the snapshot viewer calls it
   [/^\/(group-cash|super-dashboard|hiring|group-offices|group-companies)(\/|$)/, 'admin'],
   // Group Travel > client deployments, the door for everyone else (/deployments): a person's own deployments, onsite logs and expenses,
   // the approval steps that name them, and the Finance queue. The service limits each call to what the person is part of (and the

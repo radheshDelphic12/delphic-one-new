@@ -8,11 +8,10 @@ UNIT_NAME="delphic.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
 ENV_FILE="${SCRIPT_DIR}/.env"
 BACKUP_DIR="${SCRIPT_DIR}/backups"
-# Keep this many pre-deploy dumps (one per push). Oldest is deleted so the
-# count never exceeds BACKUP_KEEP — default 7, not unbounded growth.
-BACKUP_KEEP="${BACKUP_KEEP:-7}"
 # Abort the backup/deploy when the backups filesystem has less than this free.
-BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-2}"
+# Retention itself (tiers, size cap) lives in scripts/backup-prune.sh.
+BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-3}"
+export BACKUP_MIN_FREE_GB
 
 if [[ -t 1 ]]; then
   RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; NC=$'\033[0m'
@@ -43,8 +42,9 @@ Options:
 Every --prod run takes a verified `pg_dump -Fc` of the live database into
 ./backups/ BEFORE building/migrating, and aborts the deploy if that backup
 cannot be written or read back, or if the backups volume has less than
-BACKUP_MIN_FREE_GB (default 2) free. Keeps the newest BACKUP_KEEP (default 7)
-predeploy-*.dump files and deletes older ones. Restores are always manual.
+BACKUP_MIN_FREE_GB (default 3) free. Old dumps are then pruned by
+scripts/backup-prune.sh (predeploy-*: 30 days, newest 7 always kept; size cap
+BACKUP_MAX_TOTAL_MB). Restores are always manual.
 
 It then restores that backup into a throwaway Postgres container and runs the
 new server image's `prisma migrate deploy` against the copy. If any migration
@@ -192,12 +192,8 @@ backup_db() {
     success "Verified pre-deploy backup: ${out} (${size} bytes)"
   fi
 
-  # Keep exactly the newest ${BACKUP_KEEP} predeploy dumps (one per push).
-  local old
-  # shellcheck disable=SC2012
-  ls -1t "${BACKUP_DIR}"/predeploy-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
-    rm -f "${old}" && info "Rotated out old backup: $(basename "${old}")"
-  done
+  # Tiered retention (predeploy: 30 days, newest 7 always) plus the size / free-space caps.
+  BACKUP_DIR="${BACKUP_DIR}" bash "${SCRIPT_DIR}/scripts/backup-prune.sh" || warning "backup-prune.sh failed - old backups were not rotated"
 }
 
 # Refuse to write a new dump when the backups filesystem is nearly full.
@@ -284,6 +280,21 @@ wait_for_health() {
   error "API did not become healthy"
   compose_cmd logs --no-color --tail=80 || true
   exit 1
+}
+
+# Build cache grows with every deploy and was part of a 22 GB disk on a ~6 MB database. Once a week, drop
+# cache older than 7 days (never images in use, never volumes). Failure never fails the deploy.
+prune_build_cache() {
+  local marker="${SCRIPT_DIR}/.last-builder-prune"
+  if [[ -f "${marker}" && -z "$(find "${marker}" -mtime +6 2>/dev/null)" ]]; then
+    return 0
+  fi
+  info "Weekly cleanup: docker builder prune (cache older than 7 days)"
+  if docker builder prune -f --filter until=168h >/dev/null 2>&1; then
+    touch "${marker}"
+  else
+    warning "docker builder prune failed - continuing"
+  fi
 }
 
 install_boot_unit() {
@@ -392,9 +403,20 @@ main() {
     compose_cmd down || true
   fi
 
+  # The snapshot viewer writes only ./backups/viewer and runs as that folder's owner.
+  mkdir -p "${BACKUP_DIR}/viewer"
+  DBVIEWER_UID="$(stat -c %u "${BACKUP_DIR}")"
+  DBVIEWER_GID="$(stat -c %g "${BACKUP_DIR}")"
+  export DBVIEWER_UID DBVIEWER_GID
+
   info "Building and starting production stack"
-  compose_cmd up -d --build
+  compose_cmd up -d --build db server client
   wait_for_health
+
+  # A problem with the optional viewer must never fail or roll back a deploy of the app.
+  info "Starting the database snapshot viewer"
+  compose_cmd up -d --build dbviewer || warning "dbviewer did not start - the app is unaffected; see docs/features/DB-SNAPSHOT-VIEWER.md"
+  prune_build_cache
 
   if [[ "${as_service}" -eq 0 && "${no_boot}" -eq 0 ]]; then
     install_boot_unit

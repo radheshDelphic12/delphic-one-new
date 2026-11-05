@@ -99,6 +99,35 @@ services:
         echo "{\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"level\":\"info\",\"msg\":\"ports_map\",\"service\":\"delphic-client\",\"client\":\"http://localhost:$${HOST_CLIENT_PORT:-8081}\",\"api\":\"http://localhost:$${HOST_API_PORT:-4000}\",\"nginx_listen\":80}"
         nginx -g 'daemon off;'
 
+  # Database snapshot viewer (super admin only), separate from the app: reads the dump files in ./backups (read-only) and, for
+  # "compare with now", takes a fresh dump as the read-only dump_reader role. See docs/features/DB-SNAPSHOT-VIEWER.md.
+  dbviewer:
+    build:
+      context: ./dbviewer
+    restart: unless-stopped
+    # Small on purpose: it must never take memory or CPU from the app (the box has ~900 MB free).
+    mem_limit: 192m
+    memswap_limit: 256m
+    cpus: 0.5
+    # Runs as the owner of ./backups (start-delphic.sh sets these) so it can write ./backups/viewer.
+    user: '${DBVIEWER_UID:-1000}:${DBVIEWER_GID:-1000}'
+    environment:
+      PORT: 8090
+      DUMP_DIR: /backups
+      VIEWER_DIR: /viewer-dumps
+      APP_API_URL: http://server:4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-requirement_dashboard}
+      DUMP_READER_USER: dump_reader
+      DUMP_READER_PASSWORD: ${DUMP_READER_PASSWORD:-}
+      BACKUP_MIN_FREE_GB: ${BACKUP_MIN_FREE_GB:-3}
+    volumes:
+      - ./backups:/backups:ro
+      - ./backups/viewer:/viewer-dumps
+    ports:
+      - '${DBVIEWER_PORT:-8090}:8090'
+
 volumes:
   pg_data:
   uploads:
