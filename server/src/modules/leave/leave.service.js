@@ -167,16 +167,27 @@ function summariseUsage(requests, { year, today, countDays = calendarDays }) {
 
 // The employee's entitlement for a type/year: the admin-set figure if there is
 // one, else the legacy accrued value, else the type's annual quota. null = no cap.
-function entitlementFor(leaveType, balance, credit = 0) {
+// A type's annual quota for someone who joined part-way through the year: pro-rata
+// from the joining month to December (quota / 12 per month, to the nearest half day).
+// Joined before the year, or in January, gets the full quota.
+function proRataQuota(quota, joinedAt, year) {
+  if (!quota || !joinedAt) return quota;
+  const joined = new Date(joinedAt);
+  if (joined.getUTCFullYear() !== year) return quota;
+  const months = 12 - joined.getUTCMonth();
+  return Math.round(((quota * months) / 12) * 2) / 2;
+}
+
+function entitlementFor(leaveType, balance, credit = 0, { joinedAt = null, year = null } = {}) {
   let base;
   if (balance && balance.allocated !== null && balance.allocated !== undefined) base = Number(balance.allocated);
   else if (balance && Number(balance.accrued) > 0) base = Number(balance.accrued);
-  else base = leaveType.annual_quota === null || leaveType.annual_quota === undefined ? null : Number(leaveType.annual_quota);
+  else base = leaveType.annual_quota === null || leaveType.annual_quota === undefined ? null : proRataQuota(Number(leaveType.annual_quota), joinedAt, year);
   return base === null ? null : base + credit;
 }
 
-function balanceRow(leaveType, balance, usage, { year, today, credit = 0 }) {
-  const entitlement = entitlementFor(leaveType, balance, credit);
+function balanceRow(leaveType, balance, usage, { year, today, credit = 0, joinedAt = null }) {
+  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt, year });
   // Unpaid leave, a type excluded from the balance, and any type with no quota are uncapped - there is no balance to run out of.
   const unlimited = !leaveType.paid || leaveType.counts_in_balance === false || entitlement === null;
   const allocated = unlimited ? 0 : entitlement;
@@ -222,7 +233,7 @@ async function leaveTakenInRange(orgId, orgMembershipId, from, to) {
 async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) {
   await ensureDefaultTypes(orgId);
   const range = yearRange(year);
-  const [leaveTypes, balances, requests, credits] = await Promise.all([
+  const [leaveTypes, balances, requests, credits, membership] = await Promise.all([
     prisma.leaveType.findMany({ where: { org_id: orgId, is_applicable: true }, orderBy: { name: 'asc' } }),
     prisma.leaveBalance.findMany({ where: { org_membership_id: orgMembershipId, year } }),
     prisma.leaveRequest.findMany({
@@ -235,11 +246,12 @@ async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) 
       },
     }),
     compOffCredits(orgId, [orgMembershipId], year),
+    prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { joined_at: true } }),
   ]);
   const balanceByType = new Map(balances.map((b) => [b.leave_type_id, b]));
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   return leaveTypes.map((leaveType) =>
-    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today, credit: isCompOff(leaveType) ? credits.get(orgMembershipId) || 0 : 0 })
+    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today, joinedAt: membership?.joined_at, credit: isCompOff(leaveType) ? credits.get(orgMembershipId) || 0 : 0 })
   );
 }
 
@@ -259,7 +271,7 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
         ...(department_id ? { department_id } : {}),
         ...(search ? { person: { name: { contains: search, mode: 'insensitive' } } } : {}),
       },
-      select: { id: true, person: { select: { id: true, name: true } }, department: { select: { id: true, name: true } } },
+      select: { id: true, joined_at: true, person: { select: { id: true, name: true } }, department: { select: { id: true, name: true } } },
       orderBy: { person: { name: 'asc' } },
       take: 500,
     }),
@@ -285,7 +297,7 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
     department: m.department?.name || null,
     balances: leaveTypes.map((leaveType) => {
       const key = keyOf(m.id, leaveType.id);
-      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today, credit: isCompOff(leaveType) ? credits.get(m.id) || 0 : 0 });
+      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today, joinedAt: m.joined_at, credit: isCompOff(leaveType) ? credits.get(m.id) || 0 : 0 });
     }),
   }));
 
@@ -374,10 +386,11 @@ async function findOverlap(orgId, orgMembershipId, candidate) {
 async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, excludeRequestId = null) {
   if (leaveType.counts_in_balance === false) return Infinity;
   const range = yearRange(year);
-  const [balance, requests] = await Promise.all([
+  const [balance, membership, requests] = await Promise.all([
     prisma.leaveBalance.findUnique({
       where: { org_membership_id_leave_type_id_year: { org_membership_id: orgMembershipId, leave_type_id: leaveType.id, year } },
     }),
+    prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { joined_at: true } }),
     prisma.leaveRequest.findMany({
       where: {
         org_id: orgId,
@@ -391,7 +404,7 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, exclud
     }),
   ]);
   const credit = isCompOff(leaveType) ? (await compOffCredits(orgId, [orgMembershipId], year)).get(orgMembershipId) || 0 : 0;
-  const entitlement = entitlementFor(leaveType, balance, credit);
+  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt: membership?.joined_at, year });
   if (entitlement === null) return Infinity;
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst(), countDays });
