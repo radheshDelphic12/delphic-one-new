@@ -150,6 +150,9 @@ describe('The lock stages run in order', () => {
   test('a calculation cannot be locked while its timesheets are open (stage 1 first)', async () => {
     const ctx = await seed({ enforce_lock_order: true });
     const emp = await salaried(ctx, 'Eve');
+    // Stage 1 waits on the timesheets of IT people (everyone else is paid from attendance), so Eve is in IT.
+    const it = await prisma.department.create({ data: { name: 'IT', org_id: ctx.org.id } });
+    await prisma.orgMembership.update({ where: { id: emp.membership.id }, data: { department_id: it.id } });
     await prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: new Date('2026-08-12'), hours: 8, status: 'approved', approved_by: ctx.adminUser.id, approved_at: new Date() } });
 
     await markMonthPresent(ctx.org.id, emp.membership.id, 2026, 8);
@@ -159,6 +162,14 @@ describe('The lock stages run in order', () => {
 
     // Lock the employee's August timesheet, then the calculation locks.
     expect((await authed(request(app).post(api('/timesheets/locks/month')), ctx.adminToken).send({ year: 2026, month: 8, org_membership_ids: [emp.membership.id] })).body.data.locked).toBe(1);
+    expect((await calc(ctx, 'lock', { kind: 'salary_employee', scope_key: emp.membership.id })).status).toBe(200);
+  });
+
+  test('open timesheets of people outside IT do not hold back their salary lock', async () => {
+    const ctx = await seed({ enforce_lock_order: true });
+    const emp = await salaried(ctx, 'Sam');
+    await prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: new Date('2026-08-12'), hours: 8, status: 'submitted' } });
+    await markMonthPresent(ctx.org.id, emp.membership.id, 2026, 8);
     expect((await calc(ctx, 'lock', { kind: 'salary_employee', scope_key: emp.membership.id })).status).toBe(200);
   });
 
