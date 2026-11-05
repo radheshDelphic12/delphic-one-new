@@ -251,8 +251,10 @@ describe('monthly performance review', () => {
     const assign = (id) => prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: id, org_membership_id: dev.m.id, created_by: ctx.adminUser.id, start_date: new Date('2020-01-01') } });
     const oldOne = await prisma.account.create({ data: { ...base, project_code: 'P0007', deleted_at: new Date() } }); // deleted earlier, assignment left behind
     const current = await prisma.account.create({ data: { ...base, project_code: 'P0123' } });
+    // A plain client with no project data (no rate, calendar, timesheet or revenue row): dropped or not, it is not a project.
     const notAProject = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Plain client', type: 'client', stage: 'dropped', owner_id: ctx.adminUser.id } });
-    for (const a of [oldOne, current, notAProject]) { await rate(a.id); await assign(a.id); }
+    for (const a of [oldOne, current]) { await rate(a.id); await assign(a.id); }
+    await assign(notAProject.id);
 
     const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&function=it`, ctx.admin);
     const counts = Object.fromEntries(res.body.data.people[0].months[0].metrics.map((m) => [m.key, m.count]));
@@ -260,6 +262,18 @@ describe('monthly performance review', () => {
     const ym = `year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`;
     const det = await get(`/monthly-review/details?org_membership_id=${dev.m.id}&metric=projects_billable&${ym}`, ctx.admin);
     expect(det.body.data.items.map((i) => i.title)).toEqual(['Dish Network (P0123)']);
+  });
+
+  test('an older client row that is also a project still counts after the client was dropped in Sales', async () => {
+    const ctx = await seed();
+    const it = await ctx.dept('IT');
+    const dev = await ctx.person('Ankit IT', it, new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)));
+    const legacy = await prisma.account.create({ data: { org_id: ctx.org.id, name: 'Be Round', project_name: 'By.u,Tsel', project_code: 'P0024', type: 'client', stage: 'dropped', owner_id: ctx.adminUser.id } });
+    await prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: legacy.id, rate_type: 'monthly', rate: 1000, effective_from: new Date('2020-01-01'), created_by: ctx.adminUser.id } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: legacy.id, org_membership_id: dev.m.id, created_by: ctx.adminUser.id, start_date: new Date('2020-01-01') } });
+    const res = await get(`/monthly-review?from_month=${key}&to_month=${key}&function=it`, ctx.admin);
+    const counts = Object.fromEntries(res.body.data.people[0].months[0].metrics.map((m) => [m.key, m.count]));
+    expect(counts).toMatchObject({ projects_active: 1, projects_billable: 1 });
   });
 
   test('a deleted requirement or client is not counted as brought, owned or won', async () => {
