@@ -51,7 +51,7 @@ const CATALOG = [
 
   // ---- Time and Attendance
   { module: 'attendance', category: 'time', label: 'Team attendance', actions: [A('attendance', 'view', 'View', true), A('attendance', 'update', 'Edit and import', true), A('attendance', 'approve', 'Check attendance changes (everyone)')] },
-  { module: 'attendance_dashboard', category: 'time', label: 'Attendance dashboard', actions: [A('attendance_dashboard', 'view', 'View')] },
+  { module: 'attendance_dashboard', category: 'time', label: 'Attendance dashboard', actions: [A('attendance_dashboard', 'view', 'View'), A('attendance_dashboard', 'work_location', 'Set where a direct report works away from the office (project site / travel)')] },
   { module: 'whistleblower', category: 'people', label: 'Speak Up - Confidential Reporting (complaints routed to the team)', actions: [A('whistleblower', 'view', 'See the complaints of non-restricted categories'), A('whistleblower', 'update', 'Reply, change status and assign'), A('whistleblower', 'manage', 'Settings, categories and handlers')] },
   { module: 'location_checkin', category: 'time', label: 'Location check-in report', actions: [A('location_checkin', 'view', 'View the report and office settings')] },
   { module: 'project_calendar', category: 'time', label: 'Project calendar', actions: [A('project_calendar', 'view', 'View'), A('project_calendar', 'update', 'Edit')] },

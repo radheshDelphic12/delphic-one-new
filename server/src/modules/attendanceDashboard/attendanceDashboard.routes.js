@@ -8,7 +8,7 @@ const v = require('./attendanceDashboard.validation');
 const projectCalendar = require('./projectCalendar.service');
 const workLocation = require('./workLocation.service');
 const locationCheckin = require('../locationCheckin/locationCheckin.service');
-const { hasPermission } = require('../../lib/permissions');
+const { hasPermission, canAny } = require('../../lib/permissions');
 const { isMasterWorkspace } = require('../../middleware/requireMasterWorkspace');
 
 const router = express.Router();
@@ -97,11 +97,19 @@ router.get(
     return ok(res, await workLocation.history(req.user.org_id, req.params.membershipId));
   })
 );
+// An admin sets anyone's; a person holding the "work_location" permission (a manager's custom role) sets only their direct reports'.
+async function canSetWorkLocation(req, orgMembershipId) {
+  if (req.user.role === 'admin' || hasPermission(req.user, 'hr_settings.update')) return true;
+  const member = await prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: req.user.org_id }, select: { manager_id: true } });
+  return Boolean(member && member.manager_id && member.manager_id === req.user.org_membership_id);
+}
 router.post(
   '/work-locations',
-  authorize('admin'),
+  canAny(['hr_settings.update', 'attendance_dashboard.work_location'], 'admin'),
   asyncHandler(async (req, res) => {
-    const result = await workLocation.create(req.user.org_id, req.user, v.workLocationSchema.parse(req.body));
+    const body = v.workLocationSchema.parse(req.body);
+    if (!(await canSetWorkLocation(req, body.org_membership_id))) return failFor(res, 'forbidden');
+    const result = await workLocation.create(req.user.org_id, req.user, body);
     if (result.error === 'overlaps') return fail(res, 409, `This person already has a work location from ${result.clash.from_date} to ${result.clash.to_date}`);
     if (result.error) return failFor(res, result.error);
     return created(res, result.assignment);
@@ -109,8 +117,10 @@ router.post(
 );
 router.post(
   '/work-locations/:id/cancel',
-  authorize('admin'),
+  canAny(['hr_settings.update', 'attendance_dashboard.work_location'], 'admin'),
   asyncHandler(async (req, res) => {
+    const row = await prisma.workLocationAssignment.findFirst({ where: { id: req.params.id, org_id: req.user.org_id }, select: { org_membership_id: true } });
+    if (row && !(await canSetWorkLocation(req, row.org_membership_id))) return failFor(res, 'forbidden');
     const result = await workLocation.cancel(req.user.org_id, req.user, req.params.id, v.cancelWorkLocationSchema.parse(req.body));
     if (result.error) return failFor(res, result.error);
     return ok(res, result.assignment);

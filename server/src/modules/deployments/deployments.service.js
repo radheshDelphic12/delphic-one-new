@@ -2,6 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const calc = require('./deployments.calc');
 const { canTrack } = require('../payments/payments.access');
+const workLocation = require('../attendanceDashboard/workLocation.service');
 
 // Group Dashboard > Travel > Deployments: client onsite visits, assignments and long-term resource deployments of any company of the group.
 // A deployment is a record of its own (not a trip): its people, estimated budget, travel arrangements, an approval chain, actual expenses with
@@ -461,6 +462,52 @@ async function start(groupIds, user, id) {
   return get(groupIds, id);
 }
 
+/**
+ * A deployment at the client's office puts its people on a work location: for every active person who works at the client office, a
+ * work site (named after the client; the map point is set later in Location check-in settings) and a dated assignment over the
+ * person's own dates (else the deployment's), so check-in and the attendance register show them as working away. Safe to repeat:
+ * a person who already has an assignment from this deployment is left alone, and a person whose dates clash with another one is
+ * listed as skipped.
+ */
+async function createWorkLocations(groupIds, user, id) {
+  const dep = await load(groupIds, id, { people: true });
+  if (!dep) return { error: 'not_found' };
+  if (!['approved', 'active'].includes(dep.status)) return { error: 'not_open_for_work_locations' };
+  const created = [];
+  const skipped = [];
+  const siteName = [dep.client_name, dep.client_location].filter(Boolean).join(' - ');
+  const sites = new Map();
+  const siteFor = async (orgId) => {
+    if (sites.has(orgId)) return sites.get(orgId);
+    let site = await prisma.workSite.findFirst({ where: { org_id: orgId, name: siteName } });
+    if (!site) site = await prisma.workSite.create({ data: { org_id: orgId, name: siteName, city: dep.client_location || null, client_account_id: dep.client_account_id || null, created_by: user.id } });
+    sites.set(orgId, site);
+    return site;
+  };
+  for (const p of dep.people.filter((x) => x.status === 'active')) {
+    const arrangement = p.arrangement === 'inherit' ? dep.working_arrangement : p.arrangement;
+    if (arrangement !== 'client_office') { skipped.push({ name: p.name, reason: 'Does not work at the client office' }); continue; }
+    const orgId = p.org_id || dep.org_id;
+    const member = p.user_id && orgId ? await prisma.orgMembership.findFirst({ where: { person_id: p.user_id, org_id: orgId, left_at: null }, select: { id: true } }) : null;
+    if (!member) { skipped.push({ name: p.name, reason: 'Not an employee of a company in the system' }); continue; }
+    if (await prisma.workLocationAssignment.findFirst({ where: { deployment_person_id: p.id, cancelled_at: null }, select: { id: true } })) { skipped.push({ name: p.name, reason: 'Already on a work location' }); continue; }
+    const site = await siteFor(orgId);
+    const made = await workLocation.create(orgId, user, {
+      org_membership_id: member.id,
+      from_date: p.start_date || dep.start_date,
+      to_date: p.end_date || dep.actual_end_date || dep.expected_end_date,
+      work_site_id: site.id,
+      purpose: 'project',
+      deployment_person_id: p.id,
+      note: `Deployment ${dep.code}`,
+    });
+    if (made.error) skipped.push({ name: p.name, reason: made.error === 'overlaps' ? `Already has a work location from ${made.clash.from_date} to ${made.clash.to_date}` : 'Could not be saved' });
+    else created.push({ name: p.name, from_date: made.assignment.from_date, to_date: made.assignment.to_date });
+  }
+  await event(prisma, id, 'work_locations', user, null, { created: created.length, skipped: skipped.length });
+  return { created, skipped };
+}
+
 async function close(groupIds, user, id, body) {
   const input = closeSchema.parse(body || {});
   const dep = await load(groupIds, id, { people: true });
@@ -901,7 +948,7 @@ async function options(groupIds) {
 }
 
 module.exports = {
-  ctxOf, KINDS, ARRANGEMENTS, ROLES, settingsOf, updateSettings, options, listFor, get, create, update, remove, submit, start, close, cancel, extend, changeAllocation, updatePerson,
+  createWorkLocations, ctxOf, KINDS, ARRANGEMENTS, ROLES, settingsOf, updateSettings, options, listFor, get, create, update, remove, submit, start, close, cancel, extend, changeAllocation, updatePerson,
   setBudget, addTravel, updateTravel, deleteTravel, submitExpense, verifyExpense, settleExpense, recoverExpense, canReadBill, saveLog, logsOf, addReview,
   decide, pendingFor, mine, managed, financeQueue, dashboard,
 };

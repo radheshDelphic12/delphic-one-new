@@ -58,7 +58,16 @@ function Overview({ dep, call, onEdit, onDelete }) {
   const [newEnd, setNewEnd] = useState('');
   const [reasonBusy, setReasonBusy] = useState(false);
   const [tone, label] = STATUS[dep.status] || ['gray', dep.status];
+  const { pushSuccess, pushError } = useAlerts();
   const act = (path, body, msg) => call(() => apiClient.post(`${BASE}/${dep.id}/${path}`, body || {}), msg);
+  // People who work at the client office go on a work location, so check-in and the attendance register show them away from base.
+  const putOnSite = async () => {
+    const out = await call(() => apiClient.post(`${BASE}/${dep.id}/work-locations`, {}), null);
+    if (!out) return;
+    const skipped = (out.skipped || []).map((x) => `${x.name} (${x.reason})`).join('; ');
+    if (out.created?.length) pushSuccess(`${out.created.length} ${out.created.length === 1 ? 'person' : 'people'} put on the client site${skipped ? `. Skipped: ${skipped}` : ''}`);
+    else pushError(skipped || 'Nobody to put on the client site', 'Nothing added');
+  };
   const stateTag = STATE_EXTRA[dep.state];
   const est = dep.estimate;
   const s = dep.settings;
@@ -73,6 +82,7 @@ function Overview({ dep, call, onEdit, onDelete }) {
           {['draft', 'pending_approval', 'approved', 'active'].includes(dep.status) && <button type="button" className="btn-secondary text-xs" onClick={onEdit}>Edit details</button>}
           {dep.status === 'draft' && <button type="button" className="btn-primary text-xs" onClick={() => act('submit', {}, 'Sent for approval')}>Submit for approval</button>}
           {dep.status === 'draft' && s?.emergency_allowed && <button type="button" className="btn-secondary text-xs text-danger-700" onClick={() => setAsk('emergency')}>Submit as emergency</button>}
+          {['approved', 'active'].includes(dep.status) && dep.working_arrangement !== 'remote' && <button type="button" className="btn-secondary text-xs" title="Check-in and the attendance register will show these people at the client site for their dates" onClick={putOnSite}>Put people on the client site</button>}
           {dep.status === 'approved' && <button type="button" className="btn-primary text-xs" onClick={() => act('start', {}, 'Deployment started')}>Start deployment</button>}
           {dep.status === 'pending_approval' && dep.emergency && <button type="button" className="btn-primary text-xs" onClick={() => act('start', {}, 'Started before approval')}>Start now (emergency)</button>}
           {dep.status === 'active' && <button type="button" className="btn-secondary text-xs" onClick={() => { setNewEnd(dep.expected_end_date); setAsk('extend'); }}>Extend</button>}

@@ -31,6 +31,7 @@ const ERRORS = {
   emergency_reason: [422, 'Give the reason for the emergency'],
   not_approved: [409, 'The deployment must be approved before it starts (an emergency one may start while approval is pending)'],
   not_active: [409, 'The deployment is not running'],
+  not_open_for_work_locations: [409, 'The deployment must be approved or running first'],
   extend_later: [422, 'The new end date must be after the current end date'],
   extension_pending: [409, 'An extension is already waiting for approval'],
   person_not_found: [404, 'That person is not on the deployment'],
@@ -98,6 +99,7 @@ groupRouter.patch('/:id', A(async (req, res) => result(res, await service.update
 groupRouter.delete('/:id', A(async (req, res) => result(res, await service.remove(gids(req), req.user, req.params.id))));
 groupRouter.post('/:id/submit', A(async (req, res) => result(res, await service.submit(gids(req), req.user, req.params.id, req.body))));
 groupRouter.post('/:id/start', A(async (req, res) => result(res, await service.start(gids(req), req.user, req.params.id))));
+groupRouter.post('/:id/work-locations', A(async (req, res) => result(res, await service.createWorkLocations(gids(req), req.user, req.params.id))));
 groupRouter.post('/:id/close', A(async (req, res) => result(res, await service.close(gids(req), req.user, req.params.id, req.body))));
 groupRouter.post('/:id/cancel', A(async (req, res) => result(res, await service.cancel(gids(req), req.user, req.params.id, req.body))));
 groupRouter.post('/:id/extend', A(async (req, res) => result(res, await service.extend(gids(req), req.user, req.params.id, req.body))));

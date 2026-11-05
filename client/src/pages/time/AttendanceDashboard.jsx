@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, CalendarCheck, ChevronLeft, ChevronRight, Grid3x3, Home, User } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
-import { adminFor } from '../../lib/access.js';
+import { adminFor, allowed } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import AttendanceRegister from './AttendanceRegister.jsx';
@@ -456,7 +456,7 @@ export default function AttendanceDashboard() {
               <LeaveBalance rows={data.leave_balances} />
             </div>
             {isAdmin && <OfficeChanger member={data.member} onSaved={refresh} />}
-            <WorkingAway member={data.member} canEdit={isAdmin} onSaved={refresh} />
+            <WorkingAway member={data.member} canEdit={isAdmin || allowed(user, 'attendance_dashboard.work_location', false)} onSaved={refresh} />
           </aside>
         </div>
       )}
