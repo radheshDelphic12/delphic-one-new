@@ -502,11 +502,14 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
 }
 
 async function listClientInvoices(orgId, { client_account_id, status, period_month, period_year } = {}) {
-  const rows = await prisma.clientInvoice.findMany({
-    where: { org_id: orgId, ...(client_account_id ? { client_account_id } : {}), ...(status ? { status } : {}), ...(period_month ? { period_month } : {}), ...(period_year ? { period_year } : {}) },
+  // A combined invoice is stored on one contract but covers several: filtering by a contract also finds the combined invoices that include it.
+  const own = client_account_id ? { OR: [{ client_account_id }, { line_items: { path: ['consolidated'], equals: true } }] } : {};
+  let rows = await prisma.clientInvoice.findMany({
+    where: { org_id: orgId, ...own, ...(status ? { status } : {}), ...(period_month ? { period_month } : {}), ...(period_year ? { period_year } : {}) },
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { created_at: 'desc' }],
     include: { client_account: CLIENT_INVOICE_ACCOUNT },
   });
+  if (client_account_id) rows = rows.filter((r) => r.client_account_id === client_account_id || (r.line_items?.consolidated && (r.line_items.items || []).some((i) => i.account_id === client_account_id)));
   const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', rows.map((r) => r.id));
   return rows.map((r) => invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id)));
 }

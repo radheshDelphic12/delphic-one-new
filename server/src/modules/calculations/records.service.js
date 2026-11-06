@@ -200,7 +200,7 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
   const byCalc = new Map(versions.map((v) => [v.calculation_id, v]));
   const billingCalcs = calcs.filter((c) => c.kind === 'billing');
   const vendorCalcs = calcs.filter((c) => c.kind === 'vendor_bill');
-  const [clientInvoices, vendorInvoices, names] = await Promise.all([
+  const [clientInvoices, vendorInvoices, names, combinedInvoices] = await Promise.all([
     billingCalcs.length
       ? prisma.clientInvoice.findMany({ where: { org_id: orgId, OR: billingCalcs.map((c) => ({ client_account_id: c.scope_key, period_month: c.period_month, period_year: c.period_year })) }, select: { id: true, client_account_id: true, period_month: true, period_year: true, invoice_number: true, status: true, amount: true, currency: true } })
       : [],
@@ -208,12 +208,15 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
       ? prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, OR: vendorCalcs.map((c) => ({ vendor_account_id: c.scope_key, period_month: c.period_month, period_year: c.period_year })) }, select: { id: true, vendor_account_id: true, period_month: true, period_year: true, invoice_number: true, amount: true, currency: true, details: true } })
       : [],
     userNames(calcs.map((c) => c.locked_by)),
+    billingCalcs.length ? require('./invoiceStatus').consolidatedInvoices(orgId, billingCalcs.map((c) => ({ period_month: c.period_month, period_year: c.period_year }))) : [],
   ]);
   return calcs.filter((c) => byCalc.has(c.id)).map((c) => {
     const v = byCalc.get(c.id);
     const summary = summarize(c.kind, v.snapshot, Number(v.amount), fx);
     const sameMonth = (r) => r.period_month === c.period_month && r.period_year === c.period_year;
-    const invoice = c.kind === 'billing' ? clientInvoices.find((i) => i.client_account_id === c.scope_key && sameMonth(i)) || null : null;
+    // a combined invoice covers several contracts: each of them points at it
+    const combined = c.kind === 'billing' ? combinedInvoices.find((i) => sameMonth(i) && (i.line_items.items || []).some((it) => it.account_id === c.scope_key)) : null;
+    const invoice = c.kind === 'billing' ? clientInvoices.find((i) => i.client_account_id === c.scope_key && sameMonth(i)) || combined || null : null;
     return {
       id: c.id,
       kind: c.kind,
@@ -230,7 +233,7 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
       currency: summary.currency,
       amount_inr: summary.amount_inr,
       summary,
-      invoice: invoice ? { ...invoice, amount: Number(invoice.amount) } : null,
+      invoice: invoice ? { ...invoice, line_items: undefined, amount: Number(invoice.amount) } : null,
       vendor_invoices: c.kind === 'vendor_bill' ? vendorInvoices.filter((i) => i.vendor_account_id === c.scope_key && sameMonth(i)).map((i) => ({ ...i, amount: Number(i.amount) })) : [],
     };
   });

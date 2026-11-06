@@ -335,6 +335,20 @@ describe('Phase 5 — client invoices', () => {
     expect(res.body.data.line_items.consolidated).toBe(true);
     expect(res.body.data.line_items.items).toHaveLength(2);
 
+    // every contract the combined invoice covers shows it as its invoice (not only the one it is stored on), with its own part of the amount
+    const states = await require('../src/modules/calculations/invoiceStatus').load(org.id, [first.id, second.id], [{ period_month: 9, period_year: 2026 }]);
+    for (const [acc, part] of [[first, 6000], [second, 2000]]) {
+      const s = states.get(`${acc.id}|2026-9`);
+      expect(s).toMatchObject({ generated: true, number: res.body.data.invoice_number, consolidated: true });
+      expect(s.amount).toBe(part);
+    }
+
+    // the invoice list filtered by either contract finds the combined invoice
+    for (const acc of [first, second]) {
+      const list = await authed(request(app).get(`/api/v1/billing/invoices?client_account_id=${acc.id}&period_month=9&period_year=2026`), adminToken);
+      expect(list.body.data.map((i) => i.id)).toEqual([res.body.data.id]);
+    }
+
     // a contract already on a combined invoice cannot be invoiced again on its own or in another combined one
     const again = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({ client_account_id: second.id, period_month: 9, period_year: 2026 });
     expect(again.status).toBe(409);
