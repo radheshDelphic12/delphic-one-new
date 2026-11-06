@@ -11,6 +11,8 @@
 //            present, present + OT, paid leave (PL), non-paid leave (NPL), comp off, full day (the
 //            billable day's hours), first half (FH), second half (SH), half day. OT is added
 //            separately (approved OT hours x rate / benchmark hours x multiplier).
+//            Billing follows the LOGGED hours: a day is billed only when approved hours were logged on it
+//            (attendance alone does not bill), and leave (paid, unpaid, comp off) bills nothing by default.
 //
 // Client billing leave rules are their own configuration (Account.billing_leave_rules) and never read
 // or change the employee's salary leave rules.
@@ -18,14 +20,15 @@
 const prisma = require('../../../config/db');
 const { ymd } = require('../period');
 
-// Fraction of a working day's rate billed per status. Overridable per project.
+// Fraction of a working day's rate billed per status. Overridable per project. Leave is not billed (the client pays for logged
+// hours); a project whose contract bills paid leave sets pl / comp_off in its billing status rules.
 const DEFAULT_RULES = {
   present: 1,
   full_day: 1,
   half_day: 0.5,
-  pl: 1,
+  pl: 0,
   npl: 0,
-  comp_off: 1,
+  comp_off: 0,
   first_half: 0.5,
   second_half: 0.5,
   absent: 0,
@@ -104,6 +107,13 @@ function statusFor({ membershipId, date, data, approvedHours, overtimeHours, day
   return approvedHours >= dayHours ? 'full_day' : 'present';
 }
 
-const fractionOf = (rules, status) => (status === 'present_ot' ? rules.present : rules[status] ?? 0);
+// The fraction of the day's rate a status bills. Leave statuses follow the project's rules (0 unless it sets otherwise); every other
+// status bills only when approved hours were logged that day - attendance without logged hours is not billed.
+const LEAVE_STATUSES = ['pl', 'npl', 'comp_off'];
+function fractionOf(rules, status, approvedHours = 0) {
+  if (LEAVE_STATUSES.includes(status)) return rules[status] ?? 0;
+  if (!(approvedHours > 0)) return 0;
+  return status === 'present_ot' ? rules.present : rules[status] ?? 0;
+}
 
 module.exports = { DEFAULT_RULES, STATUS_LABELS, rulesFor, resourceRateOn, load, statusFor, fractionOf };

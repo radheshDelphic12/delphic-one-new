@@ -97,7 +97,7 @@ describe('Billing per resource - monthly for one, hourly for another, in the sam
     expect((await authed(request(app).delete(api(`/billing/resource-rates/${rates[0].id}`)), ctx.adminToken).send({ reason: 'Wrong rate' })).status).toBe(200);
   });
 
-  test('monthly billing follows the client billing status: present, PL, NPL, comp off, first half, half day; the rules are editable', async () => {
+  test('monthly billing follows the logged hours: a day bills only when hours were logged, leave (PL, NPL, comp off) bills nothing by default, the rules are editable', async () => {
     const ctx = await seed();
     const project = await addProject(ctx, 'Statuses Co');
     const a = await employee(ctx, 'Dev A');
@@ -105,7 +105,9 @@ describe('Billing per resource - monthly for one, hourly for another, in the sam
     const days = weekdays(AUG);
     const m = a.membership.id;
     const attend = (date, status) => prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: m, date: new Date(date), status, source: 'manual' } });
-    for (const d of days.slice(0, 10)) await attend(d, 'present'); // 10 present
+    // billing follows the LOGGED hours: attendance alone bills nothing, so every worked day also carries approved hours (under a full day, so the status stays "present")
+    const logHours = (date, hours) => prisma.timesheetEntry.create({ data: { org_id: ctx.org.id, org_membership_id: m, account_id: project.id, date: new Date(date), hours, billable: true, status: 'approved' } });
+    for (const d of days.slice(0, 10)) { await attend(d, 'present'); await logHours(d, 6); } // 10 present, with hours
     const type = async (name, paid) => prisma.leaveType.create({ data: { org_id: ctx.org.id, name, paid, annual_quota: 20 } });
     const pl = await type('Casual Leave', true);
     const npl = await type('Unpaid Leave', false);
@@ -117,21 +119,25 @@ describe('Billing per resource - monthly for one, hourly for another, in the sam
     await leave(npl.id, days[13]); // 2 NPL
     await leave(co.id, days[14]); // comp off
     await leave(pl.id, days[15], { is_half_day: true, half_day_session: 'FIRST_HALF' }); // first half
+    await logHours(days[15], 4); // the worked half of the first-half-leave day
     await attend(days[16], 'half_day'); // half day
-    // days[17..20]: no attendance, no leave -> absent
+    await logHours(days[16], 4);
+    await attend(days[17], 'present'); // present with nothing logged: not billed
+    // days[18..20]: no attendance, no leave -> absent
 
-    // Present 10 + PL 2 + comp off 1 + FH 0.5 + half day 0.5 = 14 days x 5000.
+    // Logged hours only: 10 present days + FH 0.5 + half day 0.5 = 11 days x 5000. PL, NPL, comp off and a day with no logged hours bill nothing.
     let row = (await billing(ctx)).body.data.projects.find((p) => p.project.id === project.id);
     let resource = row.resources.find((r) => r.name === 'Dev A');
-    expect(resource.amount).toBe(70000);
-    expect(resource.status_days).toMatchObject({ present: 10, pl: 2, npl: 2, comp_off: 1, first_half: 1, half_day: 1, absent: 4 });
+    expect(resource.amount).toBe(55000);
+    // 11 present days by attendance, but the one with nothing logged bills 0 (the amount above is 11 days of work, 10 of them full)
+    expect(resource.status_days).toMatchObject({ present: 11, pl: 2, npl: 2, comp_off: 1, first_half: 1, half_day: 1, absent: 3 });
 
-    // The client's rules are their own configuration: paid leave billed at half.
+    // The client's rules are their own configuration: a contract that bills paid leave at half can say so.
     const rules = await authed(request(app).put(api(`/billing/projects/${project.id}/billing-rules`)), ctx.adminToken).send({ rules: { pl: 0.5 }, reason: 'Contract says PL is half billable' });
     expect(rules.status).toBe(200);
-    expect(rules.body.data.rules).toMatchObject({ pl: 0.5, npl: 0 });
+    expect(rules.body.data.rules).toMatchObject({ pl: 0.5, npl: 0, comp_off: 0 });
     row = (await billing(ctx)).body.data.projects.find((p) => p.project.id === project.id);
-    expect(row.resources.find((r) => r.name === 'Dev A').amount).toBe(65000); // 13 days
+    expect(row.resources.find((r) => r.name === 'Dev A').amount).toBe(60000); // 12 days: 2 PL at half adds one day
     expect(await prisma.auditLog.count({ where: { action: 'billing_leave_rules_set' } })).toBe(1);
   });
 });

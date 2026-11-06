@@ -385,7 +385,7 @@ async function computeProjectMonth(orgId, accountOrId, { period_month, period_ye
         } else {
           // Monthly: the resource's rate / working days x the fraction its client billing status earns.
           const status = isWorkingDay ? resourceBilling.statusFor({ membershipId: r.org_membership_id, date, data: rbData, approvedHours: r.regular_hours, overtimeHours: r.overtime_hours, dayHours }) : null;
-          const fraction = status ? resourceBilling.fractionOf(rbRules, status) : 0;
+          const fraction = status ? resourceBilling.fractionOf(rbRules, status, r.regular_hours) : 0;
           r.billing_status = status;
           r.fraction = fraction;
           r.base_amount_exact = isWorkingDay && cal.working_days > 0 ? (rateNum / cal.working_days) * fraction : 0;

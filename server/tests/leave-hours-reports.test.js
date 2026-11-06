@@ -123,6 +123,7 @@ describe('paid-leave billing report', () => {
     const a = await ctx.person('Esha');
     const b = await ctx.person('Farid');
     const project = await addProject(ctx, 'Epsilon', { rate: 22000 });
+    await prisma.account.update({ where: { id: project.id }, data: { client_billing_basis: 'contract' } }); // billing follows logged hours by default; this report is about the full-retainer contract
     await assign(ctx, project.id, a.membership.id);
     await assign(ctx, project.id, b.membership.id);
     await leave(ctx, a.membership.id, '2026-10-06'); // only Esha: counted, not everyone
@@ -144,6 +145,7 @@ describe('paid-leave billing report', () => {
     await assign(ctx, project.id, other.membership.id);
     await prisma.resourceBillingRate.create({ data: { org_id: ctx.org.id, account_id: project.id, org_membership_id: e.membership.id, rate_type: 'monthly', rate: 22000, effective_from: d('2026-01-01'), created_by: ctx.adminUser.id } });
     await leave(ctx, e.membership.id, '2026-10-06', '2026-10-07');
+    await prisma.account.update({ where: { id: project.id }, data: { billing_leave_rules: { pl: 1 } } }); // paid leave is 0 by default; this project's contract bills it
 
     const rows = await report(prisma, { from: '2026-10', to: '2026-10', orgId: ctx.org.id });
     expect(rows[0].resource_leave_days).toBe(2);
