@@ -262,8 +262,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
               </span>
             </label>
             <label className="block text-xs font-medium text-tertiary-600">
-              Face resource
-              <input value={form.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource facing the client" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              Resource
+              <input value={form.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource the invoice is billed for" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
               <span className="mt-1 block font-normal text-tertiary-400">Optional text. Printed on this project&apos;s client invoice with the other details.</span>
             </label>
             <div className="block text-xs font-medium text-tertiary-600">

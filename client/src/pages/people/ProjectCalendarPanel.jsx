@@ -93,8 +93,8 @@ export function AddProjectModal({ open, onClose, onCreated }) {
           <input required autoFocus value={fields.name} onChange={(e) => set('name', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
         <label className="block text-xs font-medium text-tertiary-600">
-          Face resource
-          <input value={fields.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource facing the client (optional)" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          Resource
+          <input value={fields.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource the invoice is billed for (optional)" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           <span className="mt-1 block font-normal text-tertiary-500">Printed on this project&apos;s client invoices.</span>
         </label>
         <div className="block text-xs font-medium text-tertiary-600">

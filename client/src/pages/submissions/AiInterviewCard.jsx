@@ -121,10 +121,12 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   // A blob request returns its error body as a Blob too, so read the server's message out of it.
   async function recordingError(err, fallback) {
     const body = err?.response?.data;
+    // when the server gave no message (a proxy error page, a dropped connection) say which: it is the clue to what failed
+    const why = err?.response?.status ? `HTTP ${err.response.status}` : (err?.code || 'no response from the server');
     if (body instanceof Blob) {
-      try { return JSON.parse(await body.text())?.message || fallback; } catch { return fallback; }
+      try { return JSON.parse(await body.text())?.message || `${fallback} (${why})`; } catch { return `${fallback} (${why})`; }
     }
-    return apiErrorMessage(err, fallback);
+    return apiErrorMessage(err, `${fallback} (${why})`);
   }
 
   async function loadVideo(part = 0) {
