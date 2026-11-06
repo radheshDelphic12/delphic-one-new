@@ -1,3 +1,5 @@
+jest.setTimeout(120000); // the shared setup (four orgs, two logged-in users) can pass 20 s on a loaded CI runner
+
 const { app, prisma, request, cleanDatabase, createUser, createOrg, createOrgMembership, loginAs, authed } = require('./helpers');
 const calc = require('../src/modules/superDashboard/groupTasks.calc');
 
