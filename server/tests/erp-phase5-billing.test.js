@@ -282,6 +282,71 @@ describe('Phase 5 — client invoices', () => {
     expect(again.body.data).toMatchObject({ id: invoice.body.data.id, invoice_number: 'INV-2026-001', status: 'draft' });
   });
 
+  test('bill-to GST number and billing address are kept on the invoice, offered again on the preview, and can be saved to the account', async () => {
+    const { org, admin, access_token: adminToken } = await seedOrgAdmin();
+    const { membership } = await seedOrgEmployee(org);
+    const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    await setupRevenue(adminToken, org, membership, account);
+
+    const invoice = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({
+      client_account_id: account.id,
+      period_month: 9,
+      period_year: 2026,
+      invoice_date: '2026-10-05',
+      bill_to: { gstin: '27abcde1234f1z5', address: '12 MG Road, Pune' },
+      save_to_account: true,
+    });
+    expect(invoice.status).toBe(201);
+    expect(invoice.body.data.invoice_date).toBe('2026-10-05');
+    expect(invoice.body.data.line_items.bill_to).toEqual({ gstin: '27ABCDE1234F1Z5', address: '12 MG Road, Pune' });
+
+    const saved = await prisma.account.findUnique({ where: { id: account.id }, select: { gst_or_tax_id: true, billing_address: true } });
+    expect(saved).toEqual({ gst_or_tax_id: '27ABCDE1234F1Z5', billing_address: '12 MG Road, Pune' });
+
+    const preview = await authed(request(app).get('/api/v1/billing/invoices/preview').query({ account_id: account.id, period_month: 9, period_year: 2026 }), adminToken);
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.bill_to).toMatchObject({ gstin: '27ABCDE1234F1Z5', address: '12 MG Road, Pune' });
+
+    // an edit without save_to_account changes the invoice only, not the account
+    const edited = await authed(request(app).patch(`/api/v1/billing/invoices/${invoice.body.data.id}`), adminToken).send({ bill_to: { gstin: '29ABCDE1234F1Z5', address: 'Bengaluru office' } });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.line_items.bill_to.gstin).toBe('29ABCDE1234F1Z5');
+    const after = await prisma.account.findUnique({ where: { id: account.id }, select: { gst_or_tax_id: true } });
+    expect(after.gst_or_tax_id).toBe('27ABCDE1234F1Z5');
+  });
+
+  test('one invoice for several contracts of the same customer: one line each, one total; contracts of other customers are refused', async () => {
+    const { org, admin, access_token: adminToken } = await seedOrgAdmin();
+    const { membership } = await seedOrgEmployee(org);
+    const { account: first } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    const { account: second } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    const { account: other } = await seedAccountAndRequirement(org.id, admin.id, admin.id);
+    // the second contract belongs to the first account as its customer
+    await prisma.account.update({ where: { id: second.id }, data: { client_account_id: first.id } });
+    await setupRevenue(adminToken, org, membership, first, 6, 1000);
+    await setupRevenue(adminToken, org, membership, second, 4, 500);
+
+    const mixed = await authed(request(app).post('/api/v1/billing/invoices/consolidated'), adminToken).send({ account_ids: [first.id, other.id], period_month: 9, period_year: 2026 });
+    expect(mixed.status).toBe(422);
+
+    const res = await authed(request(app).post('/api/v1/billing/invoices/consolidated'), adminToken).send({ account_ids: [first.id, second.id], period_month: 9, period_year: 2026, invoice_date: '2026-10-01' });
+    expect(res.status).toBe(201);
+    expect(Number(res.body.data.amount)).toBe(8000);
+    expect(res.body.data.line_items.consolidated).toBe(true);
+    expect(res.body.data.line_items.items).toHaveLength(2);
+
+    // a contract already on a combined invoice cannot be invoiced again on its own or in another combined one
+    const again = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({ client_account_id: second.id, period_month: 9, period_year: 2026 });
+    expect(again.status).toBe(409);
+    const twice = await authed(request(app).post('/api/v1/billing/invoices/consolidated'), adminToken).send({ account_ids: [first.id, second.id], period_month: 9, period_year: 2026 });
+    expect(twice.status).toBe(409);
+
+    // one PDF for several invoices
+    const pdf = await authed(request(app).post('/api/v1/billing/invoices/pdf'), adminToken).send({ ids: [res.body.data.id] }).buffer(true).parse((r, cb) => { const c = []; r.on('data', (d) => c.push(d)); r.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(pdf.status).toBe(200);
+    expect(pdf.body.slice(0, 4).toString()).toBe('%PDF');
+  });
+
   test('generating an invoice with no computed revenue is rejected', async () => {
     const { org, admin, access_token: adminToken } = await seedOrgAdmin();
     const { account } = await seedAccountAndRequirement(org.id, admin.id, admin.id);

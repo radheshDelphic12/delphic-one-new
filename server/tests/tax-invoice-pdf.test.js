@@ -95,6 +95,17 @@ describe('client and vendor invoices', () => {
     expect((await clientInvoicePdf('org1', client)).slice(0, 4).toString()).toBe('%PDF');
   });
 
+  test('the project face resource is printed with the project details; absent when not set', async () => {
+    const withFace = await clientInvoiceModel('org1', { ...client, project: { ...client.project, face_resource: 'Asha Rao' } });
+    expect(withFace.lines[0].details).toContain('Face resource: Asha Rao');
+    expect(withFace.lines[0].details.indexOf('Face resource: Asha Rao')).toBe(1);
+    // older invoices stored no snapshot of it: the project as it is now supplies it
+    const live = await clientInvoiceModel('org1', { ...client, client_account: { client_account_id: 'c1', face_resource: 'Ravi K' } });
+    expect(live.lines[0].details).toContain('Face resource: Ravi K');
+    const none = await clientInvoiceModel('org1', client);
+    expect(none.lines[0].details.some((d) => d.startsWith('Face resource'))).toBe(false);
+  });
+
   test('overtime is its own row and an unexplained difference is shown as an adjustment, so the rows always add up', async () => {
     const m = await clientInvoiceModel('org1', { ...client, status: 'sent', amount: 105000, total_amount: 100000, details: { ...client.details, base_amount: 100000, overtime_billed: true, overtime_hours: 5, overtime_multiplier: 1.5, overtime_amount: 5000, charges: [] } });
     expect(m.lines.map((l) => l.description)).toEqual(['Manpower Services', 'Overtime']);
@@ -122,5 +133,34 @@ describe('client and vendor invoices', () => {
     expect(models[0].taxes.every((x) => Number(x.amount) === 0)).toBe(true);
     const withTds = await vendorInvoiceModels('org1', [{ ...row('INR', 10000), tds_amount: 1000, adjustment_amount: -200, adjustment_note: 'Late fee' }]);
     expect(withTds[0]).toMatchObject({ subtotal: '10000.00', total: '8800.00', taxes: [{ label: 'TDS', amount: '-1000.00' }, { label: 'Adjustment (Late fee)', amount: '-200.00' }] });
+    const face = await vendorInvoiceModels('org1', [{ ...row('INR', 10000), project: { name: 'Website', code: 'WEB', client_name: 'Giglabz', face_resource: 'Asha Rao' } }]);
+    expect(face[0].lines[0].details).toContain('Face resource: Asha Rao');
+    expect(models[0].lines[0].details.some((d) => d.startsWith('Face resource'))).toBe(false);
   });
 });
+
+describe('default signature and several invoices in one PDF', () => {
+  // a 1x1 PNG
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const model = (number, seller = {}) => ({
+    title: 'Invoice', currency: 'INR', seller: { name: 'Delphic', ...seller }, buyer: { name: 'Giglabz' }, meta: { number, date: '13-Aug-24' },
+    lines: [{ description: 'Services', details: [], qty: '1', unit: '', rate: '100.00', amount: '100.00' }], taxes: [], subtotal: '100.00', total: '100.00',
+    bank: { holder: 'Delphic', lines: [] }, showHsn: false, showTax: false, tax_summary: null,
+  });
+  const pages = (buf) => (buf.toString('latin1').match(/\/Type \/Page/g) || []).length;
+
+  test('a signature image is printed when the entity has one, and an unreadable one is ignored', async () => {
+    const plain = await taxInvoicePdf(model('A-1'));
+    const signed = await taxInvoicePdf(model('A-1', { signature_image: PNG, signatory_name: 'A. Gulati' }));
+    expect(signed.length).toBeGreaterThan(plain.length);
+    const broken = await taxInvoicePdf(model('A-1', { signature_image: 'data:image/png;base64,AAAA' }));
+    expect(broken.slice(0, 4).toString()).toBe('%PDF');
+  });
+
+  test('several invoices make one PDF, each with its own pages', async () => {
+    const one = pages(await taxInvoicePdf(model('A-1')));
+    const three = pages(await taxInvoicePdf([model('A-1'), model('A-2'), model('A-3')]));
+    expect(three).toBe(one * 3);
+  });
+});
+

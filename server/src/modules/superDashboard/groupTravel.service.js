@@ -35,7 +35,7 @@ const listQuerySchema = z.object({
 });
 const newMeetingSchema = z.object({
   org_id: uuidOrNull, // the company the client belongs to (optional: the client alone identifies it)
-  account_id: z.string().uuid(),
+  account_id: z.string().uuid().nullish(), // optional: a client or vendor (any status), or none
   title: z.string().trim().min(1).max(200),
   scheduled_at: z.string().min(8),
   duration_minutes: z.coerce.number().int().min(5).max(1440).default(60),
@@ -81,7 +81,7 @@ async function resolveMeetings(keys, orgIds) {
     acct.length ? prisma.account.findMany({ where: { id: { in: acct }, ...scope }, select: { id: true, org_id: true, name: true, meeting_date: true, meeting_mode: true, meeting_location: true, stage: true } }) : [],
   ]);
   const out = new Map();
-  for (const m of fu) out.set(`cm-${m.id}`, { key: `cm-${m.id}`, org_id: m.org_id || null, title: m.title, account_name: m.account?.name || null, scheduled_at: m.scheduled_at, mode: m.mode, location: m.location, status: m.status });
+  for (const m of fu) out.set(`cm-${m.id}`, { key: `cm-${m.id}`, org_id: m.org_id || null, title: m.title, account_id: m.account_id || null, account_name: m.account?.name || null, scheduled_at: m.scheduled_at, duration_minutes: m.duration_minutes, mode: m.mode, location: m.location, notes: m.notes || null, status: m.status, editable: true });
   for (const a of ac) out.set(`meeting-${a.id}`, { key: `meeting-${a.id}`, org_id: a.org_id || null, title: 'Client meeting', account_name: a.name, scheduled_at: a.meeting_date, mode: a.meeting_mode, location: a.meeting_location, status: a.stage === 'dropped' ? 'cancelled' : 'scheduled' });
   return out;
 }
@@ -155,8 +155,8 @@ async function options(groupIds) {
       select: { org_id: true, person: { select: { id: true, name: true, active: true } } },
     }),
     prisma.account.findMany({
-      where: { org_id: { in: orgs.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null },
-      select: { id: true, name: true, org_id: true },
+      where: { org_id: { in: orgs.map((o) => o.id) }, type: { in: ['client', 'vendor'] }, is_project: false, deleted_at: null },
+      select: { id: true, name: true, org_id: true, type: true, stage: true },
       orderBy: { name: 'asc' },
     }),
     // Meetings of EVERY company of the group (not just the Delphic Global calendar), each tagged with its company.
@@ -165,7 +165,7 @@ async function options(groupIds) {
       select: { id: true, org_id: true, name: true, meeting_date: true, meeting_mode: true, meeting_location: true, stage: true },
     }),
     prisma.clientMeeting.findMany({
-      where: { org_id: { in: orgIds }, scheduled_at: { gte: new Date(Date.now() - 365 * DAY), lte: new Date(Date.now() + 180 * DAY) }, account: { deleted_at: null } },
+      where: { org_id: { in: orgIds }, scheduled_at: { gte: new Date(Date.now() - 365 * DAY), lte: new Date(Date.now() + 180 * DAY) }, OR: [{ account_id: null }, { account: { deleted_at: null } }] },
       select: { id: true, org_id: true, title: true, scheduled_at: true, mode: true, location: true, status: true, account: { select: { name: true } } },
     }),
   ]);
@@ -185,7 +185,7 @@ async function options(groupIds) {
   return {
     companies: orgs.map((o) => ({ id: o.id, name: o.name })),
     people,
-    clients: accounts.map((a) => ({ id: a.id, name: a.name, org_id: a.org_id, org_name: orgName.get(a.org_id) || null })),
+    clients: accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, stage: a.stage, org_id: a.org_id, org_name: orgName.get(a.org_id) || null })),
     meetings: meetings
       .filter((e) => e.scheduled_at)
       .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
@@ -267,19 +267,65 @@ async function unlinkMeeting(groupIds, userId, id, key) {
   return { trip: await one(groupIds, id) };
 }
 
-/** Creates a real in-person meeting with an active client of ANY group company (so it is on that company's calendar) and links it to the trip. */
+const editMeetingSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  scheduled_at: z.string().min(8).optional(),
+  duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
+  location: text(300),
+  notes: text(2000),
+  account_id: z.string().uuid().nullish(), // a client or vendor of any status; null removes it
+});
+
+/** Edits a meeting made for / linked to the trip (a calendar follow-up meeting): title, time, length, place, notes and its client or vendor. */
+async function updateMeeting(groupIds, userId, id, key, body) {
+  const d = editMeetingSchema.parse(body);
+  const existing = await load(groupIds, id);
+  if (!existing) return { error: 'not_found' };
+  if (!key.startsWith('cm-') || !(await prisma.groupTravelMeeting.findFirst({ where: { travel_id: id, meeting_key: key } }))) return { error: 'bad_meeting' };
+  const orgs = await groupOrgs(groupIds);
+  const orgIds = orgs.map((o) => o.id);
+  const meeting = await prisma.clientMeeting.findFirst({ where: { id: key.slice(3), org_id: { in: orgIds } } });
+  if (!meeting) return { error: 'meeting_not_found' };
+  const data = {};
+  if (d.title !== undefined) data.title = d.title;
+  if (d.scheduled_at !== undefined) {
+    const when = new Date(d.scheduled_at);
+    if (Number.isNaN(when.getTime())) return { error: 'bad_date' };
+    data.scheduled_at = when;
+  }
+  if (d.duration_minutes !== undefined) data.duration_minutes = d.duration_minutes;
+  if (d.location !== undefined) data.location = d.location || null;
+  if (d.notes !== undefined) data.notes = d.notes || null;
+  if (d.account_id !== undefined) {
+    if (d.account_id) {
+      const account = await prisma.account.findFirst({ where: { id: d.account_id, org_id: { in: orgIds }, type: { in: ['client', 'vendor'] }, is_project: false, deleted_at: null } });
+      if (!account) return { error: 'client_not_found' };
+      data.account_id = account.id;
+      data.org_id = account.org_id;
+    } else data.account_id = null;
+  }
+  if (Object.keys(data).length) await prisma.clientMeeting.update({ where: { id: meeting.id }, data });
+  await audit(userId, 'update_meeting', id, `Edited meeting ${data.title || meeting.title}`, { meeting_id: meeting.id, changed: Object.keys(data) });
+  return { trip: await one(groupIds, id) };
+}
+
+/** Creates a real in-person meeting, optionally with a client or vendor (any status) of ANY group company (so it is on that company's calendar) and links it to the trip. */
 async function createMeeting(groupIds, userId, id, body) {
   const d = newMeetingSchema.parse(body);
   const existing = await load(groupIds, id);
   if (!existing) return { error: 'not_found' };
   const orgs = await groupOrgs(groupIds);
-  const account = await prisma.account.findFirst({ where: { id: d.account_id, org_id: d.org_id || { in: orgs.map((o) => o.id) }, type: 'client', stage: 'active', is_project: false, deleted_at: null } });
-  if (!account) return { error: 'client_not_found' };
+  const orgIds = orgs.map((o) => o.id);
+  // The client / vendor is optional and may be in any stage; without one the company must be given.
+  const account = d.account_id ? await prisma.account.findFirst({ where: { id: d.account_id, org_id: d.org_id || { in: orgIds }, type: { in: ['client', 'vendor'] }, is_project: false, deleted_at: null } }) : null;
+  if (d.account_id && !account) return { error: 'client_not_found' };
+  const orgId = account ? account.org_id : d.org_id;
+  if (!orgId || !orgIds.includes(orgId)) return { error: 'company_not_found' };
   const when = new Date(d.scheduled_at);
   if (Number.isNaN(when.getTime())) return { error: 'bad_date' };
   const meeting = await prisma.$transaction(async (tx) => {
     const m = await tx.clientMeeting.create({
-      data: { account_id: account.id, org_id: account.org_id, title: d.title, mode: 'offline', scheduled_at: when, duration_minutes: d.duration_minutes, location: d.location || existing.destination, notes: d.notes || null, created_by: userId },
+      data: { account_id: account?.id || null, org_id: orgId, title: d.title, mode: 'offline', scheduled_at: when, duration_minutes: d.duration_minutes, location: d.location || existing.destination, notes: d.notes || null, created_by: userId },
     });
     const attendees = existing.travelers.map((t) => t.user_id).filter(Boolean);
     if (attendees.length) await tx.clientMeetingAttendee.createMany({ data: attendees.map((user_id) => ({ meeting_id: m.id, user_id })), skipDuplicates: true });
@@ -351,4 +397,4 @@ async function calendarEvents(groupIds, from, to) {
   return events;
 }
 
-module.exports = { list, options, create, update, remove, linkMeeting, unlinkMeeting, createMeeting, tagsFor, one, calendarEvents };
+module.exports = { list, options, create, update, remove, linkMeeting, unlinkMeeting, createMeeting, updateMeeting, tagsFor, one, calendarEvents };

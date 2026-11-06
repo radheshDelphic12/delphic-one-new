@@ -122,14 +122,14 @@ function serializeFollowUpMeeting(m) {
 }
 
 async function listFollowUpMeetings({ from, to, mine, user, status }) {
-  const where = { scheduled_at: { gte: from, lte: to }, account: { deleted_at: null } };
+  const where = { scheduled_at: { gte: from, lte: to }, OR: [{ account_id: null }, { account: { deleted_at: null } }] };
   if (status) where.status = status;
   if (mine) {
-    where.OR = [
+    where.AND = [{ OR: [
       { created_by: user.id },
       { attendees: { some: { user_id: user.id } } },
       { account: { owner_id: user.id } },
-    ];
+    ] }];
   }
   const rows = await prisma.clientMeeting.findMany({
     where,

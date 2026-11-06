@@ -32,6 +32,7 @@ const {
   billingAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
+  consolidatedInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
@@ -79,6 +80,13 @@ const ERRORS = {
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
+  consolidated_min: [422, 'Pick at least two contracts for a combined invoice'],
+  consolidated_customer: [422, 'A combined invoice is for one customer - the selected contracts belong to different customers'],
+  consolidated_already_invoiced: [409, 'One of the selected contracts already has an invoice for this month - delete it first, or leave that contract out'],
+  consolidated_fixed_bid: [422, 'Fixed-bid contracts are invoiced one at a time (each invoice bills an amount against the contract value) - leave them out'],
+  consolidated_currency: [422, 'The selected contracts bill in different currencies - choose one invoice currency to convert them all'],
+  consolidated_currency_edit: [422, 'A combined invoice keeps the currency it was generated in - delete it and generate again to change it'],
+  in_consolidated: [409, 'This contract is already part of a combined invoice for this month'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
   percent_too_large: [422, 'A percentage cannot be above 100'],
@@ -206,6 +214,24 @@ router.get(
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="vendor-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}.xlsx"`);
     return res.send(Buffer.from(buffer));
+  })
+);
+
+// Several vendor invoices in one PDF: [{ vendor_account_id, period_month, period_year }].
+router.post(
+  '/vendor-invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { groups } = z.object({ groups: z.array(vendorInvoicePeriodSchema).min(1).max(100) }).parse(req.body);
+    const rowGroups = [];
+    for (const g of groups) {
+      const rows = (await invoices.listVendorInvoices(req.user.org_id, g)).filter((r) => r.generated);
+      if (rows.length) rowGroups.push(rows);
+    }
+    if (!rowGroups.length) return fail(res, 404, 'No generated vendor invoices found');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="vendor-invoices.pdf"', 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.vendorInvoicesPdf(req.user.org_id, rowGroups));
   })
 );
 
@@ -527,6 +553,35 @@ router.get(
     const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
     if (result.error) return failFor(res, result.error, result);
     return ok(res, result.preview);
+  })
+);
+
+// One invoice for several contracts of the same customer.
+router.post(
+  '/invoices/consolidated',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await invoices.generateConsolidatedInvoice(req.user.org_id, req.user, consolidatedInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error, result);
+    return created(res, result.invoice);
+  })
+);
+
+// Several client invoices in one PDF, in the order given.
+router.post(
+  '/invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(100) }).parse(req.body);
+    const found = [];
+    for (const id of ids) {
+      const result = await invoices.getClientInvoice(req.user.org_id, id);
+      if (!result.error) found.push(result.invoice);
+    }
+    if (!found.length) return fail(res, 404, 'No invoices found');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="invoices.pdf"', 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.clientInvoicesPdf(req.user.org_id, found));
   })
 );
 

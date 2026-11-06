@@ -179,15 +179,117 @@ async function fixedBidSource(orgId, account, period, { amount, replacing = 0, c
   };
 }
 
+// The customer on a project invoice is the project's client account (else the account itself); a vendor invoice's is the vendor account.
+async function customerAccount(orgId, projectAccountId) {
+  const project = await prisma.account.findFirst({ where: { id: projectAccountId, org_id: orgId }, select: { id: true, client_account_id: true } });
+  if (!project) return null;
+  return prisma.account.findFirst({ where: { id: project.client_account_id || project.id, org_id: orgId }, select: { id: true, name: true, gst_or_tax_id: true, billing_address: true, location: true } });
+}
+
+function billToDefaults(account) {
+  return { name: account?.name || '', gstin: account?.gst_or_tax_id || '', address: account?.billing_address || account?.location || '', account_id: account?.id || null };
+}
+
+// What the invoice prints for the other party. With `save` the account itself is updated (GST number + billing address), audited.
+async function resolveBillTo(orgId, user, accountId, billTo, save) {
+  if (!billTo) return undefined;
+  const clean = { gstin: (billTo.gstin || '').trim().toUpperCase() || null, address: (billTo.address || '').trim() || null };
+  if (save && accountId && (clean.gstin || clean.address)) {
+    const before = await prisma.account.findFirst({ where: { id: accountId, org_id: orgId }, select: { gst_or_tax_id: true, billing_address: true } });
+    if (before) {
+      const data = {};
+      if (clean.gstin && clean.gstin !== before.gst_or_tax_id) data.gst_or_tax_id = clean.gstin;
+      if (clean.address && clean.address !== before.billing_address) data.billing_address = clean.address;
+      if (Object.keys(data).length) {
+        await prisma.account.update({ where: { id: accountId }, data });
+        await prisma.auditLog.create({ data: { org_id: orgId, actor_id: user.id, action: 'account_billing_details_update', entity_type: 'account', entity_id: accountId, reason: 'Billing details updated from an invoice', snapshot: { before, after: data } } });
+      }
+    }
+  }
+  return clean;
+}
+
+// A single invoice that bills several contracts of one customer: it is stored on the first contract's row with every contract's
+// calculation under line_items.items, so older readers still see one invoice with one total.
+async function consolidatedCovering(orgId, accountId, period) {
+  const rows = await prisma.clientInvoice.findMany({ where: { org_id: orgId, deleted_at: null, ...period }, select: { id: true, client_account_id: true, invoice_number: true, line_items: true } });
+  return rows.find((r) => r.line_items && r.line_items.consolidated && (r.client_account_id === accountId || (r.line_items.items || []).some((i) => i.account_id === accountId))) || null;
+}
+
+async function generateConsolidatedInvoice(orgId, user, { account_ids, period_month, period_year, invoice_number, invoice_date, notes, currency, bill_to, save_to_account }) {
+  const ids = [...new Set(account_ids || [])];
+  if (ids.length < 2) return { error: 'consolidated_min' };
+  const period = { period_month, period_year };
+  const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
+  if (frozen) return frozen;
+  const customers = await Promise.all(ids.map((id) => customerAccount(orgId, id)));
+  if (customers.some((c) => !c)) return { error: 'account_not_found' };
+  if (new Set(customers.map((c) => c.id)).size > 1) return { error: 'consolidated_customer' };
+  const customer = customers[0];
+  for (const id of ids) {
+    const covering = await consolidatedCovering(orgId, id, period);
+    const own = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, deleted_at: null, client_account_id: id, ...period }, select: { invoice_number: true } });
+    const hit = covering || own;
+    if (hit) return { error: 'consolidated_already_invoiced', number: hit.invoice_number };
+  }
+  const sources = [];
+  for (const id of ids) {
+    const src = await clientInvoiceSource(orgId, id, period, currency);
+    if (src.error) return src;
+    if (src.fixed_bid) return { error: 'consolidated_fixed_bid' };
+    if (!(src.details.amount > 0)) return { error: 'nothing_to_invoice' };
+    sources.push({ id, src });
+  }
+  const currencies = new Set(sources.map((x) => x.src.details.currency));
+  if (currencies.size > 1) return { error: 'consolidated_currency' };
+  const cur = [...currencies][0];
+  const items = sources.map(({ id, src }) => ({ account_id: id, project: src.project, details: src.details, lines: src.lines, source: src.source, calculation_version: src.version?.version || null }));
+  const total = round2(items.reduce((a, i) => a + Number(i.details.total_amount ?? i.details.amount), 0));
+  const number = (invoice_number || '').trim() || (await suggestClientNumber(orgId, period_year));
+  const clash = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, invoice_number: number }, select: { id: true } });
+  if (clash) return { error: 'invoice_number_taken' };
+  const printedBillTo = await resolveBillTo(orgId, user, customer.id, bill_to, save_to_account);
+  const details = { billing_type: 'consolidated', currency: cur, amount: total, subtotal: total, total_amount: total, charges: [], contracts: items.length };
+  const invoice = await prisma.clientInvoice.create({
+    data: {
+      org_id: orgId,
+      client_account_id: ids[0],
+      ...period,
+      amount: total,
+      currency: cur,
+      invoice_number: number,
+      invoice_date: new Date(invoice_date || todayYmd()),
+      notes: notes || null,
+      line_items: {
+        consolidated: true,
+        project: { name: `${items.length} contracts - ${customer.name}`, code: null, client_name: customer.name },
+        details,
+        source: 'live',
+        items,
+        lines: [],
+        ...(printedBillTo ? { bill_to: printedBillTo } : {}),
+      },
+      created_by: user.id,
+    },
+  });
+  await prisma.auditLog.create({
+    data: { org_id: orgId, actor_id: user.id, action: 'client_invoice_generate', entity_type: 'client_invoice', entity_id: invoice.id, reason: `Combined invoice ${number} for ${customer.name}: ${items.map((i) => i.project.name).join(', ')} ${period_month}/${period_year}`, snapshot: { amount: total, currency: cur, account_ids: ids } },
+  });
+  return { invoice: serializeClientInvoice({ ...invoice, client_account: sources[0].src.account }) };
+}
+
 async function previewClientInvoice(orgId, accountId, period, currency, amount) {
   const src = await clientInvoiceSource(orgId, accountId, period, currency, { amount });
   if (src.error) return src;
-  const [existing, suggested] = await Promise.all([
-    prisma.clientInvoice.findFirst({ where: { client_account_id: accountId, org_id: orgId, ...period }, orderBy: { created_at: 'desc' }, select: { id: true, invoice_number: true, status: true, invoice_date: true } }),
+  const [existing, suggested, customer] = await Promise.all([
+    prisma.clientInvoice.findFirst({ where: { client_account_id: accountId, org_id: orgId, ...period }, orderBy: { created_at: 'desc' }, select: { id: true, invoice_number: true, status: true, invoice_date: true, line_items: true } }),
     suggestClientNumber(orgId, period.period_year),
+    customerAccount(orgId, accountId),
   ]);
+  const saved = existing?.line_items && !Array.isArray(existing.line_items) ? existing.line_items.bill_to : null;
   return {
     preview: {
+      bill_to: { ...billToDefaults(customer), ...(saved ? { gstin: saved.gstin || '', address: saved.address || '' } : {}) },
       project: src.project,
       ...period,
       details: src.details,
@@ -200,7 +302,7 @@ async function previewClientInvoice(orgId, accountId, period, currency, amount) 
       calculation_version: src.version?.version || null,
       fixed_bid: src.fixed_bid ? src.summary : null,
       // A fixed-bid project always gets a NEW invoice; a monthly one refreshes its draft.
-      existing: existing && !src.fixed_bid ? { ...existing, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
+      existing: existing && !src.fixed_bid ? { id: existing.id, invoice_number: existing.invoice_number, status: existing.status, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
       suggested_number: (!src.fixed_bid && existing?.invoice_number) || suggested,
     },
   };
@@ -208,7 +310,7 @@ async function previewClientInvoice(orgId, accountId, period, currency, amount) 
 
 // Creates the project's invoice for the month, or refreshes it while it is
 // still a draft. Sent / paid invoices are never rewritten.
-async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency, amount }) {
+async function generateClientInvoice(orgId, user, { account_id, period_month, period_year, invoice_number, invoice_date, notes, currency, amount, bill_to, save_to_account }) {
   const period = { period_month, period_year };
   const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
   if (frozen) return frozen;
@@ -216,11 +318,16 @@ async function generateClientInvoice(orgId, user, { account_id, period_month, pe
   if (src.error) return src;
   if (!(src.details.amount > 0)) return { error: src.fixed_bid ? 'fixed_bid_exhausted' : 'nothing_to_invoice' };
   // Fixed bid: every call is a new invoice (the cap above keeps the total within the contract).
+  const covering = await consolidatedCovering(orgId, account_id, period);
+  if (covering) return { error: 'in_consolidated', number: covering.invoice_number };
   const existing = src.fixed_bid ? null : await prisma.clientInvoice.findFirst({ where: { org_id: orgId, client_account_id: account_id, ...period } });
   if (existing && existing.status !== 'draft') return { error: 'invoice_sent' };
   const number = (invoice_number || '').trim() || existing?.invoice_number || (await suggestClientNumber(orgId, period_year));
   const clash = await prisma.clientInvoice.findFirst({ where: { org_id: orgId, invoice_number: number, ...(existing ? { NOT: { id: existing.id } } : {}) }, select: { id: true } });
   if (clash) return { error: 'invoice_number_taken' };
+  const customer = await customerAccount(orgId, account_id);
+  const printedBillTo = (await resolveBillTo(orgId, user, customer?.id, bill_to, save_to_account))
+    || (existing?.line_items && !Array.isArray(existing.line_items) ? existing.line_items.bill_to : undefined);
   const data = {
     amount: src.details.amount,
     currency: src.details.currency,
@@ -231,6 +338,7 @@ async function generateClientInvoice(orgId, user, { account_id, period_month, pe
       project: src.project,
       details: src.details,
       source: src.source,
+      ...(printedBillTo ? { bill_to: printedBillTo } : {}),
       // Kept for invoices read by older screens.
       billing_type: src.details.billing_type,
       rate: src.details.rate,
@@ -256,7 +364,7 @@ async function generateClientInvoice(orgId, user, { account_id, period_month, pe
   return { invoice: serializeClientInvoice({ ...invoice, client_account: src.account }) };
 }
 
-const CLIENT_INVOICE_ACCOUNT = { select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, service_category: true, client_account: { select: { id: true, name: true } } } };
+const CLIENT_INVOICE_ACCOUNT = { select: { id: true, name: true, project_name: true, project_code: true, face_resource: true, client_name: true, client_account_id: true, service_category: true, client_account: { select: { id: true, name: true } } } };
 
 // The project shown on an invoice: the one stored when it was generated, else
 // (older invoices) the project as it is now — never the account's bare name.
@@ -279,7 +387,7 @@ function serializeClientInvoice(row) {
 // only); `amount` overrides the calculated figure and is recorded in
 // line_items.manual_override. A sent / paid invoice can still be corrected, but
 // only with a `reason`, and every edit is audited with before / after.
-async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason }) {
+async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason, bill_to, save_to_account }) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
   const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
@@ -297,6 +405,7 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
       if (over) return over;
     }
   }
+  if (invoice.line_items?.consolidated && currency && currency !== invoice.currency) return { error: 'consolidated_currency_edit' };
   if (currency && currency !== invoice.currency) {
     if (!draft) return { error: 'invoice_sent' };
     const regenerated = await generateClientInvoice(orgId, user, {
@@ -307,6 +416,8 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
       invoice_date: invoice_date || (invoice.invoice_date ? ymd(invoice.invoice_date) : undefined),
       notes,
       currency,
+      bill_to,
+      save_to_account,
     });
     if (regenerated.error || amount === undefined) return regenerated;
     return updateClientInvoice(orgId, user, invoiceId, { amount, reason: why });
@@ -330,6 +441,11 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
       details: chargesService.recomputeDetails(items.details || {}, amount),
       manual_override: { original_amount: original, amount, reason: why || null, by: user.id, at: new Date().toISOString() },
     };
+  }
+  if (bill_to) {
+    const customer = await customerAccount(orgId, invoice.client_account_id);
+    const printed = await resolveBillTo(orgId, user, customer?.id, bill_to, save_to_account);
+    data.line_items = { ...(data.line_items || items), bill_to: printed };
   }
   const updated = await prisma.clientInvoice.update({ where: { id: invoice.id }, data, include: { client_account: CLIENT_INVOICE_ACCOUNT } });
   await prisma.auditLog.create({
@@ -449,9 +565,12 @@ async function vendorInvoiceSource(orgId, vendorAccountId, period) {
 async function previewVendorInvoice(orgId, vendorAccountId, period) {
   const src = await vendorInvoiceSource(orgId, vendorAccountId, period);
   if (src.error) return src;
-  const existing = await prisma.projectVendorInvoice.findFirst({ where: { org_id: orgId, vendor_account_id: vendorAccountId, ...period, details: { not: Prisma.DbNull } }, select: { invoice_number: true, invoice_date: true } });
+  const existing = await prisma.projectVendorInvoice.findFirst({ where: { org_id: orgId, vendor_account_id: vendorAccountId, ...period, details: { not: Prisma.DbNull } }, select: { invoice_number: true, invoice_date: true, details: true } });
+  const vendorAccount = await prisma.account.findFirst({ where: { id: vendorAccountId, org_id: orgId }, select: { id: true, name: true, gst_or_tax_id: true, billing_address: true, location: true } });
+  const savedBillTo = existing?.details?.bill_to;
   return {
     preview: {
+      bill_to: { ...billToDefaults(vendorAccount), ...(savedBillTo ? { gstin: savedBillTo.gstin || '', address: savedBillTo.address || '' } : {}) },
       vendor: src.vendor,
       ...period,
       projects: src.projects,
@@ -466,7 +585,7 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
 // (Re)generates the vendor's invoice for the month: one row per project and
 // currency. Rows generated earlier for the same vendor and month are
 // replaced; invoices added by hand are left alone.
-async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes }) {
+async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes, bill_to, save_to_account }) {
   const period = { period_month, period_year };
   const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
   if (frozen) return frozen;
@@ -477,6 +596,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
   const previous = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id, ...period, details: { not: Prisma.DbNull } }, select: { id: true, invoice_number: true } });
   const number = (invoice_number || '').trim() || previous[0]?.invoice_number || (await suggestVendorNumber(orgId, period_year));
   const date = new Date(invoice_date || todayYmd());
+  const printedBillTo = await resolveBillTo(orgId, user, vendor_account_id, bill_to, save_to_account);
   const rows = await prisma.$transaction(async (tx) => {
     if (previous.length) await tx.projectVendorInvoice.deleteMany({ where: { id: { in: previous.map((p) => p.id) } } });
     const created = [];
@@ -492,7 +612,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
           amount: p.amount,
           currency: p.currency,
           notes: notes || null,
-          details: { project: p.project, contractors: p.contractors, exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version },
+          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version },
           created_by: user.id,
         },
         include: VENDOR_INVOICE_INCLUDE,
@@ -543,6 +663,7 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
 module.exports = {
   previewClientInvoice,
   generateClientInvoice,
+  generateConsolidatedInvoice,
   updateClientInvoice,
   deleteClientInvoice,
   listClientInvoices,

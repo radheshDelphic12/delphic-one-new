@@ -3,7 +3,7 @@ import { Plus, Printer, RefreshCw } from 'lucide-react';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
-import { downloadFile } from '../../lib/downloadFile.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -202,9 +202,18 @@ export default function InvoicingSection() {
   }, [shown]);
   const anyFilter = Object.values(filters).some(Boolean);
 
+  const [selected, setSelected] = useState([]);
+  function downloadSelected() {
+    const ids = shown.filter((r) => selected.includes(r.id)).map((r) => r.id);
+    if (!ids.length) return;
+    downloadFilePost('/billing/invoices/pdf', { ids }, 'invoices.pdf').catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
+  }
+
   const columns = [
     { key: 'number', header: 'Invoice no.', render: (row) => <span className="font-mono text-xs font-medium text-tertiary-900">{row.invoice_number || '—'}</span> },
     { key: 'client', header: 'Project', render: (row) => <span>{row.line_items?.project?.name || row.client_account?.name || '—'}{row.line_items?.project?.code && <span className="block text-xs text-tertiary-500">{row.line_items.project.code}{row.line_items.project.client_name ? ` · ${row.line_items.project.client_name}` : ''}</span>}</span> },
+    { key: 'date', header: 'Invoice date', render: (row) => row.invoice_date || '—' },
+    { key: 'gst', header: 'Customer GST', render: (row) => (row.line_items?.bill_to?.gstin ? <span className="font-mono text-xs">{row.line_items.bill_to.gstin}</span> : <span className="text-tertiary-400">—</span>) },
     { key: 'period', header: 'Period', render: (row) => `${row.period_month}/${row.period_year}` },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
     { key: 'lines', header: 'Line items', render: (row) => invoiceLines(row).length },
@@ -255,7 +264,7 @@ export default function InvoicingSection() {
       {!loading && rows.length === 0 ? (
         <EmptyState title="No invoices yet" description="Compute revenue for a period, then generate an invoice for a project." />
       ) : (
-        <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} />
+        <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />
       )}
       <GenerateInvoiceDrawer open={generateOpen} onClose={() => setGenerateOpen(false)} onSubmit={generate} />
       <ComputeRevenueDrawer open={computeOpen} onClose={() => setComputeOpen(false)} onSubmit={computeRevenue} />

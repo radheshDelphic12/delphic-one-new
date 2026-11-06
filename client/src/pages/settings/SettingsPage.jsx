@@ -8,6 +8,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import DeletedRecordsPanel from '../../components/admin/DeletedRecordsPanel.jsx';
+import RecycleBinPanel from '../../components/admin/RecycleBinPanel.jsx';
 import RolesPermissionsPanel from '../../components/admin/RolesPermissionsPanel.jsx';
 import PermissionsPanel from '../../components/admin/PermissionsPanel.jsx';
 import { isPermissionMode, isAdminUser, LEVEL_LABEL } from '../../lib/access.js';
@@ -365,7 +366,7 @@ export default function SettingsPage() {
       {active === 'notifications' && <NotificationPreferencesPage />}
       {active === 'activity' && <ActivityTab />}
       {active === 'resignations' && showResignations && <ResignationsTab showTeam={hasTeamResignations} canHr={canHrResign} isAdmin={isAdminUser(user)} />}
-      {active === 'deleted' && canSeeDeleted && <DeletedRecordsPanel />}
+      {active === 'deleted' && canSeeDeleted && <div className="space-y-8"><DeletedRecordsPanel /><RecycleBinPanel /></div>}
       {active === 'roles' && canManageRoles && <RolesPermissionsPanel />}
       {active === 'permissions' && canManagePermissions && <PermissionsPanel />}
     </div>

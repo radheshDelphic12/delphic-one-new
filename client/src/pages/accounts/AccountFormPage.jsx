@@ -308,7 +308,10 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
               <input value={form.location_country} onChange={(event) => updateField('location_country', event.target.value)} className={INPUT_CLASS} />
             </Field>
             <Field label="GST / Tax ID">
-              <input value={form.gst_or_tax_id} onChange={(event) => updateField('gst_or_tax_id', event.target.value)} className={INPUT_CLASS} />
+              <input value={form.gst_or_tax_id} onChange={(event) => updateField('gst_or_tax_id', event.target.value.toUpperCase())} className={INPUT_CLASS} placeholder="e.g. 27ABCDE1234F1Z5" />
+            </Field>
+            <Field label="Billing address (printed on invoices)">
+              <textarea rows={2} maxLength={500} value={form.billing_address} onChange={(event) => updateField('billing_address', event.target.value)} className={INPUT_CLASS} />
             </Field>
           </div>
         </section>

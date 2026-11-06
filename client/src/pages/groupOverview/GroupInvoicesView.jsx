@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Ban, Download, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
-import { downloadFile } from '../../lib/downloadFile.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -48,6 +48,25 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
   const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
   const [v, setV] = useState(empty);
   const [lines, setLines] = useState([blankLine()]);
+  // Customers / vendors held in Accounts: pick one to fill the bill-to block, and optionally save edits back to it.
+  const [accountOptions, setAccountOptions] = useState([]);
+  const [pickedAccount, setPickedAccount] = useState('');
+  const [saveToAccount, setSaveToAccount] = useState(true);
+  useEffect(() => {
+    if (!open) return undefined;
+    let alive = true;
+    setPickedAccount('');
+    Promise.all(['client', 'vendor'].map((type) => apiClient.get('/accounts', { params: { type, limit: 100, sort_by: 'name', sort_order: 'asc' } }).then((r) => (r.data.data || []).map((a) => ({ ...a, kind: type }))).catch(() => [])))
+      .then(([clients, vendors]) => { if (alive) setAccountOptions([...clients, ...vendors]); });
+    return () => { alive = false; };
+  }, [open]);
+  function pickAccount(id) {
+    setPickedAccount(id);
+    const a = accountOptions.find((x) => x.id === id);
+    if (!a) return;
+    const gstin = (a.gst_or_tax_id || '').toUpperCase();
+    setV((c) => ({ ...c, buyer_name: a.name || c.buyer_name, buyer_gstin: gstin || c.buyer_gstin, buyer_address: a.billing_address || a.location || c.buyer_address, buyer_state_code: /^\d{2}/.test(gstin) ? gstin.slice(0, 2) : c.buyer_state_code }));
+  }
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -78,6 +97,12 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
       const res = invoice ? await apiClient.patch(`/group-cash/invoices/${invoice.id}`, rest) : await apiClient.post('/group-cash/invoices', body);
       pushSuccess(invoice ? `Invoice ${res.data.data.invoice.number} updated` : `Invoice ${res.data.data.invoice.number} issued`);
       void entityId;
+      if (pickedAccount && saveToAccount) {
+        const patch = {};
+        if (v.buyer_gstin) patch.gst_or_tax_id = v.buyer_gstin;
+        if (v.buyer_address) patch.billing_address = v.buyer_address;
+        if (Object.keys(patch).length) await apiClient.patch(`/accounts/${pickedAccount}`, patch).catch(() => pushError('The invoice is saved, but the account could not be updated with the bill-to details', 'Account not updated'));
+      }
       onSaved(res.data.data.invoice);
       onClose();
     } catch (err) { pushError(apiErrorMessage(err, 'Could not issue the invoice'), 'Not saved'); } finally { setBusy(false); }
@@ -126,6 +151,12 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
         {entity && !entity.invoice_prefix && <p className="rounded-xl bg-warning-50 p-2 text-xs">This entity has no invoice prefix yet. Add one under Setup &gt; Legal entities.</p>}
         <div className="rounded-xl border border-tertiary-100 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Bill to</p>
+          <label className={`${labelCls} mb-2 block`}>Fill from a client / vendor account
+            <select className={inputCls} value={pickedAccount} onChange={(e) => pickAccount(e.target.value)}>
+              <option value="">Enter by hand</option>
+              {accountOptions.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.kind})</option>)}
+            </select>
+          </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className={labelCls}>Name<input required className={inputCls} maxLength={200} value={v.buyer_name} onChange={set('buyer_name')} /></label>
             {gst && <label className={labelCls}>Buyer GSTIN (if any)<input className={inputCls} maxLength={15} value={v.buyer_gstin} onChange={(e) => setV((c) => ({ ...c, buyer_gstin: e.target.value.toUpperCase() }))} /></label>}
@@ -133,6 +164,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
             <label className={`${labelCls} sm:col-span-2`}>Address<textarea rows={2} className={inputCls} maxLength={500} value={v.buyer_address} onChange={set('buyer_address')} /></label>
           </div>
           {gst && v.buyer_state_code && <p className="mt-2 text-xs text-tertiary-500">{intra ? `Same state (${stateName(v.buyer_state_code)}): CGST + SGST.` : `Different state (${stateName(v.buyer_state_code)}): IGST.`}</p>}
+          {pickedAccount && <label className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><input type="checkbox" checked={saveToAccount} onChange={(e) => setSaveToAccount(e.target.checked)} /> Update the account with this GST number and billing address</label>}
         </div>
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Items</p>
@@ -253,12 +285,20 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
   const [f, setF] = useState({ legal_entity_id: entityId, status: '', from: '', to: '', search: '' });
   const [newOpen, setNewOpen] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [picked, setPicked] = useState([]);
+  const { pushError: pushPdfError } = useAlerts();
   const params = Object.fromEntries(Object.entries(f).filter(([, x]) => x));
   const list = useLiveData(() => api('/invoices', params), { deps: [f.legal_entity_id, f.status, f.from, f.to, f.search] });
   const entities = useLiveData(() => api('/entities'), { deps: [] });
   const set = (k) => (e) => setF((c) => ({ ...c, [k]: e.target.value }));
   const d = list.data;
   const changed = () => { list.refresh(); onWalletsChanged?.(); };
+  // Every ticked invoice, in the order of the list, as one PDF.
+  const downloadPicked = () => {
+    const ids = (d?.rows || []).filter((r) => picked.includes(r.id)).map((r) => r.id);
+    if (!ids.length) return;
+    downloadFilePost('/group-cash/invoices/pdf', { ids }, 'invoices.pdf').catch((err) => pushPdfError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
+  };
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -267,7 +307,8 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
         <label className={labelCls}>From<input type="date" className={inputCls} value={f.from} onChange={set('from')} /></label>
         <label className={labelCls}>To<input type="date" className={inputCls} value={f.to} onChange={set('to')} /></label>
         <label className={labelCls}>Search<input className={inputCls} placeholder="Number or buyer" value={f.search} onChange={set('search')} /></label>
-        <button type="button" className="btn-primary ml-auto inline-flex items-center gap-2" onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" />New invoice</button>
+        {picked.length > 0 && <button type="button" className="btn-secondary ml-auto inline-flex items-center gap-2" onClick={downloadPicked}><Download className="h-4 w-4" />Download {picked.length} as one PDF</button>}
+        <button type="button" className={`btn-primary ${picked.length > 0 ? '' : 'ml-auto'} inline-flex items-center gap-2`} onClick={() => setNewOpen(true)}><Plus className="h-4 w-4" />New invoice</button>
       </div>
       {!d ? <Skeleton className="h-40" /> : (
         <>
@@ -278,10 +319,11 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
           {!d.rows.length ? <EmptyState icon={FileText} title="No invoices yet" description="Issue an invoice from a legal entity; payments you record go straight into its wallet." /> : (
             <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
               <table className="min-w-full text-sm">
-                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="p-2">Number</th><th className="p-2">Date</th><th className="p-2">Buyer</th><th className="p-2">Issued by</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Due</th><th className="p-2">Status</th></tr></thead>
+                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="w-8 p-2"><input type="checkbox" aria-label="Select all invoices" checked={d.rows.length > 0 && d.rows.every((r) => picked.includes(r.id))} onChange={(e) => setPicked(e.target.checked ? d.rows.map((r) => r.id) : [])} /></th><th className="p-2">Number</th><th className="p-2">Date</th><th className="p-2">Buyer</th><th className="p-2">Issued by</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Due</th><th className="p-2">Status</th></tr></thead>
                 <tbody>
                   {d.rows.map((r) => (
                     <tr key={r.id} className="cursor-pointer border-t border-tertiary-100 hover:bg-tertiary-50/60" onClick={() => setOpenId(r.id)}>
+                      <td className="p-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${r.number}`} checked={picked.includes(r.id)} onChange={(e) => setPicked((c) => (e.target.checked ? [...c, r.id] : c.filter((x) => x !== r.id)))} /></td>
                       <td className="p-2 font-mono text-xs font-medium text-primary-700">{r.number}</td>
                       <td className="p-2 whitespace-nowrap">{r.invoice_date}</td>
                       <td className="p-2">{r.buyer_name}</td>

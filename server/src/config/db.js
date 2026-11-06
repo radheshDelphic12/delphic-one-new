@@ -73,6 +73,7 @@ prisma.$use(async (params, next) => {
 });
 
 // --- Group-wide change log (Phase 3): who changed what, old -> new, see config/changeCapture.js ---
+require('./recycleBin').attach(prisma);
 require('./changeCapture').attach(prisma);
 
 // --- Multi-company ERP: org_id auto-stamp on create (HLD §5, layer 1) ---

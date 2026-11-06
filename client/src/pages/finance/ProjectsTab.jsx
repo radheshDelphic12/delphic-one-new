@@ -110,6 +110,7 @@ function ContractPill({ contract }) {
 function emptyForm(profile) {
   return {
     project_name: profile.project_name || '',
+    face_resource: profile.face_resource || '',
     client_account_id: profile.client_account_id || '',
     requirement_id: profile.requirement_id || '',
     service_category: profile.service_category || '',
@@ -188,6 +189,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
     event.preventDefault();
     const patch = {
       project_name: form.project_name.trim(),
+      face_resource: form.face_resource.trim() || null,
       agreement_start_date: form.agreement_start_date || null,
       agreement_end_date: form.agreement_end_date || null,
       contract_status: form.contract_status || null,
@@ -258,6 +260,11 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
               <span className="mt-1 block font-normal text-tertiary-400">
                 A label only — another contract may share it. This project is <span className="font-medium text-tertiary-600">{project.project_code || 'identified by its id'}</span>, with its own resources, dates, rates, billing and P&amp;L.
               </span>
+            </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              Face resource
+              <input value={form.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource facing the client" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              <span className="mt-1 block font-normal text-tertiary-400">Optional text. Printed on this project&apos;s client invoice with the other details.</span>
             </label>
             <div className="block text-xs font-medium text-tertiary-600">
               Client name

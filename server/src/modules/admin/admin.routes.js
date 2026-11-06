@@ -1,6 +1,9 @@
 const express = require('express');
 const { authenticate, authorize, authorizeSuperadmin } = require('../../middleware/auth');
 const controller = require('./admin.controller');
+const recycleBin = require('./recycleBin.service');
+const asyncHandler = require('../../utils/asyncHandler');
+const { ok, fail } = require('../../utils/response');
 const prisma = require('../../config/db');
 const { hasPermission } = require('../../lib/permissions');
 
@@ -29,6 +32,25 @@ router.use(authenticate);
 
 // Superadmin-only record deletion / restore. `authorizeSuperadmin` is applied
 // per-route (not router-wide) so the admin/bda `unlock` route below is untouched.
+// Recycle bin: anything a person deleted in the app (see config/recycleBin.js). Declared before the /:entity_type routes.
+router.get('/recycle-bin', authorizeSuperadmin, asyncHandler(async (req, res) => ok(res, await recycleBin.list(req.user.org_id, {
+  model: typeof req.query.model === 'string' ? req.query.model : undefined,
+  q: typeof req.query.q === 'string' ? req.query.q.trim() : undefined,
+  restored: req.query.restored === 'true',
+}))));
+router.post('/recycle-bin/:id/restore', authorizeSuperadmin, asyncHandler(async (req, res) => {
+  const result = await recycleBin.restore(req.user.org_id, req.user, req.params.id);
+  const errors = {
+    not_found: [404, 'That deleted record was not found'],
+    already_restored: [409, 'That record was already restored'],
+    unsupported: [422, 'That kind of record cannot be restored'],
+    conflict: [409, 'It cannot be restored: a record with the same unique value (for example an invoice number) exists now'],
+    parent_missing: [409, 'It cannot be restored: the record it belongs to (a project, an employee ...) no longer exists'],
+    restore_failed: [422, `It could not be restored${result.message ? `: ${result.message}` : ''}`],
+  };
+  if (result.error) return fail(res, ...errors[result.error]);
+  return ok(res, result, { message: 'Record restored' });
+}));
 router.get('/deleted', authorizeSuperadmin, controller.listDeleted);
 router.get('/audit', authorizeSuperadmin, controller.listAudit);
 router.post('/:entity_type/:entity_id/delete', authorizeDelete, controller.softDelete);

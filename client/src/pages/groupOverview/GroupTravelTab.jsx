@@ -115,6 +115,10 @@ export function MeetingsPanel({ trip, options, onChanged }) {
   const linked = new Set(trip.meetings.map((x) => x.key));
   const [showAll, setShowAll] = useState(false);
   const [companyId, setCompanyId] = useState('');
+  const [editKey, setEditKey] = useState(null);
+  const [ed, setEd] = useState(null);
+  const localInput = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  const startEdit = (x) => { setEditKey(x.key); setEd({ title: x.title || '', scheduled_at: localInput(x.scheduled_at), duration_minutes: x.duration_minutes || 60, location: x.location || '', notes: x.notes || '', account_id: x.account_id || '', org_id: x.org_id || '' }); };
   const ymd = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10); // IST calendar day
   const unlinked = (options?.meetings || []).filter((x) => !linked.has(x.key));
   const onTripDates = unlinked.filter((x) => ymd(x.scheduled_at) >= trip.start_date && ymd(x.scheduled_at) <= trip.end_date);
@@ -130,13 +134,47 @@ export function MeetingsPanel({ trip, options, onChanged }) {
         <h3 className="text-sm font-semibold text-tertiary-900">Meetings on this trip</h3>
         <ul className="mt-2 divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
           {trip.meetings.map((x) => (
-            <li key={x.key} className="flex items-start gap-2 px-3 py-2">
-              <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" />
-              <div className="min-w-0 flex-1 text-sm">
-                <p className="font-medium text-tertiary-900">{x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.org_name ? <span className="ml-2 rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] font-normal text-tertiary-600">{x.org_name}</span> : null}</p>
-                <p className="text-xs text-tertiary-500">{when(x.scheduled_at)}{x.location ? ` · ${x.location}` : ''}{x.mode === 'online' ? ' · online' : ''}</p>
+            <li key={x.key} className="px-3 py-2">
+              <div className="flex items-start gap-2">
+                <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" />
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-medium text-tertiary-900">{x.title}{x.account_name ? ` · ${x.account_name}` : ''}{x.org_name ? <span className="ml-2 rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] font-normal text-tertiary-600">{x.org_name}</span> : null}</p>
+                  <p className="text-xs text-tertiary-500">{when(x.scheduled_at)}{x.location ? ` · ${x.location}` : ''}{x.mode === 'online' ? ' · online' : ''}</p>
+                  {x.key.startsWith('meeting-') && <p className="text-[11px] text-tertiary-400">A client&apos;s own meeting: change it from that client&apos;s page.</p>}
+                </div>
+                {x.editable && <button type="button" title="Edit this meeting" aria-label="Edit meeting" className="rounded p-1 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" disabled={busy} onClick={() => (editKey === x.key ? setEditKey(null) : startEdit(x))}><Pencil className="h-4 w-4" /></button>}
+                <button type="button" title="Unlink (the meeting stays on the calendar)" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy} onClick={() => run(() => apiClient.delete(`/super-dashboard/group/travel/${trip.id}/meetings/${x.key}`), 'Could not unlink')}><Unlink className="h-4 w-4" /></button>
               </div>
-              <button type="button" title="Unlink (the meeting stays on the calendar)" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy} onClick={() => run(() => apiClient.delete(`/super-dashboard/group/travel/${trip.id}/meetings/${x.key}`), 'Could not unlink')}><Unlink className="h-4 w-4" /></button>
+              {editKey === x.key && ed && (
+                <form
+                  className="mt-2 space-y-2 rounded-xl bg-tertiary-50 p-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    run(async () => {
+                      await apiClient.patch(`/super-dashboard/group/travel/${trip.id}/meetings/${x.key}`, { title: ed.title.trim(), scheduled_at: new Date(ed.scheduled_at).toISOString(), duration_minutes: Number(ed.duration_minutes) || 60, location: ed.location || null, notes: ed.notes || null, account_id: ed.account_id || null });
+                      setEditKey(null);
+                    }, 'Could not save the meeting');
+                  }}
+                >
+                  <label className={labelCls}>Meeting title<input required className={inputCls} value={ed.title} onChange={(e) => setEd((c) => ({ ...c, title: e.target.value }))} /></label>
+                  <label className={labelCls}>Client or vendor (optional)
+                    <select className={inputCls} value={ed.account_id} onChange={(e) => setEd((c) => ({ ...c, account_id: e.target.value }))}>
+                      <option value="">No client or vendor</option>
+                      {(options?.clients || []).filter((c) => !ed.org_id || c.org_id === ed.org_id || c.id === ed.account_id).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.type === 'vendor' ? 'Vendor' : 'Client'}{c.stage ? ` · ${String(c.stage).replace(/_/g, ' ')}` : ''}</option>)}
+                    </select>
+                  </label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className={labelCls}>Date and time<input required type="datetime-local" className={inputCls} value={ed.scheduled_at} onChange={(e) => setEd((c) => ({ ...c, scheduled_at: e.target.value }))} /></label>
+                    <label className={labelCls}>Minutes<input type="number" min="5" max="1440" className={inputCls} value={ed.duration_minutes} onChange={(e) => setEd((c) => ({ ...c, duration_minutes: e.target.value }))} /></label>
+                  </div>
+                  <label className={labelCls}>Where<input className={inputCls} value={ed.location} onChange={(e) => setEd((c) => ({ ...c, location: e.target.value }))} /></label>
+                  <label className={labelCls}>Notes<textarea rows={2} className={inputCls} value={ed.notes} onChange={(e) => setEd((c) => ({ ...c, notes: e.target.value }))} /></label>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" className="btn-secondary" onClick={() => setEditKey(null)} disabled={busy}>Cancel</button>
+                    <button type="submit" className="btn-primary" disabled={busy || !ed.title.trim() || !ed.scheduled_at}>Save meeting</button>
+                  </div>
+                </form>
+              )}
             </li>
           ))}
           {!trip.meetings.length && <li className="px-3 py-3 text-sm text-tertiary-500">No meetings linked yet.</li>}
@@ -170,22 +208,22 @@ export function MeetingsPanel({ trip, options, onChanged }) {
           onSubmit={(e) => {
             e.preventDefault();
             run(async () => {
-              await apiClient.post(`/super-dashboard/group/travel/${trip.id}/meetings/new`, { ...m, scheduled_at: new Date(m.scheduled_at).toISOString(), duration_minutes: Number(m.duration_minutes) || 60, location: m.location || null, notes: m.notes || null });
+              await apiClient.post(`/super-dashboard/group/travel/${trip.id}/meetings/new`, { ...m, account_id: m.account_id || null, scheduled_at: new Date(m.scheduled_at).toISOString(), duration_minutes: Number(m.duration_minutes) || 60, location: m.location || null, notes: m.notes || null });
               setM((c) => ({ ...c, title: '', scheduled_at: '', notes: '' }));
             }, 'Could not add the meeting');
           }}
         >
-          <p className="text-xs text-tertiary-500">Pick the company, then one of its active clients. The meeting appears on that company&apos;s calendar and here; the travellers are added as attendees.</p>
+          <p className="text-xs text-tertiary-500">Pick the company, then optionally one of its clients or vendors (any status). The meeting appears on that company&apos;s calendar and here; the travellers are added as attendees.</p>
           <label className={labelCls}>Company
             <select required className={inputCls} value={m.org_id} onChange={(e) => setM((c) => ({ ...c, org_id: e.target.value, account_id: '' }))}>
               <option value="">Choose a company…</option>
               {(options?.companies || []).map((co) => <option key={co.id} value={co.id}>{co.name}</option>)}
             </select>
           </label>
-          <label className={labelCls}>Client
-            <select required disabled={!m.org_id} className={inputCls} value={m.account_id} onChange={(e) => setM((c) => ({ ...c, account_id: e.target.value }))}>
-              <option value="">{!m.org_id ? 'Choose a company first' : (options?.clients || []).some((c) => c.org_id === m.org_id) ? 'Choose a client…' : 'No active clients in this company'}</option>
-              {(options?.clients || []).filter((c) => c.org_id === m.org_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <label className={labelCls}>Client or vendor (optional)
+            <select disabled={!m.org_id} className={inputCls} value={m.account_id} onChange={(e) => setM((c) => ({ ...c, account_id: e.target.value }))}>
+              <option value="">{!m.org_id ? 'Choose a company first' : 'No client or vendor'}</option>
+              {(options?.clients || []).filter((c) => c.org_id === m.org_id).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.type === 'vendor' ? 'Vendor' : 'Client'}{c.stage ? ` · ${String(c.stage).replace(/_/g, ' ')}` : ''}</option>)}
             </select>
           </label>
           <label className={labelCls}>Meeting title<input required className={inputCls} value={m.title} onChange={(e) => setM((c) => ({ ...c, title: e.target.value }))} placeholder="e.g. Quarterly review" /></label>
@@ -194,7 +232,7 @@ export function MeetingsPanel({ trip, options, onChanged }) {
             <label className={labelCls}>Minutes<input type="number" min="5" max="1440" className={inputCls} value={m.duration_minutes} onChange={(e) => setM((c) => ({ ...c, duration_minutes: e.target.value }))} /></label>
           </div>
           <label className={labelCls}>Where<input className={inputCls} value={m.location} onChange={(e) => setM((c) => ({ ...c, location: e.target.value }))} /></label>
-          <button type="submit" className="btn-primary" disabled={busy || !m.org_id || !m.account_id || !m.title.trim() || !m.scheduled_at}>Add meeting</button>
+          <button type="submit" className="btn-primary" disabled={busy || !m.org_id || !m.title.trim() || !m.scheduled_at}>Add meeting</button>
         </form>
       )}
     </div>

@@ -50,6 +50,8 @@ const assignCalendarSchema = z.object({
 // mapping always exists. Recruitment is not an accepted category yet.
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  // Free text: the resource who is the face of the project to the client; printed on its client invoices.
+  face_resource: z.string().trim().max(200).optional(),
   // A Lead account of this org (validated in the service) — no free-text client.
   client_account_id: z.string().uuid().optional(),
   service_category: z.enum(['managed_services', 'project']),

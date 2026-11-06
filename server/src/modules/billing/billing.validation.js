@@ -75,6 +75,13 @@ const listDailyRevenueQuerySchema = z.object({
 const INVOICE_NUMBER = z.string().trim().max(50).regex(/^[A-Za-z0-9][A-Za-z0-9\-_/. ]*$/, 'Use letters, digits, - _ / and .').optional().or(z.literal('').transform(() => undefined));
 const invoiceDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional().or(z.literal('').transform(() => undefined));
 
+// Bill-to details of the customer / vendor as printed on the invoice; save_to_account writes them back to the account.
+const billTo = z.object({
+  gstin: z.string().trim().max(20).optional().or(z.literal('').transform(() => undefined)),
+  address: z.string().trim().max(500).optional().or(z.literal('').transform(() => undefined)),
+}).optional();
+const saveToAccount = z.boolean().optional();
+
 const INVOICE_CURRENCY = z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional().or(z.literal('').transform(() => undefined));
 
 const createInvoiceSchema = z.object({
@@ -85,8 +92,23 @@ const createInvoiceSchema = z.object({
   invoice_date: invoiceDate,
   notes: z.string().trim().max(1000).nullable().optional(),
   currency: INVOICE_CURRENCY,
+  bill_to: billTo,
+  save_to_account: saveToAccount,
   // Fixed-bid projects only: what this invoice bills (<= what is left of the contract value).
   amount: z.coerce.number().positive().max(1e12).optional(),
+});
+
+// One invoice for several contracts (projects) of the same customer, for one month.
+const consolidatedInvoiceSchema = z.object({
+  account_ids: z.array(z.string().uuid()).min(2).max(50),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  invoice_number: INVOICE_NUMBER,
+  invoice_date: invoiceDate,
+  notes: z.string().trim().max(1000).nullable().optional(),
+  currency: INVOICE_CURRENCY,
+  bill_to: billTo,
+  save_to_account: saveToAccount,
 });
 
 // Deleting an invoice: a reason is required once it has been sent / paid.
@@ -97,6 +119,8 @@ const updateInvoiceSchema = z.object({
   invoice_date: invoiceDate,
   notes: z.string().trim().max(1000).nullable().optional(),
   currency: INVOICE_CURRENCY,
+  bill_to: billTo,
+  save_to_account: saveToAccount,
   // Overrides the calculated amount (audited); `reason` is required once the invoice is sent / paid.
   amount: z.coerce.number().positive().max(1e12).optional(),
   reason: z.string().trim().max(500).optional(),
@@ -156,6 +180,8 @@ const vendorInvoicePeriodSchema = z.object({
 const generateVendorInvoiceSchema = vendorInvoicePeriodSchema.extend({
   invoice_number: INVOICE_NUMBER,
   invoice_date: invoiceDate,
+  bill_to: billTo,
+  save_to_account: saveToAccount,
   notes: z.string().trim().max(1000).nullable().optional(),
 });
 const listVendorInvoicesQuerySchema = z.object({
@@ -300,6 +326,8 @@ const accountBudgetQuerySchema = z.object({
 const updateProjectProfileSchema = z
   .object({
     project_name: z.string().trim().min(1).max(200).optional(),
+    // Free text: the resource who is the face of the project to the client; printed on its invoices. Empty / null clears it.
+    face_resource: z.string().trim().max(200).nullable().optional().transform((v) => (v === undefined ? undefined : v || null)),
     // A Lead account of this org (validated in the service); null unlinks.
     client_account_id: z.string().uuid().nullable().optional(),
     // A requirement of this org (validated in the service); null unlinks.
@@ -361,6 +389,7 @@ module.exports = {
   billingAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
+  consolidatedInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,

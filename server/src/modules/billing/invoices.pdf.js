@@ -24,16 +24,18 @@ async function companyParty(orgId, currency) {
     pan: entity?.pan || null,
     state_code: entity?.state_code || null,
     state_name: stateName(entity?.state_code),
+    signature_image: entity?.signature_image || null,
+    signatory_name: entity?.signatory_name || null,
   };
   return { party, bankLines: String(bank?.payment_instructions || '').split('\n').map((t) => t.trim()).filter(Boolean) };
 }
 
 /** A client or vendor account as the other party: name, GSTIN / tax id and the address we hold. */
-function accountParty(account) {
+function accountParty(account, billTo) {
   const place = [account?.location_city, account?.location_country].filter(Boolean).join(', ');
-  const gst = account?.gst_or_tax_id || null;
+  const gst = billTo?.gstin || account?.gst_or_tax_id || null;
   const code = gst && /^\d{2}/.test(gst) ? gst.slice(0, 2) : null;
-  return { name: account?.name || '', address: account?.location || place || null, gstin: gst, state_code: code, state_name: stateName(code) };
+  return { name: account?.name || '', address: billTo?.address || account?.billing_address || account?.location || place || null, gstin: gst, state_code: code, state_name: stateName(code) };
 }
 
 const common = (party, bankLines) => ({
@@ -51,6 +53,19 @@ function clientLines(inv) {
   const period = periodText(d, inv.period_month, inv.period_year);
   const project = inv.project || {};
   const title = `${project.name || 'Project'}${project.code ? ` (${project.code})` : ''}${project.client_name ? ` - ${project.client_name}` : ''}`;
+  // The project's face resource (free text set on the project); older invoices stored no snapshot, so fall back to the project as it is now.
+  const face = String(project.face_resource ?? inv.client_account?.face_resource ?? '').trim();
+  const head = face ? [title, `Face resource: ${face}`] : [title];
+  if (inv.line_items?.consolidated) {
+    const label = { monthly: 'Monthly', hourly: 'Hourly', one_time: 'Fixed bid' };
+    return (inv.line_items.items || []).map((it) => {
+      const idt = it.details || {};
+      const amount = idt.total_amount ?? idt.amount;
+      const name = `${it.project?.name || 'Contract'}${it.project?.code ? ` (${it.project.code})` : ''}`;
+      const charges = (idt.charges || []).map((c) => `${c.label}${c.mode === 'percent' ? ` ${c.value}%` : ''}: ${money(c.amount, cur)}`);
+      return { description: name, details: [`(${periodText(idt, inv.period_month, inv.period_year)})`, `${label[idt.billing_type] || 'Services'} ${money(idt.rate, cur)}`, `Amount ${money(idt.amount, cur)}`, ...charges], qty: '1', unit: '', rate: num2(amount), amount: num2(amount) };
+    });
+  }
   const resources = inv.line_items?.lines || [];
   const converted = d.conversion ? [`Converted from ${money(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`] : [];
   const overtime = d.overtime_billed && D(d.overtime_amount || 0).gt(0)
@@ -59,19 +74,19 @@ function clientLines(inv) {
   if (d.billing_type === 'hourly' && resources.length) {
     return resources.map((l) => ({
       description: l.resource,
-      details: [title, period, `Rate ${money(d.rate, cur)} / hour`, ...(l.overtime_hours ? [`Includes ${l.overtime_hours} overtime hrs`] : []), ...converted],
+      details: [...head, period, `Rate ${money(d.rate, cur)} / hour`, ...(l.overtime_hours ? [`Includes ${l.overtime_hours} overtime hrs`] : []), ...converted],
       qty: String(l.hours || 0), unit: 'hrs', rate: Number(l.hours) ? num2(D(l.revenue).dividedBy(l.hours)) : num2(l.revenue), amount: num2(l.revenue),
     }));
   }
   if (d.billing_type === 'monthly' && d.contract_working_days) {
     const base = d.base_amount ?? inv.amount;
     const calc = `Base: ${money(d.rate, cur)} x ${d.contract_working_days} / ${d.working_days} working days${d.calendar ? ` (${d.calendar})` : ''}`;
-    return [{ description: 'Manpower Services', details: [title, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(d.contract_working_days), unit: 'days', rate: num2(D(base).dividedBy(d.contract_working_days)), amount: num2(base) }, ...overtime];
+    return [{ description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(d.contract_working_days), unit: 'days', rate: num2(D(base).dividedBy(d.contract_working_days)), amount: num2(base) }, ...overtime];
   }
   const kind = d.billing_type === 'one_time' ? 'Fixed-bid project services' : 'Services';
   const base = d.base_amount ?? inv.amount;
   const note = d.billing_type === 'one_time' && d.fixed_bid ? [`Contract value ${money(d.rate, cur)}; invoiced before ${money(d.fixed_bid.invoiced_before, cur)}`] : [];
-  return [{ description: kind, details: [title, `(${period})`, ...note, ...converted], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
+  return [{ description: kind, details: [...head, `(${period})`, ...note, ...converted], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
 }
 
 async function clientInvoiceModel(orgId, inv) {
@@ -93,7 +108,7 @@ async function clientInvoiceModel(orgId, inv) {
     title: 'Invoice',
     currency: cur,
     seller: party,
-    buyer: accountParty(account),
+    buyer: accountParty(account, inv.line_items?.bill_to),
     meta: { number: inv.invoice_number, date: dateText(inv.invoice_date) },
     lines,
     taxes: charges,
@@ -109,6 +124,13 @@ async function clientInvoicePdf(orgId, inv) {
   return taxInvoicePdf(await clientInvoiceModel(orgId, inv));
 }
 
+/** Several client invoices in one PDF, in the order given. */
+async function clientInvoicesPdf(orgId, invs) {
+  const models = [];
+  for (const inv of invs) models.push(await clientInvoiceModel(orgId, inv));
+  return taxInvoicePdf(models);
+}
+
 // ---- vendor invoice ----
 function contractorLine(c, project, currency, period, inr) {
   const parts = [`${money(c.monthly_vendor_rate, currency)}/month x ${c.allocation_percent}% allocation`];
@@ -117,7 +139,8 @@ function contractorLine(c, project, currency, period, inr) {
   if (c.overtime_amount) parts.push(`+ overtime ${c.overtime_hours}h ${money(c.overtime_amount, currency)}`);
   const title = `${project?.name || 'Project'}${project?.code ? ` (${project.code})` : ''}${project?.client_name ? ` - ${project.client_name}` : ''}`;
   const extra = [...(c.approved_hours !== undefined && c.approved_hours !== null ? [`Approved hours: ${c.approved_hours}`] : []), ...(inr ? [inr] : [])];
-  return { description: c.contractor, details: [title, `(${period})`, parts.join(' '), ...extra], qty: '1', unit: '', rate: num2(c.amount), amount: num2(c.amount) };
+  const face = String(project?.face_resource || '').trim();
+  return { description: c.contractor, details: [title, ...(face ? [`Face resource: ${face}`] : []), `(${period})`, parts.join(' '), ...extra], qty: '1', unit: '', rate: num2(c.amount), amount: num2(c.amount) };
 }
 
 /** One invoice per currency for a vendor's month (the rows are one per project and currency). */
@@ -139,7 +162,7 @@ async function vendorInvoiceModels(orgId, rows) {
     const adjustment = mine.reduce((a, r) => a.plus(D(r.adjustment_amount || 0)), D(0));
     const adjustmentNote = mine.map((r) => r.adjustment_note).find(Boolean);
     const total = subtotal.minus(tds).plus(adjustment);
-    const seller = accountParty(vendor);
+    const seller = accountParty(vendor, first.details?.bill_to);
     models.push({
       ...common(seller, []),
       title: 'Invoice',
@@ -163,4 +186,11 @@ async function vendorInvoicePdf(orgId, rows) {
   return taxInvoicePdf(await vendorInvoiceModels(orgId, rows));
 }
 
-module.exports = { clientInvoicePdf, vendorInvoicePdf, clientInvoiceModel, vendorInvoiceModels };
+/** Several vendor invoices (each a list of rows sharing one vendor, month and number) in one PDF. */
+async function vendorInvoicesPdf(orgId, rowGroups) {
+  const models = [];
+  for (const rows of rowGroups) models.push(...(await vendorInvoiceModels(orgId, rows)));
+  return taxInvoicePdf(models);
+}
+
+module.exports = { clientInvoicePdf, clientInvoicesPdf, vendorInvoicePdf, vendorInvoicesPdf, clientInvoiceModel, vendorInvoiceModels };

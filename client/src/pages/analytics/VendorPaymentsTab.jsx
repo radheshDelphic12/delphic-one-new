@@ -15,9 +15,10 @@ import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import { inr } from '../../components/finance/CalculationLockBar.jsx';
 import { amountText, dateText, vendorLineText } from '../../components/finance/financePrint.js';
-import { downloadFile } from '../../lib/downloadFile.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import { GenerateInvoiceButton } from './ClientInvoices.jsx';
 import { cleanParams } from './AttendanceSalaryTab.jsx';
+import { BillToFields, billToPayload } from './ClientInvoices.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -29,6 +30,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
   const { pushError, pushSuccess } = useAlerts();
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState({ invoice_number: '', invoice_date: today(), notes: '' });
+  const [billTo, setBillTo] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -41,6 +43,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
       .then(({ data }) => {
         if (!alive) return;
         setPreview(data.data);
+        setBillTo({ ...data.data.bill_to, save: true });
         setForm({ invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || today(), notes: '' });
       })
       .catch((err) => { if (alive) setError(apiErrorMessage(err, 'Nothing to invoice for this vendor')); });
@@ -54,7 +57,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null });
+      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...billToPayload(billTo) });
       pushSuccess?.(`Vendor invoice ${form.invoice_number} generated`);
       onGenerated?.();
       onClose();
@@ -90,6 +93,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
+          {billTo && <BillToFields value={billTo} onChange={setBillTo} partyLabel="vendor" />}
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Notes <span className="font-normal text-tertiary-400">(optional)</span>
             <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
@@ -225,6 +229,7 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
       pushError(apiErrorMessage(err, 'Failed to delete the vendor invoice'), 'Something went wrong');
     }
   }
+  const [selected, setSelected] = useState([]);
   const groups = useMemo(() => {
     const map = new Map();
     for (const r of data || []) {
@@ -254,7 +259,13 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
       ),
     },
   ];
-  return <DataTable columns={columns} rows={groups} loading={loading} emptyLabel={`No vendor invoices for ${periodLabel(period)} yet`} />;
+  function downloadSelected() {
+    const chosen = groups.filter((g) => selected.includes(g.id) && g.rows[0].generated);
+    if (!chosen.length) { pushError('Tick at least one generated vendor invoice', 'Nothing to download'); return; }
+    downloadFilePost('/billing/vendor-invoices/pdf', { groups: chosen.map((g) => ({ vendor_account_id: g.rows[0].vendor_account_id, period_month: g.rows[0].period_month, period_year: g.rows[0].period_year })) }, 'vendor-invoices.pdf')
+      .catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
+  }
+  return <DataTable columns={columns} rows={groups} loading={loading} emptyLabel={`No vendor invoices for ${periodLabel(period)} yet`} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />;
 }
 
 /**

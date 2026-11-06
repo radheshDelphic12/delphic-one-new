@@ -1,3 +1,4 @@
+const prisma = require('../../config/db');
 const { taxInvoicePdf, dateText } = require('../../lib/taxInvoicePdf');
 const { stateName } = require('../../lib/gstStates');
 const { D } = require('../cashPosition/cash.calc');
@@ -55,6 +56,20 @@ function invoiceModel(inv) {
   };
 }
 
-const invoicePdf = (inv) => taxInvoicePdf(invoiceModel(inv));
+// The default signature is the entity's current one (it is not part of the issue-day snapshot).
+async function modelWithSignature(inv) {
+  const model = invoiceModel(inv);
+  const entity = await prisma.legalEntity.findUnique({ where: { id: inv.legal_entity_id }, select: { signature_image: true, signatory_name: true } });
+  return { ...model, seller: { ...model.seller, signature_image: entity?.signature_image || null, signatory_name: entity?.signatory_name || null } };
+}
 
-module.exports = { invoicePdf, invoiceModel };
+const invoicePdf = async (inv) => taxInvoicePdf(await modelWithSignature(inv));
+
+/** Several invoices in one PDF, in the order given. */
+async function invoicesPdf(invs) {
+  const models = [];
+  for (const inv of invs) models.push(await modelWithSignature(inv));
+  return taxInvoicePdf(models);
+}
+
+module.exports = { invoicePdf, invoicesPdf, invoiceModel };

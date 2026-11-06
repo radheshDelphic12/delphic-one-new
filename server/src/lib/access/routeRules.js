@@ -177,7 +177,7 @@ const RULES = [
   [/^\/vendor-email(\/|$)/, 'email.send'], // one permission: Email > Send emails (no implicit allowance via vendors.onboard / accounts.update)
 
   // ---- Administration
-  [/^\/admin\/(deleted|audit)$/, 'deleted_records.view'],
+  [/^\/admin\/(deleted|audit|recycle-bin)$/, 'deleted_records.view'],
   [/^\/admin\/[^/]+\/[^/]+\/restore$/, 'deleted_records.restore'],
   [/^\/admin\/[^/]+\/[^/]+\/unlock$/, ['accounts.update', 'requirements.update']],
   [/^\/admin(\/|$)/, 'admin'],

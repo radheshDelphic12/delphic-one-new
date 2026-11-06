@@ -173,6 +173,12 @@ function taxSummary(doc, model, x, y, w, draw) {
   return h;
 }
 
+/** The entity's default signature (a PNG / JPEG data URL) as image bytes, or null. */
+function signatureBuffer(dataUrl) {
+  const m = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl || '');
+  return m ? Buffer.from(m[1], 'base64') : null;
+}
+
 function drawCopy(doc, model, copyLabel, cols) {
   const desc = cols.find((c) => c.key === 'desc');
   const leftW = Math.round(W * 0.56);
@@ -187,7 +193,8 @@ function drawCopy(doc, model, copyLabel, cols) {
   const remarksText = [model.remarks, model.notes].filter(Boolean).join('\n');
   const leftBottomH = (remarksText ? heightOf(doc, remarksText, leftW - 12) + 12 : 12) + heightOf(doc, model.declaration || DECLARATION, leftW - 12) + 24;
   const sumH = taxWords ? taxSummary(doc, model, 0, 0, 380, false) : 0;
-  const signH = 52;
+  const signature = signatureBuffer(model.seller?.signature_image);
+  const signH = signature ? 72 : 52;
   const midH = Math.max(bankH, leftBottomH);
   const bottomH = 34 + (taxWords ? sumH + 24 : 0) + midH + signH;
   const footerY = PAGE_H - M - 22;
@@ -369,7 +376,10 @@ function drawCopy(doc, model, copyLabel, cols) {
     setFont(doc, 'Helvetica-Bold', 8.5);
     doc.text(`for ${model.seller.name}`, M + leftW + 6, by + 4, { width: rightW - 12, align: 'right' });
     setFont(doc, 'Helvetica', 8);
-    doc.text('Authorised Signatory', M + leftW + 6, by + signH - 13, { width: rightW - 12, align: 'right' });
+    if (signature) {
+      try { doc.image(signature, M + leftW + 6, by + 17, { fit: [rightW - 12, signH - 34], align: 'right', valign: 'center' }); } catch (_err) { /* an unreadable image prints no signature */ }
+    }
+    doc.text(model.seller?.signatory_name ? `${model.seller.signatory_name} - Authorised Signatory` : 'Authorised Signatory', M + leftW + 6, by + signH - 13, { width: rightW - 12, align: 'right' });
   });
 
   setFont(doc, 'Helvetica', 8);

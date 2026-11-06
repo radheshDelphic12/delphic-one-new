@@ -21,6 +21,7 @@ const baseFields = {
   location_city: z.string().optional(),
   location_country: z.string().optional(),
   gst_or_tax_id: z.string().optional(),
+  billing_address: z.string().max(500).optional(),
 
   location: z.string().optional(),
   linkedin_url: z.string().optional(),

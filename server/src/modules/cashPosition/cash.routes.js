@@ -10,6 +10,7 @@ const { ALLOWED_EXT } = require('../documents/documents.validation');
 const prisma = require('../../config/db');
 const service = require('./cash.service');
 const reports = require('./cash.reports');
+const { z } = require('zod');
 const v = require('./cash.validation');
 const hooks = require('./cash.hooks');
 const invoices = require('../groupInvoices/invoices.service');
@@ -186,6 +187,17 @@ group.get('/invoices/:id/pdf', A(async (req, res) => {
   if (!inv) return fail(res, 404, 'Invoice not found');
   res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${inv.number.replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
   return res.send(await invoicePdf.invoicePdf(inv));
+}));
+group.post('/invoices/pdf', A(async (req, res) => {
+  const ids = z.object({ ids: z.array(z.string().uuid()).min(1).max(100) }).parse(req.body).ids;
+  const found = [];
+  for (const id of ids) {
+    const inv = await invoices.get(gids(req), id);
+    if (inv) found.push(inv);
+  }
+  if (!found.length) return fail(res, 404, 'No invoices found');
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="invoices.pdf"', 'Cache-Control': 'private, no-store' });
+  return res.send(await invoicePdf.invoicesPdf(found));
 }));
 group.patch('/invoices/:id', A(async (req, res) => result(res, await invoices.update(gids(req), req.user.id, req.params.id, iv.invoiceBody.omit({ legal_entity_id: true }).parse(req.body)))));
 group.patch('/invoices/:id/payments/:paymentId', A(async (req, res) => result(res, await invoices.updatePayment(gids(req), req.user.id, req.params.id, req.params.paymentId, iv.paymentBody.parse(req.body)))));

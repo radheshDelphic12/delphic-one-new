@@ -140,7 +140,7 @@ const TRAVEL_ERRORS = {
   bad_date: [422, 'Enter a valid date and time'],
   bad_meeting: [422, 'Not a valid calendar meeting'],
   meeting_not_found: [404, 'That meeting no longer exists'],
-  client_not_found: [422, 'Pick an active Delphic Global client'],
+  client_not_found: [422, 'Pick a client or vendor of that company'],
 };
 const travelResult = (res, r, key, status = 200) => {
   if (r.error) { const m = TRAVEL_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
@@ -157,6 +157,7 @@ router.patch('/group/travel/:id', asyncHandler(async (req, res) => travelResult(
 router.delete('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.remove(req.user.org_group_ids, req.user.id, req.params.id))));
 router.post('/group/travel/:id/meetings', asyncHandler(async (req, res) => travelResult(res, await groupTravel.linkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body?.meeting_key), 'trip', 201)));
 router.post('/group/travel/:id/meetings/new', asyncHandler(async (req, res) => travelResult(res, await groupTravel.createMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip', 201)));
+router.patch('/group/travel/:id/meetings/:key', asyncHandler(async (req, res) => travelResult(res, await groupTravel.updateMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.params.key, req.body), 'trip')));
 router.delete('/group/travel/:id/meetings/:key', asyncHandler(async (req, res) => travelResult(res, await groupTravel.unlinkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.params.key), 'trip')));
 
 router.get('/group/tasks', asyncHandler(async (req, res) => ok(res, await groupTasks.listMonth(req.user.org_group_ids, req.query))));

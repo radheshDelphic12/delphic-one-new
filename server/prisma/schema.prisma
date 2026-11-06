@@ -830,6 +830,27 @@ model PreviousMonthDue {
   @@map("previous_month_dues")
 }
 
+// Recycle bin (see config/recycleBin.js): a user-triggered delete of a record is archived here first, row and all, so an
+// admin delete is never final. A superadmin restores it (Settings > Deleted records), which puts the row back with its old id.
+model DeletedRecord {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String?   @db.Uuid
+  model       String // Prisma model name, e.g. TimesheetEntry
+  row_id      String?
+  label       String?
+  data        Json // the whole row as it was
+  reason      String?
+  deleted_by  String?   @db.Uuid
+  deleted_by_name String?
+  deleted_at  DateTime  @default(now())
+  restored_at DateTime?
+  restored_by String?   @db.Uuid
+
+  @@index([org_id, deleted_at])
+  @@index([model, row_id])
+  @@map("deleted_records")
+}
+
 // Group-wide change log (see config/changeCapture.js): who changed what, when, in which company, old -> new values.
 // Append-only. `context_id` ties a child record (an allocation, a finance entry, a vendor invoice...) to its project.
 model ChangeLog {
@@ -1962,18 +1983,18 @@ model OrgGroup {
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
-  orgs                  Org[]
-  memberships           OrgGroupMembership[]
-  group_billing_charges GroupBillingCharge[]
-  group_tasks           GroupTask[]
-  group_loans           GroupLoan[]
-  group_debt_setting    GroupDebtSetting?
-  group_company_days    GroupCompanyDay[]
-  group_travel          GroupTravel[]
-  group_deployments     GroupDeployment[]
+  orgs                     Org[]
+  memberships              OrgGroupMembership[]
+  group_billing_charges    GroupBillingCharge[]
+  group_tasks              GroupTask[]
+  group_loans              GroupLoan[]
+  group_debt_setting       GroupDebtSetting?
+  group_company_days       GroupCompanyDay[]
+  group_travel             GroupTravel[]
+  group_deployments        GroupDeployment[]
   group_deployment_setting GroupDeploymentSetting?
-  legal_entities        LegalEntity[]
-  group_companies       GroupCompany[]
+  legal_entities           LegalEntity[]
+  group_companies          GroupCompany[]
 
   @@map("org_groups")
 }
@@ -1995,15 +2016,15 @@ model OrgGroupMembership {
 }
 
 model Org {
-  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id               String    @db.Uuid
-  org_group                  OrgGroup  @relation(fields: [org_group_id], references: [id])
-  name                       String
-  slug                       String    @unique
-  logo_url                   String?
-  timezone                   String    @default("Asia/Kolkata")
-  default_currency           Currency  @default(INR)
-  status                     OrgStatus @default(active)
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id                 String    @db.Uuid
+  org_group                    OrgGroup  @relation(fields: [org_group_id], references: [id])
+  name                         String
+  slug                         String    @unique
+  logo_url                     String?
+  timezone                     String    @default("Asia/Kolkata")
+  default_currency             Currency  @default(INR)
+  status                       OrgStatus @default(active)
   // True only for Delphic Global. Gates the recruitment pipeline
   // (accounts/requirements/profiles/submissions/pipeline), Reports,
   // Analytics, and Financials — the strategic/recruitment layer that other
@@ -2011,33 +2032,33 @@ model Org {
   // Finance/Calendar) stays available to every org regardless of this flag.
   // Defaults false (fail-closed for new orgs); backfilled true for
   // slug='delphic' by this column's own migration.
-  is_master_workspace        Boolean   @default(false)
+  is_master_workspace          Boolean   @default(false)
   // Manually set by a group superadmin (Phase 3 group dashboard) — no
   // valuation methodology exists yet, so this is an admin-entered figure,
   // not a computed one. Null until set.
-  valuation                  Decimal?  @db.Decimal(16, 2)
+  valuation                    Decimal?  @db.Decimal(16, 2)
   // Dynamic valuation (Super Admin dashboard): 'manual' keeps the figure
   // above; 'revenue_multiple' / 'ebitda_multiple' compute one from live
   // financials x valuation_multiple (a default per method applies when null).
-  valuation_method           String    @default("manual")
-  valuation_multiple         Decimal?  @db.Decimal(8, 2)
+  valuation_method             String    @default("manual")
+  valuation_multiple           Decimal?  @db.Decimal(8, 2)
   // Feature switches for the vertical modules a company uses — 'trading',
   // 'leads', 'contracts', 'projects'. Core ERP is always on. Drives the
   // sidebar and is enforced by requireModule() on the vertical APIs.
-  enabled_modules            String[]  @default([])
+  enabled_modules              String[]  @default([])
   // People → Capacity: how many concurrent projects one resource can carry.
   // A team's capacity = its active members × this (or the team's override).
-  projects_per_resource      Decimal   @default(1.5) @db.Decimal(4, 2)
+  projects_per_resource        Decimal   @default(1.5) @db.Decimal(4, 2)
   // Timesheet / OT approval chain: Employee -> Manager (optional) -> Admin (mandatory).
   // timesheet_manager_approval = false skips the manager step (the admin decides directly).
   // timesheet_admin_approval = true means a manager approval is only a first step: the entry
   // is final (feeds pay and billing) only once an admin approves it.
-  timesheet_manager_approval Boolean   @default(true)
-  timesheet_admin_approval   Boolean   @default(true)
+  timesheet_manager_approval   Boolean   @default(true)
+  timesheet_admin_approval     Boolean   @default(true)
   // Financial lock stages run in order: timesheets locked -> calculations locked -> financials locked.
   // true = a calculation cannot be locked while the month's timesheets are open, and the month's
   // financials cannot be locked while calculations are still open.
-  enforce_lock_order         Boolean   @default(true)
+  enforce_lock_order           Boolean   @default(true)
   // Resignation requests (Settings > Account > Resign): on/off, the notice period suggested as the last working day,
   // and whether the reporting manager must record the retention call before HR can approve.
   resignation_enabled          Boolean   @default(true)
@@ -2049,8 +2070,8 @@ model Org {
   assessment_email_candidate   Boolean   @default(false)
   // Leave: extra addresses (HR, a shared inbox) mailed whenever someone applies for leave, besides the reporting manager.
   leave_mailing_list           String[]  @default([])
-  created_at                 DateTime  @default(now())
-  updated_at                 DateTime  @default(now()) @updatedAt
+  created_at                   DateTime  @default(now())
+  updated_at                   DateTime  @default(now()) @updatedAt
 
   lock_audits             LockAudit[]
   group_company           GroupCompany?
@@ -2398,7 +2419,7 @@ model OrgMembership {
   attendance_records                 AttendanceRecord[]
   attendance_regularization_requests AttendanceRegularizationRequest[]
   fnf_records                        FnfRecord[]
-  resignation_requests                ResignationRequest[]
+  resignation_requests               ResignationRequest[]
   increment_reminders                IncrementReminder[]
   previous_month_dues                PreviousMonthDue[]
   office_assignments                 EmployeeOfficeAssignment[]
@@ -2519,6 +2540,8 @@ model Account {
   location_city    String?
   location_country String?
   gst_or_tax_id    String?
+  // Billing address printed on invoices (client and vendor accounts); falls back to location when empty.
+  billing_address  String?
 
   location     String?
   linkedin_url String?
@@ -2530,22 +2553,22 @@ model Account {
 
   additional_contacts Json @default("[]")
 
-  source           String?
+  source                   String?
   // Premium account (yes/no), set by hand on the Accounts form. Accounts is a Delphic Global (master workspace) module.
-  is_premium       Boolean      @default(false)
+  is_premium               Boolean      @default(false)
   // Vendor type (vendor accounts only), picked on the Accounts form: assets | bgv. Empty = not set.
-  vendor_type      String?
-  meeting_mode     MeetingMode?
-  meeting_date     DateTime?
-  meeting_location String?
-  meeting_notes    String?
+  vendor_type              String?
+  meeting_mode             MeetingMode?
+  meeting_date             DateTime?
+  meeting_location         String?
+  meeting_notes            String?
   // Length of the account's meeting in minutes (calendar block); editable per meeting.
-  meeting_duration_minutes Int @default(60)
+  meeting_duration_minutes Int          @default(60)
 
-  vendor_specializations String[]
-  vendor_rate_range      Json?
-  vendor_payment_terms   String?
-  vendor_agreement_url   String?
+  vendor_specializations     String[]
+  vendor_rate_range          Json?
+  vendor_payment_terms       String?
+  vendor_agreement_url       String?
   // Where the vendor is paid. The account number is shown masked everywhere; the full number is read through the bank-details route by
   // people who may edit the account, and it never goes into the audit log.
   vendor_bank_holder         String?
@@ -2608,6 +2631,8 @@ model Account {
   // their own resources, dates, rates, billing and P&L; this code (and the
   // row's uuid) is what tells them apart.
   project_code            String?
+  // Free text: the resource who is the face of this project to the client; printed on its client invoices.
+  face_resource           String?
   // True for a project/contract created through Add Project. Projects live in
   // this table next to client companies (both type 'client'), so this flag is
   // what keeps them apart: the Accounts catalogue never lists, edits or deletes
@@ -2671,7 +2696,7 @@ model Account {
   org_id String? @db.Uuid
   org    Org?    @relation(fields: [org_id], references: [id])
 
-  requirements               Requirement[]             @relation("RequirementClient")
+  requirements               Requirement[]                   @relation("RequirementClient")
   vendor_profiles            Profile[]                       @relation("ProfileVendorAccount")
   meeting_attendees          AccountMeetingAttendee[]
   client_meetings            ClientMeeting[]
@@ -2726,8 +2751,9 @@ enum ClientMeetingStatus {
 model ClientMeeting {
   id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id           String?             @db.Uuid
-  account_id       String              @db.Uuid
-  account          Account             @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  // Optional: a trip meeting scheduled from the Group Dashboard may not be tied to a client or vendor.
+  account_id       String?             @db.Uuid
+  account          Account?            @relation(fields: [account_id], references: [id], onDelete: Cascade)
   title            String
   mode             MeetingMode         @default(online)
   scheduled_at     DateTime
@@ -4171,36 +4197,36 @@ model ZxLeadActivity {
 // progress_pct is the manual figure, used only while the project has no milestones
 // (otherwise progress is the weighted average of milestone percent_done).
 model ZxProject {
-  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String          @db.Uuid
-  org             Org             @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String             @db.Uuid
+  org             Org                @relation(fields: [org_id], references: [id], onDelete: Cascade)
   code            String
   name            String
-  kind            String          @default("client")
-  party_id        String?         @db.Uuid
-  party           ZxParty?        @relation(fields: [party_id], references: [id], onDelete: SetNull)
-  lead_id         String?         @db.Uuid
+  kind            String             @default("client")
+  party_id        String?            @db.Uuid
+  party           ZxParty?           @relation(fields: [party_id], references: [id], onDelete: SetNull)
+  lead_id         String?            @db.Uuid
   location        String?
-  status          String          @default("planned") // planned | active | on_hold | completed | cancelled | closed
-  start_date      DateTime?       @db.Date
-  end_date        DateTime?       @db.Date
-  contract_value  Decimal?        @db.Decimal(16, 2)
-  budget          Decimal?        @db.Decimal(16, 2)
-  progress_pct    Int             @default(0)
-  manager_id      String?         @db.Uuid
+  status          String             @default("planned") // planned | active | on_hold | completed | cancelled | closed
+  start_date      DateTime?          @db.Date
+  end_date        DateTime?          @db.Date
+  contract_value  Decimal?           @db.Decimal(16, 2)
+  budget          Decimal?           @db.Decimal(16, 2)
+  progress_pct    Int                @default(0)
+  manager_id      String?            @db.Uuid
   notes           String?
   service_type    String?
-  actual_end      DateTime?       @db.Date
+  actual_end      DateTime?          @db.Date
   agreement_ref   String?
-  property_id     String?         @db.Uuid
-  expected_profit Decimal?        @db.Decimal(16, 2)
-  assignee_id     String?         @db.Uuid
-  contractor_id   String?         @db.Uuid
+  property_id     String?            @db.Uuid
+  expected_profit Decimal?           @db.Decimal(16, 2)
+  assignee_id     String?            @db.Uuid
+  contractor_id   String?            @db.Uuid
   description     String?
   details         Json?
-  created_by      String?         @db.Uuid
-  created_at      DateTime        @default(now())
-  updated_at      DateTime        @default(now()) @updatedAt
+  created_by      String?            @db.Uuid
+  created_at      DateTime           @default(now())
+  updated_at      DateTime           @default(now()) @updatedAt
   deleted_at      DateTime?
   milestones      ZxMilestone[]
   work_orders     ZxWorkOrder[]
@@ -7769,23 +7795,26 @@ model WebsiteSubmission {
 // is the sum of its wallets. Legal entities and workspaces are separate records (the workspace link is optional).
 // ---------------------------------------------------------------------------------------------------------------------
 model LegalEntity {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id   String   @db.Uuid
-  org_group      OrgGroup @relation(fields: [org_group_id], references: [id])
-  workspace_id   String?  @db.Uuid // the company workspace this entity is, if it has one
-  workspace      Org?     @relation(fields: [workspace_id], references: [id], onDelete: SetNull)
-  name           String
-  gstin          String?
-  pan            String?
-  address        String?
-  invoice_prefix String?
-  state_code     String? // 2-digit GST state code of the registered address (place of supply rule)
-  lut_note       String? // printed on USD export invoices
-  logo_url       String?
-  active         Boolean  @default(true)
-  created_by     String?  @db.Uuid
-  created_at     DateTime @default(now())
-  updated_at     DateTime @default(now()) @updatedAt
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id    String   @db.Uuid
+  org_group       OrgGroup @relation(fields: [org_group_id], references: [id])
+  workspace_id    String?  @db.Uuid // the company workspace this entity is, if it has one
+  workspace       Org?     @relation(fields: [workspace_id], references: [id], onDelete: SetNull)
+  name            String
+  gstin           String?
+  pan             String?
+  address         String?
+  invoice_prefix  String?
+  state_code      String? // 2-digit GST state code of the registered address (place of supply rule)
+  lut_note        String? // printed on USD export invoices
+  logo_url        String?
+  // Default signature printed above 'Authorised Signatory' on every invoice of this entity (a small PNG / JPEG data URL) and the signatory's name.
+  signature_image String?
+  signatory_name  String?
+  active          Boolean  @default(true)
+  created_by      String?  @db.Uuid
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
 
   bank_accounts    BankAccount[]
   wallets          Wallet[]
@@ -8303,17 +8332,17 @@ model AssessmentQuestion {
 }
 
 model AssessmentTest {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name             String
-  description      String?
-  pass_percentage  Int      @default(60)
-  duration_minutes Int?
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                    String
+  description             String?
+  pass_percentage         Int      @default(60)
+  duration_minutes        Int?
   // How many questions each candidate gets, picked at random from the test's questions and shuffled. null = every question, in order.
   questions_per_candidate Int?
-  is_active        Boolean  @default(true)
-  created_by       String?  @db.Uuid
-  created_at       DateTime @default(now())
-  updated_at       DateTime @default(now()) @updatedAt
+  is_active               Boolean  @default(true)
+  created_by              String?  @db.Uuid
+  created_at              DateTime @default(now())
+  updated_at              DateTime @default(now()) @updatedAt
 
   questions       AssessmentTestQuestion[]
   attempts        AssessmentAttempt[]
@@ -8336,31 +8365,31 @@ model AssessmentTestQuestion {
 }
 
 model AssessmentAttempt {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  token           String         @unique
-  test_id         String         @db.Uuid
-  test            AssessmentTest @relation(fields: [test_id], references: [id])
-  submission_id   String?        @db.Uuid
-  candidate_name  String
-  candidate_email String?
-  status          String         @default("invited") // invited | started | submitted
-  answers         Json? // { questionId: optionIndex }
-  question_ids    Json? // the questions this candidate was given, in the order shown (null = all of the test's questions)
-  score_percent   Decimal?       @db.Decimal(5, 2)
-  passed          Boolean?
-  pass_percentage Int // the test's pass mark on the day it was sent
-  invited_by      String?        @db.Uuid
-  invited_at      DateTime       @default(now())
-  expires_at      DateTime
-  started_at      DateTime?
-  submitted_at    DateTime?
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token             String         @unique
+  test_id           String         @db.Uuid
+  test              AssessmentTest @relation(fields: [test_id], references: [id])
+  submission_id     String?        @db.Uuid
+  candidate_name    String
+  candidate_email   String?
+  status            String         @default("invited") // invited | started | submitted
+  answers           Json? // { questionId: optionIndex }
+  question_ids      Json? // the questions this candidate was given, in the order shown (null = all of the test's questions)
+  score_percent     Decimal?       @db.Decimal(5, 2)
+  passed            Boolean?
+  pass_percentage   Int // the test's pass mark on the day it was sent
+  invited_by        String?        @db.Uuid
+  invited_at        DateTime       @default(now())
+  expires_at        DateTime
+  started_at        DateTime?
+  submitted_at      DateTime?
   // The screening round of the candidate's interview plan this test belongs to: one live attempt per submission + round.
-  template_round_id String?   @db.Uuid
+  template_round_id String?        @db.Uuid
   // A newer link replaced this unopened one; kept for the record, no longer live.
   superseded_at     DateTime?
   // Admin deleted it (audit_logs holds who / when / why); it no longer counts anywhere.
   deleted_at        DateTime?
-  deleted_by        String?   @db.Uuid
+  deleted_by        String?        @db.Uuid
 
   @@index([submission_id])
   @@index([submission_id, template_round_id])
@@ -8372,39 +8401,39 @@ model AssessmentAttempt {
 // A candidate opens a public link (no login), is interviewed by the AI one question at a time and is scored on a rubric the
 // company sets. The AI recommends; a person decides (override with a reason). Plain uuids for people / org on purpose.
 model AiInterview {
-  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  token           String  @unique
-  submission_id   String  @db.Uuid
-  org_id          String? @db.Uuid
-  template_round_id String? @db.Uuid
-  candidate_name  String
-  candidate_email String?
-  role_title      String?
-  status          String  @default("invited") // invited | started | completed | pending_review
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token                String    @unique
+  submission_id        String    @db.Uuid
+  org_id               String?   @db.Uuid
+  template_round_id    String?   @db.Uuid
+  candidate_name       String
+  candidate_email      String?
+  role_title           String?
+  status               String    @default("invited") // invited | started | completed | pending_review
   // [{ id, text }] the main questions generated when the interview starts; transcript is the running conversation.
-  questions       Json?
-  transcript      Json    @default("[]") // [{ role: 'ai' | 'candidate', kind: 'question' | 'follow_up' | 'answer', text, question_index, at }]
-  followups_used  Int     @default(0)
+  questions            Json?
+  transcript           Json      @default("[]") // [{ role: 'ai' | 'candidate', kind: 'question' | 'follow_up' | 'answer', text, question_index, at }]
+  followups_used       Int       @default(0)
   // Rubric result: { parameters: [{ key, label, weight, score, summary, evidence }], summary, strengths, red_flags }
-  scores          Json?
-  score_percent   Decimal? @db.Decimal(5, 2)
-  outcome         String? // pass | borderline | below_pass | pending_review
-  pass_percentage Int
-  consented_at    DateTime?
-  override_outcome String? // pass | borderline | below_pass: the person's decision, wins over outcome
-  override_reason String?
-  override_by     String? @db.Uuid
-  override_at     DateTime?
-  input_tokens    Int     @default(0)
-  output_tokens   Int     @default(0)
-  invited_by      String? @db.Uuid
-  invited_at      DateTime @default(now())
-  expires_at      DateTime
-  started_at      DateTime?
-  completed_at    DateTime?
-  superseded_at   DateTime?
-  deleted_at      DateTime?
-  deleted_by      String? @db.Uuid
+  scores               Json?
+  score_percent        Decimal?  @db.Decimal(5, 2)
+  outcome              String? // pass | borderline | below_pass | pending_review
+  pass_percentage      Int
+  consented_at         DateTime?
+  override_outcome     String? // pass | borderline | below_pass: the person's decision, wins over outcome
+  override_reason      String?
+  override_by          String?   @db.Uuid
+  override_at          DateTime?
+  input_tokens         Int       @default(0)
+  output_tokens        Int       @default(0)
+  invited_by           String?   @db.Uuid
+  invited_at           DateTime  @default(now())
+  expires_at           DateTime
+  started_at           DateTime?
+  completed_at         DateTime?
+  superseded_at        DateTime?
+  deleted_at           DateTime?
+  deleted_by           String?   @db.Uuid
   // Optional audio + video recording of the interview (only when the company turns it on AND the candidate agrees).
   // The file is deleted automatically once recording_expires_at has passed; recording_deleted_at records that.
   recording_on         Boolean   @default(false)
@@ -8430,43 +8459,43 @@ model AiInterview {
 
 // Admin-editable AI interview settings, one row per org (defaults apply until a row exists).
 model AiInterviewSettings {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id             String   @unique @db.Uuid
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                   String   @unique @db.Uuid
   // Off until an admin turns it on: the AI interview is an optional, separate link and never part of the existing flow.
-  is_enabled         Boolean  @default(false)
-  question_count     Int      @default(12)
-  max_followups      Int      @default(3)
-  pass_percentage    Int      @default(60)
-  borderline_margin  Int      @default(10)
-  weight_knowledge   Int      @default(30)
-  weight_communication Int    @default(20)
-  weight_depth       Int      @default(15)
-  aptitude_enabled   Boolean  @default(true)
-  aptitude_question_count Int @default(12)
-  weight_aptitude    Int      @default(10)
-  recording_enabled  Boolean  @default(false)
-  recording_retention_days Int @default(2)
-  extra_instructions String?
-  auto_reject        Boolean  @default(false)
-  link_valid_days    Int      @default(7)
+  is_enabled               Boolean  @default(false)
+  question_count           Int      @default(12)
+  max_followups            Int      @default(3)
+  pass_percentage          Int      @default(60)
+  borderline_margin        Int      @default(10)
+  weight_knowledge         Int      @default(30)
+  weight_communication     Int      @default(20)
+  weight_depth             Int      @default(15)
+  aptitude_enabled         Boolean  @default(true)
+  aptitude_question_count  Int      @default(12)
+  weight_aptitude          Int      @default(10)
+  recording_enabled        Boolean  @default(false)
+  recording_retention_days Int      @default(2)
+  extra_instructions       String?
+  auto_reject              Boolean  @default(false)
+  link_valid_days          Int      @default(7)
   // Time allowed per question (seconds, 0 = no limit) and how many tab switches end the interview (0 = never ends it, only logs).
-  answer_time_seconds Int     @default(180)
-  max_tab_switches   Int      @default(3)
+  answer_time_seconds      Int      @default(180)
+  max_tab_switches         Int      @default(3)
   // More rubric parameters, each with its own weight, and the reference sites the interviewer may read (through the AI web search) to ground its questions.
-  weight_problem_solving Int  @default(15)
-  weight_experience_fit  Int  @default(10)
-  use_reference_sites    Boolean @default(true)
-  reference_sites        String  @default("w3schools.com,javatpoint.com")
+  weight_problem_solving   Int      @default(15)
+  weight_experience_fit    Int      @default(10)
+  use_reference_sites      Boolean  @default(true)
+  reference_sites          String   @default("w3schools.com,javatpoint.com")
   // People (besides admins) who can open every candidate's recording, whoever sent the link. Everyone else sees only the ones they sent.
-  recording_viewer_ids   String[] @default([]) @db.Uuid
+  recording_viewer_ids     String[] @default([]) @db.Uuid
   // How hard the questions are (easy | medium | hard) and how strictly answers are marked (lenient | balanced | strict). Admin-editable;
   // easy + lenient by default so an average competent candidate reaches the pass mark.
-  difficulty             String   @default("easy")
-  marking                String   @default("lenient")
+  difficulty               String   @default("easy")
+  marking                  String   @default("lenient")
   // The candidate must stay in full screen (a split screen next to another window is then impossible) and use a single display; leaving it is counted like leaving the page.
-  require_fullscreen     Boolean  @default(true)
-  updated_by         String?  @db.Uuid
-  updated_at         DateTime @default(now()) @updatedAt
+  require_fullscreen       Boolean  @default(true)
+  updated_by               String?  @db.Uuid
+  updated_at               DateTime @default(now()) @updatedAt
 
   @@map("ai_interview_settings")
 }
@@ -9041,7 +9070,7 @@ model GroupCompany {
   created_at      DateTime  @default(now())
   updated_at      DateTime  @default(now()) @updatedAt
 
-  holders GroupCompanyStake[] @relation("StakeHeld")
+  holders  GroupCompanyStake[] @relation("StakeHeld")
   holdings GroupCompanyStake[] @relation("StakeHolder")
 
   @@unique([org_group_id, name])
@@ -9052,18 +9081,18 @@ model GroupCompany {
 // Who owns how much of a business: several holders per company. holder_kind: group (the holding company itself), company (another
 // business of the register) or external (a person / outside company named in holder_name). The percentages of one company add up to at most 100.
 model GroupCompanyStake {
-  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id      String       @db.Uuid
-  held_company_id   String       @db.Uuid
-  held_company      GroupCompany @relation("StakeHeld", fields: [held_company_id], references: [id], onDelete: Cascade)
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id      String        @db.Uuid
+  held_company_id   String        @db.Uuid
+  held_company      GroupCompany  @relation("StakeHeld", fields: [held_company_id], references: [id], onDelete: Cascade)
   holder_kind       String
-  holder_company_id String?      @db.Uuid
+  holder_company_id String?       @db.Uuid
   holder_company    GroupCompany? @relation("StakeHolder", fields: [holder_company_id], references: [id], onDelete: Cascade)
   holder_name       String?
-  pct               Decimal      @db.Decimal(7, 3)
+  pct               Decimal       @db.Decimal(7, 3)
   notes             String?
-  created_at        DateTime     @default(now())
-  updated_at        DateTime     @default(now()) @updatedAt
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @default(now()) @updatedAt
 
   @@index([held_company_id])
   @@index([holder_company_id])
@@ -9074,24 +9103,24 @@ model GroupCompanyStake {
 // Daily-wage earners of Zephyr: site labour paid per day worked, tracked by project. Kept apart from ZxPerson / salary slips on purpose
 // (no monthly slip, no login). daily_rate is the default wage; each attendance row snapshots the rate it was marked with.
 model ZxWageWorker {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  org         Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  name        String
-  phone       String?
-  trade       String?
-  daily_rate  Decimal   @db.Decimal(12, 2)
-  joined_on   DateTime? @db.Date
-  active      Boolean   @default(true)
-  notes       String?
-  created_by  String?   @db.Uuid
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @default(now()) @updatedAt
-  deleted_at  DateTime?
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  org        Org       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  name       String
+  phone      String?
+  trade      String?
+  daily_rate Decimal   @db.Decimal(12, 2)
+  joined_on  DateTime? @db.Date
+  active     Boolean   @default(true)
+  notes      String?
+  created_by String?   @db.Uuid
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
 
-  attendance  ZxWageAttendance[]
-  advances    ZxWageAdvance[]
-  payouts     ZxWagePayout[]
+  attendance ZxWageAttendance[]
+  advances   ZxWageAdvance[]
+  payouts    ZxWagePayout[]
 
   @@index([org_id, active])
   @@map("zx_wage_workers")

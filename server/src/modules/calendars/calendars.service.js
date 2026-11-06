@@ -632,7 +632,7 @@ async function listProjects(orgId) {
   return rows.map((row) => serializeProject(row, fallback));
 }
 
-async function createProject(orgId, ownerId, { name, client_account_id, service_category, calendar_id }) {
+async function createProject(orgId, ownerId, { name, face_resource, client_account_id, service_category, calendar_id }) {
   if (!CATEGORY_SCOPE.includes(service_category)) return { error: 'category_not_available' };
 
   let client = null;
@@ -658,6 +658,7 @@ async function createProject(orgId, ownerId, { name, client_account_id, service_
         type: 'client',
         stage: 'active',
         name,
+        face_resource: face_resource || null,
         project_code: await nextProjectCode(orgId, tx),
         // A project, not a catalogue client (kept out of Accounts).
         is_project: true,

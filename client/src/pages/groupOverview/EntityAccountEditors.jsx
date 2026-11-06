@@ -18,12 +18,31 @@ function useSave(onSaved, onClose) {
   return { busy, save };
 }
 
+/** Shrinks a signature picture to at most 360 x 120 px (PNG) so it stays small enough to store and print. */
+function shrinkSignature(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 360 / img.width, 120 / img.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable image')); };
+    img.src = url;
+  });
+}
+
 /** A legal entity's registration details: these are what its invoices print and number from. */
 export function EntityEditDrawer({ entity, workspaces, onClose, onSaved }) {
   const [v, setV] = useState({});
   const { busy, save } = useSave(onSaved, onClose);
   useEffect(() => {
-    if (entity) setV({ name: entity.name, workspace_id: entity.workspace_id || '', gstin: entity.gstin || '', pan: entity.pan || '', address: entity.address || '', invoice_prefix: entity.invoice_prefix || '', state_code: entity.state_code || '', lut_note: entity.lut_note || '', active: entity.active });
+    if (entity) setV({ name: entity.name, workspace_id: entity.workspace_id || '', gstin: entity.gstin || '', pan: entity.pan || '', address: entity.address || '', invoice_prefix: entity.invoice_prefix || '', state_code: entity.state_code || '', lut_note: entity.lut_note || '', signature_image: entity.signature_image || '', signatory_name: entity.signatory_name || '', active: entity.active });
   }, [entity]);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
   return (
@@ -40,6 +59,15 @@ export function EntityEditDrawer({ entity, workspaces, onClose, onSaved }) {
           </div>
           <label className={labelCls}>Address (printed on invoices)<textarea rows={3} className={inputCls} maxLength={500} value={v.address || ''} onChange={set('address')} /></label>
           <label className={labelCls}>LUT note (printed on USD export invoices)<textarea rows={2} className={inputCls} maxLength={500} value={v.lut_note || ''} onChange={set('lut_note')} /></label>
+          <div className="rounded-xl border border-tertiary-100 p-3">
+            <p className="text-xs font-semibold text-tertiary-700">Default signature (printed on every invoice of this entity)</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {v.signature_image ? <img src={v.signature_image} alt="Signature" className="h-12 rounded border border-tertiary-100 bg-white p-1" /> : <span className="text-xs text-tertiary-400">No signature set</span>}
+              <input type="file" accept="image/png,image/jpeg" className="text-xs" onChange={(e) => { const file = e.target.files?.[0]; if (file) shrinkSignature(file).then((url) => setV((c) => ({ ...c, signature_image: url }))).catch(() => window.alert('That image could not be read. Use a PNG or JPEG.')); e.target.value = ''; }} />
+              {v.signature_image && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setV((c) => ({ ...c, signature_image: '' }))}>Remove</button>}
+            </div>
+            <label className={`${labelCls} mt-2 block`}>Signatory name (optional, printed with Authorised Signatory)<input className={inputCls} maxLength={100} value={v.signatory_name || ''} onChange={set('signatory_name')} /></label>
+          </div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(v.active)} onChange={(e) => setV((c) => ({ ...c, active: e.target.checked }))} />Active</label>
           <p className="text-xs text-tertiary-500">The prefix starts this entity&apos;s own invoice numbers (e.g. DG/2026-27/0001). Invoices already issued keep the details they were issued with.</p>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(v.active)} onChange={(e) => setV((c) => ({ ...c, active: e.target.checked }))} />Active (an account can only be switched off when every wallet in it is at zero)</label>

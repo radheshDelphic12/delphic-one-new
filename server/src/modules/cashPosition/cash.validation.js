@@ -22,6 +22,9 @@ const entityBody = z.object({
   state_code: z.preprocess((x) => (typeof x === 'string' && x.trim() === '' ? null : x), z.string().trim().regex(/^\d{2}$/, 'Use the 2-digit GST state code').nullable().optional()),
   lut_note: text(500),
   logo_url: text(500),
+  // A small PNG / JPEG data URL (the form shrinks it); empty clears it.
+  signature_image: z.preprocess((x) => (typeof x === 'string' && x.trim() === '' ? null : x), z.string().max(90000).regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/, 'The signature must be a PNG or JPEG image').nullable().optional()),
+  signatory_name: text(100),
   active: z.boolean().optional(),
 });
 
