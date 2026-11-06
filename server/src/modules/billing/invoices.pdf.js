@@ -82,8 +82,10 @@ function clientLines(inv) {
   }
   if (d.billing_type === 'monthly' && d.contract_working_days) {
     const base = d.base_amount ?? inv.amount;
-    const calc = `Base: ${money(d.rate, cur)} x ${d.contract_working_days} / ${d.working_days} working days`;
-    return [{ description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(d.contract_working_days), unit: 'days', rate: num2(D(base).dividedBy(d.contract_working_days)), amount: num2(base) }, ...overtime];
+    // On "approved hours" billing only the days that were logged and approved are billed, so those are the days printed
+    const days = d.billing_basis === 'approved_hours' && Number(d.payable_days) > 0 ? Number(d.payable_days) : d.contract_working_days;
+    const calc = `Base: ${money(d.rate, cur)} x ${days} / ${d.working_days} working days`;
+    return [{ description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(days), unit: 'days', rate: num2(D(base).dividedBy(days)), amount: num2(base) }, ...overtime];
   }
   const kind = d.billing_type === 'one_time' ? 'Fixed-bid project services' : 'Services';
   const base = d.base_amount ?? inv.amount;

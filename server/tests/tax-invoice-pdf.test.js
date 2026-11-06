@@ -123,6 +123,17 @@ describe('client and vendor invoices', () => {
     expect(m.total).toBe(total.toFixed(2));
   });
 
+  test('on approved-hours billing the invoice prints the days that were approved, not the contract days', async () => {
+    // 155000 a month, 20 working days: 3 approved days = 23250, so 3 days at 7750 a day (not "8 days" of the contract period)
+    const approved = { ...client, amount: 23250, total_amount: 23250, details: { ...client.details, rate: 155000, contract_working_days: 8, working_days: 20, payable_days: 3, billing_basis: 'approved_hours', base_amount: 23250, charges: [] } };
+    const m = await clientInvoiceModel('org1', approved);
+    expect(m.lines[0]).toMatchObject({ qty: '3', unit: 'days', rate: '7750.00', amount: '23250.00' });
+    expect(m.lines[0].details.join(' ')).toContain('x 3 / 20 working days');
+    // a contract-basis invoice keeps the contract days
+    const contract = await clientInvoiceModel('org1', { ...approved, details: { ...approved.details, billing_basis: 'contract', base_amount: 62000 }, amount: 62000, total_amount: 62000 });
+    expect(contract.lines[0]).toMatchObject({ qty: '8', rate: '7750.00' });
+  });
+
   test('overtime is its own row and an unexplained difference is shown as an adjustment, so the rows always add up', async () => {
     const m = await clientInvoiceModel('org1', { ...client, status: 'sent', amount: 105000, total_amount: 100000, details: { ...client.details, base_amount: 100000, overtime_billed: true, overtime_hours: 5, overtime_multiplier: 1.5, overtime_amount: 5000, charges: [] } });
     expect(m.lines.map((l) => l.description)).toEqual(['Manpower Services', 'Overtime']);
