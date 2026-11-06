@@ -25,7 +25,7 @@ async function calendar(orgId, user, accountId, { year, month }) {
     prisma.timesheetEntry.findMany({
       where: { org_id: orgId, account_id: accountId, date: { gte: from, lte: to }, status: { not: 'rejected' } },
       orderBy: [{ date: 'asc' }, { created_at: 'asc' }],
-      select: { id: true, org_membership_id: true, date: true, hours: true, overtime_hours: true, status: true, module_name: true, notes: true, org_membership: { select: { person: { select: { name: true } } } } },
+      select: { id: true, org_membership_id: true, date: true, hours: true, overtime_hours: true, billable: true, status: true, module_name: true, notes: true, org_membership: { select: { person: { select: { name: true } } } } },
     }),
     cal ? prisma.calendarHoliday.findMany({ where: { calendar_id: cal.id, date: { gte: from, lte: to } }, select: { date: true, label: true, is_working_day: true } }) : [],
     prisma.projectMemberAssignment.findMany({
@@ -62,7 +62,7 @@ async function calendar(orgId, user, accountId, { year, month }) {
       day_type: holiday && !holiday.is_working_day ? 'holiday' : off ? 'weekend' : 'working',
       day_label: holiday?.label || null,
       hours: round2(hours),
-      entries: dayEntries.map((e) => ({ id: e.id, person: e.org_membership?.person?.name || 'Unknown', hours: Number(e.hours), overtime_hours: Number(e.overtime_hours || 0), status: e.status, task: e.module_name, notes: e.notes })),
+      entries: dayEntries.map((e) => ({ id: e.id, org_membership_id: e.org_membership_id, billable: e.billable, person: e.org_membership?.person?.name || 'Unknown', hours: Number(e.hours), overtime_hours: Number(e.overtime_hours || 0), status: e.status, task: e.module_name, notes: e.notes })),
       on_leave: leaves
         .filter((l) => l.from_date <= d && l.to_date >= d)
         .map((l) => ({ person: names.get(l.org_membership_id) || 'Unknown', leave: l.leave_type?.name || 'Leave', is_half_day: l.is_half_day })),

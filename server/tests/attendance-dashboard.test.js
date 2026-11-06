@@ -197,7 +197,8 @@ describe('attendance dashboard', () => {
     expect(cal.status).toBe(200);
     const d4 = cal.body.data.days.find((d) => d.date === '2026-11-04');
     expect(d4.hours).toBe(6);
-    expect(d4.entries[0]).toMatchObject({ person: 'Dev', task: 'Code Review', notes: 'PR 12' });
+    expect(d4.entries[0]).toMatchObject({ person: 'Dev', task: 'Code Review', notes: 'PR 12', org_membership_id: dev.membership.id });
+    expect(typeof d4.entries[0].billable).toBe('boolean'); // the calendar can open an entry for an admin correction
     expect(cal.body.data.days.find((d) => d.date === '2026-11-09').on_leave[0]).toMatchObject({ person: 'Dev', leave: 'Sick Leave' });
     expect(cal.body.data.total_hours).toBe(6);
 
