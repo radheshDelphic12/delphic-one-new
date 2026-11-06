@@ -339,6 +339,8 @@ async function generateClientInvoice(orgId, user, { account_id, period_month, pe
       details: src.details,
       source: src.source,
       ...(printedBillTo ? { bill_to: printedBillTo } : {}),
+      // the descriptions an admin added under the entries survive a refresh of the draft
+      ...(existing?.line_items?.line_notes ? { line_notes: existing.line_items.line_notes } : {}),
       // Kept for invoices read by older screens.
       billing_type: src.details.billing_type,
       rate: src.details.rate,
@@ -379,6 +381,9 @@ function serializeClientInvoice(row) {
     details: items?.details || null,
     // What the client pays: the final approved amount plus / minus the contract's charges.
     total_amount: items?.details?.total_amount !== undefined ? items.details.total_amount : Number(row.amount),
+    // the entries printed on the invoice, so a description can be added under each
+    print_rows: items && project ? require('./invoices.pdf').invoiceRows({ ...row, project, details: items.details || {}, line_items: items }) : [],
+    line_notes: items?.line_notes || {},
   };
 }
 
@@ -387,7 +392,7 @@ function serializeClientInvoice(row) {
 // only); `amount` overrides the calculated figure and is recorded in
 // line_items.manual_override. A sent / paid invoice can still be corrected, but
 // only with a `reason`, and every edit is audited with before / after.
-async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason, bill_to, save_to_account }) {
+async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, invoice_date, notes, currency, amount, reason, bill_to, save_to_account, line_notes }) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
   const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
@@ -446,6 +451,11 @@ async function updateClientInvoice(orgId, user, invoiceId, { invoice_number, inv
     const customer = await customerAccount(orgId, invoice.client_account_id);
     const printed = await resolveBillTo(orgId, user, customer?.id, bill_to, save_to_account);
     data.line_items = { ...(data.line_items || items), bill_to: printed };
+  }
+  if (line_notes !== undefined) {
+    // the descriptions printed under each entry; an empty one removes it
+    const cleaned = Object.fromEntries(Object.entries(line_notes).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v));
+    data.line_items = { ...(data.line_items || items), line_notes: cleaned };
   }
   const updated = await prisma.clientInvoice.update({ where: { id: invoice.id }, data, include: { client_account: CLIENT_INVOICE_ACCOUNT } });
   await prisma.auditLog.create({

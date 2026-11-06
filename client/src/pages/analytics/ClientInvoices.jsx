@@ -118,6 +118,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       invoice_number: editing?.invoice_number || '',
       invoice_date: editing?.invoice_date || today(),
       notes: editing?.notes || '',
+      lineNotes: { ...(editing?.line_notes || {}) },
       currency: editing?.currency || '',
       amount: '',
       fixedAmount: '',
@@ -162,6 +163,8 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       if (editing) {
         if (form.amount !== '' && Number(form.amount) !== Number(editing.amount)) fields.amount = Number(form.amount);
         if (form.reason.trim()) fields.reason = form.reason.trim();
+        // descriptions under each entry (an emptied box removes that description)
+        fields.line_notes = Object.fromEntries((editing.print_rows || []).map((r) => [r.key, (form.lineNotes[r.key] || '').trim()]));
       }
       const { data } = editing
         ? await apiClient.patch(`/billing/invoices/${editing.id}`, fields)
@@ -246,6 +249,17 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
             <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
         </div>
+        {editing && (editing.print_rows || []).length > 0 && (
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3" data-testid="invoice-line-notes">
+            <legend className="px-1 text-xs font-semibold text-tertiary-700">Description for each entry <span className="font-normal text-tertiary-400">(optional, printed under that entry on the invoice)</span></legend>
+            {editing.print_rows.map((r) => (
+              <label key={r.key} className="block text-xs font-medium text-tertiary-600">
+                <span className="block truncate" title={r.title}>{r.title}</span>
+                <textarea rows={2} maxLength={1000} value={form.lineNotes[r.key] || ''} onChange={(e) => setForm((f) => ({ ...f, lineNotes: { ...f.lineNotes, [r.key]: e.target.value } }))} placeholder="Add a description for this entry" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+              </label>
+            ))}
+          </fieldset>
+        )}
         {previewError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{previewError}</p>}
         {locked && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Invoice {preview.existing.invoice_number} for this project and month is already {preview.existing.status} — it can no longer be changed.</p>}
         {consolidatedCreate && <p className="text-xs text-tertiary-500">Each contract is worked out from its own billing (locked version where it is locked) and printed as its own line; the total is their sum. Contracts that bill in different currencies need one invoice currency chosen above.</p>}

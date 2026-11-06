@@ -349,6 +349,16 @@ describe('Phase 5 — client invoices', () => {
       expect(list.body.data.map((i) => i.id)).toEqual([res.body.data.id]);
     }
 
+    // a description can be added under each entry; it is saved by entry, listed with the entries and can be removed again
+    const listed = await authed(request(app).get(`/api/v1/billing/invoices?client_account_id=${first.id}&period_month=9&period_year=2026`), adminToken);
+    const rows = listed.body.data[0].print_rows;
+    expect(rows.map((r) => r.key.split(':')[0])).toEqual([first.id, second.id]);
+    const noted = await authed(request(app).patch(`/api/v1/billing/invoices/${res.body.data.id}`), adminToken).send({ line_notes: { [rows[0].key]: '  Phase 2 sprint work  ', [rows[1].key]: '' } });
+    expect(noted.status).toBe(200);
+    expect(noted.body.data.line_notes).toEqual({ [rows[0].key]: 'Phase 2 sprint work' });
+    const cleared = await authed(request(app).patch(`/api/v1/billing/invoices/${res.body.data.id}`), adminToken).send({ line_notes: {} });
+    expect(cleared.body.data.line_notes).toEqual({});
+
     // a contract already on a combined invoice cannot be invoiced again on its own or in another combined one
     const again = await authed(request(app).post('/api/v1/billing/invoices'), adminToken).send({ client_account_id: second.id, period_month: 9, period_year: 2026 });
     expect(again.status).toBe(409);

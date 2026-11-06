@@ -134,6 +134,14 @@ describe('client and vendor invoices', () => {
     expect(contract.lines[0]).toMatchObject({ qty: '8', rate: '7750.00' });
   });
 
+  test('a description added under an entry is printed with that entry only', async () => {
+    const hourly = { ...client, details: { billing_type: 'hourly', rate: 500 }, line_items: { lines: [{ resource: 'A. Dev', hours: 10, revenue: 5000 }, { resource: 'B. Dev', hours: 4, revenue: 2000 }], line_notes: { 'res:B. Dev': 'Sprint 4 hotfix' } }, total_amount: 7000, amount: 7000 };
+    const m = await clientInvoiceModel('org1', hourly);
+    expect(m.lines.map((l) => l.note)).toEqual([undefined, 'Sprint 4 hotfix']);
+    expect(require('../src/modules/billing/invoices.pdf').invoiceRows(hourly).map((r) => r.key)).toEqual(['res:A. Dev', 'res:B. Dev']);
+    expect((await clientInvoicePdf('org1', hourly)).slice(0, 4).toString()).toBe('%PDF');
+  });
+
   test('overtime is its own row and an unexplained difference is shown as an adjustment, so the rows always add up', async () => {
     const m = await clientInvoiceModel('org1', { ...client, status: 'sent', amount: 105000, total_amount: 100000, details: { ...client.details, base_amount: 100000, overtime_billed: true, overtime_hours: 5, overtime_multiplier: 1.5, overtime_amount: 5000, charges: [] } });
     expect(m.lines.map((l) => l.description)).toEqual(['Manpower Services', 'Overtime']);

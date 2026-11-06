@@ -124,6 +124,8 @@ const updateInvoiceSchema = z.object({
   // Overrides the calculated amount (audited); `reason` is required once the invoice is sent / paid.
   amount: z.coerce.number().positive().max(1e12).optional(),
   reason: z.string().trim().max(500).optional(),
+  // Free text printed under each entry of the invoice, by entry key (an empty text removes it)
+  line_notes: z.record(z.string().max(200), z.string().trim().max(1000)).optional(),
 });
 
 const previewInvoiceQuerySchema = z.object({

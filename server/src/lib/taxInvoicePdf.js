@@ -100,6 +100,7 @@ function rowHeight(doc, line, descW) {
   let h = heightOf(doc, line.description, descW - 8) + 2;
   setFont(doc, 'Helvetica-Oblique', 7);
   for (const d of line.details || []) h += heightOf(doc, d, descW - 8) + 1;
+  if (line.note) { setFont(doc, 'Helvetica', 8); h += heightOf(doc, line.note, descW - 8) + 3; }
   return h + 6;
 }
 
@@ -118,6 +119,7 @@ function drawRow(doc, cols, model, line, i, y) {
   let cy = doc.y + 1;
   setFont(doc, 'Helvetica-Oblique', 7);
   for (const detail of line.details || []) { doc.text(detail, d.x + 4, cy, { width: d.w - 8 }); cy = doc.y + 1; }
+  if (line.note) { setFont(doc, 'Helvetica', 8); doc.text(line.note, d.x + 4, cy + 2, { width: d.w - 8 }); }
   text('hsn', line.hsn);
   text('gst', line.gst_rate !== undefined && line.gst_rate !== null && line.gst_rate !== '' ? `${line.gst_rate} %` : '');
   text('qty', `${qtyText(line.qty)}${line.unit ? ` ${line.unit}` : ''}`, 'Helvetica-Bold', 8.5);

@@ -66,15 +66,16 @@ function clientLines(inv) {
       project: it.project || {},
       amount: (it.details || {}).amount,
       line_items: { lines: it.lines || [] },
-    }));
+    }).map((row) => ({ ...row, key: `${it.account_id}:${row.key}` })));
   }
   const resources = inv.line_items?.lines || [];
   const converted = d.conversion ? [`Converted from ${money(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`] : [];
   const overtime = d.overtime_billed && D(d.overtime_amount || 0).gt(0)
-    ? [{ description: 'Overtime', details: [`${d.overtime_hours}h at ${d.overtime_multiplier}x`], qty: String(d.overtime_hours || 1), unit: d.overtime_hours ? 'hrs' : '', rate: d.overtime_hours ? num2(D(d.overtime_amount).dividedBy(d.overtime_hours)) : num2(d.overtime_amount), amount: num2(d.overtime_amount) }]
+    ? [{ key: 'overtime', description: 'Overtime', details: [`${d.overtime_hours}h at ${d.overtime_multiplier}x`], qty: String(d.overtime_hours || 1), unit: d.overtime_hours ? 'hrs' : '', rate: d.overtime_hours ? num2(D(d.overtime_amount).dividedBy(d.overtime_hours)) : num2(d.overtime_amount), amount: num2(d.overtime_amount) }]
     : [];
   if (d.billing_type === 'hourly' && resources.length) {
     return resources.map((l) => ({
+      key: `res:${l.resource}`,
       description: l.resource,
       details: [...head, period, `Rate ${money(d.rate, cur)} / hour`, ...(l.overtime_hours ? [`Includes ${l.overtime_hours} overtime hrs`] : []), ...converted],
       qty: String(l.hours || 0), unit: 'hrs', rate: Number(l.hours) ? num2(D(l.revenue).dividedBy(l.hours)) : num2(l.revenue), amount: num2(l.revenue),
@@ -85,12 +86,12 @@ function clientLines(inv) {
     // On "approved hours" billing only the days that were logged and approved are billed, so those are the days printed
     const days = d.billing_basis === 'approved_hours' && Number(d.payable_days) > 0 ? Number(d.payable_days) : d.contract_working_days;
     const calc = `Base: ${money(d.rate, cur)} x ${days} / ${d.working_days} working days`;
-    return [{ description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(days), unit: 'days', rate: num2(D(base).dividedBy(days)), amount: num2(base) }, ...overtime];
+    return [{ key: 'main', description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(days), unit: 'days', rate: num2(D(base).dividedBy(days)), amount: num2(base) }, ...overtime];
   }
   const kind = d.billing_type === 'one_time' ? 'Fixed-bid project services' : 'Services';
   const base = d.base_amount ?? inv.amount;
   const note = d.billing_type === 'one_time' && d.fixed_bid ? [`Contract value ${money(d.rate, cur)}; invoiced before ${money(d.fixed_bid.invoiced_before, cur)}`] : [];
-  return [{ description: kind, details: [...head, `(${period})`, ...note, ...converted], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
+  return [{ key: 'main', description: kind, details: [...head, `(${period})`, ...note, ...converted], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
 }
 
 async function clientInvoiceModel(orgId, inv) {
@@ -99,7 +100,9 @@ async function clientInvoiceModel(orgId, inv) {
   const account = inv.client_account?.client_account_id
     ? await prisma.account.findUnique({ where: { id: inv.client_account.client_account_id } })
     : await prisma.account.findUnique({ where: { id: inv.client_account_id } });
-  const lines = clientLines(inv);
+  // the text an admin added under an entry (Edit invoice > Description for each entry); printed below that entry's details
+  const notes = inv.line_items?.line_notes || {};
+  const lines = clientLines(inv).map((l) => (notes[l.key] ? { ...l, note: String(notes[l.key]) } : l));
   // charges the contract adds (or deducts) are rows under the items, so the total is the amount the client pays
   const sourceCharges = inv.line_items?.consolidated ? (inv.line_items.items || []).flatMap((it) => it.details?.charges || []) : (inv.details?.charges || []);
   const chargeRows = new Map();
@@ -203,4 +206,7 @@ async function vendorInvoicesPdf(orgId, rowGroups) {
   return taxInvoicePdf(models);
 }
 
-module.exports = { clientInvoicePdf, clientInvoicesPdf, vendorInvoicePdf, vendorInvoicesPdf, clientInvoiceModel, vendorInvoiceModels };
+/** The entries an invoice prints, with the key each one's description is saved under: [{ key, title }]. */
+const invoiceRows = (inv) => clientLines(inv).map((l) => ({ key: l.key, title: [l.description, (l.details || [])[0]].filter(Boolean).join(' - ') }));
+
+module.exports = { invoiceRows, clientInvoicePdf, clientInvoicesPdf, vendorInvoicePdf, vendorInvoicesPdf, clientInvoiceModel, vendorInvoiceModels };
