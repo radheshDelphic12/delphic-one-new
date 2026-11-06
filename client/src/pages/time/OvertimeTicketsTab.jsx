@@ -156,6 +156,8 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const [picked, setPicked] = useState(() => new Set()); // ticket ids ticked in "Waiting for your approval"
   const [bulkBusy, setBulkBusy] = useState(false);
   const [queueName, setQueueName] = useState('');
+  // filters on the admin "All overtime tickets" list: status, ticket date range, employee
+  const [allFilter, setAllFilter] = useState({ status: '', from: '', to: '', name: '' });
 
   const fail = (err, text) => pushError(apiErrorMessage(err, text), 'Something went wrong');
 
@@ -224,6 +226,16 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     else pushSuccess(`${done} ticket${done === 1 ? '' : 's'} ${status === 'approved' ? 'approved' : 'rejected'}`);
     load();
   }
+  const shownAll = all.filter((t) => {
+    const day = String(t.date || '').slice(0, 10);
+    if (allFilter.status && t.status !== allFilter.status) return false;
+    if (allFilter.from && day < allFilter.from) return false;
+    if (allFilter.to && day > allFilter.to) return false;
+    if (allFilter.name.trim() && !(t.employee || '').toLowerCase().includes(allFilter.name.trim().toLowerCase())) return false;
+    return true;
+  });
+  const allFiltered = Boolean(allFilter.status || allFilter.from || allFilter.to || allFilter.name.trim());
+  const setAllF = (key) => (e) => setAllFilter((f) => ({ ...f, [key]: e.target.value }));
   const adminEdit = (t) => setAdminModal({ mode: 'edit', ticket: t });
   const adminDelete = (t) => {
     const reason = window.prompt(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
@@ -238,7 +250,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     { key: 'hours', header: 'Hours', render: (t) => t.hours },
     { key: 'project', header: 'Project', render: (t) => t.project || '—' },
     { key: 'reason', header: 'Reason', render: (t) => <span className="text-xs text-tertiary-600">{t.reason}</span> },
-    { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decided_by?.name ? `${t.decided_by.name}: ` : ''}{t.decision_reason}</span>}</span> },
+    { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{(t.status === 'approved' || t.status === 'rejected') && t.decided_by?.name && <span className="block text-xs text-tertiary-500">by {t.decided_by.name}{t.decided_at ? ` · ${new Date(t.decided_at).toLocaleDateString()}` : ''}</span>}{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decision_reason}</span>}</span> },
   ];
   const mineColumns = [...base.filter((c) => c.key !== 'employee'), { key: 'actions', header: '', render: (t) => <span className="flex gap-1">{t.status === 'pending' && <button type="button" className="btn-ghost text-xs" onClick={() => cancel(t)}>Cancel</button>}{historyButton(t)}</span> }];
   const queueColumns = [{ key: 'pick', header: <input type="checkbox" checked={allShownPicked} onChange={togglePickAll} aria-label="Select all waiting tickets" />, render: (t) => <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePick(t.id)} aria-label={`Select ${t.employee} ${t.date}`} /> }, ...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
@@ -304,7 +316,20 @@ export default function OvertimeTicketsTab({ isAdmin }) {
             <h2 className="font-heading text-sm font-semibold text-tertiary-900">All overtime tickets</h2>
             <button type="button" className="btn-primary" onClick={() => setAdminModal({ mode: 'apply' })}>Apply overtime for an employee</button>
           </div>
-          <DataTable columns={allColumns} rows={all} emptyLabel="No overtime tickets yet" />
+          <div className="flex flex-wrap items-end gap-2" data-testid="ot-all-filters">
+            <label className="text-xs font-medium text-tertiary-600">Status
+              <select value={allFilter.status} onChange={setAllF('status')} className="mt-1 block w-44 rounded-xl border px-3 py-2 text-sm">
+                <option value="">All</option>
+                {Object.entries(STATUS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="text-xs font-medium text-tertiary-600">From<input type="date" value={allFilter.from} max={allFilter.to || undefined} onChange={setAllF('from')} className="mt-1 block rounded-xl border px-3 py-2 text-sm" /></label>
+            <label className="text-xs font-medium text-tertiary-600">To<input type="date" value={allFilter.to} min={allFilter.from || undefined} onChange={setAllF('to')} className="mt-1 block rounded-xl border px-3 py-2 text-sm" /></label>
+            <label className="text-xs font-medium text-tertiary-600">Employee<input value={allFilter.name} onChange={setAllF('name')} placeholder="Search by name" className="mt-1 block w-48 rounded-xl border px-3 py-2 text-sm" /></label>
+            {allFiltered && <button type="button" className="btn-ghost text-xs" onClick={() => setAllFilter({ status: '', from: '', to: '', name: '' })}>Clear filters</button>}
+            <span className="pb-2 text-xs text-tertiary-500">{shownAll.length} of {all.length}</span>
+          </div>
+          <DataTable columns={allColumns} rows={shownAll} emptyLabel={allFiltered ? 'No ticket matches these filters' : 'No overtime tickets yet'} />
         </section>
       )}
 
