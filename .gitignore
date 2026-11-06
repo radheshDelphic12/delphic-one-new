@@ -1,8 +1,6 @@
 node_modules/
 dist/
 build/
-.env
-.env.*
 !.env.example
 !server/.env.erp.example
 *.log
@@ -13,7 +11,6 @@ uploads/
 !server/src/modules/uploads/
 uploads_test/
 coverage/
-.vscode/
 *.local
 
 # Local database dumps / restore safety snapshots / pre-deploy backups
@@ -31,3 +28,4 @@ temp_interactive_push.bat
 
 # dbviewer test fixtures (tiny dumps made by dbviewer/test/make-fixtures.sh)
 !dbviewer/test/fixtures/*.dump
+config.bat
