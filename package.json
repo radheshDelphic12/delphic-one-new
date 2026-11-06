@@ -7,8 +7,8 @@
     "client"
   ],
   "scripts": {
-    "dev:server": "npm run dev --workspace server",
-    "dev:client": "npm run dev --workspace client",
+    "dev:server": "node init && npm run dev --workspace server",
+    "dev:client": "node init && npm run dev --workspace client",
     "platform": "bash start-platform.sh",
     "platform:restore": "bash start-platform.sh --restore",
     "platform:seed": "bash start-platform.sh --seed",
@@ -24,7 +24,7 @@
     "gulati:seed": "npm run gulati:seed --workspace server",
     "acconcy:seed": "npm run acconcy:seed --workspace server",
     "zephyr:seed-admin": "npm run zephyr:seed-admin --workspace server",
-    "build:client": "npm run build --workspace client",
+    "build:client": "node init && npm run build --workspace client",
     "test:changed": "npm run test:changed --workspace server",
     "test:branch": "npm run test:branch --workspace server",
     "lint": "eslint server/src client/src",
