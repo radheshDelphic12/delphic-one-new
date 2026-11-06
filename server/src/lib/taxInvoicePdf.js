@@ -181,7 +181,8 @@ function signatureBuffer(dataUrl) {
 
 function drawCopy(doc, model, copyLabel, cols) {
   const desc = cols.find((c) => c.key === 'desc');
-  const leftW = Math.round(W * 0.56);
+  // the header's dividing line sits exactly on the items table's Quantity column line, so the two parts line up
+  const leftW = cols.find((c) => c.key === 'qty').x - M;
   const rightW = W - leftW;
 
   // ---- measure the bottom block (amount in words, tax summary, bank, signature) ----

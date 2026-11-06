@@ -55,16 +55,18 @@ function clientLines(inv) {
   const title = `${project.name || 'Project'}${project.code ? ` (${project.code})` : ''}${project.client_name ? ` - ${project.client_name}` : ''}`;
   // The project's face resource (free text set on the project); older invoices stored no snapshot, so fall back to the project as it is now.
   const face = String(project.face_resource ?? inv.client_account?.face_resource ?? '').trim();
-  const head = face ? [title, `Face resource: ${face}`] : [title];
+  const head = face ? [title, `Resource: ${face}`] : [title];
+  // A combined invoice prints each contract exactly as its own invoice would (same rows, days, rate); the tax / TDS rows are totalled below the items.
   if (inv.line_items?.consolidated) {
-    const label = { monthly: 'Monthly', hourly: 'Hourly', one_time: 'Fixed bid' };
-    return (inv.line_items.items || []).map((it) => {
-      const idt = it.details || {};
-      const amount = idt.total_amount ?? idt.amount;
-      const name = `${it.project?.name || 'Contract'}${it.project?.code ? ` (${it.project.code})` : ''}`;
-      const charges = (idt.charges || []).map((c) => `${c.label}${c.mode === 'percent' ? ` ${c.value}%` : ''}: ${money(c.amount, cur)}`);
-      return { description: name, details: [`(${periodText(idt, inv.period_month, inv.period_year)})`, `${label[idt.billing_type] || 'Services'} ${money(idt.rate, cur)}`, `Amount ${money(idt.amount, cur)}`, ...charges], qty: '1', unit: '', rate: num2(amount), amount: num2(amount) };
-    });
+    return (inv.line_items.items || []).flatMap((it) => clientLines({
+      currency: cur,
+      period_month: inv.period_month,
+      period_year: inv.period_year,
+      details: it.details || {},
+      project: it.project || {},
+      amount: (it.details || {}).amount,
+      line_items: { lines: it.lines || [] },
+    }));
   }
   const resources = inv.line_items?.lines || [];
   const converted = d.conversion ? [`Converted from ${money(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`] : [];
@@ -80,7 +82,7 @@ function clientLines(inv) {
   }
   if (d.billing_type === 'monthly' && d.contract_working_days) {
     const base = d.base_amount ?? inv.amount;
-    const calc = `Base: ${money(d.rate, cur)} x ${d.contract_working_days} / ${d.working_days} working days${d.calendar ? ` (${d.calendar})` : ''}`;
+    const calc = `Base: ${money(d.rate, cur)} x ${d.contract_working_days} / ${d.working_days} working days`;
     return [{ description: 'Manpower Services', details: [...head, `(${period})`, `Price Per Month ${money(d.rate, cur)}`, calc, ...converted], qty: String(d.contract_working_days), unit: 'days', rate: num2(D(base).dividedBy(d.contract_working_days)), amount: num2(base) }, ...overtime];
   }
   const kind = d.billing_type === 'one_time' ? 'Fixed-bid project services' : 'Services';
@@ -97,7 +99,13 @@ async function clientInvoiceModel(orgId, inv) {
     : await prisma.account.findUnique({ where: { id: inv.client_account_id } });
   const lines = clientLines(inv);
   // charges the contract adds (or deducts) are rows under the items, so the total is the amount the client pays
-  const charges = (inv.details?.charges || []).map((c) => ({ label: c.mode === 'percent' ? `${c.label} @ ${c.value}%` : c.label, amount: num2(c.amount) }));
+  const sourceCharges = inv.line_items?.consolidated ? (inv.line_items.items || []).flatMap((it) => it.details?.charges || []) : (inv.details?.charges || []);
+  const chargeRows = new Map();
+  for (const c of sourceCharges) {
+    const label = c.mode === 'percent' ? `${c.label} @ ${c.value}%` : c.label;
+    chargeRows.set(label, (chargeRows.get(label) || D(0)).plus(D(c.amount)));
+  }
+  const charges = [...chargeRows].map(([label, amount]) => ({ label, amount: num2(amount) }));
   const subtotal = lines.reduce((a, l) => a.plus(D(l.amount)), D(0));
   const total = D(inv.total_amount ?? inv.amount);
   // if the rows above and the charges do not add up to the invoice amount (a manual override), say so instead of hiding the gap
@@ -140,7 +148,7 @@ function contractorLine(c, project, currency, period, inr) {
   const title = `${project?.name || 'Project'}${project?.code ? ` (${project.code})` : ''}${project?.client_name ? ` - ${project.client_name}` : ''}`;
   const extra = [...(c.approved_hours !== undefined && c.approved_hours !== null ? [`Approved hours: ${c.approved_hours}`] : []), ...(inr ? [inr] : [])];
   const face = String(project?.face_resource || '').trim();
-  return { description: c.contractor, details: [title, ...(face ? [`Face resource: ${face}`] : []), `(${period})`, parts.join(' '), ...extra], qty: '1', unit: '', rate: num2(c.amount), amount: num2(c.amount) };
+  return { description: c.contractor, details: [title, ...(face ? [`Resource: ${face}`] : []), `(${period})`, parts.join(' '), ...extra], qty: '1', unit: '', rate: num2(c.amount), amount: num2(c.amount) };
 }
 
 /** One invoice per currency for a vendor's month (the rows are one per project and currency). */

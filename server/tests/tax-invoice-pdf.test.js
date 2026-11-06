@@ -97,13 +97,30 @@ describe('client and vendor invoices', () => {
 
   test('the project face resource is printed with the project details; absent when not set', async () => {
     const withFace = await clientInvoiceModel('org1', { ...client, project: { ...client.project, face_resource: 'Asha Rao' } });
-    expect(withFace.lines[0].details).toContain('Face resource: Asha Rao');
-    expect(withFace.lines[0].details.indexOf('Face resource: Asha Rao')).toBe(1);
+    expect(withFace.lines[0].details).toContain('Resource: Asha Rao');
+    expect(withFace.lines[0].details.indexOf('Resource: Asha Rao')).toBe(1);
     // older invoices stored no snapshot of it: the project as it is now supplies it
     const live = await clientInvoiceModel('org1', { ...client, client_account: { client_account_id: 'c1', face_resource: 'Ravi K' } });
-    expect(live.lines[0].details).toContain('Face resource: Ravi K');
+    expect(live.lines[0].details).toContain('Resource: Ravi K');
     const none = await clientInvoiceModel('org1', client);
-    expect(none.lines[0].details.some((d) => d.startsWith('Face resource'))).toBe(false);
+    expect(none.lines[0].details.some((d) => d.startsWith('Resource'))).toBe(false);
+  });
+
+  test('a combined invoice prints each contract like its own invoice (days, rate) and totals the tax rows underneath', async () => {
+    const item = (name, code, base, tds) => ({
+      account_id: name, project: { name, code },
+      details: { billing_type: 'monthly', rate: base, contract_working_days: 20, working_days: 22, base_amount: base, amount: base, total_amount: base * 1.18 - tds, period_from: '2026-10-01', period_to: '2026-10-31', calendar: 'Ahmedabad Calendar',
+        charges: [{ label: 'GST', mode: 'percent', value: 18, amount: base * 0.18 }, { label: 'TDS', mode: 'percent', value: 10, amount: -tds }] },
+      lines: [],
+    });
+    const items = [item('E branch Pro', 'P0098', 80000, 8000), item('Metaflow', 'P0076', 110000, 11000)];
+    const total = items.reduce((a, i) => a + i.details.total_amount, 0);
+    const m = await clientInvoiceModel('org1', { ...client, amount: 190000, total_amount: total, details: { billing_type: 'consolidated', charges: [] }, line_items: { consolidated: true, items } });
+    expect(m.lines).toHaveLength(2);
+    expect(m.lines[0]).toMatchObject({ description: 'Manpower Services', qty: '20', unit: 'days', rate: '4000.00', amount: '80000.00' });
+    expect(m.lines[0].details.join(' ')).not.toMatch(/Ahmedabad/);
+    expect(m.taxes).toEqual([{ label: 'GST @ 18%', amount: '34200.00' }, { label: 'TDS @ 10%', amount: '-19000.00' }]);
+    expect(m.total).toBe(total.toFixed(2));
   });
 
   test('overtime is its own row and an unexplained difference is shown as an adjustment, so the rows always add up', async () => {
@@ -134,8 +151,8 @@ describe('client and vendor invoices', () => {
     const withTds = await vendorInvoiceModels('org1', [{ ...row('INR', 10000), tds_amount: 1000, adjustment_amount: -200, adjustment_note: 'Late fee' }]);
     expect(withTds[0]).toMatchObject({ subtotal: '10000.00', total: '8800.00', taxes: [{ label: 'TDS', amount: '-1000.00' }, { label: 'Adjustment (Late fee)', amount: '-200.00' }] });
     const face = await vendorInvoiceModels('org1', [{ ...row('INR', 10000), project: { name: 'Website', code: 'WEB', client_name: 'Giglabz', face_resource: 'Asha Rao' } }]);
-    expect(face[0].lines[0].details).toContain('Face resource: Asha Rao');
-    expect(models[0].lines[0].details.some((d) => d.startsWith('Face resource'))).toBe(false);
+    expect(face[0].lines[0].details).toContain('Resource: Asha Rao');
+    expect(models[0].lines[0].details.some((d) => d.startsWith('Resource'))).toBe(false);
   });
 });
 
