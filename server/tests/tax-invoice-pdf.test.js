@@ -183,7 +183,7 @@ describe('default signature and several invoices in one PDF', () => {
     lines: [{ description: 'Services', details: [], qty: '1', unit: '', rate: '100.00', amount: '100.00' }], taxes: [], subtotal: '100.00', total: '100.00',
     bank: { holder: 'Delphic', lines: [] }, showHsn: false, showTax: false, tax_summary: null,
   });
-  const pages = (buf) => (buf.toString('latin1').match(/\/Type \/Page/g) || []).length;
+  const pages = (buf) => (buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length;
 
   test('a signature image is printed when the entity has one, and an unreadable one is ignored', async () => {
     const plain = await taxInvoicePdf(model('A-1'));
