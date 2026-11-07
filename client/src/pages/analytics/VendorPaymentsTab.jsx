@@ -31,6 +31,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState({ invoice_number: '', invoice_date: today(), notes: '' });
   const [billTo, setBillTo] = useState(null);
+  const [amounts, setAmounts] = useState({});
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -38,11 +39,13 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     if (!target) return undefined;
     let alive = true;
     setPreview(null);
+    setAmounts({});
     setError('');
     apiClient.get('/billing/vendor-invoices/preview', { params: { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year } })
       .then(({ data }) => {
         if (!alive) return;
         setPreview(data.data);
+        setAmounts(Object.fromEntries((data.data.projects || []).map((p) => [`${p.project.id}|${p.currency}`, String(p.amount)])));
         setBillTo({ ...data.data.bill_to, save: true });
         setForm({ invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || today(), notes: '' });
       })
@@ -57,7 +60,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...billToPayload(billTo) });
+      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, amounts: (preview?.projects || []).map((p) => ({ project_id: p.project.id, currency: p.currency, amount: Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) })), ...billToPayload(billTo) });
       pushSuccess?.(`Vendor invoice ${form.invoice_number} generated`);
       onGenerated?.();
       onClose();
@@ -78,7 +81,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="vendor-invoice-form" className="btn-primary" disabled={saving || !preview || !form.invoice_number.trim()}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="vendor-invoice-form" className="btn-primary" disabled={saving || !preview || !form.invoice_number.trim() || (preview.projects || []).some((p) => !(Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) > 0))}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
@@ -109,7 +112,13 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
           <section key={`${p.project.id}|${p.currency}`} className="space-y-1 rounded-xl border border-tertiary-100 bg-tertiary-50/60 p-3 text-sm">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span><span className="font-medium text-tertiary-900">{p.project.name}</span>{p.project.code && <span className="text-xs text-tertiary-500"> · {p.project.code}</span>}<span className="block text-xs text-tertiary-500">Client: {p.project.client_name || '—'}</span></span>
-              <span className="text-right font-semibold tabular-nums">{amountText(p.amount, p.currency)}{p.currency !== 'INR' && <span className="block text-xs font-normal text-tertiary-500">{p.amount_inr === null ? `No ${p.currency} exchange rate` : `≈ ${amountText(p.amount_inr, 'INR')} @ ₹${p.exchange_rate}`}</span>}</span>
+              <span className="text-right font-semibold tabular-nums">
+                <span className="inline-flex items-center gap-1">
+                  <input type="number" step="0.01" min="0" value={amounts[`${p.project.id}|${p.currency}`] ?? p.amount} onChange={(e) => setAmounts((a) => ({ ...a, [`${p.project.id}|${p.currency}`]: e.target.value }))} className="w-32 rounded-xl border px-2 py-1 text-right text-sm" aria-label={`Amount for ${p.project.name}`} />
+                  <span className="text-xs font-normal text-tertiary-500">{p.currency}</span>
+                </span>
+                {Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) !== Number(p.calculated_amount ?? p.amount) && <span className="block text-xs font-normal text-warning-700">Edited · calculated {amountText(p.calculated_amount ?? p.amount, p.currency)}</span>}
+                {p.currency !== 'INR' && <span className="block text-xs font-normal text-tertiary-500">{p.amount_inr === null ? `No ${p.currency} exchange rate` : `≈ ${amountText(p.amount_inr, 'INR')} @ ₹${p.exchange_rate}`}</span>}</span>
             </div>
             <ul className="space-y-0.5 text-xs text-tertiary-700">
               {p.contractors.map((c) => <li key={c.org_membership_id}><span className="font-medium">{c.contractor}</span>: {vendorLineText(c, p.currency)} · {c.approved_hours}h logged</li>)}

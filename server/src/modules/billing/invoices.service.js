@@ -581,12 +581,16 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { org_id: orgId, vendor_account_id: vendorAccountId, ...period, details: { not: Prisma.DbNull } }, select: { invoice_number: true, invoice_date: true, details: true } });
   const vendorAccount = await prisma.account.findFirst({ where: { id: vendorAccountId, org_id: orgId }, select: { id: true, name: true, gst_or_tax_id: true, billing_address: true, location: true } });
   const savedBillTo = existing?.details?.bill_to;
+  // Amounts typed over the calculation earlier stay as the starting figure when the invoice is updated.
+  const earlier = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id: vendorAccountId, ...period, details: { not: Prisma.DbNull } }, select: { account_id: true, currency: true, amount: true, details: true } });
+  const overridden = new Map(earlier.filter((r) => r.details?.manual_override).map((r) => [`${r.account_id}|${r.currency}`, Number(r.amount)]));
+  const projects = src.projects.map((p) => (overridden.has(`${p.project.id}|${p.currency}`) ? { ...p, calculated_amount: p.amount, amount: overridden.get(`${p.project.id}|${p.currency}`) } : p));
   return {
     preview: {
       bill_to: { ...billToDefaults(vendorAccount), ...(savedBillTo ? { gstin: savedBillTo.gstin || '', address: savedBillTo.address || '' } : {}) },
       vendor: src.vendor,
       ...period,
-      projects: src.projects,
+      projects,
       source: src.source,
       locked_version: src.locked_version,
       existing: existing ? { invoice_number: existing.invoice_number, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
@@ -598,12 +602,23 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
 // (Re)generates the vendor's invoice for the month: one row per project and
 // currency. Rows generated earlier for the same vendor and month are
 // replaced; invoices added by hand are left alone.
-async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes, bill_to, save_to_account }) {
+async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes, bill_to, save_to_account, amounts }) {
   const period = { period_month, period_year };
   const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
   if (frozen) return frozen;
   const src = await vendorInvoiceSource(orgId, vendor_account_id, period);
   if (src.error) return src;
+  // An amount typed in the invoice drawer replaces the calculated figure of that project row.
+  const typed = new Map((amounts || []).map((a) => [`${a.project_id}|${a.currency}`, round2(a.amount)]));
+  const fx = await exchangeRates.inrRates(orgId);
+  for (const p of src.projects) {
+    const amount = typed.get(`${p.project.id}|${p.currency}`);
+    if (amount === undefined || amount === p.amount) continue;
+    p.calculated_amount = p.amount;
+    p.amount = amount;
+    p.amount_inr = fx.has(p.currency) ? round2(amount * fx.get(p.currency)) : null;
+    p.manual_override = { original_amount: p.calculated_amount, original_currency: p.currency, by: user.id, at: new Date().toISOString() };
+  }
   const billable = src.projects.filter((p) => p.amount > 0);
   if (!billable.length) return { error: 'nothing_to_invoice' };
   const previous = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id, ...period, details: { not: Prisma.DbNull } }, select: { id: true, invoice_number: true } });
@@ -625,7 +640,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
           amount: p.amount,
           currency: p.currency,
           notes: notes || null,
-          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version },
+          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
           created_by: user.id,
         },
         include: VENDOR_INVOICE_INCLUDE,

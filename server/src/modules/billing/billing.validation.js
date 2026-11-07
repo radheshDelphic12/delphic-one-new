@@ -185,6 +185,8 @@ const generateVendorInvoiceSchema = vendorInvoicePeriodSchema.extend({
   bill_to: billTo,
   save_to_account: saveToAccount,
   notes: z.string().trim().max(1000).nullable().optional(),
+  // Optional per-project amount typed over the calculated figure (audited via details.manual_override).
+  amounts: z.array(z.object({ project_id: z.string().uuid(), currency: CURRENCY, amount: z.coerce.number().positive().max(1e12) })).max(200).optional(),
 });
 const listVendorInvoicesQuerySchema = z.object({
   vendor_account_id: z.string().uuid().optional(),

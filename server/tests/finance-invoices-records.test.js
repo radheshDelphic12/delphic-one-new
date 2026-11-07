@@ -304,6 +304,24 @@ describe('Per-record locks and the Locked section', () => {
     expect(Number(payment.amount)).toBe(83000);
   });
 
+  test('a vendor invoice amount can be typed when generating, and stays on update', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+
+    const gen = await authed(request(app).post('/api/v1/billing/vendor-invoices/generate'), ctx.adminToken).send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'ABC-0815', amounts: [{ project_id: p.id, currency: 'USD', amount: 1250 }] });
+    expect(gen.status).toBe(201);
+    expect(gen.body.data[0]).toMatchObject({ amount: 1250, currency: 'USD' });
+    expect(gen.body.data[0].details).toMatchObject({ amount_inr: 103750, manual_override: { original_amount: 1000 } });
+
+    // The update drawer starts from the typed amount and still shows the calculation.
+    const preview = await authed(request(app).get('/api/v1/billing/vendor-invoices/preview'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id, ...AUG });
+    expect(preview.body.data.projects[0]).toMatchObject({ amount: 1250, calculated_amount: 1000 });
+  });
+
   test('a generated vendor invoice can be edited: number, date, notes, amount, currency (audited)', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
