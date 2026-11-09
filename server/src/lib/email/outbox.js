@@ -4,6 +4,7 @@ const logger = require('../../config/logger');
 const prisma = require('../../config/db');
 const { methodOf } = require('./ics');
 const { createGraphTransport } = require('./graphMail');
+const { renderEmailHtml } = require('./template');
 
 const MAX_ATTEMPTS = 5;
 
@@ -16,12 +17,9 @@ function getTransport() {
   return cachedTransport;
 }
 
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-}
-
-function defaultHtml(text) {
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2937">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+// The HTML part of every email: the plain text laid out professionally (lib/email/template.js). A caller can still pass its own `html`.
+function defaultHtml({ subject, text, kind }) {
+  return renderEmailHtml({ subject, text, kind });
 }
 
 /**
@@ -40,7 +38,7 @@ async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html
         cc_email: cc?.email || null,
         subject,
         body_text: text,
-        body_html: html || defaultHtml(text),
+        body_html: html || defaultHtml({ subject, text, kind }),
         ics: ics || null,
       },
     });
