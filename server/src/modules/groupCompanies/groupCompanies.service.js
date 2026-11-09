@@ -15,6 +15,21 @@ const labelOf = (c) => (c ? c.org?.name || c.name : '');
 
 const scoped = (groupIds) => ({ org_group_id: { in: groupIds } });
 
+// Two names are "the same business" when they differ only in case, spacing, punctuation, "&" / "and" or a trailing legal form (Pvt Ltd, Limited, LLP...).
+const LEGAL_TAIL = new Set(['pvt', 'private', 'ltd', 'limited', 'llp', 'inc', 'llc']);
+function normalName(name) {
+  const words = String(name || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  while (words.length > 1 && LEGAL_TAIL.has(words[words.length - 1])) words.pop();
+  return words.join(' ');
+}
+async function findHandMadeTwins(groupId, name) {
+  const want = normalName(name);
+  if (!want) return [];
+  const handMade = await prisma.groupCompany.findMany({ where: { org_group_id: groupId, org_id: null } });
+  return handMade.filter((r) => normalName(r.name) === want);
+}
+const findHandMadeTwin = async (groupId, name) => (await findHandMadeTwins(groupId, name))[0] || null;
+
 async function ensureRegister(groupIds) {
   const orgs = await prisma.org.findMany({ where: scoped(groupIds), select: { id: true, name: true, org_group_id: true, enabled_modules: true } });
   if (!orgs.length) return;
@@ -35,7 +50,7 @@ async function ensureRegister(groupIds) {
     }
     try {
       // a business added by hand under the same name becomes this workspace's row instead of a duplicate
-      const same = await prisma.groupCompany.findFirst({ where: { org_group_id: o.org_group_id, name: o.name, org_id: null } });
+      const same = await findHandMadeTwin(o.org_group_id, o.name);
       if (same) await prisma.groupCompany.update({ where: { id: same.id }, data: { org_id: o.id } });
       else await prisma.groupCompany.create({ data: { org_group_id: o.org_group_id, org_id: o.id, name: o.name, status: o.enabled_modules?.includes('coming_soon') ? 'planning' : 'operational' } });
     } catch (err) {
@@ -50,7 +65,7 @@ async function ensureRegister(groupIds) {
  * foundation day, notes, short name, holders) is taken over, every stake and classification pointing at the old row now points at the new one.
  */
 async function mergeSameName(rowId, groupId, name) {
-  const dupes = await prisma.groupCompany.findMany({ where: { org_group_id: groupId, org_id: null, name: { equals: name, mode: 'insensitive' } } });
+  const dupes = await findHandMadeTwins(groupId, name);
   if (!dupes.length) return;
   for (const d of dupes) {
     await prisma.$transaction(async (tx) => {

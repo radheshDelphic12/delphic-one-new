@@ -134,7 +134,7 @@ function clientLines(inv, opts = {}) {
  * A single "GST 18%" charge is split IGST or CGST + SGST by place of supply (the seller's state against the buyer's GSTIN state); charges
  * already named IGST / CGST / SGST are printed as they are.
  */
-function gstSplit(sourceCharges, taxable, sellerState, buyerState) {
+function gstSplit(sourceCharges, taxable, sellerState, buyerState, consolidated = false) {
   const gstCharges = sourceCharges.filter((c) => GST_LABEL.test(c.label) && c.effect !== 'deduct' && D(c.amount).gt(0));
   if (!gstCharges.length || !D(taxable).gt(0)) return null;
   const total = gstCharges.reduce((a, c) => a.plus(D(c.amount)), D(0));
@@ -143,7 +143,11 @@ function gstSplit(sourceCharges, taxable, sellerState, buyerState) {
     const rate = D(total).dividedBy(taxable).times(100).dividedBy(parts.length === 2 ? 2 : 1).toDecimalPlaces(2, 4).toNumber();
     return { charges: gstCharges, parts, total, rate, gst_rate: rate * (parts.length === 2 ? 2 : 1) };
   }
-  const gstRate = gstCharges.every((c) => c.mode === 'percent') ? gstCharges.reduce((a, c) => a + Number(c.value), 0) : D(total).dividedBy(taxable).times(100).toDecimalPlaces(2, 4).toNumber();
+  // a consolidated invoice carries one GST charge per contract, each on its own base: three contracts at 18% are 18%, not 54%
+  const percentValues = [...new Set(gstCharges.map((c) => Number(c.value)))];
+  const effective = D(total).dividedBy(taxable).times(100).toDecimalPlaces(2, 4).toNumber();
+  let gstRate = effective;
+  if (gstCharges.every((c) => c.mode === 'percent')) gstRate = consolidated ? (percentValues.length === 1 ? percentValues[0] : effective) : gstCharges.reduce((a, c) => a + Number(c.value), 0);
   const intra = Boolean(sellerState && buyerState && sellerState === buyerState);
   if (intra) {
     const half = D(total).dividedBy(2).toDecimalPlaces(2, 4);
@@ -164,7 +168,7 @@ async function clientInvoiceModel(orgId, inv) {
   // the invoice is a GST tax invoice when its contract carries a GST charge
   const probe = clientLines(inv, { tax: true });
   const taxable = probe.reduce((a, l) => a.plus(D(l.amount)), D(0));
-  const split = cur === 'INR' ? gstSplit(sourceCharges, taxable, party.state_code, buyer.state_code) : null;
+  const split = cur === 'INR' ? gstSplit(sourceCharges, taxable, party.state_code, buyer.state_code, Boolean(inv.line_items?.consolidated)) : null;
   // the text an admin added under an entry (Edit invoice > Description for each entry); printed below that entry's details
   const notes = inv.line_items?.line_notes || {};
   const hsn = String(inv.project?.hsn_sac || inv.client_account?.hsn_sac || account?.hsn_sac || DEFAULT_SAC);

@@ -56,6 +56,19 @@ describe('group companies register', () => {
     expect(await prisma.groupCompany.count({ where: { org_group_id: group.id } })).toBe(3);
   });
 
+  test('a hand-made business with the same name as a workspace (case, spacing, "Pvt Ltd", "&") is folded into it and keeps its holders', async () => {
+    await get(); // workspace rows exist now
+    const hand = await post({ name: 'beta  trading  Pvt. Ltd.', tagline: 'Hand made' });
+    expect(hand.status).toBe(201);
+    expect((await stakes(hand.body.data.id, [{ holder_kind: 'group', pct: 100 }])).status).toBe(200);
+    const res = await get();
+    const rows = res.body.data.companies.filter((c) => /beta/i.test(c.name));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'Beta Trading', org_id: beta.id, tagline: 'Hand made', total_pct: 100 });
+    expect(rows[0].holders).toHaveLength(1);
+    expect(await prisma.groupCompany.count({ where: { org_group_id: group.id } })).toBe(2);
+  });
+
   test('add a planned / off-platform business, edit its details, sector roll-up; a workspace keeps its name', async () => {
     await get();
     const add = await post({ name: 'Vidhyasri Mapsystems Ed Tech', short_code: 'VMET', sector: 'Education & Knowledge Services', tagline: 'Maps for schools', foundation_date: '2024-03-01', status: 'operational' });
