@@ -20,7 +20,7 @@ export function buildOwnershipGraph(companies, groups, statuses = STATUSES) {
   for (const c of companies) {
     holdersOf.set(c.id, c.holders.map((h) => {
       if (h.holder_kind === 'company') { holdsSomething.add(h.holder_company_id); return { key: `company:${h.holder_company_id}`, kind: 'company', label: h.holder_label, pct: h.pct }; }
-      if (h.holder_kind === 'group') return { key: `group:${c.org_group_id || ''}`, kind: 'group', label: groupName(c.org_group_id), pct: h.pct };
+      if (h.holder_kind === 'group') { const gid = h.holder_group_id || c.org_group_id; return { key: `group:${gid || ''}`, kind: 'group', label: groupName(gid), pct: h.pct }; }
       return { key: extKey(h.holder_name), kind: 'external', label: h.holder_name || h.holder_label, pct: h.pct };
     }));
   }

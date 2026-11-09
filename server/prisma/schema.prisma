@@ -9095,6 +9095,8 @@ model GroupCompanyStake {
   held_company_id   String        @db.Uuid
   held_company      GroupCompany  @relation("StakeHeld", fields: [held_company_id], references: [id], onDelete: Cascade)
   holder_kind       String
+  // holder_kind 'group': null = the business's own holding group; set = another holding group of the register (e.g. Gulati Industries Group holding Acconcy)
+  holder_group_id   String?       @db.Uuid
   holder_company_id String?       @db.Uuid
   holder_company    GroupCompany? @relation("StakeHolder", fields: [holder_company_id], references: [id], onDelete: Cascade)
   holder_name       String?

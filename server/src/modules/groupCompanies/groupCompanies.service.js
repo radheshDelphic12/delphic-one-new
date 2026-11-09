@@ -112,8 +112,9 @@ async function list(groupIds) {
       id: s.id,
       holder_kind: s.holder_kind,
       holder_company_id: s.holder_company_id,
+      holder_group_id: s.holder_kind === 'group' ? s.holder_group_id || s.org_group_id : null,
       holder_name: s.holder_name,
-      holder_label: s.holder_kind === 'group' ? groupName.get(s.org_group_id) || 'The group' : s.holder_kind === 'company' ? labelOf(byId.get(s.holder_company_id)) : s.holder_name,
+      holder_label: s.holder_kind === 'group' ? groupName.get(s.holder_group_id || s.org_group_id) || 'The group' : s.holder_kind === 'company' ? labelOf(byId.get(s.holder_company_id)) : s.holder_name,
       pct: num(s.pct),
       notes: s.notes,
     }));
@@ -263,7 +264,13 @@ async function setStakes(groupIds, id, stakes) {
   const holderCompanies = [];
   for (const s of stakes) {
     if (!HOLDER_KINDS.includes(s.holder_kind)) return { error: 'bad_holder' };
-    const key = s.holder_kind === 'group' ? 'group' : s.holder_kind === 'company' ? `c:${s.holder_company_id}` : `x:${String(s.holder_name || '').trim().toLowerCase()}`;
+    // a group holder is the business's own group unless another holding group is named (stored as null when it is the own group)
+    if (s.holder_kind === 'group') {
+      const gid = s.holder_group_id || company.org_group_id;
+      if (gid !== company.org_group_id && !groupIds.includes(gid)) return { error: 'bad_holder' };
+      s.holder_group_id = gid === company.org_group_id ? null : gid;
+    }
+    const key = s.holder_kind === 'group' ? `g:${s.holder_group_id || company.org_group_id}` : s.holder_kind === 'company' ? `c:${s.holder_company_id}` : `x:${String(s.holder_name || '').trim().toLowerCase()}`;
     if (seen.has(key)) return { error: 'duplicate_holder' };
     seen.add(key);
     if (s.holder_kind === 'company') {
@@ -287,6 +294,7 @@ async function setStakes(groupIds, id, stakes) {
           org_group_id: company.org_group_id,
           held_company_id: id,
           holder_kind: s.holder_kind,
+          holder_group_id: s.holder_kind === 'group' ? s.holder_group_id || null : null,
           holder_company_id: s.holder_kind === 'company' ? s.holder_company_id : null,
           holder_name: s.holder_kind === 'external' ? String(s.holder_name).trim() : null,
           pct: s.pct,

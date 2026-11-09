@@ -69,6 +69,21 @@ describe('group companies register', () => {
     expect(await prisma.groupCompany.count({ where: { org_group_id: group.id } })).toBe(2);
   });
 
+  test('another holding group of the register can be the holder of a business (e.g. the main group holding a separate-group workspace)', async () => {
+    const superUser = await prisma.user.findFirst({ where: { is_group_superadmin: true } });
+    await prisma.orgGroupMembership.create({ data: { user_id: superUser.id, org_group_id: outsider.org_group_id } });
+    await prisma.orgGroup.update({ where: { id: outsider.org_group_id }, data: { name: 'Separate Group' } });
+    const res = await get();
+    const row = byName(res, 'Other Group Co');
+    // held by the main group although the workspace sits in its own group
+    expect((await stakes(row.id, [{ holder_kind: 'group', holder_group_id: group.id, pct: 60 }, { holder_kind: 'group', pct: 40 }])).status).toBe(200);
+    const after = byName(await get(), 'Other Group Co');
+    expect(after.holders.map((h) => [h.holder_label, h.pct]).sort()).toEqual([['Gulati Industries', 60], ['Separate Group', 40]]);
+    // the same group twice is refused; a group outside the caller's scope is refused
+    expect((await stakes(row.id, [{ holder_kind: 'group', pct: 10 }, { holder_kind: 'group', holder_group_id: outsider.org_group_id, pct: 10 }])).status).toBe(400);
+    expect((await stakes(row.id, [{ holder_kind: 'group', holder_group_id: '00000000-0000-4000-8000-000000000000', pct: 10 }])).status).toBe(400);
+  });
+
   test('add a planned / off-platform business, edit its details, sector roll-up; a workspace keeps its name', async () => {
     await get();
     const add = await post({ name: 'Vidhyasri Mapsystems Ed Tech', short_code: 'VMET', sector: 'Education & Knowledge Services', tagline: 'Maps for schools', foundation_date: '2024-03-01', status: 'operational' });

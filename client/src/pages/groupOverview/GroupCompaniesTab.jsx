@@ -129,20 +129,22 @@ export default function GroupCompaniesTab() {
   // ---- stakes
   const openStakes = (c) => setStakeEditor({
     company: c,
-    rows: c.holders.map((h) => ({ kind: h.holder_kind, holder_company_id: h.holder_company_id || '', holder_name: h.holder_name || '', pct: String(h.pct) })),
+    rows: c.holders.map((h) => ({ kind: h.holder_kind, holder_group_id: h.holder_kind === 'group' && h.holder_group_id !== c.org_group_id ? h.holder_group_id || '' : '', holder_company_id: h.holder_company_id || '', holder_name: h.holder_name || '', pct: String(h.pct) })),
   });
   const setRow = (i, patch) => setStakeEditor((p) => ({ ...p, rows: p.rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) }));
   const holderOptions = (company) => [
     { value: 'group', label: `${data.groups.find((g) => g.id === company.org_group_id)?.name || data.groups[0]?.name || 'The group'} (the group itself)` },
+    // another holding group of the register can hold this business too (e.g. Gulati Industries Group holding Acconcy Finance)
+    ...data.groups.filter((g) => g.id !== company.org_group_id).map((g) => ({ value: `group:${g.id}`, label: `${g.name} (holding group)` })),
     ...companies.filter((c) => c.id !== company.id).map((c) => ({ value: `company:${c.id}`, label: data.groups.length > 1 && c.org_group_id !== company.org_group_id ? `${c.name} (${data.groups.find((g) => g.id === c.org_group_id)?.name || 'other group'})` : c.name })),
     { value: 'external', label: 'Someone outside the group' },
   ];
-  const rowValue = (r) => (r.kind === 'company' ? `company:${r.holder_company_id}` : r.kind);
+  const rowValue = (r) => (r.kind === 'company' ? `company:${r.holder_company_id}` : r.kind === 'group' && r.holder_group_id ? `group:${r.holder_group_id}` : r.kind);
   const total = stakeEditor ? stakeEditor.rows.reduce((s, r) => s + (Number(r.pct) || 0), 0) : 0;
 
   async function saveStakes() {
     const { company, rows } = stakeEditor;
-    const stakes = rows.map((r) => ({ holder_kind: r.kind, ...(r.kind === 'company' ? { holder_company_id: r.holder_company_id } : {}), ...(r.kind === 'external' ? { holder_name: r.holder_name } : {}), pct: Number(r.pct) }));
+    const stakes = rows.map((r) => ({ holder_kind: r.kind, ...(r.kind === 'company' ? { holder_company_id: r.holder_company_id } : {}), ...(r.kind === 'group' && r.holder_group_id ? { holder_group_id: r.holder_group_id } : {}), ...(r.kind === 'external' ? { holder_name: r.holder_name } : {}), pct: Number(r.pct) }));
     if (stakes.some((s) => !(s.pct > 0))) return pushError('Every holder needs a percentage above 0.', 'Percentage needed');
     if (total > 100.0005) return pushError(`The holders add up to ${pctText(total)}, which is more than 100%.`, 'Over 100%');
     const done = await run(() => apiClient.put(`/group-companies/${company.id}/stakes`, { stakes }), 'Ownership saved.', 'Failed to save the ownership');
@@ -314,7 +316,7 @@ export default function GroupCompaniesTab() {
             {stakeEditor.rows.map((r, i) => (
               <div key={i} className="grid gap-2 rounded-xl border border-tertiary-100 p-3 sm:grid-cols-[1fr_7rem_auto]" data-testid="stake-row">
                 <div className="space-y-2">
-                  <SearchableSelect ariaLabel={`Holder ${i + 1}`} value={rowValue(r)} onChange={(v) => setRow(i, v.startsWith('company:') ? { kind: 'company', holder_company_id: v.slice(8) } : { kind: v || 'group', holder_company_id: '' })} options={holderOptions(stakeEditor.company)} placeholder="Choose the holder" searchPlaceholder="Search…" />
+                  <SearchableSelect ariaLabel={`Holder ${i + 1}`} value={rowValue(r)} onChange={(v) => setRow(i, v.startsWith('company:') ? { kind: 'company', holder_company_id: v.slice(8), holder_group_id: '' } : v.startsWith('group:') ? { kind: 'group', holder_company_id: '', holder_group_id: v.slice(6) } : { kind: v || 'group', holder_company_id: '', holder_group_id: '' })} options={holderOptions(stakeEditor.company)} placeholder="Choose the holder" searchPlaceholder="Search…" />
                   {r.kind === 'external' && <input className={FIELD_INPUT} aria-label={`Outside holder name ${i + 1}`} placeholder="Name of the person or company" value={r.holder_name} onChange={(e) => setRow(i, { holder_name: e.target.value })} maxLength={150} />}
                 </div>
                 <div className="relative"><input type="number" min="0" max="100" step="0.001" className={`${FIELD_INPUT} pr-7`} aria-label={`Percentage ${i + 1}`} value={r.pct} onChange={(e) => setRow(i, { pct: e.target.value })} /><span className="pointer-events-none absolute right-3 top-2 text-sm text-tertiary-400">%</span></div>

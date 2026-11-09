@@ -41,6 +41,7 @@ const stakesSchema =z.object({
     .array(z.object({
       holder_kind: z.enum(['group', 'company', 'external']),
       holder_company_id: uuid.optional(),
+      holder_group_id: uuid.nullish(),
       holder_name: text(150).optional(),
       pct: z.coerce.number().gt(0).max(100),
       notes: text(300).optional(),
