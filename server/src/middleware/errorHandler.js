@@ -20,7 +20,7 @@ module.exports = function errorHandler(err, req, res, next) { // eslint-disable-
     err,
   };
   // Speak Up (confidential reporting): never log who made the request
-  if (req.user?.id && !/^\/api\/v1\/(public\/)?whistleblower(\/|\?|$)/.test(meta.path)) meta.user_id = req.user.id;
+  if (req.user?.id && !/^\/api\/v1\/(public\/)?(whistleblower|employee-feedback)(\/|\?|$)/.test(meta.path)) meta.user_id = req.user.id;
 
   if (status >= 500) logger.error('unhandled_error', meta);
   else logger.warn('request_error', meta);

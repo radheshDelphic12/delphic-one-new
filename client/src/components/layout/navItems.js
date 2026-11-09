@@ -22,6 +22,7 @@ import {
   MapPin,
   UserPlus,
   Megaphone,
+  MessageSquareHeart,
   UserX,
   ClipboardList,
   KanbanSquare,
@@ -55,6 +56,7 @@ export const NAV_ITEMS = [
   { to: '/internal-jobs', label: 'Internal Jobs', icon: UserPlus, masterOnly: true, need: 'basic.internal_jobs' },
   // Speak Up - Confidential Reporting: shown only while an admin has it switched on (or to the people who set it up).
   { to: '/speak-up', label: 'Speak Up', icon: Megaphone, masterOnly: true, need: 'basic.whistleblower', speakUp: true },
+  { to: '/employee-feedback', label: 'Employee Feedback', icon: MessageSquareHeart, masterOnly: true, need: 'basic.employee_feedback' },
   { to: '/people', label: 'People', icon: Users, capability: 'viewPeople' },
   { to: '/attendance', label: 'Time & Attendance', icon: Clock, capability: 'viewAttendance' },
   { to: '/finance', label: 'Finance', icon: Wallet, capability: 'viewExpenses' },
