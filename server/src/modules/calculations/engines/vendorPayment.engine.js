@@ -68,6 +68,9 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
     exchangeRates.inrRates(orgId),
   ]);
   const entries = markResolved(rawEntries);
+  // Admin edits of a line's amount (Live Analytics > Vendors): the typed figure replaces the calculated one.
+  const adjustmentRows = ids.length ? await prisma.vendorLineAdjustment.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, period_month, period_year } }) : [];
+  const adjustments = new Map(adjustmentRows.map((a) => [`${a.org_membership_id}|${a.account_id}`, a]));
   const calendarCache = new Map();
   async function workingDaysFor(accountId) {
     if (!calendarCache.has(accountId)) calendarCache.set(accountId, await calendarsService.projectWorkingDays(orgId, accountId, period_year, period_month));
@@ -149,7 +152,9 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         overtimeAmountRaw += otHours * (dayRate / benchmark);
       }
       const overtimeAmount = account.overtime_billable ? round2(overtimeAmountRaw) : 0;
-      const amount = round2(base + overtimeAmount);
+      const calculatedAmount = round2(base + overtimeAmount);
+      const adjustment = adjustments.get(`${c.id}|${account.id}`) || null;
+      const amount = adjustment ? round2(Number(adjustment.amount)) : calculatedAmount;
       // Unapproved time holds up the amount where hours decide it (approved_hours basis) or overtime is paid.
       const hoursDecide = payoutBasis === 'approved_hours' || account.overtime_billable;
       const pending = hoursDecide ? projectEntries.filter((e) => e.status === 'submitted').length : 0;
@@ -177,6 +182,8 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         base_amount: base,
         overtime_amount: overtimeAmount,
         amount,
+        calculated_amount: calculatedAmount,
+        adjustment: adjustment ? { id: adjustment.id, reason: adjustment.reason, by: adjustment.created_by, at: adjustment.updated_at } : null,
         amount_inr: toInr(amount, currency),
         entries: { approved: approved.length, pending, rejected },
         approval_status: pending ? 'pending' : rejected ? 'rejected' : approved.length ? 'approved' : 'no_entries',

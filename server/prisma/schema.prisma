@@ -9227,3 +9227,26 @@ model RateChange {
   @@index([entity_type, entity_id, changed_at])
   @@map("rate_changes")
 }
+
+// An admin's edit of one contractor-on-project vendor line for a month (Live Analytics > Vendors). `amount` is the
+// final figure in the line's currency; the calculated one stays in the engine and is shown next to it. Deleting the
+// row goes back to the calculation. A locked month is flagged for review when it changes.
+model VendorLineAdjustment {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org_membership_id String   @db.Uuid
+  account_id        String   @db.Uuid
+  period_month      Int
+  period_year       Int
+  amount            Decimal  @db.Decimal(14, 2)
+  calculated_amount Decimal? @db.Decimal(14, 2)
+  currency          String?
+  reason            String
+  created_by        String?  @db.Uuid
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, org_membership_id, account_id, period_year, period_month])
+  @@index([org_id, period_year, period_month])
+  @@map("vendor_line_adjustments")
+}

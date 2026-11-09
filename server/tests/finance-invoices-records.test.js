@@ -304,6 +304,50 @@ describe('Per-record locks and the Locked section', () => {
     expect(Number(payment.amount)).toBe(83000);
   });
 
+  test('an admin edits a contractor line amount on Live Analytics: totals, invoice, lock and payment follow; reset goes back', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const key = { org_membership_id: contractor.id, account_id: p.id, ...AUG };
+    const live = () => authed(request(app).get('/api/v1/analytics/vendor-payments'), ctx.adminToken).query(AUG);
+
+    expect((await live()).body.data.lines[0]).toMatchObject({ amount: 1000, calculated_amount: 1000, adjustment: null });
+
+    // A reason is required.
+    expect((await authed(request(app).put('/api/v1/billing/vendor-line-amount'), ctx.adminToken).send({ ...key, amount: 1400 })).status).toBe(422);
+    const set = await authed(request(app).put('/api/v1/billing/vendor-line-amount'), ctx.adminToken).send({ ...key, amount: 1400, reason: 'Extra weekend support agreed with the vendor' });
+    expect(set.status).toBe(200);
+
+    const after = (await live()).body.data;
+    expect(after.lines[0]).toMatchObject({ amount: 1400, calculated_amount: 1000, amount_inr: 116200, adjustment: expect.objectContaining({ reason: 'Extra weekend support agreed with the vendor' }) });
+    expect(after.totals.amount_inr).toBe(116200);
+    expect(after.vendors[0].amount_inr).toBe(116200);
+
+    // The vendor invoice starts from the edited figure.
+    const preview = await authed(request(app).get('/api/v1/billing/vendor-invoices/preview'), ctx.adminToken).query({ vendor_account_id: ctx.vendor.id, ...AUG });
+    expect(preview.body.data.projects[0]).toMatchObject({ amount: 1400, amount_inr: 116200 });
+
+    // Locking uses it for the lock and the pending vendor payment.
+    expect((await lock(ctx, { kind: 'vendor_bill', scope_key: ctx.vendor.id })).status).toBe(200);
+    const payment = await prisma.vendorPayment.findFirst({ where: { org_id: ctx.org.id, vendor_account_id: ctx.vendor.id, ...AUG } });
+    expect(Number(payment.amount)).toBe(116200);
+
+    // Editing a locked month flags it for review instead of rewriting the lock.
+    await authed(request(app).put('/api/v1/billing/vendor-line-amount'), ctx.adminToken).send({ ...key, amount: 1500, reason: 'Vendor corrected the figure' });
+    const locked = await authed(request(app).get('/api/v1/calculations/locked'), ctx.adminToken).query({ period_year: 2026, kind: 'vendor_bill' });
+    expect(locked.body.data[0].status).toBe('change_detected');
+
+    // Back to the calculation.
+    const reset = await authed(request(app).delete('/api/v1/billing/vendor-line-amount'), ctx.adminToken).query(key);
+    expect(reset.status).toBe(200);
+    const audits = await prisma.auditLog.findMany({ where: { org_id: ctx.org.id, entity_type: 'vendor_line_adjustment' } });
+    expect(audits.map((a) => a.action)).toEqual(expect.arrayContaining(['vendor_line_adjust', 'vendor_line_adjust_remove']));
+    expect(await prisma.vendorLineAdjustment.count({ where: { org_id: ctx.org.id } })).toBe(0);
+  });
+
   test('a vendor invoice amount can be typed when generating, and stays on update', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

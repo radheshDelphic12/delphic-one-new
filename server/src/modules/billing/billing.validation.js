@@ -188,6 +188,17 @@ const generateVendorInvoiceSchema = vendorInvoicePeriodSchema.extend({
   // Optional per-project amount typed over the calculated figure (audited via details.manual_override).
   amounts: z.array(z.object({ project_id: z.string().uuid(), currency: CURRENCY, amount: z.coerce.number().positive().max(1e12) })).max(200).optional(),
 });
+// Live Analytics > Vendors: an admin's final amount for one contractor-on-project line of a month.
+const vendorLineKeySchema = z.object({
+  org_membership_id: z.string().uuid(),
+  account_id: z.string().uuid(),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+});
+const vendorLineAdjustmentSchema = vendorLineKeySchema.extend({
+  amount: z.coerce.number().min(0).max(1e12),
+  reason: z.string().trim().min(3).max(500),
+});
 const listVendorInvoicesQuerySchema = z.object({
   vendor_account_id: z.string().uuid().optional(),
   period_month: z.coerce.number().int().min(1).max(12).optional(),
@@ -391,6 +402,8 @@ module.exports = {
   contractChargeSchema,
   updateContractChargeSchema,
   billingAdjustmentSchema,
+  vendorLineKeySchema,
+  vendorLineAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
   consolidatedInvoiceSchema,

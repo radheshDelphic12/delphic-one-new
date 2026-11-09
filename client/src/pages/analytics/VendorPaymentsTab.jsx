@@ -133,6 +133,89 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 /**
+ * Live Analytics > Vendors: set what one contractor's project line owes the vendor this month. The typed amount
+ * replaces the calculated one everywhere (vendor total, lock, vendor payment, invoice); "Back to calculated" removes it.
+ */
+function VendorLineAmountDrawer({ line, period, onClose, onSaved }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!line) return;
+    setAmount(String(line.amount));
+    setReason(line.adjustment?.reason || '');
+  }, [line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!line) return <Drawer open={false} title="" onClose={onClose} />;
+  const key = { org_membership_id: line.org_membership_id, account_id: line.project.id, period_month: period.period_month, period_year: period.period_year };
+
+  async function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiClient.put('/billing/vendor-line-amount', { ...key, amount: Number(amount), reason: reason.trim() });
+      pushSuccess?.(`Amount for ${line.contractor} updated`);
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the amount'), 'Could not update');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reset() {
+    setSaving(true);
+    try {
+      await apiClient.delete('/billing/vendor-line-amount', { params: key });
+      pushSuccess?.(`Amount for ${line.contractor} is back to the calculated figure`);
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to remove the edit'), 'Could not update');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Drawer
+      open
+      title={`Vendor amount · ${line.contractor}`}
+      onClose={onClose}
+      footer={(
+        <>
+          {line.adjustment && <button type="button" className="btn-secondary mr-auto" onClick={reset} disabled={saving}>Back to calculated</button>}
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" form="vendor-line-amount-form" className="btn-primary" disabled={saving || !(Number(amount) >= 0) || amount === '' || reason.trim().length < 3}>{saving ? 'Saving…' : 'Save amount'}</button>
+        </>
+      )}
+    >
+      <form id="vendor-line-amount-form" onSubmit={save} className="space-y-4">
+        <p className="text-sm text-tertiary-700">
+          {line.vendor?.name || 'No vendor'} · {line.project.name}{line.project.code ? ` (${line.project.code})` : ''} · {periodLabel(period)}
+        </p>
+        <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-xs text-tertiary-600">
+          Calculated: <span className="font-medium tabular-nums">{amountText(line.calculated_amount ?? line.amount, line.currency)}</span> ({vendorLineText(line, line.currency)}).
+          The amount you set replaces it in the vendor total, the lock, the vendor payment and the invoice.
+        </p>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Amount ({line.currency})
+          <input required type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Reason
+          <textarea required rows={2} minLength={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" placeholder="Why the amount differs from the calculation" />
+          <span className="mt-0.5 block font-normal text-tertiary-400">Audited. If this vendor or month is locked, it is flagged for review.</span>
+        </label>
+      </form>
+    </Drawer>
+  );
+}
+
+/**
  * Edit a vendor invoice (all its project rows): number, date and notes apply to
  * every row; each row's amount and currency can be corrected on its own.
  */
@@ -290,6 +373,7 @@ export default function VendorPaymentsTab() {
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [invoicesKey, setInvoicesKey] = useState(0);
   const [editGroup, setEditGroup] = useState(null);
+  const [editLine, setEditLine] = useState(null);
   const vendorOptions = useVendorAccountOptions(true);
   const params = useMemo(() => cleanParams({ ...period, vendor_account_id: vendorId }), [period, vendorId]);
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/analytics/vendor-payments', { params }).then((r) => r.data.data), { deps: [JSON.stringify(params)], intervalMs: 60000 });
@@ -303,7 +387,16 @@ export default function VendorPaymentsTab() {
     { key: 'project', header: 'Project', render: (l) => <span>{l.project.name}<span className="block text-xs text-tertiary-500">{l.project.code}</span></span> },
     { key: 'rate', header: 'Calculation', render: (l) => <span className="text-xs">{vendorLineText(l, l.currency)}</span> },
     { key: 'hours', header: 'Approved hours', render: (l) => `${l.approved_hours}h${l.overtime_hours ? ` + ${l.overtime_hours} OT` : ''}` },
-    { key: 'amount', header: 'Amount', render: (l) => <span className="font-medium tabular-nums">{inr(l.amount, l.currency)}{l.currency !== 'INR' ? <span className="block text-xs text-tertiary-500">{inr(l.amount_inr)}</span> : null}</span> },
+    { key: 'amount', header: 'Amount', render: (l) => (
+      <span className="font-medium tabular-nums">
+        {inr(l.amount, l.currency)}
+        {l.currency !== 'INR' ? <span className="block text-xs text-tertiary-500">{inr(l.amount_inr)}</span> : null}
+        {l.adjustment && <span className="block text-[11px] font-normal text-warning-700" title={l.adjustment.reason}>Edited · calculated {inr(l.calculated_amount, l.currency)}</span>}
+      </span>
+    ) },
+    { key: 'edit', header: '', render: (l) => (l.source === 'locked' || data?.source === 'locked'
+      ? <span className="text-[11px] text-tertiary-400" title="Reopen the vendor lock to change this amount">Locked</span>
+      : <button type="button" className="btn-ghost text-xs" onClick={() => setEditLine(l)}>Edit amount</button>) },
     { key: 'approval', header: 'Approval', render: (l) => (
       <span>
         <StatusBadge status={l.approval_status} size="xs" />
@@ -361,6 +454,7 @@ export default function VendorPaymentsTab() {
         <h2 className="flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><Truck className="h-4 w-4" /> Vendor payments generated from locked vendors</h2>
         <DataTable columns={recordCols} rows={records.data || []} loading={records.loading} emptyLabel="Lock a vendor to generate its pending payment" />
       </section>
+      <VendorLineAmountDrawer line={editLine} period={period} onClose={() => setEditLine(null)} onSaved={() => { changed(); setInvoicesKey((k) => k + 1); }} />
       <VendorInvoiceDrawer target={invoiceFor} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
       <VendorInvoiceEditDrawer group={editGroup} onClose={() => setEditGroup(null)} onSaved={() => setInvoicesKey((k) => k + 1)} />
     </div>

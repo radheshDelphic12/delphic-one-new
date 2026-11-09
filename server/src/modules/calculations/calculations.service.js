@@ -65,6 +65,8 @@ const SOURCE_KINDS = {
   timesheet: ['billing', 'salary', 'salary_employee', 'resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
   // An admin's + / - tweak to a project's month (or a change of its billing basis).
   billing_adjustment: ['billing', 'financials'],
+  // An admin's edit of one contractor's vendor line amount for a month.
+  vendor_adjustment: ['vendor_payment', 'vendor_bill', 'financials'],
   // A monthly salary adjustment (TDS, OT adjustment, variable pay, reimbursement, other).
   salary_adjustment: ['salary', 'salary_employee', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).

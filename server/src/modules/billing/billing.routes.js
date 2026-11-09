@@ -10,6 +10,7 @@ const invoices = require('./invoices.service');
 const vendorPayout = require('./vendorPayout');
 const invoicePdf = require('./invoices.pdf');
 const adjustments = require('./adjustments.service');
+const vendorAdjustments = require('./vendorAdjustments.service');
 const resourceBilling = require('./resourceBilling.service');
 const vendorTracking = require('./vendorTracking.service');
 const charges = require('./charges.service');
@@ -37,6 +38,8 @@ const {
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
   vendorInvoicePeriodSchema,
+  vendorLineKeySchema,
+  vendorLineAdjustmentSchema,
   resourceRateSchema,
   applyProjectRateSchema,
   resourceRateQuerySchema,
@@ -114,6 +117,8 @@ const ERRORS = {
   project_requirement_not_found: [400, 'That requirement was not found in this company'],
   catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
+  contractor_not_found: [404, 'Contractor not found'],
+  vendor_line_not_found: [404, 'That contractor has no vendor line on this project for the month'],
 };
 
 function failFor(res, error, result) {
@@ -514,6 +519,30 @@ router.delete(
   ...adminInOrg,
   asyncHandler(async (req, res) => {
     const result = await adjustments.removeAdjustment(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// Vendor line amount (Live Analytics > Vendors): set the final amount of a contractor's project line for a month, or go back to the calculation.
+router.put(
+  '/vendor-line-amount',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { amount, reason, ...key } = vendorLineAdjustmentSchema.parse(req.body);
+    const result = await vendorAdjustments.setLineAmount(req.user.org_id, req.user, key, { amount, reason });
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.line);
+  })
+);
+
+router.delete(
+  '/vendor-line-amount',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await vendorAdjustments.removeLineAmount(req.user.org_id, req.user, vendorLineKeySchema.parse(req.query));
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
   })
