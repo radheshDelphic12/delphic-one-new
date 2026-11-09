@@ -166,9 +166,13 @@ async function vendorInvoiceModels(orgId, rows) {
     const mine = rows.filter((r) => r.currency === cur);
     const { party: buyer } = await companyParty(orgId, cur);
     const period = `${MONTHS[first.period_month - 1]} ${first.period_year}`;
-    const lines = mine.flatMap((r) => ((r.details?.contractors || []).length
-      ? r.details.contractors.map((c, i, all) => contractorLine(c, r.project, cur, period, i === all.length - 1 && cur !== 'INR' && r.details.amount_inr !== null && r.details.amount_inr !== undefined ? `Project total approx. ${money(r.details.amount_inr, 'INR')} @ INR ${r.details.exchange_rate}` : null))
-      : [{ description: r.project?.name || 'Services', details: [`(${period})`], qty: '1', unit: '', rate: num2(r.amount), amount: num2(r.amount) }]));
+    const lines = mine.flatMap((r) => [
+      ...((r.details?.contractors || []).length
+        ? r.details.contractors.map((c, i, all) => contractorLine(c, r.project, cur, period, i === all.length - 1 && cur !== 'INR' && r.details.amount_inr !== null && r.details.amount_inr !== undefined ? `Project total approx. ${money(r.details.amount_inr, 'INR')} @ INR ${r.details.exchange_rate}` : null))
+        : [{ description: r.project?.name || 'Services', details: [`(${period})`], qty: '1', unit: '', rate: num2(r.amount), amount: num2(r.amount) }]),
+      // Vendor + / - adjustments tied to this project (Live Analytics > Vendors), each as its own line.
+      ...(r.details?.adjustments || []).map((a) => ({ description: `Adjustment - ${a.reason}`, details: [r.project?.name || 'Project'], qty: '1', unit: '', rate: num2(a.amount), amount: num2(a.amount) })),
+    ]);
     const subtotal = mine.reduce((a, r) => a.plus(D(r.amount)), D(0));
     // TDS withheld and the finance adjustment are tracked per row; they print only when set, and the total is the net payable
     const tds = mine.reduce((a, r) => a.plus(D(r.tds_amount || 0)), D(0));

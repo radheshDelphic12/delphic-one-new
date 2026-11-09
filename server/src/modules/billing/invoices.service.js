@@ -567,6 +567,14 @@ async function vendorInvoiceSource(orgId, vendorAccountId, period) {
       amount: l.amount,
     });
   }
+  // The vendor's + / - adjustments (Live Analytics > Vendors) join the project row they are tied to.
+  for (const a of (raw.adjustments || []).filter((x) => x.vendor_account_id === vendorAccountId)) {
+    const key = `${a.project.id}|${a.currency}`;
+    if (!groups.has(key)) continue;
+    const g = groups.get(key);
+    g.amount = round2(g.amount + a.amount);
+    (g.adjustments ||= []).push({ amount: a.amount, reason: a.reason });
+  }
   const projects = [...groups.values()].map((g) => ({
     ...g,
     exchange_rate: fx.has(g.currency) ? fx.get(g.currency) : null,
@@ -640,7 +648,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
           amount: p.amount,
           currency: p.currency,
           notes: notes || null,
-          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
+          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, ...(p.adjustments?.length ? { adjustments: p.adjustments } : {}), exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
           created_by: user.id,
         },
         include: VENDOR_INVOICE_INCLUDE,

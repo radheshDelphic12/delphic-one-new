@@ -493,6 +493,7 @@ model User {
   project_vendor_invoices_created ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceCreatedBy")
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
   billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
+  vendor_adjustments_created      VendorAdjustment[]              @relation("VendorAdjustmentCreatedBy")
   contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
   expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
@@ -9228,25 +9229,23 @@ model RateChange {
   @@map("rate_changes")
 }
 
-// An admin's edit of one contractor-on-project vendor line for a month (Live Analytics > Vendors). `amount` is the
-// final figure in the line's currency; the calculated one stays in the engine and is shown next to it. Deleting the
-// row goes back to the calculation. A locked month is flagged for review when it changes.
-model VendorLineAdjustment {
+// An admin's + / - adjustment to what a vendor is owed for a month (Live Analytics > Vendors), tied to one of the vendor's
+// projects and in that project's vendor currency. Each is a separate reasoned line added to the vendor's amount (total,
+// lock, vendor payment and invoice follow it); delete one to go back. A locked month is flagged for review when one changes.
+model VendorAdjustment {
   id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id            String   @db.Uuid
-  org_membership_id String   @db.Uuid
+  vendor_account_id String   @db.Uuid
   account_id        String   @db.Uuid
   period_month      Int
   period_year       Int
+  currency          String
   amount            Decimal  @db.Decimal(14, 2)
-  calculated_amount Decimal? @db.Decimal(14, 2)
-  currency          String?
   reason            String
   created_by        String?  @db.Uuid
+  creator           User?    @relation("VendorAdjustmentCreatedBy", fields: [created_by], references: [id])
   created_at        DateTime @default(now())
-  updated_at        DateTime @default(now()) @updatedAt
 
-  @@unique([org_id, org_membership_id, account_id, period_year, period_month])
-  @@index([org_id, period_year, period_month])
-  @@map("vendor_line_adjustments")
+  @@index([org_id, vendor_account_id, period_year, period_month])
+  @@map("vendor_adjustments")
 }

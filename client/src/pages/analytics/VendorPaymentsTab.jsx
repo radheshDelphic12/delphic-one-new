@@ -133,84 +133,109 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
 /**
- * Live Analytics > Vendors: set what one contractor's project line owes the vendor this month. The typed amount
- * replaces the calculated one everywhere (vendor total, lock, vendor payment, invoice); "Back to calculated" removes it.
+ * Live Analytics > Vendors: an admin's + / - tweak to what a vendor is owed for a month (same idea as the billing
+ * adjustments on Billing & Sales). The contractors' calculated amounts stay the source of truth; each adjustment is a
+ * separate line with a mandatory reason, tied to one of the vendor's projects, in that project's vendor currency.
+ * It is added to the vendor's amount, so the total, the lock, the vendor payment and the invoice follow it.
  */
-function VendorLineAmountDrawer({ line, period, onClose, onSaved }) {
+function VendorAdjustmentDrawer({ target, onClose, onChanged }) {
   const { pushError, pushSuccess } = useAlerts();
-  const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState('');
+  const [data, setData] = useState({ items: [], totals: {}, projects: [] });
+  const [form, setForm] = useState({ direction: 'add', amount: '', reason: '', key: '' });
   const [saving, setSaving] = useState(false);
+  const params = target ? { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year } : null;
+
+  function load() {
+    apiClient.get('/billing/vendor-adjustments', { params })
+      .then(({ data: res }) => {
+        setData(res.data);
+        setForm((f) => ({ ...f, key: f.key || (res.data.projects[0] ? `${res.data.projects[0].project.id}|${res.data.projects[0].currency}` : '') }));
+      })
+      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load adjustments'), 'Something went wrong'));
+  }
 
   useEffect(() => {
-    if (!line) return;
-    setAmount(String(line.amount));
-    setReason(line.adjustment?.reason || '');
-  }, [line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!target) return;
+    setForm({ direction: 'add', amount: '', reason: '', key: '' });
+    load();
+  }, [target?.vendor?.id, target?.period_month, target?.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!line) return <Drawer open={false} title="" onClose={onClose} />;
-  const key = { org_membership_id: line.org_membership_id, account_id: line.project.id, period_month: period.period_month, period_year: period.period_year };
+  if (!target) return <Drawer open={false} title="" onClose={onClose} />;
+  const chosen = data.projects.find((p) => `${p.project.id}|${p.currency}` === form.key);
+  const signed = (form.direction === 'subtract' ? -1 : 1) * Number(form.amount || 0);
 
-  async function save(event) {
+  async function add(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.put('/billing/vendor-line-amount', { ...key, amount: Number(amount), reason: reason.trim() });
-      pushSuccess?.(`Amount for ${line.contractor} updated`);
-      onSaved?.();
-      onClose();
+      await apiClient.post('/billing/vendor-adjustments', { ...params, account_id: chosen.project.id, amount: signed, reason: form.reason.trim() });
+      pushSuccess?.('Adjustment added');
+      setForm((f) => ({ ...f, direction: 'add', amount: '', reason: '' }));
+      load();
+      onChanged?.();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to update the amount'), 'Could not update');
+      pushError(apiErrorMessage(err, 'Failed to add the adjustment'), 'Could not save');
     } finally {
       setSaving(false);
     }
   }
 
-  async function reset() {
-    setSaving(true);
+  async function remove(item) {
     try {
-      await apiClient.delete('/billing/vendor-line-amount', { params: key });
-      pushSuccess?.(`Amount for ${line.contractor} is back to the calculated figure`);
-      onSaved?.();
-      onClose();
+      await apiClient.delete(`/billing/vendor-adjustments/${item.id}`);
+      load();
+      onChanged?.();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to remove the edit'), 'Could not update');
-    } finally {
-      setSaving(false);
+      pushError(apiErrorMessage(err, 'Failed to remove the adjustment'), 'Something went wrong');
     }
   }
 
   return (
-    <Drawer
-      open
-      title={`Vendor amount · ${line.contractor}`}
-      onClose={onClose}
-      footer={(
-        <>
-          {line.adjustment && <button type="button" className="btn-secondary mr-auto" onClick={reset} disabled={saving}>Back to calculated</button>}
-          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="vendor-line-amount-form" className="btn-primary" disabled={saving || !(Number(amount) >= 0) || amount === '' || reason.trim().length < 3}>{saving ? 'Saving…' : 'Save amount'}</button>
-        </>
-      )}
-    >
-      <form id="vendor-line-amount-form" onSubmit={save} className="space-y-4">
-        <p className="text-sm text-tertiary-700">
-          {line.vendor?.name || 'No vendor'} · {line.project.name}{line.project.code ? ` (${line.project.code})` : ''} · {periodLabel(period)}
+    <Drawer open title={`Adjust vendor amount · ${target.vendor.name}`} onClose={onClose} size="lg">
+      <div className="space-y-4 text-sm">
+        <p className="text-xs text-tertiary-500">
+          {periodLabel(target)} · calculated from the contractors&apos; approved work. Add a + or − tweak; it is added to what the vendor is owed (total, lock, vendor payment and invoice) and audited. A locked vendor is flagged for review.
         </p>
-        <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-xs text-tertiary-600">
-          Calculated: <span className="font-medium tabular-nums">{amountText(line.calculated_amount ?? line.amount, line.currency)}</span> ({vendorLineText(line, line.currency)}).
-          The amount you set replaces it in the vendor total, the lock, the vendor payment and the invoice.
-        </p>
-        <label className="block text-xs font-medium text-tertiary-600">
-          Amount ({line.currency})
-          <input required type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
-        </label>
-        <label className="block text-xs font-medium text-tertiary-600">
-          Reason
-          <textarea required rows={2} minLength={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" placeholder="Why the amount differs from the calculation" />
-          <span className="mt-0.5 block font-normal text-tertiary-400">Audited. If this vendor or month is locked, it is flagged for review.</span>
-        </label>
-      </form>
+        <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
+          {data.items.length === 0 && <li className="px-3 py-2 text-xs text-tertiary-400">No adjustments for this vendor this month.</li>}
+          {data.items.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-2 px-3 py-2">
+              <span>
+                <span className={`font-medium tabular-nums ${a.amount < 0 ? 'text-danger-700' : 'text-success-700'}`}>{a.amount > 0 ? '+' : ''}{amountText(a.amount, a.currency)}</span>
+                <span className="block text-xs text-tertiary-500">{a.project_name} · {a.reason}{a.creator?.name ? ` · ${a.creator.name}` : ''}</span>
+              </span>
+              <button type="button" className="btn-ghost text-xs" onClick={() => remove(a)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+        {Object.keys(data.totals).length > 0 && <p className="text-right font-semibold text-tertiary-900">Adjustments: {Object.entries(data.totals).map(([cur, amt]) => `${amt > 0 ? '+' : ''}${amountText(amt, cur)}`).join(' · ')}</p>}
+        <form onSubmit={add} className="grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/60 p-3 sm:grid-cols-3">
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-3">
+            Project
+            <select required value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              {data.projects.map((p) => <option key={`${p.project.id}|${p.currency}`} value={`${p.project.id}|${p.currency}`}>{[p.project.client_name, p.project.name].filter(Boolean).join(' · ')} ({p.currency})</option>)}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Type
+            <select value={form.direction} onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <option value="add">Add (+)</option>
+              <option value="subtract">Deduct (−)</option>
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Amount ({chosen?.currency || '—'})
+            <input required type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-3">
+            Reason (required)
+            <input required minLength={3} maxLength={500} value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Agreed deduction, extra support, advance adjusted" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <div className="sm:col-span-3">
+            <button type="submit" className="btn-primary" disabled={saving || !chosen || !(Number(form.amount) > 0) || form.reason.trim().length < 3}>{saving ? 'Saving…' : 'Add adjustment'}</button>
+          </div>
+        </form>
+      </div>
     </Drawer>
   );
 }
@@ -373,7 +398,7 @@ export default function VendorPaymentsTab() {
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [invoicesKey, setInvoicesKey] = useState(0);
   const [editGroup, setEditGroup] = useState(null);
-  const [editLine, setEditLine] = useState(null);
+  const [adjustFor, setAdjustFor] = useState(null);
   const vendorOptions = useVendorAccountOptions(true);
   const params = useMemo(() => cleanParams({ ...period, vendor_account_id: vendorId }), [period, vendorId]);
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/analytics/vendor-payments', { params }).then((r) => r.data.data), { deps: [JSON.stringify(params)], intervalMs: 60000 });
@@ -387,16 +412,7 @@ export default function VendorPaymentsTab() {
     { key: 'project', header: 'Project', render: (l) => <span>{l.project.name}<span className="block text-xs text-tertiary-500">{l.project.code}</span></span> },
     { key: 'rate', header: 'Calculation', render: (l) => <span className="text-xs">{vendorLineText(l, l.currency)}</span> },
     { key: 'hours', header: 'Approved hours', render: (l) => `${l.approved_hours}h${l.overtime_hours ? ` + ${l.overtime_hours} OT` : ''}` },
-    { key: 'amount', header: 'Amount', render: (l) => (
-      <span className="font-medium tabular-nums">
-        {inr(l.amount, l.currency)}
-        {l.currency !== 'INR' ? <span className="block text-xs text-tertiary-500">{inr(l.amount_inr)}</span> : null}
-        {l.adjustment && <span className="block text-[11px] font-normal text-warning-700" title={l.adjustment.reason}>Edited · calculated {inr(l.calculated_amount, l.currency)}</span>}
-      </span>
-    ) },
-    { key: 'edit', header: '', render: (l) => (l.source === 'locked' || data?.source === 'locked'
-      ? <span className="text-[11px] text-tertiary-400" title="Reopen the vendor lock to change this amount">Locked</span>
-      : <button type="button" className="btn-ghost text-xs" onClick={() => setEditLine(l)}>Edit amount</button>) },
+    { key: 'amount', header: 'Amount', render: (l) => <span className="font-medium tabular-nums">{inr(l.amount, l.currency)}{l.currency !== 'INR' ? <span className="block text-xs text-tertiary-500">{inr(l.amount_inr)}</span> : null}</span> },
     { key: 'approval', header: 'Approval', render: (l) => (
       <span>
         <StatusBadge status={l.approval_status} size="xs" />
@@ -410,10 +426,12 @@ export default function VendorPaymentsTab() {
     { key: 'amount', header: 'Amount', render: (v) => (
       <span className="tabular-nums">
         <span className="font-medium">{inr(v.amount_inr)}</span>
+        {v.adjustment_inr ? <span className="block text-xs text-tertiary-500" title="Admin adjustment included in the amount">incl. {v.adjustment_inr > 0 ? '+' : ''}{inr(v.adjustment_inr)} adjustment</span> : null}
         {Object.entries(v.by_currency || {}).filter(([cur]) => cur !== 'INR').map(([cur, amt]) => <span key={cur} className="block text-xs text-tertiary-500">{inr(amt, cur)}</span>)}
       </span>
     ) },
     { key: 'pending', header: 'Unapproved entries', render: (v) => (v.pending_entries || v.rejected_entries ? <StatusBadge status={v.rejected_entries ? 'rejected' : 'pending'} label={`${v.pending_entries} pending · ${v.rejected_entries} rejected`} size="xs" /> : <StatusBadge status="approved" label="All approved" size="xs" />) },
+    { key: 'adjust', header: 'Adjust', render: (v) => (v.vendor ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor({ vendor: v.vendor, ...period })}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
     { key: 'lock', header: 'Lock', render: (v) => (v.vendor ? <RecordLockButton kind="vendor_bill" scopeKey={v.vendor.id} period={period} lock={v.lock} label={`${v.vendor.name} billing`} onChanged={changed} /> : '—') },
     { key: 'invoice', header: 'Invoice', render: (v) => (v.vendor ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ vendor: v.vendor, ...period })} /> : '—') },
   ];
@@ -454,7 +472,7 @@ export default function VendorPaymentsTab() {
         <h2 className="flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><Truck className="h-4 w-4" /> Vendor payments generated from locked vendors</h2>
         <DataTable columns={recordCols} rows={records.data || []} loading={records.loading} emptyLabel="Lock a vendor to generate its pending payment" />
       </section>
-      <VendorLineAmountDrawer line={editLine} period={period} onClose={() => setEditLine(null)} onSaved={() => { changed(); setInvoicesKey((k) => k + 1); }} />
+      <VendorAdjustmentDrawer target={adjustFor} onClose={() => setAdjustFor(null)} onChanged={() => { changed(); setInvoicesKey((k) => k + 1); }} />
       <VendorInvoiceDrawer target={invoiceFor} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
       <VendorInvoiceEditDrawer group={editGroup} onClose={() => setEditGroup(null)} onSaved={() => setInvoicesKey((k) => k + 1)} />
     </div>

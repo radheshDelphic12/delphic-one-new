@@ -68,9 +68,6 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
     exchangeRates.inrRates(orgId),
   ]);
   const entries = markResolved(rawEntries);
-  // Admin edits of a line's amount (Live Analytics > Vendors): the typed figure replaces the calculated one.
-  const adjustmentRows = ids.length ? await prisma.vendorLineAdjustment.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, period_month, period_year } }) : [];
-  const adjustments = new Map(adjustmentRows.map((a) => [`${a.org_membership_id}|${a.account_id}`, a]));
   const calendarCache = new Map();
   async function workingDaysFor(accountId) {
     if (!calendarCache.has(accountId)) calendarCache.set(accountId, await calendarsService.projectWorkingDays(orgId, accountId, period_year, period_month));
@@ -152,9 +149,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         overtimeAmountRaw += otHours * (dayRate / benchmark);
       }
       const overtimeAmount = account.overtime_billable ? round2(overtimeAmountRaw) : 0;
-      const calculatedAmount = round2(base + overtimeAmount);
-      const adjustment = adjustments.get(`${c.id}|${account.id}`) || null;
-      const amount = adjustment ? round2(Number(adjustment.amount)) : calculatedAmount;
+      const amount = round2(base + overtimeAmount);
       // Unapproved time holds up the amount where hours decide it (approved_hours basis) or overtime is paid.
       const hoursDecide = payoutBasis === 'approved_hours' || account.overtime_billable;
       const pending = hoursDecide ? projectEntries.filter((e) => e.status === 'submitted').length : 0;
@@ -182,8 +177,6 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
         base_amount: base,
         overtime_amount: overtimeAmount,
         amount,
-        calculated_amount: calculatedAmount,
-        adjustment: adjustment ? { id: adjustment.id, reason: adjustment.reason, by: adjustment.created_by, at: adjustment.updated_at } : null,
         amount_inr: toInr(amount, currency),
         entries: { approved: approved.length, pending, rejected },
         approval_status: pending ? 'pending' : rejected ? 'rejected' : approved.length ? 'approved' : 'no_entries',
@@ -202,6 +195,28 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
     }
   }
 
+  // Admin + / - adjustments to a vendor's month (Live Analytics > Vendors): each is a separate reasoned line added to the vendor's
+  // amount (in its currency), so it flows to the vendor total, the lock, the vendor payment and the vendor invoice.
+  const adjustmentRows = await prisma.vendorAdjustment.findMany({
+    where: { org_id: orgId, period_month, period_year, ...(vendor_account_id ? { vendor_account_id } : {}) },
+    orderBy: { created_at: 'asc' },
+    select: { id: true, vendor_account_id: true, account_id: true, currency: true, amount: true, reason: true, created_at: true, creator: { select: { id: true, name: true } } },
+  });
+  const adjustmentProjects = adjustmentRows.length ? await prisma.account.findMany({ where: { id: { in: [...new Set(adjustmentRows.map((a) => a.account_id))] } }, select: { id: true, name: true, project_name: true, project_code: true } }) : [];
+  const projectBy = new Map(adjustmentProjects.map((a) => [a.id, a]));
+  const adjustments = [];
+  for (const a of adjustmentRows) {
+    const v = vendors.get(a.vendor_account_id);
+    if (!v) continue; // the vendor has no contractor work this month
+    const amount = round2(Number(a.amount));
+    const project = projectBy.get(a.account_id);
+    v.amount_inr = round2(v.amount_inr + toInr(amount, a.currency));
+    v.by_currency[a.currency] = round2((v.by_currency[a.currency] || 0) + amount);
+    v.adjustment_inr = round2((v.adjustment_inr || 0) + toInr(amount, a.currency));
+    const item = { id: a.id, vendor_account_id: a.vendor_account_id, project: { id: a.account_id, code: project?.project_code || null, name: project ? calendarsService.projectName(project) : 'Project' }, currency: a.currency, amount, amount_inr: toInr(amount, a.currency), reason: a.reason, by: a.creator, at: a.created_at };
+    (v.adjustments ||= []).push(item);
+    adjustments.push(item);
+  }
   const vendorList = [...vendors.values()].map((v) => ({ ...v, contractors: [...v.contractors] })).sort((a, b) => b.amount_inr - a.amount_inr);
   const pending = vendorList.reduce((s, v) => s + v.pending_entries, 0);
   const rejected = vendorList.reduce((s, v) => s + v.rejected_entries, 0);
@@ -214,6 +229,7 @@ async function computeVendorPayments(orgId, { period_month, period_year, vendor_
     period_year,
     currency: 'INR',
     lines,
+    adjustments,
     vendors: vendorList,
     missing_rates: [...missingRates],
     totals: { amount_inr: round2(vendorList.reduce((s, v) => s + v.amount_inr, 0)), vendors: vendorList.length, contractors: new Set(lines.map((l) => l.org_membership_id)).size },
