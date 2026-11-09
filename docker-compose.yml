@@ -67,6 +67,19 @@ services:
       MS_GRAPH_TENANT_ID: ${MS_GRAPH_TENANT_ID:-}
       MS_GRAPH_CLIENT_ID: ${MS_GRAPH_CLIENT_ID:-}
       MS_GRAPH_CLIENT_SECRET: ${MS_GRAPH_CLIENT_SECRET:-}
+      # AI interview recordings on SharePoint (same Azure app + Sites.Selected). Empty = recordings stay on the server disk.
+      RECORDINGS_SP_SITE_URL: ${RECORDINGS_SP_SITE_URL:-}
+      RECORDINGS_SP_SITE_ID: ${RECORDINGS_SP_SITE_ID:-}
+      RECORDINGS_SP_LIBRARY: ${RECORDINGS_SP_LIBRARY:-}
+      RECORDINGS_SP_DRIVE_ID: ${RECORDINGS_SP_DRIVE_ID:-}
+      RECORDINGS_SP_FOLDER: ${RECORDINGS_SP_FOLDER:-}
+      RECORDINGS_MIN_FREE_MB: ${RECORDINGS_MIN_FREE_MB:-}
+      # Database backups on SharePoint: a place only admins can open (NOT the HR one). Empty = backups stay on the server only.
+      BACKUP_SP_SITE_URL: ${BACKUP_SP_SITE_URL:-}
+      BACKUP_SP_SITE_ID: ${BACKUP_SP_SITE_ID:-}
+      BACKUP_SP_LIBRARY: ${BACKUP_SP_LIBRARY:-}
+      BACKUP_SP_DRIVE_ID: ${BACKUP_SP_DRIVE_ID:-}
+      BACKUP_SP_FOLDER: ${BACKUP_SP_FOLDER:-}
       # Address candidates see for the careers pages, e.g. https://delphic.in/career. Leave empty until the website rewrite is live.
       PUBLIC_CAREERS_BASE: ${PUBLIC_CAREERS_BASE:-}
     volumes:

@@ -36,6 +36,7 @@ const ERRORS = {
   recording_too_big: [413, 'The recording is too large'],
   recording_expired: [410, 'The recording was deleted after its retention period'],
   no_recording: [404, 'There is no recording for this interview'],
+  recording_unavailable: [502, 'The recording is stored on SharePoint and could not be reached right now. Try again in a minute'],
   ai_unavailable: [503, 'The interviewer is not available right now. Please try again in a few minutes'],
 };
 const mapError = (res, error) => fail(res, ...(ERRORS[error] || [400, 'Bad request']));
@@ -54,7 +55,7 @@ const settingsSchema = z.object({
   weight_aptitude: z.number().int().min(0).max(100).optional(),
   recording_enabled: z.boolean().optional(),
   auto_reject: z.boolean().optional(),
-  recording_retention_days: z.number().int().min(1).max(30).optional(),
+  recording_retention_days: z.number().int().min(1).max(7).optional(),
   extra_instructions: z.string().trim().max(1500).nullable().optional(),
   link_valid_days: z.number().int().min(1).max(60).optional(),
   answer_time_seconds: z.number().int().min(0).max(1800).optional(),
@@ -123,8 +124,9 @@ router.get('/:id/recording', asyncHandler(async (req, res) => {
   const part = z.coerce.number().int().min(0).max(20).default(0).parse(req.query.part);
   const r = await service.recordingFor(z.string().uuid().parse(req.params.id), part, req.user);
   if (r.error) return mapError(res, r.error);
-  res.setHeader('Content-Type', r.mime);
   res.setHeader('Cache-Control', 'private, no-store');
+  if (r.redirect) return res.redirect(302, r.redirect); // stored on SharePoint: a short-lived link from Microsoft
+  res.setHeader('Content-Type', r.mime);
   if (req.query.download === 'true') res.setHeader('Content-Disposition', `attachment; filename="${r.name}"`);
   return res.sendFile(r.file); // sendFile answers Range requests, so the video can be scrubbed
 }));

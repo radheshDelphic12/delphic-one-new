@@ -47,7 +47,7 @@ asks for the camera before it calls `start`, and the interview pauses behind a "
 The server refuses an answer (409 `recording_missing`) until the first chunk has been stored. The browser records with `MediaRecorder` (about 500 kbps) and uploads 5-second chunks in order to
 `POST /public/ai-interviews/:token/recording?part=p&seq=n`; the server appends to `uploads/ai-interviews/<id>.webm`. A candidate who
 closes the tab and reopens the link records the **next part** as its own file (`<id>-p2.webm`, ...); the team plays / downloads each
-part. Cap 250 MB per interview. The files are **deleted automatically after the retention days (default 2, setting 1-30)** by the
+part. Cap 250 MB per interview. The files are **deleted automatically after the retention days (default 2, setting 1-7; never more than 7)** by the
 hourly job `jobs/aiInterviewRecordings.js`; the interview, transcript and scores stay. The team plays / downloads through
 `GET /ai-interviews/:id/recording?part=n` (login required, never a public URL).
 

@@ -218,7 +218,7 @@ export default function AiInterviewTab({ isAdmin }) {
         <div className="mt-3 space-y-3">
           <Switch checked={form.recording_enabled} onChange={set('recording_enabled')} label="Record the interview (mandatory for the candidate)" hint="Off by default. When on, every candidate must allow the camera and microphone and agree to the recording before the interview starts, and the interview pauses if the camera is turned off. Recordings are deleted automatically after the days below; the transcript and scores stay." />
           {form.recording_enabled && (
-            <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 30; 2 by default', min: 1, max: 30 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
+            <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 7; 2 by default', min: 1, max: 7 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
           )}
           <div>
             <p className="text-sm font-medium text-tertiary-900">Who can watch every recording</p>

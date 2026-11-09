@@ -10,6 +10,10 @@ const submissionsService = require('../submissions/submissions.service');
 const { loadRequirementForSubmission } = require('../interviewTemplates/interviewTemplates.service');
 const { AiUnavailableError } = require('./aiClient');
 const logic = require('./aiInterviews.logic');
+const sharepoint = require('../../lib/sharepoint');
+
+// A recording never stays longer than this many days, whatever the setting says (older settings of up to 30 days are cut down).
+const MAX_RECORDING_DAYS = 7;
 
 const OUTCOMES = ['pass', 'borderline', 'below_pass'];
 // is_enabled starts false: the AI interview is an optional, separate link and nothing in the existing flow depends on it.
@@ -57,6 +61,7 @@ async function getSettings(orgId) {
   const settings = Object.fromEntries(SETTING_KEYS.map((k) => [k, row ? row[k] : DEFAULTS[k]]));
   // the limit is the Nth leave that ends the interview, so two warnings always come first: never lower than 3 (0 = only log)
   if (settings.max_tab_switches > 0 && settings.max_tab_switches < MIN_TAB_LIMIT) settings.max_tab_switches = MIN_TAB_LIMIT;
+  settings.recording_retention_days = Math.min(MAX_RECORDING_DAYS, Math.max(1, Number(settings.recording_retention_days) || DEFAULTS.recording_retention_days));
   return settings;
 }
 
@@ -768,24 +773,114 @@ async function recordingFor(id, part = 0, user = null) {
   if (a.recording_deleted_at) return { error: 'recording_expired' };
   const entry = filesOf(a)[part];
   if (!entry) return { error: 'no_recording' };
-  const file = recordingFilePath(entry.name);
-  if (!fs.existsSync(file)) return { error: 'no_recording' };
   const label = a.candidate_name.replace(/[^a-z0-9]+/gi, '-');
-  return { file, mime: entry.mime || 'video/webm', name: `ai-interview-${label}${filesOf(a).length > 1 ? `-part${part + 1}` : ''}.${entry.name.split('.').pop()}` };
+  const name = `ai-interview-${label}${filesOf(a).length > 1 ? `-part${part + 1}` : ''}.${entry.name.split('.').pop()}`;
+  const file = recordingFilePath(entry.name);
+  if (fs.existsSync(file)) return { file, mime: entry.mime || 'video/webm', name };
+  // moved to SharePoint: the browser is sent to a short-lived link on Microsoft's side (it supports scrubbing and download)
+  if (entry.remote) {
+    const sp = sharepoint.getSharePoint();
+    if (!sp) return { error: 'recording_unavailable' };
+    try {
+      const url = await sp.downloadUrl(entry.remote.item_id, entry.remote.drive_id);
+      return url ? { redirect: url, mime: entry.mime || 'video/webm', name } : { error: 'no_recording' };
+    } catch (err) {
+      logger.error('ai_interview_recording_link_failed', { err });
+      return { error: 'recording_unavailable' };
+    }
+  }
+  return { error: 'no_recording' };
 }
 
-const removeRecordingFiles = (a) => Promise.all(filesOf(a).map((f) => fs.promises.unlink(recordingFilePath(f.name)).catch(() => {})));
+// Deletes the local file and, when it was moved there, the SharePoint copy. True only when nothing is left behind.
+async function removeRecordingFiles(a) {
+  let clean = true;
+  for (const f of filesOf(a)) {
+    await fs.promises.unlink(recordingFilePath(f.name)).catch(() => {});
+    if (f.remote) {
+      const sp = sharepoint.getSharePoint();
+      if (!sp) { clean = false; continue; }
+      try { await sp.deleteItem(f.remote.item_id, f.remote.drive_id); } catch (err) { clean = false; logger.error('ai_interview_recording_remote_delete_failed', { err, id: a.id }); }
+    }
+  }
+  return clean;
+}
 
-// Deletes the files whose time is up (called by the hourly job); the interview, transcript and scores stay.
+// Deletes the files whose time is up (called by the hourly job); the interview, transcript and scores stay. A SharePoint copy that
+// could not be deleted is tried again on the next run.
 async function purgeExpiredRecordings(now = new Date()) {
   const due = await prisma.aiInterview.findMany({
     where: { recording_path: { not: null }, recording_deleted_at: null, recording_expires_at: { lt: now } },
   });
+  let purged = 0;
   for (const a of due) {
-    await removeRecordingFiles(a);
+    if (!(await removeRecordingFiles(a))) continue;
     await prisma.aiInterview.update({ where: { id: a.id }, data: { recording_path: null, recording_files: [], recording_deleted_at: now } });
+    purged += 1;
   }
-  return { purged: due.length };
+  return { purged };
+}
+
+// ---- moving finished recordings to SharePoint (when it is set up) ----
+// A recording is moved once the interview is over (10 minutes after it ends, so the last chunk has been flushed). The local file is
+// deleted only after SharePoint confirmed the upload; a failed upload leaves the file where it is and is tried again on the next run.
+let moving = false;
+async function moveRecordingsToSharePoint(now = new Date()) {
+  const sp = sharepoint.getSharePoint();
+  if (!sp) return { moved: 0, off: true };
+  if (moving) return { moved: 0, busy: true };
+  moving = true;
+  try {
+    const rows = await prisma.aiInterview.findMany({
+      where: { recording_on: true, recording_path: { not: null }, recording_deleted_at: null, status: { in: ['completed', 'pending_review'] }, completed_at: { lt: new Date(now.getTime() - 10 * 60000) } },
+    });
+    let moved = 0;
+    for (const a of rows) {
+      const files = filesOf(a).map((f) => ({ ...f }));
+      let changed = false;
+      for (const f of files) {
+        if (f.remote) continue;
+        const local = recordingFilePath(f.name);
+        if (!fs.existsSync(local)) continue;
+        try {
+          f.remote = await sp.uploadFile(local, f.name);
+          await fs.promises.unlink(local).catch(() => {});
+          changed = true;
+          moved += 1;
+        } catch (err) {
+          logger.error('ai_interview_recording_upload_failed', { err, id: a.id });
+        }
+      }
+      if (changed) await prisma.aiInterview.update({ where: { id: a.id }, data: { recording_files: files } });
+    }
+    return { moved };
+  } finally {
+    moving = false;
+  }
+}
+
+// Safety net: anything in the SharePoint folder older than the retention cap goes, even when its row is gone (e.g. a deleted interview).
+async function sweepSharePointRecordings(now = new Date()) {
+  const sp = sharepoint.getSharePoint();
+  if (!sp) return { swept: 0, off: true };
+  const cutoff = now.getTime() - (MAX_RECORDING_DAYS + 1) * 86400000;
+  let swept = 0;
+  for (const f of await sp.listFolder()) {
+    if (!/^[0-9a-f-]{36}(-p\d+)?\.(webm|mp4)$/i.test(f.name) || f.modified_at.getTime() > cutoff) continue;
+    try { await sp.deleteItem(f.id, f.drive_id); swept += 1; } catch (err) { logger.error('ai_interview_recording_sweep_failed', { err }); }
+  }
+  return { swept };
+}
+
+// Free space of the disk that holds the recordings (and the backups), so a nearly full disk is noticed before uploads start failing.
+async function diskStatus() {
+  const dir = path.resolve(RECORDING_DIR());
+  await fs.promises.mkdir(dir, { recursive: true }).catch(() => {});
+  const s = await fs.promises.statfs(dir);
+  const freeMb = Math.floor((s.bavail * s.bsize) / 1048576);
+  const totalMb = Math.floor((s.blocks * s.bsize) / 1048576);
+  const minFreeMb = Number(process.env.RECORDINGS_MIN_FREE_MB) || 3072;
+  return { freeMb, totalMb, minFreeMb, low: freeMb < minFreeMb };
 }
 
 
@@ -851,5 +946,5 @@ module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
   invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics, report, REPORT_STATUSES, REPORT_OUTCOMES, REPORT_SUBMISSION_STAGES,
   openForCandidate, startForCandidate, answerForCandidate,
-  saveRecordingChunk, recordingFor, purgeExpiredRecordings,
+  saveRecordingChunk, recordingFor, purgeExpiredRecordings, moveRecordingsToSharePoint, sweepSharePointRecordings, diskStatus, MAX_RECORDING_DAYS,
 };

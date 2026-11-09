@@ -472,6 +472,83 @@ describe('optional recording (audio + video), deleted after the retention days',
     expect(row.recording_deleted_at).not.toBeNull();
   });
 
+  describe('stored on SharePoint (client faked)', () => {
+    const sharepoint = require('../src/lib/sharepoint');
+    const svc = require('../src/modules/aiInterviews/aiInterviews.service');
+    const calls = [];
+    const fake = (overrides = {}) => ({
+      uploadFile: async (p, name) => { calls.push(['up', name, fs.readFileSync(p).toString()]); return { drive_id: 'd1', item_id: 'i1', web_url: 'https://sp.example/i1', bytes: 8 }; },
+      downloadUrl: async (id) => `https://dl.example/${id}`,
+      deleteItem: async (id) => { calls.push(['del', id]); return true; },
+      listFolder: async () => [],
+      ...overrides,
+    });
+    afterEach(() => { jest.restoreAllMocks(); calls.length = 0; });
+
+    async function finishedRecording() {
+      const { created, token } = await startRecorded(true);
+      await chunk(token, 0, 'AAAA');
+      await chunk(token, 1, 'BBBB');
+      followUps = false;
+      await runInterview(token);
+      return { created, token, local: await fileOf(token) };
+    }
+
+    test('a finished recording moves up after 10 minutes, the server copy goes, play redirects, and the hourly job deletes the SharePoint copy', async () => {
+      jest.spyOn(sharepoint, 'getSharePoint').mockReturnValue(fake());
+      const { created, token, local } = await finishedRecording();
+      expect((await svc.moveRecordingsToSharePoint()).moved).toBe(0); // only just finished: the last chunk may still arrive
+      expect(fs.existsSync(local)).toBe(true);
+
+      expect((await svc.moveRecordingsToSharePoint(new Date(Date.now() + 11 * 60000))).moved).toBe(1);
+      expect(calls).toEqual([['up', path.basename(local), 'AAAABBBB']]);
+      expect(fs.existsSync(local)).toBe(false);
+      const row = await prisma.aiInterview.findUnique({ where: { token } });
+      expect(row.recording_files[0].remote).toMatchObject({ drive_id: 'd1', item_id: 'i1' });
+      expect((await svc.moveRecordingsToSharePoint(new Date(Date.now() + 12 * 60000))).moved).toBe(0); // already moved: nothing again
+
+      const play = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording`), recruiterToken);
+      expect(play.status).toBe(302);
+      expect(play.headers.location).toBe('https://dl.example/i1');
+      expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken)).body.data.has_recording).toBe(true);
+
+      await prisma.aiInterview.update({ where: { token }, data: { recording_expires_at: new Date(Date.now() - 1000) } });
+      expect((await svc.purgeExpiredRecordings()).purged).toBe(1);
+      expect(calls).toContainEqual(['del', 'i1']);
+      expect((await prisma.aiInterview.findUnique({ where: { token } })).recording_deleted_at).not.toBeNull();
+    });
+
+    test('a failed upload keeps the server copy; a SharePoint copy that cannot be deleted is tried again next time', async () => {
+      jest.spyOn(sharepoint, 'getSharePoint').mockReturnValue(fake({ uploadFile: async () => { throw new Error('boom'); } }));
+      const { token, local } = await finishedRecording();
+      expect((await svc.moveRecordingsToSharePoint(new Date(Date.now() + 11 * 60000))).moved).toBe(0);
+      expect(fs.existsSync(local)).toBe(true);
+      expect((await prisma.aiInterview.findUnique({ where: { token } })).recording_files[0].remote).toBeUndefined();
+
+      jest.spyOn(sharepoint, 'getSharePoint').mockReturnValue(fake({ deleteItem: async () => { throw new Error('offline'); } }));
+      await svc.moveRecordingsToSharePoint(new Date(Date.now() + 11 * 60000)).catch(() => {});
+      await prisma.aiInterview.update({ where: { token }, data: { recording_files: [{ name: path.basename(local), mime: 'video/webm', bytes: 8, chunks: 2, remote: { drive_id: 'd1', item_id: 'i9' } }], recording_expires_at: new Date(Date.now() - 1000) } });
+      expect((await svc.purgeExpiredRecordings()).purged).toBe(0); // delete failed: the row is kept so it is retried
+      expect((await prisma.aiInterview.findUnique({ where: { token } })).recording_deleted_at).toBeNull();
+    });
+
+    test('the folder clean-up removes only recording files older than the cap; the retention setting is capped at 7 days', async () => {
+      const old = new Date(Date.now() - 9 * 86400000);
+      const fresh = new Date(Date.now() - 86400000);
+      jest.spyOn(sharepoint, 'getSharePoint').mockReturnValue(fake({
+        listFolder: async () => [
+          { id: 'old1', name: '0b9f2f4e-3a3c-4f0e-9f3e-0a1b2c3d4e5f.webm', modified_at: old, drive_id: 'd1' },
+          { id: 'new1', name: '0b9f2f4e-3a3c-4f0e-9f3e-0a1b2c3d4e60.webm', modified_at: fresh, drive_id: 'd1' },
+          { id: 'other', name: 'notes.docx', modified_at: old, drive_id: 'd1' },
+        ],
+      }));
+      expect((await svc.sweepSharePointRecordings()).swept).toBe(1);
+      expect(calls).toEqual([['del', 'old1']]);
+      const put = await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ recording_retention_days: 30 });
+      expect(put.status).toBe(422);
+    });
+  });
+
   test('deleting the interview removes its recording too', async () => {
     const { created, token } = await startRecorded(true);
     await chunk(token, 0, 'AAAA');
