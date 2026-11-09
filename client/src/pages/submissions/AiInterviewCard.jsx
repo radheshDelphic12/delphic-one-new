@@ -47,6 +47,8 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState(null);
   const [override, setOverride] = useState({ outcome: 'pass', reason: '' });
+  const [notes, setNotes] = useState([]); // team feedback on the opened result
+  const [myNote, setMyNote] = useState('');
   const [video, setVideo] = useState({ url: null, error: '' });
   const locked = !!submission?.is_locked;
   const isAdmin = isAdminUser(user);
@@ -114,8 +116,25 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
       const { data } = await apiClient.get(`/ai-interviews/${item.id}/review`);
       setReview(data.data);
       setOverride({ outcome: data.data.effective_outcome === 'pending_review' ? 'pass' : data.data.effective_outcome || 'pass', reason: '' });
+      await loadNotes(item.id);
     }, 'Could not open the result');
   }
+
+  async function loadNotes(id) {
+    try {
+      const { data } = await apiClient.get(`/ai-interviews/${id}/feedback`);
+      setNotes(data.data || []);
+      setMyNote((data.data || []).find((n) => n.mine)?.feedback || '');
+    } catch { setNotes([]); setMyNote(''); }
+  }
+  const saveNote = () => run(async () => {
+    await apiClient.put(`/ai-interviews/${review.id}/feedback`, { feedback: myNote.trim() });
+    await loadNotes(review.id);
+  }, 'Could not save the feedback');
+  const removeNote = () => run(async () => {
+    await apiClient.delete(`/ai-interviews/${review.id}/feedback`);
+    await loadNotes(review.id);
+  }, 'Could not remove the feedback');
 
   // A candidate who closed the tab and came back has more than one part; each is its own file.
   // A blob request returns its error body as a Blob too, so read the server's message out of it.
@@ -349,6 +368,28 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                   </select>
                   <textarea className="w-full rounded-lg border border-tertiary-200 px-3 py-2" rows={2} placeholder="Reason (required, recorded in the audit log)" value={override.reason} onChange={(e) => setOverride((o) => ({ ...o, reason: e.target.value }))} />
                   <button type="button" className="btn-primary text-xs" disabled={busy || override.reason.trim().length < 3} onClick={saveOverride}>Save decision</button>
+                </div>
+              )}
+            </div>
+
+            <div data-testid="ai-feedback">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Feedback on this interview</h3>
+              {notes.length === 0 && <p className="mb-2 text-xs text-tertiary-500">No feedback yet.</p>}
+              <ul className="mb-2 space-y-1.5">
+                {notes.map((n) => (
+                  <li key={n.id} className="rounded-lg bg-tertiary-50 px-3 py-2 text-tertiary-800" data-testid="ai-feedback-note">
+                    <p className="whitespace-pre-wrap">{n.feedback}</p>
+                    <p className="mt-1 text-[11px] text-tertiary-500">{n.by.name} · {when(n.updated_at)}{n.mine ? ' · yours' : ''}</p>
+                  </li>
+                ))}
+              </ul>
+              {!locked && (
+                <div className="space-y-2">
+                  <textarea className="w-full rounded-lg border border-tertiary-200 px-3 py-2" rows={3} maxLength={3000} placeholder="Your feedback on this AI interview (what you saw in the answers, your view of the candidate)" value={myNote} onChange={(e) => setMyNote(e.target.value)} />
+                  <div className="flex gap-2">
+                    <button type="button" className="btn-primary text-xs" data-testid="ai-feedback-save" disabled={busy || myNote.trim().length < 3} onClick={saveNote}>{notes.some((n) => n.mine) ? 'Update my feedback' : 'Save feedback'}</button>
+                    {notes.some((n) => n.mine) && <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={removeNote}>Remove mine</button>}
+                  </div>
                 </div>
               )}
             </div>

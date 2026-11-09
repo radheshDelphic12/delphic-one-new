@@ -494,6 +494,7 @@ model User {
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
   billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
   vendor_adjustments_created      VendorAdjustment[]              @relation("VendorAdjustmentCreatedBy")
+  ai_interview_feedback_given      AiInterviewFeedback[]           @relation("AiInterviewFeedbackBy")
   contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
   expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
@@ -9248,4 +9249,20 @@ model VendorAdjustment {
 
   @@index([org_id, vendor_account_id, period_year, period_month])
   @@map("vendor_adjustments")
+}
+
+// A team member's feedback on a finished AI interview (after reading the result / transcript). One note per person, amended in place,
+// so the people who took part in the hiring can each leave their view next to the AI's score.
+model AiInterviewFeedback {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ai_interview_id String   @db.Uuid
+  user_id         String   @db.Uuid
+  user            User     @relation("AiInterviewFeedbackBy", fields: [user_id], references: [id])
+  feedback        String
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  @@unique([ai_interview_id, user_id])
+  @@index([ai_interview_id])
+  @@map("ai_interview_feedback")
 }

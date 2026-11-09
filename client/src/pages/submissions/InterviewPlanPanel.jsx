@@ -72,6 +72,9 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
 
   const roundType = (step) => (step.conducted_by === 'client' ? 'template_client' : 'template_internal');
   const canManage = (step) => !locked && canManageInterviewRound(submission, roundType(step), user);
+  // The person who took the round (an interviewer assigned to it) can write and amend its feedback, result and ratings, even after it is completed.
+  const tookRound = (round) => Boolean(user && (round?.interviewers || []).some((i) => i.id === user.id));
+  const canGiveFeedback = (step, round) => !locked && (canManageInterviewRound(submission, roundType(step), user) || tookRound(round));
 
   async function run(fn, errorMessage) {
     setBusy(true);
@@ -336,8 +339,8 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
                       <Pencil className="h-4 w-4" />
                     </button>
                   )}
-                  {step.state !== 'not_scheduled' && step.result !== 'skipped' && canManage(step) && (
-                    <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => openFinish(step)}>
+                  {step.state !== 'not_scheduled' && step.result !== 'skipped' && canGiveFeedback(step, round) && (
+                    <button type="button" className="btn-secondary text-xs" data-testid="give-feedback" disabled={busy} onClick={() => openFinish(step)}>
                       {step.state === 'completed' ? 'Edit feedback' : 'Give feedback'}
                     </button>
                   )}

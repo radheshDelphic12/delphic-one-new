@@ -5,7 +5,7 @@ const { SUBMISSION_STAGE_TRANSITIONS, CLIENT_ROUND_TYPES, INTERNAL_ROUND_TYPES, 
 const { computeClosureDetail } = require('../../utils/closureProgress');
 const templates = require('../interviewTemplates/interviewTemplates.service');
 const rateLog = require('../rateChanges/rateChanges.service');
-const { notify, interviewRoundParticipants, submissionParticipants, admins } = require('../../lib/notifications');
+const { notify, interviewRoundParticipants, submissionParticipants, admins, isAssignedInterviewer } = require('../../lib/notifications');
 const { interviewRoundInvite } = require('../../lib/email/invites');
 
 /**
@@ -568,14 +568,18 @@ async function updateInterviewRound(id, patch, user) {
     const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
     const isManager = canManageInterviewRound(submission, salesOwnerId, existing.round_type, user);
     const isScheduler = canRescheduleInterviewRound(existing, submission, salesOwnerId, user);
-    if (!isManager && !isScheduler) return { error: 'forbidden' };
+    // The person who took the round (an assigned interviewer) can write and amend the result, the feedback and the skill ratings of
+    // THAT round, before and after it is completed - they do not need scheduling rights for that.
+    const isInterviewer = await isAssignedInterviewer(tx, id, user.id);
+    if (!isManager && !isScheduler && !isInterviewer) return { error: 'forbidden' };
+    const mayGiveFeedback = isManager || isInterviewer;
 
     const { interviewer_ids, skill_ratings, ...patchFields } = patch;
     const finalPatch = { ...patchFields };
 
     // Template rounds: finishing one (pass / fail) needs feedback, and ratings where the template asks for them.
     let skillsToSave;
-    if (isManager && existing.template_round_id) {
+    if (mayGiveFeedback && existing.template_round_id) {
       const templateRound = await tx.interviewTemplateRound.findUnique({ where: { id: existing.template_round_id } });
       const finalResult = patch.result !== undefined ? patch.result : existing.result;
       const touched = patch.result !== undefined || patch.feedback !== undefined || skill_ratings !== undefined;
@@ -595,7 +599,9 @@ async function updateInterviewRound(id, patch, user) {
       }
     }
     if (!isManager) {
-      const allowed = ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'];
+      // the scheduler may move the interview; an interviewer may only write the outcome of their round
+      const allowed = isScheduler ? ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'] : [];
+      if (isInterviewer) allowed.push('result', 'feedback', 'rating', 'completed_at');
       for (const key of Object.keys(finalPatch)) {
         if (!allowed.includes(key)) delete finalPatch[key];
       }
@@ -604,7 +610,7 @@ async function updateInterviewRound(id, patch, user) {
     if (finalPatch.scheduled_at) finalPatch.scheduled_at = new Date(finalPatch.scheduled_at);
     if (finalPatch.completed_at) finalPatch.completed_at = new Date(finalPatch.completed_at);
     if (finalPatch.interviewer_email === '') finalPatch.interviewer_email = null;
-    if (isManager && ['pass', 'fail', 'no_show'].includes(patch.result) && !patch.completed_at) {
+    if (mayGiveFeedback && ['pass', 'fail', 'no_show'].includes(patch.result) && !patch.completed_at) {
       finalPatch.completed_at = new Date();
     }
     // A cancelled round comes back to life when it is given a new date/time or the editor asks to reopen it;

@@ -171,7 +171,8 @@ const RULES = [
   [/^\/interview-templates(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update'] }],
   [/^\/profiles(\/|$)/, { GET: ['profiles.view', 'submissions.create', 'submissions.view', 'pipeline.view'], '*': ['profiles.create', 'profiles.update', 'profiles.delete', 'submissions.create'] }],
   [/^\/submissions(\/|$)/, { GET: ['submissions.view', 'pipeline.view', 'rejected.view', 'profiles.view'], '*': ['submissions.create', 'submissions.update', 'meetings.schedule'] }],
-  [/^\/interview-rounds(\/|$)/, ['submissions.update', 'meetings.schedule']],
+  // PATCH: the service decides (the round's manager, its scheduler, or an interviewer assigned to it); anything else needs the permissions
+  [/^\/interview-rounds(\/|$)/, { PATCH: 'open', '*': ['submissions.update', 'meetings.schedule'] }],
   [/^\/applicants(\/|$)/, { GET: ['applicants.view', 'pipeline.view'], '*': 'applicants.update' }],
   [/^\/website(\/|$)/, { GET: 'website.view', '*': 'website.update' }],
   [/^\/vendor-email(\/|$)/, 'email.send'], // one permission: Email > Send emails (no implicit allowance via vendors.onboard / accounts.update)

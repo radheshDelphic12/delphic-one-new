@@ -17,6 +17,7 @@ const interviewRoundsRoutes = require('./modules/submissions/interviewRounds.rou
 const interviewTemplatesRoutes = require('./modules/interviewTemplates/interviewTemplates.routes');
 const { router: assessmentsRoutes, publicRouter: publicAssessmentsRoutes } = require('./modules/assessments/assessments.routes');
 const { router: aiInterviewsRoutes, publicRouter: publicAiInterviewsRoutes } = require('./modules/aiInterviews/aiInterviews.routes');
+const aiInterviewFeedbackRoutes = require('./modules/aiInterviews/aiInterviewFeedback.routes');
 const documentsRoutes = require('./modules/documents/documents.routes');
 const commentsRoutes = require('./modules/comments/comments.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
@@ -133,6 +134,7 @@ app.use('/api/v1/interview-rounds', interviewRoundsRoutes);
 app.use('/api/v1/interview-templates', interviewTemplatesRoutes);
 app.use('/api/v1/assessments', assessmentsRoutes);
 app.use('/api/v1/ai-interviews', aiInterviewsRoutes);
+app.use('/api/v1/ai-interviews', aiInterviewFeedbackRoutes);
 app.use('/api/v1/documents', documentsRoutes);
 app.use('/api/v1/comments', commentsRoutes);
 app.use('/api/v1/admin', adminRoutes);
