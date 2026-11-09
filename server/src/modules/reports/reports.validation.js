@@ -91,6 +91,27 @@ const hiringFunnelDetailsSchema = hiringFunnelSchema.extend({
   bucket: z.string().max(40).optional(),
 });
 
+// Hiring panels (one table per interview template, layer by layer): submissions made in the dates, narrowed by vendor, team, recruiter,
+// client, sales owner, who brought the client and the profile type.
+const hiringPanelsSchema = z.object({
+  date_from: z.string().min(1),
+  date_to: z.string().min(1),
+  vendor_account_id: optionalUuid,
+  team_id: optionalUuid,
+  sourcer_id: optionalUuid,
+  client_id: optionalUuid,
+  sales_owner_id: optionalUuid,
+  brought_by_id: optionalUuid,
+  profile_type: z.enum(['vendor', 'market', 'bench']).optional(),
+});
+
+// The candidates behind one count of a layer: the template, the layer number (1-based) and the column.
+const hiringPanelDetailsSchema = hiringPanelsSchema.extend({
+  template_id: z.string().uuid(),
+  layer: z.coerce.number().int().min(1).max(50),
+  metric: z.enum(['bucket', 'scheduled', 'attended', 'pending', 'rejected', 'passed', 'skipped']).default('bucket'),
+});
+
 // Joinings by month (by sourcer / interviewer L1+L2 / vendor).
 const joiningsSchema = z.object({
   date_from: z.string().min(1),
@@ -162,6 +183,8 @@ module.exports = {
   hrSchema,
   hiringFunnelSchema,
   hiringFunnelDetailsSchema,
+  hiringPanelsSchema,
+  hiringPanelDetailsSchema,
   joiningsSchema,
   timeToSubmitSchema,
 };

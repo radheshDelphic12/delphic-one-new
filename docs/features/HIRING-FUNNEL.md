@@ -89,3 +89,19 @@ No migration.
 - Drill-down lists are capped at 1000 rows (latest sourced first); add an Excel export of a list if asked.
 - A submission-level view (instead of per profile) if the owner wants it.
 - Sales funnel on `lib/funnel.js`.
+
+## Hiring panels (added 2026-11-09, default view of Reports > Hiring funnel)
+One table per interview template (Client Hiring, Internal Technical, Internal Sales / HR / Operations ...; whatever Hiring setup holds), laid out
+as in the owner's `Hiring Funnel.pdf`: No, Layer, Since First, Layer by Layer, Bucket, Scheduled, Attended, Decision Pending, Rejected, Passed, Skipped.
+The earlier stage funnel (recruiter-wise, trend) stays under the "Stage funnel & recruiters" tab.
+- Each template round is a layer, in the template's order. Unit = a submission, picked by the **date of submission** (not the sourcing date).
+- **Bucket**: layer 1 = every submission in the panel; later layers = passed + skipped of the layer before. Since First = bucket / layer 1 bucket;
+  Layer by Layer = bucket / previous bucket.
+- Scheduled = a round / test / AI interview was set up. Attended = a result is in, or the time has passed (no-show and cancelled are not attended).
+  Decision pending + Rejected + Passed = Attended. Skipped = round marked skipped, an optional round moved past, or a gap in the records while the
+  candidate moved on; flows to the next bucket like a pass.
+- Layer 1 (the screening round) combines the screening interview, the screening test and the AI interview: the best result wins.
+- Filters: vendor, team, date of submission, recruiter, client, sales owner, sales brought (client's origin owner), profile type (Vendor / Market / Bench).
+- Every count opens the candidates behind it. Excel / PDF export: one sheet per panel.
+- API: `GET /reports/hiring-panels`, `GET /reports/hiring-panels/details` (`template_id`, `layer`, `metric`), `GET /reports/export?report=hiring-panels`.
+  Code: `server/src/modules/reports/hiringPanels.service.js`, `client/src/pages/reports/HiringPanels.jsx`. Test: `server/tests/hiring-panels.test.js`. No migration.

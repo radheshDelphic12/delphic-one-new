@@ -10,6 +10,7 @@ const explorerService = require('./explorer.service');
 const drilldownService = require('./drilldown.service');
 const monthlyReview = require('./monthlyReview.service');
 const hiringFunnelService = require('./hiringFunnel.service');
+const hiringPanelsService = require('./hiringPanels.service');
 const closureMatrixService = require('./closureMatrix.service');
 const dayScheduleService = require('./daySchedule.service');
 const {
@@ -22,6 +23,8 @@ const {
   hrSchema,
   hiringFunnelSchema,
   hiringFunnelDetailsSchema,
+  hiringPanelsSchema,
+  hiringPanelDetailsSchema,
   joiningsSchema,
   timeToSubmitSchema,
 } = require('./reports.validation');
@@ -66,6 +69,7 @@ const REPORTS = {
   'recruiter-vendor-gaps': (q) => service.recruiterVendorGaps(q),
   hr: (q) => service.hrReport(q),
   'hiring-funnel': (q) => hiringFunnelService.hiringFunnel(q),
+  'hiring-panels': (q) => hiringPanelsService.hiringPanels(q),
   joinings: (q) => service.joinings(q),
   'time-to-submit': (q) => service.timeToSubmit(q),
   'bda-reports': (q) => service.bdaReports(q),
@@ -253,6 +257,18 @@ router.get(
 );
 
 router.get(
+  '/hiring-panels',
+  authorizeHr,
+  asyncHandler(async (req, res) => ok(res, await hiringPanelsService.hiringPanels(hiringPanelsSchema.parse(req.query))))
+);
+
+router.get(
+  '/hiring-panels/details',
+  authorizeHr,
+  asyncHandler(async (req, res) => ok(res, await hiringPanelsService.hiringPanelDetails(hiringPanelDetailsSchema.parse(req.query))))
+);
+
+router.get(
   '/closure-matrix',
   authorize('admin', 'sales', 'bda'),
   asyncHandler(async (req, res) => ok(res, await closureMatrixService.closureMatrix(req.user.org_id, req.query)))
@@ -373,7 +389,7 @@ router.get(
     if (!fn) return fail(res, 422, 'Unknown report');
     if (!['xlsx', 'pdf'].includes(type)) return fail(res, 422, 'type must be xlsx or pdf');
     // HR is admin-only for the GET (or Reports > HR reports); keep its export the same.
-    if ((report === 'hr' || report === 'hiring-funnel') && !canOpenHr(req.user)) return fail(res, 403, 'Admin only');
+    if ((report === 'hr' || report === 'hiring-funnel' || report === 'hiring-panels') && !canOpenHr(req.user)) return fail(res, 403, 'Admin only');
 
     let query = { ...req.query };
     if (report === 'aging') query = agingSchema.parse(req.query);
@@ -381,6 +397,7 @@ router.get(
     else if (report === 'pipeline-explorer') query = explorerSchema.parse(req.query);
     else if (report === 'hr') query = hrSchema.parse(req.query);
     else if (report === 'hiring-funnel') query = hiringFunnelSchema.parse(req.query);
+    else if (report === 'hiring-panels') query = hiringPanelsSchema.parse(req.query);
     else if (report === 'joinings') query = joiningsSchema.parse(req.query);
     else if (report === 'time-to-submit') query = timeToSubmitSchema.parse(req.query);
     else if (report === 'clients-without-requirements' || report === 'recruiter-vendor-gaps') {
@@ -464,6 +481,28 @@ function buildExportSheets(report, data) {
     Array.isArray(data.tables)
   ) {
     return data.tables.map((t) => ({ name: t.title, rows: (t.rows || []).map((r) => flatten(r)) }));
+  }
+
+  if (report === 'hiring-panels' && data && typeof data === 'object' && Array.isArray(data.panels)) {
+    const num = (v) => (v == null ? '' : v);
+    const sheets = data.panels.map((p) => ({
+      name: p.template.name,
+      rows: p.layers.map((l) => ({
+        No: l.no,
+        Layer: l.label,
+        'Since First %': num(l.since_first_pct),
+        'Layer by Layer %': num(l.layer_pct),
+        Bucket: l.bucket,
+        Scheduled: l.scheduled,
+        Attended: l.attended,
+        'Decision Pending': l.pending,
+        Rejected: l.rejected,
+        Passed: l.passed,
+        Skipped: l.skipped,
+      })),
+    }));
+    sheets.push({ name: 'Assumptions', rows: data.assumptions.map((a) => ({ Note: a })) });
+    return sheets;
   }
 
   if (report === 'hiring-funnel' && data && typeof data === 'object' && Array.isArray(data.funnels)) {

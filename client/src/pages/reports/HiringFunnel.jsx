@@ -14,6 +14,7 @@ import FilterBar from '../../components/ui/FilterBar.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
 import { formatReportDate } from './reportViews.js';
+import HiringPanels from './HiringPanels.jsx';
 
 const SERVICE_OPTIONS = [
   { value: 'client', label: 'Client hiring' },
@@ -211,7 +212,7 @@ function DetailsDrawer({ detail, onClose }) {
   );
 }
 
-export default function HiringFunnel() {
+function HiringFunnelStages() {
   const { pushError } = useAlerts();
   const initial = rangeForPreset('this_month');
   const [datePreset, setDatePreset] = useState('this_month');
@@ -375,6 +376,29 @@ export default function HiringFunnel() {
           </details>
         </>
       )}
+    </div>
+  );
+}
+
+const VIEWS = [
+  { key: 'panels', label: 'Hiring panels' },
+  { key: 'stages', label: 'Stage funnel & recruiters' },
+];
+
+/** Reports > Hiring funnel: the layer-wise panels per hiring template (default), and the earlier stage funnel with recruiter-wise and trend. */
+export default function HiringFunnel() {
+  const [view, setView] = useState('panels');
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-heading text-base font-semibold text-tertiary-900">Hiring funnel</h2>
+        <div className="inline-flex rounded-xl border border-tertiary-100 bg-white p-0.5 text-xs" role="tablist" aria-label="Hiring funnel view">
+          {VIEWS.map((v) => (
+            <button key={v.key} type="button" role="tab" aria-selected={view === v.key} data-testid={`funnel-view-${v.key}`} onClick={() => setView(v.key)} className={`rounded-[10px] px-3 py-1.5 font-medium ${view === v.key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{v.label}</button>
+          ))}
+        </div>
+      </div>
+      {view === 'panels' ? <HiringPanels /> : <HiringFunnelStages />}
     </div>
   );
 }
