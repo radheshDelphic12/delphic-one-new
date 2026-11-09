@@ -7,9 +7,12 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { ConfirmDialog } from '../../components/resignation/resignationShared.jsx';
 import { KpiTile, SectionHeading } from './groupUi.jsx';
+import OwnershipChart from './OwnershipChart.jsx';
+import { STATUSES } from './ownershipGraph.js';
 
 const VIEWS = [
   { key: 'operational', label: 'Operational' },
@@ -17,6 +20,7 @@ const VIEWS = [
   { key: 'future', label: 'Future' },
   { key: 'sector', label: 'Group Sector' },
   { key: 'overall', label: 'Overall' },
+  { key: 'chart', label: 'Group chart' },
 ];
 const STATUS_OPTIONS = [
   { value: 'operational', label: 'Operational' },
@@ -26,6 +30,9 @@ const STATUS_OPTIONS = [
 // The sector picker offers these plus every sector already used; "Add a new sector…" lets an admin add another.
 const ADD_SECTOR = '__add_sector__';
 const DEFAULT_SECTORS = ['Technology & Digital', 'Pharmaceuticals', 'Mining & Resources', 'Trading', 'Finance & Investments', 'Spirits & Beverages', 'Real Estate', 'Infrastructure', 'Hospitality', 'Foundation / Non-profit'];
+// Overall, Group Sector and Group chart can show any mix of the three statuses.
+const STATUS_FILTER_VIEWS = ['overall', 'sector', 'chart'];
+const STATUS_FILTER_OPTIONS = [{ id: 'operational', label: 'Operational' }, { id: 'planning', label: 'Planning' }, { id: 'future', label: 'Future' }];
 const STATUS_TONE ={ operational: 'green', planning: 'amber', future: 'blue' };
 const BLANK = { name: '', short_code: '', sector: '', tagline: '', foundation_date: '', status: 'planning', notes: '' };
 const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500';
@@ -63,6 +70,7 @@ function HolderChips({ holders }) {
 export default function GroupCompaniesTab() {
   const { pushError, pushSuccess } = useAlerts();
   const [view, setView] = useState('operational');
+  const [statuses, setStatuses] = useState(STATUSES); // multi-select status filter (Overall, Group Sector, Group chart)
   const [data, setData] = useState(null);
   const [editor, setEditor] = useState(null); // { id?, linked?, form }
   const [stakeEditor, setStakeEditor] = useState(null); // { company, rows }
@@ -72,16 +80,16 @@ export default function GroupCompaniesTab() {
   const load = useCallback(() => apiClient.get('/group-companies').then(({ data: res }) => setData(res.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load the companies'), 'Something went wrong')), [pushError]);
   useEffect(() => { load(); }, [load]);
 
-  const companies = data?.companies || [];
-  const shown = useMemo(() => (['operational', 'planning', 'future'].includes(view) ? companies.filter((c) => c.status === view) : companies), [companies, view]);
+  const companies = useMemo(() => data?.companies || [], [data]);
+  const shown = useMemo(() => (['operational', 'planning', 'future'].includes(view) ? companies.filter((c) => c.status === view) : companies.filter((c) => statuses.includes(c.status))), [companies, view, statuses]);
   const holdersMap = useMemo(() => {
     const map = new Map();
-    for (const c of companies) for (const h of c.holders) {
+    for (const c of shown) for (const h of c.holders) {
       if (!map.has(h.holder_label)) map.set(h.holder_label, { label: h.holder_label, kind: h.holder_kind, items: [] });
       map.get(h.holder_label).items.push({ company: c.name, pct: h.pct });
     }
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [companies]);
+  }, [shown]);
 
   async function run(fn, okMessage, failMessage) {
     setBusy(true);
@@ -153,8 +161,11 @@ export default function GroupCompaniesTab() {
   }
 
   if (!data) return <Skeleton className="h-64 w-full" />;
-  const { summary, sectors } = data;
-  const countOf = (key) => (['operational', 'planning', 'future'].includes(key) ? summary.by_status[key] : key === 'overall' ? summary.total : sectors.length);
+  const { summary } = data;
+  const sectors = data.sectors
+    .map((s) => { const list = s.companies.filter((c) => statuses.includes(c.status)); return { ...s, companies: list, count: list.length }; })
+    .filter((s) => s.count > 0);
+  const countOf = (key) => (['operational', 'planning', 'future'].includes(key) ? summary.by_status[key] : key === 'overall' ? summary.total : key === 'chart' ? companies.filter((c) => c.holders.length || c.holdings.length).length : data.sectors.length);
 
   return (
     <div className="space-y-4" data-testid="group-companies">
@@ -173,6 +184,12 @@ export default function GroupCompaniesTab() {
             </button>
           ))}
         </div>
+        {STATUS_FILTER_VIEWS.includes(view) && (
+          <div className="flex min-w-[15rem] max-w-md flex-1 items-center gap-2 text-xs text-tertiary-600" data-testid="status-filter">
+            <span className="shrink-0 font-medium">Show</span>
+            <div className="min-w-0 flex-1"><MultiSelectDropdown value={statuses} onChange={setStatuses} options={STATUS_FILTER_OPTIONS} placeholder="Choose Operational, Planning, Future" searchPlaceholder="Search…" /></div>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {summary.stakes_missing > 0 && <button type="button" className="btn-secondary text-xs" data-testid="group-default" disabled={busy} onClick={groupDefault} title="Every company workspace with no holder yet is recorded as 100% held by the group">Set empty workspaces as wholly group-owned</button>}
           <button type="button" className="btn-secondary text-xs" data-testid="manage-sectors" onClick={() => setSectorEditor(true)}>Manage sectors</button>
@@ -180,7 +197,9 @@ export default function GroupCompaniesTab() {
         </div>
       </div>
 
-      {view === 'sector' ? (
+      {view === 'chart' ? (
+        <OwnershipChart companies={companies} groups={data.groups} statuses={statuses} onOpenCompany={openStakes} />
+      ) : view === 'sector' ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="sector-view">
           {sectors.map((s) => (
             <section key={s.sector} className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card" data-testid="sector-card" data-sector={s.sector}>
@@ -192,7 +211,7 @@ export default function GroupCompaniesTab() {
               </ul>
             </section>
           ))}
-          {!sectors.length && <p className="text-sm text-tertiary-500">No businesses yet.</p>}
+          {!sectors.length && <p className="text-sm text-tertiary-500">{data.sectors.length ? 'No business has the chosen status.' : 'No businesses yet.'}</p>}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-tertiary-100 bg-white shadow-card" data-testid="company-table">
@@ -222,7 +241,7 @@ export default function GroupCompaniesTab() {
                   </td>
                 </tr>
               ))}
-              {!shown.length && <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-tertiary-500">{view === 'overall' ? 'No businesses yet.' : `Nothing is marked ${view} yet. Use Add business, or change a company's status.`}</td></tr>}
+              {!shown.length && <tr><td colSpan={9} className="px-3 py-8 text-center text-sm text-tertiary-500">{view === 'overall' ? (companies.length ? 'No business has the chosen status.' : 'No businesses yet.') : `Nothing is marked ${view} yet. Use Add business, or change a company's status.`}</td></tr>}
             </tbody>
           </table>
         </div>

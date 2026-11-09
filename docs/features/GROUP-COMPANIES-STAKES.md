@@ -46,3 +46,13 @@ Built on the same `group_companies` rows (status planning / future), one workspa
 4. **Milestones and tasks**: timeline from idea to launch with owners and due dates (can reuse Group tasks).
 5. A **"Start this business"** action that turns a planned record into a real company workspace and keeps its plan history.
 Everything editable by the admin (see ADMIN-EDITABILITY); needs a short design pass on the criteria and the projection model before building.
+
+## Group chart + status filter (added 2026-11-09, no migration)
+- New view **Group chart** next to Overall: who owns what, drawn from the stakes already in the register. **Structure chart** = top-down (the holding
+  group and outside holders on top, each business under its holders, the stake % on every line); **Circular chart** = the group in the middle, its
+  direct businesses and outside holders on the first ring, deeper ownership on outer rings. Click a business to edit its ownership. Businesses with
+  no holder and holding nothing are not drawn; they are listed under "Ownership not set".
+- **Status multi-select** (Operational / Planning / Future, all on by default) on Overall, Group Sector and Group chart. In the chart a holder of a
+  shown business that the filter would hide stays as a dimmed, dashed "context" node, so the structure above it is never cut off.
+- Code: `client/src/pages/groupOverview/ownershipGraph.js` (pure graph + layouts, test `ownershipGraph.test.mjs`: `node ownershipGraph.test.mjs`),
+  `OwnershipChart.jsx` (SVG, no new dependency), `GroupCompaniesTab.jsx`.
