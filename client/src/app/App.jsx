@@ -37,6 +37,7 @@ import GuestProjectPage from '../pages/guest/GuestProjectPage.jsx';
 import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import SpeakUpPage from '../pages/speakup/SpeakUpPage.jsx';
+import EmployeeFeedbackPage from '../pages/employeeFeedback/EmployeeFeedbackPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
 import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
 import AiInterviewPage from '../pages/public/AiInterviewPage.jsx';
@@ -537,6 +538,7 @@ export default function App() {
         <Route path="offices" element={<RequireGroupSuperadmin><OfficesPage /></RequireGroupSuperadmin>} />
         <Route path="internal-jobs" element={<RequireMasterWorkspace><RequireAccess need="basic.internal_jobs"><InternalJobsPage /></RequireAccess></RequireMasterWorkspace>} />
         <Route path="speak-up" element={<RequireMasterWorkspace><RequireAccess need="basic.whistleblower"><SpeakUpPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="employee-feedback" element={<RequireMasterWorkspace><RequireAccess need="basic.employee_feedback"><EmployeeFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
         <Route path="people/:id" element={<RequireAccess need="basic.people_directory"><EmployeeProfilePage /></RequireAccess>} />
         {/* Merged into the People / Time & Attendance hubs — keep old links working. */}
         <Route path="people/settings" element={<Navigate to="/people?section=hr-settings" replace />} />

@@ -9397,3 +9397,35 @@ model BusinessClassification {
   @@index([org_group_id, sector_id])
   @@map("business_classifications")
 }
+
+// Employee Feedback (Delphic Global): any employee gives feedback (a suggestion, appreciation, a concern...), by name or anonymously, and ONLY the board
+// reads it. The board is a list of people an admin names (employee_feedback_board). Anonymous feedback stores no person (submitter_membership_id is null).
+model EmployeeFeedback {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                   String    @db.Uuid
+  submitter_membership_id  String?   @db.Uuid // null = anonymous
+  category                 String    @default("suggestion")
+  subject                  String
+  message                  String
+  status                   String    @default("new") // new | read | actioned | closed
+  board_note               String? // the board's own note; never shown to the person who gave the feedback
+  handled_by_membership_id String?   @db.Uuid
+  handled_at               DateTime?
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @default(now()) @updatedAt
+
+  @@index([org_id, created_at])
+  @@index([submitter_membership_id])
+  @@map("employee_feedback")
+}
+
+model EmployeeFeedbackBoardMember {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org_membership_id String   @db.Uuid
+  added_by          String?  @db.Uuid
+  created_at        DateTime @default(now())
+
+  @@unique([org_id, org_membership_id])
+  @@map("employee_feedback_board")
+}

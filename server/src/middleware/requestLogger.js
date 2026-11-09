@@ -3,7 +3,7 @@ const env = require('../config/env');
 
 const SKIP_PATHS = new Set(['/api/v1/health']);
 // Speak Up (confidential reporting): who made the request is never logged, so the logs cannot tie a person to a complaint.
-const CONFIDENTIAL_PATH = /^\/api\/v1\/(public\/)?whistleblower(\/|\?|$)/;
+const CONFIDENTIAL_PATH = /^\/api\/v1\/(public\/)?(whistleblower|employee-feedback)(\/|\?|$)/;
 
 function requestLogger(req, res, next) {
   if (env.nodeEnv === 'test') return next();

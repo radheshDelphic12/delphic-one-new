@@ -52,6 +52,7 @@ const CATALOG = [
   // ---- Time and Attendance
   { module: 'attendance', category: 'time', label: 'Team attendance', actions: [A('attendance', 'view', 'View', true), A('attendance', 'update', 'Edit and import', true), A('attendance', 'approve', 'Check attendance changes (everyone)')] },
   { module: 'attendance_dashboard', category: 'time', label: 'Attendance dashboard', actions: [A('attendance_dashboard', 'view', 'View'), A('attendance_dashboard', 'work_location', 'Set where a direct report works away from the office (project site / travel)')] },
+  { module: 'employee_feedback', category: 'people', label: 'Employee Feedback (feedback read only by the board)', actions: [A('employee_feedback', 'manage', 'Choose who is on the board')] },
   { module: 'whistleblower', category: 'people', label: 'Speak Up - Confidential Reporting (complaints routed to the team)', actions: [A('whistleblower', 'view', 'See the complaints of non-restricted categories'), A('whistleblower', 'update', 'Reply, change status and assign'), A('whistleblower', 'manage', 'Settings, categories and handlers')] },
   { module: 'location_checkin', category: 'time', label: 'Location check-in report', actions: [A('location_checkin', 'view', 'View the report and office settings')] },
   { module: 'project_calendar', category: 'time', label: 'Project calendar', actions: [A('project_calendar', 'view', 'View'), A('project_calendar', 'update', 'Edit')] },
@@ -95,6 +96,7 @@ const BASIC_ITEMS = [
   { key: 'basic.timesheet', label: 'Log and view own timesheet' },
   { key: 'basic.payslips', label: 'View own payslips' },
   { key: 'basic.expenses', label: 'File and track own expense claims' },
+  { key: 'basic.employee_feedback', label: 'Employee Feedback (give feedback to the board, by name or anonymously)' },
   { key: 'basic.whistleblower', label: 'Speak Up (raise a complaint in confidence and follow it)' },
   { key: 'basic.settings', label: 'Own account (my details, security, notifications)' },
 ];

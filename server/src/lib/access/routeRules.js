@@ -99,6 +99,10 @@ const RULES = [
   [/^\/whistleblower\/settings$/, { GET: 'basic.whistleblower', '*': 'whistleblower.manage' }],
   [/^\/whistleblower\/categories(\/|$)/, 'whistleblower.manage'],
   [/^\/whistleblower(\/|$)/, 'basic.whistleblower'],
+  // Employee Feedback (Delphic Global): everyone may give and follow their own feedback; only the board (named by an admin) reads it, decided in the
+  // service. Naming the board needs Employee Feedback > manage.
+  [/^\/employee-feedback\/board$/, 'employee_feedback.manage'],
+  [/^\/employee-feedback(\/|$)/, 'basic.employee_feedback'],
 
   [/^\/leave\/(types|day-status|balances\/me|requests\/me)$/, { GET: 'open', '*': 'leave.update' }],
   [/^\/leave\/requests$/, { GET: ['leave.view', 'leave.approve'], '*': 'open' }],
