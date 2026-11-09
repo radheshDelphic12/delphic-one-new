@@ -70,6 +70,30 @@ function splitCharges(lines) {
   return out;
 }
 
+/**
+ * The figures of one invoice. A single-project invoice keeps its charges in `details`; a combined (consolidated) invoice keeps
+ * them in each contract of `items`, and its own `details` carries only the net total - so the contracts are added up here.
+ * Order of the money: base amount - adjustment = base after adjustment; GST and TDS are worked out on that; payable = base + GST - TDS.
+ */
+function invoiceFigures(items, fallbackAmount) {
+  const parts = Array.isArray(items.items) && items.items.length ? items.items : [items];
+  let gross = 0; let adjustment = 0; let base = 0; let total = 0; let gst = 0; let tds = 0; let other = 0;
+  const lines = [];
+  for (const part of parts) {
+    const d = part.details || {};
+    const split = splitCharges(d.charges);
+    const partBase = num(d.subtotal ?? d.amount ?? (parts.length === 1 ? fallbackAmount : 0));
+    const adj = num(d.adjustment_amount);
+    base += partBase;
+    adjustment += adj;
+    gross += d.base_amount != null ? num(d.base_amount) : partBase - adj;
+    total += num(d.total_amount ?? (partBase + split.gst + split.other - split.tds));
+    gst += split.gst; tds += split.tds; other += split.other;
+    for (const l of split.lines) lines.push(parts.length > 1 && part.project?.name ? { ...l, label: `${l.label} (${part.project.name})` } : l);
+  }
+  return { gross: round2(gross), adjustment: round2(adjustment), base: round2(base), total: round2(total), gst: round2(gst), tds: round2(tds), other: round2(other), lines, contracts: parts.length > 1 ? parts.length : 0 };
+}
+
 function taxMode(gst, tds) {
   if (gst > 0 && tds > 0) return 'gst_tds';
   if (gst > 0) return 'gst';
@@ -98,10 +122,10 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
 
   const rows = clientRows.map((r) => {
     const items = r.line_items && !Array.isArray(r.line_items) ? r.line_items : {};
-    const details = items.details || {};
-    const split = splitCharges(details.charges);
-    const base = num(details.subtotal ?? r.amount);
-    const total = num(details.total_amount ?? r.amount);
+    const fig = invoiceFigures(items, num(r.amount));
+    const split = { gst: fig.gst, tds: fig.tds, other: fig.other, lines: fig.lines };
+    const base = fig.base;
+    const total = fig.total;
     const date = r.invoice_date || r.created_at;
     const recorded = paidBy.get(r.id) || 0;
     const paid = round2(Math.min(total, r.status === 'paid' && recorded === 0 ? total : recorded));
@@ -119,15 +143,22 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
       fy: fyOf(date).label,
       period_year: new Date(date).getUTCFullYear(),
       period_month: new Date(date).getUTCMonth() + 1,
+      // The billing month of the invoice itself (what Finance > Invoices shows as its Period); it can differ from the invoice date.
+      billing_month: r.period_month || null,
+      billing_year: r.period_year || null,
       currency: r.currency,
       status: r.status,
+      gross_base: fig.gross,
+      adjustment: fig.adjustment,
+      contracts: fig.contracts,
       base: round2(base),
       gst: split.gst,
       tds: split.tds,
       other: split.other,
       total: round2(total),
       paid,
-      pending: round2(Math.max(total - paid, 0)),
+      // an invoice marked paid is closed (older ones were settled on the amount before GST / TDS)
+      pending: r.status === 'paid' ? 0 : round2(Math.max(total - paid, 0)),
       tax_mode: taxMode(split.gst, split.tds),
       lines: split.lines,
     };

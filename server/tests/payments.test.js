@@ -54,6 +54,26 @@ describe('part payments on a client invoice', () => {
     expect((await pay(inv.id, { amount: '1' })).status).toBe(409); // nothing left to pay
   });
 
+  test('an invoice with GST and TDS is due at the payable total (amount + GST - TDS), not at the amount; one already marked paid stays paid', async () => {
+    // 1,00,000 + GST 18,000 - TDS 10,000 = 1,08,000 payable
+    const details = { subtotal: 100000, total_amount: 108000, charges: [{ label: 'GST', mode: 'percent', value: 18, effect: 'add', amount: 18000 }, { label: 'TDS', mode: 'percent', value: 10, effect: 'deduct', amount: -10000 }] };
+    const inv = await invoice({ amount: 100000, line_items: { details } });
+    let row = (await list()).find((r) => r.id === inv.id);
+    expect(row).toMatchObject({ status: 'sent', pending_amount: '108000.00', payment_status: 'unpaid' });
+    // paying the amount alone no longer closes it
+    expect((await pay(inv.id, { amount: '100000' })).status).toBe(201);
+    row = (await list()).find((r) => r.id === inv.id);
+    expect(row).toMatchObject({ status: 'sent', paid_amount: '100000.00', pending_amount: '8000.00', payment_status: 'partly_paid' });
+    // with no amount typed, the whole pending payable is paid and the invoice closes
+    expect((await pay(inv.id, {})).status).toBe(201);
+    row = (await list()).find((r) => r.id === inv.id);
+    expect(row).toMatchObject({ status: 'paid', paid_amount: '108000.00', pending_amount: '0.00', payment_status: 'paid' });
+    // an older invoice settled on the amount only (status paid) is closed: nothing pending
+    const old = await invoice({ amount: 100000, status: 'paid', line_items: { details } });
+    await prisma.paymentRecord.create({ data: { org_id: org.id, kind: 'client_invoice', reference_id: old.id, direction: 'in', paid_on: new Date('2026-05-10'), amount: 100000, currency: 'INR', inr_amount: 100000 } });
+    expect((await list()).find((r) => r.id === old.id)).toMatchObject({ status: 'paid', pending_amount: '0.00', payment_status: 'paid' });
+  });
+
   test('more than is pending is refused; with no amount the whole pending amount is paid', async () => {
     const inv = await invoice();
     expect((await pay(inv.id, { amount: '1500' })).status).toBe(422);

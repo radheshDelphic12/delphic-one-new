@@ -98,6 +98,34 @@ describe('GST & TDS tracking', () => {
     expect((await get('/invoices', { ...RANGE, currency: 'USD' })).body.data.rows).toHaveLength(1);
   });
 
+  test('a combined invoice adds up the GST / TDS of its contracts; the adjustment is taken off the base first and GST / TDS follow; the billing period is returned beside the date', async () => {
+    const item = (name, gross, adj, gst, tds) => {
+      const sub = gross + adj;
+      return { account_id: client.id, project: { name, client_name: 'Ginnar Tech' }, details: { base_amount: gross, adjustment_amount: adj, subtotal: sub, amount: sub, total_amount: sub + gst - tds, charges: [{ label: 'GST', mode: 'percent', value: 18, effect: 'add', amount: gst }, { label: 'TDS', mode: 'percent', value: 10, effect: 'deduct', amount: -tds }] } };
+    };
+    // 1,60,000 - 20,000 adjustment = 1,40,000 -> GST 25,200, TDS 14,000, payable 1,51,200; and 1,00,000 with no adjustment -> 18,000 / 10,000 / 1,08,000
+    const items = [item('CloudNova', 160000, -20000, 25200, 14000), item('Five Nine', 100000, 0, 18000, 10000)];
+    await prisma.clientInvoice.create({
+      data: {
+        org_id: alpha.id, client_account_id: client.id, period_month: 10, period_year: 2026, amount: 259200, currency: 'INR', status: 'sent', invoice_number: 'DELG-COMBINED', invoice_date: new Date('2026-11-06'), created_by: superUser.id,
+        line_items: { consolidated: true, project: { name: '2 contracts - Ginnar Tech', client_name: 'Ginnar Tech' }, details: { billing_type: 'consolidated', amount: 259200, subtotal: 259200, total_amount: 259200, charges: [], contracts: 2 }, items },
+      },
+    });
+    const res = await get('/invoices', { from: '2026-11', to: '2026-11' });
+    const row = res.body.data.rows.find((r) => r.number === 'DELG-COMBINED');
+    expect(row).toMatchObject({ gross_base: 260000, adjustment: -20000, base: 240000, gst: 43200, tds: 24000, total: 259200, tax_mode: 'gst_tds', contracts: 2, billing_month: 10, billing_year: 2026, period_month: 11 });
+    expect(row.lines).toHaveLength(4);
+    // a single-project invoice carries its adjustment too
+    const single = await prisma.clientInvoice.create({
+      data: {
+        org_id: alpha.id, client_account_id: client.id, period_month: 9, period_year: 2026, amount: 156818, currency: 'INR', status: 'paid', invoice_number: 'INV-ADJ', invoice_date: new Date('2026-11-05'), created_by: superUser.id,
+        line_items: { project: { name: 'Ugap', client_name: 'Ginnar Tech' }, details: { base_amount: 150000, adjustment_amount: 6818, subtotal: 156818, total_amount: 169363.44, charges: [GST18(156818), TDS10(156818)] } },
+      },
+    });
+    const one = (await get('/invoices', { from: '2026-11', to: '2026-11' })).body.data.rows.find((r) => r.id === single.id);
+    expect(one).toMatchObject({ gross_base: 150000, adjustment: 6818, base: 156818, billing_month: 9, period_month: 11 });
+  });
+
   test('TDS receivable: TDS is deducted when the client pays; a refund is recorded against the invoice, can be removed, and cannot exceed the TDS', async () => {
     const { a, c } = await seedInvoices();
     let res = (await get('/tds-receivable', RANGE)).body.data;

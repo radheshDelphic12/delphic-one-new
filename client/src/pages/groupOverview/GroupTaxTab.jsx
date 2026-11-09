@@ -108,8 +108,8 @@ function InvoicesView({ params, onOpenTds }) {
                 <td className={td}>{r.company}</td>
                 <td className={`${td} font-medium text-tertiary-900`}>{r.number || '—'}{r.kind === 'group_invoice' && <span className="ml-1 text-[10px] font-normal text-tertiary-500">Book Keeping</span>}</td>
                 <td className={td}>{r.client || '—'}{r.project && r.project !== r.client && <span className="block text-[11px] text-tertiary-500">{r.project}</span>}</td>
-                <td className={`${td} whitespace-nowrap`}>{r.invoice_date}</td>
-                <td className={tdr}>{money(r.base, r.currency)}</td>
+                <td className={`${td} whitespace-nowrap`}>{r.invoice_date}{r.billing_month && (r.billing_month !== r.period_month || r.billing_year !== r.period_year) && <span className="block text-[11px] text-tertiary-500" data-testid="billing-period">For {String(r.billing_month).padStart(2, '0')}/{r.billing_year}</span>}</td>
+                <td className={tdr}>{money(r.base, r.currency)}{r.adjustment ? <span className="block text-[11px] font-normal text-tertiary-500" data-testid="base-adjustment">{money(r.gross_base, r.currency)} {r.adjustment < 0 ? '−' : '+'} {money(Math.abs(r.adjustment), r.currency)} adj.</span> : null}</td>
                 <td className={tdr}>{r.gst ? money(r.gst, r.currency) : '—'}</td>
                 <td className={tdr}>{r.tds ? money(-r.tds, r.currency) : '—'}</td>
                 <td className={`${tdr} font-medium`}>{money(r.total, r.currency)}</td>
