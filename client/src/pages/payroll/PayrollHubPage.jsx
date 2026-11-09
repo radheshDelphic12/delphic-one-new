@@ -76,6 +76,18 @@ const dash = (v) => (v === null || v === undefined || v === '' ? '—' : v);
 const titleCase = (v) => String(v || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 const LEAVE_ORDER = ['CL', 'SL', 'EL', 'CO'];
 
+// The earnings of the month as printed lines: monthly pay, overtime (hours x rate x multiplier), then the gross. Overtime is never hidden inside the gross.
+function earningLines(d) {
+  const ot = d.earnings?.overtime;
+  const lines = [['Monthly pay (CTC for the month)', d.earnings ? d.earnings.base_pay : null]];
+  if (ot && (ot.amount > 0 || ot.approved_hours > 0)) {
+    const how = ot.hourly_rate != null && ot.multiplier != null ? ` - ${ot.approved_hours}h x ${titleNum(ot.hourly_rate)} x ${ot.multiplier}` : ` - ${ot.approved_hours}h`;
+    lines.push([`Overtime (approved)${how}`, ot.amount]);
+  }
+  return lines;
+}
+const titleNum = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
 /**
  * The salary slip: Delphic logo header, employee + bank details, leaves taken
  * and balances, the salary breakup, and the month's calculation down to the
@@ -129,12 +141,15 @@ function payslipHtml(payslip, orgName) {
     </tbody></table>
     <h2>Calculation &amp; net pay — ${escapeHtml(period)}</h2>
     <table><tbody>
-      ${line('Gross salary', t.gross)}
+      ${d.earnings ? earningLines(d).map(([label, amount]) => line(label, amount)).join('') : ''}
+      <tr class="total"><td>Gross salary</td><td class="r">${escapeHtml(money(t.gross))}</td></tr>
       ${line('Less: loss of pay', t.loss_of_pay, '-')}
-      ${(d.additions || []).map((a) => line(`Add: ${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '+')).join('')}
-      ${(d.other_deductions || []).map((a) => line(`Less: ${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '-')).join('')}
+      ${(d.additions || []).length ? `<tr><th colspan="2">Add-ons (added to the pay)</th></tr>${d.additions.map((a) => line(`${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '+')).join('')}` : ''}
+      ${(d.other_deductions || []).length ? `<tr><th colspan="2">Other deductions</th></tr>${d.other_deductions.map((a) => line(`${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '-')).join('')}` : ''}
       <tr class="net"><td>Final net paid amount</td><td class="r">${escapeHtml(money(t.net_paid))}</td></tr>
     </tbody></table>
+    ${d.needs_refresh ? `<p class="foot" style="color:#b45309">Note: an add-on or deduction was changed after this salary was processed (it comes to ${escapeHtml(money(t.expected_net))}); the payroll run has to be updated.</p>` : ''}
+    ${(() => { const rows = payslipFacts(payslip.breakdown || {}, money).filter(([, v]) => v !== undefined && v !== null && v !== ''); return rows.length ? `<h2>${payslip.breakdown?.source === 'approved_timesheets' ? 'Timesheet' : 'Attendance'} breakdown</h2><div class="grid"><table>${rows.slice(0, Math.ceil(rows.length / 2)).map(([k, v]) => pair(k, v)).join('')}</table><table>${rows.slice(Math.ceil(rows.length / 2)).map(([k, v]) => pair(k, v)).join('')}</table></div>` : ''; })()}
     <p class="foot">Generated ${escapeHtml(new Date(payslip.generated_at).toLocaleDateString())} · This is a computer-generated salary slip.</p>
   </body></html>`;
 }
@@ -228,12 +243,16 @@ function PayslipDrawer({ open, payslip, onClose }) {
           </SlipSection>
           <SlipSection title={`Calculation & net pay — ${period}`}>
             <dl className="space-y-1.5 text-sm">
-              <div className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Gross salary</dt><dd className="font-medium">{money(t.gross)}</dd></div>
+              {d.earnings && earningLines(d).map(([label, amount]) => <div key={label} className="flex justify-between border-b border-tertiary-50 pb-1" data-testid="slip-earning"><dt className="text-tertiary-500">{label}</dt><dd className="font-medium">{money(amount)}</dd></div>)}
+              <div className="flex justify-between border-b border-tertiary-100 pb-1 font-semibold"><dt>Gross salary</dt><dd>{money(t.gross)}</dd></div>
               <div className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Less: loss of pay</dt><dd className="font-medium text-danger-600">-{money(t.loss_of_pay)}</dd></div>
-              {(d.additions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Add: {a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-success-700">+{money(a.amount)}</dd></div>)}
-              {(d.other_deductions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Less: {a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-danger-600">-{money(a.amount)}</dd></div>)}
+              {(d.additions || []).length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Add-ons (added to the pay)</p>}
+              {(d.additions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1" data-testid="slip-addon"><dt className="text-tertiary-500">{a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-success-700">+{money(a.amount)}</dd></div>)}
+              {(d.other_deductions || []).length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Other deductions</p>}
+              {(d.other_deductions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">{a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-danger-600">-{money(a.amount)}</dd></div>)}
               <div className="flex justify-between rounded-xl bg-primary-50 px-3 py-2 text-base font-bold text-primary-800"><dt>Final net paid amount</dt><dd>{money(t.net_paid)}</dd></div>
             </dl>
+            {d.needs_refresh && <p className="mt-2 rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800" data-testid="slip-needs-refresh">An add-on or deduction was changed after this salary was processed: the lines above come to {money(t.expected_net)}, but the net paid is {money(t.net_paid)}. Use &quot;Update payroll&quot; on the run to bring the payslip in line.</p>}
           </SlipSection>
           {facts.length > 0 && (
             <SlipSection title={payslip.breakdown?.source === 'approved_timesheets' ? 'Timesheet breakdown (older payslip)' : 'Attendance breakdown'}>

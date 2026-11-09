@@ -1,3 +1,4 @@
+const fs = require('fs');
 const nodemailer = require('nodemailer');
 const env = require('../../config/env');
 const logger = require('../../config/logger');
@@ -26,7 +27,7 @@ function defaultHtml({ subject, text, kind }) {
  * Queue one email. Never throws (like notify()) — a mail problem must not roll
  * back the business transaction that triggered it. `client` may be a `tx`.
  */
-async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html, ics }) {
+async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html, ics, attachment }) {
   try {
     if (!to?.email) return null;
     return await client.emailOutbox.create({
@@ -40,6 +41,8 @@ async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html
         body_text: text,
         body_html: html || defaultHtml({ subject, text, kind }),
         ics: ics || null,
+        attachment_path: attachment?.path || null,
+        attachment_name: attachment?.name || null,
       },
     });
   } catch (err) {
@@ -80,7 +83,10 @@ async function processQueue({ limit = 25, transport = getTransport() } = {}) {
         text: row.body_text,
         html: row.body_html || undefined,
         icalEvent: row.ics ? { method: methodOf(row.ics), content: row.ics } : undefined,
+        attachments: row.attachment_path ? [{ filename: row.attachment_name || 'attachment', content: fs.readFileSync(row.attachment_path), contentType: /\.zip$/i.test(row.attachment_name || '') ? 'application/zip' : 'application/octet-stream' }] : undefined,
       });
+      // the file only had to live until it was sent
+      if (row.attachment_path) fs.promises.unlink(row.attachment_path).catch(() => {});
       await prisma.emailOutbox.update({
         where: { id: row.id },
         data: { status: 'sent', sent_at: new Date(), attempts: { increment: 1 }, last_error: null },

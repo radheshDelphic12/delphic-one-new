@@ -111,6 +111,7 @@ function emptyForm(profile) {
   return {
     project_name: profile.project_name || '',
     face_resource: profile.face_resource || '',
+    hsn_sac: profile.hsn_sac || '',
     client_account_id: profile.client_account_id || '',
     requirement_id: profile.requirement_id || '',
     service_category: profile.service_category || '',
@@ -190,6 +191,7 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
     const patch = {
       project_name: form.project_name.trim(),
       face_resource: form.face_resource.trim() || null,
+      hsn_sac: form.hsn_sac.trim() || null,
       agreement_start_date: form.agreement_start_date || null,
       agreement_end_date: form.agreement_end_date || null,
       contract_status: form.contract_status || null,
@@ -265,6 +267,11 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
               Resource
               <input value={form.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource the invoice is billed for" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
               <span className="mt-1 block font-normal text-tertiary-400">Optional text. Printed on this project&apos;s client invoice with the other details.</span>
+            </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              HSN / SAC code
+              <input value={form.hsn_sac} inputMode="numeric" maxLength={8} onChange={(e) => set('hsn_sac', e.target.value.replace(/\D/g, ''))} placeholder="998519" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" aria-label="HSN / SAC code" />
+              <span className="mt-1 block font-normal text-tertiary-400">Printed on the GST invoice of this project. Blank = 998519 (manpower services).</span>
             </label>
             <div className="block text-xs font-medium text-tertiary-600">
               Client name

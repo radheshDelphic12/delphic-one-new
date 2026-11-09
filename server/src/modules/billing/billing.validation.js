@@ -338,6 +338,8 @@ const updateProjectProfileSchema = z
     project_name: z.string().trim().min(1).max(200).optional(),
     // Free text: the resource who is the face of the project to the client; printed on its invoices. Empty / null clears it.
     face_resource: z.string().trim().max(200).nullable().optional().transform((v) => (v === undefined ? undefined : v || null)),
+    // HSN / SAC code printed on the project's GST invoices (6 to 8 digits); empty / null clears it (the default 998519 is used).
+    hsn_sac: z.string().trim().regex(/^\d{4,8}$/, 'HSN / SAC is 4 to 8 digits').nullable().optional().or(z.literal('')).transform((v) => (v === undefined ? undefined : v || null)),
     // A Lead account of this org (validated in the service); null unlinks.
     client_account_id: z.string().uuid().nullable().optional(),
     // A requirement of this org (validated in the service); null unlinks.

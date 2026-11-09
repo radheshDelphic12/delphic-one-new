@@ -7,6 +7,7 @@ const service = require('./payroll.service');
 const adjustmentsService = require('./salaryAdjustments.service');
 const paymentsService = require('./salaryPayments.service');
 const fnfService = require('./fnf.service');
+const fnfStatement = require('./fnfStatement.service');
 const incrementService = require('./incrementReminders.service');
 const previousDues = require('./previousDues.service');
 const { z } = require('zod');
@@ -271,6 +272,40 @@ router.patch('/fnf/:membershipId', canMethod('financials', 'admin'), asyncHandle
   if (result.error === 'not_found') return fail(res, 404, 'Employee not found');
   if (result.error === 'not_exited') return fail(res, 422, 'FnF applies to employees who have exited');
   return ok(res, result.record);
+}));
+
+// FnF statement and the documents package (the statement + every salary slip since joining): view, edit the lines, download, email.
+const fnfItemsSchema = z.object({ items: z.array(z.object({ label: z.string().trim().min(1).max(120), kind: z.enum(['earning', 'deduction']), amount: z.coerce.number().positive().max(1e10), note: z.string().trim().max(200).optional() })).max(40) });
+const fnfEmailSchema = z.object({ to_email: z.string().trim().email().max(200), note: z.string().trim().max(500).optional() });
+const fnfProblem = (res, r) => {
+  if (r.error === 'not_found') return fail(res, 404, 'Employee not found');
+  if (r.error === 'not_exited') return fail(res, 422, 'The FnF statement is for employees who have exited');
+  if (r.error === 'too_large') return fail(res, 413, 'The documents are too large to email (over 3 MB). Download the package and share it instead.');
+  return fail(res, 400, 'Could not do that');
+};
+router.get('/fnf/:membershipId/statement', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfStatement.build(req.user.org_id, req.params.membershipId);
+  return result.error ? fnfProblem(res, result) : ok(res, result);
+}));
+router.put('/fnf/:membershipId/items', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfStatement.setItems(req.user.org_id, req.user.id, req.params.membershipId, fnfItemsSchema.parse(req.body).items);
+  return result.error ? fnfProblem(res, result) : ok(res, result);
+}));
+router.get('/fnf/:membershipId/statement.pdf', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfStatement.statementPdf(req.user.org_id, req.params.membershipId);
+  if (result.error) return fnfProblem(res, result);
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${result.name}"`, 'Cache-Control': 'private, no-store' });
+  return res.send(result.buffer);
+}));
+router.get('/fnf/:membershipId/documents.zip', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfStatement.packageZip(req.user.org_id, req.params.membershipId);
+  if (result.error) return fnfProblem(res, result);
+  res.set({ 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${result.name}"`, 'Cache-Control': 'private, no-store' });
+  return res.send(result.buffer);
+}));
+router.post('/fnf/:membershipId/email', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfStatement.emailPackage(req.user.org_id, req.user, req.params.membershipId, fnfEmailSchema.parse(req.body));
+  return result.error ? fnfProblem(res, result) : ok(res, result);
 }));
 
 // --- Increment reminders (Super Admin users only) ---

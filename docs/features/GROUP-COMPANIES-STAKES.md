@@ -56,3 +56,26 @@ Everything editable by the admin (see ADMIN-EDITABILITY); needs a short design p
   shown business that the filter would hide stays as a dimmed, dashed "context" node, so the structure above it is never cut off.
 - Code: `client/src/pages/groupOverview/ownershipGraph.js` (pure graph + layouts, test `ownershipGraph.test.mjs`: `node ownershipGraph.test.mjs`),
   `OwnershipChart.jsx` (SVG, no new dependency), `GroupCompaniesTab.jsx`.
+
+## Ownership "Not set" after a rename + business classification (added 2026-11-09)
+
+**Bug fixed - a business showed "Not set" although it had been given the group as holder.** A workspace renamed in its own Settings to the name of a business that had been
+added by hand left two rows with one name: the workspace row (no ownership) and the hand-made row (which carried the 100% held by the group). `ensureRegister` now folds
+the hand-made row into the workspace's row every time the register is read: sector, tag line, foundation day, notes and short name the workspace row lacks are taken over,
+its holders move over (when the workspace row has none; otherwise the workspace's own holders win), what it holds in other businesses follows, and the duplicate is deleted.
+
+**Business classification.** The group's own **sector > industry > sub-industry** list (tables `business_sectors`, `business_industries`, `business_sub_industries`, migration
+`20261125100000_business_classification`), seeded from the standard "Business Expansion" list (27 sectors, 398 industries, 1,194 sub-industries; `taxonomy.seed.js`) and then edited
+freely: **Manage classification** (was "Manage sectors", which only showed the sectors in use) adds, renames and removes any sector, industry or sub-industry (several
+sub-industries at once, one per line or comma separated) and can load the standard list again without overwriting anything edited.
+- Each business is placed in it (`business_classifications`, `entity_kind` group_company; the same table takes `acconcy_investee` later): **several sectors, several industries in
+  each, several sub-industries in each**, chosen with a tree picker in Add / Edit business ("Business classification"). One row per deepest choice, so nothing is counted twice.
+  Removing an industry / sub-industry keeps the business in the level above. The old single typed sector still shows until a business is placed.
+- The register's Sector column and the Group Sector view follow the classification (a business in two sectors shows under both).
+- **Business map** (new view; honours the Operational / Planning / Future multi-select): every sector with its industries and sub-industries and which businesses operate in
+  each; what nobody covers is marked "No business here" / "Not covered" / "empty"; tiles for sectors, industries, sub-industries and businesses placed; filters All / Covered /
+  Gaps and a search; businesses not placed yet are listed on top; clicking a business opens it to change its place.
+- API under `/api/v1/group-companies`: `GET /taxonomy`, `POST /taxonomy/seed`, `POST|PATCH|DELETE /taxonomy/sectors[/:id]`, `POST /taxonomy/sectors/:id/industries`,
+  `PATCH|DELETE /taxonomy/industries/:id`, `POST /taxonomy/industries/:id/sub-industries`, `PATCH|DELETE /taxonomy/sub-industries/:id`, `PUT /:id/classification`,
+  `GET /business-map?statuses=`. Code: `taxonomy.service.js`, `taxonomy.seed.js`, client `BusinessClassificationUi.jsx`. Test: `server/tests/group-taxonomy.test.js`.
+- Not yet: the same classification for Acconcy's investees (the table already supports it), an Excel import / export of the 58 businesses with their classification.

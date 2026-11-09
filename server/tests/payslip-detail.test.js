@@ -57,6 +57,27 @@ describe('Payslip detail', () => {
     expect(d.totals).toMatchObject({ gross: 60000, loss_of_pay: 3000, net_paid: 62000 });
   });
 
+  test('overtime is its own earnings line (never hidden in the gross), add-ons are itemised, and a slip that no longer adds up is flagged', async () => {
+    const { org, admin, a } = await seed();
+    const run = await prisma.payrollRun.findFirst({ where: { org_id: org.id } });
+    // 60,000 monthly pay + 4h approved overtime (3,000) = 63,000 gross; 3,000 loss of pay; frozen net already holds a 6,000 bonus
+    const slip = await prisma.payslip.update({
+      where: { payroll_run_id_org_membership_id: { payroll_run_id: run.id, org_membership_id: a.membership.id } },
+      data: { gross: 63000, deductions: 3000, net: 66000, breakdown: { ot_approved_hours: 4, ot_pending_hours: 1, ot_amount: 3000, hourly_rate: 375, ot_multiplier: 2 } },
+    });
+    await authed(request(app).post(api('/payroll/adjustments')), admin.token).send({ org_membership_id: a.membership.id, kind: 'variable_pay', amount: 6000, ...PERIOD, note: 'Q2 bonus' });
+    let d = (await authed(request(app).get(api(`/payroll/payslips/${slip.id}`)), a.token)).body.data.detail;
+    expect(d.earnings).toEqual({ base_pay: 60000, overtime: { approved_hours: 4, pending_hours: 1, hourly_rate: 375, multiplier: 2, amount: 3000 } });
+    expect(d.totals).toMatchObject({ gross: 63000, loss_of_pay: 3000, additions: 6000, expected_net: 66000, net_paid: 66000 });
+    expect(d.needs_refresh).toBe(false);
+    // an add-on entered after processing: the frozen net does not hold it, so the slip says it needs updating
+    await authed(request(app).post(api('/payroll/adjustments')), admin.token).send({ org_membership_id: a.membership.id, kind: 'reimbursement', amount: 2000, ...PERIOD, note: 'Travel' });
+    d = (await authed(request(app).get(api(`/payroll/payslips/${slip.id}`)), a.token)).body.data.detail;
+    expect(d.additions.map((x) => x.label).sort()).toEqual(['Reimbursement', 'Variable pay']);
+    expect(d.totals).toMatchObject({ additions: 8000, expected_net: 68000, net_paid: 66000 });
+    expect(d.needs_refresh).toBe(true);
+  });
+
   test('an employee reads only their own payslip; admin reads any; "me" lists only own', async () => {
     const { admin, a, b, slipA, slipB } = await seed();
     expect((await authed(request(app).get(api(`/payroll/payslips/${slipA.id}`)), a.token)).status).toBe(200);

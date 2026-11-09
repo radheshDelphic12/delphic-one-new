@@ -46,7 +46,8 @@ function invoiceModel(inv) {
     showTax: gst,
     taxes: [{ label: 'CGST', amount: inv.cgst }, { label: 'SGST', amount: inv.sgst }, { label: 'IGST', amount: inv.igst }],
     subtotal: inv.subtotal,
-    total: inv.total,
+    // an INR tax invoice is printed to the whole rupee, the difference as "Less : Round Off" (as in the Tally layout)
+    ...(gst && inv.currency === 'INR' ? { total: D(inv.total).toDecimalPlaces(0, 4).toFixed(2), round_off: D(inv.total).toDecimalPlaces(0, 4).minus(D(inv.total)).toFixed(2) } : { total: inv.total }),
     tax_summary: gst ? taxSummary(inv) : null,
     bank: { holder: s.name, lines: String(inv.payment_instructions || '').split('\n').map((t) => t.trim()).filter(Boolean) },
     remarks: inv.type === 'usd_export' ? inv.lut_note : null,

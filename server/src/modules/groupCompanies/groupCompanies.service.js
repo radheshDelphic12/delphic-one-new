@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const taxonomy = require('./taxonomy.service');
 
 // Group Dashboard > Companies & Stakes. The register of every business of the holding group, current or planned, with sector, tagline,
 // foundation day and who holds how much of it (several holders per company). Rows exist for every company workspace of the group (created the
@@ -28,6 +29,8 @@ async function ensureRegister(groupIds) {
           prisma.groupCompanyStake.updateMany({ where: { OR: [{ held_company_id: row.id }, { holder_company_id: row.id }] }, data: { org_group_id: o.org_group_id } }),
         ]);
       }
+      // the workspace was renamed to the name of a business added by hand: they are one business, so fold the hand-made row into it
+      await mergeSameName(row.id, o.org_group_id, o.name);
       continue;
     }
     try {
@@ -38,6 +41,37 @@ async function ensureRegister(groupIds) {
     } catch (err) {
       if (err.code !== 'P2002') throw err; // a parallel request created it first
     }
+  }
+}
+
+/**
+ * A workspace renamed (in its Settings) to the name of a business added by hand left two rows with one name: the workspace with no ownership and
+ * the hand-made one that carried it. Folds the hand-made row(s) into the workspace's row: what the workspace row lacks (sector, tag line,
+ * foundation day, notes, short name, holders) is taken over, every stake and classification pointing at the old row now points at the new one.
+ */
+async function mergeSameName(rowId, groupId, name) {
+  const dupes = await prisma.groupCompany.findMany({ where: { org_group_id: groupId, org_id: null, name: { equals: name, mode: 'insensitive' } } });
+  if (!dupes.length) return;
+  for (const d of dupes) {
+    await prisma.$transaction(async (tx) => {
+      const keep = await tx.groupCompany.findUnique({ where: { id: rowId } });
+      const fill = {};
+      for (const k of ['short_code', 'sector', 'tagline', 'notes', 'foundation_date']) if (!keep[k] && d[k]) fill[k] = d[k];
+      if (Object.keys(fill).length) await tx.groupCompany.update({ where: { id: rowId }, data: fill });
+      // holders of the business: the workspace row's own win; if it has none, the hand-made row's move over
+      const hasHolders = (await tx.groupCompanyStake.count({ where: { held_company_id: rowId } })) > 0;
+      if (hasHolders) await tx.groupCompanyStake.deleteMany({ where: { held_company_id: d.id } });
+      else await tx.groupCompanyStake.updateMany({ where: { held_company_id: d.id }, data: { held_company_id: rowId, org_group_id: groupId } });
+      // what the business holds in others: the same holder cannot hold one business twice
+      const already = new Set((await tx.groupCompanyStake.findMany({ where: { holder_company_id: rowId }, select: { held_company_id: true } })).map((x) => x.held_company_id));
+      const theirs = await tx.groupCompanyStake.findMany({ where: { holder_company_id: d.id }, select: { id: true, held_company_id: true } });
+      for (const st of theirs) {
+        if (already.has(st.held_company_id)) await tx.groupCompanyStake.delete({ where: { id: st.id } });
+        else await tx.groupCompanyStake.update({ where: { id: st.id }, data: { holder_company_id: rowId } });
+      }
+      await tx.businessClassification.updateMany({ where: { entity_kind: 'group_company', entity_id: d.id }, data: { entity_id: rowId } });
+      await tx.groupCompany.delete({ where: { id: d.id } });
+    });
   }
 }
 
@@ -55,6 +89,8 @@ async function list(groupIds) {
   ]);
   const groupName = new Map(groups.map((g) => [g.id, g.name]));
   const byId = new Map(rows.map((c) => [c.id, c]));
+  const classified = await taxonomy.classificationOf(groupIds, taxonomy.KIND_COMPANY, rows.map((c) => c.id));
+  const sectorOptionRows = await prisma.businessSector.findMany({ where: { org_group_id: groupIds[0] }, select: { name: true } });
 
   const companies = rows.map((c) => {
     const holders = stakes.filter((s) => s.held_company_id === c.id).map((s) => ({
@@ -77,6 +113,9 @@ async function list(groupIds) {
       logo_url: c.org?.logo_url || null,
       short_code: c.short_code,
       sector: c.sector,
+      // the sectors of the business: the ones it is mapped to in the group's classification, else the single sector typed earlier
+      classification: classified.get(c.id) || { sectors: [], industries: [], sub_industries: [] },
+      sectors: (classified.get(c.id)?.sectors.length ? classified.get(c.id).sectors.map((x) => x.name) : (c.sector && c.sector.trim() ? [c.sector.trim()] : [])),
       tagline: c.tagline,
       foundation_date: c.foundation_date ? c.foundation_date.toISOString().slice(0, 10) : null,
       status: c.status,
@@ -89,9 +128,11 @@ async function list(groupIds) {
 
   const bySector = new Map();
   for (const c of companies) {
-    const key = (c.sector || '').trim() || NO_SECTOR;
-    if (!bySector.has(key)) bySector.set(key, { sector: key, companies: [] });
-    bySector.get(key).companies.push({ id: c.id, name: c.name, status: c.status, total_pct: c.total_pct });
+    // a business can be in several sectors: it shows under each of them
+    for (const key of (c.sectors.length ? c.sectors : [NO_SECTOR])) {
+      if (!bySector.has(key)) bySector.set(key, { sector: key, companies: [] });
+      bySector.get(key).companies.push({ id: c.id, name: c.name, status: c.status, total_pct: c.total_pct });
+    }
   }
   const sectors = [...bySector.values()].map((s) => ({ ...s, count: s.companies.length })).sort((a, b) => (a.sector === NO_SECTOR) - (b.sector === NO_SECTOR) || b.count - a.count || a.sector.localeCompare(b.sector));
 
@@ -99,7 +140,7 @@ async function list(groupIds) {
     groups,
     companies,
     sectors,
-    sector_options: [...new Set(companies.map((c) => (c.sector || '').trim()).filter(Boolean))].sort(),
+    sector_options: [...new Set([...sectorOptionRows.map((x) => x.name), ...companies.map((c) => (c.sector || '').trim()).filter(Boolean)])].sort(),
     summary: {
       total: companies.length,
       current: companies.filter((c) => c.is_current).length,
@@ -174,6 +215,7 @@ async function remove(groupIds, id) {
   const company = await prisma.groupCompany.findFirst({ where: { id, ...scoped(groupIds) }, include: { holdings: { select: { id: true } } } });
   if (!company) return { error: 'not_found' };
   if (company.org_id) return { error: 'linked_company' };
+  await prisma.businessClassification.deleteMany({ where: { entity_kind: taxonomy.KIND_COMPANY, entity_id: id } });
   await prisma.groupCompany.delete({ where: { id } });
   return { deleted: true, stakes_removed: company.holdings.length };
 }
@@ -249,4 +291,11 @@ async function setGroupDefault(groupIds) {
   return { updated: open.length };
 }
 
-module.exports = { list, create, update, renameSector, remove, setStakes, setGroupDefault, STATUSES };
+/** Sets where a business sits in the group's classification (sectors, industries and sub-industries). */
+async function setClassification(groupIds, id, body) {
+  const company = await prisma.groupCompany.findFirst({ where: { id, ...scoped(groupIds) }, select: { id: true } });
+  if (!company) return { error: 'not_found' };
+  return taxonomy.setClassification(groupIds, taxonomy.KIND_COMPANY, id, body);
+}
+
+module.exports = { list, create, update, renameSector, remove, setStakes, setGroupDefault, setClassification, STATUSES };

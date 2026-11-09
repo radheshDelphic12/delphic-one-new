@@ -4,13 +4,27 @@ const { stateName } = require('../../lib/gstStates');
 const { D } = require('../cashPosition/cash.calc');
 
 // Client invoices (what a company bills its clients) and vendor invoices (what a vendor bills the company) printed in the same
-// tax-invoice layout as the GST / USD invoices. The billing engine does not work out GST, so these show the amounts as they are
-// calculated: no HSN / GST columns and no tax summary.
+// tax-invoice layout as the GST / USD invoices. A client invoice whose contract carries a GST charge prints as a full GST TAX INVOICE
+// (the Tally layout): an HSN / SAC column, the GST rate, the tax split IGST or CGST + SGST by place of supply, a tax summary, the tax
+// in words and a Round Off line, once for the recipient and once for the transporter. Everything else prints without tax columns.
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, currency) => `${currency} ${Number(n || 0).toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const num2 = (n) => D(n).toDecimalPlaces(2, 4).toFixed(2);
 const periodText = (d, m, y) => (d?.period_from ? `${dateText(d.period_from)} to ${dateText(d.period_to)}` : `${MONTHS[m - 1]} ${y}`);
+const DEFAULT_SAC = '998519'; // manpower services
+/** "01 July 2024" from 2024-07-01 */
+const longDate = (ymd) => { const [y, m, d] = String(ymd).slice(0, 10).split('-'); return `${d} ${MONTHS[Number(m) - 1]} ${y}`; };
+/** "01 July 2024 - 31 July 2024": the dates the invoice covers, else the whole month. */
+const longPeriod = (d, m, y) => {
+  if (d?.period_from) return `${longDate(d.period_from)} - ${longDate(d.period_to || d.period_from)}`;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `01 ${MONTHS[m - 1]} ${y} - ${String(last).padStart(2, '0')} ${MONTHS[m - 1]} ${y}`;
+};
+/** "100,000.00": a price in the plain grouping the printed invoice uses on its description line. */
+const plainPrice = (n) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const GST_LABEL = /gst/i;
+const SPLIT_LABEL = /^\s*(igst|cgst|sgst)\b/i;
 
 /** The company's own legal entity (the one tied to this workspace) with the bank details printed on its invoices. */
 async function companyParty(orgId, currency) {
@@ -47,7 +61,7 @@ const common = (party, bankLines) => ({
 });
 
 // ---- client invoice ----
-function clientLines(inv) {
+function clientLines(inv, opts = {}) {
   const d = inv.details || {};
   const cur = inv.currency;
   const period = periodText(d, inv.period_month, inv.period_year);
@@ -66,13 +80,34 @@ function clientLines(inv) {
       project: it.project || {},
       amount: (it.details || {}).amount,
       line_items: { lines: it.lines || [] },
-    }).map((row) => ({ ...row, key: `${it.account_id}:${row.key}` })));
+    }, opts).map((row) => ({ ...row, key: `${it.account_id}:${row.key}` })));
   }
   const resources = inv.line_items?.lines || [];
-  const converted = d.conversion ? [`Converted from ${money(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`] : [];
   const overtime = d.overtime_billed && D(d.overtime_amount || 0).gt(0)
     ? [{ key: 'overtime', description: 'Overtime', details: [`${d.overtime_hours}h at ${d.overtime_multiplier}x`], qty: String(d.overtime_hours || 1), unit: d.overtime_hours ? 'hrs' : '', rate: d.overtime_hours ? num2(D(d.overtime_amount).dividedBy(d.overtime_hours)) : num2(d.overtime_amount), amount: num2(d.overtime_amount) }]
     : [];
+  // A GST invoice prints: who / what it is for, the dates in brackets and the monthly price - no project / client line, no working-days maths.
+  if (opts.tax) {
+    const what = face || title;
+    const dates = `(${longPeriod(d, inv.period_month, inv.period_year)})`;
+    if (d.billing_type === 'hourly' && resources.length) {
+      return resources.map((l) => ({
+        key: `res:${l.resource}`,
+        description: 'Manpower Services',
+        details: [`${l.resource}${face ? `, ${face}` : ''}`, dates, `Rate ${plainPrice(d.rate)} / hour`, ...(l.overtime_hours ? [`Includes ${l.overtime_hours} overtime hrs`] : [])],
+        qty: String(l.hours || 0), unit: 'hrs', rate: Number(l.hours) ? num2(D(l.revenue).dividedBy(l.hours)) : num2(l.revenue), amount: num2(l.revenue),
+      }));
+    }
+    if (d.billing_type === 'monthly' && d.contract_working_days) {
+      const base = d.base_amount ?? inv.amount;
+      const days = d.billing_basis === 'approved_hours' && Number(d.payable_days) > 0 ? Number(d.payable_days) : d.contract_working_days;
+      return [{ key: 'main', description: 'Manpower Services', details: [what, dates, `Price Per Month ${plainPrice(d.rate)}`], qty: String(days), unit: 'days', rate: num2(D(base).dividedBy(days)), amount: num2(base) }, ...overtime];
+    }
+    const kind = d.billing_type === 'one_time' ? 'Fixed-bid project services' : 'Services';
+    const base = d.base_amount ?? inv.amount;
+    return [{ key: 'main', description: kind, details: [what, dates], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
+  }
+  const converted = d.conversion ? [`Converted from ${money(d.conversion.from_amount, d.conversion.from_currency)} @ ${d.conversion.exchange_rate}`] : [];
   if (d.billing_type === 'hourly' && resources.length) {
     return resources.map((l) => ({
       key: `res:${l.resource}`,
@@ -94,19 +129,52 @@ function clientLines(inv) {
   return [{ key: 'main', description: kind, details: [...head, `(${period})`, ...note, ...converted], qty: '1', unit: '', rate: num2(base), amount: num2(base) }, ...overtime];
 }
 
+/**
+ * The GST split of a client invoice's contract charges, or null when the invoice carries no GST (then it prints as a plain invoice).
+ * A single "GST 18%" charge is split IGST or CGST + SGST by place of supply (the seller's state against the buyer's GSTIN state); charges
+ * already named IGST / CGST / SGST are printed as they are.
+ */
+function gstSplit(sourceCharges, taxable, sellerState, buyerState) {
+  const gstCharges = sourceCharges.filter((c) => GST_LABEL.test(c.label) && c.effect !== 'deduct' && D(c.amount).gt(0));
+  if (!gstCharges.length || !D(taxable).gt(0)) return null;
+  const total = gstCharges.reduce((a, c) => a.plus(D(c.amount)), D(0));
+  if (gstCharges.every((c) => SPLIT_LABEL.test(c.label))) {
+    const parts = gstCharges.map((c) => ({ label: SPLIT_LABEL.exec(c.label)[1].toUpperCase(), amount: D(c.amount).toFixed(2) }));
+    const rate = D(total).dividedBy(taxable).times(100).dividedBy(parts.length === 2 ? 2 : 1).toDecimalPlaces(2, 4).toNumber();
+    return { charges: gstCharges, parts, total, rate, gst_rate: rate * (parts.length === 2 ? 2 : 1) };
+  }
+  const gstRate = gstCharges.every((c) => c.mode === 'percent') ? gstCharges.reduce((a, c) => a + Number(c.value), 0) : D(total).dividedBy(taxable).times(100).toDecimalPlaces(2, 4).toNumber();
+  const intra = Boolean(sellerState && buyerState && sellerState === buyerState);
+  if (intra) {
+    const half = D(total).dividedBy(2).toDecimalPlaces(2, 4);
+    return { charges: gstCharges, parts: [{ label: 'CGST', amount: half.toFixed(2) }, { label: 'SGST', amount: D(total).minus(half).toFixed(2) }], total, rate: gstRate / 2, gst_rate: gstRate };
+  }
+  return { charges: gstCharges, parts: [{ label: 'IGST', amount: D(total).toFixed(2) }], total, rate: gstRate, gst_rate: gstRate };
+}
+
 async function clientInvoiceModel(orgId, inv) {
   const cur = inv.currency;
   const { party, bankLines } = await companyParty(orgId, cur);
   const account = inv.client_account?.client_account_id
-    ? await prisma.account.findUnique({ where: { id: inv.client_account.client_account_id } })
+    ? await prisma.account.findUnique({ where: { id: inv.client_account?.client_account_id } })
     : await prisma.account.findUnique({ where: { id: inv.client_account_id } });
-  // the text an admin added under an entry (Edit invoice > Description for each entry); printed below that entry's details
-  const notes = inv.line_items?.line_notes || {};
-  const lines = clientLines(inv).map((l) => (notes[l.key] ? { ...l, note: String(notes[l.key]) } : l));
+  const buyer = accountParty(account, inv.line_items?.bill_to);
   // charges the contract adds (or deducts) are rows under the items, so the total is the amount the client pays
   const sourceCharges = inv.line_items?.consolidated ? (inv.line_items.items || []).flatMap((it) => it.details?.charges || []) : (inv.details?.charges || []);
+  // the invoice is a GST tax invoice when its contract carries a GST charge
+  const probe = clientLines(inv, { tax: true });
+  const taxable = probe.reduce((a, l) => a.plus(D(l.amount)), D(0));
+  const split = cur === 'INR' ? gstSplit(sourceCharges, taxable, party.state_code, buyer.state_code) : null;
+  // the text an admin added under an entry (Edit invoice > Description for each entry); printed below that entry's details
+  const notes = inv.line_items?.line_notes || {};
+  const hsn = String(inv.project?.hsn_sac || inv.client_account?.hsn_sac || account?.hsn_sac || DEFAULT_SAC);
+  const lines = (split ? probe : clientLines(inv)).map((l) => {
+    const noted = notes[l.key] ? { ...l, note: String(notes[l.key]) } : l;
+    return split ? { ...noted, hsn, gst_rate: split.gst_rate } : noted;
+  });
   const chargeRows = new Map();
   for (const c of sourceCharges) {
+    if (split && split.charges.includes(c)) continue; // the GST is printed as its own IGST / CGST / SGST rows
     const label = c.mode === 'percent' ? `${c.label} @ ${c.value}%` : c.label;
     chargeRows.set(label, (chargeRows.get(label) || D(0)).plus(D(c.amount)));
   }
@@ -114,21 +182,48 @@ async function clientInvoiceModel(orgId, inv) {
   const subtotal = lines.reduce((a, l) => a.plus(D(l.amount)), D(0));
   const total = D(inv.total_amount ?? inv.amount);
   // if the rows above and the charges do not add up to the invoice amount (a manual override), say so instead of hiding the gap
-  const gap = total.minus(subtotal).minus(charges.reduce((a, c) => a.plus(D(c.amount)), D(0)));
+  const gstTotal = split ? split.total : D(0);
+  const gap = total.minus(subtotal).minus(gstTotal).minus(charges.reduce((a, c) => a.plus(D(c.amount)), D(0)));
   if (gap.abs().gt(0.005)) charges.push({ label: 'Adjustment', amount: gap.toFixed(2) });
+  if (!split) {
+    return {
+      ...common(party, bankLines),
+      title: 'Invoice',
+      currency: cur,
+      seller: party,
+      buyer,
+      meta: { number: inv.invoice_number, date: dateText(inv.invoice_date) },
+      lines,
+      taxes: charges,
+      subtotal: subtotal.toFixed(2),
+      total: total.toFixed(2),
+      notes: inv.notes,
+      remarks: inv.status ? `Status: ${inv.status}${inv.payment_status === 'partly_paid' ? ` (paid ${money(inv.paid_amount, cur)}, pending ${money(inv.pending_amount, cur)})` : ''}` : null,
+      cancelled: false,
+    };
+  }
+  // GST tax invoice: the total is rounded to the rupee, the difference printed as "Less : Round Off"
+  const exact = subtotal.plus(gstTotal).plus(charges.reduce((a, c) => a.plus(D(c.amount)), D(0)));
+  const printed = exact.toDecimalPlaces(0, 4);
+  const placeOfSupply = buyer.state_name || null;
   return {
     ...common(party, bankLines),
-    title: 'Invoice',
+    showHsn: true,
+    showTax: true,
+    title: 'Tax Invoice',
     currency: cur,
     seller: party,
-    buyer: accountParty(account, inv.line_items?.bill_to),
+    buyer,
+    place_of_supply: placeOfSupply,
     meta: { number: inv.invoice_number, date: dateText(inv.invoice_date) },
     lines,
-    taxes: charges,
+    taxes: [...split.parts, ...charges],
+    round_off: printed.minus(exact).toFixed(2),
     subtotal: subtotal.toFixed(2),
-    total: total.toFixed(2),
+    total: printed.toFixed(2),
+    tax_summary: [{ rate: split.rate, taxable: subtotal.toFixed(2), parts: split.parts }],
+    remarks: null,
     notes: inv.notes,
-    remarks: inv.status ? `Status: ${inv.status}${inv.payment_status === 'partly_paid' ? ` (paid ${money(inv.paid_amount, cur)}, pending ${money(inv.pending_amount, cur)})` : ''}` : null,
     cancelled: false,
   };
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, Building2, Landmark, MapPin, PieChart, Users, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
+import { Banknote, Building2, Landmark, MapPin, Percent, PieChart, Users, ListChecks, Network, Plane, PiggyBank, Plus, Receipt, ScrollText, Settings, TrendingUp } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -23,6 +23,7 @@ import GroupDebtTab from './GroupDebtTab.jsx';
 import GroupHeadcountTab from './GroupHeadcountTab.jsx';
 import GroupOfficesTab from './GroupOfficesTab.jsx';
 import GroupCompaniesTab from './GroupCompaniesTab.jsx';
+import GroupTaxTab from './GroupTaxTab.jsx';
 import { GroupHero, GroupTabs } from './groupUi.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -154,6 +155,7 @@ const TABS = [
   { key: 'finance', label: 'Group Finance', icon: PiggyBank },
   { key: 'dashboard', label: 'Dashboard', icon: Building2 },
   { key: 'cash', label: 'Book Keeping', icon: Banknote },
+  { key: 'taxes', label: 'GST & TDS', icon: Percent },
   { key: 'projections', label: 'Projections & Valuation', icon: TrendingUp },
   { key: 'tasks', label: 'Tasks & Weekly plan', icon: ListChecks },
   { key: 'travel', label: 'Travel', icon: Plane },
@@ -182,6 +184,7 @@ export default function GroupOverviewPage() {
       {section === 'finance' && <GroupFinanceTab />}
       {section === 'dashboard' && <GroupDashboardTab />}
       {section === 'cash' && <GroupCashTab />}
+      {section === 'taxes' && <GroupTaxTab />}
       {section === 'projections' && <ProjectionsTab />}
       {section === 'tasks' && <GroupTasksTab />}
       {section === 'travel' && <GroupTravelHub />}

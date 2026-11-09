@@ -366,7 +366,7 @@ async function generateClientInvoice(orgId, user, { account_id, period_month, pe
   return { invoice: serializeClientInvoice({ ...invoice, client_account: src.account }) };
 }
 
-const CLIENT_INVOICE_ACCOUNT = { select: { id: true, name: true, project_name: true, project_code: true, face_resource: true, client_name: true, client_account_id: true, service_category: true, client_account: { select: { id: true, name: true } } } };
+const CLIENT_INVOICE_ACCOUNT = { select: { id: true, name: true, project_name: true, project_code: true, face_resource: true, hsn_sac: true, client_name: true, client_account_id: true, service_category: true, client_account: { select: { id: true, name: true } } } };
 
 // The project shown on an invoice: the one stored when it was generated, else
 // (older invoices) the project as it is now — never the account's bare name.

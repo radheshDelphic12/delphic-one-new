@@ -62,6 +62,7 @@ const externalAccessRoutes = require('./modules/externalAccess/externalAccess.ro
 const orgChartRoutes = require('./modules/orgChart/orgChart.routes');
 const groupOfficesRoutes = require('./modules/groupOffices/groupOffices.routes');
 const groupCompaniesRoutes = require('./modules/groupCompanies/groupCompanies.routes');
+const groupTaxRoutes = require('./modules/groupTax/groupTax.routes');
 const tradingRoutes = require('./modules/trading/trading.routes');
 const leadsRoutes = require('./modules/leads/leads.routes');
 const zephyrRoutes = require('./modules/zephyr/zephyr.routes');
@@ -187,6 +188,7 @@ app.use('/api/v1/external-access', requireFinanceModule('external_access'), exte
 app.use('/api/v1/org-chart', orgChartRoutes);
 app.use('/api/v1/group-offices', groupOfficesRoutes);
 app.use('/api/v1/group-companies', groupCompaniesRoutes);
+app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/trading', tradingRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 app.use('/api/v1/zephyr', zephyrRoutes);

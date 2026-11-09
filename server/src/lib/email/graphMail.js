@@ -37,8 +37,13 @@ function buildMessage(mail) {
       body: { contentType: html ? 'HTML' : 'Text', content: html ? mail.html : mail.text || '' },
       toRecipients: [recipient(mail.to)],
       ...(mail.cc ? { ccRecipients: [recipient(mail.cc)] } : {}),
-      ...(mail.icalEvent
-        ? { attachments: [{ '@odata.type': '#microsoft.graph.fileAttachment', name: 'invite.ics', contentType: `text/calendar; method=${mail.icalEvent.method || 'REQUEST'}`, contentBytes: Buffer.from(mail.icalEvent.content, 'utf8').toString('base64') }] }
+      ...(mail.icalEvent || (mail.attachments && mail.attachments.length)
+        ? {
+          attachments: [
+            ...(mail.icalEvent ? [{ '@odata.type': '#microsoft.graph.fileAttachment', name: 'invite.ics', contentType: `text/calendar; method=${mail.icalEvent.method || 'REQUEST'}`, contentBytes: Buffer.from(mail.icalEvent.content, 'utf8').toString('base64') }] : []),
+            ...(mail.attachments || []).map((a) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType || 'application/octet-stream', contentBytes: Buffer.from(a.content).toString('base64') })),
+          ],
+        }
         : {}),
     },
     saveToSentItems: true,

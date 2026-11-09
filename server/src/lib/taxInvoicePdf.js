@@ -1,3 +1,4 @@
+const path = require('path');
 const PDFDocument = require('pdfkit');
 const { amountInWords } = require('./amountWords');
 const { D } = require('../modules/cashPosition/cash.calc');
@@ -30,6 +31,10 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const W = PAGE_W - 2 * M;
 const COPIES = ['ORIGINAL FOR RECIPIENT'];
+// A GST tax invoice is printed twice, like the Tally original: one page for the recipient and one for the transporter.
+const TAX_COPIES = ['ORIGINAL FOR RECIPIENT', 'DUPLICATE FOR TRANSPORTER'];
+// The PDF standard fonts have no rupee sign: this font draws only that one glyph.
+const RUPEE_FONT = path.join(__dirname, '..', 'assets', 'fonts', 'NotoSans-Bold.ttf');
 const INK = '#000';
 const LINE = '#222';
 const MUTED = '#444';
@@ -334,7 +339,17 @@ function drawCopy(doc, model, copyLabel, cols) {
     }
     const amountCol = cols.find((c) => c.key === 'amount');
     setFont(doc, 'Helvetica-Bold', 9.5);
-    doc.text(`${model.currency} ${fmt(model.total, model.currency)}`, amountCol.x - 30, ty + 4.5, { width: amountCol.w + 24, align: 'right' });
+    if (model.currency === 'INR') {
+      // "₹ 1,07,739.00": the sign in the rupee font, the figure in the page's own bold
+      const figure = fmt(model.total, model.currency);
+      const right = amountCol.x + amountCol.w - 6;
+      const figureW = doc.widthOfString(figure);
+      doc.text(figure, right - figureW, ty + 4.5, { lineBreak: false });
+      doc.font('Rupee').fontSize(9.5);
+      doc.text('\u20B9', right - figureW - doc.widthOfString('\u20B9') - 3, ty + 4, { lineBreak: false });
+    } else {
+      doc.text(`${model.currency} ${fmt(model.total, model.currency)}`, amountCol.x - 30, ty + 4.5, { width: amountCol.w + 24, align: 'right' });
+    }
 
     // ---- words, tax summary ----
     let by = ty + 18;
@@ -400,14 +415,15 @@ const dateText = (ymd) => {
 };
 
 /** Renders one invoice model (or an array of them, one after the other) to a PDF buffer: one copy per label. */
-function taxInvoicePdf(input) {
+function taxInvoicePdf(input, { compress = true } = {}) {
   const models = Array.isArray(input) ? input : [input];
-  const doc = new PDFDocument({ size: 'A4', margins: MARGINS, autoFirstPage: false, info: { Title: `${models[0].title} ${models[0].meta?.number || ''}`.trim() } });
+  const doc = new PDFDocument({ size: 'A4', margins: MARGINS, autoFirstPage: false, compress, info: { Title: `${models[0].title} ${models[0].meta?.number || ''}`.trim() } });
+  doc.registerFont('Rupee', RUPEE_FONT);
   const chunks = [];
   const done = new Promise((resolve, reject) => { doc.on('data', (c) => chunks.push(c)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject); });
   for (const model of models) {
     const cols = columns(model);
-    (model.copies || COPIES).forEach((label) => {
+    (model.copies || (model.showTax ? TAX_COPIES : COPIES)).forEach((label) => {
       doc.addPage({ size: 'A4', margins: MARGINS });
       drawCopy(doc, model, label, cols);
     });
@@ -416,4 +432,4 @@ function taxInvoicePdf(input) {
   return done;
 }
 
-module.exports = { taxInvoicePdf, dateText, COPIES };
+module.exports = { taxInvoicePdf, dateText, COPIES, TAX_COPIES };

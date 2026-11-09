@@ -12,6 +12,7 @@ import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { ConfirmDialog } from '../../components/resignation/resignationShared.jsx';
 import { KpiTile, SectionHeading } from './groupUi.jsx';
 import OwnershipChart from './OwnershipChart.jsx';
+import { BusinessMap, ClassificationPicker, TaxonomyEditor, classificationSummary, emptySelection, selectionOf, useTaxonomy } from './BusinessClassificationUi.jsx';
 import { STATUSES } from './ownershipGraph.js';
 
 const VIEWS = [
@@ -21,20 +22,18 @@ const VIEWS = [
   { key: 'sector', label: 'Group Sector' },
   { key: 'overall', label: 'Overall' },
   { key: 'chart', label: 'Group chart' },
+  { key: 'map', label: 'Business map' },
 ];
 const STATUS_OPTIONS = [
   { value: 'operational', label: 'Operational' },
   { value: 'planning', label: 'Planning' },
   { value: 'future', label: 'Future' },
 ];
-// The sector picker offers these plus every sector already used; "Add a new sector…" lets an admin add another.
-const ADD_SECTOR = '__add_sector__';
-const DEFAULT_SECTORS = ['Technology & Digital', 'Pharmaceuticals', 'Mining & Resources', 'Trading', 'Finance & Investments', 'Spirits & Beverages', 'Real Estate', 'Infrastructure', 'Hospitality', 'Foundation / Non-profit'];
 // Overall, Group Sector and Group chart can show any mix of the three statuses.
-const STATUS_FILTER_VIEWS = ['overall', 'sector', 'chart'];
+const STATUS_FILTER_VIEWS = ['overall', 'sector', 'chart', 'map'];
 const STATUS_FILTER_OPTIONS = [{ id: 'operational', label: 'Operational' }, { id: 'planning', label: 'Planning' }, { id: 'future', label: 'Future' }];
 const STATUS_TONE ={ operational: 'green', planning: 'amber', future: 'blue' };
-const BLANK = { name: '', short_code: '', sector: '', tagline: '', foundation_date: '', status: 'planning', notes: '' };
+const BLANK = { name: '', short_code: '', tagline: '', foundation_date: '', status: 'planning', notes: '' };
 const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500';
 const td = 'px-3 py-2 align-top';
 const pctText = (n) => `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 })}%`;
@@ -70,6 +69,9 @@ function HolderChips({ holders }) {
 export default function GroupCompaniesTab() {
   const { pushError, pushSuccess } = useAlerts();
   const [view, setView] = useState('operational');
+  const { tree, reload: reloadTree } = useTaxonomy();
+  const [mapKey, setMapKey] = useState(0);
+  const [showPicker, setShowPicker] = useState(false);
   const [statuses, setStatuses] = useState(STATUSES); // multi-select status filter (Overall, Group Sector, Group chart)
   const [data, setData] = useState(null);
   const [editor, setEditor] = useState(null); // { id?, linked?, form }
@@ -77,7 +79,7 @@ export default function GroupCompaniesTab() {
   const [removing, setRemoving] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => apiClient.get('/group-companies').then(({ data: res }) => setData(res.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load the companies'), 'Something went wrong')), [pushError]);
+  const load = useCallback(() => apiClient.get('/group-companies').then(({ data: res }) => { setData(res.data); setMapKey((k) => k + 1); }).catch((err) => pushError(apiErrorMessage(err, 'Failed to load the companies'), 'Something went wrong')), [pushError]);
   useEffect(() => { load(); }, [load]);
 
   const companies = useMemo(() => data?.companies || [], [data]);
@@ -96,8 +98,8 @@ export default function GroupCompaniesTab() {
     try { await fn(); await load(); if (okMessage) pushSuccess(okMessage, 'Saved'); return true; } catch (err) { pushError(apiErrorMessage(err, failMessage), 'Could not save'); return false; } finally { setBusy(false); }
   }
 
-  const openAdd = () => setEditor({ form: { ...BLANK, org_group_id: data.groups.length > 1 ? data.groups[0].id : '' } });
-  const openEdit = (c) => setEditor({ id: c.id, linked: c.is_current, form: { name: c.name, short_code: c.short_code || '', sector: c.sector || '', tagline: c.tagline || '', foundation_date: c.foundation_date || '', status: c.status, notes: c.notes || '' } });
+  const openAdd = () => { setShowPicker(false); setEditor({ cls: emptySelection(), clsDirty: false, form: { ...BLANK, org_group_id: data.groups.length > 1 ? data.groups[0].id : '' } }); };
+  const openEdit = (c) => { if (!c) return; setShowPicker(false); setEditor({ id: c.id, linked: c.is_current, legacySector: c.classification?.sectors.length ? null : c.sector, cls: selectionOf(c.classification), clsDirty: false, form: { name: c.name, short_code: c.short_code || '', tagline: c.tagline || '', foundation_date: c.foundation_date || '', status: c.status, notes: c.notes || '' } }); };
   const setField = (k) => (e) => setEditor((p) => ({ ...p, form: { ...p.form, [k]: e.target.value } }));
 
   async function saveDetails() {
@@ -106,15 +108,20 @@ export default function GroupCompaniesTab() {
     if (!id && data.groups.length > 1 && !form.org_group_id) return pushError('Choose which holding group this business belongs to.', 'Group needed');
     const body = {
       short_code: form.short_code.trim() || (id ? null : undefined),
-      sector: form.sector.trim() || (id ? null : undefined),
       tagline: form.tagline.trim() || (id ? null : undefined),
       foundation_date: form.foundation_date || (id ? null : undefined),
       notes: form.notes.trim() || (id ? null : undefined),
       status: form.status,
     };
     const done = await run(async () => {
+      let companyId = id;
       if (id) await apiClient.patch(`/group-companies/${id}`, { ...(linked ? {} : { name: form.name.trim() }), ...body });
-      else await apiClient.post('/group-companies', { name: form.name.trim(), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null)), ...(data.groups.length > 1 && form.org_group_id ? { org_group_id: form.org_group_id } : {}) });
+      else {
+        const { data: made } = await apiClient.post('/group-companies', { name: form.name.trim(), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null)), ...(data.groups.length > 1 && form.org_group_id ? { org_group_id: form.org_group_id } : {}) });
+        companyId = made.data.id;
+      }
+      // where the business sits in the sector > industry > sub-industry list
+      if (editor.clsDirty || (!id && editor.cls.sector_ids.length)) await apiClient.put(`/group-companies/${companyId}/classification`, editor.cls);
     }, id ? 'Details updated.' : 'Business added.', 'Failed to save');
     if (done) setEditor(null);
   }
@@ -142,13 +149,8 @@ export default function GroupCompaniesTab() {
     if (done) setStakeEditor(null);
   }
 
-  // ---- sectors: rename (every business using it follows) or clear
+  // ---- the group's classification list (sectors, industries, sub-industries) is edited in its own drawer
   const [sectorEditor, setSectorEditor] = useState(false);
-  const [sectorEdit, setSectorEdit] = useState(null); // { from, to }
-  async function saveSector(from, to) {
-    const done = await run(() => apiClient.patch('/group-companies/sectors', { from, to: to || null }), to ? 'Sector renamed.' : 'Sector cleared.', 'Failed to update the sector');
-    if (done) setSectorEdit(null);
-  }
 
   async function removeBusiness() {
     const c = removing;
@@ -192,12 +194,14 @@ export default function GroupCompaniesTab() {
         )}
         <div className="flex flex-wrap gap-2">
           {summary.stakes_missing > 0 && <button type="button" className="btn-secondary text-xs" data-testid="group-default" disabled={busy} onClick={groupDefault} title="Every company workspace with no holder yet is recorded as 100% held by the group">Set empty workspaces as wholly group-owned</button>}
-          <button type="button" className="btn-secondary text-xs" data-testid="manage-sectors" onClick={() => setSectorEditor(true)}>Manage sectors</button>
+          <button type="button" className="btn-secondary text-xs" data-testid="manage-sectors" onClick={() => setSectorEditor(true)}>Manage classification</button>
           <button type="button" className="btn-primary inline-flex items-center gap-1.5" data-testid="add-business" onClick={openAdd}><Plus className="h-4 w-4" /> Add business</button>
         </div>
       </div>
 
-      {view === 'chart' ? (
+      {view === 'map' ? (
+        <BusinessMap statuses={statuses} refreshKey={mapKey} onOpenCompany={(cid) => openEdit(companies.find((c) => c.id === cid))} onManage={() => setSectorEditor(true)} />
+      ) : view === 'chart' ? (
         <OwnershipChart companies={companies} groups={data.groups} statuses={statuses} onOpenCompany={openStakes} />
       ) : view === 'sector' ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="sector-view">
@@ -228,7 +232,7 @@ export default function GroupCompaniesTab() {
                     {c.holdings.length > 0 && <span className="mt-1 block text-[11px] font-normal text-tertiary-500">Holds: {c.holdings.map((h) => `${h.company} ${pctText(h.pct)}`).join(', ')}</span>}
                   </td>
                   <td className={td}>{c.short_code || <span className="text-tertiary-400">{initials(c.name)}</span>}</td>
-                  <td className={td}>{c.sector ? <Pill tone="gray">{c.sector}</Pill> : <span className="text-tertiary-300">—</span>}</td>
+                  <td className={td}>{c.sectors.length ? <span className="flex flex-wrap gap-1" title={classificationSummary(c) || undefined}>{c.sectors.slice(0, 2).map((x) => <Pill key={x} tone="gray">{x}</Pill>)}{c.sectors.length > 2 && <span className="text-[11px] text-tertiary-500">+{c.sectors.length - 2} more</span>}</span> : <span className="text-tertiary-300">—</span>}</td>
                   <td className={td}><Ownership company={c} /></td>
                   <td className={td}><HolderChips holders={c.holders} /></td>
                   <td className={`${td} max-w-xs text-xs text-tertiary-600`}>{c.tagline || '—'}</td>
@@ -281,18 +285,14 @@ export default function GroupCompaniesTab() {
               <div><label className="mb-1 block text-xs font-medium text-tertiary-600">Short name</label><input className={FIELD_INPUT} aria-label="Short name" value={editor.form.short_code} onChange={setField('short_code')} maxLength={12} placeholder={initials(editor.form.name || '')} /></div>
               <div><label className="mb-1 block text-xs font-medium text-tertiary-600">Status</label><SearchableSelect ariaLabel="Status" value={editor.form.status} onChange={(v) => setEditor((p) => ({ ...p, form: { ...p.form, status: v || 'planning' } }))} options={STATUS_OPTIONS} placeholder="Status" searchPlaceholder="Search…" /></div>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-tertiary-600">Sector</label>
-              <SearchableSelect
-                ariaLabel="Sector"
-                value={editor.newSector ? ADD_SECTOR : editor.form.sector}
-                onChange={(v) => setEditor((p) => (v === ADD_SECTOR ? { ...p, newSector: true, form: { ...p.form, sector: '' } } : { ...p, newSector: false, form: { ...p.form, sector: v || '' } }))}
-                options={[...new Set([...DEFAULT_SECTORS, ...data.sector_options, editor.form.sector].filter(Boolean))].sort().map((s) => ({ value: s, label: s })).concat({ value: ADD_SECTOR, label: 'Add a new sector…' })}
-                placeholder="Select a sector"
-                searchPlaceholder="Search…"
-                allowClear
-              />
-              {editor.newSector && <input className={`${FIELD_INPUT} mt-2`} aria-label="New sector" value={editor.form.sector} onChange={setField('sector')} maxLength={100} placeholder="Type the new sector" autoFocus />}
+            <div data-testid="classification-field">
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Business classification (sectors, industries, sub-industries)</label>
+              {editor.legacySector && !editor.clsDirty && <p className="mb-1 text-xs text-tertiary-500">Sector typed earlier: <b>{editor.legacySector}</b>. Choose its place below to replace it.</p>}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-tertiary-600" data-testid="classification-summary">{editor.cls.sector_ids.length ? `${editor.cls.sector_ids.length} sector${editor.cls.sector_ids.length === 1 ? '' : 's'} · ${editor.cls.industry_ids.length} industr${editor.cls.industry_ids.length === 1 ? 'y' : 'ies'} · ${editor.cls.sub_industry_ids.length} sub-industr${editor.cls.sub_industry_ids.length === 1 ? 'y' : 'ies'}` : 'Not placed yet'}</span>
+                <button type="button" className="btn-secondary text-xs" data-testid="classification-toggle" onClick={() => setShowPicker((v) => !v)}>{showPicker ? 'Hide the list' : 'Choose'}</button>
+              </div>
+              {showPicker && <div className="mt-2"><ClassificationPicker tree={tree} value={editor.cls} onChange={(cls) => setEditor((p) => ({ ...p, cls, clsDirty: true }))} /></div>}
             </div>
             <div><label className="mb-1 block text-xs font-medium text-tertiary-600">Tag line</label><input className={FIELD_INPUT} aria-label="Tag line" value={editor.form.tagline} onChange={setField('tagline')} maxLength={300} /></div>
             <div><label className="mb-1 block text-xs font-medium text-tertiary-600">Foundation day (planned date for a business not started yet)</label><input type="date" className={FIELD_INPUT} aria-label="Foundation day" value={editor.form.foundation_date} onChange={setField('foundation_date')} /></div>
@@ -301,29 +301,9 @@ export default function GroupCompaniesTab() {
         )}
       </Drawer>
 
-      <Drawer open={sectorEditor} onClose={() => { setSectorEditor(false); setSectorEdit(null); }} title="Manage sectors" tone="edit"
-        footer={<div className="flex justify-end"><button type="button" className="btn-secondary" onClick={() => { setSectorEditor(false); setSectorEdit(null); }}>Close</button></div>}>
-        <div className="space-y-3" data-testid="sector-manager">
-          <p className="text-xs text-tertiary-500">Rename a sector and every business in it follows. Clearing a sector leaves its businesses with no sector.</p>
-          {sectors.filter((s) => s.sector !== 'Not set').map((s) => (
-            <div key={s.sector} className="flex items-center gap-2 rounded-lg border border-tertiary-100 p-2" data-testid="sector-row">
-              {sectorEdit?.from === s.sector ? (
-                <>
-                  <input className={FIELD_INPUT} aria-label="Sector name" value={sectorEdit.to} maxLength={100} autoFocus onChange={(e) => setSectorEdit((p) => ({ ...p, to: e.target.value }))} />
-                  <button type="button" className="btn-primary text-xs" disabled={busy || !sectorEdit.to.trim()} onClick={() => saveSector(s.sector, sectorEdit.to.trim())}>Save</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={() => setSectorEdit(null)}>Cancel</button>
-                </>
-              ) : (
-                <>
-                  <span className="flex-1 text-sm text-tertiary-800">{s.sector} <span className="text-xs text-tertiary-500">({s.count})</span></span>
-                  <button type="button" className="rounded p-1.5 text-tertiary-500 hover:bg-tertiary-50" aria-label={`Rename ${s.sector}`} onClick={() => setSectorEdit({ from: s.sector, to: s.sector })}><Pencil className="h-4 w-4" /></button>
-                  <button type="button" className="rounded p-1.5 text-danger-600 hover:bg-danger-50" aria-label={`Clear ${s.sector}`} disabled={busy} onClick={() => saveSector(s.sector, null)}><Trash2 className="h-4 w-4" /></button>
-                </>
-              )}
-            </div>
-          ))}
-          {!sectors.some((s) => s.sector !== 'Not set') && <p className="text-sm text-tertiary-500">No sector is in use yet. Pick one when you add or edit a business.</p>}
-        </div>
+      <Drawer open={sectorEditor} onClose={() => setSectorEditor(false)} title="Manage classification" tone="edit" size="xl"
+        footer={<div className="flex justify-end"><button type="button" className="btn-secondary" onClick={() => setSectorEditor(false)}>Close</button></div>}>
+        <TaxonomyEditor tree={tree} reload={reloadTree} onChanged={load} />
       </Drawer>
 
       <Drawer open={Boolean(stakeEditor)} onClose={() => setStakeEditor(null)} title={stakeEditor ? `Ownership: ${stakeEditor.company.name}` : ''} tone="edit"

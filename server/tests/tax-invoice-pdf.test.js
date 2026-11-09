@@ -60,10 +60,10 @@ describe('GST / USD invoice model', () => {
     expect(plain).toMatchObject({ title: 'Invoice', showTax: false, showHsn: false, tax_summary: null });
   });
 
-  test('renders a one-page PDF: the original copy only', async () => {
+  test('a GST tax invoice renders two pages: the original for the recipient and the duplicate for the transporter', async () => {
     const buf = await taxInvoicePdf(invoiceModel(base));
     expect(buf.slice(0, 4).toString()).toBe('%PDF');
-    expect((buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(1);
+    expect((buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(2);
   });
 
   test('a long invoice continues on more pages', async () => {
@@ -87,7 +87,9 @@ describe('client and vendor invoices', () => {
     expect(m.lines[0]).toMatchObject({ description: 'Manpower Services', qty: '21', unit: 'days', amount: '100000.00' });
     expect(m.taxes).toEqual([{ label: 'TDS', amount: '-5000.00' }]);
     const gst = await clientInvoiceModel('org1', { ...client, amount: 100000, total_amount: 118000, details: { ...client.details, charges: [{ label: 'GST', mode: 'percent', value: 18, effect: 'add', amount: 18000 }] } });
-    expect(gst.taxes).toEqual([{ label: 'GST @ 18%', amount: '18000.00' }]);
+    // a contract with GST prints as a tax invoice: the GST is split IGST / CGST + SGST by place of supply
+    expect(gst).toMatchObject({ title: 'Tax Invoice', showHsn: true });
+    expect(gst.taxes).toEqual([{ label: 'IGST', amount: '18000.00' }]);
     expect(gst.total).toBe('118000.00');
     const none = await clientInvoiceModel('org1', { ...client, total_amount: 100000, details: { ...client.details, charges: [] } });
     expect(none.taxes).toEqual([]);
@@ -119,7 +121,7 @@ describe('client and vendor invoices', () => {
     expect(m.lines).toHaveLength(2);
     expect(m.lines[0]).toMatchObject({ description: 'Manpower Services', qty: '20', unit: 'days', rate: '4000.00', amount: '80000.00' });
     expect(m.lines[0].details.join(' ')).not.toMatch(/Ahmedabad/);
-    expect(m.taxes).toEqual([{ label: 'GST @ 18%', amount: '34200.00' }, { label: 'TDS @ 10%', amount: '-19000.00' }]);
+    expect(m.taxes).toEqual([{ label: 'IGST', amount: '34200.00' }, { label: 'TDS @ 10%', amount: '-19000.00' }]);
     expect(m.total).toBe(total.toFixed(2));
   });
 
@@ -200,3 +202,71 @@ describe('default signature and several invoices in one PDF', () => {
   });
 });
 
+
+describe('client invoice with GST prints as the Tally tax invoice', () => {
+  // The invoice of the printed sample (bill no. 68): 21 of 23 days of a 1,00,000 month = 91,304.35 + 18% IGST 16,434.78 = 1,07,739.13, rounded to 1,07,739.00
+  const gstCharge = { label: 'GST 18%', mode: 'percent', value: 18, effect: 'add', amount: 16434.78 };
+  const invoice = (extra = {}) => ({
+    invoice_number: 'DEL/68/24-25', invoice_date: '2024-08-13', period_month: 7, period_year: 2024, currency: 'INR', status: 'sent', amount: 91304.35, total_amount: 107739.13,
+    client_account_id: 'acc1', client_account: { client_account_id: null, hsn_sac: null },
+    project: { name: 'Apurva Project', code: 'P1', client_name: 'Giglabz', face_resource: 'PHP+ Wordpress Developer, Apurva Dwivedi' },
+    details: { billing_type: 'monthly', rate: 100000, working_days: 23, contract_working_days: 21, base_amount: 91304.35, period_from: '2024-07-01', period_to: '2024-07-31', charges: [gstCharge], total_amount: 107739.13 },
+    line_items: {},
+    ...extra,
+  });
+  const text = (buf) => [...buf.toString('latin1').matchAll(/<([0-9a-fA-F]{2,})>/g)].map((m) => Buffer.from(m[1], 'hex').toString('latin1')).join('');
+
+  test('HSN / SAC, the 18% rate, IGST between states, the tax summary, the tax in words and the round off', async () => {
+    const m = await clientInvoiceModel('org1', invoice());
+    expect(m).toMatchObject({ title: 'Tax Invoice', showHsn: true, showTax: true, currency: 'INR', total: '107739.00', round_off: '-0.13', subtotal: '91304.35', place_of_supply: 'Karnataka', remarks: null });
+    expect(m.lines).toEqual([expect.objectContaining({
+      description: 'Manpower Services', hsn: '998519', gst_rate: 18, qty: '21', unit: 'days', rate: '4347.83', amount: '91304.35',
+      details: ['PHP+ Wordpress Developer, Apurva Dwivedi', '(01 July 2024 - 31 July 2024)', 'Price Per Month 100,000.00'],
+    })]);
+    expect(m.taxes).toEqual([{ label: 'IGST', amount: '16434.78' }]);
+    expect(m.tax_summary).toEqual([{ rate: 18, taxable: '91304.35', parts: [{ label: 'IGST', amount: '16434.78' }] }]);
+
+    const pdf = await taxInvoicePdf(m, { compress: false });
+    const t = text(pdf);
+    for (const word of ['Tax Invoice', 'ORIGINAL FOR RECIPIENT', 'DUPLICATE FOR TRANSPORTER', 'HSN/SAC', '998519', 'Manpower Services', 'Price Per Month 100,000.00', 'IGST', 'Round Off', 'INR One Lakh Seven Thousand Seven Hundred Thirty Nine Only', 'INR Sixteen Thousand Four Hundred Thirty Four and Seventy Eight paise Only', 'Taxable', 'This is a Computer Generated Invoice']) expect(t).toContain(word);
+    // original for the recipient and duplicate for the transporter: two pages
+    expect((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(2);
+  });
+
+  test('inside the sellers state it is CGST + SGST at half the rate each, and the projects own HSN / SAC is used', async () => {
+    const mock = require('../src/config/db');
+    mock.account.findUnique.mockImplementationOnce(async ({ where }) => ({ id: where.id, name: 'Uttarakhand Client', gst_or_tax_id: '05AAICG2065Q1ZY', location: 'Dehradun', location_city: null, location_country: null }));
+    const m = await clientInvoiceModel('org1', invoice({ client_account: { client_account_id: null, hsn_sac: '998313' } }));
+    expect(m.taxes).toEqual([{ label: 'CGST', amount: '8217.39' }, { label: 'SGST', amount: '8217.39' }]);
+    expect(m.tax_summary[0]).toMatchObject({ rate: 9, taxable: '91304.35', parts: [{ label: 'CGST', amount: '8217.39' }, { label: 'SGST', amount: '8217.39' }] });
+    expect(m.lines[0]).toMatchObject({ hsn: '998313', gst_rate: 18 });
+  });
+
+  test('TDS stays a deduction row, GST named IGST by the contract is kept as it is, and an invoice with no GST prints as before', async () => {
+    const tds = { label: 'TDS 10%', mode: 'percent', value: 10, effect: 'deduct', amount: -9130.44 };
+    const withTds = await clientInvoiceModel('org1', invoice({ total_amount: 98608.69, details: { ...invoice().details, charges: [gstCharge, tds], total_amount: 98608.69 } }));
+    expect(withTds.taxes).toEqual([{ label: 'IGST', amount: '16434.78' }, { label: 'TDS 10% @ 10%', amount: '-9130.44' }]);
+    expect(withTds).toMatchObject({ total: '98609.00', round_off: '0.31' });
+    const named = await clientInvoiceModel('org1', invoice({ details: { ...invoice().details, charges: [{ label: 'IGST @ 18%', mode: 'percent', value: 18, effect: 'add', amount: 16434.78 }] } }));
+    expect(named.taxes).toEqual([{ label: 'IGST', amount: '16434.78' }]);
+    expect(named.tax_summary[0]).toMatchObject({ rate: 18 });
+    // no GST charge: the plain invoice, no HSN / tax columns, one copy, the project line as before
+    const plain = await clientInvoiceModel('org1', invoice({ total_amount: 91304.35, details: { ...invoice().details, charges: [] } }));
+    expect(plain).toMatchObject({ title: 'Invoice', showHsn: false, showTax: false, tax_summary: null, total: '91304.35' });
+    expect(plain.lines[0].details.some((d) => d.startsWith('Resource: '))).toBe(true);
+    expect((await taxInvoicePdf(plain)).toString('latin1').match(/\/Type \/Page\b/g)).toHaveLength(1);
+  });
+
+  test('a GST invoice from the invoice generator is printed to the rupee with a Round Off line too', () => {
+    const m = invoiceModel({
+      number: 'DEL/68/24-25', type: 'gst', currency: 'INR', status: 'issued', invoice_date: '2024-08-13', due_date: null,
+      seller: { name: 'Delphic', address: 'Rudrapur', gstin: '05AGYPG8954H1ZQ', state_code: '05' },
+      buyer_name: 'Giglabz', buyer_address: 'Bangalore', buyer_gstin: '29AAICG2065Q1ZY', buyer_state_code: '29', place_of_supply: '29',
+      lines: [{ description: 'Manpower Services', hsn_sac: '998519', gst_rate: 18, qty: '21', unit: 'days', rate: '4347.83', amount: '91304.35' }],
+      subtotal: '91304.35', cgst: '0', sgst: '0', igst: '16434.78', total: '107739.13', payment_instructions: null, notes: null,
+    });
+    expect(m).toMatchObject({ total: '107739.00', round_off: '-0.13' });
+    // a USD export invoice is not rounded
+    expect(invoiceModel({ number: 'X', type: 'usd_export', currency: 'USD', status: 'issued', invoice_date: '2024-08-13', seller: { name: 'D' }, buyer_name: 'B', lines: [], subtotal: '10.50', cgst: '0', sgst: '0', igst: '0', total: '10.50' }).total).toBe('10.50');
+  });
+});

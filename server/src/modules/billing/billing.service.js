@@ -430,6 +430,7 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     project_code: account.project_code || null,
     project_name: calendarsService.projectName(account),
     face_resource: account.face_resource || null,
+    hsn_sac: account.hsn_sac || null,
     ...calendarsService.clientFields(account),
     // The requirement this project is linked to (Finance picks it in the project drawer): its title for lists, the full link for the picker.
     requirement: account.requirement?.title || '',
@@ -481,6 +482,7 @@ const PROFILE_SELECT = {
   project_name: true,
   project_code: true,
   face_resource: true,
+  hsn_sac: true,
   overtime_billable: true,
   overtime_multiplier: true,
   estimated_monthly_hours: true,
@@ -581,6 +583,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   const data = {};
   if (renamed) data.project_name = patch.project_name;
   if (patch.face_resource !== undefined) data.face_resource = patch.face_resource;
+  if (patch.hsn_sac !== undefined) data.hsn_sac = patch.hsn_sac;
   // null clears the client; an id links the client account and snapshots its name.
   if (patch.client_account_id !== undefined) {
     data.client_account_id = client?.id || null;

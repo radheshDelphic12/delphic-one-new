@@ -4,6 +4,7 @@ const { authenticate, authorizeGroupSuperadmin } = require('../../middleware/aut
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./groupCompanies.service');
+const taxonomy = require('./taxonomy.service');
 
 const router = express.Router();
 router.use(authenticate, authorizeGroupSuperadmin);
@@ -59,6 +60,8 @@ const MESSAGES = {
   self_holder: [400, 'A business cannot hold itself'],
   holder_name_needed: [400, 'Give the outside holder a name'],
   holder_not_found: [400, 'A holder is not a business of this group'],
+  name_needed: [400, 'Type a name'],
+  bad_selection: [400, 'Pick industries inside the chosen sectors and sub-industries inside the chosen industries'],
   ownership_loop: [400, 'That would make two businesses own each other (directly or through others)'],
 };
 const problem = (res, result) => {
@@ -94,6 +97,29 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 router.put('/:id/stakes', asyncHandler(async (req, res) => {
   const result = await service.setStakes(req.user.org_group_ids, uuid.parse(req.params.id), stakesSchema.parse(req.body).stakes);
   return result.error ? problem(res, result) : ok(res, result);
+}));
+
+// ---- business classification: the group's own sector > industry > sub-industry list, where each business sits in it, and the map ----
+const nameBody = z.object({ name: text(150).min(1) });
+const namesBody = z.object({ names: z.string().trim().min(1).max(5000) });
+const classificationSchema = z.object({ sector_ids: z.array(uuid).max(60).default([]), industry_ids: z.array(uuid).max(400).default([]), sub_industry_ids: z.array(uuid).max(2000).default([]) });
+const answer = (res, r, key) => (r.error ? problem(res, r) : ok(res, key ? r[key] : r));
+
+router.get('/taxonomy', asyncHandler(async (req, res) => ok(res, await taxonomy.tree(req.user.org_group_ids))));
+router.post('/taxonomy/seed', asyncHandler(async (req, res) => ok(res, await taxonomy.seedStandard(req.user.org_group_ids))));
+router.post('/taxonomy/sectors', asyncHandler(async (req, res) => answer(res, await taxonomy.addSector(req.user.org_group_ids, nameBody.parse(req.body)), 'sector')));
+router.patch('/taxonomy/sectors/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.renameSector(req.user.org_group_ids, uuid.parse(req.params.id), nameBody.parse(req.body)), 'sector')));
+router.delete('/taxonomy/sectors/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.removeSector(req.user.org_group_ids, uuid.parse(req.params.id)))));
+router.post('/taxonomy/sectors/:id/industries', asyncHandler(async (req, res) => answer(res, await taxonomy.addIndustry(req.user.org_group_ids, uuid.parse(req.params.id), nameBody.parse(req.body)), 'industry')));
+router.patch('/taxonomy/industries/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.renameIndustry(req.user.org_group_ids, uuid.parse(req.params.id), nameBody.parse(req.body)), 'industry')));
+router.delete('/taxonomy/industries/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.removeIndustry(req.user.org_group_ids, uuid.parse(req.params.id)))));
+router.post('/taxonomy/industries/:id/sub-industries', asyncHandler(async (req, res) => answer(res, await taxonomy.addSubIndustries(req.user.org_group_ids, uuid.parse(req.params.id), namesBody.parse(req.body)))));
+router.patch('/taxonomy/sub-industries/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.renameSubIndustry(req.user.org_group_ids, uuid.parse(req.params.id), nameBody.parse(req.body)), 'sub_industry')));
+router.delete('/taxonomy/sub-industries/:id', asyncHandler(async (req, res) => answer(res, await taxonomy.removeSubIndustry(req.user.org_group_ids, uuid.parse(req.params.id)))));
+router.put('/:id/classification', asyncHandler(async (req, res) => answer(res, await service.setClassification(req.user.org_group_ids, uuid.parse(req.params.id), classificationSchema.parse(req.body)))));
+router.get('/business-map', asyncHandler(async (req, res) => {
+  const statuses = String(req.query.statuses || '').split(',').filter((x) => ['operational', 'planning', 'future'].includes(x));
+  return ok(res, await taxonomy.businessMap(req.user.org_group_ids, { statuses }));
 }));
 
 module.exports = router;
