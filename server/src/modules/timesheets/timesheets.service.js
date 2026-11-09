@@ -4,7 +4,6 @@ const { decide } = require('../../lib/permissions');
 const isApprover = (a) => a.role === 'admin' || decide(a, 'timesheets.approve') === true;
 const logger = require('../../config/logger');
 const calendarsService = require('../calendars/calendars.service');
-const leaveService = require('../leave/leave.service');
 const { computeDayRevenue } = require('../billing/billing.service');
 const { projectListWhere } = require('../../lib/projectScope');
 const { contractState } = require('../../lib/contractState');
@@ -80,17 +79,6 @@ async function otherHoursOnDay(orgMembershipId, date, excludeEntryId) {
   return rows.reduce((sum, e) => sum + Number(e.hours) + Number(e.overtime_hours || 0), 0);
 }
 
-// Approved leave vs the hours a day would hold after this write. Full-day
-// leave (or AM + PM halves) blocks the day; a half day caps work at what the
-// leave leaves free (shift - 4.5h). Returns a service error object or null.
-async function leaveBlock(orgId, orgMembershipId, date, totalHours) {
-  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
-  if (leave) return { error: 'leave_day', leave };
-  const cap = await leaveService.workCapacityFor(orgId, orgMembershipId, date);
-  if (cap && totalHours > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: totalHours };
-  return null;
-}
-
 // Revenue is derived from approved billable hours, so approving an entry (or
 // changing an approved one) refreshes that day's DailyProjectRevenue at once
 // instead of waiting for the nightly job. Best-effort: a billing hiccup must
@@ -137,9 +125,9 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   // Attendance-paid people: overtime is a ticket approved by the manager, never timesheet hours.
   if (overtime_hours > 0 && (await overtimeTickets.usesTickets(orgMembershipId))) return { error: 'overtime_requires_ticket' };
 
-  // Approved Leave Day = no timesheet, no project hours.
-  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
-  if (leave) return { error: 'leave_day', leave };
+  // Approved leave does NOT stop project time: a client may still be billed for the day (for example a sick day the client agreed to pay),
+  // so the person can log it. It goes through approval like any entry, and pay is unchanged (paid hours = approved hours up to what the leave
+  // leaves free + paid leave, see workHours.daySummaries), so nothing is paid twice.
 
   // Every entry is project time. Non-IT hours are never billable, so they cannot land on a client timesheet.
   const it = await isItMember(orgMembershipId);
@@ -166,8 +154,6 @@ async function createEntry(orgId, orgMembershipId, { date, account_id, requireme
   // fine; the total for the day still can't exceed 24h.
   const dayTotal = (await otherHoursOnDay(orgMembershipId, date)) + hours + overtime_hours;
   if (dayTotal > 24) return { error: 'exceeds_day_hours' };
-  const blocked = await leaveBlock(orgId, orgMembershipId, date, dayTotal);
-  if (blocked) return blocked;
   // No project-level hour cap: people log the hours they actually worked on their allocated projects.
 
   const alreadyPendingToday = await prisma.timesheetEntry.count({ where: { org_membership_id: orgMembershipId, date, status: 'submitted' } });
@@ -334,8 +320,6 @@ async function updateEntry(orgId, orgMembershipId, entryId, patch) {
     const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
     const dayTotal = (await otherHoursOnDay(orgMembershipId, existing.date, entryId)) + hours + overtime;
     if (dayTotal > 24) return { error: 'exceeds_day_hours' };
-    const cap = await leaveService.workCapacityFor(orgId, orgMembershipId, existing.date);
-    if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
 
   const data = { ...patch };
@@ -384,8 +368,6 @@ async function adminUpdateEntry(orgId, adminUserId, entryId, { reason, ...patch 
     const overtime = patch.overtime_hours !== undefined ? Number(patch.overtime_hours) : Number(existing.overtime_hours || 0);
     const dayTotal = (await otherHoursOnDay(existing.org_membership_id, existing.date, entryId)) + hours + overtime;
     if (dayTotal > 24) return { error: 'exceeds_day_hours' };
-    const cap = await leaveService.workCapacityFor(orgId, existing.org_membership_id, existing.date);
-    if (cap && dayTotal > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: dayTotal };
   }
   const data = { ...patch };
   if (data.account_id === null) { data.billable = false; data.overtime_hours = 0; }
@@ -591,9 +573,6 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
   if (date > todayIst()) return { error: 'future_date' };
   if (!(await isLocked(orgId, date))) return { error: 'not_locked' };
 
-  const leave = await leaveService.leaveDayFor(orgId, orgMembershipId, date);
-  if (leave) return { error: 'leave_day', leave };
-
   if (!account_id) return { error: 'project_required' };
   let account = null;
   if (account_id) {
@@ -693,13 +672,6 @@ async function decideTicket(orgId, ticketId, actor, { status, decision_reason })
     if (requestedHours !== undefined) {
       const others = await otherHoursOnDay(targetMembershipId, targetDate, ticket.timesheet_entry_id || undefined);
       if (others + Number(requestedHours) > 24) return { error: 'exceeds_day_hours' };
-    }
-    const leave = await leaveService.leaveDayFor(orgId, targetMembershipId, targetDate);
-    if (leave) return { error: 'leave_day', leave };
-    if (requestedHours !== undefined) {
-      const cap = await leaveService.workCapacityFor(orgId, targetMembershipId, targetDate);
-      const others = await otherHoursOnDay(targetMembershipId, targetDate, ticket.timesheet_entry_id || undefined);
-      if (cap && others + Number(requestedHours) > cap.capacity + 1e-9) return { error: 'half_day_capacity', ...cap, total: others + Number(requestedHours) };
     }
   }
 
@@ -1049,8 +1021,6 @@ async function adminCreateEntry(orgId, adminUserId, { org_membership_id, reason,
   }
   const dayTotal = (await otherHoursOnDay(org_membership_id, body.date)) + body.hours + (body.overtime_hours || 0);
   if (dayTotal > 24) return { error: 'exceeds_day_hours' };
-  const blocked = await leaveBlock(orgId, org_membership_id, body.date, dayTotal);
-  if (blocked) return blocked;
   const entry = await prisma.timesheetEntry.create({
     data: {
       org_id: orgId,
@@ -1128,13 +1098,10 @@ async function importEntries(orgId, adminUserId, { rows, reason, dry_run }) {
       project = projectByKey.get(row.project.toLowerCase());
       if (!project) { fail(`Project "${row.project}" not found — use its project code or name`); continue; }
     }
-    if (await leaveService.leaveDayFor(orgId, member.id, date)) { fail('Employee is on approved leave that day'); continue; }
     const key = `${member.id}|${row.date}`;
     if (!dayTotals.has(key)) dayTotals.set(key, await otherHoursOnDay(member.id, date));
     dayTotals.set(key, dayTotals.get(key) + hours + (project ? overtime : 0));
     if (dayTotals.get(key) > 24) { fail('More than 24 hours logged for this employee on this date'); continue; }
-    const halfCap = await leaveService.workCapacityFor(orgId, member.id, date);
-    if (halfCap && dayTotals.get(key) > halfCap.capacity + 1e-9) { fail(`Approved half-day leave that day - only ${halfCap.capacity}h can be logged for work`); continue; }
     const askedBillable = row.billable === '' ? Boolean(project) : /^(y|yes|true|1)$/i.test(row.billable);
     const onClientTimesheet = member.worker_type === 'contractor' || member.person?.department?.name?.toLowerCase() === 'it';
     valid.push({

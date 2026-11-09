@@ -92,7 +92,8 @@ function statusFor({ membershipId, date, data, approvedHours, overtimeHours, day
   const key = ymd(date);
   const onLeave = data.leaves.filter((l) => l.org_membership_id === membershipId && l.from_date <= date && l.to_date >= date);
   const full = onLeave.find((l) => !l.is_half_day);
-  if (full) {
+  // Approved hours logged on a leave day are billed like any worked day; the leave status only applies to a leave day with no hours.
+  if (full && !(approvedHours > 0)) {
     if (String(full.leave_type.name).trim().toLowerCase() === 'comp off') return 'comp_off';
     return full.leave_type.paid ? 'pl' : 'npl';
   }

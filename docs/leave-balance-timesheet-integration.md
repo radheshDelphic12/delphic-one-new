@@ -22,3 +22,11 @@ Full/half paid, full/half unpaid, pending, approved, rejected, cancelled approve
 
 ## Constraints (repo)
 Targeted tests/lint only (see CLAUDE.md); no push; local-only.
+
+## Update 2026-11-09: project time can be logged on a leave day
+A client may agree to be billed for a day the person was on (sick) leave, so approved leave no longer blocks or caps **timesheet** entries
+(employee log, edit, regularisation request and approval, admin add, bulk import). Entries go for approval like any other. Pay is unchanged
+(paid hours of a day = paid leave + approved hours up to what the leave leaves free, so nothing is paid twice) and attendance on that day stays
+Leave. Client billing: a full leave day with approved hours logged counts as a worked day (`resourceBilling.statusFor`); with no hours it keeps
+the leave status and the project's leave rule. Still enforced: applying / approving leave is refused when conflicting hours are already logged
+(rule 8), and the 24h cap.

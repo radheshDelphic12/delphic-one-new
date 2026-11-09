@@ -349,7 +349,7 @@ export default function ItTimesheetPage() {
             <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={addRow}>
               <Plus className="h-4 w-4" /> Add task
             </button>
-            <button type="submit" className="btn-primary" disabled={saving || leave.is_leave_day || noProjects}>{saving ? 'Saving…' : 'Save day'}</button>
+            <button type="submit" className="btn-primary" disabled={saving || noProjects}>{saving ? 'Saving…' : 'Save day'}</button>
           </div>
         </form>
       </section>

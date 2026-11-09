@@ -139,11 +139,11 @@ describe('approval workflow: only approved leave has any effect (rule 2)', () =>
     expect((await logHours(s.emp.token, '2026-09-08', 9)).status).toBe(201);
   });
 
-  test('cancelled / revoked approved leave reverses balance, paid hours and the timesheet block', async () => {
+  test('cancelled / revoked approved leave reverses balance and paid leave hours', async () => {
     const s = await seed();
     const res = await apply(s.emp.token, { leave_type_id: s.CL.id, from_date: '2026-09-08', to_date: '2026-09-09' });
     await decide(s.admin.token, res.body.data.id, 'approved');
-    expect((await logHours(s.emp.token, '2026-09-08', 9)).status).toBe(422); // blocked while approved
+    expect((await logHours(s.emp.token, '2026-09-08', 9)).status).toBe(201); // project time can still be logged on a leave day (goes for approval)
     expect((await septLine(s)).breakdown.paid_leave_hours).toBe(18);
     expect(await balanceOf(s, s.CL)).toMatchObject({ used: 2, remaining: 10 });
 
@@ -179,19 +179,20 @@ describe('conflicts: apply, approve and timesheet creation (rule 8)', () => {
     expect(clash.body.message).toMatch(/2026-09-16/);
   });
 
-  test('approved full-day leave blocks timesheet creation (employee, admin entry and CSV-style admin add)', async () => {
+  test('approved full-day leave does not stop project time (employee and admin entry): a client may still be billed for the day', async () => {
     const s = await seed();
     const res = await apply(s.emp.token, { leave_type_id: s.CL.id, from_date: '2026-09-10', to_date: '2026-09-10' });
     await decide(s.admin.token, res.body.data.id, 'approved');
     const own = await logHours(s.emp.token, '2026-09-10', 2);
-    expect(own.status).toBe(422);
-    expect(own.body.message).toMatch(/approved Casual Leave leave/);
-    const byAdmin = await api('post', s.admin.token, '/timesheets/entries/admin').send({ org_membership_id: s.emp.membership.id, date: '2026-09-10', hours: 2, reason: 'Backfill' });
-    expect(byAdmin.status).toBe(422);
-    expect(await prisma.timesheetEntry.count()).toBe(0);
+    expect(own.status).toBe(201);
+    const byAdmin = await api('post', s.admin.token, '/timesheets/entries/admin').send({ org_membership_id: s.emp.membership.id, date: '2026-09-10', hours: 2, reason: 'Client is billed for the sick day' });
+    expect(byAdmin.status).toBe(201);
+    expect(await prisma.timesheetEntry.count()).toBe(2);
+    // pay is not touched: the paid leave hours stay, and worked hours add nothing on top of a full-day paid leave
+    expect(await dayOf(s.emp.token, '2026-09-10')).toMatchObject({ leave_hours: 9, paid_leave_hours: 9, paid_hours: 9 });
   });
 
-  test('half-day leave caps work at the remaining 4.5h (create and edit); apply is refused above 4.5h', async () => {
+  test('applying half-day leave is refused when more than 4.5h is already logged; logging after the leave is approved is not capped', async () => {
     const s = await seed();
     // Apply side: 6h already logged -> a half day cannot be applied.
     await logHours(s.emp.token, '2026-09-10', 6);
@@ -208,15 +209,12 @@ describe('conflicts: apply, approve and timesheet creation (rule 8)', () => {
     // Create side on another half-day: working + leave <= 9.
     const half = await apply(s.emp.token, { leave_type_id: s.CL.id, from_date: '2026-09-11', to_date: '2026-09-11', is_half_day: true, half_day_session: 'SECOND_HALF' });
     await decide(s.admin.token, half.body.data.id, 'approved');
-    const tooMuch = await logHours(s.emp.token, '2026-09-11', 5);
-    expect(tooMuch.status).toBe(422);
-    expect(tooMuch.body.message).toMatch(/only 4\.5h can be logged/);
+    const more = await logHours(s.emp.token, '2026-09-11', 5);
+    expect(more.status).toBe(201); // a client may be billed for the full day
     const first = await logHours(s.emp.token, '2026-09-11', 3);
     expect(first.status).toBe(201);
-    expect((await logHours(s.emp.token, '2026-09-11', 2)).status).toBe(422); // 3 + 2 > 4.5
-    expect((await logHours(s.emp.token, '2026-09-11', 1.5)).status).toBe(201); // exactly 4.5
     const edit = await api('patch', s.emp.token, `/timesheets/entries/${first.body.data.id}`).send({ hours: 4 });
-    expect(edit.status).toBe(422); // 4 + 1.5 > 4.5
+    expect(edit.status).toBe(200);
   });
 
   test('approval after a timesheet already exists: approval is refused, request stays pending, nothing is changed', async () => {
@@ -261,7 +259,7 @@ describe('conflicts: apply, approve and timesheet creation (rule 8)', () => {
     expect([am.status, pm.status]).toEqual([201, 201]);
     await decide(s.admin.token, am.body.data.id, 'approved');
     await decide(s.admin.token, pm.body.data.id, 'approved');
-    expect((await logHours(s.emp.token, '2026-09-15', 1)).status).toBe(422);
+    expect((await logHours(s.emp.token, '2026-09-15', 1)).status).toBe(201);
     expect(await dayOf(s.emp.token, '2026-09-15')).toMatchObject({ leave_hours: 9, paid_leave_hours: 9, expected: 0 });
   });
 });

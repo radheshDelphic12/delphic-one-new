@@ -129,18 +129,18 @@ describe('non-IT vs IT timesheet fields', () => {
   });
 });
 
-describe('Approved Leave Day = no attendance, no timesheet, no project hours', () => {
-  test('timesheet logging is blocked on an approved full-day leave, but not on pending leave, half-day leave, or other dates', async () => {
+describe('Approved Leave Day: attendance is leave, but project time can still be logged (a client may be billed for the day)', () => {
+  test('timesheet logging is allowed on an approved leave day (full or half) and goes for approval like any entry; pay is not touched', async () => {
     const org = await createOrg();
     const emp = await person(org);
     await approvedLeave(org, emp.membership, '2026-09-15', '2026-09-16');
     await approvedLeave(org, emp.membership, '2026-09-17', '2026-09-17', { is_half_day: true, half_day_session: 'FIRST_HALF' });
     await approvedLeave(org, emp.membership, '2026-09-18', '2026-09-18', { status: 'pending' });
 
-    const blocked = await log(emp.token, { date: '2026-09-16', hours: 4 });
-    expect(blocked.status).toBe(422);
-    expect(blocked.body.message).toContain('leave');
-    expect((await log(emp.token, { date: '2026-09-17', hours: 4 })).status).toBe(201); // half-day
+    const onLeave = await log(emp.token, { date: '2026-09-16', hours: 8 });
+    expect(onLeave.status).toBe(201); // full-day leave: the client may still be billed for it
+    expect(onLeave.body.data).toMatchObject({ status: 'submitted' });
+    expect((await log(emp.token, { date: '2026-09-17', hours: 8 })).status).toBe(201); // half-day leave, more than the free half
     expect((await log(emp.token, { date: '2026-09-18', hours: 4 })).status).toBe(201); // only pending
     expect((await log(emp.token, { date: '2026-09-21', hours: 4 })).status).toBe(201);
   });
@@ -314,17 +314,17 @@ describe('Timesheet Regularisation', () => {
     expect(mine.body.data[0].status).toBe('approved');
   });
 
-  test('a rejected request creates nothing; a request on an approved leave day is refused', async () => {
+  test('a rejected request creates nothing; a request on an approved leave day is accepted like any other', async () => {
     const org = await createOrg();
     const manager = await person(org);
     const emp = await person(org, { managerMembership: manager.membership });
     await approvedLeave(org, emp.membership, '2026-09-23', '2026-09-23');
     await lockedWeek(org);
 
-    const onLeave = await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-23', hours: 6, reason: 'x' });
-    expect(onLeave.status).toBe(422);
-
     const proj = await project(org, emp.user.id, emp.membership);
+    const onLeave = await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-23', account_id: proj.id, hours: 6, reason: 'client is billed for the sick day' });
+    expect(onLeave.status).toBe(201);
+
     const req = (await authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date: '2026-09-22', account_id: proj.id, hours: 6, reason: 'x' })).body.data;
     const rejected = await authed(request(app).post(`/api/v1/timesheets/regularization-tickets/${req.id}/decision`), manager.token)
       .send({ status: 'rejected', decision_reason: 'Not justified' });
