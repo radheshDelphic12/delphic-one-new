@@ -17,9 +17,20 @@ function VendorChargesPanel() {
   const [vendors, setVendors] = useState([]);
   const [vendorId, setVendorId] = useState('');
   useEffect(() => {
-    apiClient.get('/accounts', { params: { type: 'vendor', limit: 100, sort_by: 'name', sort_order: 'asc' } })
-      .then(({ data }) => setVendors(data.data || []))
-      .catch(() => setVendors([]));
+    // The accounts API caps a page at 100, so read every page: a long vendor list must not be cut off.
+    let cancelled = false;
+    (async () => {
+      const all = [];
+      try {
+        for (let page = 1; page <= 50; page += 1) {
+          const { data } = await apiClient.get('/accounts', { params: { type: 'vendor', limit: 100, page, sort_by: 'name', sort_order: 'asc' } });
+          all.push(...(data.data || []));
+          if (page >= (data.pagination?.totalPages || 1)) break;
+        }
+      } catch { /* show what loaded */ }
+      if (!cancelled) setVendors(all);
+    })();
+    return () => { cancelled = true; };
   }, []);
   return (
     <div className="space-y-4">
