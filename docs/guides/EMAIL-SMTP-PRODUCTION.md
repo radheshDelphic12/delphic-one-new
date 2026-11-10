@@ -17,15 +17,15 @@ Use **either** option A **or** option B (A wins if both are set).
 
 | Variable | Meaning | Example |
 |---|---|---|
-| `NOTIFICATIONS_EMAIL_FROM` | From address of every mail (**required** in production) | `Delphic One <noreply.secure@delphic.in>` |
-| **A** `NOTIFICATIONS_SMTP_URL` | One URL with host, port, TLS, user and password | `smtps://noreply.secure%40delphic.in:APP_PASSWORD@smtp.example.com:465` |
+| `NOTIFICATIONS_EMAIL_FROM` | From address of every mail (**required** in production) | `Delphic One <noreply@delphic.in>` |
+| **A** `NOTIFICATIONS_SMTP_URL` | One URL with host, port, TLS, user and password | `smtps://noreply%40delphic.in:APP_PASSWORD@smtp.example.com:465` |
 | **B** `NOTIFICATIONS_SMTP_HOST` | SMTP server | `smtp.example.com` |
 | **B** `NOTIFICATIONS_SMTP_PORT` | Port (default `587`) | `465` or `587` |
 | **B** `NOTIFICATIONS_SMTP_SECURE` | `true` = implicit TLS (port 465). `false` = start plain and upgrade with STARTTLS (587 / 25). Left empty it follows the port: 465 → `true`, anything else → `false` | `true` |
-| **B** `NOTIFICATIONS_SMTP_USER` | Login (the mailbox) | `noreply.secure@delphic.in` |
+| **B** `NOTIFICATIONS_SMTP_USER` | Login (the mailbox) | `noreply@delphic.in` |
 | **B** `NOTIFICATIONS_SMTP_PASS` | Password / app password | *(secret)* |
 
-* **Reference sender:** `noreply.secure@delphic.in`, the mailbox the Delphic Secure product already sends from. Reuse the
+* **Reference sender:** `noreply@delphic.in`, the shared no-reply mailbox. Reuse the
   same host, port, TLS mode and credentials that product uses (copy them from its configuration; this repository does not
   contain them). If you prefer a dedicated mailbox for Delphic One, use that mailbox's values instead.
 * Option B is easier when the password contains characters such as `@`, `/`, `#` or `%` (in a URL they must be percent-encoded).
@@ -44,7 +44,7 @@ app values are set (`MAIL_GRAPH_*` are accepted as aliases for the same names).
 | `MS_GRAPH_TENANT_ID` | Directory (tenant) ID of the Azure app |
 | `MS_GRAPH_CLIENT_ID` | Application (client) ID |
 | `MS_GRAPH_CLIENT_SECRET` | Client secret **value** (replace before it expires) |
-| `NOTIFICATIONS_EMAIL_FROM` | The sending mailbox, e.g. `Delphic One <noreply.secure@delphic.in>`. It **must be a mailbox the app may send as** (see below) |
+| `NOTIFICATIONS_EMAIL_FROM` | The sending mailbox, e.g. `Delphic One <noreply@delphic.in>`. It **must be a mailbox the app may send as** (see below) |
 
 One-time Azure setup: App registration (single tenant) -> API permissions -> Microsoft Graph -> **Application** permission
 `Mail.Send` -> grant admin consent. Then limit the app to the sending mailbox only (otherwise it can send as anyone), in Exchange Online PowerShell:

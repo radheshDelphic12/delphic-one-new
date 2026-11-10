@@ -7,9 +7,37 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import VendorPayoutPanel from './VendorPayoutPanel.jsx';
+import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
+/** Finance > Vendor Invoices > GST & TDS: each vendor's GST / TDS lines, set up like a contract's charges; applied when its invoice is generated. */
+function VendorChargesPanel() {
+  const [vendors, setVendors] = useState([]);
+  const [vendorId, setVendorId] = useState('');
+  useEffect(() => {
+    apiClient.get('/accounts', { params: { type: 'vendor', limit: 100, sort_by: 'name', sort_order: 'asc' } })
+      .then(({ data }) => setVendors(data.data || []))
+      .catch(() => setVendors([]));
+  }, []);
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Finance</p>
+        <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Vendor GST &amp; TDS</h2>
+        <p className="mt-1 text-sm text-tertiary-500">Set a vendor&apos;s GST and TDS once, the same way as on a client contract. They are worked out on every project row when the vendor&apos;s invoice is generated in Live Analytics &gt; Vendors: payable = amount + GST − TDS + adjustment.</p>
+        <label className="mt-3 block text-xs font-medium text-tertiary-600">Vendor
+          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} data-testid="vendor-charges-select" className="mt-1 block w-full max-w-sm rounded-xl border px-3 py-2 text-sm">
+            <option value="">Choose a vendor</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {vendorId && <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card"><ContractChargesSection key={vendorId} accountId={vendorId} vendor /></div>}
+    </div>
+  );
+}
 
 /** Where one vendor invoice comes from: vendor -> project -> billing record -> timesheet entries -> invoice -> payment. */
 function TraceDrawer({ invoiceId, onClose }) {
@@ -28,6 +56,7 @@ function TraceDrawer({ invoiceId, onClose }) {
             <dt>Project</dt><dd className="text-tertiary-900">{trace.project.name}</dd>
             <dt>Month</dt><dd className="text-tertiary-900">{MONTHS[trace.period.month - 1]} {trace.period.year}</dd>
             <dt>Invoice</dt><dd className="text-tertiary-900">{trace.invoice.invoice_number || '—'} · {money(trace.invoice.amount, trace.invoice.currency)}</dd>
+            <dt>GST (added)</dt><dd className="text-tertiary-900">+{money(trace.invoice.gst_amount)}</dd>
             <dt>TDS / adjustment</dt><dd className="text-tertiary-900">-{money(trace.invoice.tds_amount)} / {money(trace.invoice.adjustment_amount)}</dd>
             <dt>Net payable</dt><dd className="font-semibold text-tertiary-900">{money(trace.invoice.net_payable, trace.invoice.currency)}</dd>
             <dt>Sent</dt><dd className="text-tertiary-900">{trace.invoice.sent ? 'Sent' : 'Unsent'}</dd>
@@ -77,12 +106,14 @@ export default function VendorInvoicesTab() {
   }
 
   function editMoney(row) {
+    const gst = window.prompt('GST (amount added to the payable):', String(row.gst_amount ?? 0));
+    if (gst === null) return;
     const tds = window.prompt('TDS withheld (amount):', String(row.tds_amount ?? 0));
     if (tds === null) return;
     const adjustment = window.prompt('Financial adjustment (negative reduces the payable):', String(row.adjustment_amount ?? 0));
     if (adjustment === null) return;
     const note = window.prompt('Note for the adjustment (optional):', row.adjustment_note || '') ?? '';
-    track(row, { tds_amount: Number(tds) || 0, adjustment_amount: Number(adjustment) || 0, adjustment_note: note.trim() || undefined }, 'TDS / adjustment saved');
+    track(row, { gst_amount: Number(gst) || 0, tds_amount: Number(tds) || 0, adjustment_amount: Number(adjustment) || 0, adjustment_note: note.trim() || undefined }, 'GST / TDS / adjustment saved');
   }
 
   async function exportVendor() {
@@ -98,6 +129,7 @@ export default function VendorInvoicesTab() {
     { key: 'project', header: 'Project', render: (r) => r.project?.name || '—' },
     { key: 'number', header: 'Invoice', render: (r) => r.invoice_number || '—' },
     { key: 'amount', header: 'Amount', render: (r) => money(r.amount, r.currency) },
+    { key: 'gst', header: 'GST', render: (r) => `+${money(r.gst_amount, r.currency)}` },
     { key: 'tds', header: 'TDS', render: (r) => `-${money(r.tds_amount, r.currency)}` },
     { key: 'adjustment', header: 'Adjustment', render: (r) => money(r.adjustment_amount, r.currency) },
     { key: 'net', header: 'Net payable', render: (r) => <span className="font-semibold">{money(r.net_payable, r.currency)}</span> },
@@ -109,7 +141,7 @@ export default function VendorInvoicesTab() {
       render: (r) => (
         <span className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost text-xs" onClick={() => track(r, { sent: !r.sent }, r.sent ? 'Marked unsent' : 'Marked sent')}>{r.sent ? 'Mark unsent' : 'Mark sent'}</button>
-          <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>TDS / adjustment</button>
+          <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>GST / TDS / adjustment</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => setTraceId(r.id)}>Trace</button>
         </span>
       ),
@@ -118,13 +150,14 @@ export default function VendorInvoicesTab() {
 
   const tabs = (
     <div className="flex gap-2" role="tablist" aria-label="Vendor invoices views">
-      {[['invoices', 'Invoices'], ['payout', 'Bank payout']].map(([key, label]) => (
+      {[['invoices', 'Invoices'], ['charges', 'GST & TDS setup'], ['payout', 'Bank payout']].map(([key, label]) => (
         <button key={key} type="button" role="tab" aria-selected={view === key} data-testid={`vendor-view-${key}`} onClick={() => setView(key)}
           className={`rounded-xl px-4 py-2 text-sm font-medium ${view === key ? 'bg-primary-600 text-white' : 'border bg-white text-tertiary-700 hover:bg-primary-50'}`}>{label}</button>
       ))}
     </div>
   );
 
+  if (view === 'charges') return <div className="space-y-4">{tabs}<VendorChargesPanel /></div>;
   if (view === 'payout') return <div className="space-y-4">{tabs}<VendorPayoutPanel /></div>;
 
   return (
@@ -134,7 +167,7 @@ export default function VendorInvoicesTab() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Finance</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Vendor invoices</h2>
-          <p className="mt-1 text-sm text-tertiary-500">Vendor billing -&gt; invoice -&gt; TDS / adjustments -&gt; sent -&gt; payment. Invoices are generated from Live Analytics &gt; Vendors.</p>
+          <p className="mt-1 text-sm text-tertiary-500">Vendor billing -&gt; invoice -&gt; GST / TDS / adjustments -&gt; sent -&gt; payment. Invoices are generated from Live Analytics &gt; Vendors.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-medium text-tertiary-600">Month

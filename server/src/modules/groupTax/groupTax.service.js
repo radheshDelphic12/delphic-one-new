@@ -101,8 +101,22 @@ function taxMode(gst, tds) {
   return 'none';
 }
 
-/** Every invoice of the chosen companies, with its tax split. `dateFilter` null = all time. */
-async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilEnd = false } = {}) {
+// The invoices whose BILLING month (the period the invoice is for) falls in the range, whatever day they were generated on. `start` / `end` are the month edges.
+function billingMonthWhere(start, end) {
+  if (!start && !end) return {};
+  const firstYear = start ? start.getUTCFullYear() : end.getUTCFullYear() - 30;
+  const lastYear = end ? end.getUTCFullYear() : start.getUTCFullYear() + 30;
+  const parts = [];
+  for (let y = firstYear; y <= lastYear; y += 1) {
+    const lo = start && y === start.getUTCFullYear() ? start.getUTCMonth() + 1 : 1;
+    const hi = end && y === end.getUTCFullYear() ? end.getUTCMonth() + 1 : 12;
+    parts.push({ period_year: y, period_month: { gte: lo, lte: hi } });
+  }
+  return { OR: parts };
+}
+
+/** Every invoice of the chosen companies, with its tax split. `basis` 'billing' picks them by billing month instead of invoice date. */
+async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilEnd = false, basis = 'invoice' } = {}) {
   const { ids: orgIds, all } = await orgIdsOf(groupIds, orgId);
   const orgName = new Map(all.map((o) => [o.id, o.name]));
   const { start, end } = monthRange(from, to);
@@ -110,7 +124,7 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
   const dated = (field, fallback) => (start || end ? { OR: [{ [field]: range() }, { [field]: null, [fallback]: range() }] } : {});
 
   const clientRows = await prisma.clientInvoice.findMany({
-    where: { org_id: { in: orgIds }, deleted_at: null, status: { in: ['sent', 'paid'] }, ...(currency ? { currency } : {}), ...dated('invoice_date', 'created_at') },
+    where: { org_id: { in: orgIds }, deleted_at: null, status: { in: ['sent', 'paid'] }, ...(currency ? { currency } : {}), ...(basis === 'billing' ? billingMonthWhere(start && !allTimeUntilEnd ? start : null, end) : dated('invoice_date', 'created_at')) },
     include: { client_account: { select: { name: true, project_name: true, project_code: true } } },
     orderBy: [{ invoice_date: 'desc' }, { created_at: 'desc' }],
   });
@@ -141,8 +155,8 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
       project,
       invoice_date: ymd(date),
       fy: fyOf(date).label,
-      period_year: new Date(date).getUTCFullYear(),
-      period_month: new Date(date).getUTCMonth() + 1,
+      period_year: basis === 'billing' && r.period_year ? r.period_year : new Date(date).getUTCFullYear(),
+      period_month: basis === 'billing' && r.period_month ? r.period_month : new Date(date).getUTCMonth() + 1,
       // The billing month of the invoice itself (what Finance > Invoices shows as its Period); it can differ from the invoice date.
       billing_month: r.period_month || null,
       billing_year: r.period_year || null,
@@ -427,9 +441,9 @@ async function challanFile(groupIds, id) {
 
 // ---- GST payable -------------------------------------------------------------------------------------------------------
 
-async function gst(groupIds, { orgId, from, to, by = 'month' } = {}) {
+async function gst(groupIds, { orgId, from, to, by = 'month', basis = 'invoice' } = {}) {
   // INR invoices only; everything up to the end of the range, so the balance carries the earlier months.
-  const rows = (await loadInvoices(groupIds, { orgId, to, currency: 'INR', allTimeUntilEnd: true })).filter((r) => r.gst > 0);
+  const rows = (await loadInvoices(groupIds, { orgId, to, currency: 'INR', allTimeUntilEnd: true, basis })).filter((r) => r.gst > 0);
   const payments = await prisma.taxChallan.findMany({ where: { org_group_id: { in: groupIds }, deleted_at: null, kind: { in: ['gst', 'gst_credit'] }, ...(orgId ? { OR: [{ org_id: orgId }, { org_id: null }] } : {}) }, orderBy: { paid_on: 'asc' } });
   const bucketOf = (year, month) => (by === 'quarter' ? quarterOf(year, month) : { key: `${year}-${String(month).padStart(2, '0')}`, label: `${MONTH_NAMES[month - 1]} ${year}`, order: year * 100 + month });
   const buckets = new Map();
@@ -476,7 +490,7 @@ async function tdsPayable(groupIds, { orgId, from, to, currency } = {}) {
   const vendorRows = inv.filter(inRange).map((r) => ({
     id: r.id, company: orgs.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.account?.project_name || r.account?.name || null, number: r.invoice_number,
     period: `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`, period_month: r.period_month, period_year: r.period_year, currency: r.currency,
-    base: num(r.amount), tds: num(r.tds_amount), adjustment: num(r.adjustment_amount), net_payable: round2(num(r.amount) - num(r.tds_amount) + num(r.adjustment_amount)), invoice_date: ymd(r.invoice_date),
+    base: num(r.amount), tds: num(r.tds_amount), adjustment: num(r.adjustment_amount), net_payable: round2(num(r.amount) + num(r.gst_amount) + num(r.other_amount) - num(r.tds_amount) + num(r.adjustment_amount)), invoice_date: ymd(r.invoice_date),
   }));
 
   // employees: the TDS adjustment on the month's salary
@@ -512,7 +526,79 @@ async function tdsPayable(groupIds, { orgId, from, to, currency } = {}) {
   };
 }
 
+// ---- Book Keeping > Receivables (per group, off until a group admin switches it on) -------------------------------------------------
+
+const DEFAULT_SINCE = '2026-09';
+
+/** Every holding group of the caller with its Receivables switch. */
+async function receivableSetting(groupIds) {
+  const [groups, rows] = await Promise.all([
+    prisma.orgGroup.findMany({ where: { id: { in: groupIds } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.groupReceivableSetting.findMany({ where: { org_group_id: { in: groupIds } } }),
+  ]);
+  const by = new Map(rows.map((r) => [r.org_group_id, r]));
+  return { groups: groups.map((g) => ({ id: g.id, name: g.name, enabled: Boolean(by.get(g.id)?.enabled), since_month: by.get(g.id)?.since_month || DEFAULT_SINCE })) };
+}
+
+async function setReceivableSetting(groupIds, user, { org_group_id: groupId, enabled, since_month: since }) {
+  if (!groupIds.includes(groupId)) return { error: 'not_found' };
+  const data = { enabled, ...(since ? { since_month: since } : {}), updated_by: user.id };
+  await prisma.groupReceivableSetting.upsert({ where: { org_group_id: groupId }, update: data, create: { org_group_id: groupId, ...data } });
+  return receivableSetting(groupIds);
+}
+
+/**
+ * Every client invoice of the switched-on groups from `since_month` (by BILLING month, not invoice date) with what is paid and pending, the
+ * GST and TDS still to collect, and what the group is left with: money in hand (banks + cash) minus the GST and TDS still to deposit, and the same
+ * if every pending invoice were collected. Money figures are INR; other currencies show only in the table totals.
+ */
+async function receivables(groupIds, { orgId, currency, from, to } = {}) {
+  const { groups } = await receivableSetting(groupIds);
+  const on = groups.filter((g) => g.enabled);
+  if (!on.length) return { enabled: false, groups };
+  const onIds = on.map((g) => g.id);
+  const since = from || on.map((g) => g.since_month).sort()[0];
+  const q = { orgId, currency, from: since, to: to || undefined, basis: 'billing' };
+  const cash = require('../cashPosition/cash.service');
+  const [rows, tdsRec, gstView, tdsPay, position] = await Promise.all([
+    loadInvoices(onIds, q),
+    tdsReceivable(onIds, q),
+    gst(onIds, { orgId, to: to || undefined, basis: 'billing' }),
+    tdsPayable(onIds, { orgId }),
+    cash.position(onIds, {}),
+  ]);
+  const list = rows.map((r) => ({ ...r, billing_label: r.billing_month && r.billing_year ? `${MONTH_NAMES[r.billing_month - 1]} ${r.billing_year}` : `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}` }))
+    .sort((a, b) => (b.billing_year || b.period_year) * 100 + (b.billing_month || b.period_month) - ((a.billing_year || a.period_year) * 100 + (a.billing_month || a.period_month)) || String(b.invoice_date).localeCompare(String(a.invoice_date)));
+  const inr = list.filter((r) => r.currency === 'INR');
+  const pendingInr = round2(inr.reduce((s, r) => s + r.pending, 0));
+  const gstPending = round2(inr.reduce((s, r) => s + (r.total > 0 && r.pending > 0 ? r.gst * (r.pending / r.total) : 0), 0));
+  const tdsOutstanding = tdsRec.totals.find((t) => t.currency === 'INR')?.outstanding || 0;
+  const inHand = Number(position.totals?.INR || 0);
+  const gstToDeposit = Math.max(Number(gstView.totals?.balance || 0), 0);
+  const tdsToDeposit = round2(Math.max(tdsPay.inr?.to_deposit || 0, 0) + Math.max(tdsPay.employees?.to_deposit || 0, 0));
+  const freeNow = round2(inHand - gstToDeposit - tdsToDeposit);
+  return {
+    enabled: true,
+    groups,
+    since_month: since,
+    rows: list,
+    totals: totalsByCurrency(list),
+    funds: {
+      currency: 'INR',
+      in_hand: round2(inHand),
+      to_collect: pendingInr,
+      gst_in_pending: gstPending,
+      tds_to_receive: round2(tdsOutstanding),
+      gst_to_deposit: round2(gstToDeposit),
+      tds_to_deposit: tdsToDeposit,
+      left_now: freeNow,
+      left_after_collection: round2(freeNow + pendingInr),
+    },
+  };
+}
+
 module.exports = {
+  receivableSetting, setReceivableSetting, receivables,
   options, invoices, tdsReceivable, addTdsReceipt, removeTdsReceipt, gst, tdsPayable,
   challans, parties, createChallan, updateChallan, removeChallan, challanFile, KIND_LABEL,
   chargeKind, fyOf, quarterOf,

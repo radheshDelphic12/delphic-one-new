@@ -580,7 +580,9 @@ export default function GroupTaxTab() {
   const [currency, setCurrency] = useState('');
   const [options, setOptions] = useState({ companies: [], currencies: ['INR'] });
   useEffect(() => { get('/options').then(setOptions).catch(() => {}); }, []);
-  const params = useMemo(() => ({ from, to, ...(orgId ? { org_id: orgId } : {}), ...(currency ? { currency } : {}) }), [from, to, orgId, currency]);
+  const [basis, setBasis] = useState('invoice'); // which date the months count: the invoice date, or the billing month (the month the invoice is for)
+  const clientBasis = basis === 'billing' ? { basis } : {};
+  const params = useMemo(() => ({ from, to, ...(orgId ? { org_id: orgId } : {}), ...(currency ? { currency } : {}), ...(basis === 'billing' ? { basis } : {}) }), [from, to, orgId, currency, basis]);
 
   return (
     <div className="space-y-4" data-testid="group-tax">
@@ -588,6 +590,15 @@ export default function GroupTaxTab() {
         <div><label className={labelCls}>From month</label><input type="month" className={FIELD_INPUT} aria-label="From month" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></div>
         <div><label className={labelCls}>To month</label><input type="month" className={FIELD_INPUT} aria-label="To month" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></div>
         <div className="w-56"><label className={labelCls}>Company</label><SearchableSelect ariaLabel="Company" allowClear value={orgId} onChange={setOrgId} options={options.companies.map((c) => ({ value: c.id, label: c.name }))} placeholder="All companies" searchPlaceholder="Search…" /></div>
+        {['invoices', 'tds', 'gst'].includes(view) && (
+          <div className="w-52">
+            <label className={labelCls}>Count months by</label>
+            <select className={FIELD_INPUT} aria-label="Count months by" data-testid="tax-basis" value={basis} onChange={(e) => setBasis(e.target.value)}>
+              <option value="invoice">Invoice date</option>
+              <option value="billing">Billing month (reporting month)</option>
+            </select>
+          </div>
+        )}
         {(view === 'invoices' || view === 'tds') && <div className="w-36"><label className={labelCls}>Currency</label><SearchableSelect ariaLabel="Currency" allowClear value={currency} onChange={setCurrency} options={options.currencies.map((c) => ({ value: c, label: c }))} placeholder="All" searchPlaceholder="Search…" /></div>}
       </div>
       <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="GST and TDS views">
@@ -595,7 +606,7 @@ export default function GroupTaxTab() {
       </div>
       {view === 'invoices' && <InvoicesView params={params} onOpenTds={() => setView('tds')} />}
       {view === 'tds' && <TdsView params={params} />}
-      {view === 'gst' && <GstView params={{ from, to, ...(orgId ? { org_id: orgId } : {}) }} companies={options.companies} />}
+      {view === 'gst' && <GstView params={{ from, to, ...(orgId ? { org_id: orgId } : {}), ...clientBasis }} companies={options.companies} />}
       {view === 'vendors' && <TdsPayableView params={{ from, to, ...(orgId ? { org_id: orgId } : {}) }} companies={options.companies} />}
       {view === 'challans' && <ChallansView params={{ from, to, ...(orgId ? { org_id: orgId } : {}) }} companies={options.companies} />}
     </div>

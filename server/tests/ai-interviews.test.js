@@ -151,7 +151,7 @@ describe('candidate flow', () => {
     const started = await post(`${token}/start`, { consent: true });
     expect(started.status).toBe(200);
     expect(started.body.data.transcript).toHaveLength(1);
-    expect(started.body.data.total_questions).toBe(5); // 3 role + 2 aptitude
+    expect(started.body.data.total_questions).toBe(6); // the introduction + 3 role + 2 aptitude
 
     const done = await runInterview(token);
     expect(done.done).toBe(true);
@@ -202,7 +202,7 @@ describe('candidate flow', () => {
     const row = await prisma.aiInterview.findUnique({ where: { token } });
     expect(row.status).toBe('pending_review');
     expect(row.outcome).toBe('pending_review');
-    expect(row.transcript.filter((t) => t.role === 'candidate')).toHaveLength(5);
+    expect(row.transcript.filter((t) => t.role === 'candidate')).toHaveLength(6);
   });
 
   test('an answer that tries to instruct the AI is flagged and does not change the maths', async () => {
@@ -332,8 +332,9 @@ describe('aptitude section and the reason for a result', () => {
     const started = await post(`${token}/start`, { consent: true });
     expect(JSON.stringify(started.body.data)).not.toMatch(/expected/i);
     const row0 = await prisma.aiInterview.findUnique({ where: { token } });
-    expect(row0.questions.map((q) => q.kind)).toEqual(['role', 'role', 'role', 'aptitude', 'aptitude']);
-    expect(row0.questions[3].expected).toBe('4');
+    expect(row0.questions.map((q) => q.kind)).toEqual(['intro', 'role', 'role', 'role', 'aptitude', 'aptitude']); // the interview opens with an introduction
+    expect(row0.questions[0].text).toMatch(/introduce yourself/i);
+    expect(row0.questions[4].expected).toBe('4');
     await runInterview(token);
     expect(calls.followUp).toBe(3); // the three role questions only
     const row = await prisma.aiInterview.findUnique({ where: { token } });
@@ -347,7 +348,7 @@ describe('aptitude section and the reason for a result', () => {
     const token = tokenOf((await invite()).body.data.link);
     await runInterview(token);
     const row = await prisma.aiInterview.findUnique({ where: { token } });
-    expect(row.questions).toHaveLength(3);
+    expect(row.questions).toHaveLength(4); // the introduction + 3 role questions
     expect(row.scores.parameters.map((p) => p.key)).toEqual(['knowledge', 'communication', 'depth', 'problem_solving', 'experience_fit']);
   });
 
@@ -784,6 +785,39 @@ describe('resend, restart, timer and page integrity', () => {
     expect((await event(token, 'copy')).status).toBe(410);
   });
 
+  test('camera / microphone / screen warnings: three warnings come first, the fourth ends the interview for a person; the settings are admin editable', async () => {
+    const S = '/api/v1/ai-interviews/settings';
+    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: false });
+    expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: true })).body.data.require_screen_share).toBe(true);
+    const token = tokenOf((await invite()).body.data.link);
+    const started = await post(`${token}/start`, { consent: true });
+    expect(started.body.data).toMatchObject({ proctoring: true, max_proctor_warnings: 3, require_screen_share: true, proctor_warnings: 0 });
+
+    expect((await event(token, 'eyes_away')).body.data).toMatchObject({ ended: false, proctor_warnings: 1, max_proctor_warnings: 3 });
+    expect((await event(token, 'noise')).body.data).toMatchObject({ ended: false, proctor_warnings: 2 });
+    expect((await event(token, 'looking_down')).body.data).toMatchObject({ ended: false, proctor_warnings: 3 }); // the final warning
+    const team = await authed(request(app).get(`/api/v1/ai-interviews?submission_id=${submissionId}`), recruiterToken);
+    expect(team.body.data.items[0].integrity.proctor).toMatchObject({ eyes_away: 1, noise: 1, looking_down: 1 });
+
+    const last = await event(token, 'screen_share_stopped');
+    expect(last.body.data).toMatchObject({ ended: true, proctor_warnings: 4 });
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(row.status).toBe('pending_review');
+    expect(row.scores.red_flags[0]).toMatch(/ended automatically.*3 warnings/);
+    expect((await pub(token)).status).toBe(410);
+  });
+
+  test('with the warnings at 0 (only log) or watching switched off, the interview is never ended by them', async () => {
+    const S = '/api/v1/ai-interviews/settings';
+    await authed(request(app).put(S), adminToken).send({ max_proctor_warnings: 0 });
+    const token = tokenOf((await invite()).body.data.link);
+    await post(`${token}/start`, { consent: true });
+    for (let i = 0; i < 5; i += 1) expect((await event(token, 'no_face')).body.data.ended).toBe(false);
+    await authed(request(app).put(S), adminToken).send({ max_proctor_warnings: 3, proctoring_enabled: false });
+    expect((await event(token, 'no_face')).body.data.ended).toBe(false); // 6 logged, watching is off
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).status).toBe('started');
+  });
+
   test('full screen is required by default (an admin can switch it off); leaving it counts like leaving the page, a second display is logged', async () => {
     const S = '/api/v1/ai-interviews/settings';
     expect((await authed(request(app).get(S), recruiterToken)).body.data.require_fullscreen).toBe(true);
@@ -971,7 +1005,7 @@ describe('re-take after a finished interview', () => {
   test('a new link or a re-take never repeats a question an earlier link asked, even when the AI writes the same ones again', async () => {
     const first = (await invite()).body.data;
     await post(`${tokenOf(first.link)}/start`, { consent: true });
-    const before = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(first.link) } })).questions.map((q) => q.text);
+    const before = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(first.link) } })).questions.filter((q) => q.kind !== 'intro').map((q) => q.text);
     expect(before.length).toBeGreaterThan(0);
 
     // the sender restarts the one in progress with a new link; the stub AI answers with the very same questions first
@@ -979,7 +1013,7 @@ describe('re-take after a finished interview', () => {
     const again = await authed(request(app).post('/api/v1/ai-interviews'), recruiterToken).send({ submission_id: submissionId, restart: true });
     expect(again.status).toBe(201);
     await post(`${tokenOf(again.body.data.link)}/start`, { consent: true });
-    const after = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(again.body.data.link) } })).questions.map((q) => q.text);
+    const after = (await prisma.aiInterview.findUnique({ where: { token: tokenOf(again.body.data.link) } })).questions.filter((q) => q.kind !== 'intro').map((q) => q.text);
 
     expect(after.length).toBe(before.length);
     expect(after.filter((t) => before.includes(t))).toEqual([]);
@@ -1219,15 +1253,16 @@ describe('12 role and 12 aptitude questions in every interview', () => {
     await put({ question_count: 12, aptitude_question_count: 12, max_followups: 0 });
     const { token, started } = await begin();
     expect(started.status).toBe(200);
-    expect(started.body.data.total_questions).toBe(24);
+    expect(started.body.data.total_questions).toBe(25); // the introduction + 12 + 12
     const k = await kinds(token);
     expect(k.filter((x) => x === 'role')).toHaveLength(12);
     expect(k.filter((x) => x === 'aptitude')).toHaveLength(12);
-    expect(k.indexOf('aptitude')).toBe(12); // the role section first, then the aptitude section
+    expect(k[0]).toBe('intro');
+    expect(k.indexOf('aptitude')).toBe(13); // the introduction, the role section, then the aptitude section
     followUps = false;
     const done = await runInterview(token);
     expect(done.done).toBe(true);
-    expect((await prisma.aiInterview.findUnique({ where: { token } })).transcript.filter((t) => t.role === 'candidate')).toHaveLength(24);
+    expect((await prisma.aiInterview.findUnique({ where: { token } })).transcript.filter((t) => t.role === 'candidate')).toHaveLength(25);
   });
 
   test('when the AI writes fewer, it is asked once for the missing questions (no repeats) and the interview still has 12 + 12', async () => {

@@ -20,22 +20,26 @@ const OUTCOMES = ['pass', 'borderline', 'below_pass'];
 const DEFAULTS = {
   is_enabled: false, question_count: 12, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
   weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 12, weight_aptitude: 10,
-  recording_enabled: false, recording_retention_days: 2, auto_reject: false, extra_instructions: null, link_valid_days: 7,
+  recording_enabled: false, recording_retention_days: 7, auto_reject: false, extra_instructions: null, link_valid_days: 7,
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
   difficulty: 'easy', marking: 'lenient', require_fullscreen: true,
+  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: false,
 };
 const MIN_TAB_LIMIT = 3;
 const TAB_EVENTS = ['tab_hidden', 'window_blur', 'fullscreen_exit']; // leaving the interview page; these count towards max_tab_switches
 const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off', 'multiple_displays'];
-const EVENT_TYPES = [...TAB_EVENTS, ...OTHER_EVENTS];
+// Watched through the camera, microphone and shared screen; each one is a warning, and once the company's number of warnings is used up the next ends the interview.
+const PROCTOR_EVENTS = ['no_face', 'multiple_faces', 'eyes_away', 'looking_down', 'noise', 'screen_share_stopped'];
+const EVENT_TYPES = [...TAB_EVENTS, ...OTHER_EVENTS, ...PROCTOR_EVENTS];
+const proctorWarningsOf = (a) => eventsOf(a).filter((e) => PROCTOR_EVENTS.includes(e.type)).length;
 const eventsOf = (a) => (Array.isArray(a.integrity_events) ? a.integrity_events : []);
 const tabSwitchesOf = (a) => eventsOf(a).filter((e) => TAB_EVENTS.includes(e.type)).length;
 // { tab_switches, copy_paste, camera_off, total } for the team and for the scorer
 function integritySummary(a) {
   const ev = eventsOf(a);
   const n = (types) => ev.filter((e) => types.includes(e.type)).length;
-  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), fullscreen_exits: n(['fullscreen_exit']), multiple_displays: n(['multiple_displays']), total: ev.length };
+  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), fullscreen_exits: n(['fullscreen_exit']), multiple_displays: n(['multiple_displays']), proctor: Object.fromEntries(PROCTOR_EVENTS.map((t) => [t, n([t])])), total: ev.length };
 }
 const RECORDING_DIR = () => path.join(env.uploadDir, 'ai-interviews');
 const MAX_RECORDING_BYTES = 250 * 1024 * 1024;
@@ -319,6 +323,10 @@ function candidateView(a, settings = null) {
     server_now: new Date().toISOString(),
     max_tab_switches: settings ? settings.max_tab_switches : null,
     require_fullscreen: settings ? Boolean(settings.require_fullscreen) : false,
+    proctoring: settings ? Boolean(settings.proctoring_enabled) : false,
+    max_proctor_warnings: settings ? settings.max_proctor_warnings : null,
+    require_screen_share: settings ? Boolean(settings.require_screen_share) : false,
+    proctor_warnings: proctorWarningsOf(a),
     tab_switches: tabSwitchesOf(a),
     candidate_name: a.candidate_name,
     role_title: a.role_title,
@@ -404,7 +412,7 @@ async function startForCandidate(token, { consent, recording_consent: recordingC
     ctx.resume = await loadResume(ctx.profile_id);
     // a re-take or a new link for the same submission gets different questions: what every earlier link of it asked is passed on to avoid
     const earlier = await prisma.aiInterview.findMany({ where: { submission_id: a.submission_id, id: { not: a.id } }, select: { questions: true } });
-    ctx.previous_questions = earlier.flatMap((e) => (Array.isArray(e.questions) ? e.questions : []).map((q) => q?.text)).filter(Boolean);
+    ctx.previous_questions = earlier.flatMap((e) => (Array.isArray(e.questions) ? e.questions : []).filter((q) => q?.kind !== 'intro').map((q) => q?.text)).filter(Boolean);
     const { questions, usage } = await logic.generateQuestions(ctx, { ...settings });
     const first = { role: 'ai', kind: 'question', section: questions[0].kind, question_index: 1, text: questions[0].text, at: new Date().toISOString() };
     a = await prisma.aiInterview.update({
@@ -938,6 +946,27 @@ async function recordEvent(token, { type, seconds_away: secondsAway }) {
     });
     await announceResult(row, await contextFor(a.submission_id));
     return { ended: true, tab_switches: switches, summary };
+  }
+  // camera / microphone / screen warnings: the first `max_proctor_warnings` are warnings, the next one ends the interview
+  if (PROCTOR_EVENTS.includes(type)) {
+    const warnings = proctorWarningsOf(row);
+    const allowed = settings.max_proctor_warnings;
+    if (settings.proctoring_enabled && allowed > 0 && warnings > allowed && !busy.has(a.id)) {
+      const summary = integritySummary(row);
+      const reason = `The interview was ended automatically: it was stopped after ${allowed} warnings about the camera, microphone or screen (face not visible, eyes away from the screen, looking down, background noise or the screen share stopping).`;
+      const answered = (Array.isArray(row.transcript) ? row.transcript : []).filter((t) => t.role === 'candidate').length;
+      row = await prisma.aiInterview.update({
+        where: { id: a.id },
+        data: {
+          status: 'pending_review', outcome: 'pending_review', completed_at: new Date(),
+          scores: { parameters: [], summary: reason, strengths: [], red_flags: [reason], decision_reason: `${reason} ${answered} answer(s) were given before that; please read them and decide.` },
+          ...(a.recording_on ? { recording_expires_at: new Date(Date.now() + settings.recording_retention_days * 86400000) } : {}),
+        },
+      });
+      await announceResult(row, await contextFor(a.submission_id));
+      return { ended: true, tab_switches: switches, proctor_warnings: warnings, max_proctor_warnings: allowed, summary };
+    }
+    return { ended: false, tab_switches: switches, proctor_warnings: warnings, max_proctor_warnings: allowed };
   }
   return { ended: false, tab_switches: switches };
 }

@@ -32,6 +32,7 @@ const exchangeRates = require('./exchangeRates.service');
 const invoicePayments = require('./invoicePayments.service');
 const paymentsService = require('../payments/payments.service');
 const chargesService = require('./charges.service');
+const vendorCharges = require('./vendorCharges.service');
 const { findVendorAccount } = require('../../lib/workerType');
 const { round2, ymd } = require('../calculations/period');
 const financialLock = require('../calculations/financialLock');
@@ -592,13 +593,15 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
   // Amounts typed over the calculation earlier stay as the starting figure when the invoice is updated.
   const earlier = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id: vendorAccountId, ...period, details: { not: Prisma.DbNull } }, select: { account_id: true, currency: true, amount: true, details: true } });
   const overridden = new Map(earlier.filter((r) => r.details?.manual_override).map((r) => [`${r.account_id}|${r.currency}`, Number(r.amount)]));
+  const vendorChargeList = await vendorCharges.listCharges(orgId, vendorAccountId);
   const projects = src.projects.map((p) => (overridden.has(`${p.project.id}|${p.currency}`) ? { ...p, calculated_amount: p.amount, amount: overridden.get(`${p.project.id}|${p.currency}`) } : p));
   return {
     preview: {
       bill_to: { ...billToDefaults(vendorAccount), ...(savedBillTo ? { gstin: savedBillTo.gstin || '', address: savedBillTo.address || '' } : {}) },
       vendor: src.vendor,
       ...period,
-      projects,
+      projects: projects.map((p) => ({ ...p, charges: vendorCharges.chargeAmounts(p.amount, vendorChargeList) })),
+      vendor_charges: vendorChargeList,
       source: src.source,
       locked_version: src.locked_version,
       existing: existing ? { invoice_number: existing.invoice_number, invoice_date: existing.invoice_date ? ymd(existing.invoice_date) : null } : null,
@@ -633,10 +636,13 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
   const number = (invoice_number || '').trim() || previous[0]?.invoice_number || (await suggestVendorNumber(orgId, period_year));
   const date = new Date(invoice_date || todayYmd());
   const printedBillTo = await resolveBillTo(orgId, user, vendor_account_id, bill_to, save_to_account);
+  // The vendor's GST / TDS / other charges are worked out on each project row, like a contract's charges on a client invoice.
+  const vendorChargeList = await vendorCharges.listCharges(orgId, vendor_account_id);
   const rows = await prisma.$transaction(async (tx) => {
     if (previous.length) await tx.projectVendorInvoice.deleteMany({ where: { id: { in: previous.map((p) => p.id) } } });
     const created = [];
     for (const p of billable) {
+      const figures = vendorCharges.chargeAmounts(p.amount, vendorChargeList);
       created.push(await tx.projectVendorInvoice.create({
         data: {
           org_id: orgId,
@@ -646,9 +652,12 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
           invoice_number: number,
           invoice_date: date,
           amount: p.amount,
+          gst_amount: figures.gst_amount,
+          tds_amount: figures.tds_amount,
+          other_amount: figures.other_amount,
           currency: p.currency,
           notes: notes || null,
-          details: { ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, ...(p.adjustments?.length ? { adjustments: p.adjustments } : {}), exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
+          details: { ...(figures.lines.length ? { charges: figures.lines } : {}), ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, ...(p.adjustments?.length ? { adjustments: p.adjustments } : {}), exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
           created_by: user.id,
         },
         include: VENDOR_INVOICE_INCLUDE,
@@ -671,9 +680,11 @@ function serializeVendorInvoice(row) {
   return {
     ...row,
     amount: Number(row.amount),
+    gst_amount: Number(row.gst_amount || 0),
+    other_amount: Number(row.other_amount || 0),
     tds_amount: Number(row.tds_amount || 0),
     adjustment_amount: Number(row.adjustment_amount || 0),
-    net_payable: round2(Number(row.amount) - Number(row.tds_amount || 0) + Number(row.adjustment_amount || 0)),
+    net_payable: round2(Number(row.amount) + Number(row.gst_amount || 0) + Number(row.other_amount || 0) - Number(row.tds_amount || 0) + Number(row.adjustment_amount || 0)),
     sent: Boolean(row.sent_at),
     invoice_date: row.invoice_date ? ymd(row.invoice_date) : null,
     project: row.details?.project?.name ? row.details.project : row.account ? billingEngine.describeProject(row.account) : null,

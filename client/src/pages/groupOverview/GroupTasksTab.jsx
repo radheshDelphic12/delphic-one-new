@@ -178,7 +178,7 @@ export default function GroupTasksTab() {
   useEffect(() => { if (week.error) pushError(apiErrorMessage(week.error, 'Could not load the weekly plan'), 'Load failed'); }, [week.error]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (monthData.error) pushError(apiErrorMessage(monthData.error, 'Could not load the tasks'), 'Load failed'); }, [monthData.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const companies = useMemo(() => (week.data?.assignments || []).map((a) => a.org).filter((o) => !o.coming_soon), [week.data]);
+  const companies = useMemo(() => (week.data?.assignments || []).map((a) => a.org), [week.data]);
   const m = monthData.data;
   const byDate = useMemo(() => { const map = new Map(); for (const i of m?.items || []) map.set(i.date, [...(map.get(i.date) || []), i]); return map; }, [m]);
   const taskById = useMemo(() => new Map((m?.tasks || []).map((t) => [t.id, t])), [m]);
@@ -423,7 +423,7 @@ export default function GroupTasksTab() {
       </section>
 
       <Drawer open={Boolean(drawer?.plan)} onClose={() => setDrawer(null)} size="lg" tone="edit" title="Company days of the week">
-        {drawer?.plan && w && <PlanEditor assignments={w.assignments.filter((a) => !a.org.coming_soon)} saving={saving} onSubmit={savePlan} onCancel={() => setDrawer(null)} />}
+        {drawer?.plan && w && <PlanEditor assignments={w.assignments} saving={saving} onSubmit={savePlan} onCancel={() => setDrawer(null)} />}
       </Drawer>
       <Drawer open={Boolean(drawer && !drawer.plan)} onClose={() => setDrawer(null)} size="lg" tone={drawer?.task ? 'edit' : 'create'} title={drawer?.task ? 'Edit task' : 'Add task'}>
         {drawer && !drawer.plan && <TaskForm key={drawer.task?.id || 'new'} initial={drawer.task} companies={companies} saving={saving} error={error} onSubmit={saveTask} onCancel={() => setDrawer(null)} />}

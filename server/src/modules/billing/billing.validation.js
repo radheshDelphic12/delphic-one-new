@@ -42,6 +42,7 @@ const billingRulesSchema = z.object({
 const vendorTrackingSchema = z
   .object({
     sent: z.boolean().optional(),
+    gst_amount: z.coerce.number().min(0).optional(),
     tds_amount: z.coerce.number().min(0).optional(),
     adjustment_amount: z.coerce.number().optional(),
     adjustment_note: z.string().trim().max(500).optional(),

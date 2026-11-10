@@ -4,7 +4,7 @@ const { graphOptionsFromEnv, createGraphTransport, buildMessage, parseAddress } 
 
 const opts = { tenantId: 't-1', clientId: 'c-1', clientSecret: 's-1' };
 const json = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
-const mail = { from: 'Delphic One <noreply.secure@delphic.in>', to: '"Asha Rao" <asha@alpha.test>', cc: 'owner@x.test', subject: 'Requirement: Java', text: 'Hello\nthere', html: '<p>Hello</p>' };
+const mail = { from: 'Delphic One <noreply@delphic.in>', to: '"Asha Rao" <asha@alpha.test>', cc: 'owner@x.test', subject: 'Requirement: Java', text: 'Hello\nthere', html: '<p>Hello</p>' };
 
 describe('graph mail', () => {
   test('settings: all three app values are needed (MAIL_GRAPH_* accepted as aliases); otherwise graph is off', () => {
@@ -15,7 +15,7 @@ describe('graph mail', () => {
   });
 
   test('addresses and the Graph message body', () => {
-    expect(parseAddress('Delphic One <noreply.secure@delphic.in>')).toEqual({ name: 'Delphic One', address: 'noreply.secure@delphic.in' });
+    expect(parseAddress('Delphic One <noreply@delphic.in>')).toEqual({ name: 'Delphic One', address: 'noreply@delphic.in' });
     expect(parseAddress('plain@x.com')).toEqual({ name: null, address: 'plain@x.com' });
     const body = buildMessage({ ...mail, icalEvent: { method: 'REQUEST', content: 'BEGIN:VCALENDAR' } });
     expect(body.message.toRecipients).toEqual([{ emailAddress: { address: 'asha@alpha.test', name: 'Asha Rao' } }]);
@@ -41,7 +41,7 @@ describe('graph mail', () => {
     expect(tokenCalls[0].url).toContain('/t-1/');
     expect(String(tokenCalls[0].init.body)).toContain('grant_type=client_credentials');
     expect(sendCalls).toHaveLength(2);
-    expect(sendCalls[0].url).toBe('https://graph.microsoft.com/v1.0/users/noreply.secure%40delphic.in/sendMail');
+    expect(sendCalls[0].url).toBe('https://graph.microsoft.com/v1.0/users/noreply%40delphic.in/sendMail');
     expect(sendCalls[0].init.headers.Authorization).toBe('Bearer tok');
   });
 

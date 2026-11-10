@@ -68,6 +68,9 @@ const settingsSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
   marking: z.enum(['lenient', 'balanced', 'strict']).optional(),
   require_fullscreen: z.boolean().optional(),
+  proctoring_enabled: z.boolean().optional(),
+  max_proctor_warnings: z.number().int().min(0).max(10).optional(),
+  require_screen_share: z.boolean().optional(),
 });
 
 // ---- team side (login) ----

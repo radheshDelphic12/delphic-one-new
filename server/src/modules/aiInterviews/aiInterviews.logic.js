@@ -188,12 +188,16 @@ async function generateQuestions(ctx, settings) {
   }
   if (role.length < Math.min(3, n)) throw new AiUnavailableError('AI returned too few questions');
   if (m && aptitude.length < Math.min(2, m)) throw new AiUnavailableError('AI returned too few aptitude questions');
+  // the interview always opens with an introduction (background and communication), before any role or aptitude question
   const questions = [
+    { kind: 'intro', text: INTRO_QUESTION },
     ...role.map((text) => ({ kind: 'role', text })),
     ...aptitude.map((q) => ({ kind: 'aptitude', text: q.text, expected: q.expected })),
   ].map((q, i) => ({ id: i + 1, ...q }));
   return { questions, usage: totalUsage };
 }
+
+const INTRO_QUESTION = 'Before we begin, please introduce yourself: your name, where you are from, your education and work background, what you are doing now and what you are looking for next.';
 
 // ---- follow-up (role questions only; an aptitude answer is marked against its expected answer) ----
 async function decideFollowUp(ctx, settings, question, answer) {
@@ -215,7 +219,7 @@ async function scoreInterview(ctx, settings, transcript, questions = []) {
     .map((t) => {
       if (t.role === 'candidate') return `Candidate answer:\n${asData(t.text)}`;
       const q = byIndex.get(t.question_index);
-      const label = t.kind === 'follow_up' ? 'follow-up' : q?.kind === 'aptitude' ? `aptitude question; expected answer: ${q.expected}` : 'question';
+      const label = t.kind === 'follow_up' ? 'follow-up' : q?.kind === 'aptitude' ? `aptitude question; expected answer: ${q.expected}` : q?.kind === 'intro' ? 'introduction: judge communication and background only, not technical knowledge' : 'question';
       return `Interviewer (${label}): ${t.text}`;
     })
     .join('\n\n');
@@ -305,6 +309,10 @@ function buildScores(raw, settings, transcript, integrity = null, level = null) 
   if (integrity?.tab_switches) red_flags.push(`The candidate left the interview page ${integrity.tab_switches} time${integrity.tab_switches === 1 ? '' : 's'} during the interview.`);
   if (integrity?.fullscreen_exits) red_flags.push(`The candidate left full screen ${integrity.fullscreen_exits} time${integrity.fullscreen_exits === 1 ? '' : 's'} (full screen is required, so another window could have been used).`);
   if (integrity?.multiple_displays) red_flags.push('A second display was connected during the interview.');
+  const pw = integrity?.proctor || {};
+  const proctorLines = [['no_face', 'the face was not visible'], ['multiple_faces', 'a second person was in the picture'], ['eyes_away', 'the eyes or head turned away from the screen'], ['looking_down', 'the candidate looked down for long (possibly reading)'], ['noise', 'loud background noise or voices'], ['screen_share_stopped', 'the screen share was stopped']]
+    .filter(([k]) => pw[k]).map(([k, label]) => `${label} (${pw[k]}x)`);
+  if (proctorLines.length) red_flags.push(`Camera / microphone warnings during the interview: ${proctorLines.join('; ')}. Watch the recording if you need to check.`);
   if (integrity?.copy_paste) red_flags.push(`${integrity.copy_paste} copy / paste attempt${integrity.copy_paste === 1 ? ' was' : 's were'} blocked during the interview.`);
   const notScored = parameters.filter((p) => !p.scored && p.weight > 0);
   if (notScored.length) red_flags.push(`Not scored by the AI: ${notScored.map((p) => p.label).join(', ')}. ${notScored.length === 1 ? 'It is' : 'They are'} left out of the total; please read the transcript.`);

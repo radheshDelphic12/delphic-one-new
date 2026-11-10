@@ -23,8 +23,14 @@ function TicketsTab({ project, meta, reload, openTicket }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem('pm_ticket_view') === 'board' ? 'board' : 'list'; } catch { return 'list'; } });
   const [dragOver, setDragOver] = useState('');
   const switchView = (v) => { setView(v); try { localStorage.setItem('pm_ticket_view', v); } catch { /* storage unavailable */ } };
-  const [f, setF] = useState({ category: '', assignee_membership_id: '', priority: '', overdue: '', q: '' });
-  const [dq, setDq] = useState('');
+  // The filters survive saving a ticket (the tab is rebuilt after a change) and a page reload: kept per project for this browser session.
+  const filterKey = `pm_ticket_filters_${project.id}`;
+  const [f, setF] = useState(() => {
+    const blank = { category: '', assignee_membership_id: '', priority: '', overdue: '', q: '' };
+    try { return { ...blank, ...(JSON.parse(sessionStorage.getItem(filterKey)) || {}) }; } catch { return blank; }
+  });
+  useEffect(() => { try { sessionStorage.setItem(filterKey, JSON.stringify(f)); } catch { /* storage unavailable */ } }, [f, filterKey]);
+  const [dq, setDq] = useState(() => f.q.trim());
   useEffect(() => { const t = setTimeout(() => setDq(f.q.trim()), 250); return () => clearTimeout(t); }, [f.q]);
   const load = useCallback(async () => {
     try { setRows(await pmApi.tickets(project.id, Object.fromEntries(Object.entries({ ...f, q: dq }).filter(([, v]) => v)))); } catch (e) { pushError(pmError(e, 'Could not load tickets'), 'Load failed'); setRows([]); }

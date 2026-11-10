@@ -15,6 +15,7 @@ const NUMBER_FIELDS = [
   { key: 'link_valid_days', label: 'Link valid for (days)', hint: 'One attempt per link', min: 1, max: 60 },
   { key: 'answer_time_seconds', label: 'Time per question (seconds)', hint: 'A countdown on every question; when it ends the typed answer is sent. 0 = no limit', min: 0, max: 1800 },
   { key: 'max_tab_switches', label: 'Leaves before the interview ends', hint: 'Leaving the interview page (or full screen) is warned about; the interview ends on this many. 3 = two warnings, then it ends on the third. 0 = only log', min: 0, max: 20 },
+  { key: 'max_proctor_warnings', label: 'Camera / microphone warnings before the interview ends', hint: 'Face not visible, eyes away, looking down, background noise or the screen share stopping: each is a warning. After this many warnings the next one ends the interview. 3 = three warnings, then it ends. 0 = only log', min: 0, max: 10 },
 ];
 const WEIGHTS = [
   { key: 'weight_knowledge', label: 'Role knowledge' },
@@ -120,6 +121,7 @@ export default function AiInterviewTab({ isAdmin }) {
         is_enabled: form.is_enabled, aptitude_enabled: form.aptitude_enabled, recording_enabled: form.recording_enabled, auto_reject: form.auto_reject, use_reference_sites: form.use_reference_sites, reference_sites: (form.reference_sites || '').trim(), recording_viewer_ids: form.recording_viewer_ids || [],
         extra_instructions: (form.extra_instructions || '').trim() || null,
         difficulty: form.difficulty || 'easy', marking: form.marking || 'lenient', require_fullscreen: form.require_fullscreen !== false,
+        proctoring_enabled: form.proctoring_enabled !== false, require_screen_share: form.require_screen_share === true,
       };
       const { data } = await apiClient.put('/ai-interviews/settings', body);
       setForm(data.data);
@@ -162,6 +164,12 @@ export default function AiInterviewTab({ isAdmin }) {
         </div>
         <div className="mt-4">
           <Switch checked={form.require_fullscreen !== false} onChange={set('require_fullscreen')} disabled={off} label="Require full screen and a single display" hint="On by default. The candidate must stay in full screen (nothing else can sit next to the interview) and use one display. Leaving full screen is counted like leaving the page, again every 20 seconds until they return, and too many ends the interview for review." />
+        </div>
+        <div className="mt-4">
+          <Switch checked={form.proctoring_enabled !== false} onChange={set('proctoring_enabled')} disabled={off} label="Watch the camera and microphone" hint="On by default. In the candidate's browser only: no face or a second face, eyes or head turned away from the screen, looking down for long (reading), loud background noise. Each is a warning; after the warnings below the interview ends and a person reviews it. The camera is then required even when recording is off." />
+        </div>
+        <div className="mt-4">
+          <Switch checked={form.require_screen_share === true} onChange={set('require_screen_share')} disabled={off} label="Candidate shares the entire screen" hint="The candidate must share the whole screen before starting, and again if it stops (a warning). When recording is on, the recording shows the screen with the face in a corner." />
         </div>
         <div className="mt-4">
           <label className="mb-1 block text-xs font-medium text-tertiary-600">Extra instructions for the AI (optional)</label>
@@ -218,7 +226,7 @@ export default function AiInterviewTab({ isAdmin }) {
         <div className="mt-3 space-y-3">
           <Switch checked={form.recording_enabled} onChange={set('recording_enabled')} label="Record the interview (mandatory for the candidate)" hint="Off by default. When on, every candidate must allow the camera and microphone and agree to the recording before the interview starts, and the interview pauses if the camera is turned off. Recordings are deleted automatically after the days below; the transcript and scores stay." />
           {form.recording_enabled && (
-            <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 7; 2 by default', min: 1, max: 7 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
+            <div className="max-w-xs"><NumberField field={{ label: 'Keep recordings for (days)', hint: '1 to 7; 7 by default', min: 1, max: 7 }} value={form.recording_retention_days} onChange={set('recording_retention_days')} disabled={off} /></div>
           )}
           <div>
             <p className="text-sm font-medium text-tertiary-900">Who can watch every recording</p>

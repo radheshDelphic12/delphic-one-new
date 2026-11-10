@@ -274,10 +274,12 @@ async function vendorInvoiceModels(orgId, rows) {
     ]);
     const subtotal = mine.reduce((a, r) => a.plus(D(r.amount)), D(0));
     // TDS withheld and the finance adjustment are tracked per row; they print only when set, and the total is the net payable
+    const gst = mine.reduce((a, r) => a.plus(D(r.gst_amount || 0)), D(0));
+    const other = mine.reduce((a, r) => a.plus(D(r.other_amount || 0)), D(0));
     const tds = mine.reduce((a, r) => a.plus(D(r.tds_amount || 0)), D(0));
     const adjustment = mine.reduce((a, r) => a.plus(D(r.adjustment_amount || 0)), D(0));
     const adjustmentNote = mine.map((r) => r.adjustment_note).find(Boolean);
-    const total = subtotal.minus(tds).plus(adjustment);
+    const total = subtotal.plus(gst).plus(other).minus(tds).plus(adjustment);
     const seller = accountParty(vendor, first.details?.bill_to);
     models.push({
       ...common(seller, []),
@@ -287,7 +289,7 @@ async function vendorInvoiceModels(orgId, rows) {
       buyer,
       meta: { number: first.invoice_number, date: dateText(first.invoice_date) },
       lines,
-      taxes: [{ label: 'TDS', amount: tds.negated().toFixed(2) }, { label: adjustmentNote ? `Adjustment (${adjustmentNote})` : 'Adjustment', amount: adjustment.toFixed(2) }],
+      taxes: [...(gst.isZero() ? [] : [{ label: 'GST', amount: gst.toFixed(2) }]), ...(other.isZero() ? [] : [{ label: 'Other charges', amount: other.toFixed(2) }]), { label: 'TDS', amount: tds.negated().toFixed(2) }, { label: adjustmentNote ? `Adjustment (${adjustmentNote})` : 'Adjustment', amount: adjustment.toFixed(2) }],
       subtotal: subtotal.toFixed(2),
       total: total.toFixed(2),
       notes: first.notes,

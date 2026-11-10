@@ -24,7 +24,10 @@ export function chargeText(c, currency) {
  * hours + any admin adjustment), added to or deducted from what the client pays.
  * Added, edited and deleted one by one; applies to invoices generated afterwards.
  */
-export default function ContractChargesSection({ accountId, currency = 'INR' }) {
+export default function ContractChargesSection({ accountId, currency = 'INR', vendor = false }) {
+  // A vendor's GST / TDS lines are set up the same way as a contract's; only the API paths and wording differ.
+  const listPath = vendor ? `/billing/vendors/${accountId}/charges` : `/billing/projects/${accountId}/charges`;
+  const itemPath = (id) => (vendor ? `/billing/vendor-charges/${id}` : `/billing/charges/${id}`);
   const { pushError, pushSuccess } = useAlerts();
   const [charges, setCharges] = useState([]);
   const [form, setForm] = useState(BLANK);
@@ -32,7 +35,7 @@ export default function ContractChargesSection({ accountId, currency = 'INR' }) 
   const [saving, setSaving] = useState(false);
 
   function load() {
-    apiClient.get(`/billing/projects/${accountId}/charges`)
+    apiClient.get(listPath)
       .then(({ data }) => setCharges(data.data || []))
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the charges'), 'Something went wrong'));
   }
@@ -46,8 +49,8 @@ export default function ContractChargesSection({ accountId, currency = 'INR' }) 
     setSaving(true);
     try {
       const body = { label: form.label.trim(), mode: form.mode, value: Number(form.value), effect: form.effect };
-      if (editingId) await apiClient.patch(`/billing/charges/${editingId}`, body);
-      else await apiClient.post(`/billing/projects/${accountId}/charges`, body);
+      if (editingId) await apiClient.patch(itemPath(editingId), body);
+      else await apiClient.post(listPath, body);
       pushSuccess?.(editingId ? 'Charge updated' : 'Charge added');
       reset();
       load();
@@ -59,9 +62,9 @@ export default function ContractChargesSection({ accountId, currency = 'INR' }) 
   }
 
   async function remove(charge) {
-    if (!window.confirm(`Delete "${charge.label}" from this contract? Invoices already generated keep it.`)) return;
+    if (!window.confirm(`Delete "${charge.label}" from this ${vendor ? 'vendor' : 'contract'}? Invoices already generated keep it.`)) return;
     try {
-      await apiClient.delete(`/billing/charges/${charge.id}`);
+      await apiClient.delete(itemPath(charge.id));
       if (editingId === charge.id) reset();
       load();
     } catch (err) {
@@ -74,12 +77,14 @@ export default function ContractChargesSection({ accountId, currency = 'INR' }) 
       <div>
         <h3 className="font-heading text-sm font-semibold text-tertiary-900">Invoice charges (GST, TDS, other)</h3>
         <p className="text-xs text-tertiary-500">
-          Worked out on the month&apos;s final approved amount (approved project timesheet hours plus any adjustment). Percent = % of that amount; fixed = an amount in {currency}. “Added” raises what the client pays (GST), “deducted” lowers it (TDS). Applies to invoices generated or refreshed after the change.
+          {vendor
+            ? <>Worked out on each project row of the vendor&apos;s invoice. Percent = % of that amount; fixed = an amount in the invoice currency. “Added” raises what we pay the vendor (GST), “deducted” lowers it (TDS). Applies to vendor invoices generated or refreshed after the change.</>
+            : <>Worked out on the month&apos;s final approved amount (approved project timesheet hours plus any adjustment). Percent = % of that amount; fixed = an amount in {currency}. “Added” raises what the client pays (GST), “deducted” lowers it (TDS). Applies to invoices generated or refreshed after the change.</>}
         </p>
       </div>
 
       <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
-        {charges.length === 0 && <li className="px-3 py-2 text-xs text-tertiary-400">No charges on this contract — invoices carry only the approved amount.</li>}
+        {charges.length === 0 && <li className="px-3 py-2 text-xs text-tertiary-400">{vendor ? 'No charges on this vendor — its invoices carry only the amount.' : 'No charges on this contract — invoices carry only the approved amount.'}</li>}
         {charges.map((c) => (
           <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
             <span><span className="font-medium text-tertiary-900">{c.label}</span> <span className="text-xs text-tertiary-500">· {chargeText(c, currency)}</span></span>

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { AlertTriangle, Clock, Loader2, Mic, MicOff, Video } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, Mic, MicOff, MonitorUp, Video } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { PROCTOR_TEXT, createCompositeStream, createFaceMonitor, createNoiseMonitor, requestScreenShare } from '../../lib/aiProctor.js';
 
 const SpeechRecognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
 const RECORDER_TYPES = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
@@ -63,6 +64,12 @@ export default function AiInterviewPage() {
   const resumedRef = useRef(false);
   const partRef = useRef({ part: 0, stored: false }); // the recording part in progress and whether the server has stored a chunk of it
   const graceUntilRef = useRef(0);
+  // camera / microphone / screen watching (settings: proctoring, require_screen_share)
+  const [cameraReady, setCameraReady] = useState(false);
+  const [screenOn, setScreenOn] = useState(false); // the whole screen is being shared
+  const [screenError, setScreenError] = useState('');
+  const screenRef = useRef(null); // the screen-share stream
+  const compositeRef = useRef(null); // screen + face, what the recording is made from while sharing
   // Full screen and one display: with the interview in full screen no other window can sit next to it, so the rule is enforced on the page.
   const [fsOk, setFsOk] = useState(() => Boolean(document.fullscreenElement));
   const [multiDisplay, setMultiDisplay] = useState(false);
@@ -135,7 +142,13 @@ export default function AiInterviewPage() {
       streamRef.current = stream;
       const type = RECORDER_TYPES.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
       if (!window.MediaRecorder || !type) throw new Error('unsupported');
-      const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 500000, audioBitsPerSecond: 64000 });
+      setCameraReady(true);
+      // while the screen is shared the recording is the screen with the face in a corner; otherwise the camera alone
+      compositeRef.current?.stop();
+      compositeRef.current = null;
+      if (screenRef.current && screenRef.current.getVideoTracks().some((t) => t.readyState === 'live')) compositeRef.current = createCompositeStream({ screenStream: screenRef.current, cameraStream: stream });
+      const source = compositeRef.current ? compositeRef.current.stream : stream;
+      const recorder = new MediaRecorder(source, { mimeType: type, videoBitsPerSecond: compositeRef.current ? 900000 : 500000, audioBitsPerSecond: 64000 });
       let seq = 0;
       recorder.ondataavailable = (e) => {
         if (!e.data || !e.data.size) return;
@@ -159,6 +172,19 @@ export default function AiInterviewPage() {
   // after the camera was off or refused: carry on as the next part (the same part again if nothing of the last one reached the server)
   const retryCamera = () => { const p = partRef.current; startRecording(p.stored ? p.part + 1 : p.part); };
 
+  // ---- camera / microphone / screen warnings: each one is a warning from the server; after the company's number of warnings the next ends the interview ----
+  const proctoring = Boolean(view?.proctoring);
+  const needScreen = Boolean(view?.require_screen_share);
+  const speakingRef = useRef(false);
+  useEffect(() => { speakingRef.current = listening; }, [listening]);
+  const proctorWarn = useCallback(async (type) => {
+    const res = await report(type);
+    if (!res || res.ended) return;
+    const max = res.max_proctor_warnings;
+    const n = res.proctor_warnings;
+    setWarning(max > 0 ? `${PROCTOR_TEXT[type]} Warning ${Math.min(n, max)} of ${max}${n >= max ? ' - this is the final warning: the next one ends the interview' : ''}.` : PROCTOR_TEXT[type]);
+  }, [report]);
+
   const stopRecording = useCallback(async () => {
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
@@ -166,11 +192,13 @@ export default function AiInterviewPage() {
     }
     await queueRef.current;
     streamRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+    compositeRef.current?.stop();
+    screenRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
     setRecording(false);
   }, []);
 
   useEffect(() => { if (recording && videoRef.current) videoRef.current.srcObject = streamRef.current; }, [recording]);
-  useEffect(() => () => { recRef.current?.stop?.(); streamRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); }); }, []);
+  useEffect(() => () => { recRef.current?.stop?.(); streamRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); }); compositeRef.current?.stop(); screenRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); }); }, []);
 
   // A reopened, recorded interview carries on recording as the next part (the same consent still applies).
   useEffect(() => {
@@ -236,6 +264,47 @@ export default function AiInterviewPage() {
       window.removeEventListener('focus', back);
     };
   }, [active, report, view?.max_tab_switches]);
+
+  // ---- sharing the entire screen (recorded beside the face) ----
+  const activeRef = useRef(false);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  const shareScreen = useCallback(async () => {
+    setScreenError('');
+    graceUntilRef.current = Date.now() + GRACE_MS;
+    try {
+      const stream = await requestScreenShare();
+      screenRef.current?.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+      screenRef.current = stream;
+      stream.getVideoTracks()[0].onended = () => { setScreenOn(false); if (activeRef.current) proctorWarn('screen_share_stopped'); };
+      setScreenOn(true);
+      return true;
+    } catch (err) {
+      setScreenOn(false);
+      setScreenError(err?.code === 'not_entire_screen' ? 'Please choose "Entire screen", not a window or a tab.' : 'The screen could not be shared. Allow it and choose your entire screen.');
+      return false;
+    }
+  }, [proctorWarn]);
+  // after the share stopped mid-interview: share again, and carry the recording on (the screen is in it again) as the next part
+  async function shareAgain() {
+    if (!(await shareScreen())) return;
+    if (viewRef.current?.recording_on) { const p = partRef.current; startRecording(p.stored ? p.part + 1 : p.part); }
+  }
+
+  // ---- watching the camera and microphone while the interview runs ----
+  useEffect(() => {
+    if (!active || !proctoring || !cameraReady || !streamRef.current) return undefined;
+    let face = null;
+    let cancelled = false;
+    const paused = () => document.hidden || (needScreen && !screenRef.current?.getVideoTracks().some((t) => t.readyState === 'live'));
+    createFaceMonitor({ stream: streamRef.current, onEvent: proctorWarn, isPaused: paused }).then((m) => { if (cancelled) m?.stop(); else face = m; });
+    const noise = createNoiseMonitor({ stream: streamRef.current, onEvent: proctorWarn, isCandidateSpeaking: () => speakingRef.current || busyRef.current, isPaused: paused });
+    return () => { cancelled = true; face?.stop(); noise?.stop(); };
+  }, [active, proctoring, cameraReady, needScreen, proctorWarn]);
+  // an interview reopened without recording still needs the camera for the watching
+  useEffect(() => {
+    if (view?.status !== 'started' || !view.proctoring || view.recording_on || streamRef.current) return;
+    navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } }).then((st) => { streamRef.current = st; setCameraReady(true); }).catch(() => { setCameraProblem('The camera and microphone could not be started. Allow them in the browser and reload this page.'); });
+  }, [view]);
 
   // ---- full screen and a single display ----
   const needFullscreen = Boolean(view?.require_fullscreen);
@@ -310,13 +379,18 @@ export default function AiInterviewPage() {
         setError('This interview must be taken in full screen on a single display, and this browser would not allow it. Please open the link in a recent Chrome or Edge on a computer.');
         return;
       }
-      // a recorded interview needs the camera before it begins, so a refusal is caught here and not halfway through
-      if (view.recording_required) {
+      if (view.require_screen_share && !(screenRef.current && screenRef.current.getVideoTracks().some((t) => t.readyState === 'live'))) {
+        setError('Please share your entire screen first (the "Share entire screen" button), then press Start.');
+        return;
+      }
+      // a recorded or watched interview needs the camera before it begins, so a refusal is caught here and not halfway through
+      if (view.recording_required || view.proctoring) {
         graceUntilRef.current = Date.now() + GRACE_MS;
         try {
           streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
+          setCameraReady(true);
         } catch {
-          setError('This interview is recorded, so the camera and microphone must be allowed. Allow them in the browser (the camera icon in the address bar) and press Start again.');
+          setError('This interview is recorded or watched, so the camera and microphone must be allowed. Allow them in the browser (the camera icon in the address bar) and press Start again.');
           return;
         }
       }
@@ -480,7 +554,7 @@ export default function AiInterviewPage() {
   }, [active, waiting, asked, limit, view?.server_now, send]);
 
   if (endedByRules) {
-    return <Shell><h1 className="font-heading text-lg font-semibold">Interview ended</h1><p className="mt-2 text-sm text-tertiary-600">This interview was ended because the page was left too many times. The answers you gave have been saved and the team will review them and get in touch with you.</p></Shell>;
+    return <Shell><h1 className="font-heading text-lg font-semibold">Interview ended</h1><p className="mt-2 text-sm text-tertiary-600">This interview was ended because the interview rules were not followed (leaving the page too many times, or repeated warnings about the camera, microphone or screen). The answers you gave have been saved and the team will review them and get in touch with you.</p></Shell>;
   }
   if (finished || (view && !['invited', 'started'].includes(view.status))) {
     return <Shell><h1 className="font-heading text-lg font-semibold">Thank you</h1><p className="mt-2 text-sm text-tertiary-600">Your interview is complete. The team will get in touch with you.</p></Shell>;
@@ -503,6 +577,8 @@ export default function AiInterviewPage() {
           {view.require_fullscreen && <li>The interview runs in full screen on a single display. Leaving full screen, or connecting a second display, is recorded and counted like leaving the page.</li>}
           <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; you get ${view.max_tab_switches - 1} warnings, and the next time the interview ends automatically` : ''}.</li>
           {mustRecord && <li>This interview is recorded (camera and microphone) and the recording is required. Keep them on until you finish.</li>}
+          {view.proctoring && <li>Your camera and microphone are watched during the interview: keep your face visible, look at the screen, sit alone in a quiet place and do not read from notes or a phone. {view.max_proctor_warnings ? `You get ${view.max_proctor_warnings} warnings; the next one ends the interview.` : 'Problems are recorded for the team.'}</li>}
+          {view.require_screen_share && <li>You share your entire screen, and the recording shows your screen together with your face.</li>}
           <li>The AI scores your answers; people at the company make the final decision.</li>
         </ul>
         <div className="mt-4 rounded-xl border border-tertiary-100 p-3">
@@ -515,6 +591,16 @@ export default function AiInterviewPage() {
           {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. Speaking is required, so please allow it.</p>}
           {!SpeechRecognition && <p className="mt-2 text-xs text-tertiary-500">This browser cannot turn speech into text. Please open this link in a recent Chrome or Edge on a computer or an Android phone.</p>}
         </div>
+        {view.require_screen_share && (
+          <div className="mt-3 rounded-xl border border-tertiary-100 p-3" data-testid="screen-share-step">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-tertiary-800">Share your screen</p>
+              <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={screenOn} onClick={shareScreen}><MonitorUp className="h-4 w-4" />{screenOn ? 'Screen shared' : 'Share entire screen'}</button>
+            </div>
+            {screenOn && <p className="mt-2 text-xs text-success-700">Your entire screen is shared. Keep it shared until the interview ends.</p>}
+            {screenError && <p className="mt-2 text-xs text-warning-700">{screenError}</p>}
+          </div>
+        )}
         <label className="mt-4 flex items-start gap-2 text-sm text-tertiary-800">
           <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
           <span>I understand that my answers are evaluated by an AI, and I agree.</span>
@@ -531,7 +617,7 @@ export default function AiInterviewPage() {
         {!view.ai_enabled && <p className="mt-3 text-xs text-warning-700">The interviewer is not switched on yet. Please try again later.</p>}
         {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
         {view.require_fullscreen && multiDisplay && <p className="mt-3 text-sm text-danger-700" data-testid="multi-display-note">A second display is connected. Please use one screen only (disconnect or switch off the other) to start.</p>}
-        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok' || (view.require_fullscreen && multiDisplay)} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
+        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok' || (view.require_screen_share && !screenOn) || (view.require_fullscreen && multiDisplay)} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
         {busy && <p data-testid="start-working" className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />The interviewer is writing your questions. This can take up to a minute - please keep this page open.</p>}
       </Shell>
     );
@@ -550,6 +636,17 @@ export default function AiInterviewPage() {
   const urgent = remaining != null && remaining <= 30;
   return (
     <Shell>
+      {active && needScreen && !screenOn && (
+        <div role="alertdialog" data-testid="screen-share-required" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6">
+          <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-soft">
+            <MonitorUp className="mx-auto h-8 w-8 text-warning-600" />
+            <h2 className="mt-2 font-heading text-lg font-semibold text-tertiary-900">Share your entire screen</h2>
+            <p className="mt-2 text-sm text-tertiary-700">This interview needs your entire screen to be shared. The interview stays covered until it is shared again, and the question timer keeps running.</p>
+            {screenError && <p className="mt-2 text-xs text-warning-700">{screenError}</p>}
+            <button type="button" className="btn-primary mt-4" onClick={shareAgain}>Share entire screen</button>
+          </div>
+        </div>
+      )}
       {active && ((needFullscreen && !fsOk) || multiDisplay) && (
         <div role="alertdialog" data-testid="screen-rules" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6">
           <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-soft">

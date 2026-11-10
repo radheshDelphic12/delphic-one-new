@@ -14,6 +14,7 @@ const vendorAdjustments = require('./vendorAdjustments.service');
 const resourceBilling = require('./resourceBilling.service');
 const vendorTracking = require('./vendorTracking.service');
 const charges = require('./charges.service');
+const vendorCharges = require('./vendorCharges.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
@@ -486,6 +487,43 @@ router.delete(
   ...adminInOrg,
   asyncHandler(async (req, res) => {
     const result = await charges.removeCharge(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
+// Vendor charges - GST, TDS or any other line a vendor's invoices carry; set up exactly like contract charges.
+router.get(
+  '/vendors/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await vendorCharges.listCharges(req.user.org_id, req.params.id)))
+);
+
+router.post(
+  '/vendors/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.createCharge(req.user.org_id, req.user, req.params.id, contractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.charge);
+  })
+);
+
+router.patch(
+  '/vendor-charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.updateCharge(req.user.org_id, req.user, req.params.id, updateContractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+router.delete(
+  '/vendor-charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.removeCharge(req.user.org_id, req.user, req.params.id);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
   })

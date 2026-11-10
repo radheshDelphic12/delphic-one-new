@@ -49,12 +49,25 @@ function validateRule(t) {
   return null;
 }
 
+// Workspace companies plus the businesses of the Companies & Stakes register that have no workspace (any status:
+// operational, future, planning...). A register-only business is identified by its register id, which is used wherever a
+// task / weekday link stores an org_id (those columns are plain uuids), so no schema change is needed.
 async function companies(groupIds, orgId) {
-  return prisma.org.findMany({
+  const orgs = await prisma.org.findMany({
     where: { org_group_id: { in: groupIds }, status: 'active', ...(orgId ? { id: orgId } : {}) },
     select: { id: true, name: true, slug: true, logo_url: true, enabled_modules: true },
     orderBy: { name: 'asc' },
   });
+  const extra = await prisma.groupCompany.findMany({
+    where: { org_group_id: { in: groupIds }, org_id: null, ...(orgId ? { id: orgId } : {}) },
+    select: { id: true, name: true, status: true },
+    orderBy: { name: 'asc' },
+  });
+  const taken = new Set(orgs.map((o) => o.name.trim().toLowerCase()));
+  const registerOnly = extra
+    .filter((c) => orgId || !taken.has(c.name.trim().toLowerCase()))
+    .map((c) => ({ id: c.id, name: c.name, slug: null, logo_url: null, enabled_modules: [], register_status: c.status, register_only: true }));
+  return [...orgs, ...registerOnly].sort((a, b) => a.name.localeCompare(b.name));
 }
 const isSoon = (o) => Boolean(o.enabled_modules?.includes('coming_soon'));
 
@@ -204,7 +217,7 @@ async function weeklyPlan(groupIds, rawQuery = {}) {
     prisma.groupCompanyDay.findMany({ where: { org_group_id: { in: groupIds } } }),
     occurrences(groupIds, weekStart, weekEnd, q.org_id),
   ]);
-  const byOrg = new Map(orgs.map((o) => [o.id, { id: o.id, name: o.name, slug: o.slug, logo_url: o.logo_url, coming_soon: isSoon(o) }]));
+  const byOrg = new Map(orgs.map((o) => [o.id, { id: o.id, name: o.name, slug: o.slug, logo_url: o.logo_url, coming_soon: isSoon(o), register_only: Boolean(o.register_only), status: o.register_status || null }]));
   const notes = new Map(links.map((l) => [`${l.org_id}|${l.weekday}`, l.note]));
   const days = DAY_NAMES.map((name, i) => {
     const weekday = i + 1;

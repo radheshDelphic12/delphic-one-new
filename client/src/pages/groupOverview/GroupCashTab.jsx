@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import GroupInvoicesView from './GroupInvoicesView.jsx';
+import { GroupReceivablesView, ReceivablesSetupCard } from './GroupReceivablesView.jsx';
 import { AccountEditDrawer, EntityEditDrawer } from './EntityAccountEditors.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
@@ -859,6 +860,14 @@ export default function GroupCashTab() {
   // the Fund view ticks wallets only, so its selection is totalled over the same accounts and wallets
   const picked = useMemo(() => selectionTotals(accounts, selected), [accounts, selected]);
   const p = position.data;
+  // the Receivables tab exists only for a holding group that switched it on (Setup)
+  const [receivablesOn, setReceivablesOn] = useState(false);
+  const checkReceivables = useCallback(() => {
+    apiClient.get('/group-tax/receivable-setting').then(({ data }) => setReceivablesOn((data.data.groups || []).some((g) => g.enabled))).catch(() => setReceivablesOn(false));
+  }, []);
+  useEffect(() => { checkReceivables(); }, [checkReceivables]);
+  const sections = useMemo(() => (receivablesOn ? [...SECTIONS.slice(0, 4), { key: 'receivables', label: 'Receivables', icon: Receipt }, ...SECTIONS.slice(4)] : SECTIONS), [receivablesOn]);
+  const shownSection = sections.some((s) => s.key === section) ? section : 'bank';
 
   return (
     <div className="space-y-4">
@@ -884,8 +893,9 @@ export default function GroupCashTab() {
           </div>
         </div>
       )}
-      <SectionTabs tabs={SECTIONS} value={section} onChange={setSection} />
+      <SectionTabs tabs={sections} value={shownSection} onChange={setSection} />
       {['bank', 'fund', 'cash'].includes(section) && <Filters options={options.data} filters={filters} setFilters={setFilters} />}
+      {shownSection === 'receivables' && <GroupReceivablesView />}
       {!p ? <Skeleton className="h-48" /> : (
         <>
           {section === 'bank' && <BankView position={p} selected={selected} toggle={toggle} setOpenWallet={setOpenWallet} setOpenAccount={setOpenAccount} />}
@@ -896,7 +906,7 @@ export default function GroupCashTab() {
           {section === 'statements' && <StatementsView options={options.data} filters={filters} seed={stmtSeed} />}
           {section === 'payments' && <PaymentsReportView options={options.data} />}
           {section === 'reconcile' && <ReconcileView position={p} onSaved={refresh} onOpenStatement={(accountId) => { setStmtSeed({ scope: 'account', id: accountId }); setSection('statements'); }} />}
-          {section === 'setup' && <SetupView options={options.data} position={p} onChanged={refresh} />}
+          {section === 'setup' && <><SetupView options={options.data} position={p} onChanged={refresh} /><ReceivablesSetupCard onChanged={checkReceivables} /></>}
         </>
       )}
       <WalletDrawer walletId={openWallet} accountId={openAccount} options={options.data} onClose={() => { setOpenWallet(null); setOpenAccount(null); }} onChanged={refresh} />

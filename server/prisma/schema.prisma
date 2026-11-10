@@ -496,6 +496,7 @@ model User {
   vendor_adjustments_created      VendorAdjustment[]              @relation("VendorAdjustmentCreatedBy")
   ai_interview_feedback_given      AiInterviewFeedback[]           @relation("AiInterviewFeedbackBy")
   contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
+  vendor_charges_created          VendorCharge[]                  @relation("VendorChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
   expense_claims_decided          ExpenseClaim[]                  @relation("ExpenseClaimDecidedBy")
   vendor_payments_created         VendorPayment[]                 @relation("VendorPaymentCreatedBy")
@@ -1553,6 +1554,9 @@ model ProjectVendorInvoice {
   tds_amount        Decimal   @default(0) @db.Decimal(14, 2)
   adjustment_amount Decimal   @default(0) @db.Decimal(14, 2)
   adjustment_note   String?
+  // GST added and any other charge line (net of deductions), worked out from the vendor's charges when the invoice is generated; payable = amount + gst + other - TDS + adjustment.
+  gst_amount        Decimal   @default(0) @db.Decimal(14, 2)
+  other_amount      Decimal   @default(0) @db.Decimal(14, 2)
   created_by        String    @db.Uuid
   creator           User      @relation("ProjectVendorInvoiceCreatedBy", fields: [created_by], references: [id])
   created_at        DateTime  @default(now())
@@ -1639,6 +1643,27 @@ model ContractCharge {
 
   @@index([org_id, account_id])
   @@map("contract_charges")
+}
+
+// A vendor's GST / TDS / other lines, set up the same way as a contract's charges (percent or fixed, added or deducted).
+// Worked out on each project row of the vendor's invoice when it is generated; the invoice keeps the lines (details.charges).
+model VendorCharge {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org               Org      @relation(fields: [org_id], references: [id])
+  vendor_account_id String   @db.Uuid
+  vendor_account    Account  @relation(fields: [vendor_account_id], references: [id])
+  label             String
+  mode              String   @default("percent")
+  value             Decimal  @db.Decimal(14, 4)
+  effect            String   @default("add")
+  created_by        String   @db.Uuid
+  creator           User     @relation("VendorChargeCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  @@index([org_id, vendor_account_id])
+  @@map("vendor_charges")
 }
 
 model ClientInvoice {
@@ -2290,6 +2315,7 @@ model Org {
   client_invoices        ClientInvoice[]
   billing_adjustments    BillingAdjustment[]
   contract_charges       ContractCharge[]
+  vendor_charges         VendorCharge[]
   group_billing_charges  GroupBillingCharge[]
 
   // Multi-company ERP (Phase 6).
@@ -2678,6 +2704,7 @@ model Account {
   billing_leave_rules     Json?
   billing_adjustments     BillingAdjustment[]
   contract_charges        ContractCharge[]
+  vendor_charges          VendorCharge[]
   overtime_tickets        OvertimeTicket[]
 
   owner_id           String    @db.Uuid
@@ -8503,6 +8530,11 @@ model AiInterviewSettings {
   marking                  String   @default("lenient")
   // The candidate must stay in full screen (a split screen next to another window is then impossible) and use a single display; leaving it is counted like leaving the page.
   require_fullscreen       Boolean  @default(true)
+  // Camera and microphone watching: no face, a second face, eyes away from the screen, looking down (reading), background noise, the shared screen stopping.
+  // Each is a warning; after max_proctor_warnings warnings the next one ends the interview. require_screen_share: the candidate shares the whole screen, recorded beside the face.
+  proctoring_enabled       Boolean  @default(true)
+  max_proctor_warnings     Int      @default(3)
+  require_screen_share     Boolean  @default(false)
   updated_by               String?  @db.Uuid
   updated_at               DateTime @default(now()) @updatedAt
 
@@ -9428,4 +9460,16 @@ model EmployeeFeedbackBoardMember {
 
   @@unique([org_id, org_membership_id])
   @@map("employee_feedback_board")
+}
+
+// Group Dashboard > Book Keeping > Receivables: a per-group switch (off by default) for the "money to collect" view of every client invoice from
+// `since_month` on, picked by the invoice's BILLING month. Switched on only for the group that wants it (e.g. Gulati Industries Group).
+model GroupReceivableSetting {
+  org_group_id String   @id @db.Uuid
+  enabled      Boolean  @default(false)
+  since_month  String   @default("2026-09") // YYYY-MM, the first billing month counted
+  updated_by   String?  @db.Uuid
+  updated_at   DateTime @default(now()) @updatedAt
+
+  @@map("group_receivable_settings")
 }

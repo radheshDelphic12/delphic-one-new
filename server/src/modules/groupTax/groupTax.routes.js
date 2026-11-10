@@ -20,7 +20,7 @@ const text = (max) => z.string().trim().max(max);
 const amount = z.coerce.number().positive().max(1e12);
 const KINDS = Object.keys(service.KIND_LABEL);
 
-const filters = z.object({ from: month.optional(), to: month.optional(), org_id: uuid.optional(), currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional() });
+const filters = z.object({ from: month.optional(), to: month.optional(), org_id: uuid.optional(), currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional(), basis: z.enum(['invoice', 'billing']).optional() });
 const gstQuery = filters.extend({ by: z.enum(['month', 'quarter']).default('month') });
 const challanQuery = filters.extend({ kind: z.enum(KINDS).optional() });
 const rename = (q) => ({ ...q, orgId: q.org_id });
@@ -87,6 +87,15 @@ router.delete('/tds-receipts/:id', asyncHandler(async (req, res) => {
   const result = await service.removeTdsReceipt(req.user.org_group_ids, req.user, uuid.parse(req.params.id), removeSchema.parse(req.body || {}).reason);
   return result.error ? problem(res, result) : ok(res, result);
 }));
+
+// Book Keeping > Receivables: switched on per holding group (off by default), invoices from a billing month on, and what the group is left with.
+const receivableBody = z.object({ org_group_id: uuid, enabled: z.boolean(), since_month: month.optional() });
+router.get('/receivable-setting', asyncHandler(async (req, res) => ok(res, await service.receivableSetting(req.user.org_group_ids))));
+router.put('/receivable-setting', asyncHandler(async (req, res) => {
+  const result = await service.setReceivableSetting(req.user.org_group_ids, req.user, receivableBody.parse(req.body));
+  return result.error ? problem(res, result) : ok(res, result);
+}));
+router.get('/receivables', asyncHandler(async (req, res) => ok(res, await service.receivables(req.user.org_group_ids, rename(filters.parse(req.query))))));
 
 router.get('/gst', asyncHandler(async (req, res) => ok(res, await service.gst(req.user.org_group_ids, rename(gstQuery.parse(req.query))))));
 router.get('/tds-payable', asyncHandler(async (req, res) => ok(res, await service.tdsPayable(req.user.org_group_ids, rename(filters.parse(req.query))))));
