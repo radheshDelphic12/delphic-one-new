@@ -460,6 +460,7 @@ async function gst(groupIds, { orgId, from, to, by = 'month', basis = 'invoice' 
     if (p.kind === 'gst_credit') b.credits = round2(b.credits + amount); else b.paid = round2(b.paid + amount);
     b.payments.push({ id: p.id, kind: p.kind === 'gst_credit' ? 'credit' : 'payment', amount, paid_on: ymd(p.paid_on), challan_number: p.challan_number, has_file: Boolean(p.file_path), note: p.note, covers_months: p.covers_months, period_month: p.period_month, period_year: p.period_year });
   }
+  const vendorGst = await vendorGstIn(groupIds, { orgId, from, to, basis });
   const { start } = monthRange(from, null);
   const list = [...buckets.values()].sort((a, b) => a.order - b.order);
   let running = 0;
@@ -470,12 +471,40 @@ async function gst(groupIds, { orgId, from, to, by = 'month', basis = 'invoice' 
   }
   const inRange = start ? list.filter((b) => b.order >= (by === 'quarter' ? quarterOf(start.getUTCFullYear(), start.getUTCMonth() + 1).order : start.getUTCFullYear() * 100 + start.getUTCMonth() + 1)) : list;
   const totals = inRange.reduce((t, b) => ({ collected: round2(t.collected + b.collected), paid: round2(t.paid + b.paid), credits: round2(t.credits + b.credits) }), { collected: 0, paid: 0, credits: 0 });
-  return { by, periods: inRange.slice().reverse(), totals: { ...totals, payable_in_range: round2(totals.collected - totals.paid - totals.credits), balance: list.length ? list[list.length - 1].balance : 0 } };
+  return { by, periods: inRange.slice().reverse(), vendor_gst: vendorGst, totals: { ...totals, vendor_gst: vendorGst.total, payable_in_range: round2(totals.collected - totals.paid - totals.credits), balance: list.length ? list[list.length - 1].balance : 0 } };
+}
+
+/** GST charged on vendor invoices of the months shown (INR): the GST the group pays to vendors, which it can usually claim back as input credit. */
+async function vendorGstIn(groupIds, { orgId, from, to, basis = 'invoice' } = {}) {
+  const { ids: orgIds, all } = await orgIdsOf(groupIds, orgId);
+  const orgName = new Map(all.map((o) => [o.id, o.name]));
+  const { start, end } = monthRange(from, to);
+  const key = (y, m) => y * 100 + m;
+  const inv = await prisma.projectVendorInvoice.findMany({
+    where: { org_id: { in: orgIds }, gst_amount: { gt: 0 }, currency: 'INR' },
+    include: { vendor_account: { select: { name: true } }, account: { select: { name: true, project_name: true } } },
+    orderBy: [{ invoice_date: 'desc' }, { created_at: 'desc' }],
+  });
+  const rows = inv.filter((r) => {
+    const m = vendorMonth(r, basis);
+    return (!start || key(m.year, m.month) >= key(start.getUTCFullYear(), start.getUTCMonth() + 1)) && (!end || key(m.year, m.month) <= key(end.getUTCFullYear(), end.getUTCMonth() + 1));
+  }).map((r) => ({
+    id: r.id, company: orgName.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.account?.project_name || r.account?.name || null, number: r.invoice_number,
+    invoice_date: ymd(r.invoice_date), period: `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`, base: num(r.amount), gst: num(r.gst_amount),
+  }));
+  return { total: round2(rows.reduce((s, r) => s + r.gst, 0)), rows };
 }
 
 // ---- TDS withheld (employees' salary TDS, vendors) and deposited ------------------------------------------------------
 
-async function tdsPayable(groupIds, { orgId, from, to, currency } = {}) {
+/** The month a vendor invoice counts in: its invoice date (when the tax is withheld / charged), or the billing month it is for. */
+function vendorMonth(r, basis) {
+  if ((basis === 'billing' || !r.invoice_date) && r.period_year && r.period_month) return { year: r.period_year, month: r.period_month };
+  const d = new Date(r.invoice_date || r.created_at);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
+async function tdsPayable(groupIds, { orgId, from, to, currency, basis = 'invoice' } = {}) {
   const { ids: orgIds } = await orgIdsOf(groupIds, orgId);
   const { start, end } = monthRange(from, to);
   const orgs = new Map((await prisma.org.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } })).map((o) => [o.id, o.name]));
@@ -488,10 +517,10 @@ async function tdsPayable(groupIds, { orgId, from, to, currency } = {}) {
     include: { vendor_account: { select: { name: true } }, account: { select: { name: true, project_name: true, project_code: true } } },
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
   });
-  const vendorRows = inv.filter(inRange).map((r) => ({
+  const vendorRows = inv.filter((r) => { const m = vendorMonth(r, basis); return inRange({ period_year: m.year, period_month: m.month }); }).map((r) => ({
     id: r.id, company: orgs.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.account?.project_name || r.account?.name || null, number: r.invoice_number,
     period: `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`, period_month: r.period_month, period_year: r.period_year, currency: r.currency,
-    base: num(r.amount), tds: num(r.tds_amount), adjustment: num(r.adjustment_amount), net_payable: round2(num(r.amount) + num(r.gst_amount) + num(r.other_amount) - num(r.tds_amount) + num(r.adjustment_amount)), invoice_date: ymd(r.invoice_date),
+    base: num(r.amount), gst: num(r.gst_amount), tds: num(r.tds_amount), adjustment: num(r.adjustment_amount), net_payable: round2(num(r.amount) + num(r.gst_amount) + num(r.other_amount) - num(r.tds_amount) + num(r.adjustment_amount)), invoice_date: ymd(r.invoice_date),
   }));
 
   // employees: the TDS adjustment on the month's salary

@@ -268,4 +268,19 @@ describe('GST & TDS tracking', () => {
     expect((await get('/invoices', RANGE, adminToken)).status).toBe(403);
     expect((await challan({ kind: 'gst', period_month: 9, period_year: 2026, amount: 1, paid_on: '2026-10-01' }, null, adminToken)).status).toBe(403);
   });
+
+  test('a vendor invoice billed for September but dated in October: its TDS and GST show for October by invoice date, for September by billing month', async () => {
+    await prisma.projectVendorInvoice.create({ data: { org_id: alpha.id, account_id: project.id, vendor_account_id: vendor.id, period_month: 9, period_year: 2026, invoice_date: new Date('2026-10-06'), invoice_number: 'VINV-LATE', amount: 65000, gst_amount: 11700, tds_amount: 6500, currency: 'INR', created_by: superUser.id } });
+    const oct = { from: '2026-10', to: '2026-11' };
+    const tds = (await get('/tds-payable', oct)).body.data;
+    expect(tds.rows).toHaveLength(1);
+    expect(tds.rows[0]).toMatchObject({ number: 'VINV-LATE', gst: 11700, tds: 6500 });
+    expect((await get('/tds-payable', { ...oct, basis: 'billing' })).body.data.rows).toHaveLength(0);
+    expect((await get('/tds-payable', { from: '2026-09', to: '2026-09', basis: 'billing' })).body.data.rows).toHaveLength(1);
+    const gst = (await get('/gst', oct)).body.data;
+    expect(gst.vendor_gst.total).toBe(11700);
+    expect(gst.vendor_gst.rows[0]).toMatchObject({ vendor: 'EkamNext', number: 'VINV-LATE', gst: 11700, base: 65000 });
+    expect(gst.totals.vendor_gst).toBe(11700);
+    expect((await get('/gst', { ...oct, basis: 'billing' })).body.data.vendor_gst.rows).toHaveLength(0);
+  });
 });

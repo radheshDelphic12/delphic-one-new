@@ -463,6 +463,7 @@ function GstView({ params, companies }) {
         <KpiTile label="GST paid to the government" value={money(t.paid)} icon={Banknote} theme="green" hint="challans recorded" />
         <KpiTile label="Credits set off" value={money(t.credits)} icon={FileText} theme="blue" hint="input tax credit etc." />
         <KpiTile label="GST still to pay" value={money(t.balance)} icon={Wallet} theme="orange" hint="all months up to the last one shown" />
+        <KpiTile label="GST on vendor invoices" value={money(t.vendor_gst)} icon={Percent} theme="blue" hint="charged by vendors in these months (input credit)" />
       </Tiles>
       <div className="flex items-center justify-between">
         <div className="inline-flex rounded-xl border border-tertiary-100 bg-white p-0.5 text-xs" role="tablist" aria-label="GST period">
@@ -479,6 +480,17 @@ function GstView({ params, companies }) {
             ))}
             {!data.periods.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm text-tertiary-500">No GST in these months.</td></tr>}
           </tbody>
+        </table>
+      </div>
+      <SectionHeading title="GST on vendor invoices" hint="GST the vendors charged the group in these months. Claim it as input credit, then record it above as a credit." />
+      <div className="overflow-x-auto rounded-xl border border-tertiary-100 bg-white shadow-card">
+        <table className="min-w-full text-sm">
+          <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Vendor</th><th className={th}>Invoice</th><th className={th}>Invoice date</th><th className={th}>Billing month</th><th className={thr}>Base</th><th className={thr}>GST</th></tr></thead>
+          <tbody>
+            {data.vendor_gst.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-gst-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={td}>{r.invoice_date}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base)}</td><td className={`${tdr} font-medium`}>{money(r.gst)}</td></tr>)}
+            {!data.vendor_gst.rows.length && <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-tertiary-500">No vendor invoice with GST in these months.</td></tr>}
+          </tbody>
+          {data.vendor_gst.rows.length > 0 && <tfoot className="bg-canvas-muted"><tr><td className={`${td} font-semibold`} colSpan={6}>Total</td><td className={`${tdr} font-semibold`}>{money(data.vendor_gst.total)}</td></tr></tfoot>}
         </table>
       </div>
       <ChallanDrawer draft={draft} companies={companies} onClose={() => setDraft(null)} onSaved={reload} />
@@ -545,13 +557,13 @@ function TdsPayableView({ params, companies }) {
         </table>
       </div>
 
-      <SectionHeading title="Vendors" hint="A payment to a vendor is base + GST - TDS; the GST can be entered as the invoice's adjustment until GST fields are added" />
+      <SectionHeading title="Vendors" hint="A payment to a vendor is base + GST - TDS (months counted by the option chosen above)" />
       <div className="overflow-x-auto rounded-xl border border-tertiary-100 bg-white shadow-card">
         <table className="min-w-full text-sm">
-          <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Vendor</th><th className={th}>Invoice</th><th className={th}>Period</th><th className={thr}>Base</th><th className={thr}>TDS withheld</th><th className={thr}>Adjustment / GST</th><th className={thr}>Net payable</th></tr></thead>
+          <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Vendor</th><th className={th}>Invoice</th><th className={th}>Period</th><th className={thr}>Base</th><th className={thr}>GST</th><th className={thr}>TDS withheld</th><th className={thr}>Adjustment</th><th className={thr}>Net payable</th></tr></thead>
           <tbody>
-            {data.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-tds-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base, r.currency)}</td><td className={tdr}>{money(r.tds, r.currency)}</td><td className={tdr}>{r.adjustment ? money(r.adjustment, r.currency) : '—'}</td><td className={`${tdr} font-medium`}>{money(r.net_payable, r.currency)}</td></tr>)}
-            {!data.rows.length && <tr><td colSpan={8} className="px-3 py-6 text-center text-sm text-tertiary-500">No vendor invoice with TDS in these months.</td></tr>}
+            {data.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-tds-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base, r.currency)}</td><td className={tdr}>{r.gst ? money(r.gst, r.currency) : '—'}</td><td className={tdr}>{money(r.tds, r.currency)}</td><td className={tdr}>{r.adjustment ? money(r.adjustment, r.currency) : '—'}</td><td className={`${tdr} font-medium`}>{money(r.net_payable, r.currency)}</td></tr>)}
+            {!data.rows.length && <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-tertiary-500">No vendor invoice with TDS in these months.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -590,7 +602,7 @@ export default function GroupTaxTab() {
         <div><label className={labelCls}>From month</label><input type="month" className={FIELD_INPUT} aria-label="From month" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></div>
         <div><label className={labelCls}>To month</label><input type="month" className={FIELD_INPUT} aria-label="To month" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></div>
         <div className="w-56"><label className={labelCls}>Company</label><SearchableSelect ariaLabel="Company" allowClear value={orgId} onChange={setOrgId} options={options.companies.map((c) => ({ value: c.id, label: c.name }))} placeholder="All companies" searchPlaceholder="Search…" /></div>
-        {['invoices', 'tds', 'gst'].includes(view) && (
+        {['invoices', 'tds', 'gst', 'vendors'].includes(view) && (
           <div className="w-52">
             <label className={labelCls}>Count months by</label>
             <select className={FIELD_INPUT} aria-label="Count months by" data-testid="tax-basis" value={basis} onChange={(e) => setBasis(e.target.value)}>
@@ -607,7 +619,7 @@ export default function GroupTaxTab() {
       {view === 'invoices' && <InvoicesView params={params} onOpenTds={() => setView('tds')} />}
       {view === 'tds' && <TdsView params={params} />}
       {view === 'gst' && <GstView params={{ from, to, ...(orgId ? { org_id: orgId } : {}), ...clientBasis }} companies={options.companies} />}
-      {view === 'vendors' && <TdsPayableView params={{ from, to, ...(orgId ? { org_id: orgId } : {}) }} companies={options.companies} />}
+      {view === 'vendors' && <TdsPayableView params={{ from, to, ...(orgId ? { org_id: orgId } : {}), ...clientBasis }} companies={options.companies} />}
       {view === 'challans' && <ChallansView params={{ from, to, ...(orgId ? { org_id: orgId } : {}) }} companies={options.companies} />}
     </div>
   );
