@@ -38,6 +38,7 @@ import OfficesPage from '../pages/offices/OfficesPage.jsx';
 import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
 import SpeakUpPage from '../pages/speakup/SpeakUpPage.jsx';
 import EmployeeFeedbackPage from '../pages/employeeFeedback/EmployeeFeedbackPage.jsx';
+import InterviewFeedbackPage from '../pages/interviewFeedback/InterviewFeedbackPage.jsx';
 import CareerRedirect from '../pages/public/CareerRedirect.jsx';
 import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
 import AiInterviewPage from '../pages/public/AiInterviewPage.jsx';
@@ -220,6 +221,19 @@ function RequirePermission({ capability, need, children }) {
   if (isPermissionMode(user)) return (need ? hasNeed(user, need) : userCan(user, capability)) ? children : <NoAccess />;
   if (!can(user.role, capability)) return <Navigate to="/" replace />;
   return children;
+}
+
+/**
+ * /submissions/:id (an old or a new link): the full candidate page for people who can open submissions; everyone else - an interviewer who was
+ * sent the link, for example - lands on the Interview feedback page of that candidate, where they can give the feedback of the round they took.
+ */
+function SubmissionOrFeedback() {
+  const { user, loading } = useAuth();
+  const { id } = useParams();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  const allowed = isPermissionMode(user) ? hasNeed(user, 'submissions.view') : can(user.role, 'viewPipeline');
+  return allowed ? <SubmissionDetailPage /> : <Navigate to={`/interview-feedback/${id}`} replace />;
 }
 
 /** Only acts in a company on permissions: the page needs one of these permissions (a basic item or a grant). */
@@ -419,7 +433,9 @@ export default function App() {
         <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="rejected-candidates" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="rejected.view"><RejectedCandidatesPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions/:id" element={<RequireMasterWorkspace><SubmissionOrFeedback /></RequireMasterWorkspace>} />
+        <Route path="interview-feedback" element={<RequireMasterWorkspace><RequireAccess need="basic.interview_feedback"><InterviewFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="interview-feedback/:submissionId" element={<RequireMasterWorkspace><RequireAccess need="basic.interview_feedback"><InterviewFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
         {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced
             by the server; AppLayout keeps Zephyr users off every Delphic page. */}
         <Route path="zephyr" element={<RequireZephyr><ZephyrHomePage /></RequireZephyr>} />

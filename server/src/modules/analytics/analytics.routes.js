@@ -32,6 +32,8 @@ router.get('/vendor-payments', asyncHandler(async (req, res) => ok(res, await li
 router.get('/vendor-payments/records', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentRecords(orgId(req), live.monthSchema.partial().parse(req.query)))));
 // Expense records of a month (approved claims + group charges), each lockable.
 router.get('/expense-records', asyncHandler(async (req, res) => ok(res, await records.expenseRecords(orgId(req), live.monthSchema.parse(req.query)))));
+// Earnings and profit up to today (revenue, salary earned so far, expenses, profit), month by month.
+router.get('/earnings-profit', asyncHandler(async (req, res) => ok(res, await live.earningsProfit(orgId(req), live.earningsQuerySchema.parse(req.query)))));
 router.get('/financial-month', asyncHandler(async (req, res) => ok(res, await live.financialMonthLive(orgId(req), live.monthSchema.parse(req.query)))));
 
 // --- Previous Live Analytics reports. No longer shown in the UI (replaced by

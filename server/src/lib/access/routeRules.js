@@ -177,6 +177,8 @@ const RULES = [
   [/^\/submissions(\/|$)/, { GET: ['submissions.view', 'pipeline.view', 'rejected.view', 'profiles.view'], '*': ['submissions.create', 'submissions.update', 'meetings.schedule'] }],
   // PATCH: the service decides (the round's manager, its scheduler, or an interviewer assigned to it); anything else needs the permissions
   [/^\/interview-rounds(\/|$)/, { PATCH: 'open', '*': ['submissions.update', 'meetings.schedule'] }],
+  // Interview feedback: everyone may open it (basic access, on by default); the service shows each person only the rounds they took (HR and admins: all).
+  [/^\/interview-feedback(\/|$)/, 'basic.interview_feedback'],
   [/^\/applicants(\/|$)/, { GET: ['applicants.view', 'pipeline.view'], '*': 'applicants.update' }],
   [/^\/website(\/|$)/, { GET: 'website.view', '*': 'website.update' }],
   [/^\/vendor-email(\/|$)/, 'email.send'], // one permission: Email > Send emails (no implicit allowance via vendors.onboard / accounts.update)

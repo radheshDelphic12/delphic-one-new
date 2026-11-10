@@ -571,8 +571,10 @@ async function updateInterviewRound(id, patch, user) {
     // The person who took the round (an assigned interviewer) can write and amend the result, the feedback and the skill ratings of
     // THAT round, before and after it is completed - they do not need scheduling rights for that.
     const isInterviewer = await isAssignedInterviewer(tx, id, user.id);
-    if (!isManager && !isScheduler && !isInterviewer) return { error: 'forbidden' };
-    const mayGiveFeedback = isManager || isInterviewer;
+    // HR (the recruiter role) can write the feedback of any round too, so the Interview feedback page works for them whoever sent the candidate
+    const isHr = user.role === 'recruiter';
+    if (!isManager && !isScheduler && !isInterviewer && !isHr) return { error: 'forbidden' };
+    const mayGiveFeedback = isManager || isInterviewer || isHr;
 
     const { interviewer_ids, skill_ratings, ...patchFields } = patch;
     const finalPatch = { ...patchFields };
@@ -601,7 +603,7 @@ async function updateInterviewRound(id, patch, user) {
     if (!isManager) {
       // the scheduler may move the interview; an interviewer may only write the outcome of their round
       const allowed = isScheduler ? ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'] : [];
-      if (isInterviewer) allowed.push('result', 'feedback', 'rating', 'completed_at');
+      if (isInterviewer || isHr) allowed.push('result', 'feedback', 'rating', 'completed_at');
       for (const key of Object.keys(finalPatch)) {
         if (!allowed.includes(key)) delete finalPatch[key];
       }

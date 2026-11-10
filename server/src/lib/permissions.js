@@ -96,6 +96,7 @@ const BASIC_ITEMS = [
   { key: 'basic.timesheet', label: 'Log and view own timesheet' },
   { key: 'basic.payslips', label: 'View own payslips' },
   { key: 'basic.expenses', label: 'File and track own expense claims' },
+  { key: 'basic.interview_feedback', label: 'Interview feedback (the interviews you took: result, feedback and skill ratings)' },
   { key: 'basic.employee_feedback', label: 'Employee Feedback (give feedback to the board, by name or anonymously)' },
   { key: 'basic.whistleblower', label: 'Speak Up (raise a complaint in confidence and follow it)' },
   { key: 'basic.settings', label: 'Own account (my details, security, notifications)' },
