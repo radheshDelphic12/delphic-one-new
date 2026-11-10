@@ -67,6 +67,7 @@ const MESSAGES = {
   invoice_not_found: [404, 'Invoice not found'],
   no_tds: [422, 'That invoice has no TDS recorded on it'],
   not_found: [404, 'Not found'],
+  receivables_off: [409, 'Receivables are switched off for this group (Setup)'],
   party_not_found: [422, 'One of the chosen employees / vendors is not part of this group'],
 };
 const problem = (res, result) => {
@@ -96,6 +97,11 @@ router.put('/receivable-setting', asyncHandler(async (req, res) => {
   return result.error ? problem(res, result) : ok(res, result);
 }));
 router.get('/receivables', asyncHandler(async (req, res) => ok(res, await service.receivables(req.user.org_group_ids, rename(filters.parse(req.query))))));
+router.post('/receivables/sync-wallet', asyncHandler(async (req, res) => {
+  const body = z.object({ wallet_id: uuid.optional(), from: month.optional() }).parse(req.body || {});
+  const result = await service.syncReceivableWallets(req.user.org_group_ids, req.user, { walletId: body.wallet_id, from: body.from });
+  return result.error ? problem(res, result) : ok(res, result);
+}));
 
 router.get('/gst', asyncHandler(async (req, res) => ok(res, await service.gst(req.user.org_group_ids, rename(gstQuery.parse(req.query))))));
 router.get('/tds-payable', asyncHandler(async (req, res) => ok(res, await service.tdsPayable(req.user.org_group_ids, rename(filters.parse(req.query))))));

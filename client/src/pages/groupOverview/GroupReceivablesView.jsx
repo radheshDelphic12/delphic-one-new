@@ -29,7 +29,7 @@ function Tile({ label, value, hint, tone = '' }) {
 }
 
 export function GroupReceivablesView() {
-  const { pushError } = useAlerts();
+  const { pushError, pushSuccess } = useAlerts();
   const [from, setFrom] = useState('');
   const [pendingOnly, setPendingOnly] = useState(true);
   const [query, setQuery] = useState('');
@@ -45,6 +45,16 @@ export function GroupReceivablesView() {
     return (data?.rows || []).filter((r) => (!pendingOnly || r.pending > 0)
       && (!q || [r.number, r.client, r.project, r.company].some((x) => String(x || '').toLowerCase().includes(q))));
   }, [data, pendingOnly, query]);
+
+  const [syncing, setSyncing] = useState(false);
+  const syncWallets = async () => {
+    setSyncing(true);
+    try {
+      const { data: res } = await apiClient.post('/group-tax/receivables/sync-wallet', from ? { from } : {});
+      setData(res.data);
+      pushSuccess(`${res.data.synced} Receivable wallet${res.data.synced === 1 ? '' : 's'} updated`);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not update the Receivable wallet'), 'Update failed'); } finally { setSyncing(false); }
+  };
 
   if (!data) return <Skeleton className="h-48" />;
   if (!data.enabled) return <p className="rounded-xl bg-warning-50 px-3 py-2 text-sm text-warning-800">Receivables are switched off. Switch them on under Setup.</p>;
@@ -73,6 +83,29 @@ export function GroupReceivablesView() {
         <Tile label="Left now" value={money(f.left_now)} hint="In hand - GST to deposit - TDS to deposit" tone={f.left_now < 0 ? 'border-danger-200' : ''} />
         <Tile label="Left after collecting" value={money(f.left_after_collection)} hint="Left now + everything to collect" />
       </div>
+
+      {(data.wallets || []).length > 0 && (
+        <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="receivable-wallets">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-heading text-sm font-semibold text-tertiary-900">Receivable wallet</h3>
+              <p className="text-xs text-tertiary-500">The wallet named Receivable should equal what clients still owe on invoices billed from {data.since_month}. Updating adds one audited entry for the difference.</p>
+            </div>
+            {data.wallets.some((w) => !w.in_sync) && <button type="button" className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50" disabled={syncing} onClick={syncWallets}>{syncing ? 'Updating…' : 'Update wallet to match invoices'}</button>}
+          </div>
+          <table className="mt-2 min-w-full text-sm">
+            <thead><tr><th className={th}>Owner</th><th className={thr}>Wallet balance</th><th className={thr}>Pending on invoices</th><th className={thr}>Difference</th><th className={th}>Status</th></tr></thead>
+            <tbody className="divide-y divide-tertiary-100">
+              {data.wallets.map((w) => (
+                <tr key={w.id} data-testid="receivable-wallet-row">
+                  <td className={td}>{w.owner}</td><td className={tdr}>{money(w.balance)}</td><td className={tdr}>{money(w.expected)}</td><td className={tdr}>{money(w.difference)}</td>
+                  <td className={td}><Pill tone={w.in_sync ? 'green' : 'amber'}>{w.in_sync ? 'Matches' : 'Differs'}</Pill></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <table className="min-w-full text-sm">

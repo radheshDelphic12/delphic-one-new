@@ -107,3 +107,29 @@ describe('Book Keeping receivables', () => {
     expect(numbers(await get('/receivables', { from: '2026-10' }))).toEqual(['INV-OCT']);
   });
 });
+
+describe('the Receivable wallet follows the pending invoices', () => {
+  test('shows the difference and one audited entry brings the wallet to the pending amount', async () => {
+    await seed();
+    await put('/receivable-setting', { org_group_id: group.id, enabled: true, since_month: '2026-09' });
+    const wallet = await prisma.wallet.create({ data: { org_group_id: group.id, owner_org_id: alpha.id, purpose: 'general', name: 'Receivable', currency: 'INR', opening_balance: 1000 } });
+    await prisma.wallet.create({ data: { org_group_id: group.id, owner_org_id: alpha.id, purpose: 'general', name: 'Delphic INR', currency: 'INR', opening_balance: 5 } });
+    const before = (await get('/receivables')).body.data.wallets;
+    expect(before).toHaveLength(1); // only the wallet named Receivable
+    expect(before[0]).toMatchObject({ id: wallet.id, balance: 1000, expected: 304000, difference: 303000, in_sync: false });
+    const res = await authed(request(app).post(`${base}/receivables/sync-wallet`), superToken).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data.synced).toBe(1);
+    expect(res.body.data.wallets[0]).toMatchObject({ balance: 304000, difference: 0, in_sync: true });
+    const tx = await prisma.walletTransaction.findFirst({ where: { wallet_id: wallet.id } });
+    expect(tx).toMatchObject({ direction: 'in', category: 'Receivable sync' });
+    expect(await prisma.walletAudit.count({ where: { entity_id: tx.id, action: 'create' } })).toBe(1);
+    // a second call changes nothing
+    expect((await authed(request(app).post(`${base}/receivables/sync-wallet`), superToken).send({})).body.data.synced).toBe(0);
+  });
+
+  test('refused while Receivables is switched off', async () => {
+    const res = await authed(request(app).post(`${base}/receivables/sync-wallet`), superToken).send({});
+    expect(res.status).toBe(409);
+  });
+});

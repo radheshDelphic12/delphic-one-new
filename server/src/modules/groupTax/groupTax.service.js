@@ -578,8 +578,10 @@ async function receivables(groupIds, { orgId, currency, from, to } = {}) {
   const gstToDeposit = Math.max(Number(gstView.totals?.balance || 0), 0);
   const tdsToDeposit = round2(Math.max(tdsPay.inr?.to_deposit || 0, 0) + Math.max(tdsPay.employees?.to_deposit || 0, 0));
   const freeNow = round2(inHand - gstToDeposit - tdsToDeposit);
+  const wallets = await receivableWallets(onIds, inr);
   return {
     enabled: true,
+    wallets,
     groups,
     since_month: since,
     rows: list,
@@ -598,7 +600,51 @@ async function receivables(groupIds, { orgId, currency, from, to } = {}) {
   };
 }
 
+/** Active INR wallets named "Receivable": their book balance next to what the invoices say is pending (the owning company's, or the whole group's when the wallet has no company). */
+async function receivableWallets(groupIds, inrRows) {
+  const calc = require('../cashPosition/cash.calc');
+  const list = await prisma.wallet.findMany({
+    where: { org_group_id: { in: groupIds }, active: true, currency: 'INR', name: { equals: 'Receivable', mode: 'insensitive' } },
+    include: { owner_org: { select: { name: true } }, owner_legal_entity: { select: { name: true, workspace_id: true } }, transactions: { where: { deleted_at: null } } },
+    orderBy: { created_at: 'asc' },
+  });
+  const pendingByOrg = new Map();
+  let all = 0;
+  for (const r of inrRows) { pendingByOrg.set(r.org_id, round2((pendingByOrg.get(r.org_id) || 0) + r.pending)); all = round2(all + r.pending); }
+  return list.map((w) => {
+    const orgId = w.owner_org_id || w.owner_legal_entity?.workspace_id || null;
+    const expected = orgId ? pendingByOrg.get(orgId) || 0 : all;
+    const balance = Number(calc.walletBalance(w.opening_balance, w.transactions).toFixed(2));
+    return {
+      id: w.id, group_id: w.org_group_id, owner: w.owner_org?.name || w.owner_legal_entity?.name || 'Whole group',
+      balance, expected: round2(expected), difference: round2(expected - balance), in_sync: Math.abs(expected - balance) < 0.005,
+    };
+  });
+}
+
+/** Bring the Receivable wallets to what the invoices say: one audited manual entry for the difference (in or out), nothing else is touched. */
+async function syncReceivableWallets(groupIds, user, { walletId, ...q } = {}) {
+  const data = await receivables(groupIds, q);
+  if (!data.enabled) return { error: 'receivables_off' };
+  const targets = (data.wallets || []).filter((w) => !w.in_sync && (!walletId || w.id === walletId));
+  const today = new Date(new Date().toISOString().slice(0, 10));
+  const done = [];
+  for (const w of targets) {
+    const amount = Math.abs(w.difference);
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.walletTransaction.create({ data: {
+        wallet_id: w.id, date: today, direction: w.difference > 0 ? 'in' : 'out', amount, mode: 'other', category: 'Receivable sync',
+        notes: `Brought to the pending client invoices from ${data.since_month} (was ${w.balance}, now ${w.expected})`, reference_type: 'manual', created_by: user.id,
+      } });
+      await tx.walletAudit.create({ data: { org_group_id: w.group_id, entity_type: 'transaction', entity_id: row.id, action: 'create', after: JSON.parse(JSON.stringify(row)), actor_id: user.id } });
+    });
+    done.push(w.id);
+  }
+  return { synced: done.length, ...(await receivables(groupIds, q)) };
+}
+
 module.exports = {
+  syncReceivableWallets,
   receivableSetting, setReceivableSetting, receivables,
   options, invoices, tdsReceivable, addTdsReceipt, removeTdsReceipt, gst, tdsPayable,
   challans, parties, createChallan, updateChallan, removeChallan, challanFile, KIND_LABEL,
