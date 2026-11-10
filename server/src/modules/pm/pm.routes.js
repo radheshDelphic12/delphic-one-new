@@ -53,6 +53,8 @@ const ERRORS = {
   duplicate_version: [409, 'This project already has a release with that version'],
   already_released: [409, 'A released version is closed: its status cannot be changed back and it cannot be deleted'],
   release_closed: [409, 'A released or cancelled version is closed for changes'],
+  release_cancelled: [409, 'A cancelled release cannot be deployed'],
+  version_not_found: [404, 'This project has no release with that version'],
   git_unavailable: [422, 'This server has no git history to read. Push the commits from your build or from your computer instead'],
   git_failed: [422, 'Could not read the git history (check the branch name)'],
 };
@@ -139,6 +141,10 @@ router.get('/releases/:id/notes', run((req, a) => releases.releaseNotes(orgId(re
 router.get('/projects/:id/commits', run((req, a) => releases.listCommits(orgId(req), req.params.id, a, z.object({ release: z.union([z.literal('none'), z.string().uuid()]).optional(), q: z.string().trim().max(100).optional(), limit: z.coerce.number().int().min(1).max(500).optional() }).parse(req.query))));
 router.post('/projects/:id/commits', run((req, a) => releases.importCommits(orgId(req), req.params.id, a, releases.importSchema.parse(req.body || {})), 201));
 router.post('/projects/:id/commits/sync', run((req, a) => releases.syncFromGit(orgId(req), req.params.id, a, releases.syncSchema.parse(req.body || {}))));
+router.get('/projects/:id/environments', run((req, a) => releases.environmentsOverview(orgId(req), req.params.id, a)));
+router.post('/projects/:id/deployments', run((req, a) => releases.recordDeploymentByVersion(orgId(req), req.params.id, a, releases.deployByVersionSchema.parse(req.body || {})), 201));
+router.post('/releases/:id/deployments', run((req, a) => releases.recordDeployment(orgId(req), req.params.id, a, releases.deploymentSchema.parse(req.body || {})), 201));
+router.delete('/deployments/:id', run((req, a) => releases.deleteDeployment(orgId(req), req.params.id, a)));
 router.post('/commits/:id/tickets', run((req, a) => releases.setCommitTickets(orgId(req), req.params.id, a, releases.idsSchema.parse(req.body || {})), 200, 'commit'));
 
 // ---- contract links (added whenever required; tickets never depend on them)

@@ -494,7 +494,7 @@ model User {
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
   billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
   vendor_adjustments_created      VendorAdjustment[]              @relation("VendorAdjustmentCreatedBy")
-  ai_interview_feedback_given      AiInterviewFeedback[]           @relation("AiInterviewFeedbackBy")
+  ai_interview_feedback_given     AiInterviewFeedback[]           @relation("AiInterviewFeedbackBy")
   contract_charges_created        ContractCharge[]                @relation("ContractChargeCreatedBy")
   vendor_charges_created          VendorCharge[]                  @relation("VendorChargeCreatedBy")
   group_billing_charges_raised    GroupBillingCharge[]            @relation("GroupBillingChargeRaisedBy")
@@ -838,18 +838,18 @@ model PreviousMonthDue {
 // Recycle bin (see config/recycleBin.js): a user-triggered delete of a record is archived here first, row and all, so an
 // admin delete is never final. A superadmin restores it (Settings > Deleted records), which puts the row back with its old id.
 model DeletedRecord {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String?   @db.Uuid
-  model       String // Prisma model name, e.g. TimesheetEntry
-  row_id      String?
-  label       String?
-  data        Json // the whole row as it was
-  reason      String?
-  deleted_by  String?   @db.Uuid
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String?   @db.Uuid
+  model           String // Prisma model name, e.g. TimesheetEntry
+  row_id          String?
+  label           String?
+  data            Json // the whole row as it was
+  reason          String?
+  deleted_by      String?   @db.Uuid
   deleted_by_name String?
-  deleted_at  DateTime  @default(now())
-  restored_at DateTime?
-  restored_by String?   @db.Uuid
+  deleted_at      DateTime  @default(now())
+  restored_at     DateTime?
+  restored_by     String?   @db.Uuid
 
   @@index([org_id, deleted_at])
   @@index([model, row_id])
@@ -3350,26 +3350,26 @@ enum EmailStatus {
 // talks SMTP) and a job drains it, so a mail outage cannot fail a request and
 // every send is auditable. `ics` carries an optional calendar-invite attachment.
 model EmailOutbox {
-  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id     String?     @db.Uuid
-  org        Org?        @relation(fields: [org_id], references: [id])
-  kind       String
-  to_email   String
-  to_name    String?
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String?     @db.Uuid
+  org             Org?        @relation(fields: [org_id], references: [id])
+  kind            String
+  to_email        String
+  to_name         String?
   // Optional CC (for example the internal owner of a vendor account); sent as a real CC header.
-  cc_email   String?
-  subject    String
-  body_text  String
-  body_html  String?
-  ics        String?
+  cc_email        String?
+  subject         String
+  body_text       String
+  body_html       String?
+  ics             String?
   // One file sent with the mail (kept on the server disk until it is sent): the FnF documents package, for example.
   attachment_path String?
   attachment_name String?
-  status     EmailStatus @default(queued)
-  attempts   Int         @default(0)
-  last_error String?
-  sent_at    DateTime?
-  created_at DateTime    @default(now())
+  status          EmailStatus @default(queued)
+  attempts        Int         @default(0)
+  last_error      String?
+  sent_at         DateTime?
+  created_at      DateTime    @default(now())
 
   @@index([status, created_at])
   @@index([org_id])
@@ -8577,13 +8577,14 @@ model PmProject {
   created_at          DateTime        @default(now())
   updated_at          DateTime        @default(now()) @updatedAt
 
-  members   PmProjectMember[]
-  tickets   PmTicket[]
-  contracts PmProjectContract[]
-  activity  PmActivity[]
-  fields    PmCustomField[]
-  releases  PmRelease[]
-  commits   PmCommit[]
+  members     PmProjectMember[]
+  tickets     PmTicket[]
+  contracts   PmProjectContract[]
+  activity    PmActivity[]
+  fields      PmCustomField[]
+  releases    PmRelease[]
+  commits     PmCommit[]
+  deployments PmDeployment[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -8621,36 +8622,36 @@ model PmStatus {
 }
 
 model PmTicket {
-  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id                 String    @db.Uuid
-  project_id             String    @db.Uuid
-  project                PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  id                     String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String     @db.Uuid
+  project_id             String     @db.Uuid
+  project                PmProject  @relation(fields: [project_id], references: [id], onDelete: Cascade)
   number                 Int
   title                  String
   description            String?
-  type                   String    @default("task")
-  priority               String    @default("medium")
-  status_key             String    @default("open")
-  assignee_membership_id String?   @db.Uuid
-  reporter_membership_id String?   @db.Uuid
+  type                   String     @default("task")
+  priority               String     @default("medium")
+  status_key             String     @default("open")
+  assignee_membership_id String?    @db.Uuid
+  reporter_membership_id String?    @db.Uuid
   // Optional tag to one of the project's linked contracts (progress per contract).
-  contract_id            String?   @db.Uuid
-  due_date               DateTime? @db.Date
+  contract_id            String?    @db.Uuid
+  due_date               DateTime?  @db.Date
   resolution             String?
   resolved_at            DateTime?
   // Values of the project's custom fields, keyed by field key. internal_only hides the ticket from client / vendor shares.
-  custom_values          Json      @default("{}")
-  internal_only          Boolean   @default(false)
+  custom_values          Json       @default("{}")
+  internal_only          Boolean    @default(false)
   // The release this ticket ships in.
-  release_id             String?   @db.Uuid
+  release_id             String?    @db.Uuid
   release                PmRelease? @relation(fields: [release_id], references: [id], onDelete: SetNull)
-  created_by             String    @db.Uuid
-  created_at             DateTime  @default(now())
-  updated_at             DateTime  @default(now()) @updatedAt
+  created_by             String     @db.Uuid
+  created_at             DateTime   @default(now())
+  updated_at             DateTime   @default(now()) @updatedAt
 
-  comments    PmTicketComment[]
-  activity    PmActivity[]
-  attachments PmTicketAttachment[]
+  comments     PmTicketComment[]
+  activity     PmActivity[]
+  attachments  PmTicketAttachment[]
   commit_links PmCommitTicket[]
 
   @@unique([project_id, number])
@@ -8695,8 +8696,9 @@ model PmRelease {
   created_at   DateTime  @default(now())
   updated_at   DateTime  @default(now()) @updatedAt
 
-  tickets PmTicket[]
-  commits PmCommit[]
+  tickets     PmTicket[]
+  commits     PmCommit[]
+  deployments PmDeployment[]
 
   @@unique([project_id, version])
   @@index([org_id, project_id])
@@ -8705,12 +8707,12 @@ model PmRelease {
 
 // A commit recorded against a project (synced from git or pushed by a CI step). Ticket references in the message link it to tickets.
 model PmCommit {
-  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id       String      @db.Uuid
-  project_id   String      @db.Uuid
-  project      PmProject   @relation(fields: [project_id], references: [id], onDelete: Cascade)
-  release_id   String?     @db.Uuid
-  release      PmRelease?  @relation(fields: [release_id], references: [id], onDelete: SetNull)
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String     @db.Uuid
+  project_id   String     @db.Uuid
+  project      PmProject  @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  release_id   String?    @db.Uuid
+  release      PmRelease? @relation(fields: [release_id], references: [id], onDelete: SetNull)
   sha          String
   message      String
   author_name  String?
@@ -8718,7 +8720,7 @@ model PmCommit {
   committed_at DateTime
   branch       String?
   url          String?
-  created_at   DateTime    @default(now())
+  created_at   DateTime   @default(now())
 
   tickets PmCommitTicket[]
 
@@ -8726,6 +8728,27 @@ model PmCommit {
   @@index([project_id, committed_at])
   @@index([release_id])
   @@map("pm_commits")
+}
+
+// A release put on an environment (dev, beta or prod): when, with which commit, and whether it worked. The newest 'deployed' row of an environment is what runs there.
+model PmDeployment {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  project_id  String    @db.Uuid
+  project     PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  release_id  String    @db.Uuid
+  release     PmRelease @relation(fields: [release_id], references: [id], onDelete: Cascade)
+  environment String
+  status      String    @default("deployed")
+  deployed_at DateTime  @default(now())
+  commit_sha  String?
+  note        String?
+  deployed_by String?   @db.Uuid
+  created_at  DateTime  @default(now())
+
+  @@index([project_id, environment, deployed_at])
+  @@index([release_id])
+  @@map("pm_deployments")
 }
 
 model PmCommitTicket {
@@ -9404,29 +9427,29 @@ model TdsReceipt {
 // with its challan number (CIN / CRN), the paid-through bank, the period it settles and the uploaded challan. `parties` = who the challan covers
 // (employees and / or vendors picked on the form, optionally with the amount for each). kind gst_credit is a credit set against GST (no challan).
 model TaxChallan {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_group_id  String    @db.Uuid
-  org_id        String?   @db.Uuid
-  kind          String // gst | gst_credit | tds_salary | tds_vendor | advance_tax | pf | esi | pt | other
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id   String    @db.Uuid
+  org_id         String?   @db.Uuid
+  kind           String // gst | gst_credit | tds_salary | tds_vendor | advance_tax | pf | esi | pt | other
   challan_number String?
-  bsr_code      String?
-  bank          String?
-  period_month  Int
-  period_year   Int
-  covers_months Int       @default(1)
-  amount        Decimal   @db.Decimal(16, 2)
-  paid_on       DateTime  @db.Date
-  parties       Json      @default("[]") // [{ kind: employee | vendor, id, label, amount? }]
-  note          String?
-  file_path     String?
-  file_name     String?
-  file_mime     String?
-  created_by    String?   @db.Uuid
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @default(now()) @updatedAt
-  deleted_at    DateTime?
-  deleted_by    String?   @db.Uuid
-  delete_reason String?
+  bsr_code       String?
+  bank           String?
+  period_month   Int
+  period_year    Int
+  covers_months  Int       @default(1)
+  amount         Decimal   @db.Decimal(16, 2)
+  paid_on        DateTime  @db.Date
+  parties        Json      @default("[]") // [{ kind: employee | vendor, id, label, amount? }]
+  note           String?
+  file_path      String?
+  file_name      String?
+  file_mime      String?
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+  deleted_at     DateTime?
+  deleted_by     String?   @db.Uuid
+  delete_reason  String?
 
   @@index([org_group_id, kind, period_year, period_month])
   @@map("tax_challans")

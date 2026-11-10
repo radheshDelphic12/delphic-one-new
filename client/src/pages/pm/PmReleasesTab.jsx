@@ -10,6 +10,20 @@ const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const Empty = ({ children }) => <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-tertiary-500">{children}</p>;
 const STATUS_LABEL = { planned: 'Planned', in_progress: 'In progress', released: 'Released', cancelled: 'Cancelled' };
 const STATUS_TONE = { planned: 'blue', in_progress: 'purple', released: 'green', cancelled: 'gray' };
+const ENVS = [{ key: 'dev', label: 'Dev' }, { key: 'beta', label: 'Beta' }, { key: 'prod', label: 'Prod' }];
+const TYPE_LABEL = { bug: 'Bug', task: 'Feature / task', change: 'Change', support: 'Support' };
+
+/** Dev / Beta / Prod badges of one release: green with the date when deployed there, grey when not yet. */
+function EnvBadges({ environments }) {
+  return (
+    <span className="inline-flex flex-wrap gap-1" data-testid="pm-env-badges">
+      {ENVS.map(({ key, label }) => {
+        const d = environments?.[key];
+        return <span key={key} className={`rounded-full px-2 py-0.5 text-[11px] ${d ? 'bg-success-50 text-success-700' : 'bg-tertiary-100 text-tertiary-500'}`}>{label}{d ? ` ${dateLabel(d.deployed_at.slice(0, 10))}` : ' -'}</span>;
+      })}
+    </span>
+  );
+}
 const when = (iso) => (iso ? dateLabel(iso.slice(0, 10)) : '');
 
 function CommitRow({ c, project }) {
@@ -31,6 +45,7 @@ function ReleaseDetail({ project, releaseId, canManage, onChanged }) {
   const [freeCommits, setFreeCommits] = useState([]);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ git_tag: '', commit_sha: '', notes: '' });
+  const [deployNote, setDeployNote] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +96,33 @@ function ReleaseDetail({ project, releaseId, canManage, onChanged }) {
         </div>
       )}
       {!open && r.notes && <p className="whitespace-pre-wrap text-sm text-tertiary-700">{r.notes}</p>}
+
+      <section data-testid="pm-release-deploy">
+        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Environments</h4>
+        <EnvBadges environments={r.environments} />
+        {canManage && r.status !== 'cancelled' && (
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <label className="text-xs text-tertiary-600">Note (optional)<input className={`${INPUT} mt-1 w-56`} maxLength={1000} value={deployNote} onChange={(e) => setDeployNote(e.target.value)} /></label>
+            {ENVS.map(({ key, label }) => (
+              <button key={key} type="button" className="btn-secondary px-3 py-1 text-xs" disabled={busy} data-testid={`pm-deploy-${key}`} onClick={() => run(async () => { await pmApi.deployRelease(r.id, { environment: key, ...(deployNote.trim() ? { note: deployNote.trim() } : {}) }); setDeployNote(''); }, `${r.version} recorded on ${label}`)}>Deployed to {label}</button>
+            ))}
+          </div>
+        )}
+        {r.deployments.length > 0 && (
+          <ul className="mt-2 divide-y rounded-xl border bg-white text-xs">
+            {r.deployments.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center gap-x-3 px-3 py-1.5">
+                <Pill tone={d.status === 'deployed' ? 'green' : 'red'}>{d.status === 'deployed' ? 'Deployed' : 'Failed'}</Pill>
+                <b>{ENVS.find((e) => e.key === d.environment)?.label || d.environment}</b>
+                <span className="text-tertiary-500">{when(d.deployed_at)}</span>
+                {d.commit_sha && <span className="font-mono text-tertiary-500">{d.commit_sha.slice(0, 7)}</span>}
+                {d.note && <span className="min-w-0 flex-1 break-words text-tertiary-700">{d.note}</span>}
+                {canManage && <button type="button" className="ml-auto text-danger-600 underline" disabled={busy} onClick={() => run(() => pmApi.deleteDeployment(d.id), 'Entry removed')}>Remove</button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section>
         <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Tickets in this release ({r.tickets.length})</h4>
@@ -175,6 +217,7 @@ function ReleasesList({ project, canManage }) {
                 {x.name && <span className="text-sm text-tertiary-600">{x.name}</span>}
                 <Pill tone={STATUS_TONE[x.status]}>{STATUS_LABEL[x.status]}</Pill>
                 {x.git_tag && <span className="font-mono text-xs text-tertiary-500">{x.git_tag}</span>}
+                <EnvBadges environments={x.environments} />
                 <span className="ml-auto text-xs text-tertiary-500">{x.tickets_done}/{x.tickets} tickets done · {x.commits} commits · {x.released_at ? `released ${when(x.released_at)}` : x.planned_date ? `planned ${dateLabel(x.planned_date)}` : 'no date'}</span>
               </button>
               {openId === x.id && <ReleaseDetail project={project} releaseId={x.id} canManage={canManage} onChanged={load} />}
@@ -182,6 +225,51 @@ function ReleasesList({ project, canManage }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Dev / Beta / Prod side by side: what runs there now, and which bugs and features went live in each release that was put there. */
+function EnvironmentsView({ project }) {
+  const { pushError } = useAlerts();
+  const [data, setData] = useState(null);
+  useEffect(() => { pmApi.environments(project.id).then(setData).catch((e) => pushError(pmError(e, 'Could not load the environments'), 'Load failed')); }, [project.id, pushError]);
+  if (!data) return <p className="text-sm text-tertiary-500">Loading…</p>;
+  return (
+    <div className="space-y-4" data-testid="pm-environments">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {data.environments.map((e) => (
+          <div key={e.key} className="rounded-xl border bg-white p-3" data-testid={`pm-env-${e.key}`}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">{e.label} is running</div>
+            {e.live ? (
+              <>
+                <div className="text-lg font-semibold text-tertiary-900">{e.live.release.version}</div>
+                <div className="text-xs text-tertiary-500">since {when(e.live.deployed_at)}{e.live.commit_sha ? ` · ${e.live.commit_sha.slice(0, 7)}` : ''}</div>
+              </>
+            ) : <div className="text-sm text-tertiary-400">Nothing recorded yet</div>}
+            {e.last_failed && <div className="mt-1 text-xs text-danger-600">Last attempt failed {when(e.last_failed.deployed_at)}</div>}
+          </div>
+        ))}
+      </div>
+      {data.environments.map((e) => (
+        <section key={e.key}>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Went live on {e.label}</h4>
+          {e.releases.length === 0 ? <p className="text-xs text-tertiary-400">No release has been put on {e.label} yet.</p> : (
+            <ul className="space-y-2">
+              {e.releases.map((x) => (
+                <li key={x.release.id} className="rounded-xl border bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm"><b>{x.release.version}</b>{x.release.name && <span className="text-tertiary-600">{x.release.name}</span>}{x.live && <Pill tone="green">Live now</Pill>}<span className="ml-auto text-xs text-tertiary-500">{when(x.deployed_at)}</span></div>
+                  {x.tickets.length === 0 ? <p className="mt-1 text-xs text-tertiary-400">No tickets were added to this release.</p> : (
+                    <ul className="mt-1 divide-y text-sm">
+                      {x.tickets.map((t) => <li key={t.id} className="flex items-center gap-2 py-1"><span className="text-xs text-tertiary-500">{project.code}#{t.number}</span><Pill tone={t.type === 'bug' ? 'red' : 'blue'}>{TYPE_LABEL[t.type] || t.type}</Pill><span className="flex-1">{t.title}</span></li>)}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
     </div>
   );
 }
@@ -224,8 +312,10 @@ export default function PmReleasesTab({ project }) {
   const [view, setView] = useState('releases');
   return (
     <div className="space-y-4">
-      <SectionTabs tabs={[{ key: 'releases', label: 'Releases' }, { key: 'commits', label: 'Commits' }]} value={view} onChange={setView} />
-      {view === 'releases' ? <ReleasesList project={project} canManage={project.can_manage} /> : <CommitsList project={project} canManage={project.can_manage} />}
+      <SectionTabs tabs={[{ key: 'releases', label: 'Releases' }, { key: 'environments', label: 'Dev / Beta / Prod' }, { key: 'commits', label: 'Commits' }]} value={view} onChange={setView} />
+      {view === 'releases' && <ReleasesList project={project} canManage={project.can_manage} />}
+      {view === 'environments' && <EnvironmentsView project={project} />}
+      {view === 'commits' && <CommitsList project={project} canManage={project.can_manage} />}
       <p className="flex items-center gap-1 text-[11px] text-tertiary-400"><GitCommit className="h-3 w-3" />A released version is closed: its tickets and commits stay as they were.</p>
     </div>
   );

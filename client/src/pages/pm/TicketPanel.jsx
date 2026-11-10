@@ -152,7 +152,16 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
               {t.tracking && (t.tracking.release || t.tracking.commits.length > 0) && (
                 <section data-testid="pm-ticket-tracking">
                   <h4 className="mb-2 text-sm font-semibold text-tertiary-900">Release and commits</h4>
-                  {t.tracking.release && <p className="mb-1 text-xs text-tertiary-600">Ships in release <b>{t.tracking.release.version}</b> ({t.tracking.release.status.replace('_', ' ')})</p>}
+                  {t.tracking.release && <p className="mb-1 text-xs text-tertiary-600">Ships in release <b>{t.tracking.release.version}</b> ({t.tracking.release.status.replace('_', ' ')})
+                    {t.tracking.release.environments && (
+                      <span className="ml-2 inline-flex flex-wrap gap-1" data-testid="pm-ticket-envs">
+                        {[['dev', 'Dev'], ['beta', 'Beta'], ['prod', 'Prod']].map(([k, label]) => {
+                          const d = t.tracking.release.environments[k];
+                          return <span key={k} className={`rounded-full px-2 py-0.5 text-[11px] ${d ? 'bg-success-50 text-success-700' : 'bg-tertiary-100 text-tertiary-500'}`}>{label}: {d ? `live ${d.deployed_at.slice(0, 10)}` : 'not yet'}</span>;
+                        })}
+                      </span>
+                    )}
+                  </p>}
                   <ul className="space-y-1">
                     {t.tracking.commits.map((c) => (
                       <li key={c.id} className="text-xs text-tertiary-600"><span className="font-mono">{c.short}</span> {c.subject}{c.author_name ? ` (${c.author_name})` : ''}</li>

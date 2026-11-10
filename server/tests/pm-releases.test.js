@@ -138,3 +138,58 @@ describe('releases', () => {
     expect((await post(`/commits/${commit.id}/tickets`, adminToken, { remove: [t2.id] })).body.data.tickets).toHaveLength(0);
   });
 });
+
+describe('environments (dev / beta / prod)', () => {
+  test('a release is put on dev, beta and prod; each environment shows what runs there and which tickets went live', async () => {
+    const { project, t1, t2 } = await setup();
+    const r1 = (await post(`/projects/${project.id}/releases`, adminToken, { version: '1.0.0' })).body.data;
+    const r2 = (await post(`/projects/${project.id}/releases`, adminToken, { version: '1.1.0' })).body.data;
+    await post(`/releases/${r1.id}/tickets`, adminToken, { add: [t1.id] });
+    await post(`/releases/${r2.id}/tickets`, adminToken, { add: [t2.id] });
+
+    // nothing deployed yet
+    let ov = (await get(`/projects/${project.id}/environments`, annToken)).body.data;
+    expect(ov.environments.map((e) => [e.key, e.live])).toEqual([['dev', null], ['beta', null], ['prod', null]]);
+
+    // 1.0.0 everywhere, then 1.1.0 on dev and beta only
+    for (const environment of ['dev', 'beta', 'prod']) expect((await post(`/releases/${r1.id}/deployments`, adminToken, { environment, deployed_at: '2026-11-01T10:00:00.000Z' })).status).toBe(201);
+    for (const environment of ['dev', 'beta']) await post(`/releases/${r2.id}/deployments`, adminToken, { environment, deployed_at: '2026-11-05T10:00:00.000Z' });
+    // a failed attempt does not change what runs
+    await post(`/releases/${r2.id}/deployments`, adminToken, { environment: 'prod', status: 'failed', note: 'migration error', deployed_at: '2026-11-06T10:00:00.000Z' });
+
+    ov = (await get(`/projects/${project.id}/environments`, annToken)).body.data;
+    const by = Object.fromEntries(ov.environments.map((e) => [e.key, e]));
+    expect(by.dev.live.release.version).toBe('1.1.0');
+    expect(by.beta.live.release.version).toBe('1.1.0');
+    expect(by.prod.live.release.version).toBe('1.0.0');
+    expect(by.prod.last_failed).toMatchObject({ status: 'failed', note: 'migration error' });
+    expect(by.prod.releases.map((x) => x.release.version)).toEqual(['1.0.0']);
+    expect(by.prod.releases[0].tickets.map((t) => t.number)).toEqual([t1.number]);
+    expect(by.beta.releases.map((x) => [x.release.version, x.live])).toEqual([['1.1.0', true], ['1.0.0', false]]);
+
+    // the release and the ticket both say where it is live
+    const list = (await get(`/projects/${project.id}/releases`, annToken)).body.data.releases;
+    expect(list.find((x) => x.version === '1.1.0').environments).toMatchObject({ dev: expect.any(Object), beta: expect.any(Object), prod: null });
+    const tracking = (await get(`/tickets/${t2.id}`, annToken)).body.data.tracking;
+    expect(tracking.release.environments.dev).not.toBeNull();
+    expect(tracking.release.environments.prod).toBeNull();
+    expect((await get(`/tickets/${t1.id}`, annToken)).body.data.tracking.release.environments.prod).not.toBeNull();
+  });
+
+  test('a deploy script names the version; unknown version, unknown environment, member and cancelled release are refused', async () => {
+    const { project } = await setup();
+    const rel = (await post(`/projects/${project.id}/releases`, adminToken, { version: '2.0.0' })).body.data;
+    expect((await post(`/projects/${project.id}/deployments`, adminToken, { version: '2.0.0', environment: 'beta', commit_sha: 'abc1234' })).status).toBe(201);
+    expect((await post(`/projects/${project.id}/deployments`, adminToken, { version: '9.9.9', environment: 'beta' })).status).toBe(404);
+    expect((await post(`/projects/${project.id}/deployments`, adminToken, { version: '2.0.0', environment: 'staging' })).status).toBe(422);
+    expect((await post(`/releases/${rel.id}/deployments`, annToken, { environment: 'dev' })).status).toBe(403);
+    const detail = (await get(`/releases/${rel.id}`, adminToken)).body.data;
+    expect(detail.deployments).toHaveLength(1);
+    expect(detail.environments.beta.commit_sha).toBe('abc1234');
+    // a deployment entered by mistake can be removed
+    expect((await del(`/deployments/${detail.deployments[0].id}`, adminToken)).status).toBe(200);
+    expect((await get(`/releases/${rel.id}`, adminToken)).body.data.environments.beta).toBeNull();
+    await patch(`/releases/${rel.id}`, adminToken, { status: 'cancelled' });
+    expect((await post(`/releases/${rel.id}/deployments`, adminToken, { environment: 'dev' })).status).toBe(409);
+  });
+});
