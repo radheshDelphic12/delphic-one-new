@@ -274,6 +274,21 @@ router.patch('/fnf/:membershipId', canMethod('financials', 'admin'), asyncHandle
   return ok(res, result.record);
 }));
 
+// Put the final payment into any month's payroll (it is a normal salary adjustment of kind fnf, so it shows on that month's payslip).
+const fnfPayrollBody = z.object({ period_month: z.number().int().min(1).max(12), period_year: z.number().int().min(2000).max(2100), amount: z.coerce.number().positive().max(1e10), note: z.string().trim().max(300).optional() });
+router.put('/fnf/:membershipId/payroll-entry', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfService.setPayrollEntry(req.user.org_id, req.user, req.params.membershipId, fnfPayrollBody.parse(req.body));
+  if (result.error === 'not_found') return fail(res, 404, 'Employee not found');
+  if (result.error === 'not_exited') return fail(res, 422, 'FnF applies to employees who have exited');
+  if (result.error) return fail(res, 400, result.error);
+  return ok(res, result.entry, { needs_refresh: result.needs_refresh });
+}));
+router.delete('/fnf/:membershipId/payroll-entry', canMethod('financials', 'admin'), asyncHandler(async (req, res) => {
+  const result = await fnfService.clearPayrollEntry(req.user.org_id, req.user, req.params.membershipId);
+  if (result.error) return fail(res, 404, 'No FnF payment is set in payroll');
+  return ok(res, { removed: result.removed });
+}));
+
 // FnF statement and the documents package (the statement + every salary slip since joining): view, edit the lines, download, email.
 const fnfItemsSchema = z.object({ items: z.array(z.object({ label: z.string().trim().min(1).max(120), kind: z.enum(['earning', 'deduction']), amount: z.coerce.number().positive().max(1e10), note: z.string().trim().max(200).optional() })).max(40) });
 const fnfEmailSchema = z.object({ to_email: z.string().trim().email().max(200), note: z.string().trim().max(500).optional() });

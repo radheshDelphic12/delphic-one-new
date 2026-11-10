@@ -543,6 +543,7 @@ async function getTicket(orgId, ticketId, actor) {
   return {
     ...(await shapeTickets(orgId, [ticket], cat))[0],
     project: { id: project.id, code: project.code, name: project.name },
+    tracking: await require('./pmReleases.service').ticketTracking(ticketId),
     attachments: attachments.map((a) => ({ id: a.id, filename: a.filename, mime_type: a.mime_type, size_bytes: a.size_bytes, uploaded_by: who.get(a.uploaded_by) || 'Unknown', can_delete: actor.isManager || a.uploaded_by === actor.userId, created_at: a.created_at })),
     comments: comments.map((c) => ({ id: c.id, body: c.body, author: c.external_label ? `${c.external_label} (shared access)` : who.get(c.author_user_id) || 'Unknown', is_public: c.is_public, external: Boolean(c.external_label), created_at: c.created_at })),
     activity: activity.map((a) => ({ id: a.id, action: a.action, from_value: a.from_value, to_value: a.to_value, note: a.note, actor: who.get(a.actor_user_id) || 'Unknown', created_at: a.created_at })),
@@ -922,6 +923,7 @@ async function myTickets(orgId, actor) {
 }
 
 module.exports = {
+  loadProject, canManageProject, logActivity, categoryResolver,
   PROJECT_STATUSES, TICKET_TYPES, PRIORITIES, CATEGORIES,
   projectCreateSchema, projectUpdateSchema, ticketCreateSchema, ticketUpdateSchema, ticketListQuerySchema, statusSchema, statusUpdateSchema,
   listStatuses, createStatus, updateStatus, listPeople,

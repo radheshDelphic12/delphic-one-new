@@ -11,6 +11,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const inputCls = 'mt-1 block w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FNF_LABEL = { not_started: 'Not started', pending: 'Pending', in_progress: 'In progress', settled: 'Settled' };
 const FNF_TONE = { not_started: 'gray', pending: 'amber', in_progress: 'blue', settled: 'green' };
 
@@ -69,22 +70,35 @@ function FnfStatementDrawer({ row, onClose, onChanged }) {
   const [email, setEmail] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState('');
+  const [payForm, setPayForm] = useState({});
   const base = row ? `/payroll/fnf/${row.org_membership_id}` : null;
 
   const load = useCallback(() => {
     if (!base) return Promise.resolve();
     return apiClient.get(`${base}/statement`).then(({ data: res }) => { setData(res.data); setItems(res.data.items || []); }).catch((err) => pushError(apiErrorMessage(err, 'Could not build the statement'), 'Something went wrong'));
   }, [base, pushError]);
-  useEffect(() => { setData(null); setEmail(''); setNote(''); load(); }, [load]);
+  useEffect(() => { setData(null); setEmail(''); setNote(''); setPayForm({}); load(); }, [load]);
 
   if (!row) return <Drawer open={false} title="" onClose={onClose} />;
   const dirty = JSON.stringify(items) !== JSON.stringify(data?.items || []);
+  const entry = data?.payroll_entry || null;
+  const now = new Date();
+  const payMonth = payForm.month || (entry ? String(entry.period_month) : String(now.getMonth() + 1));
+  const payYear = payForm.year || (entry ? String(entry.period_year) : String(now.getFullYear()));
+  const payAmount = payForm.amount !== undefined ? payForm.amount : String(entry ? entry.amount : Math.max(0, data?.totals?.net_payable || 0));
   const setItem = (i, patch) => setItems((list) => list.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
 
   async function run(key, fn, ok) {
     setBusy(key);
     try { await fn(); if (ok) pushSuccess(ok, 'Done'); } catch (err) { pushError(apiErrorMessage(err, 'That did not work'), 'Something went wrong'); } finally { setBusy(''); }
   }
+  const savePayroll = () => run('payroll', async () => {
+    await apiClient.put(`${base}/payroll-entry`, { period_month: Number(payMonth), period_year: Number(payYear), amount: Number(payAmount), ...(payForm.note ? { note: payForm.note } : {}) });
+    setPayForm({});
+    await load();
+    onChanged?.();
+  }, `The final payment is placed in the ${MONTH_NAMES[Number(payMonth) - 1]} ${payYear} payroll.`);
+  const clearPayroll = () => run('payroll-clear', async () => { await apiClient.delete(`${base}/payroll-entry`); setPayForm({}); await load(); onChanged?.(); }, 'The final payment is taken out of payroll.');
   const saveItems = () => run('items', async () => {
     const clean = items.filter((i) => String(i.label || '').trim() && Number(i.amount) > 0).map((i) => ({ label: i.label.trim(), kind: i.kind, amount: Number(i.amount), ...(i.note ? { note: i.note } : {}) }));
     await apiClient.put(`${base}/items`, { items: clean });
@@ -140,6 +154,30 @@ function FnfStatementDrawer({ row, onClose, onChanged }) {
             <div className="flex justify-between"><span>Total deductions</span><b className="tabular-nums">-{inr(data.totals.deductions)}</b></div>
             <div className="mt-1 flex justify-between border-t border-primary-200 pt-1 text-base"><span className="font-semibold">Net payable</span><b className="tabular-nums text-primary-800">{inr(data.totals.net_payable)}</b></div>
             {data.totals.recorded_amount != null && Math.abs(data.totals.recorded_amount - data.totals.net_payable) > 0.01 && <p className="mt-1 text-xs text-warning-800">The FnF register holds {inr(data.totals.recorded_amount)}. Update it with the amount above if this is the final figure.</p>}
+          </section>
+
+          <section className="rounded-xl border border-tertiary-100 p-3" data-testid="fnf-payroll-entry">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Pay this in a payroll month</h3>
+            <p className="mt-1 text-xs text-tertiary-500">Pick any month. The amount appears on that month&apos;s payroll and payslip as &quot;Full &amp; final settlement&quot;. Choosing another month moves it.</p>
+            {entry && <p className="mt-1 text-xs text-success-700" data-testid="fnf-payroll-current">Now set in {MONTH_NAMES[entry.period_month - 1]} {entry.period_year}: {inr(entry.amount)} ({entry.run_status === 'processed' ? 'that payroll is processed: use Update payroll on the run to refresh the payslip' : entry.run_status === 'no_run' ? 'no payroll run for that month yet' : 'payroll is still a draft'}).</p>}
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="text-xs text-tertiary-600">Month
+                <select className="input mt-1" data-testid="fnf-pay-month" value={payMonth} onChange={(e) => setPayForm((f) => ({ ...f, month: e.target.value }))}>{MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+              </label>
+              <label className="text-xs text-tertiary-600">Year
+                <input type="number" min="2000" max="2100" className="input mt-1" data-testid="fnf-pay-year" value={payYear} onChange={(e) => setPayForm((f) => ({ ...f, year: e.target.value }))} />
+              </label>
+              <label className="text-xs text-tertiary-600">Amount (₹)
+                <input type="number" min="0" step="0.01" className="input mt-1" data-testid="fnf-pay-amount" value={payAmount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} />
+              </label>
+              <label className="text-xs text-tertiary-600">Note
+                <input className="input mt-1" maxLength={300} value={payForm.note ?? entry?.note ?? ''} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} />
+              </label>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button type="button" className="btn-primary text-xs" data-testid="fnf-pay-save" disabled={busy === 'payroll' || !(Number(payAmount) > 0)} onClick={savePayroll}>{busy === 'payroll' ? 'Saving…' : entry ? 'Move / update' : 'Add to payroll'}</button>
+              {entry && <button type="button" className="btn-secondary text-xs" data-testid="fnf-pay-clear" disabled={busy === 'payroll-clear'} onClick={clearPayroll}>Take out of payroll</button>}
+            </div>
           </section>
 
           {data.leave_balances.length > 0 && <p className="text-xs text-tertiary-500">Leave balance at exit: {data.leave_balances.map((b) => `${b.name} ${b.remaining === null ? 'no cap' : b.remaining}`).join(' · ')}. Add leave encashment above if it is paid.</p>}

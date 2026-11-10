@@ -8582,6 +8582,8 @@ model PmProject {
   contracts PmProjectContract[]
   activity  PmActivity[]
   fields    PmCustomField[]
+  releases  PmRelease[]
+  commits   PmCommit[]
 
   @@unique([org_id, code])
   @@index([org_id, status])
@@ -8639,6 +8641,9 @@ model PmTicket {
   // Values of the project's custom fields, keyed by field key. internal_only hides the ticket from client / vendor shares.
   custom_values          Json      @default("{}")
   internal_only          Boolean   @default(false)
+  // The release this ticket ships in.
+  release_id             String?   @db.Uuid
+  release                PmRelease? @relation(fields: [release_id], references: [id], onDelete: SetNull)
   created_by             String    @db.Uuid
   created_at             DateTime  @default(now())
   updated_at             DateTime  @default(now()) @updatedAt
@@ -8646,6 +8651,7 @@ model PmTicket {
   comments    PmTicketComment[]
   activity    PmActivity[]
   attachments PmTicketAttachment[]
+  commit_links PmCommitTicket[]
 
   @@unique([project_id, number])
   @@index([org_id, assignee_membership_id])
@@ -8670,6 +8676,69 @@ model PmTicketComment {
 }
 
 // One audit trail for projects and tickets: who changed what (ticket_id is null for project-level events).
+// A release (version) of a project: which tickets and commits ship in it. status: planned | in_progress | released | cancelled.
+model PmRelease {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  project_id   String    @db.Uuid
+  project      PmProject @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  version      String
+  name         String?
+  status       String    @default("planned")
+  planned_date DateTime? @db.Date
+  released_at  DateTime?
+  git_tag      String?
+  commit_sha   String?
+  notes        String?
+  released_by  String?   @db.Uuid
+  created_by   String    @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  tickets PmTicket[]
+  commits PmCommit[]
+
+  @@unique([project_id, version])
+  @@index([org_id, project_id])
+  @@map("pm_releases")
+}
+
+// A commit recorded against a project (synced from git or pushed by a CI step). Ticket references in the message link it to tickets.
+model PmCommit {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String      @db.Uuid
+  project_id   String      @db.Uuid
+  project      PmProject   @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  release_id   String?     @db.Uuid
+  release      PmRelease?  @relation(fields: [release_id], references: [id], onDelete: SetNull)
+  sha          String
+  message      String
+  author_name  String?
+  author_email String?
+  committed_at DateTime
+  branch       String?
+  url          String?
+  created_at   DateTime    @default(now())
+
+  tickets PmCommitTicket[]
+
+  @@unique([project_id, sha])
+  @@index([project_id, committed_at])
+  @@index([release_id])
+  @@map("pm_commits")
+}
+
+model PmCommitTicket {
+  commit_id String   @db.Uuid
+  commit    PmCommit @relation(fields: [commit_id], references: [id], onDelete: Cascade)
+  ticket_id String   @db.Uuid
+  ticket    PmTicket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+
+  @@id([commit_id, ticket_id])
+  @@index([ticket_id])
+  @@map("pm_commit_tickets")
+}
+
 model PmActivity {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id        String    @db.Uuid

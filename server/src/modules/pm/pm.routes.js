@@ -9,6 +9,7 @@ const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace'
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./pm.service');
+const releases = require('./pmReleases.service');
 
 // Project Management: Delphic Global only (the master workspace). Every member sees the projects they belong to; an admin sees all.
 // Who may change what is decided per record in the service (admin / project owner / project lead manage; members work their tickets).
@@ -49,6 +50,11 @@ const ERRORS = {
   expiry_in_past: [422, 'Choose an expiry date in the future'],
   expiry_too_far: [422, 'A shared link can last at most one year'],
   already_revoked: [409, 'Already revoked'],
+  duplicate_version: [409, 'This project already has a release with that version'],
+  already_released: [409, 'A released version is closed: its status cannot be changed back and it cannot be deleted'],
+  release_closed: [409, 'A released or cancelled version is closed for changes'],
+  git_unavailable: [422, 'This server has no git history to read. Push the commits from your build or from your computer instead'],
+  git_failed: [422, 'Could not read the git history (check the branch name)'],
 };
 const bad = (res, e) => { const [s, m] = ERRORS[e] || [400, 'Request failed']; return fail(res, s, m); };
 
@@ -120,6 +126,20 @@ router.get('/attachments/:id/download', asyncHandler(async (req, res) => {
   return res.download(r.path, r.filename);
 }));
 router.delete('/attachments/:id', run((req, a) => service.deleteAttachment(orgId(req), req.params.id, a)));
+
+// ---- releases (versions) and commit tracking
+router.get('/projects/:id/releases', run((req, a) => releases.listReleases(orgId(req), req.params.id, a)));
+router.post('/projects/:id/releases', run((req, a) => releases.createRelease(orgId(req), req.params.id, a, releases.releaseCreateSchema.parse(req.body || {})), 201, 'release'));
+router.get('/releases/:id', run((req, a) => releases.getRelease(orgId(req), req.params.id, a), 200, 'release'));
+router.patch('/releases/:id', run((req, a) => releases.updateRelease(orgId(req), req.params.id, a, releases.releaseUpdateSchema.parse(req.body || {}))));
+router.delete('/releases/:id', run((req, a) => releases.deleteRelease(orgId(req), req.params.id, a)));
+router.post('/releases/:id/tickets', run((req, a) => releases.setReleaseTickets(orgId(req), req.params.id, a, releases.idsSchema.parse(req.body || {})), 200, 'release'));
+router.post('/releases/:id/commits', run((req, a) => releases.setReleaseCommits(orgId(req), req.params.id, a, releases.idsSchema.parse(req.body || {})), 200, 'release'));
+router.get('/releases/:id/notes', run((req, a) => releases.releaseNotes(orgId(req), req.params.id, a)));
+router.get('/projects/:id/commits', run((req, a) => releases.listCommits(orgId(req), req.params.id, a, z.object({ release: z.union([z.literal('none'), z.string().uuid()]).optional(), q: z.string().trim().max(100).optional(), limit: z.coerce.number().int().min(1).max(500).optional() }).parse(req.query))));
+router.post('/projects/:id/commits', run((req, a) => releases.importCommits(orgId(req), req.params.id, a, releases.importSchema.parse(req.body || {})), 201));
+router.post('/projects/:id/commits/sync', run((req, a) => releases.syncFromGit(orgId(req), req.params.id, a, releases.syncSchema.parse(req.body || {}))));
+router.post('/commits/:id/tickets', run((req, a) => releases.setCommitTickets(orgId(req), req.params.id, a, releases.idsSchema.parse(req.body || {})), 200, 'commit'));
 
 // ---- contract links (added whenever required; tickets never depend on them)
 router.post('/projects/:id/contracts', run((req, a) => service.linkContract(orgId(req), req.params.id, a, z.object({ contract_id: z.string().uuid(), is_primary: z.boolean().optional() }).parse(req.body || {})), 201, 'project'));

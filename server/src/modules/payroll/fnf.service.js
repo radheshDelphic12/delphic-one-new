@@ -54,4 +54,37 @@ async function upsert(orgId, adminUserId, orgMembershipId, patch) {
   return { record };
 }
 
-module.exports = { list, upsert };
+/** The FnF payment placed in one payroll month (a normal, audited salary adjustment of kind `fnf`), or null. */
+async function payrollEntry(orgId, orgMembershipId) {
+  const row = await prisma.salaryAdjustment.findFirst({ where: { org_id: orgId, org_membership_id: orgMembershipId, kind: 'fnf' }, orderBy: { created_at: 'desc' } });
+  if (!row) return null;
+  const run = await prisma.payrollRun.findUnique({ where: { org_id_period_month_period_year: { org_id: orgId, period_month: row.period_month, period_year: row.period_year } }, select: { status: true } });
+  return { id: row.id, period_month: row.period_month, period_year: row.period_year, amount: Number(row.amount), note: row.note, run_status: run?.status || 'no_run' };
+}
+
+/**
+ * Puts (or moves) the final payment into any month's payroll. One entry per person: choosing another month moves it.
+ * A processed month is flagged "update payroll" so the payslip picks the amount up; a month with no run yet picks it up when created.
+ */
+async function setPayrollEntry(orgId, admin, orgMembershipId, { period_month, period_year, amount, note }) {
+  const member = await prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { employment_status: true } });
+  if (!member) return { error: 'not_found' };
+  if (member.employment_status !== 'terminated') return { error: 'not_exited' };
+  const adjustments = require('./salaryAdjustments.service');
+  const old = await prisma.salaryAdjustment.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, kind: 'fnf' }, select: { id: true } });
+  for (const o of old) await adjustments.remove(orgId, admin, o.id, { reason: 'FnF payment moved to another month' });
+  const made = await adjustments.create(orgId, admin, { org_membership_id: orgMembershipId, period_month, period_year, kind: 'fnf', amount, note: note || 'Full & final settlement' });
+  if (made.error) return { error: made.error };
+  const entry = await payrollEntry(orgId, orgMembershipId);
+  return { entry, needs_refresh: entry?.run_status === 'processed' };
+}
+
+async function clearPayrollEntry(orgId, admin, orgMembershipId) {
+  const adjustments = require('./salaryAdjustments.service');
+  const old = await prisma.salaryAdjustment.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId, kind: 'fnf' }, select: { id: true } });
+  if (!old.length) return { error: 'not_found' };
+  for (const o of old) await adjustments.remove(orgId, admin, o.id, { reason: 'FnF payment taken out of payroll' });
+  return { removed: old.length };
+}
+
+module.exports = { list, upsert, payrollEntry, setPayrollEntry, clearPayrollEntry };

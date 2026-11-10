@@ -93,6 +93,7 @@ async function build(orgId, membershipId) {
     },
     status: record?.status || 'not_started',
     notes: record?.notes || null,
+    payroll_entry: await require('./fnf.service').payrollEntry(orgId, membershipId),
     earnings,
     deductions,
     items: manual,
