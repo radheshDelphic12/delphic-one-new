@@ -32,6 +32,17 @@ export const pmApi = {
   revokeShare: (id, shareId) => unwrap(apiClient.delete(`/pm/projects/${id}/shares/${shareId}`)),
   deleteAttachment: (id) => unwrap(apiClient.delete(`/pm/attachments/${id}`)),
 
+  releases: (id) => unwrap(apiClient.get(`/pm/projects/${id}/releases`)),
+  createRelease: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/releases`, body)),
+  release: (id) => unwrap(apiClient.get(`/pm/releases/${id}`)),
+  updateRelease: (id, body) => unwrap(apiClient.patch(`/pm/releases/${id}`, body)),
+  deleteRelease: (id) => unwrap(apiClient.delete(`/pm/releases/${id}`)),
+  setReleaseTickets: (id, body) => unwrap(apiClient.post(`/pm/releases/${id}/tickets`, body)),
+  setReleaseCommits: (id, body) => unwrap(apiClient.post(`/pm/releases/${id}/commits`, body)),
+  releaseNotes: (id) => unwrap(apiClient.get(`/pm/releases/${id}/notes`)),
+  commits: (id, params) => unwrap(apiClient.get(`/pm/projects/${id}/commits`, { params })),
+  syncCommits: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/commits/sync`, body)),
+
   linkContract: (id, body) => unwrap(apiClient.post(`/pm/projects/${id}/contracts`, body)),
   unlinkContract: (id, contractId) => unwrap(apiClient.delete(`/pm/projects/${id}/contracts/${contractId}`)),
   makePrimary: (id, contractId) => unwrap(apiClient.post(`/pm/projects/${id}/contracts/${contractId}/primary`)),

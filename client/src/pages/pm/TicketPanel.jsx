@@ -149,6 +149,17 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
 
           {!isNew && t && (
             <>
+              {t.tracking && (t.tracking.release || t.tracking.commits.length > 0) && (
+                <section data-testid="pm-ticket-tracking">
+                  <h4 className="mb-2 text-sm font-semibold text-tertiary-900">Release and commits</h4>
+                  {t.tracking.release && <p className="mb-1 text-xs text-tertiary-600">Ships in release <b>{t.tracking.release.version}</b> ({t.tracking.release.status.replace('_', ' ')})</p>}
+                  <ul className="space-y-1">
+                    {t.tracking.commits.map((c) => (
+                      <li key={c.id} className="text-xs text-tertiary-600"><span className="font-mono">{c.short}</span> {c.subject}{c.author_name ? ` (${c.author_name})` : ''}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               <section>
                 <h4 className="mb-2 flex items-center justify-between text-sm font-semibold text-tertiary-900">Attachments
                   <label className="inline-flex cursor-pointer items-center gap-1 rounded-xl border px-2 py-1 text-xs font-normal hover:bg-primary-50"><Paperclip className="h-3.5 w-3.5" />Attach a file

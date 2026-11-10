@@ -12,6 +12,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import { ProgressBar } from './PmProjectsPage.jsx';
 import TicketPanel from './TicketPanel.jsx';
 import { FieldsTab, SharingTab } from './PmProjectSettingsTabs.jsx';
+import PmReleasesTab from './PmReleasesTab.jsx';
 
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const CONTRACT_STATE_LABEL = { running: 'Running', not_started: 'Not started', about_to_end: 'About to end', on_hold: 'On hold', completed: 'Completed' };
@@ -234,7 +235,7 @@ export default function PmProjectDetailPage() {
   if (missing) return <Empty>This project does not exist, or you are not a member of it. <Link to="/pm" className="text-primary-700 underline">Back to projects</Link></Empty>;
   if (!project || !meta) return <Skeleton className="h-64" />;
 
-  const tabs = [{ key: 'tickets', label: `Tickets (${project.progress.total})` }, { key: 'members', label: `Team (${project.members.length})` }, { key: 'contracts', label: `Contracts (${project.contracts.length})` }, { key: 'fields', label: `Fields (${project.fields.filter((f) => f.is_active).length})` }, ...(project.can_manage ? [{ key: 'sharing', label: 'Sharing' }] : []), { key: 'activity', label: 'Activity' }];
+  const tabs = [{ key: 'tickets', label: `Tickets (${project.progress.total})` }, { key: 'members', label: `Team (${project.members.length})` }, { key: 'releases', label: 'Releases' }, { key: 'contracts', label: `Contracts (${project.contracts.length})` }, { key: 'fields', label: `Fields (${project.fields.filter((f) => f.is_active).length})` }, ...(project.can_manage ? [{ key: 'sharing', label: 'Sharing' }] : []), { key: 'activity', label: 'Activity' }];
   const closePanel = () => { setPanel({ open: false, ticketId: null, presetStatus: null }); if (sp.get('ticket')) setSp({}, { replace: true }); };
 
   return (
@@ -259,6 +260,7 @@ export default function PmProjectDetailPage() {
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'tickets' && <TicketsTab key={bump} project={project} meta={meta} reload={reload} openTicket={(tid, presetStatus) => setPanel({ open: true, ticketId: tid, presetStatus })} />}
       {tab === 'members' && <MembersTab project={project} people={people} reload={reload} />}
+      {tab === 'releases' && <PmReleasesTab project={project} />}
       {tab === 'contracts' && <ContractsTab project={project} isManager={meta.is_manager} reload={reload} />}
       {tab === 'fields' && <FieldsTab project={project} reload={reload} />}
       {tab === 'sharing' && project.can_manage && <SharingTab project={project} />}

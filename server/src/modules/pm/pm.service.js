@@ -467,7 +467,7 @@ async function shapeTickets(orgId, rows, cat) {
       assignee: names.get(t.assignee_membership_id) || null, reporter: names.get(t.reporter_membership_id) || null,
       contract_id: t.contract_id, due_date: dayOf(t.due_date), overdue: category !== 'done' && Boolean(t.due_date) && new Date(t.due_date) < t0,
       resolution: t.resolution, resolved_at: t.resolved_at, created_at: t.created_at, updated_at: t.updated_at,
-      custom_values: t.custom_values || {}, internal_only: t.internal_only,
+      custom_values: t.custom_values || {}, internal_only: t.internal_only, release_id: t.release_id || null,
     };
   });
 }
