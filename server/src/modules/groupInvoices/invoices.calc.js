@@ -23,7 +23,7 @@ const invoiceNumber = (prefix, series, seq) => `${prefix}/${series}/${String(seq
  * Returns { lines (with amount), subtotal, cgst, sgst, igst, total } as 2-decimal strings.
  * intraState: true -> CGST + SGST, false -> IGST (ignored unless type is "gst").
  */
-function computeTotals({ type, lines, intraState }) {
+function computeTotals({ type, lines, intraState, tdsRate = 0 }) {
   const priced = lines.map((l) => ({ ...l, amount: roundHalfUp(D(l.qty).times(D(l.rate))) }));
   const subtotal = priced.reduce((acc, l) => acc.plus(l.amount), ZERO);
   let tax = ZERO;
@@ -38,13 +38,15 @@ function computeTotals({ type, lines, intraState }) {
   return {
     lines: priced.map((l) => ({ ...l, amount: money(l.amount), gst_rate: type === 'gst' ? Number(l.gst_rate || 0) : 0 })),
     subtotal: money(subtotal), cgst: money(cgst), sgst: money(sgst), igst: money(igst), total: money(subtotal.plus(cgst).plus(sgst).plus(igst)),
+    tds_rate: D(tdsRate || 0).toFixed(2), tds_amount: money(roundHalfUp(subtotal.times(D(tdsRate || 0)).dividedBy(100))),
   };
 }
 
 /** paid / balance and a plain status from the invoice and its live payments. */
 function paymentState(invoice, payments, today = new Date().toISOString().slice(0, 10)) {
   const paid = payments.reduce((acc, p) => acc.plus(D(p.amount)), ZERO);
-  const balance = D(invoice.total).minus(paid);
+  // the buyer deducts TDS and pays the rest, so the invoice is settled when payments reach total - TDS
+  const balance = D(invoice.total).minus(D(invoice.tds_amount || 0)).minus(paid);
   let status = 'unpaid';
   if (invoice.status === 'cancelled') status = 'cancelled';
   else if (balance.lte(0)) status = 'paid';

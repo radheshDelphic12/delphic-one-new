@@ -152,6 +152,21 @@ describe('group cash: invoices', () => {
     expect(d(await get(`/invoices/${inv.id}`))).toMatchObject({ balance: '0.00', payment_status: 'paid' });
   });
 
+  test('TDS the buyer deducts: on the amount before GST, settles the invoice at total - TDS, edits follow, and the tax view shows it', async () => {
+    const inv = d(await invoice({ tds_rate: 10 })).invoice; // 10000 + 18% GST = 11800; TDS 10% of 10000 = 1000
+    expect(inv).toMatchObject({ total: '11800.00', tds_rate: 10, tds_amount: '1000.00', payable: '10800.00', balance: '10800.00' });
+    expect((await post(`/invoices/${inv.id}/payments`, { date: '2026-05-15', amount: '10800.01', mode: 'neft' })).status).toBe(422);
+    const part = await post(`/invoices/${inv.id}/payments`, { date: '2026-05-15', amount: '5000', mode: 'neft' });
+    expect(d(part).invoice).toMatchObject({ balance: '5800.00', payment_status: 'partially_paid' });
+    const rest = await post(`/invoices/${inv.id}/payments`, { date: '2026-05-20', amount: '5800', mode: 'neft' });
+    expect(d(rest).invoice).toMatchObject({ balance: '0.00', payment_status: 'paid' });
+    // an invoice without TDS is unchanged
+    expect(d(await invoice()).invoice).toMatchObject({ tds_rate: 0, tds_amount: '0.00', balance: '11800.00' });
+    // editing the rate re-works the amount; the payable cannot fall below what was received
+    const edit = await authed(request(app).patch(`${G}/invoices/${inv.id}`), superToken).send({ type: 'gst', invoice_date: '2026-05-10', buyer_name: 'Acme Pvt Ltd', buyer_gstin: '23AAACA1234A1Z5', buyer_state_code: '23', lines: [line()], receiving_wallet_id: inrWallet.id, tds_rate: 20 });
+    expect(edit.status).toBe(422);
+  });
+
   test('list filters and totals (per currency), overdue, and the PDF', async () => {
     const a = d(await invoice({ due_date: '2020-01-01' })).invoice;
     await invoice({ type: 'usd_export', receiving_wallet_id: usdWallet.id, buyer_gstin: undefined, buyer_state_code: undefined, lines: [line({ rate: '100', gst_rate: 0 })], workspace_id: org.id });

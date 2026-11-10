@@ -38,6 +38,8 @@ const invoiceBody = z.object({
   buyer_state_code: stateCode,
   place_of_supply: stateCode,
   lines: z.array(line).min(1).max(100),
+  // TDS the buyer deducts, as a % of the taxable value (blank = none)
+  tds_rate: z.preprocess((v) => (v === '' || v === null ? 0 : v), z.coerce.number().min(0).max(30).default(0)),
   receiving_wallet_id: z.string().uuid(),
   notes: text(2000),
   payment_instructions: text(1000),

@@ -178,7 +178,7 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
     };
   });
 
-  // The Book Keeping invoice generator: GST lines only (no TDS recorded on those invoices yet).
+  // The Book Keeping invoice generator: GST lines and the TDS the buyer deducts.
   const gRange = (start || end) ? { invoice_date: { ...(start && !allTimeUntilEnd ? { gte: start } : {}), ...(end ? { lte: end } : {}) } } : {};
   const groupRows = await prisma.groupInvoice.findMany({
     where: { org_group_id: { in: groupIds }, status: 'issued', ...(currency ? { currency } : {}), ...gRange, ...(orgId ? { legal_entity: { workspace_id: orgId } } : {}) },
@@ -187,7 +187,8 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
   });
   for (const g of groupRows) {
     const gst = round2(num(g.cgst) + num(g.sgst) + num(g.igst));
-    const total = num(g.total);
+    const tds = round2(num(g.tds_amount));
+    const total = round2(num(g.total) - tds); // payable: amount + GST - TDS
     const paid = round2(Math.min(total, g.payments.reduce((s, p) => s + num(p.amount), 0)));
     const d = new Date(g.invoice_date);
     rows.push({
@@ -207,13 +208,13 @@ async function loadInvoices(groupIds, { orgId, from, to, currency, allTimeUntilE
       status: paid >= total && total > 0 ? 'paid' : paid > 0 ? 'part_paid' : 'sent',
       base: round2(num(g.subtotal)),
       gst,
-      tds: 0,
+      tds,
       other: 0,
       total: round2(total),
       paid,
       pending: round2(Math.max(total - paid, 0)),
-      tax_mode: taxMode(gst, 0),
-      lines: gst ? [{ label: g.type === 'gst' ? 'GST' : 'Tax', kind: 'gst', amount: gst }] : [],
+      tax_mode: taxMode(gst, tds),
+      lines: [...(gst ? [{ label: g.type === 'gst' ? 'GST' : 'Tax', kind: 'gst', amount: gst }] : []), ...(tds ? [{ label: 'TDS', kind: 'tds', amount: -tds }] : [])],
     });
   }
   rows.sort((a, b) => String(b.invoice_date).localeCompare(String(a.invoice_date)));

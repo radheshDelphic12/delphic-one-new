@@ -26,7 +26,7 @@ function view(inv, payments = []) {
     invoice_date: ymd(inv.invoice_date), due_date: ymd(inv.due_date), legal_entity_id: inv.legal_entity_id, workspace_id: inv.workspace_id,
     contract_id: inv.contract_id, contract_month: inv.contract_month, contract_year: inv.contract_year,
     seller: inv.seller, buyer_name: inv.buyer_name, buyer_gstin: inv.buyer_gstin, buyer_address: inv.buyer_address, buyer_state_code: inv.buyer_state_code, place_of_supply: inv.place_of_supply,
-    lines: inv.lines, subtotal: money(inv.subtotal), cgst: money(inv.cgst), sgst: money(inv.sgst), igst: money(inv.igst), total: money(inv.total),
+    lines: inv.lines, subtotal: money(inv.subtotal), cgst: money(inv.cgst), sgst: money(inv.sgst), igst: money(inv.igst), total: money(inv.total), tds_rate: Number(inv.tds_rate || 0), tds_amount: money(inv.tds_amount || 0), payable: money(D(inv.total).minus(D(inv.tds_amount || 0))),
     receiving_wallet_id: inv.receiving_wallet_id, notes: inv.notes, payment_instructions: inv.payment_instructions, lut_note: inv.lut_note, cancelled_reason: inv.cancelled_reason,
     created_at: inv.created_at,
     ...invCalc.paymentState(inv, live),
@@ -101,14 +101,14 @@ async function build(entity, body, issuedSeller = null) {
   const instructions = body.payment_instructions || wallet.bank_account?.payment_instructions || null;
   if (body.type === 'usd_export' && !instructions) return { error: 'bank_details_required' };
 
-  const totals = invCalc.computeTotals({ type: body.type, lines: body.lines, intraState });
+  const totals = invCalc.computeTotals({ type: body.type, lines: body.lines, intraState, tdsRate: body.tds_rate });
   return {
     wallet,
     currency,
     data: {
       workspace_id: body.workspace_id ?? null, contract_id: contractId, contract_month: contractMonth, contract_year: contractYear, type: body.type, invoice_date: toDate(body.invoice_date), due_date: body.due_date ? toDate(body.due_date) : null, currency, seller,
       buyer_name: body.buyer_name, buyer_gstin: body.buyer_gstin ?? null, buyer_address: body.buyer_address ?? null, buyer_state_code: body.buyer_state_code ?? null, place_of_supply: placeOfSupply,
-      lines: totals.lines, subtotal: totals.subtotal, cgst: totals.cgst, sgst: totals.sgst, igst: totals.igst, total: totals.total,
+      lines: totals.lines, subtotal: totals.subtotal, cgst: totals.cgst, sgst: totals.sgst, igst: totals.igst, total: totals.total, tds_rate: totals.tds_rate, tds_amount: totals.tds_amount,
       receiving_wallet_id: wallet.id, notes: body.notes ?? null, payment_instructions: instructions,
       lut_note: body.type === 'usd_export' ? body.lut_note || entity.lut_note || DEFAULT_LUT : null,
     },
@@ -153,7 +153,7 @@ async function update(groupIds, userId, id, body) {
   if (built.error) return built;
   if (livePayments.length && (built.currency !== inv.currency || built.wallet.id !== inv.receiving_wallet_id)) return { error: 'has_payments_locked' };
   const paid = livePayments.reduce((acc, p) => acc.plus(D(p.amount)), calc.ZERO);
-  if (D(built.data.total).lt(paid)) return { error: 'total_below_paid' };
+  if (D(built.data.total).minus(D(built.data.tds_amount)).lt(paid)) return { error: 'total_below_paid' };
   const number = body.number && body.number !== inv.number ? body.number : null;
   if (number && (await prisma.groupInvoice.findFirst({ where: { legal_entity_id: inv.legal_entity_id, number, id: { not: id } }, select: { id: true } }))) return { error: 'number_taken' };
   const row = await prisma.$transaction(async (tx) => {

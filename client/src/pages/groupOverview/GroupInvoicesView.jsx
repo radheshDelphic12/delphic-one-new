@@ -31,6 +31,8 @@ const StateSelect = ({ value, onChange, label, required }) => (
   </label>
 );
 
+const tdsOf = (sub, rate) => Math.round(sub * Number(rate || 0)) / 100;
+
 /** A rough total while typing; the final amounts are worked out by the server when the invoice is issued. */
 function preview(type, lines, intra) {
   let sub = 0;
@@ -45,7 +47,7 @@ function preview(type, lines, intra) {
 
 function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, onClose, onSaved }) {
   const { pushSuccess, pushError } = useAlerts();
-  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '' };
+  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '', tds_rate: '' };
   const [v, setV] = useState(empty);
   const [lines, setLines] = useState([blankLine()]);
   // Customers / vendors held in Accounts: pick one to fill the bill-to block, and optionally save edits back to it.
@@ -71,7 +73,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
   useEffect(() => {
     if (!open) return;
     if (invoice) {
-      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', number: invoice.number, seller_address: invoice.seller?.address || '', contract_id: invoice.contract_id || '', contract_month: invoice.contract_month || '', contract_year: invoice.contract_year || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '' });
+      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', number: invoice.number, seller_address: invoice.seller?.address || '', contract_id: invoice.contract_id || '', contract_month: invoice.contract_month || '', contract_year: invoice.contract_year || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '', tds_rate: Number(invoice.tds_rate) ? String(invoice.tds_rate) : '' });
       setLines(invoice.lines.map((l) => ({ description: l.description, hsn_sac: l.hsn_sac || '', qty: String(l.qty), rate: String(l.rate), gst_rate: l.gst_rate })));
     } else { setV(empty); setLines([blankLine()]); }
   }, [open, invoice]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -92,7 +94,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
     e.preventDefault();
     setBusy(true);
     try {
-      const body = { ...v, workspace_id: v.workspace_id || null, contract_id: v.contract_id || null, contract_month: v.contract_id && v.contract_month ? Number(v.contract_month) : null, contract_year: v.contract_id && v.contract_year ? Number(v.contract_year) : null, due_date: v.due_date || null, lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
+      const body = { ...v, workspace_id: v.workspace_id || null, contract_id: v.contract_id || null, contract_month: v.contract_id && v.contract_month ? Number(v.contract_month) : null, contract_year: v.contract_id && v.contract_year ? Number(v.contract_year) : null, due_date: v.due_date || null, tds_rate: v.tds_rate === '' ? 0 : Number(v.tds_rate), lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
       const { legal_entity_id: entityId, ...rest } = body;
       const res = invoice ? await apiClient.patch(`/group-cash/invoices/${invoice.id}`, rest) : await apiClient.post('/group-cash/invoices', body);
       pushSuccess(invoice ? `Invoice ${res.data.data.invoice.number} updated` : `Invoice ${res.data.data.invoice.number} issued`);
@@ -179,7 +181,10 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
             </div>
           ))}
           <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" onClick={() => setLines((c) => [...c, blankLine()])}><Plus className="h-3.5 w-3.5" />Add item</button>
-          <p className="text-right text-sm text-tertiary-700">Subtotal {formatMoney(t.sub.toFixed(2), currency)}{gst && ` · GST about ${formatMoney(t.tax.toFixed(2), currency)}`} · <strong>Total about {formatMoney((t.sub + t.tax).toFixed(2), currency)}</strong></p>
+          <p className="text-right text-sm text-tertiary-700">Subtotal {formatMoney(t.sub.toFixed(2), currency)}{gst && ` · GST about ${formatMoney(t.tax.toFixed(2), currency)}`} · <strong>Total about {formatMoney((t.sub + t.tax).toFixed(2), currency)}</strong>{Number(v.tds_rate) > 0 && ` · TDS ${v.tds_rate}% − ${formatMoney(tdsOf(t.sub, v.tds_rate).toFixed(2), currency)} · `}{Number(v.tds_rate) > 0 && <strong>To receive about {formatMoney((t.sub + t.tax - tdsOf(t.sub, v.tds_rate)).toFixed(2), currency)}</strong>}</p>
+          <label className={`${labelCls} max-w-xs`}>TDS deducted by the buyer (% of the amount before GST, blank = none)
+            <input inputMode="decimal" className={inputCls} placeholder="e.g. 10, 2, 1" value={v.tds_rate} onChange={(e) => setV((c) => ({ ...c, tds_rate: e.target.value.replace(/[^0-9.]/g, '') }))} />
+          </label>
         </div>
         <label className={labelCls}>Money will be received in (wallet of this entity, {currency})
           <select required className={inputCls} value={v.receiving_wallet_id} onChange={set('receiving_wallet_id')}>
@@ -233,6 +238,8 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
           <dl className="ml-auto max-w-xs space-y-1">
             {[['Subtotal', inv.subtotal], ['CGST', inv.cgst], ['SGST', inv.sgst], ['IGST', inv.igst]].filter(([l, x]) => l === 'Subtotal' || Number(x) > 0).map(([l, x]) => <div key={l} className="flex justify-between"><dt className="text-tertiary-500">{l}</dt><dd>{formatMoney(x, cur)}</dd></div>)}
             <div className="flex justify-between border-t border-tertiary-100 pt-1 font-semibold"><dt>Total</dt><dd>{formatMoney(inv.total, cur)}</dd></div>
+            {Number(inv.tds_amount) > 0 && <div className="flex justify-between"><dt className="text-tertiary-500">TDS deducted ({inv.tds_rate}%)</dt><dd>− {formatMoney(inv.tds_amount, cur)}</dd></div>}
+            {Number(inv.tds_amount) > 0 && <div className="flex justify-between font-semibold"><dt>To receive</dt><dd>{formatMoney(inv.payable, cur)}</dd></div>}
             <div className="flex justify-between"><dt className="text-tertiary-500">Received</dt><dd>{formatMoney(inv.paid, cur)}</dd></div>
             <div className="flex justify-between font-semibold"><dt>Still due</dt><dd>{formatMoney(inv.balance, cur)}</dd></div>
           </dl>

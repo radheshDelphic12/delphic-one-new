@@ -8062,6 +8062,8 @@ model GroupInvoice {
   sgst                 Decimal     @default(0) @db.Decimal(16, 2)
   igst                 Decimal     @default(0) @db.Decimal(16, 2)
   total                Decimal     @db.Decimal(16, 2)
+  tds_rate             Decimal     @default(0) @db.Decimal(5, 2) // TDS the buyer deducts, % of the taxable value (subtotal); 0 = none
+  tds_amount           Decimal     @default(0) @db.Decimal(16, 2)
   receiving_wallet_id  String      @db.Uuid
   notes                String?
   payment_instructions String?
