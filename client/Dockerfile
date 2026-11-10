@@ -15,6 +15,8 @@ ARG BUILD_COMMIT_DATE
 ARG BUILD_COMMIT_MESSAGE
 ARG BUILD_BRANCH
 ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA BUILD_COMMIT_DATE=$BUILD_COMMIT_DATE BUILD_COMMIT_MESSAGE=$BUILD_COMMIT_MESSAGE BUILD_BRANCH=$BUILD_BRANCH
+# The bundle outgrew Node's default heap (about 1 GB on the small build box): vite build died with "JavaScript heap out of memory" in the render-chunks step.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN npm run build --workspace client
 
 FROM nginx:1.27-alpine AS runtime
