@@ -1,7 +1,7 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
-import { FileText, Gauge, Laptop, Megaphone, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
+import { FilePenLine, FileText, Gauge, Laptop, Megaphone, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
 import PeopleListPage from './PeopleListPage.jsx';
@@ -11,6 +11,7 @@ import HrSettingsPage from './HrSettingsPage.jsx';
 import AssetsPage from './AssetsPage.jsx';
 import CapacityPage from './CapacityPage.jsx';
 import PoliciesPage from './PoliciesPage.jsx';
+import LettersPage from './LettersPage.jsx';
 import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const BASE_TABS = [
@@ -22,6 +23,7 @@ const ADMIN_TABS = [
   { key: 'capacity', label: 'Capacity & Allocation', icon: Gauge, need: 'allocations.view' },
   { key: 'users', label: 'Users', icon: UserCog, need: 'users.view' },
   { key: 'assets', label: 'Assets', icon: Laptop, need: 'assets.view' },
+  { key: 'letters', label: 'Letters', icon: FilePenLine, need: 'letters.view' },
   { key: 'hr-settings', label: 'HR Settings', icon: Settings2, need: 'hr_settings.view' },
 ];
 
@@ -68,6 +70,7 @@ export default function PeopleHubPage() {
       {section === 'capacity' && tabs.some((t) => t.key === 'capacity') && <CapacityPage />}
       {section === 'users' && tabs.some((t) => t.key === 'users') && <UsersPage />}
       {section === 'assets' && tabs.some((t) => t.key === 'assets') && <AssetsPage />}
+      {section === 'letters' && tabs.some((t) => t.key === 'letters') && <LettersPage />}
       {section === 'hr-settings' && tabs.some((t) => t.key === 'hr-settings') && <HrSettingsPage />}
     </div>
   );

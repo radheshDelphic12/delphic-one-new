@@ -9589,3 +9589,73 @@ model InvoiceFollowup {
   @@index([invoice_kind, invoice_id])
   @@map("invoice_followups")
 }
+
+// ===================== HR letters (offer, appointment, appraisal, relieving ...) =====================
+// An admin writes the templates (text with {{fields}} and an editable serial number format); HR issues a letter to an employee, a past
+// employee, a candidate, a vendor or anyone else. Every issued letter keeps its own text and a unique serial number; it is cancelled, never edited.
+model LetterTemplate {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String    @db.Uuid
+  name            String
+  kind            String // offer | appointment | appraisal | relieving | experience | warning | other (free label)
+  audience        String    @default("any") // employee | new_joiner | left_employee | vendor | other | any - who it is meant for
+  subject         String?
+  body            String // plain text with {{field}} placeholders; blank line = new paragraph
+  signatory_name  String?
+  signatory_title String?
+  serial_format   String    @default("{PREFIX}/{FY}/{SEQ:4}") // tokens {PREFIX} {YYYY} {YY} {MM} {FY} {SEQ:n}; the counter restarts when the text before the number changes
+  serial_prefix   String    @default("LTR")
+  active          Boolean   @default(true)
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+  deleted_at      DateTime?
+
+  @@index([org_id, kind])
+  @@map("letter_templates")
+}
+
+// One counter per company and series (the serial number with the running number left out), so numbers are gap-safe and never reused.
+model LetterCounter {
+  org_id      String @db.Uuid
+  series      String
+  last_number Int    @default(0)
+
+  @@id([org_id, series])
+  @@map("letter_counters")
+}
+
+model Letter {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  template_id       String?   @db.Uuid
+  template_name     String
+  kind              String
+  serial_number     String
+  serial_series     String
+  serial_seq        Int
+  recipient_type    String // employee | vendor | candidate | other
+  org_membership_id String?   @db.Uuid
+  account_id        String?   @db.Uuid
+  recipient_name    String
+  recipient_email   String?
+  recipient_address String?
+  fields            Json      @default("{}") // every merge value used, as typed or taken from the record
+  subject           String?
+  body              String // the final text exactly as issued
+  signatory_name    String?
+  signatory_title   String?
+  issued_on         DateTime  @db.Date
+  status            String    @default("issued") // issued | cancelled
+  cancelled_reason  String?
+  cancelled_by      String?   @db.Uuid
+  cancelled_at      DateTime?
+  created_by        String?   @db.Uuid
+  created_at        DateTime  @default(now())
+
+  @@unique([org_id, serial_number])
+  @@index([org_id, issued_on])
+  @@index([org_membership_id])
+  @@index([account_id])
+  @@map("letters")
+}

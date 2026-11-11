@@ -123,6 +123,9 @@ const RULES = [
   [/^\/timesheets(\/|$)/, 'open'], // own entries, manager approvals, OT tickets, regularization: limited to own / reports by the service
 
   // ---- Finance
+  // HR letters: templates and the serial number format are Letters > manage; issuing, cancelling and previewing is Letters > create; reading is Letters > view.
+  [/^\/letters\/(fields|templates)(\/|$)/, { GET: ['letters.view', 'letters.create'], '*': 'letters.manage' }],
+  [/^\/letters(\/|$)/, { GET: 'letters.view', '*': 'letters.create' }],
   [/^\/payroll\/(payslips\/me|salary-structures\/me)$/, 'basic.payslips'],
   [/^\/payroll\/payslips\/[^/]+$/, 'open'], // the service returns only the caller's own payslip unless they hold payroll.view (see payroll.routes)
   [/^\/payroll\/increment-reminders(\/|$)/, 'increments.receive'],

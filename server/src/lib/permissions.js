@@ -47,6 +47,7 @@ const CATALOG = [
   { module: 'allocations', category: 'people', label: 'Capacity and allocation', actions: [A('allocations', 'view', 'View'), A('allocations', 'manage', 'Allocate people to projects')] },
   { module: 'users', category: 'people', label: 'Users', actions: [A('users', 'view', 'View'), A('users', 'create', 'Add'), A('users', 'update', 'Edit')] },
   { module: 'assets', category: 'people', label: 'Assets', actions: [A('assets', 'view', 'View'), A('assets', 'create', 'Add'), A('assets', 'update', 'Edit'), A('assets', 'delete', 'Delete')] },
+  { module: 'letters', category: 'people', label: 'HR letters (offer, appointment, appraisal ...)', actions: [A('letters', 'view', 'View issued letters'), A('letters', 'create', 'Issue and cancel letters'), A('letters', 'manage', 'Edit letter templates and serial number formats')] },
   { module: 'hr_settings', category: 'people', label: 'HR settings', actions: [A('hr_settings', 'view', 'View'), A('hr_settings', 'update', 'Edit (departments, teams, designations, offices, policies, leave types, shifts)')] },
 
   // ---- Time and Attendance

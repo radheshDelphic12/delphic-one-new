@@ -66,6 +66,7 @@ const groupOfficesRoutes = require('./modules/groupOffices/groupOffices.routes')
 const groupCompaniesRoutes = require('./modules/groupCompanies/groupCompanies.routes');
 const groupTaxRoutes = require('./modules/groupTax/groupTax.routes');
 const storageRoutes = require('./modules/storage/storage.routes');
+const lettersRoutes = require('./modules/letters/letters.routes');
 const tradingRoutes = require('./modules/trading/trading.routes');
 const leadsRoutes = require('./modules/leads/leads.routes');
 const zephyrRoutes = require('./modules/zephyr/zephyr.routes');
@@ -195,6 +196,7 @@ app.use('/api/v1/group-offices', groupOfficesRoutes);
 app.use('/api/v1/group-companies', groupCompaniesRoutes);
 app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/storage', storageRoutes);
+app.use('/api/v1/letters', lettersRoutes);
 app.use('/api/v1/trading', tradingRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 app.use('/api/v1/zephyr', zephyrRoutes);
