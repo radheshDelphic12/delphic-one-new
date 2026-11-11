@@ -201,6 +201,12 @@ group.post('/invoices/pdf', A(async (req, res) => {
 }));
 group.patch('/invoices/:id', A(async (req, res) => result(res, await invoices.update(gids(req), req.user.id, req.params.id, iv.invoiceBody.omit({ legal_entity_id: true }).parse(req.body)))));
 group.patch('/invoices/:id/payments/:paymentId', A(async (req, res) => result(res, await invoices.updatePayment(gids(req), req.user.id, req.params.id, req.params.paymentId, iv.paymentBody.parse(req.body)))));
+// Payment collection (due date, next follow-up date, chase notes) on a group invoice.
+const followupsService = require('../billing/invoiceFollowups.service');
+const followupResult = (res, r, status = 200) => (r.error ? fail(res, r.error === 'not_found' ? 404 : r.error === 'cancelled' ? 409 : 422, r.error === 'not_found' ? 'Invoice not found' : r.error === 'cancelled' ? 'A cancelled invoice cannot be changed' : 'Nothing to change') : ok(res, r.followup || (r.followups ? r : r.terms), {}, status));
+group.patch('/invoices/:id/collection', A(async (req, res) => followupResult(res, await followupsService.setTerms('group_invoice', { groupIds: gids(req) }, req.params.id, followupsService.termsSchema.parse(req.body || {})))));
+group.get('/invoices/:id/followups', A(async (req, res) => followupResult(res, await followupsService.list('group_invoice', { groupIds: gids(req) }, req.params.id))));
+group.post('/invoices/:id/followups', A(async (req, res) => followupResult(res, await followupsService.add('group_invoice', { groupIds: gids(req) }, req.user, req.params.id, followupsService.followupSchema.parse(req.body || {})), 201)));
 group.post('/invoices/:id/cancel', A(async (req, res) => result(res, await invoices.cancel(gids(req), req.user.id, req.params.id, iv.cancelBody.parse(req.body)))));
 group.post('/invoices/:id/payments', A(async (req, res) => result(res, await invoices.addPayment(gids(req), req.user.id, req.params.id, iv.paymentBody.parse(req.body)), 201)));
 group.delete('/invoices/:id/payments/:paymentId', A(async (req, res) => result(res, await invoices.removePayment(gids(req), req.user.id, req.params.id, req.params.paymentId))));

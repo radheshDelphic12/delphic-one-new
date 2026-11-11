@@ -13,6 +13,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 
 function money(n) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -155,6 +156,7 @@ export default function InvoicingSection() {
 
   const paymentDialog = usePaymentDialog();
   const [paymentsFor, setPaymentsFor] = useState(null);
+  const [chaseFor, setChaseFor] = useState(null); // the invoice whose due date / follow-ups are open
   async function transition(row, status) {
     try {
       await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
@@ -178,7 +180,7 @@ export default function InvoicingSection() {
   }
 
   // Month by month: which invoices are paid, partly paid or unpaid; filters combine, totals follow them (one line per currency).
-  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '' });
+  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '', collect: '' });
   const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
   const years = useMemo(() => [...new Set(rows.map((r) => r.period_year))].sort((a, b) => b - a), [rows]);
   const shown = useMemo(() => rows.filter((r) => (
@@ -186,6 +188,7 @@ export default function InvoicingSection() {
     && (!filters.month || String(r.period_month) === filters.month)
     && (!filters.status || r.status === filters.status)
     && (!filters.pay || r.payment_status === filters.pay)
+    && (!filters.collect || (filters.collect === 'overdue' && r.overdue) || (filters.collect === 'followup_due' && r.followup_due) || (filters.collect === 'no_due_date' && r.status === 'sent' && r.payment_status !== 'paid' && !r.due_date))
     && (!filters.q || `${r.invoice_number || ''} ${r.line_items?.project?.name || ''} ${r.client_account?.name || ''}`.toLowerCase().includes(filters.q.toLowerCase()))
   )), [rows, filters]);
   const totals = useMemo(() => {
@@ -201,6 +204,8 @@ export default function InvoicingSection() {
     return [...by];
   }, [shown]);
   const anyFilter = Object.values(filters).some(Boolean);
+  const overdueCount = useMemo(() => rows.filter((r) => r.overdue).length, [rows]);
+  const followupDueCount = useMemo(() => rows.filter((r) => r.followup_due).length, [rows]);
 
   const [selected, setSelected] = useState([]);
   function downloadSelected() {
@@ -218,6 +223,8 @@ export default function InvoicingSection() {
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
     { key: 'lines', header: 'Line items', render: (row) => invoiceLines(row).length },
     { key: 'source', header: 'Source', render: (row) => (row.calculation_version_id ? <span className="text-xs text-success-700">Locked billing v{row.line_items?.calculation_version}</span> : <span className="text-xs text-tertiary-500">Computed revenue</span>) },
+    { key: 'due', header: 'Due date', render: (row) => <span className="whitespace-nowrap text-xs">{row.due_date || <span className="text-tertiary-400">not set</span>}{row.overdue && <span className="block font-medium text-danger-600">{row.days_overdue} day{row.days_overdue === 1 ? '' : 's'} overdue</span>}</span> },
+    { key: 'followup', header: 'Next follow-up', render: (row) => <span className="text-xs">{row.next_followup_date ? <span className={row.followup_due ? 'font-semibold text-warning-700' : ''}>{row.next_followup_date}</span> : '—'}{row.followup_count > 0 && <span className="block max-w-[14rem] truncate text-tertiary-500" title={row.last_followup_note}>{row.last_followup_note}</span>}</span> },
     { key: 'status', header: 'Status', render: (row) => <span><Badge value={row.status} />{row.payment_status === 'partly_paid' && <span className="block text-[11px] text-warning-700">Paid {row.currency} {money(row.paid_amount)} · pending {money(row.pending_amount)}</span>}</span> },
     {
       key: 'actions',
@@ -228,6 +235,7 @@ export default function InvoicingSection() {
           {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
           {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(row)}>{row.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
           {row.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(row)}>Payments</button>}
+          {row.status === 'sent' && row.payment_status !== 'paid' && <button type="button" className="btn-ghost text-xs" data-testid="invoice-followup" onClick={() => setChaseFor(row)}>Follow-up{row.followup_count ? ` (${row.followup_count})` : ''}</button>}
         </div>
       ),
     },
@@ -247,7 +255,8 @@ export default function InvoicingSection() {
         <select value={filters.month} onChange={setFilter('month')} aria-label="Month" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All months</option>{['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
         <select value={filters.status} onChange={setFilter('status')} aria-label="Status" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any status</option><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option></select>
         <select value={filters.pay} onChange={setFilter('pay')} aria-label="Payment" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any payment</option><option value="unpaid">Unpaid</option><option value="partly_paid">Partly paid</option><option value="paid">Paid</option></select>
-        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '' })}>Clear filters</button>}
+        <select value={filters.collect} onChange={setFilter('collect')} aria-label="Collection" data-testid="invoicing-collection-filter" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All collection</option><option value="overdue">Overdue ({overdueCount})</option><option value="followup_due">Follow-up due ({followupDueCount})</option><option value="no_due_date">No due date set</option></select>
+        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '', collect: '' })}>Clear filters</button>}
       </div>
       {totals.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="invoicing-totals">
@@ -266,6 +275,7 @@ export default function InvoicingSection() {
       ) : (
         <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />
       )}
+      <InvoiceCollectionDrawer invoice={chaseFor} title={chaseFor ? `Follow-up: ${chaseFor.invoice_number || 'invoice'}` : ''} basePath={chaseFor ? `/billing/invoices/${chaseFor.id}` : ''} onClose={() => setChaseFor(null)} onChanged={load} />
       <GenerateInvoiceDrawer open={generateOpen} onClose={() => setGenerateOpen(false)} onSubmit={generate} />
       <ComputeRevenueDrawer open={computeOpen} onClose={() => setComputeOpen(false)} onSubmit={computeRevenue} />
     </div>

@@ -11,6 +11,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -211,6 +212,7 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editPay, setEditPay] = useState(null);
+  const [chaseOpen, setChaseOpen] = useState(false);
   const meta = useLiveData(() => api('/options'), { deps: [] });
   const entityList = useLiveData(() => api('/entities'), { deps: [] });
   useEffect(() => { if (inv) setPay((c) => ({ ...c, amount: inv.balance })); }, [inv?.balance]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -226,7 +228,8 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
             <Pill tone={STATUS[inv.payment_status][0]}>{STATUS[inv.payment_status][1]}</Pill>
             <Pill tone="blue">{TYPE_LABEL[inv.type]}</Pill>
             <span className="text-xs text-tertiary-500">{inv.seller?.name} · {inv.invoice_date}{inv.due_date ? ` · due ${inv.due_date}` : ''}</span>
-            {inv.payment_status !== 'cancelled' && <button type="button" className="btn-secondary ml-auto inline-flex items-center gap-1" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" />Edit</button>}
+            {inv.payment_status !== 'cancelled' && inv.payment_status !== 'paid' && <button type="button" className="btn-secondary ml-auto inline-flex items-center gap-1" data-testid="group-invoice-followup" onClick={() => setChaseOpen(true)}>Follow-up{inv.followup_count ? ` (${inv.followup_count})` : ''}</button>}
+            {inv.payment_status !== 'cancelled' && <button type="button" className={`btn-secondary ${inv.payment_status === 'paid' ? 'ml-auto ' : ''}inline-flex items-center gap-1`} onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" />Edit</button>}
             <button type="button" className="btn-secondary inline-flex items-center gap-1" onClick={() => downloadFile(`/group-cash/invoices/${id}/pdf`, undefined, `${inv.number.replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf`).catch((e) => pushError(apiErrorMessage(e, 'Could not download'), 'Download failed'))}><Download className="h-4 w-4" />PDF</button>
           </div>
           <div className="overflow-x-auto rounded-xl border border-tertiary-100">
@@ -271,6 +274,7 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
           {inv.cancelled_reason && <p className="text-xs text-tertiary-500">Cancelled: {inv.cancelled_reason}</p>}
         </div>
       )}
+      <InvoiceCollectionDrawer invoice={chaseOpen ? inv : null} title={inv ? `Follow-up: ${inv.number}` : ''} basePath={`/group-cash/invoices/${id}`} canSetDueDate={false} onClose={() => setChaseOpen(false)} onChanged={() => { data.refresh(); onChanged(); }} />
       <NewInvoiceDrawer open={editOpen} invoice={inv} options={meta.data} entities={entityList.data || []} onClose={() => setEditOpen(false)} onSaved={() => { data.refresh(); onChanged(); }} />
       <Drawer open={Boolean(editPay)} onClose={() => setEditPay(null)} size="sm" tone="edit" title="Edit payment">
         {editPay && (
@@ -326,7 +330,7 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
           {!d.rows.length ? <EmptyState icon={FileText} title="No invoices yet" description="Issue an invoice from a legal entity; payments you record go straight into its wallet." /> : (
             <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
               <table className="min-w-full text-sm">
-                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="w-8 p-2"><input type="checkbox" aria-label="Select all invoices" checked={d.rows.length > 0 && d.rows.every((r) => picked.includes(r.id))} onChange={(e) => setPicked(e.target.checked ? d.rows.map((r) => r.id) : [])} /></th><th className="p-2">Number</th><th className="p-2">Date</th><th className="p-2">Buyer</th><th className="p-2">Issued by</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Due</th><th className="p-2">Status</th></tr></thead>
+                <thead className="bg-tertiary-50 text-left text-xs text-tertiary-500"><tr><th className="w-8 p-2"><input type="checkbox" aria-label="Select all invoices" checked={d.rows.length > 0 && d.rows.every((r) => picked.includes(r.id))} onChange={(e) => setPicked(e.target.checked ? d.rows.map((r) => r.id) : [])} /></th><th className="p-2">Number</th><th className="p-2">Date</th><th className="p-2">Buyer</th><th className="p-2">Issued by</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Due</th><th className="p-2">Due</th><th className="p-2">Next follow-up</th><th className="p-2">Status</th></tr></thead>
                 <tbody>
                   {d.rows.map((r) => (
                     <tr key={r.id} className="cursor-pointer border-t border-tertiary-100 hover:bg-tertiary-50/60" onClick={() => setOpenId(r.id)}>
@@ -337,6 +341,8 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
                       <td className="p-2 text-xs text-tertiary-500">{r.legal_entity_name}</td>
                       <td className="p-2 text-right tabular-nums">{formatMoney(r.total, r.currency)}</td>
                       <td className="p-2 text-right tabular-nums">{r.payment_status === 'cancelled' ? '—' : formatMoney(r.balance, r.currency)}</td>
+                      <td className="p-2 whitespace-nowrap text-xs">{r.due_date || '—'}{r.overdue && <span className="block text-danger-600">{r.days_overdue} day{r.days_overdue === 1 ? '' : 's'} late</span>}</td>
+                      <td className="p-2 whitespace-nowrap text-xs">{r.next_followup_date ? <span className={r.followup_due ? 'font-semibold text-warning-700' : ''}>{r.next_followup_date}</span> : '—'}{r.followup_count > 0 && <span className="block text-tertiary-500" title={r.last_followup_note}>{r.followup_count} chase{r.followup_count === 1 ? '' : 's'}</span>}</td>
                       <td className="p-2"><Pill tone={STATUS[r.payment_status][0]}>{STATUS[r.payment_status][1]}</Pill></td>
                     </tr>
                   ))}

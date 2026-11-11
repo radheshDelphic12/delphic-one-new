@@ -751,6 +751,38 @@ router.delete(
   })
 );
 
+// Payment collection: due date, next follow-up date, and the log of every chase of an unpaid invoice.
+const followupsService = require('./invoiceFollowups.service');
+const COLLECTION_ERRORS = { not_found: [404, 'Invoice not found'], nothing_to_change: [422, 'Nothing to change'], cancelled: [409, 'A cancelled invoice cannot be changed'] };
+const collectionFail = (res, error) => { const [status, message] = COLLECTION_ERRORS[error] || [400, 'Bad request']; return fail(res, status, message); };
+router.patch(
+  '/invoices/:id/collection',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.setTerms('client_invoice', { orgId: req.user.org_id }, req.params.id, followupsService.termsSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : ok(res, result.terms);
+  })
+);
+router.get(
+  '/invoices/:id/followups',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.list('client_invoice', { orgId: req.user.org_id }, req.params.id);
+    return result.error ? collectionFail(res, result.error) : ok(res, result);
+  })
+);
+router.post(
+  '/invoices/:id/followups',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.add('client_invoice', { orgId: req.user.org_id }, req.user, req.params.id, followupsService.followupSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : created(res, result.followup);
+  })
+);
+
 router.post(
   '/invoices/:id/status',
   requireOrgMembership,

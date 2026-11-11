@@ -1686,6 +1686,9 @@ model ClientInvoice {
   // The company's own numbering (e.g. INV-2026-001) — editable, unique per org.
   invoice_number         String?
   invoice_date           DateTime?           @db.Date
+  // Payment collection: when the client should pay, and when we next chase it (the notes of each chase live in invoice_followups).
+  due_date               DateTime?           @db.Date
+  next_followup_date     DateTime?           @db.Date
   notes                  String?
   created_by             String              @db.Uuid
   creator                User                @relation("ClientInvoiceCreatedBy", fields: [created_by], references: [id])
@@ -8049,6 +8052,7 @@ model GroupInvoice {
   status               String      @default("issued") // issued | cancelled (paid state is derived from the payments)
   invoice_date         DateTime    @db.Date
   due_date             DateTime?   @db.Date
+  next_followup_date   DateTime?   @db.Date // when we next chase this invoice; notes of each chase live in invoice_followups
   currency             String // INR | USD
   seller               Json // name, gstin, pan, address, state_code, logo_url as on the day it was issued
   buyer_name           String
@@ -9566,4 +9570,22 @@ model GroupReceivableSetting {
   updated_at   DateTime @default(now()) @updatedAt
 
   @@map("group_receivable_settings")
+}
+
+// Payment collection log: one row per chase of an unpaid invoice (a call, a mail, a promise to pay), with the next follow-up date.
+// Shared by client invoices (Finance > Invoicing) and group invoices (Book Keeping); no FK because it points at either table.
+model InvoiceFollowup {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoice_kind       String // client_invoice | group_invoice
+  invoice_id         String    @db.Uuid
+  org_id             String?   @db.Uuid
+  org_group_id       String?   @db.Uuid
+  followed_on        DateTime  @db.Date
+  note               String
+  next_followup_date DateTime? @db.Date
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+
+  @@index([invoice_kind, invoice_id])
+  @@map("invoice_followups")
 }

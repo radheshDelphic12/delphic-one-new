@@ -30,6 +30,7 @@ const billingEngine = require('../calculations/engines/billing.engine');
 const vendorEngine = require('../calculations/engines/vendorPayment.engine');
 const exchangeRates = require('./exchangeRates.service');
 const invoicePayments = require('./invoicePayments.service');
+const followups = require('./invoiceFollowups.service');
 const paymentsService = require('../payments/payments.service');
 const chargesService = require('./charges.service');
 const vendorCharges = require('./vendorCharges.service');
@@ -522,14 +523,22 @@ async function listClientInvoices(orgId, { client_account_id, status, period_mon
   });
   if (client_account_id) rows = rows.filter((r) => r.client_account_id === client_account_id || (r.line_items?.consolidated && (r.line_items.items || []).some((i) => i.account_id === client_account_id)));
   const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', rows.map((r) => r.id));
-  return rows.map((r) => invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id)));
+  const chases = await followups.summaries('client_invoice', rows.map((r) => r.id));
+  return rows.map((r) => withCollection(invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id)), chases.get(r.id)));
+}
+
+// Payment collection on top of the payment state: due date, overdue days, next follow-up and the last chase note.
+function withCollection(invoice, chase) {
+  const open = invoice.status === 'sent' && invoice.payment_status !== 'paid';
+  return { ...invoice, ...followups.collectionState({ due_date: invoice.due_date, next_followup_date: invoice.next_followup_date, open }), followup_count: chase?.followup_count || 0, last_followup_note: chase?.last_followup_note || null, last_followup_on: chase?.last_followup_on || null };
 }
 
 async function getClientInvoice(orgId, invoiceId) {
   const row = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId }, include: { client_account: CLIENT_INVOICE_ACCOUNT } });
   if (!row) return { error: 'not_found' };
   const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', [row.id]);
-  return { invoice: invoicePayments.withPayments(serializeClientInvoice(row), totals.get(row.id)) };
+  const chases = await followups.summaries('client_invoice', [row.id]);
+  return { invoice: withCollection(invoicePayments.withPayments(serializeClientInvoice(row), totals.get(row.id)), chases.get(row.id)) };
 }
 
 // --- Vendor invoices -------------------------------------------------------
@@ -704,7 +713,12 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
     ? await prisma.vendorPayment.findMany({ where: { org_id: orgId, status: 'paid', vendor_account_id: { in: [...new Set(rows.map((r) => r.vendor_account_id))] } }, select: { vendor_account_id: true, period_month: true, period_year: true } })
     : [];
   const paid = new Set(payments.map((p) => `${p.vendor_account_id}|${p.period_year}-${p.period_month}`));
-  return rows.map((row) => ({ ...serializeVendorInvoice(row), paid: paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`) }));
+  // How many files (the vendor's own invoice PDF, proofs) are attached to each invoice.
+  const fileCounts = rows.length
+    ? await prisma.document.groupBy({ by: ['entity_id'], where: { entity_type: 'project_vendor_invoice', entity_id: { in: rows.map((r) => r.id) } }, _count: { _all: true } })
+    : [];
+  const filesBy = new Map(fileCounts.map((g) => [g.entity_id, g._count._all]));
+  return rows.map((row) => ({ ...serializeVendorInvoice(row), paid: paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`), file_count: filesBy.get(row.id) || 0 }));
 }
 
 module.exports = {

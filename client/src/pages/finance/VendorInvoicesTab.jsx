@@ -8,6 +8,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import VendorPayoutPanel from './VendorPayoutPanel.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
+import FilesPanel from '../../components/FilesPanel.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -98,6 +99,7 @@ export default function VendorInvoicesTab() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [rows, setRows] = useState(null);
   const [traceId, setTraceId] = useState(null);
+  const [filesFor, setFilesFor] = useState(null); // the invoice whose files are open
   const [view, setView] = useState('invoices');
 
   const load = useCallback(() => {
@@ -153,6 +155,7 @@ export default function VendorInvoicesTab() {
         <span className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost text-xs" onClick={() => track(r, { sent: !r.sent }, r.sent ? 'Marked unsent' : 'Marked sent')}>{r.sent ? 'Mark unsent' : 'Mark sent'}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>GST / TDS / adjustment</button>
+          <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-files" onClick={() => setFilesFor(r)}>Files{r.file_count ? ` (${r.file_count})` : ''}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => setTraceId(r.id)}>Trace</button>
         </span>
       ),
@@ -192,6 +195,9 @@ export default function VendorInvoicesTab() {
       </div>
       <DataTable columns={columns} rows={rows || []} loading={!rows} emptyLabel="No vendor invoices for this month" maxHeight="calc(100dvh - 22rem)" />
       <TraceDrawer invoiceId={traceId} onClose={() => setTraceId(null)} />
+      <Drawer open={Boolean(filesFor)} title={filesFor ? `Files: ${filesFor.vendor_account?.name || 'Vendor'} ${filesFor.invoice_number || ''}`.trim() : 'Files'} onClose={() => { setFilesFor(null); load(); }}>
+        {filesFor && <FilesPanel entityType="project_vendor_invoice" entityId={filesFor.id} title="Vendor invoice files" defaultLabel={filesFor.invoice_number || 'Vendor invoice'} multiple />}
+      </Drawer>
     </div>
   );
 }

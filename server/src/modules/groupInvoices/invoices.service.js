@@ -170,7 +170,12 @@ async function load(groupIds, id, client = prisma) {
 
 async function get(groupIds, id) {
   const inv = await load(groupIds, id);
-  return inv ? view(inv, inv.payments) : null;
+  if (!inv) return null;
+  const v = view(inv, inv.payments);
+  const followups = require('../billing/invoiceFollowups.service');
+  const chase = (await followups.summaries('group_invoice', [inv.id])).get(inv.id);
+  const open = !['paid', 'cancelled'].includes(v.payment_status);
+  return { ...v, ...followups.collectionState({ due_date: inv.due_date, next_followup_date: inv.next_followup_date, open }), followup_count: chase?.followup_count || 0, last_followup_note: chase?.last_followup_note || null };
 }
 
 async function list(groupIds, q = {}) {
@@ -188,7 +193,14 @@ async function list(groupIds, q = {}) {
     orderBy: [{ invoice_date: 'desc' }, { seq: 'desc' }],
     take: 500,
   });
-  const out = rows.map((r) => ({ ...view(r, r.payments), legal_entity_name: r.legal_entity.name, payments: undefined }));
+  const chases = await require('../billing/invoiceFollowups.service').summaries('group_invoice', rows.map((r) => r.id));
+  const out = rows.map((r) => {
+    const v = view(r, r.payments);
+    const open = !['paid', 'cancelled'].includes(v.payment_status);
+    const collection = require('../billing/invoiceFollowups.service').collectionState({ due_date: r.due_date, next_followup_date: r.next_followup_date, open });
+    const chase = chases.get(r.id);
+    return { ...v, ...collection, followup_count: chase?.followup_count || 0, last_followup_note: chase?.last_followup_note || null, last_followup_on: chase?.last_followup_on || null, legal_entity_name: r.legal_entity.name, payments: undefined };
+  });
   const filtered = q.status ? out.filter((r) => r.payment_status === q.status) : out;
   const open = filtered.filter((r) => r.payment_status !== 'cancelled');
   return { rows: filtered, totals: calc.totalsByCurrency(open, (r) => r.total), outstanding: calc.totalsByCurrency(open, (r) => r.balance) };
