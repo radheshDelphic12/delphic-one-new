@@ -115,8 +115,10 @@ describe('sharepoint storage', () => {
 
   test('download link, delete (already gone = fine) and folder listing with paging', async () => {
     const { calls, fetchFn } = fakeGraph((url, init) => {
-      if (url.includes('/items/item-1?$select')) return json(200, { id: 'item-1', '@microsoft.graph.downloadUrl': 'https://dl.example/abc' });
-      if (url.includes('/items/missing?$select')) return json(404, {});
+      // the plain item (no $select, which makes SharePoint leave the link out) carries the download link
+      if (init.method === 'GET' && url.endsWith('/items/item-1')) return json(200, { id: 'item-1', '@microsoft.graph.downloadUrl': 'https://dl.example/abc' });
+      if (url.includes('/items/item-1?$select')) return json(200, { id: 'item-1' }); // what SharePoint really answers to $select: no link
+      if (init.method === 'GET' && url.endsWith('/items/missing')) return json(404, {});
       if (init.method === 'DELETE' && url.endsWith('/items/item-1')) return json(204, {});
       if (init.method === 'DELETE' && url.endsWith('/items/gone')) return json(404, {});
       if (url.includes('/root:/Interview-Recordings:/children') && !url.includes('page2')) return json(200, { value: [{ id: 'f1', name: 'a.webm', lastModifiedDateTime: '2026-11-01T00:00:00Z', file: {} }, { id: 'd1', name: 'sub', lastModifiedDateTime: '2026-11-01T00:00:00Z' }], '@odata.nextLink': 'https://graph.microsoft.com/v1.0/page2' });

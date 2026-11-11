@@ -146,9 +146,13 @@ function createSharePointClient(options, fetchFn = fetch, sleep = wait) {
     }
   }
 
-  /** A short-lived, pre-authorised link to the file (for play / download in the browser). */
+  /**
+   * A short-lived, pre-authorised link to the file (for play / download in the browser).
+   * Ask for the item WITHOUT $select: SharePoint no longer returns '@microsoft.graph.downloadUrl' when it is named in $select (the item came
+   * back without it, so every recording looked "not available"). The plain item always carries it.
+   */
   async function downloadUrl(itemId, drive = null) {
-    const res = await graph('GET', `/drives/${drive || await resolveDrive()}/items/${encodeURIComponent(itemId)}?$select=id,@microsoft.graph.downloadUrl`);
+    const res = await graph('GET', `/drives/${drive || await resolveDrive()}/items/${encodeURIComponent(itemId)}`);
     if (res.status === 404) return null;
     if (!res.ok) throw await fail('link', res);
     return (await res.json())['@microsoft.graph.downloadUrl'] || null;
