@@ -81,4 +81,19 @@ describe('interview feedback page', () => {
     expect((await prisma.interviewRound.findUnique({ where: { id: r2.id } })).scheduled_at.getTime()).toBe(before);
     expect((await get('/all?pending=1', tokens.admin)).body.data.rounds).toEqual([]);
   });
+
+  test('a candidate whose process has ended (closed) is not listed as waiting for feedback, and the round is marked as ended', async () => {
+    const past = new Date(Date.now() - 3600000);
+    await createInterviewRound(submissionId, { round_type: 'internal_r1', interviewer_ids: [users.harshit.id], scheduled_at: past });
+    expect((await get('/all?pending=1', tokens.admin)).body.data.rounds).toHaveLength(1);
+    expect((await get('/mine', tokens.harshit)).body.data[0]).toMatchObject({ has_feedback: false, candidate_ended: false });
+
+    // the candidate is closed (and the record locked) without the round's feedback being typed in
+    await prisma.submission.update({ where: { id: submissionId }, data: { stage: 'closed', is_locked: true } });
+    expect((await get('/all?pending=1', tokens.admin)).body.data.rounds).toHaveLength(0); // nothing is waited for any more
+    const all = (await get('/all', tokens.admin)).body.data.rounds;
+    expect(all).toHaveLength(1); // still listed in the full view, marked as ended
+    expect(all[0]).toMatchObject({ has_feedback: false, candidate_ended: true, submission_stage: 'closed' });
+    expect((await get('/mine', tokens.harshit)).body.data[0]).toMatchObject({ candidate_ended: true });
+  });
 });

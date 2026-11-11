@@ -12,8 +12,12 @@ import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 const dateTime = (v) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not scheduled');
 const RESULT_LABEL = { pending: 'Result pending', pass: 'Pass', fail: 'Fail', no_show: 'No show', skipped: 'Skipped' };
 
+const ENDED_LABEL = { closed: 'Candidate closed', backout: 'Candidate backed out', rejected: 'Candidate rejected' };
+
 function StatusPill({ round }) {
   const done = round.has_feedback;
+  // the candidate's process has ended: nothing is waited for (the outcome is recorded on the submission)
+  if (!done && round.candidate_ended) return <span className="inline-block rounded-full bg-tertiary-100 px-2 py-0.5 text-xs font-medium text-tertiary-700">{ENDED_LABEL[round.submission_stage] || 'Candidate locked'} · no feedback needed</span>;
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${done ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-800'}`}>{done ? `Feedback given${round.result && round.result !== 'pending' ? ` · ${RESULT_LABEL[round.result] || round.result}` : ''}` : 'Waiting for feedback'}</span>;
 }
 
@@ -61,7 +65,7 @@ function FeedbackList() {
   }, [pendingOnly]);
 
   const tabs = [{ key: 'mine', label: 'My interviews', icon: ClipboardCheck }, ...(all !== null && all !== undefined ? [{ key: 'all', label: 'All interviews', icon: ClipboardCheck }] : [])];
-  const waiting = (mine || []).filter((r) => !r.has_feedback).length;
+  const waiting = (mine || []).filter((r) => !r.has_feedback && !r.candidate_ended).length;
   return (
     <div className="space-y-4">
       <div>

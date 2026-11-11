@@ -14,11 +14,18 @@ const ROUND_INCLUDE = {
     select: {
       id: true,
       stage: true,
+      is_locked: true,
       profile: { select: { name: true, current_designation: true, current_company: true, total_experience_years: true, current_location: true } },
       seat: { select: { requirement: { select: { title: true, primary_tech_stack: true } } } },
     },
   },
 };
+// A candidate whose process has ended (closed, backed out, rejected) or whose record is locked is not waiting for anyone's feedback any more:
+// the round can no longer be edited, and the outcome is already recorded on the submission.
+const ENDED_STAGES = ['closed', 'backout', 'rejected'];
+const isEnded = (submission) => Boolean(submission && (ENDED_STAGES.includes(submission.stage) || submission.is_locked));
+// The same rule as a database filter: only rounds of candidates still in the process.
+const STILL_IN_PROCESS = { submission: { is: { stage: { notIn: ENDED_STAGES }, is_locked: false } } };
 const ACTIVE = { deleted_at: null, status: { not: 'cancelled' } };
 const ROUND_LABEL = { hr: 'HR round', technical: 'Technical round', client: 'Client round', managerial: 'Managerial round', final: 'Final round' };
 
@@ -44,6 +51,8 @@ function view(r, userId) {
     result: r.result,
     feedback: r.feedback || '',
     has_feedback: Boolean(r.feedback && r.feedback.trim()),
+    candidate_ended: isEnded(r.submission), // closed / backed out / rejected / locked: no feedback is awaited
+    submission_stage: r.submission?.stage || null,
     completed_at: r.completed_at,
     score_percent: r.score_percent != null ? Number(r.score_percent) : null,
     rating_required: Boolean(r.template_round?.rating_required),
@@ -53,7 +62,9 @@ function view(r, userId) {
   };
 }
 
-const byDueFirst = (a, b) => (Number(a.has_feedback) - Number(b.has_feedback)) || (new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0));
+// Waiting for feedback first; a round with feedback, or of a candidate whose process has ended, counts as done.
+const waiting = (r) => !r.has_feedback && !r.candidate_ended;
+const byDueFirst = (a, b) => (Number(!waiting(a)) - Number(!waiting(b))) || (new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0));
 
 /** The rounds this person took (as an interviewer), those waiting for feedback first. */
 async function mine(user) {
@@ -70,7 +81,7 @@ async function mine(user) {
 async function all(user, { pending } = {}) {
   if (!(await seesAll(user))) return { error: 'forbidden' };
   const rows = await prisma.interviewRound.findMany({
-    where: { ...ACTIVE, ...(pending ? { OR: [{ feedback: null }, { feedback: '' }] } : {}), scheduled_at: { not: null } },
+    where: { ...ACTIVE, ...(pending ? { OR: [{ feedback: null }, { feedback: '' }], ...STILL_IN_PROCESS } : {}), scheduled_at: { not: null } },
     include: ROUND_INCLUDE,
     orderBy: { scheduled_at: 'desc' },
     take: 300,
