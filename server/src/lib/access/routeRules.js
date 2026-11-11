@@ -160,7 +160,7 @@ const RULES = [
   [/^\/payments(\/|$)/, 'open'],
 
   // ---- Reports
-  [/^\/reports\/(hr|hiring-funnel|hiring-panels)(\/|$)/, ['reports.hr']],
+  [/^\/reports\/(hr|hiring-funnel|hiring-panels|joining-attrition)(\/|$)/, ['reports.hr']],
   [/^\/reports\/export$/, 'reports.export'],
   [/^\/reports(\/|$)/, 'reports.view'],
 

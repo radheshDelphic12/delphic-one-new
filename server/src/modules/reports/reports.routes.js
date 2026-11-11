@@ -9,6 +9,7 @@ const service = require('./reports.service');
 const explorerService = require('./explorer.service');
 const drilldownService = require('./drilldown.service');
 const monthlyReview = require('./monthlyReview.service');
+const peopleMovement = require('./peopleMovement.service');
 const hiringFunnelService = require('./hiringFunnel.service');
 const hiringPanelsService = require('./hiringPanels.service');
 const closureMatrixService = require('./closureMatrix.service');
@@ -254,6 +255,19 @@ router.get(
     const data = await hiringFunnelService.hiringFunnelDetails(query);
     return ok(res, data);
   })
+);
+
+// Joining and attrition: joiners, leavers, joining rate and attrition rate by month, department and reason (HR reports).
+router.get(
+  '/joining-attrition',
+  authorizeHr,
+  asyncHandler(async (req, res) => ok(res, await peopleMovement.movement(req.user.org_id, req.query)))
+);
+
+router.get(
+  '/joining-attrition/details',
+  authorizeHr,
+  asyncHandler(async (req, res) => ok(res, await peopleMovement.details(req.user.org_id, req.query)))
 );
 
 router.get(

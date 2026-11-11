@@ -45,6 +45,7 @@ import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
 import DrilldownDrawer from './DrilldownDrawer.jsx';
 import MonthlyReview from './MonthlyReview.jsx';
 import HiringFunnel from './HiringFunnel.jsx';
+import JoiningAttrition from './JoiningAttrition.jsx';
 import ClosureMatrix from './ClosureMatrix.jsx';
 import AiInterviewReport from './AiInterviewReport.jsx';
 import DaySchedule from './DaySchedule.jsx';
@@ -318,6 +319,7 @@ function CoveragePersonCell({ row, field, people, saving, onSave }) {
 const OWN_SCREENS = {
   'monthly-review': MonthlyReview,
   'hiring-funnel': HiringFunnel,
+  'joining-attrition': JoiningAttrition,
   'client-wins': () => <ClosureMatrix kind="client" />,
   'vendor-joinings': () => <ClosureMatrix kind="vendor" />,
   'ai-interviews': AiInterviewReport,

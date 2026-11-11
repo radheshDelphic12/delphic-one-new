@@ -22,6 +22,7 @@ export const ALL_REPORTS = [
   { key: 'recruiter-vendor-gaps', label: 'Recruiter-vendor gaps', roles: ['admin', 'recruiter'] },
   { key: 'hr', label: 'HR reports', roles: ['admin'], permission: 'reports.hr' },
   { key: 'hiring-funnel', label: 'Hiring funnel', roles: ['admin'], permission: 'reports.hr' },
+  { key: 'joining-attrition', label: 'Joining & attrition', roles: ['admin'], permission: 'reports.hr' },
   { key: 'client-wins', label: 'Client-wise closures', roles: ['admin', 'sales', 'bda'] },
   { key: 'vendor-joinings', label: 'Vendor-wise joinings', roles: ['admin', 'sales', 'bda'] },
   { key: 'ai-interviews', label: 'AI interviews', roles: ['admin', 'sales', 'recruiter'] },
