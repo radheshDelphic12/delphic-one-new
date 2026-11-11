@@ -439,6 +439,23 @@ describe('optional recording (audio + video), deleted after the retention days',
     const review = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/review`), recruiterToken);
     expect(review.body.data.has_recording).toBe(true);
 
+    // playback: the team gets a short-lived signed link and the player streams it (partial requests work), so it opens at once
+    const link = await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording-link?part=0`), recruiterToken);
+    expect(link.status).toBe(200);
+    const streamUrl = link.body.data.url;
+    expect(streamUrl).toMatch(/^\/api\/v1\/public\/ai-interviews\/recording-stream\//);
+    const whole = await request(app).get(streamUrl).buffer(true).parse(binary);
+    expect(whole.status).toBe(200);
+    expect(whole.body.toString()).toBe('AAAABBBB');
+    const ranged = await request(app).get(streamUrl).set('Range', 'bytes=0-3').buffer(true).parse(binary);
+    expect(ranged.status).toBe(206);
+    expect(ranged.body.toString()).toBe('AAAA');
+    // a forged or altered link is refused, and so is a team member who may not see the recording
+    expect((await request(app).get(streamUrl.replace(/sig=[0-9a-f]{4}/, 'sig=0000'))).status).toBe(403);
+    expect((await request(app).get(streamUrl.replace(/exp=\d+/, 'exp=1'))).status).toBe(403);
+    const { access_token: strangerToken } = await loginAs(await createUser({ role: 'recruiter' }));
+    expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording-link`), strangerToken)).status).toBe(403);
+
     // an admin sees it too; another recruiter who did not send the link does not
     expect((await authed(request(app).get(`/api/v1/ai-interviews/${created.id}/recording`), adminToken).buffer(true).parse(binary)).status).toBe(200);
     const { access_token: otherToken } = await loginAs(await createUser({ role: 'recruiter' }));

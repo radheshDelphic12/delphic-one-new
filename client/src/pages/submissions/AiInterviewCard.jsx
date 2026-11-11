@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Download, Eye, RotateCcw, Send, Trash2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -50,6 +50,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   const [notes, setNotes] = useState([]); // team feedback on the opened result
   const [myNote, setMyNote] = useState('');
   const [video, setVideo] = useState({ url: null, error: '' });
+  const retried = useRef(false); // the player may ask for a fresh link once when an old one has run out
   const locked = !!submission?.is_locked;
   const isAdmin = isAdminUser(user);
 
@@ -60,7 +61,6 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     apiClient.get('/ai-interviews/settings').then(({ data }) => setEnabled(!!data.data.is_enabled)).catch(() => setEnabled(false));
   }, []);
   useEffect(() => { if (enabled) load(); }, [enabled, load]);
-  useEffect(() => () => { if (video.url) URL.revokeObjectURL(video.url); }, [video.url]);
 
   if (!enabled) return null;
   const live = state.items.find((i) => i.id === state.live_id) || null;
@@ -150,22 +150,28 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
 
   async function loadVideo(part = 0) {
     try {
-      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { part }, responseType: 'blob' });
-      setVideo({ url: URL.createObjectURL(res.data), part, error: '' });
+      // a link the <video> streams itself: playback starts at once, the file is not downloaded whole first
+      const { url } = (await apiClient.get(`/ai-interviews/${review.id}/recording-link`, { params: { part } })).data.data;
+      setVideo({ url, part, error: '' });
     } catch (err) {
       setVideo({ url: null, part, error: await recordingError(err, 'The recording is not available') });
     }
   }
 
+  // A link runs out after 20 minutes: when the player fails on an old one, ask for a fresh link once.
+  async function loadVideoAgain(part) {
+    if (retried.current) { setVideo((v) => ({ ...v, url: null, error: 'The recording could not be played. Try again, or use the download button' })); return; }
+    retried.current = true;
+    await loadVideo(part);
+  }
+
   async function downloadVideo(part = 0) {
     try {
-      const res = await apiClient.get(`/ai-interviews/${review.id}/recording`, { params: { part, download: 'true' }, responseType: 'blob' });
-      const href = URL.createObjectURL(res.data);
+      const { url } = (await apiClient.get(`/ai-interviews/${review.id}/recording-link`, { params: { part, download: 'true' } })).data.data;
       const a = document.createElement('a');
-      a.href = href;
+      a.href = url; // the browser downloads it directly (the link carries a Content-Disposition, or Microsoft's own download link)
       a.download = `ai-interview-${review.candidate_name.replace(/[^a-z0-9]+/gi, '-')}${review.recording_parts.length > 1 ? `-part${part + 1}` : ''}.webm`;
       a.click();
-      URL.revokeObjectURL(href);
     } catch (err) {
       pushError(await recordingError(err, 'Could not download the recording'), 'Something went wrong');
     }
@@ -341,7 +347,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                   <>
                     <p className="mb-2 text-xs text-tertiary-500">Available until {when(review.recording_expires_at)}, then deleted automatically.</p>
                     {review.recording_parts.length > 1 && <p className="mb-2 text-xs text-tertiary-600">The candidate closed the page and came back, so this interview has {review.recording_parts.length} recording parts.</p>}
-                    {video.url && <video src={video.url} controls className="mb-2 w-full rounded-lg bg-black" />}
+                    {video.url && <video key={video.url} src={video.url} controls preload="metadata" autoPlay className="mb-2 w-full rounded-lg bg-black" onError={() => loadVideoAgain(video.part)} />}
                     {video.error && <p className="mb-2 text-xs text-danger-700">{video.error}</p>}
                     <div className="flex flex-wrap gap-2">
                       {review.recording_parts.map((p, idx) => (

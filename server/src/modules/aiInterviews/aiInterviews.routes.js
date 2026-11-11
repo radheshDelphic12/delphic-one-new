@@ -133,6 +133,14 @@ router.get('/:id/recording', asyncHandler(async (req, res) => {
   if (req.query.download === 'true') res.setHeader('Content-Disposition', `attachment; filename="${r.name}"`);
   return res.sendFile(r.file); // sendFile answers Range requests, so the video can be scrubbed
 }));
+// A short-lived link the <video> element plays directly (streams, scrubs); the recording is not downloaded whole first.
+router.get('/:id/recording-link', asyncHandler(async (req, res) => {
+  const part = z.coerce.number().int().min(0).max(20).default(0).parse(req.query.part);
+  const r = await service.recordingLink(z.string().uuid().parse(req.params.id), part, req.user, { download: req.query.download === 'true' });
+  if (r.error) return mapError(res, r.error);
+  res.setHeader('Cache-Control', 'private, no-store');
+  return ok(res, { url: r.url, name: r.name });
+}));
 router.post('/:id/override', authorize('admin', 'recruiter', 'sales'), asyncHandler(async (req, res) => {
   const body = z.object({ outcome: z.enum(service.OUTCOMES), reason: z.string().trim().min(3).max(500) }).parse(req.body);
   const r = await service.override(z.string().uuid().parse(req.params.id), body, req.user);
@@ -148,17 +156,28 @@ router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => {
 const publicRouter = express.Router();
 // Recording sends a chunk every 5 seconds (about 720 an hour), so it has its own, much higher budget; sharing the 240/hour limit of
 // the interview calls would cut a recording off a few minutes in.
-const isRecording = (req) => req.path.endsWith('/recording');
+const isRecording = (req) => req.path.endsWith('/recording') || req.path.startsWith('/recording-stream/');
 // The budget is kept PER INTERVIEW LINK, not per IP address: candidates who take the interview from the same office or network share one
 // address, and an address-wide limit cut their answers and their camera uploads off (the answer box then stayed inactive). The link is a
 // 48-character secret, so a second, much higher limit per address still stops anyone trying to guess links.
-const linkKey = (req) => `link:${req.path.split('/')[1] || req.ip}`;
+const linkKey = (req) => `link:${(req.path.startsWith('/recording-stream/') ? req.path.split('/')[2] : req.path.split('/')[1]) || req.ip}`;
 if (env.nodeEnv !== 'test') {
   publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 5000, skip: isRecording, standardHeaders: true, legacyHeaders: false })); // per address, generous
   publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 600, skip: isRecording, keyGenerator: linkKey, standardHeaders: true, legacyHeaders: false }));
   publicRouter.use('/ai-interviews', rateLimit({ windowMs: 60 * 60 * 1000, max: 3000, skip: (req) => !isRecording(req), keyGenerator: linkKey, standardHeaders: true, legacyHeaders: false }));
 }
 
+// The stream behind a signed link from /:id/recording-link (the signature is the credential and runs out after 20 minutes).
+publicRouter.get('/ai-interviews/recording-stream/:id', asyncHandler(async (req, res) => {
+  const q = z.object({ part: z.coerce.number().int().min(0).max(20).default(0), exp: z.coerce.number(), sig: z.string().max(200) }).safeParse(req.query);
+  if (!q.success) return mapError(res, 'recording_forbidden');
+  const r = await service.recordingForStream(z.string().uuid().parse(req.params.id), q.data.part, q.data.exp, q.data.sig);
+  if (r.error) return mapError(res, r.error);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Type', r.mime);
+  if (req.query.download === 'true') res.setHeader('Content-Disposition', `attachment; filename="${r.name}"`);
+  return res.sendFile(r.file); // answers Range requests, so playback starts at once and can be scrubbed
+}));
 publicRouter.get('/ai-interviews/:token', asyncHandler(async (req, res) => {
   const r = await service.openForCandidate(req.params.token);
   return r.error ? mapError(res, r.error) : ok(res, r.view);

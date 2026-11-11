@@ -800,6 +800,34 @@ async function recordingFor(id, part = 0, user = null) {
   return { error: 'no_recording' };
 }
 
+// Playing a recording must not wait for the whole file: the browser gets a link and streams it itself (a <video> asks for the first bytes and
+// for the part it is scrubbed to). A recording kept on this server gets a short-lived signed link to the stream route below; one on SharePoint
+// gets Microsoft's own short-lived link, which supports the same partial requests.
+const STREAM_LINK_SECONDS = 20 * 60;
+const streamSig = (id, part, exp) => crypto.createHmac('sha256', env.jwt.accessSecret).update(`recording-stream.${id}.${part}.${exp}`).digest('hex');
+async function recordingLink(id, part = 0, user = null, { download = false } = {}) {
+  const r = await recordingFor(id, part, user);
+  if (r.error) return r;
+  if (r.redirect) return { url: r.redirect, mime: r.mime, name: r.name };
+  const exp = Math.floor(Date.now() / 1000) + STREAM_LINK_SECONDS;
+  return { url: `/api/v1/public/ai-interviews/recording-stream/${id}?part=${part}&exp=${exp}&sig=${streamSig(id, part, exp)}${download ? '&download=true' : ''}`, mime: r.mime, name: r.name };
+}
+/** The file behind a signed stream link, or an error when the link is forged or has run out. */
+async function recordingForStream(id, part, exp, sig) {
+  const given = Buffer.from(String(sig || ''), 'hex');
+  const want = Buffer.from(streamSig(id, part, exp), 'hex');
+  if (!Number.isFinite(exp) || exp < Date.now() / 1000 || given.length !== want.length || !crypto.timingSafeEqual(given, want)) return { error: 'recording_forbidden' };
+  const a = await prisma.aiInterview.findFirst({ where: { id, deleted_at: null } });
+  if (!a) return { error: 'not_found' };
+  if (a.recording_deleted_at) return { error: 'recording_expired' };
+  const entry = filesOf(a)[part];
+  if (!entry) return { error: 'no_recording' };
+  const file = recordingFilePath(entry.name);
+  if (!fs.existsSync(file)) return { error: 'no_recording' };
+  const label = a.candidate_name.replace(/[^a-z0-9]+/gi, '-');
+  return { file, mime: entry.mime || 'video/webm', name: `ai-interview-${label}${filesOf(a).length > 1 ? `-part${part + 1}` : ''}.${entry.name.split('.').pop()}` };
+}
+
 // Deletes the local file and, when it was moved there, the SharePoint copy. True only when nothing is left behind.
 async function removeRecordingFiles(a) {
   let clean = true;
@@ -975,5 +1003,5 @@ module.exports = {
   OUTCOMES, DEFAULTS, getSettings, updateSettings,
   invite, resend, recordEvent, list, review, override, remove, setRequirementSwitch, analytics, report, REPORT_STATUSES, REPORT_OUTCOMES, REPORT_SUBMISSION_STAGES,
   openForCandidate, startForCandidate, answerForCandidate,
-  saveRecordingChunk, recordingFor, purgeExpiredRecordings, moveRecordingsToSharePoint, sweepSharePointRecordings, diskStatus, MAX_RECORDING_DAYS,
+  saveRecordingChunk, recordingFor, recordingLink, recordingForStream, purgeExpiredRecordings, moveRecordingsToSharePoint, sweepSharePointRecordings, diskStatus, MAX_RECORDING_DAYS,
 };
