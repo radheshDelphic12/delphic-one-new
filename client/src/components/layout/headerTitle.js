@@ -1,4 +1,5 @@
 import { ROLE_COPY } from '../../pages/dashboard/dashboardWidgets.js';
+import { DELPHIC_ONE_TITLES } from '../../lib/delphicone/sections.js';
 
 const ZEPHYR_TITLES = {
   '/zephyr': ['Dashboard', 'Your business at a glance.'],
@@ -126,6 +127,7 @@ export function headerTitleForPath(pathname, user) {
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[0];
   if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[0];
   if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[0];
+  if (pathname.startsWith('/delphic-one')) return (DELPHIC_ONE_TITLES[pathname] || DELPHIC_ONE_TITLES['/delphic-one'])[0];
   if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[0];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
@@ -162,6 +164,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[1];
   if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[1];
   if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[1];
+  if (pathname.startsWith('/delphic-one')) return (DELPHIC_ONE_TITLES[pathname] || DELPHIC_ONE_TITLES['/delphic-one'])[1];
   if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[1];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;

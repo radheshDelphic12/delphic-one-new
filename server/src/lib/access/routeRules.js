@@ -196,7 +196,7 @@ const RULES = [
 ];
 
 // Each company workspace (Zephyr, Gulati Industries, ...) has its own roles inside it; they are not governed by this table.
-const WORKSPACE = /^\/(zephyr|gulati|acconcy|foundation|zklyrera|valterra|novarex)(\/|$)/;
+const WORKSPACE = /^\/(zephyr|gulati|acconcy|foundation|zklyrera|valterra|novarex|delphic-one)(\/|$)/;
 
 /** The permission a request needs: 'open' | 'admin' | a key | an array of keys. */
 function needFor(method, path) {

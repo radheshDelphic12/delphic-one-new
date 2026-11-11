@@ -21,6 +21,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 /** Which invoice table and which scope a kind belongs to. */
 function target(kind, scope) {
   if (kind === 'client_invoice') return { model: prisma.clientInvoice, where: { org_id: scope.orgId }, owner: { org_id: scope.orgId } };
+  if (kind === 'dox_invoice') return { model: prisma.doxInvoice, where: { org_id: scope.orgId }, owner: { org_id: scope.orgId } };
   return { model: prisma.groupInvoice, where: { org_group_id: { in: scope.groupIds } }, owner: {} };
 }
 

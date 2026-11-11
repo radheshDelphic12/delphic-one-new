@@ -146,6 +146,11 @@ import NovarexPeoplePage from '../pages/novarex/NovarexPeoplePage.jsx';
 import ValterraSettingsPage from '../pages/valterra/ValterraSettingsPage.jsx';
 import NovarexSettingsPage from '../pages/novarex/NovarexSettingsPage.jsx';
 import { isValterraOrg } from '../lib/valterra/useValterra.js';
+import { isDelphicOneOrg } from '../lib/delphicone/useDelphicOne.js';
+import DelphicOneHomePage from '../pages/delphicone/DelphicOneHomePage.jsx';
+import DelphicOneCustomersPage from '../pages/delphicone/DelphicOneCustomersPage.jsx';
+import DelphicOneLeadsPage from '../pages/delphicone/DelphicOneLeadsPage.jsx';
+import DelphicOneInvoicesPage from '../pages/delphicone/DelphicOneInvoicesPage.jsx';
 import { isNovarexOrg } from '../lib/novarex/useNovarex.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
 import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
@@ -204,6 +209,8 @@ function HomePage() {
   // Novarex Pharmaceuticals is a standalone workspace with its own home.
   if (isValterraOrg(user)) return <Navigate to="/valterra" replace />;
   if (isNovarexOrg(user)) return <Navigate to="/novarex" replace />;
+  // Delphic One (the company that sells the product) is a standalone workspace with its own home.
+  if (isDelphicOneOrg(user)) return <Navigate to="/delphic-one" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
   if (isAdminUser(user)) return <Navigate to={ADMIN_HOME} replace />;
   return (
@@ -313,6 +320,15 @@ function RequireValterra({ children }) {
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isValterraOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Delphic One workspace needs the `delphic_one` module on the ACTIVE company. */
+function RequireDelphicOne({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isDelphicOneOrg(user)) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -505,6 +521,10 @@ export default function App() {
         <Route path="zklyrera/people" element={<RequireZklyrera><ZklyreraPeoplePage /></RequireZklyrera>} />
         <Route path="zklyrera/settings" element={<RequireZklyrera><ZklyreraSettingsPage /></RequireZklyrera>} />
         <Route path="zklyrera/*" element={<Navigate to="/zklyrera" replace />} />
+        <Route path="delphic-one" element={<RequireDelphicOne><DelphicOneHomePage /></RequireDelphicOne>} />
+        <Route path="delphic-one/customers" element={<RequireDelphicOne><DelphicOneCustomersPage /></RequireDelphicOne>} />
+        <Route path="delphic-one/leads" element={<RequireDelphicOne><DelphicOneLeadsPage /></RequireDelphicOne>} />
+        <Route path="delphic-one/invoices" element={<RequireDelphicOne><DelphicOneInvoicesPage /></RequireDelphicOne>} />
         <Route path="valterra" element={<RequireValterra><ValterraHomePage /></RequireValterra>} />
         <Route path="novarex" element={<RequireNovarex><NovarexHomePage /></RequireNovarex>} />
         <Route path="valterra/sites" element={<RequireValterra><ValterraSitesPage /></RequireValterra>} />

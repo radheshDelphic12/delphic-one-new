@@ -9659,3 +9659,112 @@ model Letter {
   @@index([account_id])
   @@map("letters")
 }
+
+// ===================== Delphic One (the product company): customers, leads, invoices =====================
+// The workspace of the company that sells Delphic One. Module key `delphic_one`; every table is scoped by org_id; no foreign keys to other modules.
+model DoxCustomer {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  name          String
+  contact_name  String?
+  contact_email String?
+  contact_phone String?
+  gstin         String?
+  address       String?
+  status        String    @default("trial") // trial | active | read_only | churned
+  plan_name     String?
+  users_count   Int       @default(0)
+  monthly_value Decimal   @default(0) @db.Decimal(14, 2) // recurring revenue per 30 days, INR, before GST
+  trial_ends_on DateTime? @db.Date
+  started_on    DateTime? @db.Date
+  owner_user_id String?   @db.Uuid
+  notes         String?
+  lead_id       String?   @db.Uuid // the lead this customer came from
+  created_by    String?   @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+  deleted_at    DateTime?
+
+  @@index([org_id, status])
+  @@map("dox_customers")
+}
+
+model DoxLead {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  company_name       String
+  contact_name       String?
+  contact_email      String?
+  contact_phone      String?
+  source             String    @default("website") // website | referral | outbound | event | partner | other
+  stage              String    @default("new") // new | contacted | demo | trial | won | lost
+  expected_value     Decimal   @default(0) @db.Decimal(14, 2) // expected recurring revenue per 30 days
+  users_expected     Int?
+  owner_user_id      String?   @db.Uuid
+  next_followup_date DateTime? @db.Date
+  notes              String?
+  customer_id        String?   @db.Uuid
+  lost_reason        String?
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  deleted_at         DateTime?
+
+  @@index([org_id, stage])
+  @@map("dox_leads")
+}
+
+// What happened with a lead: a call, a demo, a mail; the date of the next step lives on the lead.
+model DoxLeadNote {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  lead_id    String   @db.Uuid
+  note       String
+  stage_to   String? // set when the note moved the lead to another stage
+  created_by String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@index([lead_id])
+  @@map("dox_lead_notes")
+}
+
+model DoxInvoice {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String    @db.Uuid
+  customer_id        String    @db.Uuid
+  number             String
+  invoice_date       DateTime  @db.Date
+  due_date           DateTime? @db.Date
+  next_followup_date DateTime? @db.Date
+  description        String?
+  amount             Decimal   @db.Decimal(14, 2) // before GST
+  gst_amount         Decimal   @default(0) @db.Decimal(14, 2)
+  total              Decimal   @db.Decimal(14, 2)
+  status             String    @default("sent") // draft | sent | cancelled (paid is worked out from the payments)
+  cancelled_reason   String?
+  notes              String?
+  created_by         String?   @db.Uuid
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+
+  @@unique([org_id, number])
+  @@index([org_id, customer_id])
+  @@map("dox_invoices")
+}
+
+model DoxInvoicePayment {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String    @db.Uuid
+  invoice_id String    @db.Uuid
+  date       DateTime  @db.Date
+  amount     Decimal   @db.Decimal(14, 2)
+  mode       String    @default("neft")
+  reference  String?
+  notes      String?
+  created_by String?   @db.Uuid
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  @@index([invoice_id])
+  @@map("dox_invoice_payments")
+}

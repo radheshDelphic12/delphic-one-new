@@ -31,6 +31,8 @@ import { zklyreraNavFor } from '../../lib/zklyrera/sections.js';
 import { isZklyreraOrg, useZklyrera, zkCan } from '../../lib/zklyrera/useZklyrera.js';
 import { valterraNavFor } from '../../lib/valterra/sections.js';
 import { novarexNavFor } from '../../lib/novarex/sections.js';
+import { delphicOneNavFor } from '../../lib/delphicone/sections.js';
+import { isDelphicOneOrg, useDelphicOne } from '../../lib/delphicone/useDelphicOne.js';
 import { isValterraOrg, useValterra, vtCan } from '../../lib/valterra/useValterra.js';
 import { isNovarexOrg, useNovarex, nxCan } from '../../lib/novarex/useNovarex.js';
 
@@ -108,6 +110,8 @@ const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || SHARED_
 const isValterraPath = (pathname) => pathname.startsWith('/valterra') || SHARED_PATHS.includes(pathname);
 // Novarex Pharmaceuticals as well.
 const isNovarexPath = (pathname) => pathname.startsWith('/novarex') || SHARED_PATHS.includes(pathname);
+// The Delphic One company (customers, leads, invoices) as well.
+const isDelphicOnePath = (pathname) => pathname.startsWith('/delphic-one') || SHARED_PATHS.includes(pathname);
 // Gulati Foundation as well.
 const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || SHARED_PATHS.includes(pathname);
 
@@ -138,8 +142,11 @@ export default function AppLayout() {
   const { me: vtMe } = useValterra();
   const isNovarex = isNovarexOrg(user);
   const { me: nxMe } = useNovarex();
+  const isDelphicOne = isDelphicOneOrg(user);
+  const { me: doxMe } = useDelphicOne();
   const navBase = useMemo(
     () => {
+      if (isDelphicOne) return [...delphicOneNavFor(doxMe), ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       if (isNovarex) {
         const setup = nxCan(nxMe, 'settings') ? [{ to: '/novarex/settings', label: 'Novarex setup', icon: Settings }] : [];
         return [...novarexNavFor(nxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
@@ -181,7 +188,7 @@ export default function AppLayout() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.access, speakUp, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe]
+    [user?.role, user?.access, speakUp, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe, isDelphicOne, doxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
@@ -638,7 +645,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : isDelphicOne && !isDelphicOnePath(pathname) && !isGroupPath ? <Navigate to="/delphic-one" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>
