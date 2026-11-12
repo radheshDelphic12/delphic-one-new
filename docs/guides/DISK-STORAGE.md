@@ -56,3 +56,35 @@ Swap: keep `/swapfile2` while the server has 1.9 GB of memory. When the server i
 * Keep backups off the server (`scripts/offsite-backup.sh` exists; a managed database such as RDS also keeps its own backups).
 * Move uploaded files (CVs, receipts, recordings) to object storage. AI interview recordings already go to SharePoint when that is set up (docs/features/RECORDINGS-SHAREPOINT.md).
 * A larger root disk is the simplest relief; resizing an EBS volume does not need a rebuild.
+
+## How documents are managed (read on production 2026-11-12)
+
+Documents here means everything people upload: CVs, receipts, wallet attachments, vendor invoice files, HR letters, AI interview recordings.
+
+| Fact | Value |
+|---|---|
+| Where they live | the `delphic_uploads` docker volume, mounted at `/app/server/uploads` in the server container; the database keeps only the file name |
+| Size today | 90 MB in 655 files; about 19 new files a week, so a few MB a month |
+| Largest file | under 1 MB (recordings are no longer kept here once they are on SharePoint) |
+| Root disk | 28 GB, 63% used, 11 GB free (after the disk-guard clean-up) |
+| Off-server copy | database dumps only (`scripts/offsite-backup.sh`). Uploaded documents have **no** off-server copy |
+
+What this means:
+
+* Space is not a document problem. At this growth the uploads volume needs years to reach 1 GB. The earlier "storage problem" was docker images, build cache and swap, which `scripts/disk-guard.sh` now handles.
+* The real risk is loss, not size: if the server disk is lost, the uploaded documents are lost with it, because only the database is copied off the server.
+* Recordings are the only large documents. They go to SharePoint when Graph is set up and are removed after the retention days (`AI interview > Settings`).
+
+Rules to follow:
+
+1. Keep documents on the uploads volume while it is under about 5 GB. Check **Group Dashboard > Settings > Storage** (uploads by kind, oldest file) every month.
+2. Run `scripts/disk-guard.sh` daily from cron (the line above is not installed yet; production has only the 15-minute database backup in cron).
+3. Off-server copy of the uploads: `scripts/uploads-backup.sh` sends one `uploads-DATE.tar.gz` a day to the same SharePoint place as the database dumps and keeps the newest 14. Install on the server (as the deploy user), once:
+
+   ```
+   chmod +x scripts/uploads-backup.sh
+   ( crontab -l; echo '45 3 * * * cd /opt/delphic && ./scripts/uploads-backup.sh >> /var/log/delphic-uploads-backup.log 2>&1'; echo '30 3 * * * cd /opt/delphic && ./scripts/disk-guard.sh >> /var/log/delphic-disk.log 2>&1' ) | crontab -
+   ```
+
+   Test it once by hand first (`./scripts/uploads-backup.sh`); the log line says `uploads-DATE.tar.gz: uploaded`. To restore, download the archive from SharePoint and unpack it into the uploads volume.
+4. Move to object storage (SharePoint library or S3) when uploads pass about 5 GB or the disk goes under 8 GB free again.

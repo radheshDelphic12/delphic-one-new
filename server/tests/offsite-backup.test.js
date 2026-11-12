@@ -19,6 +19,20 @@ describe('off-server backups', () => {
     expect(shouldUpload('pre-restore-safety-2026-11-09.dump', [], NOW)).toBe(false);
   });
 
+  test('the uploaded documents go up once a day as uploads-DATE.tar.gz and the newest 14 archives are kept', () => {
+    expect(shouldUpload('uploads-2026-11-09.tar.gz', [], NOW)).toBe(true);
+    expect(shouldUpload('uploads-2026-11-09.tar.gz', [file('uploads-2026-11-09.tar.gz', 2)], NOW)).toBe(false);
+    expect(shouldUpload('uploads-2026-11-09.zip', [], NOW)).toBe(false);
+    const files = [];
+    for (let d = 0; d < 20; d += 1) files.push(file(`uploads-2026-10-${String(10 + d).padStart(2, '0')}.tar.gz`, 24 * (20 - d)));
+    files.push(file('auto-2026-11-08-100000.dump', 30));
+    const dropped = planRemoteRetention(files, NOW).map((f) => f.name);
+    expect(dropped).toHaveLength(6);
+    expect(dropped.every((n) => n.startsWith('uploads-'))).toBe(true);
+    expect(dropped).toContain('uploads-2026-10-10.tar.gz');
+    expect(dropped).not.toContain('uploads-2026-10-29.tar.gz');
+  });
+
   test('retention keeps the newest 24 copies and one per day up to 30 days, drops the rest; other files are never touched', () => {
     const files = [];
     for (let i = 0; i < 24; i += 1) files.push(file(`auto-2026-11-08-${String(i).padStart(2, '0')}0000.dump`, i + 1)); // the last day: all kept

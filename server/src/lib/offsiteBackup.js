@@ -3,12 +3,16 @@
 
 const DAY = 24 * 3600000;
 const NAME_RE = /^(auto|predeploy)-\d{4}-\d{2}-\d{2}-\d{6}\.dump$/;
+// The uploaded documents (CVs, receipts, invoice files, letters): one archive a day, uploads-2026-11-12.tar.gz.
+const UPLOADS_RE = /^uploads-\d{4}-\d{2}-\d{2}\.tar\.gz$/;
+const UPLOADS_KEEP = 14; // the newest 14 daily archives stay on SharePoint
 
 /** Dumps run every 15 minutes; copies of automatic dumps go up about once an hour. */
 const MIN_GAP_MS = 55 * 60000;
 
 /** Should this dump be uploaded now? Pre-deploy dumps always go; automatic ones at most about once an hour; other names never. */
 function shouldUpload(name, existing, now = new Date()) {
+  if (UPLOADS_RE.test(name)) return !existing.some((f) => f.name === name); // once a day: today's archive is not there yet
   if (!NAME_RE.test(name)) return false;
   if (name.startsWith('predeploy-')) return true;
   const newest = existing.filter((f) => f.name.startsWith('auto-')).reduce((m, f) => Math.max(m, f.modified_at.getTime()), 0);
@@ -32,7 +36,9 @@ function planRemoteRetention(files, now = new Date()) {
     else days.add(day);
   });
   for (const f of mine) if (f.name.startsWith('predeploy-') && t - f.modified_at.getTime() > 30 * DAY) del.push(f);
+  const uploads = files.filter((f) => UPLOADS_RE.test(f.name)).sort((a, b) => b.modified_at - a.modified_at);
+  del.push(...uploads.slice(UPLOADS_KEEP));
   return del;
 }
 
-module.exports = { shouldUpload, planRemoteRetention, NAME_RE, MIN_GAP_MS };
+module.exports = { shouldUpload, planRemoteRetention, NAME_RE, UPLOADS_RE, MIN_GAP_MS };
