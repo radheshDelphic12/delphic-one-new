@@ -9,7 +9,7 @@ import { orgLogo } from '../../lib/orgLogo.js';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
 import { usePermissions } from '../../lib/permissions.js';
 import { hasNeed, isAdminUser, isPermissionMode } from '../../lib/access.js';
-import { usePlatformAccess } from '../../lib/platform/usePlatformAccess.js';
+import { usePlatformAccess, useLockedMenu } from '../../lib/platform/usePlatformAccess.js';
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
@@ -148,6 +148,7 @@ export default function AppLayout() {
   const isDelphicOne = isDelphicOneOrg(user);
   const { me: doxMe } = useDelphicOne();
   const platformAdmin = usePlatformAccess();
+  const lockedMenu = useLockedMenu();
   const navBase = useMemo(
     () => {
       if (isDelphicOne) return [...delphicOneNavFor(doxMe), ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
@@ -200,12 +201,14 @@ export default function AppLayout() {
     () => {
       // The database snapshot viewer is a separate app (/dbviewer/), shown to a super admin in every workspace view.
       const viewer = [...(user?.is_superadmin && !isContractor ? [DB_SNAPSHOTS_NAV_ITEM] : []), ...(platformAdmin && !isContractor ? [PLATFORM_NAV_ITEM] : [])];
-      if (!isGroupSuperadmin || isContractor) return [...navBase, ...viewer];
+      // customer plan: menu entries of modules without days are hidden (empty list for every company that is not a customer)
+      const unlocked = (item) => !lockedMenu.some((p) => item.to === p || item.to.startsWith(`${p}/`));
+      if (!isGroupSuperadmin || isContractor) return [...navBase.filter(unlocked), ...viewer];
       // In group view the sidebar is the group's, not whichever company happens to be active underneath.
       if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }, ...viewer];
       return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview'), ...viewer];
     },
-    [navBase, isGroupSuperadmin, isContractor, isGroupPath, user?.is_superadmin, platformAdmin]
+    [navBase, isGroupSuperadmin, isContractor, isGroupPath, user?.is_superadmin, platformAdmin, lockedMenu]
   );
 
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.

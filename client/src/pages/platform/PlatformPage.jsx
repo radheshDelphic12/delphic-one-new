@@ -7,7 +7,7 @@ import { inputCls, labelCls, th, td, useSave } from '../delphicone/ui.jsx';
 // SaaS platform administration (SaaS launch plan, phase 1.4). Only people on the platform-admin list get past the first call; everyone else sees a
 // short "not available" message. Everything on the product's catalogue is edited here: modules, what each needs, dated price books, the numbers
 // (trial days, trial users, grace days...), who may administer the platform, and the customer list.
-const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['switches', 'Switches'], ['customers', 'Customers'], ['admins', 'Platform admins'], ['audit', 'Audit trail']];
+const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['routes', 'Screen mapping'], ['switches', 'Switches'], ['customers', 'Customers'], ['admins', 'Platform admins'], ['audit', 'Audit trail']];
 const rupee = (n) => (n == null ? '-' : `Rs ${Number(n).toLocaleString('en-IN')}`);
 const get = (path) => apiClient.get(`/platform${path}`).then((r) => r.data.data);
 
@@ -139,6 +139,45 @@ function Settings() {
   );
 }
 
+function RouteMap() {
+  const [rows, reload] = useData('/route-modules');
+  const [mods] = useData('/modules');
+  const save = useSave();
+  const [form, setForm] = useState({ path_prefix: '', module_code: '', menu_prefix: '' });
+  if (rows === null || mods === null) return <Skeleton className="h-40" />;
+  if (rows === false) return <p className="text-sm text-tertiary-500">The mapping could not be loaded.</p>;
+  const put = async (body, ok) => { const r = await save(() => apiClient.put('/platform/route-modules', body), ok, 'Could not save the mapping'); if (r) reload(); return r; };
+  const add = async (e) => {
+    e.preventDefault();
+    const r = await put({ path_prefix: form.path_prefix.trim(), module_code: form.module_code, menu_prefix: form.menu_prefix.trim() || null }, 'Mapping saved');
+    if (r) setForm({ path_prefix: '', module_code: '', menu_prefix: '' });
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-tertiary-500">Which module each part of the product belongs to. Used only while "Module access checks" is ON and only for customer companies. The longest matching address wins; an address with no row is open to everyone.</p>
+      <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-2xl border border-tertiary-100 bg-white p-4">
+        <label className={labelCls}>API address<input required className={inputCls} aria-label="API address" placeholder="/accounts" value={form.path_prefix} onChange={(e) => setForm({ ...form, path_prefix: e.target.value })} /></label>
+        <label className={labelCls}>Module<select required className={inputCls} aria-label="Module" value={form.module_code} onChange={(e) => setForm({ ...form, module_code: e.target.value })}><option value="">Choose</option>{mods.modules.map((m) => <option key={m.code} value={m.code}>{m.code} {m.name}</option>)}</select></label>
+        <label className={labelCls}>Menu path (optional)<input className={inputCls} placeholder="/accounts" value={form.menu_prefix} onChange={(e) => setForm({ ...form, menu_prefix: e.target.value })} /></label>
+        <button type="submit" className="btn-primary">Add or change</button>
+      </form>
+      <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
+        <table className="min-w-full text-sm"><thead><tr><th className={th}>API address</th><th className={th}>Module</th><th className={th}>Menu</th><th className={th}>On</th><th className={th} /></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={r.id} className="border-t border-tertiary-100">
+              <td className={`${td} font-mono text-xs`}>{r.path_prefix}</td>
+              <td className={td}><select className={inputCls} aria-label={`Module of ${r.path_prefix}`} value={r.module_code} onChange={(e) => put({ path_prefix: r.path_prefix, module_code: e.target.value, menu_prefix: r.menu_prefix, active: r.active }, 'Saved')}>{mods.modules.map((m) => <option key={m.code} value={m.code}>{m.code}</option>)}</select></td>
+              <td className={`${td} font-mono text-xs`}>{r.menu_prefix || '-'}</td>
+              <td className={td}><input type="checkbox" checked={r.active} aria-label={`On ${r.path_prefix}`} onChange={(e) => put({ path_prefix: r.path_prefix, module_code: r.module_code, menu_prefix: r.menu_prefix, active: e.target.checked }, 'Saved')} /></td>
+              <td className={td}><button type="button" className="btn-secondary text-xs" onClick={async () => { if (window.confirm(`Remove ${r.path_prefix} from the mapping? It will then be open to everyone.`) && await save(() => apiClient.delete(`/platform/route-modules/${r.id}`), 'Removed', 'Could not remove')) reload(); }}>Remove</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Switches() {
   const [rows, reload] = useData('/switches');
   const save = useSave();
@@ -228,7 +267,7 @@ export default function PlatformPage() {
   useEffect(() => { get('/me').then(() => setAllowed(true)).catch(() => setAllowed(false)); }, []);
   if (allowed === null) return <div className="p-6"><Skeleton className="h-40" /></div>;
   if (!allowed) return <div className="p-6 text-sm text-tertiary-500" data-testid="platform-denied">This area is only for the platform administrators.</div>;
-  const Body = { modules: Modules, books: Books, settings: Settings, switches: Switches, customers: Customers, admins: Admins, audit: Audit }[tab];
+  const Body = { modules: Modules, books: Books, settings: Settings, routes: RouteMap, switches: Switches, customers: Customers, admins: Admins, audit: Audit }[tab];
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6" data-testid="platform-page">
       <div>

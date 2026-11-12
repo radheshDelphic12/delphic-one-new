@@ -9808,6 +9808,7 @@ model SaasModule {
   needed_by SaasModuleDependency[] @relation("DependencyNeeds")
   prices    SaasModulePrice[]
   credits   SaasSlotCredit[]
+  routes    SaasRouteModule[]
 
   @@map("saas_modules")
 }
@@ -9975,3 +9976,18 @@ model SaasAudit {
   @@index([created_at])
   @@map("saas_audit")
 }
+
+// Which module an API route belongs to (edited on the platform screen). The longest matching path_prefix decides; no row = not gated.
+model SaasRouteModule {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  path_prefix String     @unique
+  menu_prefix String?
+  module_code String     @db.VarChar(8)
+  module      SaasModule @relation(fields: [module_code], references: [code], onDelete: Cascade)
+  note        String?
+  active      Boolean    @default(true)
+
+  @@index([module_code])
+  @@map("saas_route_modules")
+}
+

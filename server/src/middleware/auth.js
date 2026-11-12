@@ -9,6 +9,7 @@ const { contractorMayAccess } = require('./contractorScope');
 const { teamUserIds } = require('../lib/permissions');
 const { loadAccess } = require('../lib/access/load');
 const accessGuard = require('../lib/access/guard');
+const saasGate = require('../modules/platform/saasGate');
 
 // Multi-company ERP (Phase 1): the JWT carries an `org_id` for users who have
 // an OrgMembership (everyone, post Phase-0 backfill). Tokens issued before
@@ -59,7 +60,7 @@ function authenticate(req, res, next) {
     const payload = jwt.verify(token, env.jwt.accessSecret);
     const base = { id: payload.sub, role: payload.role, name: payload.name, email: payload.email };
     resolveOrgContext(base, payload.org_id)
-      .then((user) => {
+      .then(async (user) => {
         if (!user) return fail(res, 403, 'Active organization membership required');
         if (user.worker_type === 'contractor' && !contractorMayAccess(req.method, req.originalUrl)) {
           return fail(res, 403, 'Not available in the contractor portal');
@@ -71,6 +72,9 @@ function authenticate(req, res, next) {
           return fail(res, 403, mail ? "You don't have permission to send emails. Ask an admin to give you Email > Send emails." : "You don't have access to this");
         }
         user.role = allowed.role;
+        // SaaS module access: a no-op unless the "Module access checks" switch is on, and then only for customer companies.
+        const saasBlocked = await saasGate.check(req, user);
+        if (saasBlocked) return fail(res, 403, saasBlocked);
         req.user = user;
         // Multi-company ERP (HLD §5, layer 1): the rest of this request runs
         // inside an AsyncLocalStorage context carrying the resolved org_id,

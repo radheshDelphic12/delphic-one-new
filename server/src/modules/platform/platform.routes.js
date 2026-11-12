@@ -8,6 +8,7 @@ const credits = require('./credits.service');
 const entitlements = require('./entitlements.service');
 const switches = require('./switches.service');
 const audit = require('./audit.service');
+const saasGate = require('./saasGate');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -25,6 +26,8 @@ const router = express.Router();
 router.use(authenticate);
 // Anyone signed in may ask whether they are a platform admin (the menu link appears only when yes); everything below needs to be one.
 router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin: await service.isPlatformAdmin(req.user) })));
+// The menu paths this person cannot use (only when module access checks are on and their company is a customer).
+router.get('/my-modules', asyncHandler(async (req, res) => ok(res, await saasGate.lockedMenu(req.user))));
 router.use(requirePlatformAdmin);
 
 const ERRORS = {
@@ -139,6 +142,26 @@ router.get('/switches', asyncHandler(async (req, res) => ok(res, await switches.
 router.put('/switches/:name', asyncHandler(async (req, res) => {
   const { on } = z.object({ on: z.boolean(), confirm: z.literal(true) }).parse(req.body);
   return result(res, await switches.setSwitch(z.enum(Object.keys(switches.SWITCHES)).parse(req.params.name), on, req.user.id));
+}));
+
+// screen-to-module mapping: which module an API route belongs to
+router.get('/route-modules', asyncHandler(async (req, res) => ok(res, await prisma.saasRouteModule.findMany({ orderBy: [{ module_code: 'asc' }, { path_prefix: 'asc' }] }))));
+router.put('/route-modules', asyncHandler(async (req, res) => {
+  const body = z.object({ path_prefix: z.string().regex(/^\/[a-z0-9/_-]+$/), module_code: code, menu_prefix: z.string().regex(/^\/[a-z0-9/_-]*$/).nullable().optional(), note: z.string().max(200).nullable().optional(), active: z.boolean().optional() }).parse(req.body);
+  if (!(await prisma.saasModule.findUnique({ where: { code: body.module_code } }))) return problem(res, { error: 'module_not_found' });
+  const before = await prisma.saasRouteModule.findUnique({ where: { path_prefix: body.path_prefix } });
+  const row = await prisma.saasRouteModule.upsert({ where: { path_prefix: body.path_prefix }, update: { module_code: body.module_code, menu_prefix: body.menu_prefix ?? null, note: body.note ?? null, ...(body.active !== undefined ? { active: body.active } : {}) }, create: { path_prefix: body.path_prefix, module_code: body.module_code, menu_prefix: body.menu_prefix ?? null, note: body.note ?? null } });
+  saasGate.clearCache();
+  await audit.record(req.user.id, before ? 'route_mapping_edited' : 'route_mapping_added', 'route_module', body.path_prefix, before && { module_code: before.module_code, active: before.active }, { module_code: row.module_code, active: row.active });
+  return ok(res, row);
+}));
+router.delete('/route-modules/:id', asyncHandler(async (req, res) => {
+  const row = await prisma.saasRouteModule.findUnique({ where: { id: z.string().uuid().parse(req.params.id) } });
+  if (!row) return problem(res, { error: 'not_found' });
+  await prisma.saasRouteModule.delete({ where: { id: row.id } });
+  saasGate.clearCache();
+  await audit.record(req.user.id, 'route_mapping_removed', 'route_module', row.path_prefix, { module_code: row.module_code }, null);
+  return ok(res, { ok: true });
 }));
 
 // who changed what
