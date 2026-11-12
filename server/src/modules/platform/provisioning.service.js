@@ -4,21 +4,22 @@ const prisma = require('../../config/db');
 const { nextEmployeeCode, withEmployeeCodeRetry } = require('../../lib/employeeCode');
 const platform = require('./platform.service');
 const credits = require('./credits.service');
+const switches = require('./switches.service');
 
 // Creating a customer workspace from a Delphic One customer (docs/features/SAAS-LAUNCH-BUILD-PLAN.md, phase 1.5; SaaS plan sections 21 and 22).
 //
-// Off unless SAAS_CUSTOMER_PROVISIONING=true. A customer gets a NEW group (kind 'trial') with one clean company in it: never a company inside our own
+// Off unless the "Customer workspaces" switch is on (platform screen; env SAAS_CUSTOMER_PROVISIONING is only the initial fallback). A customer gets a NEW group (kind 'trial') with one clean company in it: never a company inside our own
 // group, never any data copied from our companies. The company is created exactly like "add a company" does (an empty company and its first admin).
 // Trial length and number of users come from the platform settings (15 days and 2 users by default).
 
-const enabled = () => process.env.SAAS_CUSTOMER_PROVISIONING === 'true';
+const enabled = () => switches.isOn('provisioning');
 const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'customer';
 
 // A readable one-time password for the customer's first admin (shown once to our team, who pass it on; the customer should change it).
 const tempPassword = () => `${crypto.randomBytes(4).toString('hex')}-${crypto.randomBytes(4).toString('hex')}`;
 
 async function provision({ doxCustomerId, doxOrgId, actorId }) {
-  if (!enabled()) return { error: 'disabled' };
+  if (!(await enabled())) return { error: 'disabled' };
   const dox = await prisma.doxCustomer.findFirst({ where: { id: doxCustomerId, org_id: doxOrgId, deleted_at: null } });
   if (!dox) return { error: 'customer_not_found' };
   if (!dox.contact_email) return { error: 'no_email' };

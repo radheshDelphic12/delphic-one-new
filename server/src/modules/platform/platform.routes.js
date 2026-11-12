@@ -6,6 +6,8 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./platform.service');
 const credits = require('./credits.service');
 const entitlements = require('./entitlements.service');
+const switches = require('./switches.service');
+const audit = require('./audit.service');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -57,22 +59,22 @@ router.post('/admins', asyncHandler(async (req, res) => {
   const r = await service.addAdmin(email, req.user.id);
   return r.error ? problem(res, r) : created(res, { id: r.admin.id });
 }));
-router.delete('/admins/:id', asyncHandler(async (req, res) => result(res, await service.removeAdmin(z.string().uuid().parse(req.params.id)))));
+router.delete('/admins/:id', asyncHandler(async (req, res) => result(res, await service.removeAdmin(z.string().uuid().parse(req.params.id), req.user.id))));
 
 // catalogue
 router.get('/modules', asyncHandler(async (req, res) => ok(res, await service.listModules())));
 router.post('/modules', asyncHandler(async (req, res) => {
   const body = z.object({ code, name: z.string().min(2).max(120), description: z.string().max(1000).optional(), price_30d: money.optional(), is_basic: z.boolean().optional(), coming_soon: z.boolean().optional() }).parse(req.body);
-  const r = await service.createModule(body);
+  const r = await service.createModule(body, req.user.id);
   return r.error ? problem(res, r) : created(res, { code: body.code });
 }));
 router.patch('/modules/:code', asyncHandler(async (req, res) => {
   const patch = z.object({ name: z.string().min(2).max(120).optional(), description: z.string().max(1000).nullable().optional(), coming_soon: z.boolean().optional(), active: z.boolean().optional(), sort_order: z.number().int().optional(), is_basic: z.boolean().optional() }).parse(req.body);
-  return result(res, await service.updateModule(code.parse(req.params.code), patch));
+  return result(res, await service.updateModule(code.parse(req.params.code), patch, req.user.id));
 }));
 router.put('/modules/:code/dependencies', asyncHandler(async (req, res) => {
   const { needs } = z.object({ needs: z.array(z.object({ code, group: z.number().int().min(1).max(10).optional() })).max(20) }).parse(req.body);
-  return result(res, await service.setDependencies(code.parse(req.params.code), needs));
+  return result(res, await service.setDependencies(code.parse(req.params.code), needs, req.user.id));
 }));
 router.post('/modules/prerequisites', asyncHandler(async (req, res) => {
   const { codes } = z.object({ codes: z.array(code).max(40) }).parse(req.body);
@@ -88,7 +90,7 @@ router.post('/price-books', asyncHandler(async (req, res) => {
 }));
 router.patch('/price-books/:id', asyncHandler(async (req, res) => {
   const patch = z.object({ name: z.string().min(2).max(120).optional(), effective_from: day.optional(), admin_price: money.optional(), notes: z.string().max(1000).nullable().optional(), prices: z.record(code, money).optional() }).parse(req.body);
-  return result(res, await service.updateBook(z.string().uuid().parse(req.params.id), patch));
+  return result(res, await service.updateBook(z.string().uuid().parse(req.params.id), patch, req.user.id));
 }));
 
 // settings (trial days, trial users, grace days, ...)
@@ -127,12 +129,22 @@ router.post('/slots/:id/status', asyncHandler(async (req, res) => {
   return result(res, await credits.setSlotStatus(z.string().uuid().parse(req.params.id), status));
 }));
 // Run the daily counter by hand (a catch-up). Only when the counter is switched on.
-router.post('/counter/run', asyncHandler(async (req, res) => (process.env.SAAS_COUNTER_ENABLED === 'true' ? ok(res, await credits.runDailyCounter()) : problem(res, { error: 'counter_off' }))));
+router.post('/counter/run', asyncHandler(async (req, res) => ((await switches.isOn('counter')) ? ok(res, await credits.runDailyCounter()) : problem(res, { error: 'counter_off' }))));
+
+// the three switches: current state, and turning one on or off (a confirm flag is required, every change is audited)
+router.get('/switches', asyncHandler(async (req, res) => ok(res, await switches.state())));
+router.put('/switches/:name', asyncHandler(async (req, res) => {
+  const { on } = z.object({ on: z.boolean(), confirm: z.literal(true) }).parse(req.body);
+  return result(res, await switches.setSwitch(z.enum(Object.keys(switches.SWITCHES)).parse(req.params.name), on, req.user.id));
+}));
+
+// who changed what
+router.get('/audit', asyncHandler(async (req, res) => ok(res, await audit.list(z.object({ entity: z.string().max(40).optional(), limit: z.coerce.number().int().min(1).max(500).optional() }).parse(req.query)))));
 // What a person would be allowed to use (works whether or not enforcement is on): for checking a customer's setup before switching it on.
 router.get('/entitlements', asyncHandler(async (req, res) => {
   const q = z.object({ user_id: z.string().uuid(), org_id: z.string().uuid() }).parse(req.query);
   const user = await prisma.user.findUnique({ where: { id: q.user_id }, select: { id: true, email: true } });
-  return ok(res, { enforcing: entitlements.enforcing(), ...(user ? await entitlements.entitlementsFor(user, q.org_id) : { applies: false }) });
+  return ok(res, { enforcing: await entitlements.enforcing(), ...(user ? await entitlements.entitlementsFor(user, q.org_id) : { applies: false }) });
 }));
 
 module.exports = router;

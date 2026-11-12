@@ -1,13 +1,14 @@
 const prisma = require('../../config/db');
 const { fail } = require('../../utils/response');
 const { dayStr } = require('./credits.service');
+const switches = require('./switches.service');
 
 // Which modules a person may use (docs/features/SAAS-LAUNCH-BUILD-PLAN.md, phase 2.4).
 //
-// SAFE BY DEFAULT: nothing below changes any behaviour unless SAAS_ENFORCE_ENTITLEMENTS=true, and even then it applies only to companies that are
+// SAFE BY DEFAULT: nothing below changes any behaviour unless the "Module access checks" switch is on (platform screen; env SAAS_ENFORCE_ENTITLEMENTS is the initial fallback), and even then it applies only to companies that are
 // SaaS customers (a row in saas_customers). Our own companies, and every company that existed before the SaaS work, are never subject to it.
 
-const enforcing = () => process.env.SAAS_ENFORCE_ENTITLEMENTS === 'true';
+const enforcing = () => switches.isOn('enforce');
 
 // Pure rule: a module is usable when it has credit days AND every requirement group of it has at least one usable module. Settled by repeating
 // until nothing changes, so a prerequisite that ran out also pauses what depends on it.
@@ -52,7 +53,7 @@ async function entitlementsFor(user, orgId, now = new Date()) {
 // Route guard: no-op unless enforcing. `code` is the module code of the screen or API (draft mapping in the SaaS plan, section 10).
 const requireModuleCode = (code) => async (req, res, next) => {
   try {
-    if (!enforcing()) return next();
+    if (!(await enforcing())) return next();
     const ent = await entitlementsFor(req.user, req.user.org_id);
     if (!ent.applies || ent.modules.includes(code)) return next();
     return fail(res, 403, ent.read_only ? 'This account is read-only' : `The ${code} module is not active for your user`);

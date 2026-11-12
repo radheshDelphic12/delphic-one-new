@@ -60,6 +60,19 @@ describe('provisioning a customer workspace', () => {
     expect((await me(salesToken)).body.data.provisioning).toBe(false);
   });
 
+  test('the switch set on the platform screen turns provisioning on with no server setting at all', async () => {
+    const switches = require('../src/modules/platform/switches.service');
+    const c = await doxCustomer();
+    expect((await post(`/customers/${c.id}/provision`)).status).toBe(404);
+    await switches.setSwitch('provisioning', true, null);
+    try {
+      expect((await post(`/customers/${c.id}/provision`)).status).toBe(201);
+    } finally {
+      await prisma.saasSetting.deleteMany({ where: { key: { startsWith: 'switch.' } } });
+      switches.clearCache();
+    }
+  });
+
   test('when on: a new trial group with one clean company, a first admin, an admin slot, 15 days and 2 users', async () => {
     const r = await provisioned();
     const group = await prisma.orgGroup.findUnique({ where: { id: r.org_group_id } });

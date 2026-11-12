@@ -7,7 +7,7 @@ import { inputCls, labelCls, th, td, useSave } from '../delphicone/ui.jsx';
 // SaaS platform administration (SaaS launch plan, phase 1.4). Only people on the platform-admin list get past the first call; everyone else sees a
 // short "not available" message. Everything on the product's catalogue is edited here: modules, what each needs, dated price books, the numbers
 // (trial days, trial users, grace days...), who may administer the platform, and the customer list.
-const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['customers', 'Customers'], ['admins', 'Platform admins']];
+const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['switches', 'Switches'], ['customers', 'Customers'], ['admins', 'Platform admins'], ['audit', 'Audit trail']];
 const rupee = (n) => (n == null ? '-' : `Rs ${Number(n).toLocaleString('en-IN')}`);
 const get = (path) => apiClient.get(`/platform${path}`).then((r) => r.data.data);
 
@@ -96,7 +96,7 @@ function Books() {
       {books.map((b) => (
         <section key={b.id} className="rounded-2xl border border-tertiary-100 bg-white p-4" data-testid={`book-${b.id}`}>
           <h3 className="font-heading text-sm font-semibold">{b.name} <span className="font-normal text-tertiary-500">applies from {String(b.effective_from).slice(0, 10)}</span></h3>
-          <p className="mt-1 text-xs text-tertiary-500">New subscriptions use the book with the latest start date that has already begun. Prices are per user per 30 days, before GST.</p>
+          <p className="mt-1 text-xs text-tertiary-500">Every amount is yours to set and can change with the season: make a new book (a copy of the latest) with its start date. New subscriptions use the book with the latest start date that has already begun; older subscriptions keep their price. Per user per 30 days, before GST.</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
             <label className={labelCls}>Admin slot<input type="number" min="0" className={inputCls} value={draft[b.id]?.admin_price ?? b.admin_price} onChange={(e) => setDraft((x) => ({ ...x, [b.id]: { ...x[b.id], admin_price: e.target.value } }))} /></label>
             {mods.modules.map((m) => (
@@ -135,6 +135,49 @@ function Settings() {
           <p className="mt-1 font-mono text-[11px] text-tertiary-400">{r.key}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+function Switches() {
+  const [rows, reload] = useData('/switches');
+  const save = useSave();
+  if (rows === null) return <Skeleton className="h-40" />;
+  if (rows === false) return <p className="text-sm text-tertiary-500">The switches could not be loaded.</p>;
+  const flip = async (s) => {
+    const next = !s.on;
+    if (!window.confirm(`Turn "${s.label}" ${next ? 'ON' : 'OFF'}?\n\n${s.help}\n\nThis is recorded in the audit trail.`)) return;
+    const r = await save(() => apiClient.put(`/platform/switches/${s.name}`, { on: next, confirm: true }), `${s.label} is now ${next ? 'on' : 'off'}`, 'Could not change the switch');
+    if (r) reload();
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-tertiary-500">All three are off until you turn them on here. A value set here wins over the server setting, which is only the starting value.</p>
+      {rows.map((s) => (
+        <div key={s.name} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-tertiary-100 bg-white p-4" data-testid={`switch-${s.name}`}>
+          <div>
+            <p className="font-heading text-sm font-semibold">{s.label} <Pill tone={s.on ? 'green' : 'gray'}>{s.on ? 'ON' : 'OFF'}</Pill></p>
+            <p className="text-xs text-tertiary-500">{s.help}</p>
+            <p className="text-[11px] text-tertiary-400">Set by: {s.source}</p>
+          </div>
+          <button type="button" className={s.on ? 'btn-secondary' : 'btn-primary'} onClick={() => flip(s)}>{s.on ? 'Turn off' : 'Turn on'}</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Audit() {
+  const [rows] = useData('/audit');
+  if (rows === null) return <Skeleton className="h-40" />;
+  if (rows === false) return <p className="text-sm text-tertiary-500">The audit trail could not be loaded.</p>;
+  if (!rows.length) return <p className="text-sm text-tertiary-500">No changes recorded yet.</p>;
+  const show = (v) => (v == null ? '' : JSON.stringify(v));
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
+      <table className="min-w-full text-sm"><thead><tr><th className={th}>When</th><th className={th}>Who</th><th className={th}>What</th><th className={th}>Before</th><th className={th}>After</th></tr></thead>
+        <tbody>{rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100 align-top"><td className={`${td} whitespace-nowrap text-xs`}>{new Date(r.at).toLocaleString()}</td><td className={td}>{r.actor?.name || '-'}</td><td className={td}>{r.action.replace(/_/g, ' ')} <span className="font-mono text-xs text-tertiary-500">{r.entity_id}</span></td><td className={`${td} max-w-xs break-words font-mono text-[11px]`}>{show(r.before)}</td><td className={`${td} max-w-xs break-words font-mono text-[11px]`}>{show(r.after)}</td></tr>)}</tbody>
+      </table>
     </div>
   );
 }
@@ -185,7 +228,7 @@ export default function PlatformPage() {
   useEffect(() => { get('/me').then(() => setAllowed(true)).catch(() => setAllowed(false)); }, []);
   if (allowed === null) return <div className="p-6"><Skeleton className="h-40" /></div>;
   if (!allowed) return <div className="p-6 text-sm text-tertiary-500" data-testid="platform-denied">This area is only for the platform administrators.</div>;
-  const Body = { modules: Modules, books: Books, settings: Settings, customers: Customers, admins: Admins }[tab];
+  const Body = { modules: Modules, books: Books, settings: Settings, switches: Switches, customers: Customers, admins: Admins, audit: Audit }[tab];
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6" data-testid="platform-page">
       <div>

@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const audit = require('./audit.service');
 
 // SaaS platform administration (docs/features/SAAS-LAUNCH-BUILD-PLAN.md, phase 1): who may run the platform, the module catalogue, the dated
 // price books and the platform settings. Nothing here is read by an existing feature; it is configuration for the SaaS product.
@@ -29,13 +30,16 @@ async function addAdmin(email, addedBy) {
   if (!user) return { error: 'user_not_found' };
   const existing = await prisma.platformAdmin.findUnique({ where: { user_id: user.id } });
   if (existing) return { error: 'already_admin' };
-  return { admin: await prisma.platformAdmin.create({ data: { user_id: user.id, added_by: addedBy } }) };
+  const admin = await prisma.platformAdmin.create({ data: { user_id: user.id, added_by: addedBy } });
+  await audit.record(addedBy, 'admin_added', 'platform_admin', admin.id, null, { email });
+  return { admin };
 }
 
-async function removeAdmin(id) {
-  const row = await prisma.platformAdmin.findUnique({ where: { id } });
+async function removeAdmin(id, actorId = null) {
+  const row = await prisma.platformAdmin.findUnique({ where: { id }, include: { user: { select: { email: true } } } });
   if (!row) return { error: 'not_found' };
   await prisma.platformAdmin.delete({ where: { id } });
+  await audit.record(actorId, 'admin_removed', 'platform_admin', id, { email: row.user.email }, null);
   return { ok: true };
 }
 
@@ -64,12 +68,14 @@ async function createBook({ name, effective_from, admin_price, notes, copy_from 
       prices: { create: (source?.prices || []).map((p) => ({ module_code: p.module_code, price_30d: p.price_30d })) },
     },
   });
+  await audit.record(userId, 'price_book_created', 'price_book', book.id, null, { name, effective_from, admin_price: Number(book.admin_price), copied_from: source?.id || null });
   return book;
 }
 
-async function updateBook(id, patch) {
-  const book = await prisma.saasPriceBook.findUnique({ where: { id } });
+async function updateBook(id, patch, actorId = null) {
+  const book = await prisma.saasPriceBook.findUnique({ where: { id }, include: { prices: true } });
   if (!book) return { error: 'not_found' };
+  const was = { name: book.name, effective_from: String(book.effective_from).slice(0, 10), admin_price: Number(book.admin_price), prices: Object.fromEntries(book.prices.map((x) => [x.module_code, Number(x.price_30d)])) };
   const data = {};
   if (patch.name !== undefined) data.name = patch.name;
   if (patch.effective_from !== undefined) data.effective_from = new Date(patch.effective_from);
@@ -81,6 +87,8 @@ async function updateBook(id, patch) {
       await tx.saasModulePrice.upsert({ where: { price_book_id_module_code: { price_book_id: id, module_code: code } }, update: { price_30d: price }, create: { price_book_id: id, module_code: code, price_30d: price } });
     }
   });
+  const changedPrices = Object.fromEntries(Object.entries(patch.prices || {}).filter(([c, v]) => was.prices[c] !== v));
+  await audit.record(actorId, 'price_book_edited', 'price_book', id, { ...(patch.name !== undefined ? { name: was.name } : {}), ...(patch.effective_from !== undefined ? { effective_from: was.effective_from } : {}), ...(patch.admin_price !== undefined ? { admin_price: was.admin_price } : {}), prices: Object.fromEntries(Object.keys(changedPrices).map((c) => [c, was.prices[c] ?? null])) }, { ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.effective_from !== undefined ? { effective_from: patch.effective_from } : {}), ...(patch.admin_price !== undefined ? { admin_price: patch.admin_price } : {}), prices: changedPrices });
   return { ok: true };
 }
 
@@ -101,7 +109,7 @@ async function listModules() {
   };
 }
 
-async function createModule({ code, name, description, price_30d, is_basic, coming_soon }) {
+async function createModule({ code, name, description, price_30d, is_basic, coming_soon }, actorId = null) {
   if (!CODE.test(code)) return { error: 'bad_code' };
   if (await prisma.saasModule.findUnique({ where: { code } })) return { error: 'code_taken' };
   const last = await prisma.saasModule.findFirst({ orderBy: { sort_order: 'desc' }, select: { sort_order: true } });
@@ -110,16 +118,18 @@ async function createModule({ code, name, description, price_30d, is_basic, comi
     await tx.saasModule.create({ data: { code, name, description: description || null, is_basic: Boolean(is_basic), coming_soon: Boolean(coming_soon), sort_order: (last?.sort_order || 0) + 10 } });
     if (book && price_30d !== undefined) await tx.saasModulePrice.create({ data: { price_book_id: book.id, module_code: code, price_30d } });
   });
+  await audit.record(actorId, 'module_created', 'module', code, null, { name, price_30d: price_30d ?? null, coming_soon: Boolean(coming_soon) });
   return { ok: true };
 }
 
 // The code never changes; a module is retired with active=false, never deleted (credits and invoices will point at it).
-async function updateModule(code, patch) {
+async function updateModule(code, patch, actorId = null) {
   const m = await prisma.saasModule.findUnique({ where: { code } });
   if (!m) return { error: 'not_found' };
   const data = {};
   for (const k of ['name', 'description', 'coming_soon', 'active', 'sort_order', 'is_basic']) if (patch[k] !== undefined) data[k] = patch[k];
   await prisma.saasModule.update({ where: { code }, data });
+  await audit.record(actorId, 'module_edited', 'module', code, Object.fromEntries(Object.keys(data).map((k) => [k, m[k]])), data);
   return { ok: true };
 }
 
@@ -140,10 +150,11 @@ function hasCycle(code, needs, edges) {
   return false;
 }
 
-async function setDependencies(code, needs) {
+async function setDependencies(code, needs, actorId = null) {
   const m = await prisma.saasModule.findUnique({ where: { code } });
   if (!m) return { error: 'not_found' };
   const codes = needs.map((n) => n.code);
+  const was = await prisma.saasModuleDependency.findMany({ where: { module_code: code }, select: { needs_code: true, requirement_group: true } });
   if (codes.includes(code)) return { error: 'cycle' };
   if (new Set(codes).size !== codes.length) return { error: 'duplicate' };
   const known = await prisma.saasModule.findMany({ where: { code: { in: codes } }, select: { code: true } });
@@ -154,6 +165,7 @@ async function setDependencies(code, needs) {
     prisma.saasModuleDependency.deleteMany({ where: { module_code: code } }),
     prisma.saasModuleDependency.createMany({ data: needs.map((n) => ({ module_code: code, needs_code: n.code, requirement_group: n.group || 1 })) }),
   ]);
+  await audit.record(actorId, 'dependencies_edited', 'module', code, was.map((w) => ({ code: w.needs_code, group: w.requirement_group })), needs.map((n) => ({ code: n.code, group: n.group || 1 })));
   return { ok: true };
 }
 
@@ -188,14 +200,15 @@ async function withPrerequisites(selected) {
 
 // ---- settings ----------------------------------------------------------------------------------------------------------
 async function listSettings() {
-  const rows = await prisma.saasSetting.findMany({ orderBy: { key: 'asc' } });
+  const rows = await prisma.saasSetting.findMany({ where: { NOT: { key: { startsWith: 'switch.' } } }, orderBy: { key: 'asc' } });
   return rows.map((r) => ({ key: r.key, value: r.value, note: r.note, updated_at: r.updated_at }));
 }
 
 async function updateSetting(key, value, userId) {
-  const row = await prisma.saasSetting.findUnique({ where: { key } });
+  const row = key.startsWith('switch.') ? null : await prisma.saasSetting.findUnique({ where: { key } });
   if (!row) return { error: 'not_found' };
   await prisma.saasSetting.update({ where: { key }, data: { value, updated_by: userId } });
+  await audit.record(userId, 'setting_edited', 'setting', key, { value: row.value }, { value });
   return { ok: true };
 }
 

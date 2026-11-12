@@ -33,6 +33,10 @@ afterEach(async () => {
   await prisma.saasPriceBook.deleteMany({ where: { name: 'Test book' } });
   await prisma.saasSetting.update({ where: { key: 'trial_days' }, data: { value: 15 } });
   delete process.env.PLATFORM_ADMIN_EMAILS;
+  delete process.env.SAAS_ENFORCE_ENTITLEMENTS;
+  await prisma.saasSetting.deleteMany({ where: { key: { startsWith: 'switch.' } } });
+  await prisma.saasAudit.deleteMany({});
+  require('../src/modules/platform/switches.service').clearCache();
 });
 afterAll(async () => { await prisma.$disconnect(); });
 
@@ -126,5 +130,58 @@ describe('price books and settings', () => {
     expect(await service.settingNumber('trial_days', 0)).toBe(21);
     expect((await api('patch', '/settings/nope', pTok, { value: 1 })).status).toBe(404);
     expect((await api('patch', '/settings/trial_days', pTok, { value: -3 })).status).toBe(422);
+  });
+});
+
+describe('switches and audit trail', () => {
+  test('the three switches default to off and are turned on and off from the platform screen, with a confirm step', async () => {
+    const state = async () => Object.fromEntries((await api('get', '/switches', pTok)).body.data.map((x) => [x.name, x]));
+    let st = await state();
+    expect(Object.keys(st).sort()).toEqual(['counter', 'enforce', 'provisioning']);
+    expect(Object.values(st).every((x) => x.on === false && x.source === 'default (off)')).toBe(true);
+    expect((await api('put', '/switches/enforce', cTok, { on: true, confirm: true })).status).toBe(403);
+    expect((await api('put', '/switches/enforce', pTok, { on: true })).status).toBe(422); // no confirm
+    expect((await api('put', '/switches/nonsense', pTok, { on: true, confirm: true })).status).toBe(422);
+    expect((await api('put', '/switches/enforce', pTok, { on: true, confirm: true })).status).toBe(200);
+    st = await state();
+    expect(st.enforce).toMatchObject({ on: true, source: 'platform screen' });
+    expect(st.counter.on).toBe(false);
+    // a value set on the screen wins over the server setting; the server setting is only the fallback
+    process.env.SAAS_ENFORCE_ENTITLEMENTS = 'true';
+    expect((await api('put', '/switches/enforce', pTok, { on: false, confirm: true })).status).toBe(200);
+    expect((await state()).enforce.on).toBe(false);
+    await prisma.saasSetting.deleteMany({ where: { key: 'switch.enforce' } });
+    require('../src/modules/platform/switches.service').clearCache();
+    expect((await state()).enforce).toMatchObject({ on: true, source: 'server setting (initial)' });
+  });
+
+  test('switches do not show among the numeric settings and cannot be edited as one', async () => {
+    await api('put', '/switches/counter', pTok, { on: true, confirm: true });
+    const keys = (await api('get', '/settings', pTok)).body.data.map((r) => r.key);
+    expect(keys.some((k) => k.startsWith('switch.'))).toBe(false);
+    expect((await api('patch', '/settings/switch.counter', pTok, { value: 0 })).status).toBe(404);
+  });
+
+  test('every platform edit leaves an audit row with who, before and after', async () => {
+    await api('patch', '/modules/BANK', pTok, { name: 'Banking', coming_soon: false });
+    await api('put', '/modules/BANK/dependencies', pTok, { needs: [{ code: 'BILL' }] });
+    const book = (await api('post', '/price-books', pTok, { name: 'Test book', effective_from: '2027-03-01' })).body.data.id;
+    await api('patch', `/price-books/${book}`, pTok, { admin_price: 650, prices: { BILL: 14 } });
+    await api('patch', '/settings/trial_days', pTok, { value: 18 });
+    await api('put', '/switches/provisioning', pTok, { on: true, confirm: true });
+    const add = await api('post', '/admins', pTok, { email: companyAdmin.email });
+    await api('delete', `/admins/${add.body.data.id}`, pTok);
+    const rows = (await api('get', '/audit', pTok)).body.data;
+    const by = (action) => rows.find((r) => r.action === action);
+    expect(by('module_edited')).toMatchObject({ entity: 'module', entity_id: 'BANK', before: { name: 'Banking Management', coming_soon: true }, after: { name: 'Banking', coming_soon: false } });
+    expect(by('module_edited').actor.email).toBe(platform.email);
+    expect(by('dependencies_edited').after).toEqual([{ code: 'BILL', group: 1 }]);
+    expect(by('price_book_created').after.name).toBe('Test book');
+    expect(by('price_book_edited')).toMatchObject({ before: { admin_price: 500, prices: { BILL: 10 } }, after: { admin_price: 650, prices: { BILL: 14 } } });
+    expect(by('setting_edited')).toMatchObject({ entity_id: 'trial_days', before: { value: 15 }, after: { value: 18 } });
+    expect(by('switch_on')).toMatchObject({ entity_id: 'provisioning', after: { on: true } });
+    expect(by('admin_added')).toBeTruthy();
+    expect(by('admin_removed').before.email).toBe(companyAdmin.email);
+    expect((await api('get', '/audit', cTok)).status).toBe(403);
   });
 });

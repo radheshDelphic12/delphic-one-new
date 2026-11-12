@@ -9959,3 +9959,19 @@ model SaasCounterRun {
 
   @@map("saas_counter_runs")
 }
+
+// Audit trail of platform changes: who changed what, before and after.
+model SaasAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id   String?  @db.Uuid
+  action     String
+  entity     String
+  entity_id  String?
+  before     Json?
+  after      Json?
+  created_at DateTime @default(now())
+
+  @@index([entity, entity_id])
+  @@index([created_at])
+  @@map("saas_audit")
+}
