@@ -17,11 +17,11 @@ export const PROCTOR_TEXT = {
 const FACE = {
   tickMs: 400,
   settleMs: 4000, // nothing is judged in the first seconds after the camera starts
-  holdMs: { no_face: 5000, multiple_faces: 3000, eyes_away: 5000, looking_down: 7000 },
+  holdMs: { no_face: 4000, multiple_faces: 3000, eyes_away: 3000, looking_down: 4000 },
   cooldownMs: 15000, // one episode is one warning; a problem that goes on gives the next warning only after this long
-  gazeSide: 0.55, // average eye-look score to the side (0..1)
-  gazeDown: 0.6, // average eye-look-down score (a webcam above the screen makes normal reading look slightly down)
-  yawDeg: 32, // head turned this far to a side
+  gazeSide: 0.45, // average eye-look score to the side (0..1)
+  gazeDown: 0.5, // average eye-look-down score (a webcam above the screen makes normal reading look slightly down)
+  yawDeg: 25, // head turned this far to a side
 };
 
 const avg = (...n) => n.reduce((a, b) => a + b, 0) / n.length;
