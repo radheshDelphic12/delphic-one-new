@@ -22,7 +22,10 @@ async function requirePlatformAdmin(req, res, next) {
 }
 
 const router = express.Router();
-router.use(authenticate, requirePlatformAdmin);
+router.use(authenticate);
+// Anyone signed in may ask whether they are a platform admin (the menu link appears only when yes); everything below needs to be one.
+router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin: await service.isPlatformAdmin(req.user) })));
+router.use(requirePlatformAdmin);
 
 const ERRORS = {
   not_found: [404, 'Not found'],

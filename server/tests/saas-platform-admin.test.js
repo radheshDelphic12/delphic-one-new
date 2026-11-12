@@ -48,6 +48,13 @@ describe('platform-admin gate', () => {
     expect((await request(app).get('/api/v1/platform/modules')).status).toBe(401);
   });
 
+  test('anyone signed in can ask whether they are a platform admin (for the menu link); only admins get yes', async () => {
+    expect((await api('get', '/access', pTok)).body.data.platform_admin).toBe(true);
+    expect((await api('get', '/access', cTok)).body.data.platform_admin).toBe(false);
+    expect((await api('get', '/access', gTok)).body.data.platform_admin).toBe(false);
+    expect((await request(app).get('/api/v1/platform/access')).status).toBe(401);
+  });
+
   test('the environment list names a first admin before any row exists', async () => {
     process.env.PLATFORM_ADMIN_EMAILS = `someone@else.com, ${companyAdmin.email.toUpperCase()}`;
     expect((await api('get', '/me', cTok)).status).toBe(200);
