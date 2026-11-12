@@ -31,10 +31,10 @@ Source: `D:\chinu\Delphic One SaaS Launch Plan.docx` (version 3, sections 1-26).
 
 Goal: a restore point before any work, a one-customer restore, release tags. Pure scripts, no application behaviour change.
 
-- [ ] 0.1 `scripts/restore-point.sh`: full verified dump, per-table row counts, uploads listing, git tag, settings copy without secrets, written to `backups/restore-points/<name>/`.
-- [ ] 0.2 `scripts/restore-org.js` (one-customer restore): restore a dump into a scratch DB, copy one org's rows back; generic over tables with `org_id`; dry-run default; `--apply` needed.
-- [ ] 0.3 `scripts/release-tag.sh`: tag `vYYYY.MM.DD-<stage>-N` for the commit that is live, with notes.
-- [ ] 0.4 `scripts/branch-diff-report.sh`: what is on dev but not on staging/main, and staging but not main.
+- [x] 0.1 `scripts/restore-point.sh`: full verified dump, per-table row counts, uploads listing, git tag, settings copy without secrets, written to `backups/restore-points/<name>/`.
+- [x] 0.2 `scripts/restore-org.js` (one-customer restore): restore a dump into a scratch DB, copy one org's rows back; generic over tables with `org_id`; dry-run default; `--apply` needed.
+- [x] 0.3 `scripts/release-tag.sh`: tag `vYYYY.MM.DD-<stage>-N` for the commit that is live, with notes.
+- [x] 0.4 `scripts/branch-diff-report.sh`: what is on dev but not on staging/main, and staging but not main.
 - Acceptance: scripts run locally against the dev DB; restore-org dry-run lists tables and row counts; shell syntax checked; a test for the table-ordering/dry-run logic.
 
 ## Phase 1 - Catalogue, group kind, platform admin, customer groups
@@ -64,3 +64,4 @@ Billing portal, gateway, webhook, GST invoices, usage credits. Not started.
 ## Work log
 
 - 2026-11-12 plan written; worktree created from 0d86f4e (super_admin_branch).
+- 2026-11-12 Phase 0 done. `scripts/restore-point.sh` (dump, row counts, uploads list, git tag, settings without secrets, `--compare`), `server/scripts/restore-org.js` (one-company restore, dry run by default, tested against a cloned database: only the named company is restored, other companies untouched), `scripts/release-tag.sh`, `scripts/branch-diff-report.sh`. restore-point.sh is syntax-checked only: this machine has no pg_dump/psql, so the dump path must be tried once on a machine with Postgres tools or in Docker. Finding from branch-diff-report: origin/dev is far behind staging (hotfixes and features went to staging/main directly), so the dev->staging->main path needs dev brought up to date once before it can be the rule.
