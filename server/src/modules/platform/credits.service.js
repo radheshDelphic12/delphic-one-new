@@ -99,4 +99,32 @@ async function runDailyCounter(now = new Date()) {
   return { ran_days: ranDays, touched, alerts };
 }
 
-module.exports = { createSlot, addCredit, moveSlot, setSlotStatus, runDailyCounter, dayStr, addDays, toDate };
+// Trial lifecycle (SaaS plan section 22): a trial whose last day has passed becomes read-only; after `trial_read_only_days` (setting, 30) a customer that has
+// not bought anything is suspended (nothing is deleted, the data stays). One reminder is returned when 7 days are left. Idempotent: running it again the same
+// day changes nothing. Only customers (rows in saas_customers) are touched.
+async function runTrialLifecycle(now = new Date()) {
+  const today = dayStr(now);
+  const readOnlyDays = await platform.settingNumber('trial_read_only_days', 30);
+  const out = { made_read_only: [], suspended: [], reminders: [] };
+  const trials = await prisma.saasCustomer.findMany({ where: { status: 'trial', trial_ends_on: { not: null } } });
+  for (const c of trials) {
+    const end = c.trial_ends_on.toISOString().slice(0, 10);
+    if (end < today) {
+      await prisma.saasCustomer.update({ where: { id: c.id }, data: { status: 'read_only' } });
+      await require('./audit.service').record(null, 'trial_ended', 'customer', c.id, { status: 'trial' }, { status: 'read_only', trial_ended_on: end });
+      out.made_read_only.push(c.id);
+    } else if (end === addDays(today, 7)) out.reminders.push({ customer_id: c.id, days_left: 7 });
+  }
+  const readOnly = await prisma.saasCustomer.findMany({ where: { status: 'read_only', trial_ends_on: { not: null } } });
+  for (const c of readOnly) {
+    const end = c.trial_ends_on.toISOString().slice(0, 10);
+    if (addDays(end, readOnlyDays) < today) {
+      await prisma.saasCustomer.update({ where: { id: c.id }, data: { status: 'suspended' } });
+      await require('./audit.service').record(null, 'customer_suspended', 'customer', c.id, { status: 'read_only' }, { status: 'suspended', reason: `no purchase ${readOnlyDays} days after the trial` });
+      out.suspended.push(c.id);
+    }
+  }
+  return out;
+}
+
+module.exports = { createSlot, addCredit, moveSlot, setSlotStatus, runDailyCounter, runTrialLifecycle, dayStr, addDays, toDate };

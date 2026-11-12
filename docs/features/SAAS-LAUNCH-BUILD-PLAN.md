@@ -55,11 +55,28 @@ Goal: a restore point before any work, a one-customer restore, release tags. Pur
 - [x] 2.4 Entitlement lookup `entitlementsFor(user)` and a middleware `requireModuleCode(code)` that is a no-op unless `SAAS_ENFORCE_ENTITLEMENTS` is on and the company is a customer/trial company. Our own companies are never subject to it.
 - [x] 2.5 Tests: counter clock cases (missed day, double run, reaching 0), slot move, dependency rules, middleware off = identical behaviour.
 
-## Phase 3 - Trial flow (later)
-Website early-access form, Sales creates customer, setup wizard, Excel import, demo company, read-only at the end. Not started.
+## Phase 3 - Trial flow
 
-## Phase 4 - Billing (later)
-Billing portal, gateway, webhook, GST invoices, usage credits. Not started.
+- [x] 3.1 Website "Request a trial" -> lead in Delphic One (public endpoint, closed by default, honeypot, de-duplication). Website page itself is a documented stub (`SAAS-TRIAL-REQUEST.md`).
+- [x] 3.2 Sales converts the lead and creates the customer's trial workspace (15 days, 2 users, clean company, first admin login) - slice 1.5.
+- [x] 3.3 Trial lifecycle: ended trial -> read-only -> suspended after the read-only days; 7-day reminder; audited (`runTrialLifecycle`, nightly job under the counter switch).
+- [x] 3.4 Read-only at the end of a trial (GET allowed, changes refused) - entitlement guard.
+- [x] 3.5 First-steps checklist for the customer admin (`GET /platform/my-setup`: offices, departments, calendar, team, policies with counts). The API is built; a screen that shows it is NOT built.
+- [ ] 3.6 Excel import of people/clients: NOT built (needs the owner to say which columns and which modules).
+- [ ] 3.7 Demo company / sample data: NOT built (owner decision: what a clean customer company should contain; today it starts empty on purpose, no data copied from our companies).
+
+## Phase 4 - Billing foundations
+
+- [x] 4.1 Orders from the dated price book + GST setting (pro rata per day, prerequisites and Basic View as separate lines, admin fee line, coming-soon refused).
+- [x] 4.2 Payment records (manual bank transfer by a platform admin; partial payments; idempotency key; over-payment refused).
+- [x] 4.3 Credit top-up on full payment (credit days + ledger + customer becomes active) in one transaction.
+- [x] 4.4 GST invoice raised in Delphic One with the existing invoice code and the payment recorded on it.
+- [x] 4.5 Webhook stub with signature + idempotency (closed without `SAAS_WEBHOOK_SECRET`; no gateway keys).
+- [ ] 4.6 Real payment gateway, customer billing portal, statements, credit notes, auto top-up, yearly discount flow, usage credits (storage, email, AI): NOT built (need gateway choice/keys and owner decisions).
+
+## Round 2 items (owner, 2026-11-12)
+
+- [x] (a) audit trail + switches in the database  - [x] (b) Platform menu link  - [x] (c) screen-to-module mapping + guard + matrix test  - [x] (d) one-person-in-two-groups checks (+ tenant read guard)  - [x] (e) website trial form  - [x] (f) billing foundations
 
 ## Work log
 
@@ -109,3 +126,5 @@ Owner instruction (round 2): ALL SaaS work stays only on branch `saas-launch-pla
 - 2026-11-12 (e) done: website trial request. `POST /api/v1/public/trial-request` (no login, 10 an hour per address, honeypot field) writes a lead (source website, stage new, unassigned) plus a note in the Delphic One workspace; the same email within 30 days adds a note to the open lead. Closed by default: platform setting `trial_form_open` (migration 20261212150000_saas_trial_form_setting, 0 = closed) edited on /platform > Settings, audited. The public website page is a stub documented in `docs/features/SAAS-TRIAL-REQUEST.md` (snippet + CORS note); the existing sheet-based website flow was not touched because it needs the Apps Script setup. Tests: saas-trial-request 5 green. Phase 3 items "setup wizard, Excel import, demo company, read-only at the end": read-only at the end is done (entitlements: ended trial and `read_only` customers can only GET); setup wizard, Excel import and demo company are NOT built (owner decision needed: what a clean customer company should contain at start).
 - 2026-11-12 (f) done: billing foundations (phase 4), no gateway and no gateway keys. Migration 20261212160000_saas_billing: `saas_orders` (order numbers SO-00001.. from a sequence), `saas_order_lines`, `saas_payments` (unique idempotency key), `saas_webhook_events` (unique provider + event id), and settings `gst_rate_pct` (18) and `order_days_default` (30). `billing.service.js`: `quote` (price from the dated price book in force today, pro rata per day, GST from the setting, Basic View and unmet prerequisites added as separate "needed" lines, the admin slot fee as a line, coming-soon modules refused), `createOrder`, manual payments, `applyPayment` (row-locked; partial payments allowed; when fully paid, in ONE transaction the order is marked paid, credit days are added to the slots with ledger rows, and a trial/read-only customer becomes active; then the GST invoice is raised in Delphic One with the existing `createInvoice` + `addPayment`, retry with `POST /platform/orders/:id/invoice`), and a signed webhook STUB `POST /api/v1/public/saas-webhook/:provider` (HMAC-SHA256 of the JSON body with env SAAS_WEBHOOK_SECRET; no secret = 404; duplicate delivery changes nothing). Platform routes: quote, create/list/get/cancel orders, record payment, invoice. Orders tab added to /platform. Tests: saas-billing 11 green (prices follow the price book and GST setting, order keeps the price of its day, partial then full payment, idempotent keys, over-payment/cancelled refused, webhook signature/duplicate/unknown order/failed event, credit days open modules).
 - Phase 4 still NOT built (needs owner decisions / external accounts): a real payment gateway and its keys, customer-facing billing portal and statements, credit notes, auto top-up, yearly discount (setting `yearly_discount_pct` exists but no yearly order flow), usage credits (storage, email, AI). The webhook signature is over the re-serialised JSON body; a real gateway signs the raw body, so the raw-body capture must be added when one is chosen.
+- 2026-11-12 Phase 3 completion: trial lifecycle (`credits.runTrialLifecycle`: ended trial -> read_only, `trial_read_only_days` later -> suspended, 7-day reminder, audited, idempotent; runs in the nightly job under the counter switch and with the manual `POST /platform/counter/run`), first-steps checklist API `GET /platform/my-setup` (customer companies only), ended-trial read-only already enforced by the guard. Tests: saas-customers-credits 17 green. Excel import and demo company are NOT built (see Phase 3 list).
+- FULL test suite started on its own database (`saas_launch_full`) because shared infra changed (`config/db.js` tenant guard, `middleware/auth.js` gate, `routeRules.js`, `app.js`, new migrations); the result is recorded below when it finishes.

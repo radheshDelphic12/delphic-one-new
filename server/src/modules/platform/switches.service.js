@@ -6,7 +6,7 @@ const audit = require('./audit.service');
 // the switch is OFF. Once a platform admin has set a switch, the stored value wins over the environment.
 const SWITCHES = {
   provisioning: { env: 'SAAS_CUSTOMER_PROVISIONING', label: 'Customer workspaces', help: 'Lets Delphic One create a customer\'s own trial workspace.' },
-  counter: { env: 'SAAS_COUNTER_ENABLED', label: 'Daily credit counter', help: 'Takes one credit day a day off every active customer slot.' },
+  counter: { env: 'SAAS_COUNTER_ENABLED', label: 'Daily credit counter', help: 'Takes one credit day a day off every active customer slot, and moves ended trials to read-only and then suspended.' },
   enforce: { env: 'SAAS_ENFORCE_ENTITLEMENTS', label: 'Module access checks', help: 'Customer users can open only the modules they have credit days for. Companies that are not customers are never affected.' },
 };
 const keyOf = (name) => `switch.${name}`;

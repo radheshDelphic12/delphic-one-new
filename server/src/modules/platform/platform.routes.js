@@ -10,6 +10,7 @@ const switches = require('./switches.service');
 const audit = require('./audit.service');
 const saasGate = require('./saasGate');
 const billing = require('./billing.service');
+const setup = require('./setup.service');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -29,6 +30,8 @@ router.use(authenticate);
 router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin: await service.isPlatformAdmin(req.user) })));
 // The menu paths this person cannot use (only when module access checks are on and their company is a customer).
 router.get('/my-modules', asyncHandler(async (req, res) => ok(res, await saasGate.lockedMenu(req.user))));
+// First-steps checklist for a customer's own admin ({ applies: false } for every other company).
+router.get('/my-setup', asyncHandler(async (req, res) => ok(res, await setup.mySetup(req.user))));
 router.use(requirePlatformAdmin);
 
 const ERRORS = {
@@ -147,7 +150,7 @@ router.post('/slots/:id/status', asyncHandler(async (req, res) => {
   return result(res, await credits.setSlotStatus(z.string().uuid().parse(req.params.id), status));
 }));
 // Run the daily counter by hand (a catch-up). Only when the counter is switched on.
-router.post('/counter/run', asyncHandler(async (req, res) => ((await switches.isOn('counter')) ? ok(res, await credits.runDailyCounter()) : problem(res, { error: 'counter_off' }))));
+router.post('/counter/run', asyncHandler(async (req, res) => ((await switches.isOn('counter')) ? ok(res, { ...(await credits.runDailyCounter()), lifecycle: await credits.runTrialLifecycle() }) : problem(res, { error: 'counter_off' }))));
 
 // orders and payments (billing foundations: no gateway; payments are recorded by hand or arrive through the signed webhook stub)
 const orderBody = z.object({ lines: z.array(z.object({ slot_id: z.string().uuid(), code, days: z.number().int().min(1).max(3650).optional() })).min(1).max(200), note: z.string().max(300).optional() });

@@ -267,3 +267,58 @@ describe('entitlements', () => {
     expect(await run(ours.user, org.id, 'PAYR')).toBe('next'); // our own company: never enforced
   });
 });
+
+describe('trial lifecycle and first steps', () => {
+  const setEnd = (id, iso) => prisma.saasCustomer.update({ where: { id }, data: { trial_ends_on: new Date(`${iso}T00:00:00Z`) } });
+
+  test('an ended trial becomes read-only, then suspended after the read-only days; a paying customer and a running trial are untouched; running twice changes nothing', async () => {
+    const a = await provisioned();
+    const ended = a.customer_id;
+    const running = (await (async () => { const c = await doxCustomer(); const r = await post(`/customers/${c.id}/provision`); return r.body.data; })()).customer_id;
+    const paying = (await (async () => { const c = await doxCustomer(); const r = await post(`/customers/${c.id}/provision`); return r.body.data; })()).customer_id;
+    await prisma.saasCustomer.update({ where: { id: paying }, data: { status: 'active' } });
+    await setEnd(paying, '2026-11-01');
+    await setEnd(ended, '2026-12-01');
+    await setEnd(running, '2026-12-20');
+    const st = async (id) => (await prisma.saasCustomer.findUnique({ where: { id } })).status;
+
+    const day1 = await credits.runTrialLifecycle(at('2026-12-02'));
+    expect(day1.made_read_only).toEqual([ended]);
+    expect(await st(ended)).toBe('read_only');
+    expect(await st(running)).toBe('trial');
+    expect(await st(paying)).toBe('active');
+    expect((await credits.runTrialLifecycle(at('2026-12-02'))).made_read_only).toEqual([]); // same day again
+    expect((await credits.runTrialLifecycle(at('2026-12-13'))).reminders).toEqual([{ customer_id: running, days_left: 7 }]);
+    expect(await st(ended)).toBe('read_only'); // 12 days in: still inside the 30 read-only days
+    const later = await credits.runTrialLifecycle(at('2027-01-05'));
+    expect(later.suspended).toContain(ended);
+    expect(await st(ended)).toBe('suspended');
+    const audit = await prisma.saasAudit.findMany({ where: { entity: 'customer', entity_id: ended }, orderBy: { created_at: 'asc' } });
+    expect(audit.map((x) => x.action)).toEqual(['trial_ended', 'customer_suspended']);
+  });
+
+  test('the lifecycle runs with the nightly job only when the counter switch is on', async () => {
+    const job = require('../src/jobs/saasCounter');
+    expect(await job.run()).toEqual({ skipped: true });
+    process.env.SAAS_COUNTER_ENABLED = 'true';
+    try {
+      const r = await job.run();
+      expect(r.lifecycle).toBeTruthy();
+    } finally {
+      delete process.env.SAAS_COUNTER_ENABLED;
+    }
+  });
+
+  test('the first-steps checklist is for customer companies only, and counts what the new company already has', async () => {
+    const r = await provisioned();
+    const login = await request(app).post('/api/v1/auth/login').send({ email: r.admin_email, password: r.temp_password });
+    const tok = login.body.data.access_token;
+    const mine = (await authed(request(app).get('/api/v1/platform/my-setup'), tok)).body.data;
+    expect(mine).toMatchObject({ applies: true, status: 'trial', total: 5 });
+    expect(mine.steps.find((s) => s.key === 'people')).toMatchObject({ count: 1, done: false });
+    expect(mine.trial_days_left).toBeGreaterThan(10);
+    await prisma.department.create({ data: { org_id: r.org_id, name: 'Operations' } });
+    expect((await authed(request(app).get('/api/v1/platform/my-setup'), tok)).body.data.steps.find((s) => s.key === 'departments').done).toBe(true);
+    expect((await authed(request(app).get('/api/v1/platform/my-setup'), adminToken)).body.data).toEqual({ applies: false }); // our own company
+  });
+});
