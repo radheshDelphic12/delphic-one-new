@@ -14,7 +14,7 @@ const calculations = () => require('../calculations/calculations.service');
 const num = (v) => Number(v || 0);
 
 function payable(invoice) {
-  return round2(num(invoice.amount) - num(invoice.tds_amount) + num(invoice.adjustment_amount));
+  return round2(num(invoice.amount) + num(invoice.gst_amount) + num(invoice.other_amount) - num(invoice.tds_amount) + num(invoice.adjustment_amount));
 }
 
 async function paymentFor(orgId, invoice) {
@@ -37,6 +37,8 @@ function describe(invoice, payment) {
     invoice_date: invoice.invoice_date ? invoice.invoice_date.toISOString().slice(0, 10) : null,
     amount: num(invoice.amount),
     currency: invoice.currency,
+    gst_amount: num(invoice.gst_amount),
+    other_amount: num(invoice.other_amount),
     tds_amount: num(invoice.tds_amount),
     adjustment_amount: num(invoice.adjustment_amount),
     adjustment_note: invoice.adjustment_note || null,
@@ -49,13 +51,14 @@ function describe(invoice, payment) {
 }
 
 // Sent / unsent, TDS and adjustment; audited.
-async function updateTracking(orgId, user, invoiceId, { sent, tds_amount, adjustment_amount, adjustment_note, reason }) {
+async function updateTracking(orgId, user, invoiceId, { sent, gst_amount, tds_amount, adjustment_amount, adjustment_note, reason }) {
   const existing = await prisma.projectVendorInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!existing) return { error: 'not_found' };
   const frozen = await financialLock.assertOpen(orgId, existing.period_month, existing.period_year);
   if (frozen) return frozen;
   const data = {};
   if (sent !== undefined) data.sent_at = sent ? existing.sent_at || new Date() : null;
+  if (gst_amount !== undefined) data.gst_amount = gst_amount;
   if (tds_amount !== undefined) data.tds_amount = tds_amount;
   if (adjustment_amount !== undefined) data.adjustment_amount = adjustment_amount;
   if (adjustment_note !== undefined) data.adjustment_note = adjustment_note;
@@ -63,7 +66,7 @@ async function updateTracking(orgId, user, invoiceId, { sent, tds_amount, adjust
   await prisma.auditLog.create({
     data: {
       org_id: orgId, actor_id: user.id, action: 'vendor_invoice_tracking', entity_type: 'project_vendor_invoice', entity_id: invoiceId, reason: reason || 'vendor invoice tracking',
-      snapshot: { before: { sent_at: existing.sent_at, tds_amount: num(existing.tds_amount), adjustment_amount: num(existing.adjustment_amount) }, after: { sent_at: updated.sent_at, tds_amount: num(updated.tds_amount), adjustment_amount: num(updated.adjustment_amount) } },
+      snapshot: { before: { sent_at: existing.sent_at, gst_amount: num(existing.gst_amount), tds_amount: num(existing.tds_amount), adjustment_amount: num(existing.adjustment_amount) }, after: { sent_at: updated.sent_at, gst_amount: num(updated.gst_amount), tds_amount: num(updated.tds_amount), adjustment_amount: num(updated.adjustment_amount) } },
     },
   });
   return { invoice: describe(updated, await paymentFor(orgId, updated)) };

@@ -25,7 +25,10 @@ const addHolidaySchema = z.object({
   label: z.string().min(1).max(200),
   // A working-day exception instead of a holiday (e.g. a client working Sunday).
   is_working_day: z.boolean().optional(),
+  // Put the holiday on every calendar of the company, not only this one.
+  applies_to_all: z.boolean().optional(),
 });
+const shareHolidaySchema = z.object({ share: z.boolean() });
 
 const updateHolidaySchema = z
   .object({
@@ -47,6 +50,8 @@ const assignCalendarSchema = z.object({
 // mapping always exists. Recruitment is not an accepted category yet.
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  // Free text: the resource who is the face of the project to the client; printed on its client invoices.
+  face_resource: z.string().trim().max(200).optional(),
   // A Lead account of this org (validated in the service) — no free-text client.
   client_account_id: z.string().uuid().optional(),
   service_category: z.enum(['managed_services', 'project']),
@@ -61,6 +66,7 @@ module.exports = {
   createCalendarSchema,
   updateCalendarSchema,
   addHolidaySchema,
+  shareHolidaySchema,
   updateHolidaySchema,
   assignCalendarSchema,
   createProjectSchema,

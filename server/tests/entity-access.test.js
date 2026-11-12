@@ -151,6 +151,35 @@ describe('document entity access', () => {
 });
 
 describe('comment entity access', () => {
+  test('a sales user can read and add notes on another sales user\'s requirement', async () => {
+    const owner = await createUser({ role: 'sales' });
+    const other = await createUser({ role: 'sales' });
+    const { access_token: ownerToken } = await loginAs(owner);
+    const { access_token: otherToken } = await loginAs(other);
+    const account = await createActiveClientAccount(owner.id);
+    const requirement = await createRequirement(ownerToken, account.id);
+
+    const posted = await authed(request(app).post('/api/v1/comments'), otherToken).send({
+      entity_type: 'requirement',
+      entity_id: requirement.id,
+      body: 'shared note',
+    });
+    expect(posted.status).toBe(201);
+
+    const listed = await authed(request(app).get('/api/v1/comments'), ownerToken).query({
+      entity_type: 'requirement',
+      entity_id: requirement.id,
+    });
+    expect(listed.status).toBe(200);
+    expect(listed.body.data.some((c) => c.body === 'shared note')).toBe(true);
+
+    const docs = await authed(request(app).get('/api/v1/documents'), otherToken).query({
+      entity_type: 'requirement',
+      entity_id: requirement.id,
+    });
+    expect(docs.status).toBe(200);
+  });
+
   test('other bda can list comments on an owned account', async () => {
     const owner = await createUser({ role: 'bda' });
     const other = await createUser({ role: 'bda' });

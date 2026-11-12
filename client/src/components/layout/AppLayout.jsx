@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
 import { orgLogo } from '../../lib/orgLogo.js';
 import { useNotifications } from '../../lib/notifications/notificationsContext.jsx';
 import { usePermissions } from '../../lib/permissions.js';
+import { hasNeed, isAdminUser, isPermissionMode } from '../../lib/access.js';
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
-import { NAV_ITEMS } from './navItems.js';
+import { DB_SNAPSHOTS_NAV_ITEM, NAV_ITEMS } from './navItems.js';
+import { useSpeakUpSummary } from '../../pages/speakup/speakUp.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
@@ -23,6 +25,16 @@ import { gulatiNavFor } from '../../lib/gulati/sections.js';
 import { isGulatiOrg, useGulati, gxCan } from '../../lib/gulati/useGulati.js';
 import { acconcyNavFor } from '../../lib/acconcy/sections.js';
 import { isAcconcyOrg, useAcconcy, axCan } from '../../lib/acconcy/useAcconcy.js';
+import { foundationNavFor } from '../../lib/foundation/sections.js';
+import { isFoundationOrg, useFoundation, fxCan } from '../../lib/foundation/useFoundation.js';
+import { zklyreraNavFor } from '../../lib/zklyrera/sections.js';
+import { isZklyreraOrg, useZklyrera, zkCan } from '../../lib/zklyrera/useZklyrera.js';
+import { valterraNavFor } from '../../lib/valterra/sections.js';
+import { novarexNavFor } from '../../lib/novarex/sections.js';
+import { delphicOneNavFor } from '../../lib/delphicone/sections.js';
+import { isDelphicOneOrg, useDelphicOne } from '../../lib/delphicone/useDelphicOne.js';
+import { isValterraOrg, useValterra, vtCan } from '../../lib/valterra/useValterra.js';
+import { isNovarexOrg, useNovarex, nxCan } from '../../lib/novarex/useNovarex.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
 
@@ -84,11 +96,24 @@ const CONTRACTOR_PATHS = ['/', '/notifications', '/settings'];
 // Zephyr Infrastructure is a standalone workspace: its users see only the
 // Zephyr sections plus their own notifications and personal settings.
 const ZEPHYR_EXTRA_NAV = [{ to: '/settings', label: 'Settings', icon: Settings }];
-const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || ['/settings', '/notifications'].includes(pathname);
+// Paths every company workspace shares: its own settings and notifications, and Hiring (the company's career page).
+const SHARED_PATHS = ['/settings', '/notifications', '/hiring'];
+const HIRING_NAV = [{ to: '/hiring', label: 'Hiring', icon: UserPlus }];
+const isZephyrPath = (pathname) => pathname.startsWith('/zephyr') || SHARED_PATHS.includes(pathname);
 // Gulati Industries is standalone in the same way.
-const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || ['/settings', '/notifications'].includes(pathname);
+const isGulatiPath = (pathname) => pathname.startsWith('/gulati') || SHARED_PATHS.includes(pathname);
 // Acconcy Finance as well.
-const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || ['/settings', '/notifications'].includes(pathname);
+const isAcconcyPath = (pathname) => pathname.startsWith('/acconcy') || SHARED_PATHS.includes(pathname);
+// Zklyrera Spirits as well.
+const isZklyreraPath = (pathname) => pathname.startsWith('/zklyrera') || SHARED_PATHS.includes(pathname);
+// Valterra Resources as well.
+const isValterraPath = (pathname) => pathname.startsWith('/valterra') || SHARED_PATHS.includes(pathname);
+// Novarex Pharmaceuticals as well.
+const isNovarexPath = (pathname) => pathname.startsWith('/novarex') || SHARED_PATHS.includes(pathname);
+// The Delphic One company (customers, leads, invoices) as well.
+const isDelphicOnePath = (pathname) => pathname.startsWith('/delphic-one') || SHARED_PATHS.includes(pathname);
+// Gulati Foundation as well.
+const isFoundationPath = (pathname) => pathname.startsWith('/foundation') || SHARED_PATHS.includes(pathname);
 
 const GROUP_NAV_ITEM = { to: '/group-overview', label: 'Group Dashboard', icon: Network, end: true };
 
@@ -100,6 +125,7 @@ export default function AppLayout() {
   const { can } = usePermissions(user);
   const { interviewUnread } = useNotifications();
   const isContractor = user?.worker_type === 'contractor';
+  const speakUp = useSpeakUpSummary(Boolean(user?.active_org?.is_master_workspace) && !isContractor, user?.active_org?.id);
   const isZephyr = isZephyrOrg(user);
   const { me: zxMe } = useZephyr();
   const isGulati = isGulatiOrg(user);
@@ -108,42 +134,74 @@ export default function AppLayout() {
   const { me: gxMe } = useGulati();
   const isAcconcy = isAcconcyOrg(user);
   const { me: axMe } = useAcconcy();
+  const isFoundation = isFoundationOrg(user);
+  const { me: fxMe } = useFoundation();
+  const isZklyrera = isZklyreraOrg(user);
+  const { me: zkMe } = useZklyrera();
+  const isValterra = isValterraOrg(user);
+  const { me: vtMe } = useValterra();
+  const isNovarex = isNovarexOrg(user);
+  const { me: nxMe } = useNovarex();
+  const isDelphicOne = isDelphicOneOrg(user);
+  const { me: doxMe } = useDelphicOne();
   const navBase = useMemo(
     () => {
+      if (isDelphicOne) return [...delphicOneNavFor(doxMe), ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
+      if (isNovarex) {
+        const setup = nxCan(nxMe, 'settings') ? [{ to: '/novarex/settings', label: 'Novarex setup', icon: Settings }] : [];
+        return [...novarexNavFor(nxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
+      }
+      if (isValterra) {
+        const setup = vtCan(vtMe, 'settings') ? [{ to: '/valterra/settings', label: 'Valterra setup', icon: Settings }] : [];
+        return [...valterraNavFor(vtMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
+      }
+      if (isZklyrera) {
+        const setup = zkCan(zkMe, 'settings') ? [{ to: '/zklyrera/settings', label: 'Zklyrera setup', icon: Settings }] : [];
+        return [...zklyreraNavFor(zkMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
+      }
+      if (isFoundation) {
+        const setup = fxCan(fxMe, 'settings') ? [{ to: '/foundation/settings', label: 'Foundation setup', icon: Settings }] : [];
+        return [...foundationNavFor(fxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
+      }
       if (isAcconcy) {
         const setup = axCan(axMe, 'settings') ? [{ to: '/acconcy/settings', label: 'Acconcy setup', icon: Settings }] : [];
-        return [...acconcyNavFor(axMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...acconcyNavFor(axMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isGulati) {
         const setup = gxCan(gxMe, 'settings') ? [{ to: '/gulati/settings', label: 'Gulati setup', icon: Settings }] : [];
-        return [...gulatiNavFor(gxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...gulatiNavFor(gxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       if (isZephyr) {
         const setup = zxCan(zxMe, 'settings') ? [{ to: '/zephyr/settings', label: 'Zephyr setup', icon: Settings }] : [];
-        return [...zephyrNavFor(zxMe), ...setup, ...ZEPHYR_EXTRA_NAV];
+        return [...zephyrNavFor(zxMe), ...setup, ...(isAdminUser(user) ? HIRING_NAV : []), ...ZEPHYR_EXTRA_NAV];
       }
       return isContractor ? CONTRACTOR_NAV : NAV_ITEMS.filter((item) => {
-        if (item.hiddenForAdmin && user?.role === 'admin') return false;
+        if (item.hiddenForAdmin && isAdminUser(user)) return false;
         if (item.groupSuperadminOnly) return isGroupSuperadmin;
         if (item.meetingsCalendar && !canSeeMeetingsCalendar(user)) return false;
         if (item.masterOnly && !user?.active_org?.is_master_workspace) return false;
+        if (item.speakUp && !(speakUp && (speakUp.enabled || speakUp.can_manage))) return false;
         if (item.module && !user?.active_org?.enabled_modules?.includes(item.module)) return false;
+        // A company on permissions: a menu item shows only when the person holds View on that module (no empty pages).
+        if (isPermissionMode(user) && item.need) return hasNeed(user, item.need);
         return !item.capability || can(item.capability);
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- can is derived from user.role
-    [user?.role, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe]
+    [user?.role, user?.access, speakUp, user?.department?.name, user?.active_org?.enabled_modules, user?.active_org?.is_master_workspace, isGroupSuperadmin, isContractor, isZephyr, zxMe, isGulati, gxMe, isAcconcy, axMe, isFoundation, fxMe, isZklyrera, zkMe, isValterra, vtMe, isNovarex, nxMe, isDelphicOne, doxMe]
   );
 
   // The group superadmin always has the Group Dashboard pinned at the top, inside every company workspace.
   const navItems = useMemo(
     () => {
-      if (!isGroupSuperadmin || isContractor) return navBase;
+      // The database snapshot viewer is a separate app (/dbviewer/), shown to a super admin in every workspace view.
+      const viewer = user?.is_superadmin && !isContractor ? [DB_SNAPSHOTS_NAV_ITEM] : [];
+      if (!isGroupSuperadmin || isContractor) return [...navBase, ...viewer];
       // In group view the sidebar is the group's, not whichever company happens to be active underneath.
-      if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }];
-      return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview')];
+      if (isGroupPath) return [GROUP_NAV_ITEM, { to: '/group-overview/settings', label: 'Settings', icon: Settings }, ...viewer];
+      return [GROUP_NAV_ITEM, ...navBase.filter((item) => item.to !== '/group-overview'), ...viewer];
     },
-    [navBase, isGroupSuperadmin, isContractor, isGroupPath]
+    [navBase, isGroupSuperadmin, isContractor, isGroupPath, user?.is_superadmin]
   );
 
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
@@ -153,12 +211,40 @@ export default function AppLayout() {
     return () => document.documentElement.classList.remove('theme-zephyr');
   }, [isZephyr, isGroupPath]);
 
-  // Group view gets the light green of the Gulati Foundation logo, not the company's palette underneath.
+  // Group view gets the light green of the Gulati Industries logo, not the company's palette underneath.
   useEffect(() => {
     if (!isGroupPath) return undefined;
     document.documentElement.classList.add('theme-group');
     return () => document.documentElement.classList.remove('theme-group');
   }, [isGroupPath]);
+
+  // Zklyrera Spirits gets the ink and brass of its logo.
+  useEffect(() => {
+    if (!isZklyrera || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-zklyrera');
+    return () => document.documentElement.classList.remove('theme-zklyrera');
+  }, [isZklyrera, isGroupPath]);
+
+  // Valterra Resources gets the maroon and gold of its logo.
+  useEffect(() => {
+    if (!isValterra || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-valterra');
+    return () => document.documentElement.classList.remove('theme-valterra');
+  }, [isValterra, isGroupPath]);
+
+  // Novarex Pharmaceuticals gets the teal and medical blue of its logo.
+  useEffect(() => {
+    if (!isNovarex || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-novarex');
+    return () => document.documentElement.classList.remove('theme-novarex');
+  }, [isNovarex, isGroupPath]);
+
+  // Gulati Foundation gets the calm green of its logo.
+  useEffect(() => {
+    if (!isFoundation || isGroupPath) return undefined;
+    document.documentElement.classList.add('theme-foundation');
+    return () => document.documentElement.classList.remove('theme-foundation');
+  }, [isFoundation, isGroupPath]);
 
   // Acconcy gets the plum palette of its logo.
   useEffect(() => {
@@ -233,6 +319,58 @@ export default function AppLayout() {
           <div className="h-0.5 bg-[rgb(var(--zx-earth))]" />
         </Link>
       )}
+      {isValterra && !isGroupPath && !collapsed && (
+        <Link
+          to="/valterra"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Valterra Resources home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-white shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/valterra-logo.png'} alt={user?.active_org?.name || 'Valterra Resources'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--vt-gold))]" />
+        </Link>
+      )}
+      {isNovarex && !isGroupPath && !collapsed && (
+        <Link
+          to="/novarex"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Novarex Pharmaceuticals home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-white shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/novarex-logo.svg'} alt={user?.active_org?.name || 'Novarex Pharmaceuticals'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--nx-accent))]" />
+        </Link>
+      )}
+      {isZklyrera && !isGroupPath && !collapsed && (
+        <Link
+          to="/zklyrera"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Zklyrera Spirits home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-white shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/zklyrera-logo.png'} alt={user?.active_org?.name || 'Zklyrera Spirits'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-[rgb(var(--zk-brass))]" />
+        </Link>
+      )}
+      {isFoundation && !isGroupPath && !collapsed && (
+        <Link
+          to="/foundation"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Gulati Foundation home"
+          className="group mx-3 mb-2 block overflow-hidden rounded-xl border border-primary-200 bg-gradient-to-b from-white to-primary-50 shadow-soft transition hover:shadow-card"
+        >
+          <div className="flex justify-center px-4 py-3">
+            <img src={user?.active_org?.logo_url || '/foundation-logo.svg'} alt={user?.active_org?.name || 'Gulati Foundation'} className="h-24 w-auto max-w-full object-contain transition group-hover:scale-105" />
+          </div>
+          <div className="h-0.5 bg-primary-400" />
+        </Link>
+      )}
       {isAcconcy && !isGroupPath && !collapsed && (
         <Link
           to="/acconcy"
@@ -272,6 +410,21 @@ export default function AppLayout() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const showInterviewDot = item.to === '/calendar' && interviewUnread > 0;
+          if (item.external) {
+            return (
+              <a
+                key={item.to}
+                href={item.to}
+                target="_blank"
+                rel="noreferrer"
+                title={collapsed ? item.label : undefined}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-tertiary-600 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900 ${collapsed ? 'justify-center px-2' : ''}`}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span>{item.label}</span>}
+              </a>
+            );
+          }
           return (
             <NavLink
               key={item.to}
@@ -492,7 +645,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : isDelphicOne && !isDelphicOnePath(pathname) && !isGroupPath ? <Navigate to="/delphic-one" replace /> : <Outlet />}
             </ErrorBoundary>
           </div>
         </main>

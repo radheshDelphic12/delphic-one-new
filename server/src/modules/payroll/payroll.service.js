@@ -612,6 +612,23 @@ async function payslipDetail(orgId, payslip) {
   });
   const items = adjustments.map((a) => ({ id: a.id, label: a.label, note: a.note, amount: a.amount, sign: a.sign }));
   const round = (n) => Math.round(n * 100) / 100;
+  // Gross = monthly pay + approved overtime. Show them apart, so the overtime is never hidden inside the gross figure.
+  const b = payslip.breakdown || {};
+  const overtimeAmount = round(Number(b.ot_amount || 0));
+  const earnings = {
+    base_pay: round(Number(payslip.gross) - overtimeAmount),
+    overtime: {
+      approved_hours: Number(b.ot_approved_hours || 0),
+      pending_hours: Number(b.ot_pending_hours || 0),
+      hourly_rate: b.hourly_rate == null ? null : Number(b.hourly_rate),
+      multiplier: b.ot_multiplier == null ? null : Number(b.ot_multiplier),
+      amount: overtimeAmount,
+    },
+  };
+  const additionsTotal = round(items.filter((i) => i.sign > 0).reduce((s, i) => s + i.amount, 0));
+  const deductionsTotal = round(items.filter((i) => i.sign < 0).reduce((s, i) => s + i.amount, 0));
+  // The net was frozen when the run was processed. When adjustments changed afterwards the slip no longer adds up: say so.
+  const expectedNet = round(Number(payslip.gross) - Number(payslip.deductions) + additionsTotal - deductionsTotal);
   return {
     employee: member && {
       employee_code: member.employee_code || null,
@@ -626,15 +643,19 @@ async function payslipDetail(orgId, payslip) {
     },
     leaves,
     salary: structure && { monthly_ctc: Number(structure.ctc), components: Object.entries(structure.components || {}).map(([name, amount]) => ({ name, amount: Number(amount) })).sort((x, y) => componentRank(x.name) - componentRank(y.name)) },
+    earnings,
     additions: items.filter((i) => i.sign > 0),
     other_deductions: items.filter((i) => i.sign < 0),
     totals: {
       gross: Number(payslip.gross),
       loss_of_pay: Number(payslip.deductions),
-      additions: round(items.filter((i) => i.sign > 0).reduce((s, i) => s + i.amount, 0)),
-      adjustment_deductions: round(items.filter((i) => i.sign < 0).reduce((s, i) => s + i.amount, 0)),
+      additions: additionsTotal,
+      adjustment_deductions: deductionsTotal,
       net_paid: Number(payslip.net),
+      expected_net: expectedNet,
     },
+    // true when the adjustments were changed after the payslip was processed: update the payroll run to bring the net in line
+    needs_refresh: Math.abs(expectedNet - Number(payslip.net)) > 0.01,
   };
 }
 
@@ -650,6 +671,7 @@ async function getPayslip(orgId, payslipId, { orgMembershipId, isAdmin }) {
 }
 
 module.exports = {
+  runLines,
   deleteSalaryStructure,
   createSalaryStructure,
   updateSalaryStructure,

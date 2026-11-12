@@ -8,6 +8,7 @@ import { STATUS_META, rupees } from '../../lib/zephyr/projectMeta.js';
 import { dateLabel } from '../../lib/format.js';
 import Pill from '../../components/ui/Pill.jsx';
 import { ProgressBar } from './ZephyrProjectsPage.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const card = 'rounded-2xl border bg-white p-4 shadow-soft md:p-5';
 const SLIP_TONE = { approved: 'amber', paid: 'green' };
@@ -92,6 +93,8 @@ export default function ZephyrMyWorkPage() {
           </table>
         </div>
       </section>
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

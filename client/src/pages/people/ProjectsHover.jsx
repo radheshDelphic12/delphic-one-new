@@ -9,9 +9,9 @@ function formatDay(ymd) {
 /**
  * A count that lists its projects on hover / keyboard focus: name, code,
  * client, agreement end date and the people on it. The panel is
- * position:fixed so the table's scroll container can't clip it.
+ * position:fixed so the table's scroll container can't clip it. With `onOpen` the count is also a button: a click opens the full detail.
  */
-export default function ProjectsHover({ projects, title, children }) {
+export default function ProjectsHover({ projects, title, children, onOpen }) {
   const [pos, setPos] = useState(null);
   const timer = useRef(null);
   const anchor = useRef(null);
@@ -43,8 +43,10 @@ export default function ProjectsHover({ projects, title, children }) {
       onMouseLeave={hide}
       onFocus={show}
       onBlur={hide}
-      onClick={(e) => e.stopPropagation()}
-      className="cursor-help rounded underline decoration-dotted underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+      onClick={(e) => { e.stopPropagation(); if (onOpen) onOpen(); }}
+      onKeyDown={(e) => { if (onOpen && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(); } }}
+      role={onOpen ? 'button' : undefined}
+      className={`${onOpen ? 'cursor-pointer' : 'cursor-help'} rounded underline decoration-dotted underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-primary-300`}
       aria-label={`${title}: ${projects.map((p) => p.name).join(', ')}`}
     >
       {children}

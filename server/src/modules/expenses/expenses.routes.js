@@ -1,23 +1,34 @@
 const express = require('express');
-const { authenticate, authorize, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, authorize, authorizeGroupSuperadmin, loadSuperadminFlag, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./expenses.service');
+const payout = require('./expenses.payout');
+const processed = require('./expenses.processed');
 const {
   createClaimSchema,
   updateClaimSchema,
   decideClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
+  claimsPayoutQuerySchema,
+  claimsProcessedQuerySchema,
   createVendorPaymentSchema,
   decideVendorPaymentSchema,
   listVendorPaymentsQuerySchema,
 } = require('./expenses.validation');
 
+const cashHooks = require('../cashPosition/cash.hooks');
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
 
+const paymentsService = require('../payments/payments.service');
+
 const ERRORS = {
+  ...cashHooks.HOOK_ERRORS,
+  ...paymentsService.PAYMENT_ERRORS,
+  not_reimbursed: [409, 'Only a reimbursed claim can be undone'],
+  not_paid: [409, 'Only a payment marked paid can be undone'],
   location_not_found: [404, 'Location not found'],
   not_found: [404, 'Not found'],
   already_decided: [409, 'Already decided'],
@@ -61,7 +72,7 @@ router.patch(
   loadSuperadminFlag,
   asyncHandler(async (req, res) => {
     const body = updateClaimSchema.parse(req.body);
-    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: req.user.is_superadmin };
+    const actor = { userId: req.user.id, role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: req.user.is_superadmin };
     const result = await service.updateClaim(req.user.org_id, req.params.id, actor, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
@@ -74,7 +85,7 @@ router.delete(
   '/claims/:id',
   loadSuperadminFlag,
   asyncHandler(async (req, res) => {
-    const actor = { role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: Boolean(req.user.is_superadmin) };
+    const actor = { userId: req.user.id, role: req.user.role, orgMembershipId: req.user.org_membership_id, isSuperadmin: Boolean(req.user.is_superadmin) };
     const result = await service.deleteClaim(req.user.org_id, req.params.id, actor);
     if (result.error) return failFor(res, result.error);
     return ok(res, { deleted: true });
@@ -97,6 +108,35 @@ router.get(
     const query = listClaimsQuerySchema.parse(req.query);
     const result = await service.listClaims(req.user.org_id, query);
     return ok(res, result.data, { pagination: result.pagination });
+  })
+);
+
+// Bank payout: one row per employee with the bank account on their profile and the total of their claims for a month and status
+// (approved = still to be paid). `format=json` previews it, otherwise an Excel file downloads. Admin only (it carries bank details).
+router.get(
+  '/claims/payout',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = claimsPayoutQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await payout.payoutData(req.user.org_id, query));
+    const buffer = await payout.payoutWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="reimbursement-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}-${query.status}.xlsx"`);
+    return res.send(Buffer.from(buffer));
+  })
+);
+
+// Processed reimbursements report: when each reimbursed claim was filed, approved and paid. `format=json` previews, otherwise Excel. Admin only.
+router.get(
+  '/claims/processed',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = claimsProcessedQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await processed.processedData(req.user.org_id, query));
+    const buffer = await processed.processedWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="processed-reimbursements-${query.from || 'start'}-to-${query.to || 'today'}.xlsx"`);
+    return res.send(Buffer.from(buffer));
   })
 );
 
@@ -124,7 +164,7 @@ router.post(
   '/claims/:id/reimburse',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.reimburseClaim(req.user.org_id, req.params.id);
+    const result = await service.reimburseClaim(req.user.org_id, req.params.id, { user: req.user, input: paymentsService.paymentInputSchema.parse(req.body || {}) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
   })
@@ -174,11 +214,34 @@ router.post(
   })
 );
 
+// A reimbursement marked by mistake: undone by the group admin only, with a reason (the wallet entry goes, the claim is approved again).
+router.post(
+  '/claims/:id/undo-reimbursement',
+  authorizeGroupSuperadmin,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await service.undoReimbursement(req.user.org_id, req.params.id, req.user, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.claim);
+  })
+);
+
+router.post(
+  '/vendor-payments/:id/undo-paid',
+  authorizeGroupSuperadmin,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await service.undoVendorPaymentPaid(req.user.org_id, req.params.id, req.user, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.payment);
+  })
+);
+
 router.post(
   '/vendor-payments/:id/pay',
   authorize('admin'),
   asyncHandler(async (req, res) => {
-    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id);
+    const result = await service.markVendorPaymentPaid(req.user.org_id, req.params.id, { user: req.user, input: paymentsService.paymentInputSchema.parse(req.body || {}) });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.payment);
   })

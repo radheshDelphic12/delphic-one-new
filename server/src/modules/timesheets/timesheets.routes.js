@@ -1,4 +1,5 @@
 const express = require('express');
+const { can } = require('../../lib/permissions');
 const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -50,6 +51,7 @@ const monthLocks = require('./monthLocks.service');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
+router.use('/project-timesheet', require('./projectTimesheet.routes'));
 
 const ENTRY_ERRORS = {
   day_locked: [409, 'That day is locked (weekly auto-lock) — submit a Timesheet Regularisation request instead'],
@@ -105,7 +107,7 @@ router.get(
 
 router.get(
   '/entries',
-  authorize('admin'),
+  can('timesheets.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
@@ -132,7 +134,7 @@ router.get(
 
 router.get(
   '/overview',
-  authorize('admin'),
+  can('timesheets.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const { department_id, exclude_department_id, month, year } = overviewQuerySchema.parse(req.query);
     const overview = await service.teamOverview(req.user.org_id, { department_id, exclude_department_id, month, year });
@@ -171,7 +173,7 @@ router.patch(
 // (recalculate them in Live Analytics → Billing & sales, then re-invoice).
 router.patch(
   '/entries/:id/admin',
-  authorize('admin'),
+  can('timesheets.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const body = adminUpdateEntrySchema.parse(req.body);
     const result = await service.adminUpdateEntry(req.user.org_id, req.user.id, req.params.id, body);
@@ -323,7 +325,7 @@ router.post(
 
 router.get(
   '/regularization-tickets',
-  authorize('admin'),
+  can('timesheets.approve', 'admin'),
   asyncHandler(async (req, res) => {
     const status = req.query.status;
     const rows = await service.listTickets(req.user.org_id, { status });

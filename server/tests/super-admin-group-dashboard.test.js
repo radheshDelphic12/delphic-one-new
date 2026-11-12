@@ -37,6 +37,7 @@ afterAll(async () => {
 });
 
 const put = (orgId, body) => authed(request(app).put(`${base}/companies/${orgId}/asset-values`), superToken).send(body);
+const projection = (qs = '') => authed(request(app).get(`${base}/group/projection${qs}`), superToken);
 const overview = async (qs = '') => { const r = await authed(request(app).get(`${base}/group/overview${qs}`), superToken); if (r.status >= 500) console.log(r.status, JSON.stringify(r.body)); return r; };
 
 describe('super admin group dashboard', () => {
@@ -101,6 +102,22 @@ describe('super admin group dashboard', () => {
     // earlier month carried forward into a later month without its own figure
     const res = await overview('?from=2026-10&to=2026-10');
     expect(res.body.data.companies.find((c) => c.org.id === zephyr.id).months[0]).toMatchObject({ asset_value: 250, asset_value_carried: true });
+  });
+
+  test('an asset value can be set for a date; the month keeps the latest date, an earlier date does not override it, a future date is refused', async () => {
+    const datesUrl = `${base}/companies/${zephyr.id}/asset-value-dates`;
+    await put(zephyr.id, { as_of: '2026-05-20', asset_value: 500 });
+    await put(zephyr.id, { as_of: '2026-05-05', asset_value: 300 });
+    const rev = await put(zephyr.id, { as_of: '2026-05-20', asset_value: 550, notes: 'revalued' });
+    expect(rev.body.data.previous).toBe(500);
+    const dates = await authed(request(app).get(datesUrl), superToken);
+    expect(dates.body.data.map((r) => [r.as_of, r.asset_value])).toEqual([['2026-05-20', 550], ['2026-05-05', 300]]);
+    const months = await authed(request(app).get(`${base}/companies/${zephyr.id}/asset-values`), superToken);
+    expect(months.body.data.find((r) => r.month === '2026-05').asset_value).toBe(550);
+    const future = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    expect((await put(zephyr.id, { as_of: future, asset_value: 1 })).status).toBe(422);
+    expect((await put(zephyr.id, { asset_value: 1 })).status).toBe(422);
+    expect((await authed(request(app).get(`${base}/companies/${outsider.id}/asset-value-dates`), superToken)).status).toBe(404);
   });
 
   test('asset value rules: future month, negative and foreign company are refused', async () => {
@@ -235,5 +252,163 @@ describe('super admin group dashboard', () => {
     const rows = (await authed(request(app).get(`${base}/group/activity`), superToken)).body.data;
     expect(rows.some((r) => r.detail === 'today')).toBe(true);
     expect(rows.some((r) => r.detail === 'ten days ago')).toBe(false);
+  });
+
+  test('projection continues from the chosen end month, month by month, with the same valuation formula', async () => {
+    // four closed Gulati months with a steady rise: revenue 1000, 2000, 3000, 4000 (costs 500 each month)
+    for (const [i, m] of ['2026-05', '2026-06', '2026-07', '2026-08'].entries()) {
+      await prisma.gxPeriodClose.create({ data: { org_id: gulati.id, month: m, status: 'closed', snapshot: { sales_revenue: 1000 * (i + 1), net_profit: 1000 * (i + 1) - 500 }, closed_at: new Date() } });
+    }
+    await put(gulati.id, { month: '2026-08', asset_value: 10000 });
+    const res = await projection('?from=2026-05&to=2026-08&horizon=3&state=locked');
+    expect(res.status).toBe(200);
+    const d = res.body.data;
+    expect(d.projected_months).toEqual(['2026-09', '2026-10', '2026-11']);
+    const g = d.companies.find((c) => c.org.id === gulati.id);
+    expect(g.history.map((m) => m.month)).toEqual(['2026-05', '2026-06', '2026-07', '2026-08']);
+    expect(g.history.map((m) => m.revenue)).toEqual([1000, 2000, 3000, 4000]);
+    expect(g.projected.map((m) => m.revenue)).toEqual([5000, 6000, 7000]);
+    expect(g.projected.map((m) => m.expenses)).toEqual([500, 500, 500]);
+    for (const m of g.projected) expect(m.valuation).toBe(m.profit * 240 + 10000 * 3);
+    expect(g.totals.projected_revenue).toBe(18000);
+    expect(g.confidence).toBe('medium');
+    // group totals add the live companies together, per month
+    expect(d.group.projected.map((m) => m.month)).toEqual(d.projected_months);
+    expect(d.group.totals.projected_revenue).toBe(d.companies.reduce((a2, c) => a2 + (c.totals?.projected_revenue || 0), 0));
+    // a different end month moves the whole projection
+    const earlier = (await projection('?from=2026-05&to=2026-07&horizon=2&state=locked')).body.data;
+    expect(earlier.projected_months).toEqual(['2026-08', '2026-09']);
+    expect(earlier.companies.find((c) => c.org.id === gulati.id).projected.map((m) => m.revenue)).toEqual([4000, 5000]);
+  });
+
+  test('a history that ends this month still projects: it starts with the current month and uses the last complete months', async () => {
+    const now = new Date();
+    const key = (back) => { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1)); return d.toISOString().slice(0, 7); };
+    for (const [i, back] of [4, 3, 2, 1].entries()) {
+      await prisma.gxPeriodClose.create({ data: { org_id: gulati.id, month: key(back), status: 'closed', snapshot: { sales_revenue: 1000 * (i + 1), net_profit: 1000 * (i + 1) - 500 }, closed_at: new Date() } });
+    }
+    const cur = key(0);
+    const r = (await projection(`?from=${cur}&to=${cur}&horizon=3&state=locked`)).body.data;
+    expect(r.projected_months).toEqual([cur, key(-1), key(-2)]);
+    const g = r.companies.find((c) => c.org.id === gulati.id);
+    expect(g.history.map((m) => m.month)).toEqual([cur]);
+    expect(g.projected.map((m) => m.revenue)).toEqual([5000, 6000, 7000]);
+    expect(g.confidence).toBe('medium');
+    // last month as the history: the projection still begins with the current month
+    const last = (await projection(`?from=${key(1)}&to=${key(1)}&horizon=2&state=locked`)).body.data;
+    expect(last.projected_months).toEqual([cur, key(-1)]);
+  });
+
+  test('projection filters: company subset, coming soon left out, bad ranges refused, company admin refused', async () => {
+    const only = (await projection(`?org_ids=${gulati.id}&horizon=1`)).body.data;
+    expect(only.companies.map((c) => c.org.id)).toEqual([gulati.id]);
+    await prisma.org.update({ where: { id: zephyr.id }, data: { enabled_modules: ['zephyr', 'coming_soon'] } });
+    const all = (await projection('')).body.data;
+    expect(all.companies.find((c) => c.org.id === zephyr.id)).toMatchObject({ coming_soon: true, history: [], projected: [] });
+    expect((await projection('?from=2026-08&to=2026-05')).status).toBeGreaterThanOrEqual(400);
+    expect((await projection('?horizon=99')).status).toBeGreaterThanOrEqual(400);
+    expect((await authed(request(app).get(`${base}/group/projection`), adminToken)).status).toBe(403);
+  });
+
+  test('every period filter of the group overview returns exactly its own months', async () => {
+    const months = async (qs) => (await overview(qs)).body.data.companies[0].months.map((m) => m.month);
+    expect(await months('?from=2026-04&to=2026-06')).toEqual(['2026-04', '2026-05', '2026-06']);
+    expect(await months('?from=2026-06&to=2026-06')).toEqual(['2026-06']);
+    expect(await months('?from=2025-04&to=2026-03&granularity=quarter')).toHaveLength(12);
+    const q = (await overview('?from=2025-04&to=2026-03&granularity=quarter')).body.data.companies[0].series;
+    expect(q.map((r) => r.label)).toEqual(['FY2025-26 Q1', 'FY2025-26 Q2', 'FY2025-26 Q3', 'FY2025-26 Q4']);
+    const y = (await overview('?from=2024-04&to=2026-03&granularity=year')).body.data.companies[0].series;
+    expect(y.map((r) => r.label)).toEqual(['FY2024-25', 'FY2025-26']);
+    expect((await overview('?from=2026-06&to=2026-04')).status).toBeGreaterThanOrEqual(400);
+  });
+
+  test('Gulati Foundation joins the group on its own: income = funds received, expenses = paid spending, no valuation, campaign block beside the books', async () => {
+    const foundation = await createOrg({ name: 'Zeta Foundation', org_group_id: group.id });
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation'] } });
+    const actor = await prisma.user.findFirst();
+    const d = (days) => new Date(Date.now() - days * 86400000);
+    const camp = await prisma.fxCampaign.create({ data: { org_id: foundation.id, code: 'GF-0001', name: 'Child Care Ahmedabad', status: 'active', city: 'Ahmedabad', state: 'Gujarat', planned_start: d(60), planned_end: new Date(Date.now() + 120 * 86400000), actual_start: d(60), allocated_budget: 1000000, planned_investment: 800000 } });
+    const mk = (kind, status, amount, extra = {}) => prisma.fxEntry.create({ data: { org_id: foundation.id, campaign_id: camp.id, kind, status, amount, entry_date: d(3), created_by: actor.id, expense_class: kind === 'expense' ? 'programme' : null, ...extra } });
+    await mk('funding', 'received', 600000);
+    await mk('funding', 'pledged', 250000); // not income yet
+    await mk('expense', 'paid', 300000);
+    await mk('expense', 'approved', 100000); // a commitment, not spending
+    await mk('expense', 'pending', 50000);
+    await prisma.fxEntry.create({ data: { org_id: foundation.id, kind: 'transfer', status: 'recorded', amount: 999999, entry_date: d(3), created_by: actor.id } }); // internal: nothing
+
+    const res = await overview(`?from=${thisMonth}&to=${thisMonth}&state=all`);
+    expect(res.status).toBe(200);
+    const f = res.body.data.companies.find((c) => c.org.id === foundation.id);
+    expect(f.org.kind).toBe('foundation');
+    // the three months around "d(3)" may straddle a month edge, so read the whole window
+    const wide = (await overview(`?from=${new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 7)}&to=${thisMonth}&state=all`)).body.data.companies.find((c) => c.org.id === foundation.id);
+    expect(wide.totals).toMatchObject({ revenue: 600000, expenses: 300000, profit: 300000 });
+    expect(wide.valuation).toBeNull();
+    expect(wide.assets).toBe(300000); // the fund balance
+    // the group valuation is the sum of the companies that have one; the foundation adds nothing to it
+    const valuations = res.body.data.companies.filter((c) => c.valuation).reduce((a, c) => a + c.valuation.current, 0);
+    expect(res.body.data.totals.valuation).toBe(valuations);
+    // campaign planning numbers are kept apart from the books
+    const fb = res.body.data.foundation;
+    expect(fb.companies.map((c) => c.org_id)).toEqual([foundation.id]);
+    expect(fb.campaigns).toMatchObject({ total: 1, active: 1 });
+    expect(fb.money).toMatchObject({ allocated_budget: 1000000, planned_investment: 800000, actual_expenditure: 300000, commitments: 100000, funds_received: 600000, remaining_allocated: 700000, uncommitted: 600000 });
+    expect(fb.projected.monthly.length).toBeGreaterThan(0);
+    expect(f.foundation.campaigns.total).toBe(1);
+    // other companies carry no foundation block
+    expect(res.body.data.companies.find((c) => c.org.id === gulati.id).foundation).toBeUndefined();
+    // a group without a foundation has none
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation', 'coming_soon'] } });
+    expect((await overview()).body.data.foundation).toBeNull();
+    await prisma.org.update({ where: { id: foundation.id }, data: { enabled_modules: ['foundation'] } });
+
+    // asset value is not set from the group (it is the fund balance); drill-down and projection both answer
+    expect((await put(foundation.id, { month: thisMonth, asset_value: 1 })).status).toBe(422);
+    const dd = await authed(request(app).get(`${base}/companies/${foundation.id}/drilldown?from=${thisMonth}&to=${thisMonth}`), superToken);
+    expect(dd.status).toBe(200);
+    expect(dd.body.data.sections.map((x) => x.key)).toEqual(['campaigns', 'months']);
+    expect(dd.body.data.sections[0].rows[0][0]).toContain('GF-0001');
+    const pr = (await projection(`?org_ids=${foundation.id}&horizon=2`)).body.data;
+    const pf = pr.companies[0];
+    expect(pf.org.kind).toBe('foundation');
+    expect(pf.projected.every((m) => m.valuation === null)).toBe(true);
+    // the previous period of a foundation compares income / expenses like any company
+    expect(res.body.data.totals.change_pct).toHaveProperty('revenue');
+  });
+
+  test('Zephyr valuation includes its owned properties automatically (valuation if recorded, else cost), plus recorded other assets', async () => {
+    const orgId = zephyr.id;
+    const ymd = (monthsBack, day = 5) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - monthsBack); d.setUTCDate(day); return d.toISOString().slice(0, 10); };
+    const day = (v) => new Date(`${v}T00:00:00.000Z`);
+    const prop = (code, extra) => prisma.zxProperty.create({ data: { org_id: orgId, code, name: `Property ${code}`, purchase_date: day(ymd(8)), ...extra } });
+    const cost = await prop('P-COST', { status: 'active', purchase_cost: 5000000, brokerage: 100000 }); // counts at cost 51 lakh
+    const valued = await prop('P-VAL', { status: 'held', purchase_cost: 5000000 });
+    await prisma.zxPropertyValuation.create({ data: { org_id: orgId, property_id: valued.id, value: 8000000, as_of: day(ymd(2)) } });
+    await prisma.zxProperty.update({ where: { id: valued.id }, data: { valuation: 8000000, valuation_date: day(ymd(2)) } });
+    await prop('P-BUILD', { status: 'under_construction', purchase_cost: 2000000, construction_cost: 500000 }); // 25 lakh
+    await prop('P-INACTIVE', { status: 'inactive', purchase_cost: 9000000 }); // never counts
+    await prop('P-FUTURE', { status: 'active', purchase_cost: 7000000, purchase_date: day(ymd(-2)) }); // not bought yet
+    const sold = await prop('P-SOLD', { status: 'sold', purchase_cost: 3000000 });
+    await prisma.zxPropertySale.create({ data: { org_id: orgId, property_id: sold.id, sale_value: 4000000, sale_date: day(ymd(1)), cost_basis: 3000000, realized_profit: 1000000 } });
+    await prisma.zxProperty.create({ data: { org_id: orgId, code: 'P-DELETED', name: 'Deleted', status: 'active', purchase_cost: 6000000, deleted_at: new Date() } });
+    await put(zephyr.id, { month: thisMonth, asset_value: 1000000 }); // other assets recorded by the admin
+
+    const res = await overview(`?from=${thisMonth}&to=${thisMonth}&state=all`);
+    const z = res.body.data.companies.find((c) => c.org.id === zephyr.id);
+    const owned = 5100000 + 8000000 + 2500000; // cost + valuation + under construction (sold, inactive, future, deleted excluded)
+    expect(z.assets).toBe(owned + 1000000);
+    expect(z.valuation.current).toBe(z.totals.profit * 240 + (owned + 1000000) * 3);
+    expect(z.months[0]).toMatchObject({ property_value: owned, property_count: 3, recorded_asset_value: 1000000 });
+    // a month before the sale still counts the sold property; before the valuation, the property counts at cost
+    const early = (await overview(`?from=${ymd(3).slice(0, 7)}&to=${ymd(3).slice(0, 7)}&state=all`)).body.data.companies.find((c) => c.org.id === zephyr.id);
+    expect(early.months[0].property_value).toBe(5100000 + 5000000 + 2500000 + 3000000);
+    // the drill-down lists the properties behind the figure
+    const dd = await authed(request(app).get(`${base}/companies/${zephyr.id}/drilldown?from=${thisMonth}&to=${thisMonth}`), superToken);
+    const sec = dd.body.data.sections.find((x) => x.key === 'properties');
+    expect(sec.rows.map((r) => r[0]).sort()).toEqual(['P-BUILD Property P-BUILD', 'P-COST Property P-COST', 'P-VAL Property P-VAL']);
+    expect(sec.rows.find((r) => r[0].startsWith('P-VAL'))[3]).toMatch(/Valuation/);
+    expect(sec.rows.find((r) => r[0].startsWith('P-COST'))[3]).toMatch(/Cost/);
+    // another company's properties are not mixed in
+    expect(res.body.data.companies.find((c) => c.org.id === gulati.id).months[0].property_value).toBeUndefined();
   });
 });

@@ -31,16 +31,57 @@ async function isMemberMonthLocked(orgMembershipId, date) {
 async function status(orgId, { year, month }) {
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0));
-  const [members, entries, locks, dayLocks] = await Promise.all([
+  // Everyone who is working now, plus anyone (also someone who has left) who has entries in the month or left on or
+  // after its first day: a person who left still has a month of timesheets to lock before their salary can be locked.
+  const [members, entries, locks, dayLocks, pendingRows, policy] = await Promise.all([
     prisma.orgMembership.findMany({
-      where: { org_id: orgId, employment_status: { not: 'terminated' } },
-      select: { id: true, person: { select: { name: true, department: { select: { name: true } } } } },
+      where: {
+        org_id: orgId,
+        OR: [
+          { employment_status: { not: 'terminated' } },
+          { left_at: { gte: from } },
+          { timesheet_entries: { some: { date: { gte: from, lte: to } } } },
+        ],
+      },
+      select: {
+        id: true, employment_status: true, left_at: true, worker_type: true,
+        department: { select: { name: true } },
+        manager: { select: { person: { select: { name: true } } } },
+        person: { select: { name: true, department: { select: { name: true } } } },
+      },
       orderBy: { person: { name: 'asc' } },
     }),
     prisma.timesheetEntry.groupBy({ by: ['org_membership_id', 'status'], where: { org_id: orgId, date: { gte: from, lte: to } }, _count: { _all: true }, _sum: { hours: true } }),
     prisma.timesheetMonthLock.findMany({ where: { org_id: orgId, period_year: year, period_month: month } }),
     prisma.timesheetLock.count({ where: { org_id: orgId, date: { gte: from, lte: to } } }),
+    // What is actually waiting: so the lock screen can say which entry, on which project, and who has to approve it.
+    prisma.timesheetEntry.findMany({
+      where: { org_id: orgId, date: { gte: from, lte: to }, status: 'submitted' },
+      orderBy: { date: 'asc' },
+      select: { id: true, org_membership_id: true, date: true, hours: true, overtime_hours: true, notes: true, module_name: true, manager_approved_at: true, account: { select: { project_name: true, name: true } } },
+    }),
+    prisma.org.findUnique({ where: { id: orgId }, select: { timesheet_manager_approval: true } }),
   ]);
+  const managerStep = policy?.timesheet_manager_approval !== false;
+  const pendingByMember = new Map();
+  for (const m of members) pendingByMember.set(m.id, []);
+  const managerOf = new Map(members.map((m) => [m.id, m.manager?.person?.name || null]));
+  for (const r of pendingRows) {
+    const list = pendingByMember.get(r.org_membership_id);
+    if (!list) continue;
+    const manager = managerOf.get(r.org_membership_id);
+    list.push({
+      id: r.id,
+      date: ymd(r.date),
+      project: r.account?.project_name || r.account?.name || null,
+      module: r.module_name || null,
+      hours: Number(r.hours),
+      overtime_hours: Number(r.overtime_hours || 0),
+      notes: r.notes || null,
+      // Employee -> Manager (optional) -> Admin (always last).
+      waiting_on: r.manager_approved_at ? 'Admin' : managerStep && manager ? `Manager (${manager}) or Admin` : 'Admin',
+    });
+  }
   const due = dueDate(year, month);
   const overdue = todayIst() > due;
   const lockByMember = new Map(locks.map((l) => [l.org_membership_id, l]));
@@ -73,6 +114,10 @@ async function status(orgId, { year, month }) {
         locked_at: lock?.locked_at || null,
         locked_by: lock?.locked_by || null,
         needs_lock: !lock && overdue,
+        employment_status: m.employment_status,
+        left_at: m.left_at ? ymd(m.left_at) : null,
+        worker_type: m.worker_type,
+        pending_entries: pendingByMember.get(m.id) || [],
       };
     }),
   };

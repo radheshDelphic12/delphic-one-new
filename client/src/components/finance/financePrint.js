@@ -54,8 +54,10 @@ export function billingCalculationLines(d) {
   } else if (d.billing_type === 'monthly') {
     lines.push(`Monthly rate: ${amountText(d.rate, c)}`);
     lines.push(`Working days in the month: ${d.working_days}${d.calendar ? ` (${d.calendar})` : ''}`);
-    lines.push(`Billed working days: ${d.contract_working_days}${d.period_from ? ` (${dateText(d.period_from)} – ${dateText(d.period_to)})` : ''}`);
-    lines.push(`Base: ${amountText(d.rate, c)} × ${d.contract_working_days} ÷ ${d.working_days} = ${amountText(d.base_amount, c)}`);
+    // On "approved hours" billing only the logged and approved days are billed
+    const billedDays = d.billing_basis === 'approved_hours' && Number(d.payable_days) > 0 ? Number(d.payable_days) : d.contract_working_days;
+    lines.push(`Billed working days: ${billedDays}${d.period_from ? ` (${dateText(d.period_from)} – ${dateText(d.period_to)})` : ''}`);
+    lines.push(`Base: ${amountText(d.rate, c)} × ${billedDays} ÷ ${d.working_days} = ${amountText(d.base_amount, c)}`);
   } else if (d.billing_type === 'hourly') {
     lines.push(`Hourly rate: ${amountText(d.rate, c)}/hour`);
     lines.push(`Billable (approved) hours: ${d.billable_hours}h${d.period_from ? ` (${dateText(d.period_from)} – ${dateText(d.period_to)})` : ''}`);

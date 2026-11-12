@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
+import TatTag from '../../components/ui/TatTag.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Modal from '../../components/ui/Modal.jsx';
@@ -29,6 +30,7 @@ import {
   requiresJoinedAt,
 } from '../../lib/requirementStages.js';
 import RequirementStatusOverrideDrawer from './RequirementStatusOverrideDrawer.jsx';
+import WebsitePublishPanel from '../website/WebsitePublishPanel.jsx';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -58,6 +60,8 @@ export default function RequirementDetailPage() {
   const [addSeatOpen, setAddSeatOpen] = useState(false);
   const [seatLabel, setSeatLabel] = useState('');
   const [assignRole, setAssignRole] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [budgetHistory, setBudgetHistory] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,6 +77,8 @@ export default function RequirementDetailPage() {
       setSeats(seatsRes.data.data || []);
       setAssignments(assignRes.data.data || []);
       setHistory(histRes.data.data || []);
+      apiClient.get(`/requirements/${id}/rate-changes`).then((r) => setBudgetHistory(r.data.data || [])).catch(() => setBudgetHistory([]));
+      apiClient.get(`/requirements/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
       setTaggedProfiles(subsRes.data.data || []);
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to load requirement'), 'Something went wrong');
@@ -89,6 +95,18 @@ export default function RequirementDetailPage() {
   useEffect(() => {
     if (searchParams.get('edit') === '1') setEditOpen(true);
   }, [searchParams]);
+
+  async function extendTat(hours) {
+    setBusy(true);
+    try {
+      const { data } = await apiClient.post(`/requirements/${id}/tat/extend`, { hours });
+      setRequirement((prev) => ({ ...prev, ...data.data }));
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to extend the TAT'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function closeEdit() {
     setEditOpen(false);
@@ -121,7 +139,7 @@ export default function RequirementDetailPage() {
     setBusy(true);
     try {
       const body = { to_status: statusModal };
-      if (requiresDropReason(statusModal)) body.reason = reason.trim();
+      if (statusNeedsReason(statusModal)) body.reason = reason.trim();
       await apiClient.post(`/requirements/${id}/status`, body);
       setStatusModal(null);
       setReason('');
@@ -192,6 +210,10 @@ export default function RequirementDetailPage() {
   }
 
   const nextStatuses = nextRequirementStatuses(requirement.status);
+  // A dropped requirement is locked, but can be reactivated (back to open) with a reason.
+  const dropped = requirement.status === 'dropped';
+  const reactivatable = locked && dropped && canEdit;
+  const statusNeedsReason = (to) => requiresDropReason(to) || dropped;
   const activeAssignments = assignments.filter((a) => !a.unassigned_at);
 
   const seatColumns = [
@@ -334,6 +356,24 @@ export default function RequirementDetailPage() {
           {user?.role === 'admin' && locked && (
             <UnlockButton entityType="requirement" entityId={requirement.id} onUnlocked={load} />
           )}
+          {!userCan(user, 'deleteRecords') && canEdit && (
+            <button
+              type="button"
+              className="btn-secondary text-danger-600"
+              onClick={async () => {
+                const reason = window.prompt('Why is this requirement being deleted? (kept in the activity log)');
+                if (!reason || reason.trim().length < 3) return;
+                try {
+                  await apiClient.delete(`/requirements/${requirement.id}`, { data: { reason: reason.trim() } });
+                  navigate('/requirements');
+                } catch (err) {
+                  pushError(apiErrorMessage(err, 'Failed to delete the requirement'), 'Something went wrong');
+                }
+              }}
+            >
+              Delete
+            </button>
+          )}
           {userCan(user, 'deleteRecords') && (
             <DeleteRecordButton
               entityType="requirement"
@@ -348,9 +388,11 @@ export default function RequirementDetailPage() {
       {locked && (
         <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           This requirement is locked. It remains available for viewing.
-          {user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
+          {reactivatable ? ' Use Reactivate requirement to bring it back to open.' : user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
         </div>
       )}
+
+      {userCan(user, 'manageWebsite') && <WebsitePublishPanel requirementId={requirement.id} requirementStatus={requirement.status} />}
 
       {/* Status controls */}
       <section className="rounded-lg border bg-white p-4">
@@ -362,7 +404,7 @@ export default function RequirementDetailPage() {
             </button>
           )}
         </div>
-        {locked || !canEdit ? (
+        {(locked && !reactivatable) || !canEdit ? (
           <p className="mt-2 text-sm text-tertiary-500">
             {locked ? 'This requirement is locked. Admin unlock is required to change status.' : 'Only the sales owner or admin can change status.'}
           </p>
@@ -376,7 +418,7 @@ export default function RequirementDetailPage() {
                 label={
                   to === 'closed'
                     ? 'All seats must already be closed or dropped'
-                    : requiresDropReason(to)
+                    : statusNeedsReason(to)
                       ? 'Requires a reason'
                       : `Move this requirement to ${to.replace(/_/g, ' ')}`
                 }
@@ -386,7 +428,7 @@ export default function RequirementDetailPage() {
                   className={to === 'dropped' ? 'btn-danger' : 'btn-secondary'}
                   onClick={() => openStatus(to)}
                 >
-                  Move to {to.replace(/_/g, ' ')}
+                  {dropped && to === 'open' ? 'Reactivate requirement' : `Move to ${to.replace(/_/g, ' ')}`}
                 </button>
               </Tooltip>
             ))}
@@ -433,6 +475,27 @@ export default function RequirementDetailPage() {
             <dd>
               {requirement.budget_min ?? '—'}–{requirement.budget_max ?? '—'} {requirement.budget_currency || ''}{' '}
               {requirement.budget_type ? `(${requirement.budget_type.replace(/_/g, ' ')})` : ''}
+              {budgetHistory.length > 0 && (
+                <ul data-testid="budget-history" className="mt-1 space-y-0.5 text-xs text-tertiary-500">
+                  {budgetHistory.slice(0, 5).map((h) => (
+                    <li key={h.id}>{h.field === 'budget_min' ? 'Min' : 'Max'}: {h.old_value ?? '—'} → {h.new_value ?? '—'} · {h.reason || 'No reason'} · {h.changed_by || 'Unknown'}, {new Date(h.changed_at).toLocaleDateString()}</li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+            <dt className="text-tertiary-500">TAT</dt>
+            <dd className="flex min-w-0 flex-wrap items-center gap-2">
+              {requirement.tat?.hours ? (
+                <>
+                  <span>{requirement.tat.hours % 24 === 0 ? `${requirement.tat.hours / 24} day(s)` : `${requirement.tat.hours} hours`}</span>
+                  {requirement.tat.tag ? <TatTag tat={requirement.tat} /> : <span className="text-xs text-tertiary-500">{requirement.tat.state === 'expired' ? 'TAT ended' : ''}</span>}
+                  {canEdit && ['open', 'in_progress'].includes(requirement.status) && [12, 24, 48].map((h) => (
+                    <button key={h} type="button" className="rounded-md border border-tertiary-100 px-1.5 py-0.5 text-xs text-primary-700 hover:bg-primary-50" disabled={busy} onClick={() => extendTat(h)}>
+                      +{h === 12 ? '12h' : `${h / 24}d`}
+                    </button>
+                  ))}
+                </>
+              ) : '—'}
             </dd>
             <dt className="text-tertiary-500">SLA</dt>
             <dd>{requirement.sla_days != null ? `${requirement.sla_days} days` : '—'}</dd>
@@ -596,6 +659,26 @@ export default function RequirementDetailPage() {
         </ul>
       </section>
 
+      {/* Who did what */}
+      <section className="rounded-lg border bg-white p-4" aria-label="Activity">
+        <h2 className="text-sm font-semibold text-tertiary-800">Activity - who did what</h2>
+        <ul className="mt-2 space-y-2 text-sm text-tertiary-700">
+          {activity.length === 0 && <li className="text-tertiary-400">No changes recorded yet</li>}
+          {activity.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-x-2">
+              <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800" title={a.by?.role}>{a.by?.name || 'Unknown'}</span>
+              <span>{a.summary}</span>
+              <span className="text-tertiary-400">· {formatDate(a.at)}</span>
+              {a.kind === 'update' && a.details?.changes && (
+                <span className="w-full pl-1 text-xs text-tertiary-500">
+                  {Object.entries(a.details.changes).map(([field, c]) => `${field}: ${c.from ?? '-'} → ${c.to ?? '-'}`).join(' · ')}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <NotesPanel entityType="requirement" entityId={requirement.id} />
         <FilesPanel
@@ -619,7 +702,7 @@ export default function RequirementDetailPage() {
             <button
               type="button"
               className="btn-primary"
-              disabled={busy || (requiresDropReason(statusModal) && !reason.trim())}
+              disabled={busy || (statusNeedsReason(statusModal) && !reason.trim())}
               onClick={confirmRequirementStatus}
             >
               Confirm
@@ -630,7 +713,7 @@ export default function RequirementDetailPage() {
         {statusModal === 'closed' && (
           <p className="mb-2 text-tertiary-600">All seats must already be closed or dropped.</p>
         )}
-        {requiresDropReason(statusModal) && (
+        {statusNeedsReason(statusModal) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-tertiary-500">Reason *</label>
             <textarea
@@ -638,11 +721,11 @@ export default function RequirementDetailPage() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="w-full rounded-md border px-3 py-2 text-sm"
-              placeholder="Why is this being dropped?"
+              placeholder={dropped ? 'Why is this being reactivated?' : 'Why is this being dropped?'}
             />
           </div>
         )}
-        {!requiresDropReason(statusModal) && statusModal !== 'closed' && (
+        {!statusNeedsReason(statusModal) && statusModal !== 'closed' && (
           <p className="text-tertiary-600">Confirm moving this requirement to {statusModal?.replace(/_/g, ' ')}.</p>
         )}
       </Modal>

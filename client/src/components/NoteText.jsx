@@ -15,6 +15,47 @@ function normalise(text) {
     .replace(/^\n+|\n+$/g, '');
 }
 
+// Light markup, rendered as React elements (never raw HTML): **bold**, *italic*,
+// `code`, [label](https://link), bare https:// links and "- " / "* " bullets.
+const INLINE = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<]+)/g;
+
+function linkProps(href) {
+  return { href, target: '_blank', rel: 'noopener noreferrer', className: 'text-primary-700 underline', onClick: (e) => e.stopPropagation() };
+}
+
+function renderInline(line, keyPrefix) {
+  return line.split(INLINE).map((part, i) => {
+    const key = `${keyPrefix}-${i}`;
+    if (!part) return null;
+    if (/^\*\*[^*\n]+\*\*$/.test(part)) return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (/^\*[^*\n]+\*$/.test(part)) return <em key={key}>{part.slice(1, -1)}</em>;
+    if (/^`[^`\n]+`$/.test(part)) return <code key={key} className="rounded bg-tertiary-100 px-1 text-[0.9em]">{part.slice(1, -1)}</code>;
+    const md = part.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/);
+    if (md) return <a key={key} {...linkProps(md[2])}>{md[1]}</a>;
+    if (/^https?:\/\//.test(part)) return <a key={key} {...linkProps(part)}>{part}</a>;
+    return part;
+  });
+}
+
+function renderMarkup(value) {
+  return value.split('\n').map((line, i) => {
+    const bullet = line.match(/^(\s*)[-*]\s+(.*)$/);
+    return (
+      <span key={i} className="block">
+        {bullet ? <>{bullet[1]}• {renderInline(bullet[2], i)}</> : renderInline(line, i)}
+        {line === '' && '​'}
+      </span>
+    );
+  });
+}
+
+/** The markup rendered in full (no "Show more"): used for the live preview while typing. */
+export function MarkupPreview({ text, className = '' }) {
+  const value = normalise(text);
+  if (!value.trim()) return null;
+  return <span className={`block whitespace-pre-wrap break-words text-left leading-snug ${className}`}>{renderMarkup(value)}</span>;
+}
+
 /**
  * A timesheet description (or any free-text note) exactly as it was typed:
  * line breaks, indentation, bullets and spacing kept (pre-wrap; pre-line used
@@ -29,7 +70,7 @@ export default function NoteText({ text, empty = '—', className = '' }) {
   const long = lines.length > COLLAPSED_LINES || value.length > 320;
   return (
     <span className={`block max-w-xl whitespace-pre-wrap break-words text-left leading-snug ${className}`}>
-      <span className={!expanded && long ? 'line-clamp-4' : 'block'}>{value}</span>
+      <span className={!expanded && long ? 'line-clamp-4' : 'block'}>{renderMarkup(value)}</span>
       {long && (
         <button
           type="button"

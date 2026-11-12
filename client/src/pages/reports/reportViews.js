@@ -20,12 +20,27 @@ export const ALL_REPORTS = [
   { key: 'closure', label: 'Closure report', roles: ['admin', 'sales'], hidden: true },
   { key: 'clients-without-requirements', label: 'Clients w/o requirements', roles: ['admin', 'sales', 'bda'] },
   { key: 'recruiter-vendor-gaps', label: 'Recruiter-vendor gaps', roles: ['admin', 'recruiter'] },
-  { key: 'hr', label: 'HR reports', roles: ['admin'] },
+  { key: 'hr', label: 'HR reports', roles: ['admin'], permission: 'reports.hr' },
+  { key: 'hiring-funnel', label: 'Hiring funnel', roles: ['admin'], permission: 'reports.hr' },
+  { key: 'joining-attrition', label: 'Joining & attrition', roles: ['admin'], permission: 'reports.hr' },
+  { key: 'client-wins', label: 'Client-wise closures', roles: ['admin', 'sales', 'bda'] },
+  { key: 'vendor-joinings', label: 'Vendor-wise joinings', roles: ['admin', 'sales', 'bda'] },
+  { key: 'ai-interviews', label: 'AI interviews', roles: ['admin', 'sales', 'recruiter'] },
+  { key: 'day-schedule', label: 'Day schedule (24h)', roles: ['admin', 'sales', 'bda', 'recruiter'] },
+  { key: 'monthly-review', label: 'Monthly performance review', roles: ['admin'] },
   { key: 'joinings', label: 'Joinings', roles: ['admin', 'sales'] },
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },
   { key: 'bda-reports', label: 'BDA reports', roles: ['admin', 'bda'] },
   { key: 'sales-reports', label: 'Sales reports', roles: ['admin', 'sales'] },
+  // Temporarily hidden from the Reports dropdown (still fully working): remove `hidden: true` to bring it back.
+  { key: 'recruiter-reports', label: 'Recruiter reports', roles: ['admin', 'recruiter'], hidden: true },
 ];
+
+/** Reports open to more than admins, for a person on the permission model who holds `reports.view` (their derived role may be 'employee'). */
+export function reportsForPermissions(holds) {
+  // plus the admin-only reports that have their own permission (HR reports) for a person who holds it
+  return ALL_REPORTS.filter((r) => !r.hidden && (r.roles.length > 1 || (r.permission && holds?.(r.permission))));
+}
 
 export function reportsForRole(role) {
   return ALL_REPORTS.filter((r) => !r.hidden && r.roles.includes(role));
@@ -344,6 +359,11 @@ const HR_COLUMNS = {
     hrCount,
     hrDate('Submission date'),
   ],
+  submitted_to_client: [
+    { key: 'sourcer', header: 'Sourcer' },
+    hrCount,
+    hrDate('Submitted to client on'),
+  ],
   round1_by_sourcer: [
     { key: 'sourcer', header: 'Sourcer' },
     { key: 'scheduled', header: 'Scheduled' },
@@ -405,6 +425,8 @@ export function joiningsSections(data) {
     title: t.title,
     columns: JOININGS_COLUMNS[t.key] || fallbackColumns(t.rows?.[0]),
     rows: (t.rows || []).map((r, i) => ({ id: `${t.key}-${i}`, ...r })),
+    // Badge = total joinings (sum of the count column), not the number of rows.
+    count: (t.rows || []).reduce((sum, r) => sum + (Number(t.key === 'by_interviewer' ? r.total : r.joinings) || 0), 0),
   }));
 }
 
@@ -485,6 +507,14 @@ const SALES_REPORTS_COLUMNS = {
   ],
 };
 
+const RECRUITER_REPORTS_COLUMNS = {
+  profiles_submitted_to_client: [
+    { key: 'recruiter', header: 'Recruiter' },
+    { key: 'count', header: 'Count', render: hoverCount('profiles') },
+    reportDate('Date'),
+  ],
+};
+
 // Per-table tab badge: for the daily aggregate tables the useful headline number
 // is the SUM of the count column (e.g. total meetings this month), not the number
 // of grouped rows. Detail tables (one row = one record) fall back to row count.
@@ -499,6 +529,7 @@ const TAB_BADGE_SUM_FIELD = {
   // HR report (the server's `total` wins when present — see below).
   sourcing: 'count',
   submissions: 'count',
+  submitted_to_client: 'count',
   round1_by_sourcer: 'scheduled',
   round1_by_interviewer: 'scheduled',
 };
@@ -532,6 +563,10 @@ function tablesToSections(columnsByKey, data) {
 
 export function bdaReportsSections(data) {
   return tablesToSections(BDA_REPORTS_COLUMNS, data);
+}
+
+export function recruiterReportsSections(data) {
+  return tablesToSections(RECRUITER_REPORTS_COLUMNS, data);
 }
 
 export function salesReportsSections(data) {
@@ -750,4 +785,67 @@ export function chartBarsForReport(reportKey) {
     return [{ dataKey: 'vendors', name: 'Vendors w/o submissions', fill: '#d97706' }];
   }
   return [];
+}
+
+// --- Drill-down: click a count -> the records behind it ----------------------------
+// `report:table` -> the count columns that open a side panel, and how a clicked row maps
+// to the server's `/reports/drilldown` identifiers (person / account / day / month).
+// Section-less reports use table `main`. Only counts that map to a list of records are
+// listed — averages, rates and money columns are not.
+const dayAndPerson = (personKey) => (row) => ({ person_id: row[personKey], date: row.date });
+const DRILL_RULES = {
+  'hr:sourcing': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:submissions': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:submitted_to_client': { metrics: ['count'], ids: dayAndPerson('sourcer_id') },
+  'hr:round1_by_sourcer': { metrics: ['scheduled', 'completed', 'shortlisted'], ids: dayAndPerson('sourcer_id') },
+  'hr:round1_by_interviewer': {
+    metrics: ['scheduled', 'completed', 'shortlisted'],
+    ids: (row) => ({ person_id: row.interviewer_id, person_name: row.interviewer, date: row.date }),
+  },
+  'joinings:by_sourcer': { metrics: ['joinings'], ids: (row) => ({ person_id: row.sourcer_id, month: row.sort }) },
+  'joinings:by_vendor': { metrics: ['joinings'], ids: (row) => ({ person_id: row.vendor_id, month: row.sort }) },
+  'joinings:by_sales_poc': { metrics: ['joinings'], ids: (row) => ({ person_id: row.sales_poc_id, month: row.sort }) },
+  'joinings:by_interviewer': {
+    metrics: ['l1', 'l2', 'total'],
+    ids: (row) => ({ person_id: row.interviewer_id, person_name: row.interviewer, month: row.sort }),
+  },
+  'bda-reports:accounts_created': { metrics: ['count'], ids: dayAndPerson('bda_id') },
+  'bda-reports:meetings_scheduled': { metrics: ['meetings_scheduled', 'converted_to_active'], ids: dayAndPerson('bda_id') },
+  'bda-reports:meetings_conversion': {
+    metrics: ['meetings_scheduled', 'converted_to_active'],
+    ids: (row) => ({ person_id: row.bda_id }),
+  },
+  'bda-reports:requirements_brought_counts': { metrics: ['count'], ids: dayAndPerson('bda_id') },
+  'sales-reports:requirements_created': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'sales-reports:meetings_attended': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'sales-reports:profiles_submitted_to_client': { metrics: ['count'], ids: dayAndPerson('sales_poc_id') },
+  'recruiter-reports:profiles_submitted_to_client': { metrics: ['count'], ids: dayAndPerson('recruiter_id') },
+  'clients-without-requirements:main': {
+    metrics: ['active_requirements_count'],
+    ids: (row) => ({ account_id: row.client?.id }),
+  },
+  'recruiter-vendor-gaps:main': {
+    metrics: ['profiles_sourced', 'profiles_submitted'],
+    ids: (row) => ({ account_id: row.vendor?.id }),
+  },
+};
+
+/** Count columns of a report table that open a drill-down panel. */
+export function drillMetrics(reportKey, tableKey = 'main') {
+  return DRILL_RULES[`${reportKey}:${tableKey}`]?.metrics || [];
+}
+
+/**
+ * Query params for `/reports/drilldown` for one clicked count, or null when the row has
+ * no identifier to drill into. `filters` are the report's current filters (date range, type…).
+ */
+export function drillParams(reportKey, tableKey, metric, row, filters = {}) {
+  const rule = DRILL_RULES[`${reportKey}:${tableKey}`];
+  if (!rule || !rule.metrics.includes(metric)) return null;
+  const ids = rule.ids(row);
+  const params = { report: reportKey, table: tableKey, metric, ...filters };
+  for (const [key, value] of Object.entries(ids)) if (value) params[key] = value;
+  // Without an identifier the server would not narrow to anyone; only the unassigned sales row (null owner) may go without one.
+  if (!params.person_id && !params.person_name && !params.account_id && tableKey !== 'by_sales_poc') return null;
+  return params;
 }

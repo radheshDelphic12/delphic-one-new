@@ -1,72 +1,100 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, ListChecks, Lock, Users } from 'lucide-react';
+import { AlarmClockPlus, CalendarCheck, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, CalendarRange, ListChecks, LogIn, MapPin, UserCheck, Lock, Users, FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { allowed, isAdminUser } from '../../lib/access.js';
 import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
+import AttendanceDashboard from './AttendanceDashboard.jsx';
+import LocationCheckinTab from './LocationCheckinTab.jsx';
+import ContractorCheckinTab from './ContractorCheckinTab.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
 import ItTimesheetPage from './ItTimesheetPage.jsx';
 import MyHolidaysTab from './MyHolidaysTab.jsx';
 import OvertimeTicketsTab from './OvertimeTicketsTab.jsx';
-import TimesheetDashboard from './TimesheetDashboard.jsx';
+// Hidden on request – may be re-enabled later (see the 'dashboard' tab below).
+// import TimesheetDashboard from './TimesheetDashboard.jsx';
+import ProjectCalendarDashboard from './ProjectCalendarDashboard.jsx';
 import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
+import MyDeployments, { useDeploymentAccess } from './MyDeployments.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
+import RegularizationAdminTab from './RegularizationAdminTab.jsx';
 
 const BASE_TABS = [
-  { key: 'attendance', label: 'Attendance', icon: CalendarClock },
-  { key: 'leave', label: 'Leave', icon: CalendarCheck },
-  // Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
-  { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
+  { key: 'attendance', label: 'Attendance', icon: CalendarClock, need: 'basic.attendance' },
+  { key: 'leave', label: 'Leave', icon: CalendarCheck, need: 'basic.leave' },
+  // Hidden on request – may be re-enabled later. Month view of every timesheet you may open, as a calendar (hours, attendance, leave, lock, approval per day).
+  // { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
+  // Attendance only (no project hours): status, reporting office and office / home per day, plus leave balance.
+  { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck, need: ['basic.attendance', 'attendance_dashboard.view'] },
+  // Every project as a month calendar: hours, tasks, leave, holidays.
+  { key: 'project-calendar', label: 'Project Calendar', icon: CalendarRange, need: ['basic.timesheet', 'project_calendar.view'] },
   // Hours logged by everyone on a project you are assigned to (visibility only, no cap).
-  { key: 'project-team', label: 'Project Team', icon: Users },
+  { key: 'project-team', label: 'Project Team', icon: Users, need: ['basic.timesheet', 'project_team.view'] },
   // Everyone's own holiday calendar(s): standard + per-project (client) calendars.
-  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays },
+  { key: 'holidays', label: 'Holiday Calendar', icon: CalendarDays, need: ['basic.attendance', 'holidays.view'] },
   // Overtime is a ticket the manager approves (people paid from attendance); managers and admins decide them here.
-  { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus },
+  { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
+// Where people check in from (office, home, away) and who is late: a separate record, never feeds attendance or pay. Delphic Global only.
+const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Workplace Check-in', icon: MapPin, need: 'basic.attendance' };
+// Contractors' plain check-in / check-out (no location): report for HR / admin. Delphic Global only.
+const CONTRACTOR_CHECKIN_TAB = { key: 'contractor-checkin', label: 'Contractor Check-in', icon: LogIn, need: 'basic.attendance' };
 // IT staff log client project hours here. Non-IT logging is hidden until that flow is switched on.
-const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks };
+const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.timesheet' };
 // Admin: the client project timesheet (IT and contractors).
-const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList };
+const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList, need: 'timesheets.view' };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
-const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock };
+const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock, need: 'timesheets.lock' };
+// Admin: every employee's attendance and project-timesheet correction requests, to approve or reject.
+const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock, need: ['regularization.view', 'regularization.approve'] };
 // Reporting managers approve their direct reports' timesheets here. An admin gives the final approval on Project Timesheets.
 const APPROVALS_TAB = { key: 'approvals', label: 'Approvals', icon: ClipboardCheck };
+// People deployed at a client site log their days and expenses here; their managers and Finance act on deployment approvals and expenses.
+const DEPLOYMENTS_TAB = { key: 'deployments', label: 'Client deployments', icon: MapPin };
 
 /** Time & Attendance hub: Attendance + Leave + Timesheets (+ IT Timesheet — logging for IT staff, records view for admins — + Team Monitoring for admins) under one sidebar entry. */
 export default function TimeAttendanceHubPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const { user, isGroupSuperadmin } = useAuth();
+  const isAdmin = isAdminUser(user);
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const isIt = user?.department?.name?.toLowerCase() === 'it';
   const [isApprover, setIsApprover] = useState(false);
+  const deployments = useDeploymentAccess();
   useEffect(() => {
     apiClient.get('/timesheets/approvals/scope').then(({ data }) => setIsApprover(Boolean(data.data?.is_approver))).catch(() => setIsApprover(false));
   }, []);
+  // Tabs with a permission need are filtered by it; the approvals tab is gated by the API's reporting scope.
   const TABS = [
     ...BASE_TABS.slice(0, 2),
     ...(isIt ? [LOG_TAB] : []),
     ...BASE_TABS.slice(2),
+    // Employees check in from the dashboard; this tab is only the report / settings for those who manage it.
+    ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB, CONTRACTOR_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
-    ...(isAdmin ? [PROJECT_TIMESHEETS_TAB, LOCKS_TAB] : []),
-  ];
+    ...(deployments.any ? [DEPLOYMENTS_TAB] : []),
+    ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
+  ].filter((t) => t.need == null || allowed(user, t.need, true));
+  const has = (key) => TABS.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'attendance';
   const section = TABS.some((t) => t.key === requested) ? requested : 'attendance';
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
+    <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
+      <div className={modern ? 'flex flex-wrap gap-1 rounded-2xl border border-tertiary-100 bg-white p-1.5 shadow-card' : 'flex flex-wrap gap-1 border-b border-tertiary-200'}>
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={section === key}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${
-              section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'
-            }`}
+            className={modern
+              ? `inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${section === key ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100' : 'text-tertiary-500 hover:bg-tertiary-50 hover:text-tertiary-800'}`
+              : `inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`}
             onClick={() => setParams({ section: key })}
           >
             <Icon className="h-4 w-4" />
@@ -76,19 +104,26 @@ export default function TimeAttendanceHubPage() {
       </div>
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
+      {section === 'deployments' && has('deployments') && <MyDeployments />}
       {section === 'log' && isIt && (
         <div className="space-y-3">
           <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Log hours against a project you are assigned to. These hours are for client billing. Your salary still comes from attendance.</p>
           <ItTimesheetPage />
         </div>
       )}
-      {section === 'project-timesheets' && isAdmin && <ItTimesheetAdminView scope="it" />}
-      {section === 'dashboard' && <TimesheetDashboard />}
+      {section === 'project-timesheets' && has('project-timesheets') && <ItTimesheetAdminView scope="it" />}
+      {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
+      {/* {section === 'dashboard' && <TimesheetDashboard />} */}
+      {section === 'attendance-dashboard' && <AttendanceDashboard />}
+      {section === 'location-checkin' && has('location-checkin') && <LocationCheckinTab />}
+      {section === 'contractor-checkin' && has('contractor-checkin') && <ContractorCheckinTab canEdit={allowed(user, 'hr_settings.update', isAdmin)} />}
+      {section === 'project-calendar' && <ProjectCalendarDashboard />}
       {section === 'project-team' && <ProjectTeamTimesheet />}
       {section === 'holidays' && <MyHolidaysTab />}
-      {section === 'overtime' && <OvertimeTicketsTab isAdmin={isAdmin} />}
+      {section === 'overtime' && <OvertimeTicketsTab isAdmin={allowed(user, 'overtime.update', isAdmin)} />}
       {section === 'approvals' && isApprover && <ApprovalsTab />}
-      {section === 'locks' && isAdmin && <TimesheetLocksTab />}
+      {section === 'locks' && has('locks') && <TimesheetLocksTab />}
+      {section === 'regularization' && has('regularization') && <RegularizationAdminTab />}
     </div>
   );
 }

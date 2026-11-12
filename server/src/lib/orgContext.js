@@ -16,4 +16,13 @@ function getOrgId() {
   return storage.getStore()?.org_id;
 }
 
-module.exports = { run, getOrgId };
+function getStore() {
+  return storage.getStore();
+}
+
+/** Run a background job (or a public form handler) as a named actor so its writes appear in the change log as that actor. */
+function runAs(systemName, fn, extra = {}) {
+  return storage.run({ system: true, system_name: systemName, ...extra }, fn);
+}
+
+module.exports = { run, getOrgId, getStore, runAs };

@@ -1,0 +1,501 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Download } from 'lucide-react';
+import apiClient from '../../lib/apiClient.js';
+import { useAlerts } from '../../lib/alerts/alertContext.jsx';
+import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { downloadCsv } from '../../lib/groupExport.js';
+import Drawer from '../../components/ui/Drawer.jsx';
+import { AddTimesheetEntryDrawer } from './TimesheetBackfill.jsx';
+import { CHECKIN_RESULT_LABEL, CHECKIN_COMPARISON_LABEL, CHECKIN_PLACE_LABEL, hoursMinutes, clock } from './checkinLabels.js';
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+// Cell tone per kind of day. Leave codes (CL, SL, EL, CO ...) all share the leave tone.
+const TONE = {
+  present: 'bg-green-50 text-green-700',
+  planned: 'bg-green-50/60 text-green-600',
+  half_day: 'bg-amber-50 text-amber-700',
+  leave: 'bg-blue-50 text-blue-700',
+  absent: 'bg-red-50 text-red-700',
+  holiday: 'bg-violet-50 text-violet-700',
+  weekly_off: 'bg-tertiary-100 text-tertiary-500',
+  none: '',
+};
+const LEGEND = [
+  ['P', 'present', 'Present (office)'], ['WFH', 'present', 'Work from home'], ['HD', 'half_day', 'Half day'],
+  ['CL', 'leave', 'Casual leave'], ['SL', 'leave', 'Sick leave'], ['EL', 'leave', 'Earned / paid leave'], ['UL', 'leave', 'Unpaid leave'], ['CO', 'leave', 'Comp off'], ['L', 'leave', 'Leave, type not set (open the day and pick the real leave type)'],
+  ['H', 'holiday', 'Holiday'], ['WO', 'weekly_off', 'Weekly off'], ['A', 'absent', 'Absent (working day, nothing recorded)'],
+];
+// "Pune – Client site (By.u,Tsel)": where a person is working on a day inside a work location assignment.
+const AWAY_PURPOSE = { project: 'Project site', travel: 'Travel', other: 'Away' };
+const awayLabel = (a) => `${a.city ? `${a.city} – ` : ''}${a.place_name || 'Away'}${a.kind === 'site' ? ' (client site)' : ''} · ${AWAY_PURPOSE[a.purpose] || 'Away'}${a.project_name ? ` (${a.project_name})` : ''}`;
+const STATE_TAG = { notice_period: 'serving notice', exited: 'exited' };
+const NO_PROJECT = 'No project';
+const STATUS_OPTIONS = [['present', 'Present'], ['wfh', 'Work from home'], ['half_day', 'Half day'], ['absent', 'Absent'], ['leave', 'Leave'], ['holiday', 'Holiday']];
+const STATUS_LABEL = Object.fromEntries(STATUS_OPTIONS);
+const inputClass = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
+const hoursLabel = (h) => (h ? Number(h).toFixed(h % 1 ? 1 : 0) : '');
+const dayLabel = (d) => `${d.date.slice(8)} ${WEEKDAYS[d.weekday]}`;
+
+// Workplace Check-in laid over the register (Delphic Global): a small dot in the cell corner says where the person checked in, a red line
+// under the code means late, a dashed outline means a working day with no check-in. The status code itself is untouched.
+const DOT = { in_office: 'bg-green-600', work_from_home: 'bg-blue-500', location_unavailable: 'bg-amber-500', outside_office: 'bg-red-600' };
+const CHECKIN_LEGEND = [['bg-green-600', 'Checked in at the office'], ['bg-blue-500', 'Checked in from home'], ['bg-amber-500', 'Checked in, location unavailable'], ['bg-red-600', 'Checked in away from the office']];
+const NOT_CHECKED_STYLE = { outline: '1px dashed #f87171', outlineOffset: '-2px' };
+
+// Tooltip lines of a day that has a check-in; "Not checked in" for a working day without one.
+function checkinLines(d) {
+  const c = d.checkin;
+  if (c) {
+    return [
+      `Checked in ${clock(c.first_in)} · ${c.currently_in ? 'still at work' : `out ${clock(c.last_out)}`}`,
+      c.late_minutes > 0 ? `Late: ${hoursMinutes(c.late_minutes)}` : null,
+      `Checked in from: ${CHECKIN_RESULT_LABEL[c.result] || c.result}`,
+      c.distance_m != null ? `Distance from office: ${c.distance_m} m` : null,
+      `Planned vs actual: ${CHECKIN_PLACE_LABEL[c.planned_place]} · ${CHECKIN_COMPARISON_LABEL[c.comparison] || c.comparison}`,
+      c.out_of_desk_minutes > 0 ? `Out of desk: ${hoursMinutes(c.out_of_desk_minutes)} (${c.break_count} ${c.break_count === 1 ? 'break' : 'breaks'})` : null,
+      c.sessions.length > 1 ? `${c.sessions.length} check-ins` : null,
+      (d.checkin_flags || []).includes('leave_but_checked_in') ? 'On leave, but checked in' : null,
+    ].filter(Boolean);
+  }
+  if (d.checkin_state === 'missing') return ['Not checked in'];
+  if (d.checkin_state === 'not_yet') return ['Not checked in yet (before the late-after time)'];
+  return [];
+}
+
+/**
+ * Monthly register: employees down the side, every day of the month across, one response for the whole month.
+ * "Attendance" shows a short code per day with per-person totals; "Project hours" shows the hours logged per day (project
+ * breakdown on hover and in the expandable row) with a monthly total. Click a name to open that person's calendar.
+ */
+export default function AttendanceRegister({ year, month, status, workMode = '', locationId = '', onOpenPerson, canEdit = false }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const [mode, setMode] = useState('attendance');
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(() => new Set());
+  const [group, setGroup] = useState('employee');
+  const [openProjects, setOpenProjects] = useState(() => new Set());
+  const [editing, setEditing] = useState(null); // { kind: 'attendance' | 'hours', person, day }
+  const [reloadKey, setReloadKey] = useState(0);
+  const [showCheckin, setShowCheckin] = useState(true);
+  const [notCheckedOnly, setNotCheckedOnly] = useState(false);
+  const lastParams = useRef('');
+
+  useEffect(() => {
+    let alive = true;
+    // a change of month / status shows the loading state; a reload after an edit keeps the table (and its scroll position) in place
+    const key = `${year}-${month}-${status}-${workMode}-${locationId}`;
+    if (lastParams.current !== key) { setData(null); lastParams.current = key; }
+    apiClient.get('/attendance-dashboard/register', { params: { year, month, status, work_mode: workMode || undefined, location_id: locationId || undefined } })
+      .then(({ data: res }) => { if (alive) setData(res.data); })
+      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load the register'), 'Something went wrong'));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month, status, workMode, locationId, reloadKey]);
+
+  const projectTotals = useMemo(() => {
+    const map = new Map();
+    for (const p of data?.people || []) {
+      const by = new Map();
+      for (const d of p.days) for (const pr of d.projects) by.set(pr.project, Math.round(((by.get(pr.project) || 0) + pr.hours) * 100) / 100);
+      map.set(p.org_membership_id, [...by.entries()].sort((a, b) => b[1] - a[1]));
+    }
+    return map;
+  }, [data]);
+
+  // One block per project: each person's own hours on that project per day, with project and person totals. Hours with no project fall under NO_PROJECT.
+  const projectGroups = useMemo(() => {
+    const groups = new Map();
+    const round = (n) => Math.round(n * 100) / 100;
+    // the attendance people, plus contractors / exited people / others the filters hide, who still logged hours on a project
+    for (const p of [...(data?.people || []), ...(data?.project_people || [])]) {
+      const mine = new Map();
+      p.days.forEach((d, i) => {
+        for (const pr of d.projects) {
+          const name = pr.project || NO_PROJECT;
+          if (!mine.has(name)) mine.set(name, { person: p, perDay: data.days.map(() => 0), total: 0 });
+          const row = mine.get(name);
+          row.perDay[i] = round(row.perDay[i] + pr.hours);
+          row.total = round(row.total + pr.hours);
+        }
+      });
+      for (const [name, row] of mine) {
+        if (!groups.has(name)) groups.set(name, { name, rows: [], total: 0 });
+        const g = groups.get(name);
+        g.rows.push(row);
+        g.total = round(g.total + row.total);
+      }
+    }
+    // every project active in the month is listed, also where nobody logged hours
+    for (const name of data?.projects || []) if (!groups.has(name)) groups.set(name, { name, rows: [], total: 0 });
+    for (const g of groups.values()) g.rows.sort((a, b) => b.total - a.total);
+    return [...groups.values()].sort((a, b) => (a.name === NO_PROJECT) - (b.name === NO_PROJECT) || b.total - a.total);
+  }, [data]);
+
+  const toggleProject = (name) => setOpenProjects((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+  const toggle = (id) => setOpen((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+
+  // One column per leave code that appears this month (CL, SL, CO, UL ...), in a steady order.
+  const leaveCodes = [...new Set((data?.people || []).flatMap((p) => Object.keys(p.totals.leave_by_code || {})))].sort();
+
+  function exportCsv() {
+    if (!data) return;
+    const dayHeads = data.days.map((d) => String(Number(d.date.slice(8))));
+    const file = `${mode === 'attendance' ? 'attendance-register' : 'project-hours-register'}-${year}-${String(month).padStart(2, '0')}.csv`;
+    if (mode === 'attendance') {
+      downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Weekly offs', 'Absent'],
+        data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => d.code), p.totals.office, p.totals.wfh, p.totals.worked, ...leaveCodes.map((c) => p.totals.leave_by_code?.[c] || 0), p.totals.holidays, p.totals.weekly_offs, p.totals.absent]));
+    } else if (group === 'project') {
+      downloadCsv(file, ['Project', 'Employee', 'Code', 'Department', ...dayHeads, 'Total hours'],
+        projectGroups.flatMap((g) => g.rows.map((r) => [g.name, r.person.name, r.person.employee_code || '', r.person.department || '', ...r.perDay.map(hoursLabel), r.total])));
+    } else {
+      downloadCsv(file, ['Employee', 'Code', 'Department', ...dayHeads, 'Total hours'],
+        data.people.map((p) => [p.name, p.employee_code || '', p.department || '', ...p.days.map((d) => hoursLabel(d.hours)), p.totals.hours]));
+    }
+  }
+
+  const cols = data?.days.length || 0;
+  const overlay = mode === 'attendance' && Boolean(data?.checkin?.enabled) && showCheckin;
+  const rows = overlay && notCheckedOnly ? (data?.people || []).filter((p) => p.checkin_totals?.missing > 0) : data?.people || [];
+  // who has checked in today (only when the month shown contains today)
+  const todayCount = useMemo(() => {
+    if (!data?.checkin?.enabled) return null;
+    const counts = { checked_in: 0, missing: 0, not_yet: 0 };
+    for (const p of data.people) {
+      const d = p.days.find((x) => x.date === data.today);
+      if (d && counts[d.checkin_state] !== undefined) counts[d.checkin_state] += 1;
+    }
+    return data.people.some((p) => p.days.some((x) => x.date === data.today)) ? counts : null;
+  }, [data]);
+  const th = 'sticky top-0 z-10 bg-tertiary-50 text-center text-[11px] font-medium text-tertiary-500';
+
+  return (
+    <div className="space-y-3">
+      {canEdit && <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800" data-testid="register-edit-hint">{mode === 'attendance' ? 'Admin: click a day to change or remove that person\'s attendance (a reason is kept in the audit log).' : 'Admin: click a day to add hours for that person. To change or delete entries already logged, use Project Timesheets.'}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5 text-sm">
+          {[['attendance', 'Attendance register'], ['hours', 'Project hours register']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setMode(k)} className={`rounded-lg px-3 py-1.5 font-medium ${mode === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500 hover:text-tertiary-800'}`}>{label}</button>
+          ))}
+        </div>
+        {mode === 'hours' && (
+          <div className="inline-flex rounded-xl border border-tertiary-200 bg-white p-0.5 text-sm" data-testid="group-toggle">
+            {[['employee', 'By employee'], ['project', 'By project']].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setGroup(k)} className={`rounded-lg px-3 py-1.5 font-medium ${group === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-500 hover:text-tertiary-800'}`}>{label}</button>
+            ))}
+          </div>
+        )}
+        {mode === 'attendance' && data?.checkin?.enabled && (
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-1"><input type="checkbox" checked={showCheckin} onChange={(e) => setShowCheckin(e.target.checked)} /> Show check-ins</label>
+            {showCheckin && <label className="flex items-center gap-1"><input type="checkbox" checked={notCheckedOnly} onChange={(e) => setNotCheckedOnly(e.target.checked)} /> Not checked in only</label>}
+          </div>
+        )}
+        <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={!data?.people.length} onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export CSV</button>
+      </div>
+
+      {mode === 'attendance' ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary-500" data-testid="register-legend">
+          {[...LEGEND, ...(data?.leave_codes || []).filter((t) => !LEGEND.some(([c]) => c === t.code)).map((t) => [t.code, 'leave', t.name])].map(([code, kind, label]) => (
+            <span key={code} className="inline-flex items-center gap-1"><span className={`inline-block min-w-[1.75rem] rounded px-1 text-center font-semibold ${TONE[kind]}`}>{code}</span>{label}</span>
+          ))}
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-amber-500" />Working away from the base office (project site / travel)</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block min-w-[1.75rem] rounded border border-dashed border-tertiary-300 px-1 text-center">&nbsp;</span>Blank = future day / not employed</span>
+        </p>
+      ) : (
+        <p className="text-xs text-tertiary-500">Hours logged per day (approved and waiting for approval; rejected entries are left out). {group === 'project' ? 'Each block is one project: open it with the arrow to see who worked on it and their hours on that project only.' : 'Hover a cell for the project breakdown, or open a row with the arrow.'} A blank cell means no hours.</p>
+      )}
+
+      {overlay && (
+        <div className="space-y-1 text-xs text-tertiary-500" data-testid="checkin-legend">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <b className="text-tertiary-700">Workplace check-in:</b>
+            {CHECKIN_LEGEND.map(([cls, label]) => <span key={label} className="inline-flex items-center gap-1"><span className={`inline-block h-2 w-2 rounded-full ${cls}`} />{label}</span>)}
+            <span className="inline-flex items-center gap-1"><span className="inline-block min-w-[1.75rem] rounded px-1 text-center font-semibold text-tertiary-700" style={{ boxShadow: 'inset 0 -2px 0 #ef4444' }}>P</span>Late</span>
+            <span className="inline-flex items-center gap-1"><span className="inline-block min-w-[1.75rem] rounded px-1 text-center font-semibold text-red-700" style={NOT_CHECKED_STYLE}>A</span>Not checked in (a working day)</span>
+          </p>
+          {data?.checkin?.scope === 'own' && <p>Check-ins are shown for your own row only.</p>}
+          {todayCount && data?.checkin?.scope === 'all' && <p data-testid="checkin-today">Today: <b className="text-green-700">{todayCount.checked_in}</b> checked in · <b className={todayCount.missing ? 'text-red-700' : 'text-tertiary-700'}>{todayCount.missing}</b> not checked in{todayCount.not_yet ? <> · {todayCount.not_yet} not due yet</> : null}</p>}
+        </div>
+      )}
+      {!data ? <p className="text-sm text-tertiary-500">Loading the register...</p> : !data.people.length ? (
+        <p className="rounded-2xl border border-dashed border-tertiary-200 p-4 text-sm text-tertiary-500">No employees with this status.</p>
+      ) : (
+        <div className="max-h-[70vh] overflow-auto rounded-2xl border border-tertiary-100 bg-white shadow-card" data-testid="register-scroll">
+          <table className="border-separate border-spacing-0 text-xs" data-testid={mode === 'attendance' ? 'attendance-register' : 'hours-register'}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 top-0 z-20 min-w-[13rem] bg-tertiary-50 p-2 text-left text-xs font-medium text-tertiary-600">Employee · {MONTHS[month - 1]} {year}</th>
+                {data.days.map((d) => (
+                  <th key={d.date} className={`${th} min-w-[2rem] px-0.5 py-1 ${d.weekday === 0 || d.weekday === 6 ? 'text-tertiary-400' : ''}`}>
+                    <span className="block text-tertiary-800">{Number(d.date.slice(8))}</span>
+                    <span className="block font-normal">{WEEKDAYS[d.weekday]}</span>
+                  </th>
+                ))}
+                {mode === 'attendance' ? [...['Present (office)', 'WFH', 'Total worked', ...leaveCodes, 'Holidays', 'Weekly offs', 'Absent'], ...(overlay ? ['Checked in', 'Not checked in'] : [])].map((h) => <th key={h} className={`${th} min-w-[3.5rem] px-1 py-1`}>{h}</th>) : <th className={`${th} min-w-[4rem] px-1 py-1`}>Total hrs</th>}
+              </tr>
+            </thead>
+            {mode === 'hours' && group === 'project' ? (
+              <tbody data-testid="project-groups">
+                {!projectGroups.length && <tr><td colSpan={cols + 2} className="p-4 text-sm text-tertiary-500">No active projects this month.</td></tr>}
+                {projectGroups.map((g) => {
+                  const expanded = openProjects.has(g.name);
+                  return (
+                    <FragmentRow key={g.name}>
+                      <tr className="bg-tertiary-50">
+                        <td colSpan={cols + 2} className="sticky left-0 border-t border-tertiary-100 p-2">
+                          <button type="button" className="flex items-center gap-1 text-left font-semibold text-tertiary-800" aria-label={expanded ? `Collapse ${g.name}` : `Expand ${g.name}`} onClick={() => toggleProject(g.name)}>
+                            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            {g.name}
+                            <span className="font-normal text-tertiary-500">· {hoursLabel(g.total) || 0} h · {g.rows.length ? `${g.rows.length} ${g.rows.length === 1 ? 'person' : 'people'}` : 'no hours logged'}</span>
+                          </button>
+                        </td>
+                      </tr>
+                      {expanded && g.rows.map((r) => (
+                        <tr key={r.person.org_membership_id} className="hover:bg-tertiary-50/60">
+                          <td className="sticky left-0 z-10 border-t border-tertiary-100 bg-white p-2 pl-6">
+                            <button type="button" className="text-left font-medium text-primary-700 hover:underline" title="Open this person's calendar" onClick={() => onOpenPerson(r.person.org_membership_id)}>{r.person.name}</button>
+                            {r.person.employee_code && <span className="block pl-0.5 text-[10px] text-tertiary-400">{r.person.employee_code}</span>}
+                          </td>
+                          {r.perDay.map((h, i) => (
+                            <td key={data.days[i].date} title={`${dayLabel(data.days[i])}: ${h ? `${hoursLabel(h)} h on ${g.name}` : 'No hours'}`} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${h ? 'bg-primary-50 font-semibold text-primary-800' : 'text-tertiary-300'}`}>{hoursLabel(h)}</td>
+                          ))}
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums">{hoursLabel(r.total)}</td>
+                        </tr>
+                      ))}
+                    </FragmentRow>
+                  );
+                })}
+              </tbody>
+            ) : (
+            <tbody>
+              {rows.map((p) => {
+                const expanded = mode === 'hours' && open.has(p.org_membership_id);
+                return (
+                  <FragmentRow key={p.org_membership_id}>
+                    <tr className="hover:bg-tertiary-50/60">
+                      <td className="sticky left-0 z-10 border-t border-tertiary-100 bg-white p-2">
+                        <div className="flex items-center gap-1">
+                          {mode === 'hours' && (
+                            <button type="button" aria-label={expanded ? 'Collapse' : 'Show projects'} className="text-tertiary-400 hover:text-tertiary-700" onClick={() => toggle(p.org_membership_id)}>
+                              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                          )}
+                          <button type="button" className="text-left font-medium text-primary-700 hover:underline" title="Open this person's calendar" onClick={() => onOpenPerson(p.org_membership_id)}>
+                            {p.name}{STATE_TAG[p.status] ? <span className="ml-1 font-normal text-tertiary-400">({STATE_TAG[p.status]})</span> : null}
+                          </button>
+                        </div>
+                        {p.employee_code && <span className="block pl-0.5 text-[10px] text-tertiary-400">{p.employee_code}</span>}
+                      </td>
+                      {p.days.map((d) => {
+                        const lines = overlay ? checkinLines(d) : [];
+                        const tip = mode === 'attendance'
+                          ? [`${dayLabel(d)}: ${d.label || d.code || 'No record'}`, ...(d.away ? [awayLabel(d.away)] : []), ...lines].join('\n')
+                          : `${dayLabel(d)}: ${d.hours ? `${hoursLabel(d.hours)} h${d.projects.length ? ` — ${d.projects.map((x) => `${x.project} ${hoursLabel(x.hours)}h`).join(', ')}` : ''}` : 'No hours'}`;
+                        return mode === 'attendance' ? (
+                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to edit)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'attendance', person: p, day: d }) : undefined} className={`relative border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] font-semibold ${TONE[d.kind] || ''} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`} style={overlay ? (d.checkin_state === 'missing' ? NOT_CHECKED_STYLE : d.checkin?.late_minutes > 0 ? { boxShadow: 'inset 0 -2px 0 #ef4444' } : undefined) : undefined} data-editable={canEdit && d.date <= data.today ? 'true' : undefined} data-checkin={overlay ? d.checkin_state || undefined : undefined}>{d.code}{d.away && <span aria-hidden="true" data-away="true" className="absolute left-0.5 top-0.5 h-1.5 w-1.5 rounded-sm bg-amber-500" />}{overlay && d.checkin && <span aria-hidden="true" className={`absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ${DOT[d.checkin.result] || 'bg-tertiary-400'}`} />}</td>
+                        ) : (
+                          <td key={d.date} title={canEdit && d.date <= data.today ? `${tip} (click to add hours)` : tip} onClick={canEdit && d.date <= data.today ? () => setEditing({ kind: 'hours', person: p, day: d }) : undefined} className={`border-t border-tertiary-100 px-0.5 py-1 text-center text-[11px] tabular-nums ${d.hours ? 'bg-primary-50 font-semibold text-primary-800' : d.kind === 'weekly_off' || d.kind === 'holiday' ? 'bg-tertiary-50 text-tertiary-300' : 'text-tertiary-300'} ${canEdit && d.date <= data.today ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-primary-300' : ''}`}>{hoursLabel(d.hours)}</td>
+                        );
+                      })}
+                      {mode === 'attendance' ? (
+                        <>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.totals.office}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.totals.wfh}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-800" title="Office + work from home + half days">{p.totals.worked}</td>
+                          {leaveCodes.map((c) => <td key={c} className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-blue-700">{p.totals.leave_by_code?.[c] || 0}</td>)}
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-violet-700">{p.totals.holidays}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-tertiary-500">{p.totals.weekly_offs}</td>
+                          <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-red-700">{p.totals.absent}</td>
+                          {overlay && (
+                            <>
+                              <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums text-green-700">{p.checkin_totals ? p.checkin_totals.checked_in : ''}</td>
+                              <td className={`border-t border-tertiary-100 text-center font-semibold tabular-nums ${p.checkin_totals?.missing ? 'text-red-700' : 'text-tertiary-400'}`}>{p.checkin_totals ? p.checkin_totals.missing : ''}</td>
+                            </>
+                          )}
+                        </>
+                      ) : <td className="border-t border-tertiary-100 text-center font-semibold tabular-nums">{hoursLabel(p.totals.hours) || 0}</td>}
+                    </tr>
+                    {expanded && (
+                      <tr>
+                        <td colSpan={cols + 2} className="sticky left-0 border-t border-tertiary-100 bg-tertiary-50/60 px-3 py-2 text-xs text-tertiary-700">
+                          {projectTotals.get(p.org_membership_id)?.length
+                            ? <span className="flex flex-wrap gap-x-4 gap-y-1">{projectTotals.get(p.org_membership_id).map(([project, h]) => <span key={project}><b>{project}</b> {hoursLabel(h)} h</span>)}</span>
+                            : 'No hours logged this month.'}
+                        </td>
+                      </tr>
+                    )}
+                  </FragmentRow>
+                );
+              })}
+            </tbody>
+            )}
+          </table>
+        </div>
+      )}
+      <DayEditor editing={editing?.kind === 'attendance' ? editing : null} onClose={() => setEditing(null)} onSaved={(msg) => { pushSuccess(msg); setEditing(null); setReloadKey((k) => k + 1); }} />
+      <AddTimesheetEntryDrawer
+        open={editing?.kind === 'hours'}
+        initial={editing?.kind === 'hours' ? { org_membership_id: editing.person.org_membership_id, date: editing.day.date } : null}
+        onClose={() => setEditing(null)}
+        onSaved={() => setReloadKey((k) => k + 1)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Admin: edit one person's one day as two separate things.
+ *   1. Attendance - did they work (present / half day), were they absent, on leave (and which leave) or on a holiday.
+ *   2. Where they worked - office or work from home (only a day they worked).
+ * A leave type is a real approved leave (balance and unpaid overflow included). Everything needs a reason and is audit-logged;
+ * a locked month is flagged for review instead of being rewritten.
+ */
+const ATTENDANCE_OPTIONS = [
+  ['present', 'Present (worked the full day)'],
+  ['half_day', 'Half day (worked half)'],
+  ['leave', 'Leave (did not work)'],
+  ['absent', 'Absent'],
+  ['holiday', 'Holiday'],
+];
+const ATTENDANCE_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent', holiday: 'Holiday' };
+
+// What the editor starts from, read off the register day.
+function initialDay(day, leaveTypes) {
+  const typeId = (name) => leaveTypes.find((t) => t.name === name)?.id || '';
+  const recorded = day.recorded_status === 'wfh' ? 'present' : day.recorded_status;
+  let status = 'present';
+  if (day.leave_name) status = 'leave';
+  else if (day.half_leave_name && recorded === 'half_day') status = 'half_day';
+  else if (recorded && ATTENDANCE_LABEL[recorded]) status = recorded;
+  else if (day.kind === 'absent') status = 'absent';
+  else if (day.kind === 'holiday') status = 'holiday';
+  return { status, leaveTypeId: status === 'leave' ? typeId(day.leave_name) : typeId(day.half_leave_name), place: day.place === 'home' ? 'home' : 'office' };
+}
+
+function DayEditor({ editing, onClose, onSaved }) {
+  const { pushError } = useAlerts();
+  const [form, setForm] = useState({ status: 'present', leaveTypeId: '', place: 'office', reason: '' });
+  const [leaveTypes, setLeaveTypes] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const day = editing?.day;
+  const person = editing?.person;
+
+  useEffect(() => {
+    if (!editing) return undefined;
+    let current = true;
+    apiClient.get('/leave/types').then((r) => { if (current) setLeaveTypes((r.data.data || []).filter((t) => t.is_applicable !== false)); }).catch(() => { if (current) setLeaveTypes([]); });
+    return () => { current = false; };
+  }, [editing]);
+  useEffect(() => {
+    if (editing) setForm({ ...initialDay(day, leaveTypes), reason: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, leaveTypes]);
+
+  const worked = form.status === 'present' || form.status === 'half_day';
+  const needsType = form.status === 'leave';
+  const typeLabel = (t) => `${t.name}${t.paid ? '' : ' (unpaid)'}`;
+  const reasonOk = form.reason.trim().length >= 3;
+  const canSave = reasonOk && (!needsType || Boolean(form.leaveTypeId));
+
+  // The day has a full-day leave and is being set to something that is not leave: that leave is cancelled first.
+  const cancelsLeave = Boolean(day?.leave_name) && form.status !== 'leave';
+
+  async function save(event, confirmSpan = false) {
+    event?.preventDefault?.();
+    setBusy(true);
+    try {
+      await apiClient.post('/attendance/day', {
+        org_membership_id: person.org_membership_id,
+        date: day.date,
+        status: form.status,
+        ...(form.status === 'leave' ? { leave_type_id: form.leaveTypeId } : {}),
+        // Half day: the leave covering the other half (none = it simply stays unpaid).
+        ...(form.status === 'half_day' ? { leave_type_id: form.leaveTypeId || null } : {}),
+        ...(worked ? { work_place: form.place } : {}),
+        ...(cancelsLeave ? { cancel_leave: true } : {}),
+        ...(confirmSpan ? { confirm_span: true } : {}),
+        reason: form.reason.trim(),
+      });
+      const type = leaveTypes.find((t) => t.id === form.leaveTypeId);
+      onSaved(`${person.name}: ${day.date} set to ${ATTENDANCE_LABEL[form.status]}${form.status === 'leave' && type ? ` (${type.name})` : ''}${worked ? `, ${form.place === 'home' ? 'work from home' : 'office'}` : ''}`);
+    } catch (err) {
+      const span = err?.response?.data?.errors?.[0];
+      if (span?.code === 'leave_spans_days' && !confirmSpan) {
+        // A several-day leave: name every day it covers before withdrawing it whole.
+        if (window.confirm(`This leave covers ${span.from} to ${span.to}. Saving withdraws the whole leave and puts back the other days with the same leave type. Continue?`)) { setBusy(false); return save(null, true); }
+      } else pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved');
+    } finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!day.record_id || !reasonOk) return;
+    setBusy(true);
+    try {
+      await apiClient.delete(`/attendance/${day.record_id}`, { data: { reason: form.reason.trim() } });
+      onSaved(`${person.name}: the attendance record for ${day.date} was removed`);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not remove the record'), 'Not removed'); } finally { setBusy(false); }
+  }
+
+  return (
+    <Drawer
+      open={Boolean(editing)}
+      title={editing ? `${person.name} · ${day.date}` : 'Edit attendance'}
+      onClose={() => !busy && onClose()}
+      size="sm"
+      tone="edit"
+      footer={(
+        <>
+          {day?.record_id && <button type="button" className="btn-ghost mr-auto text-danger-600" disabled={busy || !reasonOk} onClick={remove} title={reasonOk ? 'Delete the recorded attendance for this day' : 'Give a reason first'}>Remove record</button>}
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" form="register-day-editor" className="btn-primary" disabled={busy || !canSave}>{busy ? 'Saving…' : 'Save'}</button>
+        </>
+      )}
+    >
+      {editing && (
+        <form id="register-day-editor" onSubmit={save} className="space-y-4">
+          <p className="text-sm text-tertiary-600">Now shown as <b>{day.code || 'blank'}</b>{day.label ? ` (${day.label})` : ''}{day.recorded_status ? ` · recorded as ${STATUS_LABEL[day.recorded_status] || day.recorded_status}` : ' · nothing recorded for this day'}.</p>
+          {cancelsLeave && <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">This day has approved {day.leave_name}. Saving cancels that leave (the balance is given back) and sets the day to {ATTENDANCE_LABEL[form.status]}.</p>}
+
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">1. Attendance</legend>
+            <label className="block text-xs font-medium text-tertiary-600">Did they work?
+              <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className={inputClass} aria-label="Attendance">
+                {ATTENDANCE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            {form.status === 'absent' && <p className="text-xs text-tertiary-500">Absent: a working day with no attendance and no leave. It is unpaid. If they were on leave, choose Leave and pick the type.</p>}
+            {(needsType || form.status === 'half_day') && (
+              <label className="block text-xs font-medium text-tertiary-600">{needsType ? 'Which leave?' : 'Leave for the other half (optional)'}
+                <select value={form.leaveTypeId} onChange={(e) => setForm((f) => ({ ...f, leaveTypeId: e.target.value }))} className={inputClass} aria-label="Leave type">
+                  <option value="">{needsType ? 'Choose the leave type' : 'No leave (the other half stays unpaid)'}</option>
+                  {leaveTypes.map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
+                </select>
+              </label>
+            )}
+          </fieldset>
+
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3" disabled={!worked}>
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">2. Where did they work?</legend>
+            <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Work mode">
+              {[['office', 'Office'], ['home', 'Work from home']].map(([value, label]) => (
+                <label key={value} className={`inline-flex items-center gap-1.5 ${worked ? '' : 'opacity-50'}`}>
+                  <input type="radio" name="work-place" value={value} checked={form.place === value} onChange={() => setForm((f) => ({ ...f, place: value }))} /> {label}
+                </label>
+              ))}
+            </div>
+            {!worked && <p className="text-xs text-tertiary-500">Only for a day they worked (present or half day).</p>}
+          </fieldset>
+
+          <label className="block text-xs font-medium text-tertiary-600">Reason (kept in the audit log)
+            <input value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Marked present after checking with the manager" className={inputClass} maxLength={500} />
+          </label>
+          <p className="text-xs text-tertiary-500">Replaces anything already recorded for that day. A day with approved leave can only be changed through Leave (pick the leave type above). If the month is locked, the change is flagged for review instead of altering locked salary.</p>
+        </form>
+      )}
+    </Drawer>
+  );
+}
+
+// A plain fragment wrapper so a person can render one or two table rows under one key.
+function FragmentRow({ children }) { return <>{children}</>; }

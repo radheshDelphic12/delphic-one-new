@@ -1,3 +1,4 @@
+import { trackInWallet } from '../payments/trackInWallet.js';
 import apiClient from '../apiClient.js';
 
 // Thin wrapper over the Gulati API (/api/v1/gulati). Every call returns the unwrapped `data` payload.
@@ -70,13 +71,28 @@ export const gulatiApi = {
   createSale: (id, body) => post(`/deals/${id}/sales`, body),
   updateSale: (id, lid, body) => patch(`/deals/${id}/sales/${lid}`, body),
   deleteSale: (id, lid, reason) => del(`/deals/${id}/sales/${lid}`, reason ? { reason } : {}),
-  payPurchase: (id, lid, body) => post(`/deals/${id}/purchases/${lid}/payments`, body),
-  paySale: (id, lid, body) => post(`/deals/${id}/sales/${lid}/payments`, body),
+  payPurchase: async (id, lid, body) => {
+    const r = await post(`/deals/${id}/purchases/${lid}/payments`, body);
+    await trackInWallet({ kind: 'deal_vendor_payment', reference_id: lid, amount: body.amount, title: 'Vendor payment (deal)', category: 'Deal vendor payment' });
+    return r;
+  },
+  paySale: async (id, lid, body) => {
+    const r = await post(`/deals/${id}/sales/${lid}/payments`, body);
+    await trackInWallet({ kind: 'deal_client_payment', reference_id: lid, amount: body.amount, title: 'Payment received (deal)', category: 'Deal payment received' });
+    return r;
+  },
   updatePayment: (id, pid, body) => patch(`/deals/${id}/payments/${pid}`, body),
   deletePayment: (id, pid, reason) => del(`/deals/${id}/payments/${pid}`, reason ? { reason } : {}),
 
   ledger: (params) => apiClient.get('/gulati/ledger', { params }).then((res) => res.data),
-  createEntry: (body) => post('/ledger', body),
+  createEntry: async (body) => {
+    const r = await post('/ledger', body);
+    // a hand-typed ledger entry is money in or out: ask whether to track it in a wallet
+    const money = Number(body?.amount || 0) + Number(body?.tax || 0);
+    const incoming = ['revenue', 'income'].includes(body?.type);
+    await trackInWallet({ kind: incoming ? 'ledger_income' : 'ledger_expense', reference_id: r?.id, amount: money, title: incoming ? 'Income received' : 'Expense paid', party: body?.description, category: body?.category });
+    return r;
+  },
   updateEntry: (id, body) => patch(`/ledger/${id}`, body),
   deleteEntry: (id, reason) => del(`/ledger/${id}`, reason ? { reason } : {}),
 

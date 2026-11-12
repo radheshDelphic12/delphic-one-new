@@ -4,6 +4,11 @@ const { num, round2 } = require('../../lib/vertical');
 const financialsService = require('../financials/financials.service');
 const gulatiFinance = require('../gulati/finance.service');
 const acconcyFinance = require('../acconcy/finance.service');
+const foundationFinance = require('../foundation/finance.service');
+const zklyreraFinance = require('../zklyrera/finance.service');
+const valterraFinance = require('../valterra/finance.service');
+const novarexFinance = require('../novarex/finance.service');
+const groupInsights = require('./groupInsights.service');
 const zephyrMoney = require('../zephyr/money.service');
 const records = require('../calculations/records.service');
 
@@ -15,7 +20,8 @@ const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const monthSchema = z.string().regex(MONTH);
 const idx = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5)) - 1;
 const at = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+// The current month in the app's own timezone (not UTC), so it turns over at local midnight like the client's does.
+const currentMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata', year: 'numeric', month: '2-digit' }).format(new Date());
 
 // Alert thresholds are configurable per request; these are only the defaults.
 const DEFAULT_THRESHOLDS = { revenue_drop_pct: 20, profit_drop_pct: 20, expense_rise_pct: 30, valuation_drop_pct: 0 };
@@ -36,10 +42,20 @@ const overviewQuerySchema = z
   .refine((q) => !q.from || !q.to || idx(q.to) >= idx(q.from), { message: 'The end month cannot be before the start month' })
   .refine((q) => !q.from || !q.to || idx(q.to) - idx(q.from) < 60, { message: 'Pick at most 60 months' });
 
-const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
+// The one place the group valuation factors live: valuation = profit x 240 + asset value x 3.
+const FORMULA = { profit: 240, asset_value: 3 };
+
+// A value is set for a DATE (as_of, any day up to today) or, as before, for a whole month. A dated value also becomes the month's value (the latest dated
+// value of the month), which is what the valuation reads.
+const assetBodySchema = z
+  .object({ as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(), month: monthSchema.optional(), asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() })
+  .refine((b) => b.as_of || b.month, { message: 'Pick the date the value is as at', path: ['as_of'] })
+  .transform((b) => ({ ...b, month: b.as_of ? b.as_of.slice(0, 7) : b.month }));
 
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
-const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : 'delphic');
+const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : org.enabled_modules?.includes('foundation') ? 'foundation' : org.enabled_modules?.includes('zklyrera') ? 'zklyrera' : org.enabled_modules?.includes('valterra') ? 'valterra' : org.enabled_modules?.includes('novarex') ? 'novarex' : 'delphic');
+// Companies the Delphic valuation formula (profit x 240 + assets x 3) does not apply to.
+const noValuation = (org) => kindOf(org) === 'foundation';
 
 // Indian financial year (April - March), the convention the Zephyr presets already use.
 function bucketOf(month, granularity) {
@@ -63,7 +79,7 @@ async function groupOrgs(orgGroupIds, orgIds) {
 }
 
 // One company's months in a common shape, whichever finance service owns its books.
-async function companyMonths(org, from, to, state) {
+async function computeCompanyMonths(org, from, to, state) {
   const kind = kindOf(org);
   if (kind === 'gulati' || kind === 'zephyr') {
     const svc = kind === 'gulati' ? gulatiFinance : zephyrMoney;
@@ -73,6 +89,27 @@ async function companyMonths(org, from, to, state) {
       month: m.month, revenue: m.revenue, profit: m.profit, expenses: round2(m.revenue - m.profit),
       asset_value: m.asset_value, asset_value_carried: m.asset_value_carried, profit_x: m.profit_x, asset_value_x: m.asset_value_x,
       valuation: m.valuation, closed: Boolean(m.closed),
+      ...(kind === 'zephyr' ? { property_value: m.property_value, property_count: m.property_count, recorded_asset_value: m.recorded_asset_value } : {}),
+    }));
+  }
+  if (kind === 'zklyrera' || kind === 'valterra' || kind === 'novarex') {
+    // Income = investment earnings + other income (Valterra: mining revenue), expenses = expenses + salaries, profit = net result; assets = principal
+    // still invested. Capital placed and principal recovered are NOT revenue or profit. Valuation = profit x 240 + principal still invested x 3.
+    const t = await ({ valterra: valterraFinance, novarex: novarexFinance }[kind] || zklyreraFinance).valuationTrend(org.id, { from, to, state });
+    if (t.error) return [];
+    return t.months.map((m) => ({
+      month: m.month, revenue: m.income, profit: m.profit, expenses: m.expenses,
+      asset_value: m.asset_value, asset_value_carried: false, profit_x: m.profit_x, asset_value_x: m.asset_value_x, valuation: m.valuation, closed: Boolean(m.closed),
+    }));
+  }
+  if (kind === 'foundation') {
+    // Income = funding received, expenses = paid spending, surplus = the difference; assets = the fund balance.
+    // Allocated budgets, commitments, pledges and internal transfers are not income or expense. Valuation does not apply.
+    const t = await foundationFinance.valuationTrend(org.id, { from, to, state });
+    if (t.error) return [];
+    return t.months.map((m) => ({
+      month: m.month, revenue: m.income, profit: m.surplus, expenses: m.expenses,
+      asset_value: m.asset_value, asset_value_carried: false, profit_x: null, asset_value_x: null, valuation: null, closed: Boolean(m.closed),
     }));
   }
   if (kind === 'acconcy') {
@@ -91,6 +128,164 @@ async function companyMonths(org, from, to, state) {
     asset_value: m.asset_value, asset_value_carried: m.asset_value_carried, profit_x: m.delphic_profit_x, asset_value_x: m.asset_value_x,
     valuation: m.valuation, closed: null,
   }));
+}
+
+// The Delphic engine prices every project for every month, which is ~300 queries a month: cheap on a local database,
+// far too slow over a remote one. So each company-month is cached on its own (key: company, month, figures view) and
+// served stale-while-revalidate - always instant once warm, refreshed in the background after FRESH_MS. Any window
+// (this quarter, a custom range, the previous period) is assembled from cached months, so changing a filter only
+// computes months that have never been seen. Concurrent callers share one computation. Off in tests so assertions
+// always see fresh data.
+const FRESH_MS = 120_000;
+const MAX_ENTRIES = 2000;
+const monthsCache = new Map(); // key -> { value, at, promise }
+
+function cachedMonth(org, month, state) {
+  const key = `${org.id}|${month}|${state || ''}`;
+  const entry = monthsCache.get(key);
+  const refresh = () => {
+    const promise = computeCompanyMonths(org, month, month, state).then(
+      (rows) => {
+        const value = rows[0] || null;
+        monthsCache.set(key, { value, at: Date.now(), promise: null });
+        if (monthsCache.size > MAX_ENTRIES) monthsCache.delete(monthsCache.keys().next().value);
+        return value;
+      },
+      (err) => {
+        const cur = monthsCache.get(key);
+        if (cur && cur.value !== undefined && cur.at) cur.promise = null;
+        else monthsCache.delete(key);
+        throw err;
+      },
+    );
+    const cur = monthsCache.get(key);
+    if (cur) cur.promise = promise;
+    else monthsCache.set(key, { value: undefined, at: 0, promise });
+    return promise;
+  };
+  if (entry && entry.at && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.value);
+  if (entry?.promise) return entry.at ? Promise.resolve(entry.value) : entry.promise;
+  if (entry?.at) {
+    refresh().catch(() => {});
+    return Promise.resolve(entry.value);
+  }
+  return refresh();
+}
+
+async function companyMonths(org, from, to, state) {
+  if (process.env.NODE_ENV === 'test') return computeCompanyMonths(org, from, to, state);
+  const keys = [];
+  for (let i = idx(from); i <= idx(to); i += 1) keys.push(at(i));
+  const rows = await Promise.all(keys.map((m) => cachedMonth(org, m, state)));
+  return rows.filter(Boolean);
+}
+
+function invalidateCompany(orgId) {
+  for (const key of [...monthsCache.keys()]) if (key.startsWith(`${orgId}|`)) monthsCache.delete(key);
+}
+
+/** Computes the default Group Dashboard window once in the background (called after the server starts). */
+async function warmUp() {
+  const groups = await prisma.orgGroupMembership.findMany({ distinct: ['org_group_id'], select: { org_group_id: true } });
+  if (!groups.length) return;
+  const ids = groups.map((g) => g.org_group_id);
+  await overview(ids, {}); // last 12 months + the 12 before (previous-period change)
+  const now = currentMonth();
+  const fyStart = Number(now.slice(5)) >= 4 ? `${now.slice(0, 4)}-04` : `${Number(now.slice(0, 4)) - 1}-04`;
+  await overview(ids, { from: fyStart, to: now }); // financial year to date
+}
+
+const projectionQuerySchema = z
+  .object({
+    from: monthSchema.optional(),
+    to: monthSchema.optional(),
+    horizon: z.coerce.number().int().min(1).max(12).default(6),
+    state: z.enum(['locked', 'unlocked', 'all']).default('all'),
+    org_ids: z.string().optional(),
+  })
+  .refine((q) => !q.from || !q.to || idx(q.to) >= idx(q.from), { message: 'The end month cannot be before the start month' })
+  .refine((q) => !q.from || !q.to || idx(q.to) - idx(q.from) < 36, { message: 'Pick at most 36 months' });
+
+/**
+ * Projection + valuation for every company, from the SAME monthly books the Group Finance tab uses (companyMonths).
+ * History = start..end month (what is shown as actuals). The projection runs for `horizon` months from the month after
+ * the end month - but never later than the CURRENT month, so a history that ends this month still projects this month
+ * (its actuals are only to date) and the months after it. Its basis is a straight-line (least squares) fit of the last
+ * six COMPLETE months before the projection starts that have figures, separately for revenue and costs, whatever the
+ * history window is (a one-month window projects as well as a year). Projected valuation = projected profit x 240 +
+ * the latest asset value x 3.
+ */
+async function projection(orgGroupIds, query = {}) {
+  const q = projectionQuerySchema.parse(query);
+  const now = currentMonth();
+  const to = q.to || now;
+  const from = q.from || at(idx(to) - 11);
+  const orgs = await groupOrgs(orgGroupIds, q.org_ids);
+  const startIdx = Math.min(idx(to) + 1, idx(now));
+  const futureKeys = Array.from({ length: q.horizon }, (_, k) => at(startIdx + k));
+  const basisFrom = at(startIdx - 6);
+  const basisTo = at(startIdx - 1);
+
+  const companies = await Promise.all(orgs.map(async (org) => {
+    const orgOut = { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org), enabled_modules: org.enabled_modules, coming_soon: isSoon(org) };
+    if (isSoon(org)) return { org: orgOut, coming_soon: true, history: [], projected: [], totals: null, confidence: 'low' };
+    const [months, basisMonths] = await Promise.all([companyMonths(org, from, to, q.state), companyMonths(org, basisFrom, basisTo, q.state)]);
+    const history = months.map((m) => ({ month: m.month, revenue: m.revenue, expenses: m.expenses, profit: m.profit, asset_value: m.asset_value, valuation: m.valuation, closed: m.closed }));
+    // Basis: the last six COMPLETE months before the projection starts that carry figures (the month in progress is not a full month).
+    const basis = basisMonths.filter((m) => m.month < now && (m.revenue || m.expenses || m.profit));
+    const revenue = financialsService.linearForecast(basis.map((m) => m.revenue), q.horizon);
+    const cost = financialsService.linearForecast(basis.map((m) => m.expenses), q.horizon);
+    const asset = history.length ? history[history.length - 1].asset_value : 0;
+    const projected = futureKeys.map((month, i) => {
+      const profit = round2(revenue[i] - cost[i]);
+      return { month, revenue: revenue[i], expenses: cost[i], profit, asset_value: asset, valuation: noValuation(org) ? null : round2(profit * FORMULA.profit + asset * FORMULA.asset_value) };
+    });
+    const sum = (rows, k) => round2(rows.reduce((a, r) => a + r[k], 0));
+    const last = history[history.length - 1] || null;
+    return {
+      org: orgOut,
+      coming_soon: false,
+      history,
+      projected,
+      confidence: basis.length >= 6 ? 'high' : basis.length >= 3 ? 'medium' : 'low',
+      totals: {
+        history_revenue: sum(history, 'revenue'), history_profit: sum(history, 'profit'),
+        projected_revenue: sum(projected, 'revenue'), projected_profit: sum(projected, 'profit'),
+        current_valuation: last ? last.valuation : null,
+        projected_valuation: projected.length ? projected[projected.length - 1].valuation : null,
+      },
+    };
+  }));
+
+  const live = companies.filter((c) => !c.coming_soon);
+  const foundationData = await Promise.all(orgs.map((org) => (kindOf(org) === 'foundation' && !isSoon(org) ? foundationFinance.groupSummary(org.id, {}) : null)));
+  const zklyreraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'zklyrera' && !isSoon(org) ? zklyreraFinance.groupSummary(org.id, {}) : null)));
+  const valterraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'valterra' && !isSoon(org) ? valterraFinance.groupSummary(org.id, {}) : null)));
+  const novarexData = await Promise.all(orgs.map((org) => (kindOf(org) === 'novarex' && !isSoon(org) ? novarexFinance.groupSummary(org.id, {}) : null)));
+  const currencies = [...new Set(live.map((c) => c.org.currency))];
+  const byMonth = (pick) => {
+    const keys = [...new Set(live.flatMap((c) => pick(c).map((r) => r.month)))].sort();
+    return keys.map((month) => {
+      const rows = live.flatMap((c) => pick(c).filter((r) => r.month === month));
+      return { month, revenue: round2(rows.reduce((a, r) => a + r.revenue, 0)), profit: round2(rows.reduce((a, r) => a + r.profit, 0)), valuation: round2(rows.reduce((a, r) => a + r.valuation, 0)) };
+    });
+  };
+  const gh = byMonth((c) => c.history);
+  const gp = byMonth((c) => c.projected);
+  const tot = (k) => round2(live.reduce((a, c) => a + (c.totals[k] || 0), 0));
+  return {
+    from, to, horizon: q.horizon, state: q.state, formula: FORMULA, projected_months: futureKeys, basis_from: basisFrom, basis_to: basisTo,
+    currency: currencies.length === 1 ? currencies[0] : null, mixed_currency: currencies.length > 1,
+    companies,
+    foundation: foundationGroup(live, foundationData, orgs),
+    zklyrera: zklyreraGroup(live, zklyreraData, orgs),
+    valterra: valterraGroup(live, valterraData, orgs),
+    novarex: novarexGroup(live, novarexData, orgs),
+    group: {
+      history: gh, projected: gp,
+      totals: { history_revenue: tot('history_revenue'), history_profit: tot('history_profit'), projected_revenue: tot('projected_revenue'), projected_profit: tot('projected_profit'), current_valuation: tot('current_valuation'), projected_valuation: tot('projected_valuation') },
+    },
+  };
 }
 
 function bucketSeries(months, granularity) {
@@ -132,11 +327,15 @@ function alertsFor(company, thresholds, nowMonth) {
     if (val !== null && val < 0 && Math.abs(val) >= thresholds.valuation_drop_pct) push('valuation_drop', 'warning', `Valuation fell ${Math.abs(val)}% (${prev.label} to ${cur.label})`);
   }
   const loss = s.filter((r) => r.profit < 0);
-  if (loss.length) push('loss_period', 'critical', `Loss in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
+  if (loss.length) {
+    if (['zklyrera', 'valterra', 'novarex'].includes(company.org.kind)) push('loss_period', 'warning', `Expenses and salaries passed income in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
+    else if (company.org.kind === 'foundation') push('loss_period', 'warning', `Spent more than it received in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
+    else push('loss_period', 'critical', `Loss in ${loss.length} period(s), latest ${loss[loss.length - 1].label}`);
+  }
   // Months in the past that carry figures but were never locked (only companies that lock months report this).
   const unlocked = company.months.filter((m) => m.closed === false && m.month < nowMonth && (m.revenue || m.profit));
   if (unlocked.length) push('pending_lock', 'info', `${unlocked.length} past month(s) with figures are not locked yet`);
-  if (!company.months.some((m) => m.asset_value > 0)) push('no_asset_value', 'info', 'No asset value recorded - valuation uses profit only');
+  if (!['foundation', 'zklyrera', 'valterra', 'novarex'].includes(company.org.kind) && !company.months.some((m) => m.asset_value > 0)) push('no_asset_value', 'info', 'No asset value recorded - valuation uses profit only');
   return out;
 }
 
@@ -158,8 +357,24 @@ async function overview(orgGroupIds, query = {}) {
     headBy.set(h.org_id, e);
   }
 
+  // Every live company's two windows are fetched at the same time (each is cached, see companyMonths).
+  const span = idx(to) - idx(from) + 1;
+  const monthData = await Promise.all(orgs.map((org) => (isSoon(org) ? null : Promise.all([
+    companyMonths(org, from, to, q.state),
+    companyMonths(org, at(idx(from) - span), at(idx(from) - 1), q.state),
+  ]))));
+
+  // Foundation campaigns (budgets, projections, items needing attention) sit beside the books, never inside them.
+  const foundationData = await Promise.all(orgs.map((org) => (kindOf(org) === 'foundation' && !isSoon(org) ? foundationFinance.groupSummary(org.id, {}) : null)));
+  // Zklyrera Spirits' capital, returns and projections sit beside its books too.
+  const zklyreraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'zklyrera' && !isSoon(org) ? zklyreraFinance.groupSummary(org.id, {}) : null)));
+  const valterraData = await Promise.all(orgs.map((org) => (kindOf(org) === 'valterra' && !isSoon(org) ? valterraFinance.groupSummary(org.id, {}) : null)));
+  const novarexData = await Promise.all(orgs.map((org) => (kindOf(org) === 'novarex' && !isSoon(org) ? novarexFinance.groupSummary(org.id, {}) : null)));
+  // Delphic Global, Gulati Industries, Zephyr and Acconcy get the same kind of company insight (their own services' numbers).
+  const insightData = await Promise.all(orgs.map((org) => (isSoon(org) ? null : groupInsights.build(org, kindOf(org)))));
+
   const companies = [];
-  for (const org of orgs) {
+  for (const [i, org] of orgs.entries()) {
     if (isSoon(org)) {
       // Not built yet: listed so it is visible, but it has no figures and is left out of every total.
       companies.push({
@@ -169,20 +384,23 @@ async function overview(orgGroupIds, query = {}) {
       });
       continue;
     }
-    // The period just before the selected one (same length), for the change shown on the group cards.
-    const span = idx(to) - idx(from) + 1;
-    const [months, prevMonths] = await Promise.all([
-      companyMonths(org, from, to, q.state),
-      companyMonths(org, at(idx(from) - span), at(idx(from) - 1), q.state),
-    ]);
+    // monthData holds the selected period and the one just before it (same length), for the change on the group cards.
+    const [months, prevMonths] = monthData[i];
     const series = bucketSeries(months, q.granularity);
     const last = series[series.length - 1] || null;
     const prior = series.length > 1 ? series[series.length - 2] : null;
+    // With one bucket in view, compare with the last month of the period just before it.
+    const priorValuation = prior ? prior.valuation : (prevMonths.length ? prevMonths[prevMonths.length - 1].valuation : null);
     const totals = series.reduce((a, r) => ({ revenue: a.revenue + r.revenue, expenses: a.expenses + r.expenses, profit: a.profit + r.profit }), { revenue: 0, expenses: 0, profit: 0 });
     const hasBooks = months.some((m) => m.revenue || m.profit || m.asset_value);
     companies.push({
       org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org) },
-      has_data: hasBooks,
+      has_data: hasBooks || Boolean(foundationData[i]?.campaigns.total) || Boolean(zklyreraData[i]?.investments.total) || Boolean(valterraData[i]?.investments.total) || Boolean(valterraData[i]?.sites.total) || Boolean(novarexData[i]?.investments.total) || Boolean(novarexData[i]?.outlets.total),
+      ...(foundationData[i] ? { foundation: foundationData[i] } : {}),
+      ...(zklyreraData[i] ? { zklyrera: zklyreraData[i] } : {}),
+      ...(valterraData[i] ? { valterra: valterraData[i] } : {}),
+      ...(novarexData[i] ? { novarex: novarexData[i] } : {}),
+      ...(insightData[i] ? { insight: insightData[i] } : {}),
       previous_totals: prevMonths.length
         ? { revenue: round2(prevMonths.reduce((a, m) => a + m.revenue, 0)), expenses: round2(prevMonths.reduce((a, m) => a + m.expenses, 0)), profit: round2(prevMonths.reduce((a, m) => a + m.profit, 0)), assets: prevMonths[prevMonths.length - 1].asset_value, valuation: prevMonths[prevMonths.length - 1].valuation }
         : null,
@@ -190,12 +408,12 @@ async function overview(orgGroupIds, query = {}) {
       series,
       totals: { revenue: round2(totals.revenue), expenses: round2(totals.expenses), profit: round2(totals.profit), margin_pct: totals.revenue ? round2((totals.profit / totals.revenue) * 100) : null },
       assets: last ? last.asset_value : 0,
-      valuation: last
+      valuation: noValuation(org) ? null : last
         ? {
             current: last.valuation,
-            previous: prior ? prior.valuation : null,
-            change: prior ? round2(last.valuation - prior.valuation) : null,
-            growth_pct: prior ? pct(last.valuation, prior.valuation) : null,
+            previous: priorValuation,
+            change: priorValuation != null ? round2(last.valuation - priorValuation) : null,
+            growth_pct: pct(last.valuation, priorValuation),
             as_of: last.label,
             profit_component: last.profit_x,
             asset_component: last.asset_value_x,
@@ -257,7 +475,7 @@ async function overview(orgGroupIds, query = {}) {
   return {
     filters: { from, to, state: q.state, granularity: q.granularity, org_ids: q.org_ids ? q.org_ids.split(',') : null },
     thresholds,
-    formula: { profit: 240, asset_value: 3 },
+    formula: FORMULA,
     notes: {
       inter_company: 'Group figures add the companies together. Intra-group charges are not eliminated.',
       valuation: 'Group valuation is the plain sum of each company valuation; each company is also shown on its own.',
@@ -274,6 +492,123 @@ async function overview(orgGroupIds, query = {}) {
       growth: rank((c) => c.valuation?.growth_pct ?? -Infinity).map((r) => ({ ...r, value: Number.isFinite(r.value) ? r.value : null })),
     },
     alerts: live.flatMap((c) => alertsFor(c, thresholds, now)),
+    foundation: foundationGroup(live, foundationData, orgs),
+    zklyrera: zklyreraGroup(live, zklyreraData, orgs),
+    valterra: valterraGroup(live, valterraData, orgs),
+    novarex: novarexGroup(live, novarexData, orgs),
+  };
+}
+
+/** All Zklyrera-type companies of the group together (normally one): capital placed, returns, position, projections, what needs attention. */
+function zklyreraGroup(live, zkData, orgs) {
+  const parts = orgs.map((org, i) => (zkData[i] ? { org, data: zkData[i] } : null)).filter((x) => x && live.some((c) => c.org.id === x.org.id));
+  if (!parts.length) return null;
+  const add = (pick) => round2(parts.reduce((a, x) => a + (pick(x.data) || 0), 0));
+  const monthly = new Map();
+  for (const x of parts) {
+    for (const m of x.data.projected.monthly) {
+      const r = monthly.get(m.month) || { month: m.month, projected_income: 0, projected_expenses: 0, projected_net: 0, projected_investment: 0, projected_principal: 0 };
+      for (const k of Object.keys(r)) if (k !== 'month') r[k] = round2(r[k] + m[k]);
+      monthly.set(m.month, r);
+    }
+  }
+  return {
+    companies: parts.map((x) => ({ org_id: x.org.id, org_name: x.org.name })),
+    investments: Object.fromEntries(Object.keys(parts[0].data.investments).map((k) => [k, parts.reduce((a, x) => a + x.data.investments[k], 0)])),
+    money: Object.fromEntries(Object.keys(parts[0].data.money).map((k) => [k, add((d) => d.money[k])])),
+    period: Object.fromEntries(Object.keys(parts[0].data.period).filter((k) => !['from', 'to'].includes(k)).map((k) => [k, add((d) => d.period[k])])),
+    projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)), total_income: add((d) => d.projected.total_income), total_expenses: add((d) => d.projected.total_expenses), total_net: add((d) => d.projected.total_net) },
+    attention: { overdue_investments: parts.flatMap((x) => x.data.attention.overdue_investments.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))) },
+    top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
+  };
+}
+
+/** All Valterra-type (mining) companies of the group together (normally one): capital, returns, position, projections, and the mining sites. */
+function valterraGroup(live, vtData, orgs) {
+  const parts = orgs.map((org, i) => (vtData[i] ? { org, data: vtData[i] } : null)).filter((x) => x && live.some((c) => c.org.id === x.org.id));
+  if (!parts.length) return null;
+  const add = (pick) => round2(parts.reduce((a, x) => a + (pick(x.data) || 0), 0));
+  const monthly = new Map();
+  for (const x of parts) {
+    for (const m of x.data.projected.monthly) {
+      const r = monthly.get(m.month) || { month: m.month, projected_income: 0, projected_expenses: 0, projected_net: 0, projected_investment: 0, projected_principal: 0 };
+      for (const k of Object.keys(r)) if (k !== 'month') r[k] = round2(r[k] + m[k]);
+      monthly.set(m.month, r);
+    }
+  }
+  return {
+    companies: parts.map((x) => ({ org_id: x.org.id, org_name: x.org.name })),
+    investments: Object.fromEntries(Object.keys(parts[0].data.investments).map((k) => [k, parts.reduce((a, x) => a + x.data.investments[k], 0)])),
+    money: Object.fromEntries(Object.keys(parts[0].data.money).map((k) => [k, add((d) => d.money[k])])),
+    period: Object.fromEntries(Object.keys(parts[0].data.period).filter((k) => !['from', 'to'].includes(k)).map((k) => [k, add((d) => d.period[k])])),
+    projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)), total_income: add((d) => d.projected.total_income), total_expenses: add((d) => d.projected.total_expenses), total_net: add((d) => d.projected.total_net) },
+    attention: { overdue_investments: parts.flatMap((x) => x.data.attention.overdue_investments.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))) },
+    top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
+    sites: {
+      total: parts.reduce((a, x) => a + x.data.sites.total, 0),
+      active: parts.reduce((a, x) => a + x.data.sites.active, 0),
+      rows: parts.flatMap((x) => x.data.sites.rows.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))).sort((a, b) => b.invested_total - a.invested_total).slice(0, 10),
+      company_level_net: add((d) => d.sites.company_level?.net_result),
+    },
+  };
+}
+
+/** All Novarex-type (pharma outlets) companies of the group together (normally one): capital, returns, position, projections, and the outlets. */
+function novarexGroup(live, nxData, orgs) {
+  const parts = orgs.map((org, i) => (nxData[i] ? { org, data: nxData[i] } : null)).filter((x) => x && live.some((c) => c.org.id === x.org.id));
+  if (!parts.length) return null;
+  const add = (pick) => round2(parts.reduce((a, x) => a + (pick(x.data) || 0), 0));
+  const monthly = new Map();
+  for (const x of parts) {
+    for (const m of x.data.projected.monthly) {
+      const r = monthly.get(m.month) || { month: m.month, projected_income: 0, projected_expenses: 0, projected_net: 0, projected_investment: 0, projected_principal: 0 };
+      for (const k of Object.keys(r)) if (k !== 'month') r[k] = round2(r[k] + m[k]);
+      monthly.set(m.month, r);
+    }
+  }
+  const opsKeys = Object.keys(parts[0].data.operations.kpis).filter((k) => typeof parts[0].data.operations.kpis[k] === 'number' && k !== 'gross_margin_pct');
+  const opsSeries = new Map();
+  for (const x of parts) for (const r of x.data.operations.series) { const c = opsSeries.get(r.month) || { month: r.month, sales: 0, cogs: 0, gross_profit: 0, purchases: 0, collections: 0, logistics: 0, franchise_fees: 0 }; for (const k of Object.keys(c)) if (k !== 'month') c[k] = round2(c[k] + r[k]); opsSeries.set(r.month, c); }
+  const opsKpis = Object.fromEntries(opsKeys.map((k) => [k, add((d) => d.operations.kpis[k])]));
+  return {
+    operations: { kpis: { ...opsKpis, gross_margin_pct: opsKpis.sales_revenue > 0 ? Math.round((opsKpis.gross_profit / opsKpis.sales_revenue) * 1000) / 10 : null }, alerts: Object.fromEntries(Object.keys(parts[0].data.operations.alerts).map((k) => [k, parts.reduce((a, x) => a + x.data.operations.alerts[k], 0)])), delivery: { delivered: add((d) => d.operations.delivery.delivered), on_time: add((d) => d.operations.delivery.on_time), freight_variance: add((d) => d.operations.delivery.freight_variance) }, series: [...opsSeries.values()].sort((a, b) => a.month.localeCompare(b.month)), outlets: parts.flatMap((x) => x.data.operations.outlets.map((r) => ({ ...r, org_id: x.org.id }))).sort((a, b) => b.revenue - a.revenue).slice(0, 10) },
+    companies: parts.map((x) => ({ org_id: x.org.id, org_name: x.org.name })),
+    investments: Object.fromEntries(Object.keys(parts[0].data.investments).map((k) => [k, parts.reduce((a, x) => a + x.data.investments[k], 0)])),
+    money: Object.fromEntries(Object.keys(parts[0].data.money).map((k) => [k, add((d) => d.money[k])])),
+    period: Object.fromEntries(Object.keys(parts[0].data.period).filter((k) => !['from', 'to'].includes(k)).map((k) => [k, add((d) => d.period[k])])),
+    projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)), total_income: add((d) => d.projected.total_income), total_expenses: add((d) => d.projected.total_expenses), total_net: add((d) => d.projected.total_net) },
+    attention: { overdue_investments: parts.flatMap((x) => x.data.attention.overdue_investments.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))) },
+    top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
+    outlets: {
+      total: parts.reduce((a, x) => a + x.data.outlets.total, 0),
+      active: parts.reduce((a, x) => a + x.data.outlets.active, 0),
+      rows: parts.flatMap((x) => x.data.outlets.rows.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))).sort((a, b) => b.invested_total - a.invested_total).slice(0, 10),
+      company_level_net: add((d) => d.outlets.company_level?.net_result),
+    },
+  };
+}
+
+/** All foundations of the group together (normally one): campaign counts, money, projections and what needs attention. */
+function foundationGroup(live, foundationData, orgs) {
+  const parts = orgs.map((org, i) => (foundationData[i] ? { org, data: foundationData[i] } : null)).filter((x) => x && live.some((c) => c.org.id === x.org.id));
+  if (!parts.length) return null;
+  const add = (pick) => round2(parts.reduce((a, x) => a + (pick(x.data) || 0), 0));
+  const moneyKeys = Object.keys(parts[0].data.money);
+  const monthly = new Map();
+  for (const x of parts) for (const m of x.data.projected.monthly) { const r = monthly.get(m.month) || { month: m.month, projected: 0, planned_investment: 0 }; r.projected += m.projected; r.planned_investment += m.planned_investment; monthly.set(m.month, r); }
+  const quarterly = new Map();
+  for (const x of parts) for (const q of x.data.projected.quarterly) quarterly.set(q.label, round2((quarterly.get(q.label) || 0) + q.projected));
+  const attention = {};
+  for (const x of parts) for (const [k, rows] of Object.entries(x.data.attention)) attention[k] = [...(attention[k] || []), ...rows.map((r) => ({ ...r, org_id: x.org.id, org_name: x.org.name }))];
+  return {
+    companies: parts.map((x) => ({ org_id: x.org.id, org_name: x.org.name })),
+    campaigns: Object.fromEntries(Object.keys(parts[0].data.campaigns).map((k) => [k, parts.reduce((a, x) => a + x.data.campaigns[k], 0)])),
+    money: Object.fromEntries(moneyKeys.map((k) => [k, add((d) => d.money[k])])),
+    period: { actual_expenditure: add((d) => d.period.actual_expenditure), actual_investment: add((d) => d.period.actual_investment), funds_received: add((d) => d.period.funds_received) },
+    projected: { monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ ...r, projected: round2(r.projected), planned_investment: round2(r.planned_investment) })), quarterly: [...quarterly.entries()].map(([label, projected]) => ({ label, projected })) },
+    attention,
+    attention_count: parts.reduce((a, x) => a + x.data.attention_count, 0),
+    top: parts.flatMap((x) => x.data.top.map((t) => ({ ...t, org_id: x.org.id, org_name: x.org.name }))),
   };
 }
 
@@ -292,10 +627,36 @@ async function drilldown(org, query) {
   if (kind === 'zephyr') {
     const rows = await zephyrMoney.byProject(org.id, `${q.from}-01`, monthEndDay(q.to));
     sec('projects', 'Projects', ['Project', 'Revenue', 'Expense', 'Salaries', 'Profit'], rows.map((r) => [r.code ? `${r.code} ${r.name}` : r.name, r.revenue, r.expense, r.salaries, r.profit]));
+    const props = await zephyrMoney.propertyBreakdown(org.id, q.to);
+    sec('properties', `Properties counted in the asset value (as at ${q.to})`, ['Property', 'Status', 'Value', 'Basis'], props.map((r) => [`${r.code} ${r.name}`, r.status.replace(/_/g, ' '), r.value, r.basis === 'valuation' ? `Valuation${r.as_of ? ` (${r.as_of})` : ''}` : 'Cost (no valuation yet)']));
   } else if (kind === 'gulati') {
     const p = await gulatiFinance.pnl(org.id, { from: `${q.from}-01`, to: monthEndDay(q.to) });
     sec('deals', 'Deals', ['Deal', 'Type', 'Sales', 'Net profit'], p.by_deal.map((d) => [d.code ? `${d.code} ${d.name || ''}`.trim() : 'Company-level', d.trading_type || '', d.sales_revenue, d.net_profit]));
     sec('types', 'Trading types', ['Type', 'Sales', 'Net profit'], p.by_trading_type.map((t) => [t.label, t.sales_revenue, t.net_profit]));
+  } else if (kind === 'zklyrera') {
+    const t = await zklyreraFinance.valuationTrend(org.id, { from: q.from, to: q.to, state: q.state });
+    sec('months', 'Income, expenses and capital by month', ['Month', 'Income (earnings + other)', 'Expenses (incl. salaries)', 'Net result', 'Capital placed', 'Principal returned', 'Principal still invested'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.net_result, m.investment_added, m.principal_returned, m.outstanding_principal]));
+    const inv = await zklyreraFinance.report(org.id, { report: 'investments' });
+    sec('investments', 'Investments', inv.columns, inv.rows || []);
+  } else if (kind === 'valterra') {
+    const t = await valterraFinance.valuationTrend(org.id, { from: q.from, to: q.to, state: q.state });
+    sec('months', 'Income, expenses and capital by month', ['Month', 'Income (earnings + mining revenue)', 'Expenses (incl. salaries)', 'Net result', 'Capital placed', 'Principal returned', 'Principal still invested'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.net_result, m.investment_added, m.principal_returned, m.outstanding_principal]));
+    const st = await valterraFinance.report(org.id, { report: 'sites', from: `${q.from}-01`, to: monthEndDay(q.to) });
+    sec('sites', 'Mining sites (same period)', st.columns || [], st.rows || []);
+    const inv = await valterraFinance.report(org.id, { report: 'investments' });
+    sec('investments', 'Investments', inv.columns, inv.rows || []);
+  } else if (kind === 'novarex') {
+    const t = await novarexFinance.valuationTrend(org.id, { from: q.from, to: q.to, state: q.state });
+    sec('months', 'Income, expenses and capital by month', ['Month', 'Income (earnings + sales revenue)', 'Expenses (incl. salaries)', 'Net result', 'Capital placed', 'Principal returned', 'Principal still invested'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.net_result, m.investment_added, m.principal_returned, m.outstanding_principal]));
+    const st = await novarexFinance.report(org.id, { report: 'outlets', from: `${q.from}-01`, to: monthEndDay(q.to) });
+    sec('outlets', 'Outlets (same period)', st.columns || [], st.rows || []);
+    const inv = await novarexFinance.report(org.id, { report: 'investments' });
+    sec('investments', 'Investments', inv.columns, inv.rows || []);
+  } else if (kind === 'foundation') {
+    const items = await foundationFinance.base(org.id, {});
+    sec('campaigns', 'Campaigns', ['Campaign', 'Status', 'Allocated budget', 'Actual expenditure', 'Remaining budget', 'Funds received'], items.map((c) => [`${c.code} ${c.name}`, c.status, c.metrics.allocated_budget, c.metrics.actual_expenditure, c.metrics.remaining_allocated, c.metrics.funds_received]));
+    const t = await foundationFinance.valuationTrend(org.id, { from: q.from, to: q.to, state: q.state });
+    sec('months', 'Income and expenses by month', ['Month', 'Income (funds received)', 'Expenses (paid)', 'Surplus'], (t.months || []).map((m) => [m.month, m.income, m.expenses, m.surplus]));
   } else if (kind === 'acconcy') {
     const p = await acconcyFinance.pnl(org.id, { from: `${q.from}-01`, to: monthEndDay(q.to) });
     sec('deals', 'Deals', ['Deal', 'Service', 'Revenue', 'Net profit'], p.by_deal.map((d) => [d.code ? `${d.code} ${d.name || ''}`.trim() : 'Company-level', d.service_type || '', d.revenue, d.net_profit]));
@@ -323,12 +684,20 @@ async function drilldown(org, query) {
 async function listAssetValues(org) {
   const kind = kindOf(org);
   if (kind === 'gulati') return (await prisma.gxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
-  if (kind === 'acconcy') return [];
+  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera' || kind === 'valterra' || kind === 'novarex') return [];
   if (kind === 'zephyr') return (await prisma.zxAssetValue.findMany({ where: { org_id: org.id }, orderBy: { month: 'desc' } })).map(plainAsset);
   const rows = await prisma.financialAssetValue.findMany({ where: { org_id: org.id }, orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }] });
   return rows.map((r) => ({ id: r.id, month: `${r.period_year}-${String(r.period_month).padStart(2, '0')}`, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
 }
 const plainAsset = (r) => ({ id: r.id, month: r.month, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at });
+const isoDay = (d) => new Date(d).toISOString().slice(0, 10);
+const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata' }).format(new Date());
+
+/** Every value set for a date, newest date first. */
+async function listAssetValueDates(org) {
+  const rows = await prisma.groupAssetValue.findMany({ where: { org_id: org.id }, orderBy: { as_of: 'desc' } });
+  return rows.map((r) => ({ id: r.id, as_of: isoDay(r.as_of), asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
+}
 
 async function companyInGroup(orgGroupIds, orgId) {
   return prisma.org.findFirst({ where: { id: orgId, org_group_id: { in: orgGroupIds } }, select: { id: true, name: true, enabled_modules: true } });
@@ -340,8 +709,26 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
   const org = await companyInGroup(orgGroupIds, orgId);
   if (!org) return { error: 'not_found' };
   if (input.month > currentMonth()) return { error: 'future_month' };
+  if (input.as_of && input.as_of > todayIso()) return { error: 'future_month' };
   const kind = kindOf(org);
-  if (kind === 'acconcy') return { error: 'managed_in_company' };
+  invalidateCompany(org.id);
+  if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera' || kind === 'valterra' || kind === 'novarex') return { error: 'managed_in_company' };
+  // A value for a date: keep it as its own row (history), and let the month carry the latest dated value of that month.
+  let datedBefore = null;
+  if (input.as_of) {
+    const day = new Date(`${input.as_of}T00:00:00.000Z`);
+    const existing = await prisma.groupAssetValue.findUnique({ where: { org_id_as_of: { org_id: org.id, as_of: day } } });
+    datedBefore = existing ? num(existing.asset_value) : null;
+    await prisma.groupAssetValue.upsert({
+      where: { org_id_as_of: { org_id: org.id, as_of: day } },
+      create: { org_id: org.id, as_of: day, asset_value: input.asset_value, notes: input.notes || null, updated_by: actorId },
+      update: { asset_value: input.asset_value, notes: input.notes || null, updated_by: actorId },
+    });
+    const first = new Date(`${input.month}-01T00:00:00.000Z`);
+    const next = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1));
+    const latest = await prisma.groupAssetValue.findFirst({ where: { org_id: org.id, as_of: { gte: first, lt: next } }, orderBy: { as_of: 'desc' } });
+    input = { ...input, asset_value: num(latest.asset_value), notes: input.notes ? `${isoDay(latest.as_of)}: ${input.notes}` : `As at ${isoDay(latest.as_of)}` };
+  }
   const before = (await listAssetValues(org)).find((r) => r.month === input.month) || null;
   let result;
   if (kind === 'gulati') result = await gulatiFinance.setAssetValue(org.id, actorId, input);
@@ -358,7 +745,8 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
       reason: `Asset value ${input.month}`, snapshot: { company: org.name, month: input.month, previous: before ? before.asset_value : null, new: input.asset_value },
     },
   });
-  return { asset: result.asset, previous: before ? before.asset_value : null };
+  invalidateCompany(org.id);
+  return { asset: result.asset, previous: input.as_of ? datedBefore : (before ? before.asset_value : null) };
 }
 
 // Recent changes across the companies the caller may see.
@@ -375,4 +763,4 @@ async function activity(orgGroupIds, limit = 30, days = 7) {
   return rows.map((r) => ({ id: r.id, at: r.created_at, actor: name.get(r.actor_id) || null, company: r.org, action: r.action, entity: r.entity_type, detail: r.reason, snapshot: r.snapshot }));
 }
 
-module.exports = { drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };
+module.exports = { warmUp, projection, projectionQuerySchema, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, listAssetValueDates, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };

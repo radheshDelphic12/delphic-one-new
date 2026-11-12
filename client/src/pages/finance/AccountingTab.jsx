@@ -73,7 +73,7 @@ function LedgerAccountsSection() {
       <Drawer open={drawerOpen} title="Add ledger account" onClose={() => setDrawerOpen(false)} size="sm" tone="create" footer={
         <>
           <button type="button" className="btn-secondary" onClick={() => setDrawerOpen(false)} disabled={saving}>Cancel</button>
-          <button type="submit" form="ledger-account-form" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'Saving…' : 'Add account'}</button>
+          <button type="submit" form="ledger-account-form" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'Saving…' : 'Add ledger account'}</button>
         </>
       }>
         <form id="ledger-account-form" onSubmit={submit} className="space-y-3">

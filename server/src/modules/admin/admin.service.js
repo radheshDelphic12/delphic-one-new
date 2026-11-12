@@ -51,6 +51,12 @@ const SOFT_DELETE_MODELS = {
   submission: 'submission',
   profile: 'profile',
   interview_round: 'interviewRound',
+  job_applicant: 'jobApplicant',
+  // Phase 3: projects are accounts rows (is_project), employees are org memberships
+  project: 'account',
+  employee: 'orgMembership',
+  expense_claim: 'expenseClaim',
+  invoice: 'clientInvoice',
 };
 
 // Live-dependent counts, shown to the deleter as a heads-up (does not block —
@@ -71,38 +77,64 @@ async function dependencyCounts(entityType, id) {
       return { interview_rounds: await prisma.interviewRound.count({ where: { submission_id: id } }) };
     case 'profile':
       return { submissions: await prisma.submission.count({ where: { profile_id: id } }) };
+    case 'project':
+      return {
+        allocations: await prisma.projectMemberAssignment.count({ where: { account_id: id } }),
+        vendor_invoices: await prisma.projectVendorInvoice.count({ where: { account_id: id } }),
+        timesheet_entries: await prisma.timesheetEntry.count({ where: { account_id: id } }),
+        invoices: await prisma.clientInvoice.count({ where: { client_account_id: id } }),
+      };
+    case 'employee':
+      return {
+        allocations: await prisma.projectMemberAssignment.count({ where: { org_membership_id: id } }),
+        attendance_records: await prisma.attendanceRecord.count({ where: { org_membership_id: id } }),
+        payslips: await prisma.payslip.count({ where: { org_membership_id: id } }),
+      };
     default:
       return {};
   }
 }
 
-async function softDelete(entityType, entityId, password, reason, user) {
+// Records a locked month or a finalised payment depends on cannot be deleted at all: reopen them first.
+async function lockedBlock(entityType, live) {
+  if (entityType === 'employee') {
+    if (await prisma.timesheetMonthLock.count({ where: { org_membership_id: live.id } })) return 'locked_attendance';
+    if (await prisma.payslip.count({ where: { org_membership_id: live.id, payroll_run: { status: 'processed' } } })) return 'locked_payroll';
+  }
+  if (entityType === 'invoice' && live.status === 'paid') return 'locked_invoice_paid';
+  if (entityType === 'expense_claim' && live.status === 'reimbursed') return 'locked_claim_reimbursed';
+  return null;
+}
+
+/**
+ * The soft delete itself (no password): used by the superadmin endpoint below and by screens that delete their own kind of
+ * record. `orgId` keeps a company admin inside their own company. An invoice number is released so it can be reused; restoring
+ * puts it back unless someone took it meanwhile.
+ */
+async function softDeleteRecord(entityType, entityId, reason, user, { orgId = null } = {}) {
   const model = SOFT_DELETE_MODELS[entityType];
   if (!model) return { error: 'invalid_entity_type' };
 
-  const account = await prisma.user.findUnique({ where: { id: user.id } });
-  if (!account) return { error: 'not_found' };
-  const passwordOk = await bcrypt.compare(password, account.password_hash);
-  if (!passwordOk) return { error: 'bad_password' };
-
   // `deleted_at` in the where bypasses the global soft-delete filter.
-  const live = await prisma[model].findFirst({ where: { id: entityId, deleted_at: null } });
+  const live = await prisma[model].findFirst({ where: { id: entityId, deleted_at: null, ...(orgId ? { org_id: orgId } : {}) } });
   if (!live) {
-    const gone = await prisma[model].findFirst({ where: { id: entityId, deleted_at: { not: null } } });
+    const gone = await prisma[model].findFirst({ where: { id: entityId, deleted_at: { not: null }, ...(orgId ? { org_id: orgId } : {}) } });
     return { error: gone ? 'already_deleted' : 'not_found' };
   }
 
-  // A project is an accounts row but not a catalogue account: deleting it
-  // here would silently remove the project (billing, allocations, timesheets).
+  // A project is an accounts row but not a catalogue account: it is deleted as a "project", never as an account.
   if (entityType === 'account' && live.is_project) return { error: 'is_project' };
+  if (entityType === 'project' && !live.is_project) return { error: 'not_a_project' };
+
+  const locked = await lockedBlock(entityType, live);
+  if (locked) return { error: locked };
 
   const dependency = await dependencyCounts(entityType, entityId);
+  const data = { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason };
+  if (entityType === 'invoice' && live.invoice_number) data.invoice_number = `${live.invoice_number}~deleted~${String(entityId).slice(0, 8)}`;
 
   await prisma.$transaction(async (tx) => {
-    await tx[model].update({
-      where: { id: entityId },
-      data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason },
-    });
+    await tx[model].update({ where: { id: entityId }, data });
     await tx.auditLog.create({
       data: {
         actor_id: user.id,
@@ -126,6 +158,18 @@ async function softDelete(entityType, entityId, password, reason, user) {
   };
 }
 
+async function softDelete(entityType, entityId, password, reason, user) {
+  const model = SOFT_DELETE_MODELS[entityType];
+  if (!model) return { error: 'invalid_entity_type' };
+
+  const account = await prisma.user.findUnique({ where: { id: user.id } });
+  if (!account) return { error: 'not_found' };
+  const passwordOk = await bcrypt.compare(password, account.password_hash);
+  if (!passwordOk) return { error: 'bad_password' };
+
+  return softDeleteRecord(entityType, entityId, reason, user);
+}
+
 async function restore(entityType, entityId, reason, user) {
   const model = SOFT_DELETE_MODELS[entityType];
   if (!model) return { error: 'invalid_entity_type' };
@@ -135,11 +179,22 @@ async function restore(entityType, entityId, reason, user) {
     const live = await prisma[model].findFirst({ where: { id: entityId } });
     return { error: live ? 'not_deleted' : 'not_found' };
   }
+  if (entityType === 'project' && !gone.is_project) return { error: 'not_a_project' };
+  if (entityType === 'account' && gone.is_project) return { error: 'is_project' };
 
+  try {
   await prisma.$transaction(async (tx) => {
+    // an applicant gets its one-application-per-email key back; if the same person applied again meanwhile it cannot be restored
+    const keyFix = model === 'jobApplicant' && gone.email ? { dedupe_key: String(gone.email).trim().toLowerCase() } : {};
+    // an invoice gets its number back (it was released on delete); if someone took it meanwhile the restore is refused
+    if (entityType === 'invoice' && gone.invoice_number && gone.invoice_number.includes('~deleted~')) {
+      const original = gone.invoice_number.split('~deleted~')[0];
+      if (await tx.clientInvoice.findFirst({ where: { org_id: gone.org_id, invoice_number: original } })) throw Object.assign(new Error('invoice_number_taken'), { code: 'invoice_number_taken' });
+      keyFix.invoice_number = original;
+    }
     await tx[model].update({
       where: { id: entityId },
-      data: { deleted_at: null, deleted_by: null, delete_reason: null },
+      data: { deleted_at: null, deleted_by: null, delete_reason: null, ...keyFix },
     });
     await tx.auditLog.create({
       data: {
@@ -152,6 +207,11 @@ async function restore(entityType, entityId, reason, user) {
       },
     });
   });
+
+  } catch (err) {
+    if (err?.code === 'invoice_number_taken' || err?.code === 'P2002') return { error: err.code === 'P2002' ? 'duplicate_on_restore' : 'invoice_number_taken' };
+    throw err;
+  }
 
   return { result: { entity_type: entityType, entity_id: entityId, restored_by: { id: user.id, name: user.name }, reason } };
 }
@@ -178,6 +238,7 @@ async function listDeleted(entityType) {
         entity_type: t,
         entity_id: r.id,
         name: r.name || r.title || null,
+        org_id: r.org_id || null,
         deleted_at: r.deleted_at,
         deleted_by: r.deleted_by,
         delete_reason: r.delete_reason,
@@ -218,6 +279,7 @@ module.exports = {
   ENTITY_MODELS,
   SOFT_DELETE_MODELS,
   softDelete,
+  softDeleteRecord,
   restore,
   listDeleted,
   listAudit,

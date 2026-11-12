@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const { writeAudit } = require('./audit');
+const propertyCalc = require('./property.calc');
+const wages = require('./wages.service');
 
 // One place that turns ledger entries and pay slips into figures, so the Overview (Z6) and
 // Financials (Z7) never disagree.
@@ -101,10 +103,17 @@ async function slips(orgId, from, to) {
   });
 }
 
+// Daily-wage cost (days worked, by project) counts with salaries; it follows the same project filters.
+async function wageCosts(orgId, from, to, scope) {
+  if (scope.mode === 'none') return [];
+  const rows = await wages.costRows(orgId, from, to);
+  return scope.mode === 'all' ? rows : rows.filter((r) => scope.ids.has(r.project_id));
+}
+
 async function summary(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows] = await Promise.all([actualEntries(orgId, from, to, {}, filters), includeSalaries ? slips(orgId, from, to) : []]);
+  const [entries, slipRows, wageRows] = await Promise.all([actualEntries(orgId, from, to, {}, filters), includeSalaries ? slips(orgId, from, to) : [], includeSalaries ? wageCosts(orgId, from, to, scope) : []]);
   let revenue = 0;
   let expense = 0;
   let taxIn = 0;
@@ -118,7 +127,7 @@ async function summary(orgId, from, to, { includeSalaries = true, filters = {} }
       taxOut += num(e.tax);
     }
   }
-  const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0);
+  const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0) + wageRows.reduce((a, w) => a + w.amount, 0);
   const profit = revenue - expense - salaries;
   return {
     from,
@@ -138,9 +147,10 @@ async function summary(orgId, from, to, { includeSalaries = true, filters = {} }
 async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows] = await Promise.all([
+  const [entries, slipRows, wageRows] = await Promise.all([
     actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth), {}, filters),
     includeSalaries ? slips(orgId, monthStart(fromMonth), monthEnd(toMonth)) : [],
+    includeSalaries ? wageCosts(orgId, monthStart(fromMonth), monthEnd(toMonth), scope) : [],
   ]);
   const rows = new Map(monthsBetween(fromMonth, toMonth).map((m) => [m, { month: m, revenue: 0, expense: 0, salaries: 0 }]));
   for (const e of entries) {
@@ -150,6 +160,10 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filt
   for (const s of slipRows) {
     const row = rows.get(s.month);
     if (row) row.salaries += slipPortion(s, scope);
+  }
+  for (const w of wageRows) {
+    const row = rows.get(w.month);
+    if (row) row.salaries += w.amount;
   }
   return [...rows.values()].map((r) => ({
     month: r.month,
@@ -164,9 +178,10 @@ async function monthly(orgId, fromMonth, toMonth, { includeSalaries = true, filt
 async function byProject(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
-  const [entries, slipRows, projects] = await Promise.all([
+  const [entries, slipRows, wageRows, projects] = await Promise.all([
     actualEntries(orgId, from, to, {}, filters),
     includeSalaries ? slips(orgId, from, to) : [],
+    includeSalaries ? wageCosts(orgId, from, to, scope) : [],
     prisma.zxProject.findMany({ where: { org_id: orgId, deleted_at: null }, select: { id: true, code: true, name: true, kind: true } }),
   ]);
   const rows = new Map();
@@ -181,6 +196,7 @@ async function byProject(orgId, from, to, { includeSalaries = true, filters = {}
       if (scope.mode === 'all') row(null).salaries += num(s.net);
     } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(part.project_id).salaries += num(part.amount);
   }
+  for (const w of wageRows) row(w.project_id).salaries += w.amount;
   const meta = new Map(projects.map((p) => [p.id, p]));
   return [...rows.values()]
     .map((r) => ({
@@ -201,9 +217,10 @@ async function byProject(orgId, from, to, { includeSalaries = true, filters = {}
 async function byDimension(orgId, from, to, dim, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   const withSalaries = includeSalaries && scope.mode !== 'none' && dim === 'service';
-  const [entries, slipRows, projects] = await Promise.all([
+  const [entries, slipRows, wageRows, projects] = await Promise.all([
     actualEntries(orgId, from, to, {}, filters),
     withSalaries ? slips(orgId, from, to) : [],
+    withSalaries ? wageCosts(orgId, from, to, scope) : [],
     withSalaries ? prisma.zxProject.findMany({ where: { org_id: orgId }, select: { id: true, service_type: true } }) : [],
   ]);
   const rows = new Map();
@@ -221,6 +238,7 @@ async function byDimension(orgId, from, to, dim, { includeSalaries = true, filte
         if (scope.mode === 'all') row(null).salaries += num(s.net);
       } else for (const part of split) if (scope.mode === 'all' || scope.ids.has(part.project_id)) row(serviceOf.get(part.project_id) || null).salaries += num(part.amount);
     }
+    for (const w of wageRows) row(serviceOf.get(w.project_id) || null).salaries += w.amount;
   }
   return [...rows.values()].map((r) => ({
     key: r.key,
@@ -233,9 +251,10 @@ async function byDimension(orgId, from, to, dim, { includeSalaries = true, filte
 
 // Month-by-month figures for one project (salaries come from the slips' project split).
 async function byProjectMonthly(orgId, fromMonth, toMonth, projectId) {
-  const [entries, slipRows] = await Promise.all([
+  const [entries, slipRows, wageRows] = await Promise.all([
     actualEntries(orgId, monthStart(fromMonth), monthEnd(toMonth), { project_id: projectId }),
     slips(orgId, monthStart(fromMonth), monthEnd(toMonth)),
+    wages.costRows(orgId, monthStart(fromMonth), monthEnd(toMonth)),
   ]);
   const rows = new Map(monthsBetween(fromMonth, toMonth).map((m) => [m, { month: m, revenue: 0, expense: 0, salaries: 0 }]));
   for (const e of entries) {
@@ -247,10 +266,69 @@ async function byProjectMonthly(orgId, fromMonth, toMonth, projectId) {
     const split = Array.isArray(s.project_split) ? s.project_split : [];
     if (row) row.salaries += split.filter((p) => p.project_id === projectId).reduce((a, p) => a + num(p.amount), 0);
   }
+  for (const w of wageRows) {
+    const row = rows.get(w.month);
+    if (row && w.project_id === projectId) row.salaries += w.amount;
+  }
   return [...rows.values()].map((r) => ({ month: r.month, revenue: round2(r.revenue), expense: round2(r.expense), salaries: round2(r.salaries), profit: round2(r.revenue - r.expense - r.salaries) }));
 }
 // Valuation = (Zephyr profit x 240) + (asset value x 3), the same formula as Delphic Global, month by month.
 // Profit is Zephyr's own: revenue - expense - approved salaries.
+// ---- properties as assets ----
+// The asset value in Zephyr's valuation is its properties (automatic) plus any other assets an admin records. A property
+// counts while it is OWNED: status active / under construction / under renovation / held (not sold, not inactive), from its
+// purchase date, until its sale date. Its value at a month end is the latest valuation recorded on or before that date;
+// with no valuation yet it counts at what it cost (purchase + brokerage + documentation + registration + construction +
+// renovation + other), so a newly bought property is in the valuation from the day it is entered.
+const OWNED_STATUSES = ['active', 'under_construction', 'under_renovation', 'held'];
+
+async function loadProperties(orgId) {
+  const [props, vals, sales] = await Promise.all([
+    prisma.zxProperty.findMany({ where: { org_id: orgId, deleted_at: null, status: { in: [...OWNED_STATUSES, 'sold'] } } }),
+    prisma.zxPropertyValuation.findMany({ where: { org_id: orgId, unit_id: null }, orderBy: { as_of: 'asc' }, select: { property_id: true, value: true, as_of: true } }),
+    prisma.zxPropertySale.findMany({ where: { org_id: orgId, deleted_at: null, unit_id: null }, select: { property_id: true, sale_date: true } }),
+  ]);
+  const valsBy = new Map();
+  for (const v of vals) valsBy.set(v.property_id, [...(valsBy.get(v.property_id) || []), v]);
+  const saleBy = new Map(sales.map((s) => [s.property_id, dayOf(s.sale_date)]));
+  return { props, valsBy, saleBy };
+}
+
+/** The properties that count at the end of `month`, each with its value and where the value comes from. */
+function propertiesAt(data, month) {
+  const end = monthEnd(month);
+  const rows = [];
+  for (const p of data.props) {
+    const sold = data.saleBy.get(p.id);
+    if (p.status === 'sold' && !sold) continue; // sold with no sale record: nothing to date it by
+    if (sold && sold <= end) continue;
+    if (p.purchase_date && dayOf(p.purchase_date) > end) continue;
+    const latest = [...(data.valsBy.get(p.id) || [])].reverse().find((v) => dayOf(v.as_of) <= end);
+    let value;
+    let basis;
+    let as_of = null;
+    if (latest) { value = num(latest.value); basis = 'valuation'; as_of = dayOf(latest.as_of); }
+    else if (p.valuation !== null && p.valuation_date && dayOf(p.valuation_date) <= end) { value = num(p.valuation); basis = 'valuation'; as_of = dayOf(p.valuation_date); }
+    else { value = propertyCalc.totalInvestment(p); basis = 'cost'; }
+    rows.push({ id: p.id, code: p.code, name: p.name, status: p.status, value: round2(value), basis, as_of });
+  }
+  return rows;
+}
+
+/** Value of the owned properties at the end of each month (and how many), for the valuation. */
+async function propertyValueByMonth(orgId, months) {
+  const data = await loadProperties(orgId);
+  return new Map(months.map((m) => {
+    const rows = propertiesAt(data, m);
+    return [m, { value: round2(rows.reduce((a, r) => a + r.value, 0)), count: rows.length }];
+  }));
+}
+
+/** The individual properties behind a month's asset value (for drill-down). */
+async function propertyBreakdown(orgId, month) {
+  return propertiesAt(await loadProperties(orgId), month);
+}
+
 const PROFIT_FACTOR = 240;
 const ASSET_FACTOR = 3;
 const valuationOf = (profit, assetValue) => round2(profit * PROFIT_FACTOR + assetValue * ASSET_FACTOR);
@@ -267,10 +345,12 @@ async function valuationTrend(orgId, q = {}) {
   const from = q.from || monthAt(monthIdx(to) - 11);
   if (from > to || monthIdx(to) - monthIdx(from) > 119) return { error: 'bad_range' };
   const state = q.state || 'all';
-  const [assets, closes, live] = await Promise.all([
+  const monthList = monthsBetween(from, to);
+  const [assets, closes, live, props] = await Promise.all([
     prisma.zxAssetValue.findMany({ where: { org_id: orgId }, orderBy: { month: 'asc' } }),
     prisma.zxPeriodClose.findMany({ where: { org_id: orgId, status: 'closed' } }),
     state === 'locked' ? null : monthly(orgId, from, to),
+    propertyValueByMonth(orgId, monthList),
   ]);
   const closed = new Map(closes.map((c) => [c.month, c]));
   const liveBy = new Map((live || []).map((r) => [r.month, r]));
@@ -281,7 +361,9 @@ async function valuationTrend(orgId, q = {}) {
     const exact = assets.find((r) => r.month === month);
     const earlier = exact ? null : [...assets].reverse().find((r) => r.month < month);
     const asset = exact || earlier;
-    const asset_value = asset ? num(asset.asset_value) : 0;
+    const recorded = asset ? num(asset.asset_value) : 0; // other assets an admin records
+    const property = props.get(month) || { value: 0, count: 0 }; // owned properties, automatic
+    const asset_value = round2(recorded + property.value);
     const profit = round2(fig?.profit || 0);
     return {
       month,
@@ -290,6 +372,9 @@ async function valuationTrend(orgId, q = {}) {
       closed: closed.has(month),
       profit_x: round2(profit * PROFIT_FACTOR),
       asset_value,
+      recorded_asset_value: recorded,
+      property_value: property.value,
+      property_count: property.count,
       asset_value_carried: Boolean(earlier),
       asset_value_id: exact?.id || null,
       asset_notes: exact?.notes || null,
@@ -297,7 +382,8 @@ async function valuationTrend(orgId, q = {}) {
       valuation: valuationOf(profit, asset_value),
     };
   });
-  return { currency: 'INR', state, from, to, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, months };
+  // the properties behind the last month's asset value (shown on Zephyr's Financials page)
+  return { currency: 'INR', state, from, to, formula: { profit: PROFIT_FACTOR, asset_value: ASSET_FACTOR }, months, properties: await propertyBreakdown(orgId, to) };
 }
 
 // Headline figure: the formula for the current month.
@@ -329,5 +415,5 @@ async function deleteAssetValue(orgId, actorId, month) {
 module.exports = {
   round2, num, dayOf, monthOf, toDate, addMonths, monthsBetween, monthStart, monthEnd, currentMonth, resolveRange,
   actualEntries, entryWhere, slips, summary, monthly, byProject, byDimension, byProjectMonthly, valuation,
-  assetSchema, trendSchema, valuationTrend, setAssetValue, deleteAssetValue,
+  OWNED_STATUSES, propertyValueByMonth, propertyBreakdown, assetSchema, trendSchema, valuationTrend, setAssetValue, deleteAssetValue,
 };

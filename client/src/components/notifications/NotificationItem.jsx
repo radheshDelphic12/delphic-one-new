@@ -27,6 +27,7 @@ const ICONS = {
   candidate_rejected: UserX,
   candidate_backout: UserX,
   candidate_offer: BadgeCheck,
+  candidate_closed: BadgeCheck,
 };
 
 /**

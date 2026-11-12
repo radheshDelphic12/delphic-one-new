@@ -1,0 +1,2 @@
+-- AI interview: weights for two more rubric parameters (problem solving, experience fit) and the reference sites the interviewer may read. Additive only.
+ALTER TABLE "ai_interview_settings" ADD COLUMN "weight_problem_solving" INTEGER NOT NULL DEFAULT 15, ADD COLUMN "weight_experience_fit" INTEGER NOT NULL DEFAULT 10, ADD COLUMN "use_reference_sites" BOOLEAN NOT NULL DEFAULT true, ADD COLUMN "reference_sites" TEXT NOT NULL DEFAULT 'w3schools.com,javatpoint.com';

@@ -1,24 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Bar, BarChart } from 'recharts';
-import { AlertTriangle, Building2, PiggyBank, Plus, RefreshCw, RotateCcw, Scale, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Building2, History, PiggyBank, Plus, RefreshCw, Scale, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
-import KpiCard from '../../components/ui/KpiCard.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { downloadCsv, printReport } from '../../lib/groupExport.js';
 import { loadThresholds } from '../../lib/groupSettings.js';
 import useLiveData from '../../lib/useLiveData.js';
+import useTrendWindow from './trendWindow.js';
 import { LiveIndicator } from '../analytics/LiveSalesTab.jsx';
+import FoundationGroupSection from './FoundationGroupSection.jsx';
+import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
+import ValterraGroupSection from './ValterraGroupSection.jsx';
+import NovarexGroupSection from './NovarexGroupSection.jsx';
+import CompanyInsightSection from './CompanyInsightSection.jsx';
+import { GROUPINGS, GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
+import { COMPANY_COLORS, CompanyCard, ContributionLines, Disclosure, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
-const PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#be185d', '#65a30d', '#475569', '#ea580c'];
+const PALETTE = COMPANY_COLORS;
 
 const money = (n) => (n === null || n === undefined ? 'N/A' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`);
 const compact = (n) => {
@@ -30,63 +35,12 @@ const compact = (n) => {
 };
 const pctText = (p) => (p === null || p === undefined ? 'N/A' : `${p > 0 ? '+' : ''}${p}%`);
 
-const monthStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
-
-// Indian financial year (April - March), the convention the rest of the app uses.
-function presetRange(key) {
-  const now = new Date();
-  const cur = new Date(now.getFullYear(), now.getMonth(), 1);
-  const fyStart = new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
-  switch (key) {
-    case 'this_month': return { from: monthStr(cur), to: monthStr(cur) };
-    case 'prev_month': return { from: monthStr(addMonths(cur, -1)), to: monthStr(addMonths(cur, -1)) };
-    case 'quarter': { const q = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1); return { from: monthStr(q), to: monthStr(cur) }; }
-    case 'prev_quarter': { const q = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 - 3, 1); return { from: monthStr(q), to: monthStr(addMonths(q, 2)) }; }
-    case 'fy': return { from: monthStr(fyStart), to: monthStr(cur) };
-    case 'last_12': return { from: monthStr(addMonths(cur, -11)), to: monthStr(cur) };
-    default: return null;
-  }
-}
-const PRESETS = [
-  ['this_month', 'This month'], ['prev_month', 'Last month'], ['quarter', 'This quarter'], ['prev_quarter', 'Last quarter'],
-  ['fy', 'Financial year'], ['last_12', 'Last 12 months'], ['custom', 'Custom'],
-];
-const GROUPINGS = [['month', 'Monthly'], ['quarter', 'Quarterly'], ['year', 'Yearly']];
-const FIGURES = [['all', 'All (live)'], ['locked', 'Locked'], ['unlocked', 'Unlocked']];
 const LIVE_EVERY_MS = 30000;
-const DEFAULTS = { preset: 'last_12', granularity: 'month', state: 'all' };
-
-// A row of pills: one choice at a time, the chosen one filled.
-function Segmented({ label, value, options, onChange }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">{label}</div>
-      <div className="inline-flex flex-wrap gap-1 rounded-xl bg-tertiary-50 p-1" role="group" aria-label={label}>
-        {options.map(([k, text]) => (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={value === k}
-            onClick={() => onChange(k)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${value === k ? 'bg-white text-primary-700 shadow-soft ring-1 ring-primary-200' : 'text-tertiary-600 hover:bg-white/70'}`}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+const DEFAULTS = { granularity: 'month', state: 'all' };
 
 function SectionTitle({ title, hint }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-3 border-b border-tertiary-100 pb-2 pt-3">
-      <span className="h-5 w-1.5 self-center rounded-full bg-[#4f8f60]" aria-hidden="true" />
-      <h2 className="font-heading text-lg font-bold tracking-tight text-tertiary-900">{title}</h2>
-      {hint && <span className="text-xs text-tertiary-500">{hint}</span>}
-    </div>
-  );
+  // Titles carry a leading "1. " for the order in the source; the page shows the plain title.
+  return <SectionHeading title={title.replace(/^\d+\.\s*/, '')} hint={hint} />;
 }
 
 const TREND_METRICS = [
@@ -97,50 +51,14 @@ const TREND_METRICS = [
   ['assets', 'Assets', 'Recorded asset value, carried forward until the next entry'],
 ];
 
-function TrendChart({ title, subtitle, rows, companies, metric }) {
+function TrendChart({ title, subtitle, rows, companies, metric, colorOfOrg }) {
   const hasData = rows.some((r) => companies.some((c) => r[c.org.id]));
   return (
     <ChartCard title={title} subtitle={subtitle}>
       {!hasData ? (
         <EmptyState title="No data in this period" description="Nothing has been recorded for the selected companies and dates." />
       ) : (
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={compact} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(v, name) => [money(v), name]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              {companies.map((c, i) => (
-                <Line key={`${metric}-${c.org.id}`} type="monotone" dataKey={c.org.id} name={c.org.name} stroke={PALETTE[i % PALETTE.length]} strokeWidth={2} dot={rows.length < 25} connectNulls />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </ChartCard>
-  );
-}
-
-function ShareBars({ title, rows }) {
-  const data = rows.map((r) => ({ name: r.org_name, share: r.share_pct ?? 0, value: r.value }));
-  return (
-    <ChartCard title={title} subtitle="Share of the group total (companies with a loss count as 0%)">
-      {data.length === 0 ? (
-        <EmptyState title="No companies" description="" />
-      ) : (
-        <div className="h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ left: 20, right: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(v, n, p) => [`${v}%  (${money(p.payload.value)})`, 'Share']} />
-              <Bar dataKey="share" fill="#2563eb" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <TrendLines rows={rows} companies={companies} colorOfOrg={colorOfOrg} metric={metric} />
       )}
     </ChartCard>
   );
@@ -149,7 +67,8 @@ function ShareBars({ title, rows }) {
 function AssetValueForm({ company, onSaved }) {
   const { pushError, pushInfo } = useAlerts();
   const [history, setHistory] = useState(null);
-  const [month, setMonth] = useState(monthStr(new Date()));
+  const [asOf, setAsOf] = useState(new Date().toLocaleDateString('en-CA'));
+  const [dated, setDated] = useState(null);
   const [value, setValue] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -157,6 +76,7 @@ function AssetValueForm({ company, onSaved }) {
 
   const load = useCallback(() => {
     apiClient.get(`/super-dashboard/companies/${orgId}/asset-values`).then(({ data }) => setHistory(data.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load asset values'), 'Something went wrong'));
+    apiClient.get(`/super-dashboard/companies/${orgId}/asset-value-dates`).then(({ data }) => setDated(data.data)).catch(() => setDated([]));
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(load, [load]);
 
@@ -164,7 +84,7 @@ function AssetValueForm({ company, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const { data } = await apiClient.put(`/super-dashboard/companies/${orgId}/asset-values`, { month, asset_value: Number(value), notes: notes || undefined });
+      const { data } = await apiClient.put(`/super-dashboard/companies/${orgId}/asset-values`, { as_of: asOf, asset_value: Number(value), notes: notes || undefined });
       pushInfo(data.data.previous === null ? 'Asset value added' : `Asset value revised (was ${money(data.data.previous)})`);
       setValue('');
       setNotes('');
@@ -180,8 +100,8 @@ function AssetValueForm({ company, onSaved }) {
   return (
     <div className="space-y-3">
       <form onSubmit={save} className="grid grid-cols-2 gap-2 rounded-xl border border-tertiary-100 p-3">
-        <label className="text-xs font-medium text-tertiary-600">Month
-          <input type="month" required max={monthStr(new Date())} value={month} onChange={(e) => setMonth(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
+        <label className="text-xs font-medium text-tertiary-600">Value as at (date)
+          <input type="date" required max={new Date().toLocaleDateString('en-CA')} value={asOf} onChange={(e) => setAsOf(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" data-testid="asset-as-of" />
         </label>
         <label className="text-xs font-medium text-tertiary-600">Asset value (₹)
           <input type="number" required min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
@@ -190,10 +110,16 @@ function AssetValueForm({ company, onSaved }) {
           <input value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
         </label>
         <div className="col-span-2 flex items-center justify-between">
-          <span className="text-[11px] text-tertiary-500">Saving an existing month revises it; other months are kept. Every change is audited.</span>
+          <span className="text-[11px] text-tertiary-500">Pick any date up to today. Saving a date that already has a value revises it; other dates are kept. The month&apos;s valuation uses the latest date of that month. Every change is audited.</span>
           <button type="submit" className="btn-primary inline-flex items-center gap-1 text-sm" disabled={saving || value === ''}><Plus className="h-4 w-4" />{saving ? 'Saving…' : 'Add / revise'}</button>
         </div>
       </form>
+      {dated && dated.length > 0 && (
+        <table className="w-full text-sm" data-testid="asset-dated-history">
+          <thead><tr className="text-left text-xs text-tertiary-500"><th className="py-1">As at</th><th className="text-right">Asset value</th><th className="pl-3">Note</th></tr></thead>
+          <tbody>{dated.map((h) => <tr key={h.id} className="border-t border-tertiary-100"><td className="py-1">{h.as_of}</td><td className="text-right">{money(h.asset_value)}</td><td className="pl-3 text-xs text-tertiary-500">{h.notes || ''}</td></tr>)}</tbody>
+        </table>
+      )}
       {!history ? <Skeleton className="h-20 w-full" /> : history.length === 0 ? (
         <p className="text-xs text-tertiary-500">No asset value recorded yet - the valuation uses profit only.</p>
       ) : (
@@ -240,12 +166,16 @@ function DrillDown({ orgId, range, state }) {
 function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChanged }) {
   if (!company) return <Drawer open={false} onClose={onClose} title="" />;
   const v = company.valuation;
+  const isFx = company.org.kind === 'foundation';
+  const isZk = company.org.kind === 'zklyrera' || company.org.kind === 'valterra' || company.org.kind === 'novarex';
+  const isZx = company.org.kind === 'zephyr';
+  const lastM = [...(company.months || [])].reverse().find((m) => m.property_count !== undefined);
   return (
     <Drawer open title={company.org.name} onClose={onClose} size="lg" footer={<button type="button" className="btn-primary" onClick={() => onOpen(company.org)}>Open {company.org.name} (admin view)</button>}>
       <div className="space-y-5">
         <section>
           <h4 className="mb-2 font-heading text-sm font-semibold">Valuation</h4>
-          {!v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
+          {isFx ? <p className="rounded-xl bg-tertiary-50 px-3 py-2 text-sm text-tertiary-600">Not applicable: valuation (profit × {formula.profit} + asset value × {formula.asset_value}) is a business measure. A foundation is followed through its income, expenses, fund balance and campaign budgets instead. Its assets here are the fund balance: {money(company.assets)}.</p> : !v ? <p className="text-sm text-tertiary-500">No data in the selected period.</p> : (
             <div className="space-y-1 rounded-xl border border-tertiary-100 p-3 text-sm">
               <div className="flex justify-between"><span>Profit component ({money(v.profit_component / formula.profit)} × {formula.profit})</span><b>{money(v.profit_component)}</b></div>
               <div className="flex justify-between"><span>Asset component ({money(company.assets)} × {formula.asset_value})</span><b>{money(v.asset_component)}</b></div>
@@ -266,9 +196,12 @@ function CompanyDrawer({ company, formula, range, state, onClose, onOpen, onChan
           <h4 className="mb-2 font-heading text-sm font-semibold">Where the numbers come from</h4>
           <DrillDown orgId={company.org.id} range={range} state={state} />
         </section>
+        {isZx && lastM && (
+          <p className="rounded-xl bg-primary-50 px-3 py-2 text-sm text-primary-900">Asset value includes the company&apos;s <b>active properties</b>, added automatically: <b>{money(lastM.property_value)}</b> for {lastM.property_count} propert{lastM.property_count === 1 ? 'y' : 'ies'} (as at {lastM.month}), plus other assets recorded below: <b>{money(lastM.recorded_asset_value)}</b>. The property list is under &quot;Where the numbers come from&quot;.</p>
+        )}
         <section>
-          <h4 className="mb-2 font-heading text-sm font-semibold">Monthly asset values</h4>
-          <AssetValueForm company={company} onSaved={onChanged} />
+          <h4 className="mb-2 font-heading text-sm font-semibold">{isZk ? 'Principal still invested' : isFx ? 'Fund balance' : isZx ? 'Other assets (monthly)' : 'Monthly asset values'}</h4>
+          {isZk ? <p className="text-sm text-tertiary-600">Assets here are the principal still invested (capital placed minus principal returned), so they are not typed in. Record investments and returns in the company (open it with the button below).</p> : isFx ? <p className="text-sm text-tertiary-600">The fund balance is funds received minus paid spending, so it is not typed in. Record funding and spending in the foundation (open it with the button below); campaigns, budgets and their projections are managed there too.</p> : <AssetValueForm company={company} onSaved={onChanged} />}
         </section>
       </div>
     </Drawer>
@@ -350,8 +283,7 @@ export default function GroupFinanceTab() {
   const { pushError } = useAlerts();
   const navigate = useNavigate();
   const { pushInfo } = useAlerts();
-  const [preset, setPreset] = useState(DEFAULTS.preset);
-  const [custom, setCustom] = useState(presetRange('last_12'));
+  const period = usePeriod('this_month');
   const [granularity, setGranularity] = useState(DEFAULTS.granularity);
   const [state, setState] = useState(DEFAULTS.state);
   const [selected, setSelected] = useState(null); // null = all companies
@@ -360,9 +292,10 @@ export default function GroupFinanceTab() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState({ key: 'valuation', dir: 'desc' });
   const [openOrgId, setOpenOrgId] = useState(null);
+  const [insight, setInsight] = useState('');
+  const [activityOpen, setActivityOpen] = useState(false);
 
-  const range = preset === 'custom' ? custom : presetRange(preset);
-  const validRange = Boolean(range?.from && range?.to && range.to >= range.from);
+  const { range, valid: validRange } = period;
   const selectedKey = selected ? selected.join(',') : '';
 
   // Every filter change reloads at once (a slower, older answer can never overwrite a newer one), and the page
@@ -375,6 +308,9 @@ export default function GroupFinanceTab() {
     },
     { intervalMs: LIVE_EVERY_MS, enabled: validRange, deps: [range?.from, range?.to, granularity, state, selectedKey] }
   );
+
+  // Charts read a 12-month window when the chosen period is too short to draw a line.
+  const trend = useTrendWindow({ data, range, valid: validRange, state, orgIds: selectedKey });
 
   useEffect(() => {
     if (error) pushError(apiErrorMessage(error, 'Failed to load the group dashboard'), 'Something went wrong');
@@ -390,13 +326,12 @@ export default function GroupFinanceTab() {
   }, [updatedAt]);
 
   function resetFilters() {
-    setPreset(DEFAULTS.preset);
+    period.reset();
     setGranularity(DEFAULTS.granularity);
     setState(DEFAULTS.state);
     setSelected(null);
     setSearch('');
   }
-  const filtersChanged = preset !== DEFAULTS.preset || granularity !== DEFAULTS.granularity || state !== DEFAULTS.state || Boolean(selected);
 
   async function openCompany(org) {
     try {
@@ -444,6 +379,12 @@ export default function GroupFinanceTab() {
     if (kind === 'csv') downloadCsv(`${set.title.toLowerCase().replace(/\s+/g, '-')}-${range.from}-${range.to}.csv`, set.headers, set.rows);
     else if (!printReport(set.title, sub, set.headers, set.rows)) pushError('Allow pop-ups to export the PDF', 'Export blocked');
   }
+  const colorOfOrg = useCallback((id) => {
+    const i = allCompanies.findIndex((o) => o.id === id);
+    return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
+  }, [allCompanies]);
+  // Every company gets the same card: live ones by valuation, coming-soon ones last.
+  const cardOrder = useMemo(() => [...everyCompany].sort((x, y) => Number(Boolean(x.coming_soon)) - Number(Boolean(y.coming_soon)) || (y.valuation?.current ?? -Infinity) - (x.valuation?.current ?? -Infinity)), [everyCompany]);
   const t = data?.totals;
   const openCompanyData = companies.find((c) => c.org.id === openOrgId) || null;
 
@@ -454,51 +395,35 @@ export default function GroupFinanceTab() {
     setSelected(next.length === 0 || next.length === live.length ? null : next);
   }
 
+  const pb = periodBinding(period);
+  const filterFields = [
+    ...pb.fields,
+    { key: 'group', label: 'Group by', type: 'select', options: GROUPINGS },
+    { key: 'companies', label: 'Companies', type: 'checks', options: allCompanies.filter((o) => !o.coming_soon).map((o) => [o.id, o.name]) },
+  ];
+  const filterValues = { ...pb.values, group: granularity, companies: selected || [] };
+  const filterDefaults = { ...pb.defaults, group: DEFAULTS.granularity, companies: [] };
+  function changeFilter(key, value) {
+    if (key === 'group') setGranularity(value);
+    else if (key === 'companies') setSelected(value.length ? value : null);
+    else pb.change(key, value);
+  }
+
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
-        <div className={`h-1 bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
-        <div className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-tertiary-700">Filters</h2>
-              {validRange && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
-              <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
-            </div>
-            <div className="flex items-center gap-2">
-              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
-              </button>
-              {filtersChanged && (
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={resetFilters}>
-                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Reset
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <Segmented label="Period" value={preset} options={PRESETS} onChange={setPreset} />
-            {preset === 'custom' && (
-              <div className="flex items-end gap-2">
-                <label className="text-xs font-medium text-tertiary-600">From<input type="month" value={custom.from} max={custom.to || undefined} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="mt-1 block rounded-lg border px-2 py-1.5 text-sm" /></label>
-                <label className="text-xs font-medium text-tertiary-600">To<input type="month" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="mt-1 block rounded-lg border px-2 py-1.5 text-sm" /></label>
-              </div>
-            )}
-            <Segmented label="Group by" value={granularity} options={GROUPINGS} onChange={setGranularity} />
-            <Segmented label="Figures" value={state} options={FIGURES} onChange={setState} />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">Companies</span>
-            {allCompanies.map((o) => {
-              const on = !selected || selected.includes(o.id);
-              if (o.coming_soon) {
-                return <span key={o.id} className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-tertiary-300 px-3 py-1 text-xs text-tertiary-400">{o.name}<span className="rounded-full bg-amber-50 px-1.5 text-[10px] font-semibold uppercase text-amber-700">Coming soon</span></span>;
-              }
-              return <button key={o.id} type="button" aria-pressed={on} onClick={() => toggleCompany(o.id)} className={`rounded-full border px-3 py-1 text-xs font-medium transition ${on ? 'border-primary-600 bg-primary-50 text-primary-700' : 'border-tertiary-200 text-tertiary-400 hover:bg-tertiary-50'}`}>{o.name}</button>;
-            })}
-          </div>
+      <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card">
+        <div className={`h-1 overflow-hidden rounded-t-2xl bg-primary-100 ${loading ? '' : 'invisible'}`} aria-hidden="true"><div className="h-full w-1/3 animate-pulse rounded-r bg-primary-500" /></div>
+        <div className="space-y-3 p-4">
+          <GroupFilterBar fields={filterFields} values={filterValues} defaults={filterDefaults} onChange={changeFilter} onToggle={(key, id) => toggleCompany(id)} onReset={resetFilters} below={<FigureSwitch value={state} onChange={setState} />}>
+            {validRange && <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700">{range.from} to {range.to}</span>}
+            <LiveIndicator updatedAt={updatedAt} everyMs={LIVE_EVERY_MS} />
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={() => setActivityOpen(true)}>
+              <History className="h-3.5 w-3.5" aria-hidden="true" />Activity{activity.length > 0 && <span className="rounded-full bg-primary-100 px-1.5 text-[10px] font-bold text-primary-800">{activity.length}</span>}
+            </button>
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium text-tertiary-700 hover:bg-tertiary-50" onClick={refresh} aria-label="Refresh now">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh
+            </button>
+          </GroupFilterBar>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-tertiary-100 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-400">Export</span>
@@ -508,7 +433,7 @@ export default function GroupFinanceTab() {
             </select>
             <button type="button" className="btn-secondary text-sm" disabled={!data} onClick={() => doExport('csv')}>CSV</button>
             <button type="button" className="btn-secondary text-sm" disabled={!data} onClick={() => doExport('pdf')}>PDF</button>
-            <span className="ml-auto text-[11px] text-tertiary-500">Month is the finest period; quarter and year follow the April-March financial year. Group totals add live companies together.</span>
+            <span className="ml-auto text-[11px] text-tertiary-500">Month is the finest period; quarter and year follow the April-March financial year. Group totals add live companies together.{allCompanies.some((o) => o.coming_soon) ? ` Coming soon: ${allCompanies.filter((o) => o.coming_soon).map((o) => o.name).join(', ')}.` : ''}</span>
           </div>
         </div>
       </div>
@@ -518,24 +443,26 @@ export default function GroupFinanceTab() {
         <div className={`space-y-5 transition-opacity ${loading ? 'pointer-events-none opacity-60' : ''}`}>
           {t.mixed_currency && <div className="rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-sm">Companies report in different currencies, so group totals are shown as plain sums.</div>}
           <SectionTitle title="1. Group at a glance" hint={`${range.from} to ${range.to} - ${t.active_companies} companies`} />
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <KpiCard label="Group revenue" value={compact(t.revenue)} hint={t.change_pct?.revenue != null ? `${pctText(t.change_pct.revenue)} vs previous period` : undefined} icon={Wallet} theme="green" />
-            <KpiCard label="Group profit" value={compact(t.profit)} hint={t.change_pct?.profit != null ? `${pctText(t.change_pct.profit)} vs previous period` : undefined} icon={TrendingUp} theme="blue" />
-            <KpiCard label="Group expenses" value={compact(t.expenses)} hint={t.change_pct?.expenses != null ? `${pctText(t.change_pct.expenses)} vs previous period` : undefined} icon={Scale} theme="orange" />
-            <KpiCard label="Group assets" value={compact(t.assets)} hint={t.change_pct?.assets != null ? `${pctText(t.change_pct.assets)} vs previous period` : undefined} icon={PiggyBank} theme="purple" />
-            <KpiCard label="Group valuation" value={compact(t.valuation)} hint={t.change_pct?.valuation != null ? `${pctText(t.change_pct.valuation)} vs previous period` : undefined} icon={PiggyBank} theme="blue" />
-            <KpiCard label="Active companies" value={t.active_companies} hint={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : undefined} icon={Building2} theme="purple" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <StatTile label="Group revenue" value={compact(t.revenue)} icon={Wallet} tone="green" pct={t.change_pct?.revenue} series={(trend.trends || data.trends).revenue.map((r) => r.total)} />
+            <StatTile label="Group profit" value={compact(t.profit)} icon={TrendingUp} tone="blue" pct={t.change_pct?.profit} series={(trend.trends || data.trends).profit.map((r) => r.total)} />
+            <StatTile label="Group expenses" value={compact(t.expenses)} icon={Scale} tone="amber" pct={t.change_pct?.expenses} invert series={(trend.trends || data.trends).expenses.map((r) => r.total)} />
+            <StatTile label="Group assets" value={compact(t.assets)} icon={PiggyBank} tone="violet" pct={t.change_pct?.assets} series={(trend.trends || data.trends).assets.map((r) => r.total)} />
+            <StatTile label="Group valuation" value={compact(t.valuation)} icon={PiggyBank} tone="teal" pct={t.change_pct?.valuation} series={(trend.trends || data.trends).valuation.map((r) => r.total)} />
+            <StatTile label="Active companies" value={t.active_companies} icon={Building2} tone="rose" note={t.coming_soon_companies ? `${t.coming_soon_companies} coming soon` : `${t.employees} employees · ${t.contractors} contractors`} />
           </div>
           <p className="text-xs text-tertiary-500">Profit margin {t.margin_pct === null ? 'N/A' : `${t.margin_pct}%`} · {t.employees} employees · {t.contractors} contractors. Group valuation = sum of each company&apos;s valuation (profit × {data.formula.profit} + asset value × {data.formula.asset_value}).</p>
 
           {data.alerts.length > 0 && (
-            <div className="rounded-2xl border border-warning-200 bg-warning-50 p-4">
-              <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-semibold"><AlertTriangle className="h-4 w-4" />Attention required</h3>
-              <ul className="space-y-1 text-sm">{data.alerts.map((a, i) => <li key={`${a.org_id}-${a.type}-${i}`}><b>{a.org_name}:</b> {a.message}</li>)}</ul>
-            </div>
+            <Disclosure title="Needs attention" count={data.alerts.length} icon={AlertTriangle}>
+              <ul className="space-y-1">{data.alerts.map((a, i) => <li key={`${a.org_id}-${a.type}-${i}`}><b>{a.org_name}:</b> {a.message}</li>)}</ul>
+            </Disclosure>
           )}
 
           <SectionTitle title="2. Companies" hint="Click a company for its valuation, history, drill-down and asset values" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {cardOrder.map((c) => <CompanyCard key={c.org.id} company={c} color={colorOfOrg(c.org.id)} groupRevenue={t.revenue} series={trend.companies?.find((x) => x.org.id === c.org.id)?.series} onOpen={(org) => (c.coming_soon ? pushInfo(`${org.name} is coming soon. Its figures will appear here once it is ready.`) : setOpenOrgId(org.id))} />)}
+          </div>
           <div className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="font-heading text-sm font-semibold">Company comparison</h3>
@@ -575,32 +502,48 @@ export default function GroupFinanceTab() {
           <SectionTitle title="3. Trends" hint="Every company has its own line and legend" />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Trend metric">
             {TREND_METRICS.map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'border-primary-600 bg-primary-600 text-white' : 'border-tertiary-200 bg-white text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
+              <button key={k} type="button" role="tab" aria-selected={trendMetric === k} onClick={() => setTrendMetric(k)} className={`rounded-full border px-3.5 py-1 text-sm ${trendMetric === k ? 'group-tab-active border-primary-700 bg-primary-700 text-white' : 'border-tertiary-200 bg-white text-tertiary-600 transition-colors hover:bg-tertiary-50 hover:text-tertiary-900'}`}>{label}</button>
             ))}
           </div>
-          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={TREND_METRICS.find(([k]) => k === trendMetric)[2]} rows={data.trends[trendMetric]} companies={companies} metric={trendMetric} />
+          <TrendChart title={`${TREND_METRICS.find(([k]) => k === trendMetric)[1]} comparison`} subtitle={[TREND_METRICS.find(([k]) => k === trendMetric)[2], trend.note].filter(Boolean).join(' - ')} rows={(trend.trends || data.trends)[trendMetric]} companies={companies} metric={trendMetric} colorOfOrg={colorOfOrg} />
 
           <SectionTitle title="4. Who contributes and who leads" />
           <div className="grid gap-4 lg:grid-cols-2">
-            <ShareBars title="Revenue contribution" rows={data.contribution.revenue} />
-            <ShareBars title="Profit contribution" rows={data.contribution.profit} />
+            <ContributionLines title="Revenue contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={(trend.trends || data.trends).revenue} rows={data.contribution.revenue} companies={companies} colorOfOrg={colorOfOrg} />
+            <ContributionLines title="Profit contribution" subtitle="Share of the group total over time (a company in loss counts as 0%)" trendRows={(trend.trends || data.trends).profit} rows={data.contribution.profit} companies={companies} colorOfOrg={colorOfOrg} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {[['revenue', 'Highest revenue', money], ['profit', 'Highest profit', money], ['valuation', 'Highest valuation', money], ['growth', 'Highest valuation growth', pctText]].map(([k, label, fmt]) => (
-              <div key={k} className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card">
-                <h4 className="mb-2 font-heading text-sm font-semibold">{label}</h4>
-                <ol className="space-y-1 text-sm">{data.rankings[k].map((r) => <li key={r.org_id} className="flex justify-between"><span>{r.rank}. {r.org_name}</span><span className="text-tertiary-600">{fmt(r.value)}</span></li>)}</ol>
-              </div>
+              <RankCard key={k} title={label} rows={data.rankings[k]} format={fmt} />
             ))}
           </div>
 
-          <SectionTitle title="5. Recent activity" hint="Last 7 days - changes made in any company of the group" />
-          <div className="rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
-            <ActivityFeed items={activity} colorOf={(id) => PALETTE[Math.max(0, allCompanies.findIndex((o) => o.id === id)) % PALETTE.length]} />
-          </div>
+          {(data.foundation || data.zklyrera || data.valterra || data.novarex || data.companies.some((c) => c.insight)) && (
+            <>
+              <SectionTitle title="5. Company insights" hint="Open a company-specific view only when you need it" />
+              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Company insights">
+                {[...data.companies.filter((c) => c.insight).map((c) => [`insight-${c.org.id}`, c.org.name, c.insight.subtitle]), data.foundation && ['foundation', 'Gulati Foundation', 'Campaigns, budgets and fund projections'], data.zklyrera && ['zklyrera', 'Zklyrera Spirits', 'Investments, returns and projections'], data.valterra && ['valterra', 'Valterra Resources', 'Mining sites, investments, returns and projections'], data.novarex && ['novarex', 'Novarex Pharmaceuticals', 'Outlets, sales, investments, returns and projections']].filter(Boolean).map(([key, label, hint]) => (
+                  <button key={key} type="button" role="tab" aria-selected={insight === key} onClick={() => setInsight((cur) => (cur === key ? '' : key))} className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition-all ${insight === key ? 'border-primary-300 bg-primary-50 shadow-card ring-1 ring-primary-200' : 'border-tertiary-100 bg-white hover:border-tertiary-200 hover:shadow-card'}`}>
+                    <span className="min-w-0"><span className="block text-sm font-semibold text-tertiary-900">{label}</span><span className="block text-xs text-tertiary-500">{hint}</span></span>
+                    <span className="text-xs font-semibold text-primary-700">{insight === key ? 'Hide' : 'View'}</span>
+                  </button>
+                ))}
+              </div>
+              {data.companies.filter((c) => c.insight && insight === `insight-${c.org.id}`).map((c) => <CompanyInsightSection key={c.org.id} insight={c.insight} />)}
+              {insight === 'foundation' && <FoundationGroupSection foundation={data.foundation} />}
+              {insight === 'zklyrera' && <ZklyreraGroupSection zklyrera={data.zklyrera} />}
+              {insight === 'valterra' && <ValterraGroupSection valterra={data.valterra} />}
+              {insight === 'novarex' && <NovarexGroupSection novarex={data.novarex} />}
+            </>
+          )}
         </div>
       )}
+
+      <Drawer open={activityOpen} title="Recent activity" onClose={() => setActivityOpen(false)} size="lg" tone="info">
+        <p className="mb-3 text-xs text-tertiary-500">Last 7 days: changes made in any company of the group.</p>
+        <ActivityFeed items={activity} colorOf={colorOfOrg} />
+      </Drawer>
 
       <CompanyDrawer company={openCompanyData} range={range} state={state} formula={data?.formula || { profit: 240, asset_value: 3 }} onClose={() => setOpenOrgId(null)} onOpen={openCompany} onChanged={refresh} />
     </div>

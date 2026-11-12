@@ -16,6 +16,17 @@ COPY client ./client
 ARG VITE_DISABLE_QUICK_LOGIN
 ENV VITE_DISABLE_QUICK_LOGIN=$VITE_DISABLE_QUICK_LOGIN
 
+# Build info for the page's <meta name="build-commit"> tags (client/build-info.js). On Render only the commit id is known (RENDER_GIT_COMMIT); the build asks GitHub for the message and date.
+ARG BUILD_COMMIT_SHA
+ARG BUILD_COMMIT_DATE
+ARG BUILD_COMMIT_MESSAGE
+ARG BUILD_BRANCH
+ENV BUILD_COMMIT_SHA=$BUILD_COMMIT_SHA BUILD_COMMIT_DATE=$BUILD_COMMIT_DATE BUILD_COMMIT_MESSAGE=$BUILD_COMMIT_MESSAGE BUILD_BRANCH=$BUILD_BRANCH
+ARG RENDER_GIT_COMMIT
+ARG RENDER_GIT_REPO_SLUG
+ARG RENDER_GIT_BRANCH
+ENV RENDER_GIT_COMMIT=$RENDER_GIT_COMMIT RENDER_GIT_REPO_SLUG=$RENDER_GIT_REPO_SLUG RENDER_GIT_BRANCH=$RENDER_GIT_BRANCH
+
 RUN npm run generate --workspace server
 RUN npm run build --workspace client
 
@@ -61,6 +72,15 @@ server {
 
     location /uploads/ {
         proxy_pass http://127.0.0.1:4000;
+    }
+
+    location ~ ^/[a-z0-9-]+/career(/|$) {
+        client_max_body_size 3m;
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     location / {

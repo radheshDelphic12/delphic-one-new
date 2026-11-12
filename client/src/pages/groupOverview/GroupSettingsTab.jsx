@@ -7,6 +7,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { DEFAULT_THRESHOLDS, loadThresholds, resetThresholds, saveThresholds } from '../../lib/groupSettings.js';
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import StorageCard from './StorageCard.jsx';
 
 const THRESHOLD_FIELDS = [
   ['revenue_drop_pct', 'Revenue drop (%)', 'Alert when a company revenue falls by at least this much against the previous period'],
@@ -78,6 +79,8 @@ export default function GroupSettingsTab() {
           </table>
         )}
       </Card>
+
+      <StorageCard />
 
       <Card icon={Building2} title="Dashboard alert thresholds" hint="Saved in this browser for your login. They decide when 'Attention required' flags a company">
         <form onSubmit={saveAlerts} className="space-y-3">

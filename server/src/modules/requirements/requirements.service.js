@@ -1,6 +1,9 @@
 const prisma = require('../../config/db');
+const rateLog = require('../rateChanges/rateChanges.service');
+const { decide } = require('../../lib/permissions');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { notify, requirementParticipants, admins } = require('../../lib/notifications');
+const { resolveTemplate } = require('../interviewTemplates/interviewTemplates.service');
 const {
   REQUIREMENT_STATUS_TRANSITIONS,
   SEAT_STATUS_TRANSITIONS,
@@ -39,6 +42,26 @@ function isStuck(row) {
   );
 }
 
+const DEFAULT_TAT_HOURS = 24;
+const TAT_OPEN_STATUSES = ['open', 'in_progress'];
+
+/**
+ * TAT = how long a requirement is "hot" for recruiters. While the clock runs the card is tagged Super Active; in the last
+ * quarter of the window (at least one hour) it is tagged Expiring soon; afterwards the requirement stays active but leaves
+ * the TAT Active tab. Older requirements with no TAT, and ones that are no longer open, carry no tag.
+ */
+function tatInfo(row, now = new Date()) {
+  if (!row.tat_ends_at) return { state: 'none', hours: null, ends_at: null, remaining_minutes: null, tag: null };
+  const ends = new Date(row.tat_ends_at);
+  const remaining = Math.max(0, Math.round((ends.getTime() - now.getTime()) / 60000));
+  const base = { hours: row.tat_hours ?? null, ends_at: ends.toISOString(), remaining_minutes: remaining };
+  if (!TAT_OPEN_STATUSES.includes(row.status)) return { ...base, state: 'closed', tag: null };
+  if (ends <= now) return { ...base, state: 'expired', tag: null };
+  const windowMin = (row.tat_hours || DEFAULT_TAT_HOURS) * 60;
+  if (remaining <= Math.max(60, windowMin * 0.25)) return { ...base, state: 'expiring', tag: 'Expiring soon' };
+  return { ...base, state: 'active', tag: 'Super Active' };
+}
+
 function serialize(row) {
   if (!row) return null;
   const { account_id, account, sales_owner_id, sales_owner, assignments, seats, ...rest } = row;
@@ -55,7 +78,8 @@ function serialize(row) {
   return {
     ...rest,
     is_stuck: isStuck(row),
-    account: account ? { id: account.id, name: account.name, type: account.type } : undefined,
+    tat: tatInfo(row),
+    account: account ? { id: account.id, name: account.name, type: account.type, is_premium: Boolean(account.is_premium) } : undefined,
     sales_owner: sales_owner ? { id: sales_owner.id, name: sales_owner.name } : undefined,
     assigned_recruiters: assignments
       ? assignments
@@ -74,7 +98,7 @@ function serialize(row) {
 }
 
 const DECORATE_INCLUDE = {
-  account: { select: { id: true, name: true, type: true } },
+  account: { select: { id: true, name: true, type: true, is_premium: true } },
   sales_owner: { select: { id: true, name: true } },
   assignments: {
     where: { role_on_req: { in: ['recruiter', 'vendor_team'] }, unassigned_at: null },
@@ -89,7 +113,7 @@ const DECORATE_INCLUDE = {
 };
 
 async function list(filters) {
-  const { status, req_type, account_id, sales_owner_id, recruiter_id, priority, work_mode, stuck, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
+  const { status, req_type, account_id, premium, sales_owner_id, recruiter_id, priority, work_mode, stuck, tat, closed_from, closed_to, tech_stack, search, sort_by, sort_order, page, limit } = filters;
 
   const stuckClause = { status: { in: STUCK_STATUSES }, updated_at: { lte: stuckCutoff() } };
 
@@ -101,9 +125,11 @@ async function list(filters) {
     ...(status ? { status } : {}),
     ...(stuck === 'stuck' ? { AND: [stuckClause] } : {}),
     ...(stuck === 'not_stuck' ? { NOT: [stuckClause] } : {}),
+    ...(tat === 'active' ? { status: { in: TAT_OPEN_STATUSES }, tat_ends_at: { gt: new Date() } } : {}),
     ...(Object.keys(closedRange).length ? { closed_at: closedRange } : {}),
     ...(req_type ? { req_type } : {}),
     ...(account_id ? { account_id } : {}),
+    ...(premium ? { account: { is_premium: premium === 'yes' } } : {}),
     ...(sales_owner_id ? { sales_owner_id } : {}),
     ...(priority ? { priority } : {}),
     ...(work_mode ? { work_mode } : {}),
@@ -134,7 +160,7 @@ async function list(filters) {
     prisma.requirement.findMany({
       where,
       include: DECORATE_INCLUDE,
-      orderBy: { [sort_by]: sort_order },
+      orderBy: tat === 'active' ? { tat_ends_at: 'asc' } : { [sort_by]: sort_order },
       take: limit,
       skip: (page - 1) * limit,
     }),
@@ -148,10 +174,13 @@ async function getById(id) {
   return serialize(row);
 }
 
-function canMutateRequirement(requirement, user) {
+function canMutateRequirement(requirement, user, perm = 'requirements.update') {
   if (!requirement) return false;
+  const decided = decide(user, perm, requirement.sales_owner_id);
+  if (decided !== null) return decided;
   if (user.role === 'admin') return true;
-  return user.role === 'sales' && requirement.sales_owner_id === user.id;
+  // The whole Sales team manages every requirement (edit, status, assign, seats, delete); each action is tagged with who did it.
+  return user.role === 'sales';
 }
 
 async function create(data, salesOwnerId, actor = null) {
@@ -160,11 +189,17 @@ async function create(data, salesOwnerId, actor = null) {
     return { error: 'invalid_account' };
   }
 
-  const { seats_total = 1, ...rest } = data;
+  const { seats_total = 1, tat_hours = DEFAULT_TAT_HOURS, ...rest } = data;
+  // The service type (and Internal Hiring track) picks the interview template; requirements made before this flow have none.
+  const template = await resolveTemplate(prisma, rest.req_type, rest.hiring_track);
+  if (rest.req_type !== 'internal_hiring') rest.hiring_track = null;
 
   const row = await prisma.requirement.create({
     data: {
       ...rest,
+      interview_template_id: template?.id || null,
+      tat_hours,
+      tat_ends_at: new Date(Date.now() + tat_hours * 3600000),
       seats_total,
       sales_owner_id: salesOwnerId,
       seats: {
@@ -195,10 +230,35 @@ async function create(data, salesOwnerId, actor = null) {
 
 const OWNER_ROLES = ['sales', 'bda', 'admin'];
 
-async function update(id, patch, user) {
+// ---- who did what ----
+// Every change to a requirement by a person writes one audit_logs row (entity_type 'requirement'), so the detail page can
+// say "edited by Tanvi, 3 Oct". Status moves are already in stage_history; both are merged by getActivity().
+const FIELD_LABEL = { title: 'title', description: 'description', req_type: 'type', priority: 'priority', work_mode: 'work mode', location: 'location', tech_stack: 'tech stack', sales_owner_id: 'sales owner' };
+async function logActivity(user, requirementId, action, reason, snapshot = {}) {
+  await prisma.auditLog.create({ data: { actor_id: user.id, action, entity_type: 'requirement', entity_id: requirementId, reason, snapshot } });
+}
+// empty text, empty list and null all mean "not set", so saving a form without touching a field is not a change
+const plain = (v) => {
+  const x = v instanceof Date ? v.toISOString() : Array.isArray(v) ? (v.length ? v.join(', ') : null) : v;
+  return x === '' || x === undefined ? null : x;
+};
+function changedFields(before, after, patch) {
+  const out = {};
+  for (const key of Object.keys(patch)) {
+    const a = JSON.stringify(plain(before[key]) ?? null);
+    const b = JSON.stringify(plain(after[key]) ?? null);
+    if (a !== b) out[FIELD_LABEL[key] || key] = { from: plain(before[key]) ?? null, to: plain(after[key]) ?? null };
+  }
+  return out;
+}
+
+async function update(id, input, user) {
+  const { rate_change_reason, ...patch } = input;
   const existing = await prisma.requirement.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
   if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  const budgetChanges = rateLog.diff(existing, patch, rateLog.REQUIREMENT_FIELDS);
+  if (rateLog.needsReason(budgetChanges) && !rate_change_reason) return { error: 'rate_reason_required' };
 
   if (patch.sales_owner_id && patch.sales_owner_id !== existing.sales_owner_id) {
     if (user.role !== 'admin') return { error: 'forbidden_owner_change' };
@@ -207,7 +267,39 @@ async function update(id, patch, user) {
     if (!OWNER_ROLES.includes(target.role)) return { error: 'invalid_owner_role' };
   }
 
-  const row = await prisma.requirement.update({ where: { id }, data: patch, include: DECORATE_INCLUDE });
+  // A different TAT restarts the clock from now.
+  const data = patch.tat_hours && patch.tat_hours !== existing.tat_hours ? { ...patch, tat_ends_at: new Date(Date.now() + patch.tat_hours * 3600000) } : { ...patch };
+  // Changing the service type / track re-picks the template, but only while no interview has used the current one.
+  const typeChanged = (patch.req_type && patch.req_type !== existing.req_type) || (patch.hiring_track !== undefined && patch.hiring_track !== existing.hiring_track);
+  if (typeChanged) {
+    const reqType = patch.req_type || existing.req_type;
+    if (reqType !== 'internal_hiring') data.hiring_track = null;
+    const track = reqType === 'internal_hiring' ? (data.hiring_track !== undefined ? data.hiring_track : existing.hiring_track) : null;
+    if (reqType === 'internal_hiring' && !track) return { error: 'hiring_track_required' };
+    const used = await prisma.interviewRound.count({ where: { template_round_id: { not: null }, submission: { seat: { requirement_id: id } } } });
+    if (used) return { error: 'template_in_use' };
+    data.interview_template_id = (await resolveTemplate(prisma, reqType, track))?.id || null;
+  }
+  const row = await prisma.requirement.update({ where: { id }, data, include: DECORATE_INCLUDE });
+  await rateLog.record(prisma, { entityType: 'requirement', entityId: id, orgId: existing.org_id, userId: user?.id, currency: patch.budget_currency || existing.budget_currency, reason: rate_change_reason, changes: budgetChanges });
+  const changes = changedFields(existing, row, patch);
+  if (Object.keys(changes).length) await logActivity(user, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
+  return { requirement: serialize(row) };
+}
+
+// Gives a requirement more TAT time: counted from the end of the current window, or from now when it already ran out.
+async function extendTat(id, hours, user) {
+  const existing = await prisma.requirement.findUnique({ where: { id } });
+  if (!existing) return { error: 'not_found' };
+  if (!canMutateRequirement(existing, user)) return { error: 'forbidden' };
+  const from = existing.tat_ends_at && new Date(existing.tat_ends_at) > new Date() ? new Date(existing.tat_ends_at) : new Date();
+  const ends = new Date(from.getTime() + hours * 3600000);
+  const row = await prisma.requirement.update({
+    where: { id },
+    data: { tat_ends_at: ends, tat_hours: (existing.tat_hours || DEFAULT_TAT_HOURS) + hours },
+    include: DECORATE_INCLUDE,
+  });
+  await logActivity(user, id, 'update', `Extended TAT by ${hours} hours`, { changes: { TAT: { from: existing.tat_ends_at, to: ends.toISOString() } } });
   return { requirement: serialize(row) };
 }
 
@@ -216,9 +308,11 @@ async function changeStatus(id, { to_status, reason }, user) {
     const requirement = await tx.requirement.findUnique({ where: { id } });
     if (!requirement) return { error: 'not_found' };
     if (!canMutateRequirement(requirement, user)) return { error: 'forbidden' };
-    if (requirement.is_locked) return { error: 'locked' };
+    // Reactivating a dropped requirement is the one move allowed while it is locked (the drop locks it).
+    const reactivating = requirement.status === 'dropped' && to_status === 'open';
+    if (requirement.is_locked && !reactivating) return { error: 'locked' };
     if (!(REQUIREMENT_STATUS_TRANSITIONS[requirement.status] || []).includes(to_status)) return { error: 'invalid_transition' };
-    if (to_status === 'dropped' && !reason) return { error: 'reason_required' };
+    if ((to_status === 'dropped' || reactivating) && !reason) return { error: 'reason_required' };
 
     if (to_status === 'closed') {
       const openSeats = await tx.requirementSeat.count({
@@ -229,6 +323,7 @@ async function changeStatus(id, { to_status, reason }, user) {
 
     const patch = { status: to_status };
     if (to_status === 'dropped') patch.is_locked = true;
+    if (reactivating) patch.is_locked = false;
     if (to_status === 'closed') {
       patch.is_locked = true;
       patch.closed_at = new Date();
@@ -243,7 +338,7 @@ async function changeStatus(id, { to_status, reason }, user) {
         from_stage: requirement.status,
         to_stage: to_status,
         changed_by: user.id,
-        reason: reason || null,
+        reason: reason ? (reactivating ? `[reactivated] ${reason}` : reason) : null,
       },
     });
 
@@ -492,19 +587,64 @@ async function changeSeatStatus(seatId, { to_status, reason, joined_at }, userId
   });
 }
 
+/** Soft delete by the Sales team / admin: hidden from every list, kept in the database with who deleted it and why. */
+async function remove(id, reason, user) {
+  const existing = await prisma.requirement.findUnique({ where: { id } });
+  if (!existing) return { error: 'not_found' };
+  if (!canMutateRequirement(existing, user, 'requirements.delete')) return { error: 'forbidden' };
+  await prisma.$transaction(async (tx) => {
+    await tx.requirement.update({ where: { id }, data: { deleted_at: new Date(), deleted_by: user.id, delete_reason: reason } });
+    await tx.auditLog.create({ data: { actor_id: user.id, action: 'soft_delete', entity_type: 'requirement', entity_id: id, reason, snapshot: JSON.parse(JSON.stringify(existing)) } });
+  });
+  return { ok: true };
+}
+
+/** Everything that happened to a requirement, newest first, each tagged with the person who did it. */
+async function getActivity(id) {
+  const [logs, stages] = await Promise.all([
+    prisma.auditLog.findMany({ where: { entity_type: 'requirement', entity_id: id, action: { not: 'soft_delete' } }, orderBy: { created_at: 'desc' }, take: 200 }),
+    prisma.stageHistory.findMany({ where: { entity_type: 'requirement', entity_id: id }, orderBy: { changed_at: 'desc' }, take: 200 }),
+  ]);
+  const ids = [...new Set([...logs.map((l) => l.actor_id), ...stages.map((s) => s.changed_by)].filter(Boolean))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, role: true } }) : [];
+  const by = new Map(users.map((u) => [u.id, u]));
+  const who = (uid) => (by.get(uid) ? { id: uid, name: by.get(uid).name, role: by.get(uid).role } : null);
+  const rows = [
+    ...logs.map((l) => ({ id: l.id, kind: l.action, summary: l.reason, details: l.snapshot, by: who(l.actor_id), at: l.created_at })),
+    ...stages.map((s) => ({ id: s.id, kind: 'status', summary: `Status ${s.from_stage || '-'} → ${s.to_stage}`, details: { reason: s.reason }, by: who(s.changed_by), at: s.changed_at })),
+  ];
+  return rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
+// Assign / unassign / add seat: same behaviour as before, plus the activity tag.
+const wrap = (fn, describe) => async (...args) => {
+  const result = await fn(...args);
+  if (!result.error) {
+    const [requirementId, , user] = describe.pick(args);
+    await logActivity(user, requirementId, describe.action, describe.text(args, result), describe.snapshot ? describe.snapshot(args, result) : {});
+  }
+  return result;
+};
+const assignLogged = wrap(assign, { action: 'assign', pick: (a) => [a[0], null, a[2]], text: (a) => `Assigned a ${a[1].role_on_req.replace('_', ' ')}`, snapshot: (a) => ({ user_id: a[1].user_id, role_on_req: a[1].role_on_req }) });
+const unassignLogged = wrap(unassign, { action: 'unassign', pick: (a) => [a[0], null, a[2]], text: () => 'Removed an assignment', snapshot: (a) => ({ assignment_id: a[1] }) });
+const addSeatLogged = wrap(addSeat, { action: 'add_seat', pick: (a) => [a[0], null, a[2]], text: (a) => `Added a seat${a[1].seat_label ? ` (${a[1].seat_label})` : ''}`, snapshot: (a) => ({ seat_label: a[1].seat_label || null }) });
+
 module.exports = {
+  remove,
+  getActivity,
   list,
   getById,
   create,
   update,
   changeStatus,
   changeStatusOverride,
-  assign,
-  unassign,
+  extendTat,
+  assign: assignLogged,
+  unassign: unassignLogged,
   getAssignments,
   getHistory,
   getSeats,
-  addSeat,
+  addSeat: addSeatLogged,
   changeSeatStatus,
   canMutateRequirement,
 };

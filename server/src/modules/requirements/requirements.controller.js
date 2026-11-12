@@ -1,11 +1,14 @@
 const asyncHandler = require('../../utils/asyncHandler');
 const { ok, created, fail } = require('../../utils/response');
+const prisma = require('../../config/db');
 const service = require('./requirements.service');
+const websitePostings = require('../website/postings.service');
 const {
   createSchema,
   updateSchema,
   statusSchema,
   statusOverrideSchema,
+  tatExtendSchema,
   assignSchema,
   unassignSchema,
   seatCreateSchema,
@@ -16,11 +19,14 @@ const {
 const ERROR_STATUS = {
   not_found: [404, 'Not found'],
   locked: [403, 'Record is locked'],
+  rate_reason_required: [422, 'Give a reason for changing the budget (rate_change_reason)'],
   forbidden: [403, 'You do not own this record'],
   invalid_transition: [400, 'Invalid status transition'],
   reason_required: [400, 'reason is required for this transition'],
   seats_not_closed: [400, 'All seats must be closed before closing the requirement'],
   invalid_account: [400, 'account_id must reference an active client'],
+  hiring_track_required: [400, 'Choose Technical or Non-Technical for Internal Hiring'],
+  template_in_use: [400, 'Candidates already have interviews on this requirement, so its service type cannot change'],
   user_not_found: [404, 'User not found'],
   forbidden_owner_change: [403, 'Only an admin can change the sales owner'],
   invalid_owner_role: [400, 'Sales owner must be a sales, BDA, or admin user'],
@@ -36,17 +42,17 @@ function mapError(res, error) {
 
 const list = asyncHandler(async (req, res) => {
   const query = listQuerySchema.parse(req.query);
-  if (req.user.role === 'recruiter') query.recruiter_id = req.user.id;
-  if (req.user.role === 'sales') query.sales_owner_id = req.user.id;
+  // Recruiters see their own requirements, except on the TAT Active tab, which shows every hot requirement so they can pick one up.
+  if (req.user.role === 'recruiter' && query.tat !== 'active') query.recruiter_id = req.user.id;
+  // Every requirement is visible to the whole Sales team; ?scope=mine narrows to the user's own.
+  if (req.user.role === 'sales' && query.scope === 'mine') query.sales_owner_id = req.user.id;
+  delete query.scope;
   const { rows, pagination } = await service.list(query);
   return ok(res, rows, { pagination });
 });
 
 function assertCanViewRequirement(user, requirement) {
   if (user.role === 'admin') return null;
-  if (user.role === 'sales' && requirement.sales_owner?.id !== user.id) {
-    return 'You do not own this record';
-  }
   if (user.role === 'recruiter') {
     const assigned = (requirement.assigned_recruiters || []).some((row) => row.id === user.id);
     if (!assigned) return 'You do not own this record';
@@ -80,6 +86,14 @@ const changeStatus = asyncHandler(async (req, res) => {
   const body = statusSchema.parse(req.body);
   const result = await service.changeStatus(req.params.id, body, req.user);
   if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
+  return ok(res, result.requirement);
+});
+
+const extendTat = asyncHandler(async (req, res) => {
+  const body = tatExtendSchema.parse(req.body);
+  const result = await service.extendTat(req.params.id, body.hours, req.user);
+  if (result.error) return mapError(res, result.error);
   return ok(res, result.requirement);
 });
 
@@ -87,6 +101,7 @@ const changeStatusOverride = asyncHandler(async (req, res) => {
   const body = statusOverrideSchema.parse(req.body);
   const result = await service.changeStatusOverride(req.params.id, body, req.user);
   if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
   return ok(res, result.requirement);
 });
 
@@ -111,6 +126,29 @@ const assignments = asyncHandler(async (req, res) => {
   if (denied) return fail(res, 403, denied);
   const rows = await service.getAssignments(req.params.id);
   return ok(res, rows);
+});
+
+const activity = asyncHandler(async (req, res) => {
+  const requirement = await service.getById(req.params.id);
+  if (!requirement) return fail(res, 404, 'Not found');
+  const denied = assertCanViewRequirement(req.user, requirement);
+  if (denied) return fail(res, 403, denied);
+  return ok(res, await service.getActivity(req.params.id));
+});
+
+const remove = asyncHandler(async (req, res) => {
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length < 3) return fail(res, 400, 'Give the reason for deleting this requirement');
+  const result = await service.remove(req.params.id, reason, req.user);
+  if (result.error) return mapError(res, result.error);
+  await websitePostings.followRequirement(req.params.id, { background: true });
+  return ok(res, { id: req.params.id });
+});
+
+const rateChanges = asyncHandler(async (req, res) => {
+  const row = await prisma.requirement.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!row) return fail(res, 404, 'Not found');
+  return ok(res, await require('../rateChanges/rateChanges.service').list('requirement', req.params.id));
 });
 
 const history = asyncHandler(async (req, res) => {
@@ -142,20 +180,26 @@ const changeSeatStatus = asyncHandler(async (req, res) => {
   const body = seatStageSchema.parse(req.body);
   const result = await service.changeSeatStatus(req.params.id, body, req.user.id);
   if (result.error) return mapError(res, result.error);
+  // Closing the last seat auto-closes the requirement.
+  await websitePostings.followRequirement(result.seat.requirement_id, { background: true });
   return ok(res, result.seat);
 });
 
 module.exports = {
+  activity,
+  remove,
   list,
   getOne,
   create,
   update,
   changeStatus,
   changeStatusOverride,
+  extendTat,
   assign,
   unassign,
   assignments,
   history,
+  rateChanges,
   getSeats,
   addSeat,
   changeSeatStatus,

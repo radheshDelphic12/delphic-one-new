@@ -3,8 +3,9 @@
 # Scheduled database backup — independent of deploys.
 #
 # Run from cron / a systemd timer on the VPS. Each run writes a verified
-# `pg_dump -Fc` into ./backups/ and keeps only the newest BACKUP_KEEP dumps
-# (default 7). Oldest auto-*.dump files are deleted so disk use stays bounded.
+# `pg_dump -Fc` into ./backups/ and then runs scripts/backup-prune.sh, which keeps
+# dumps in tiers (all for 6 h, hourly 48 h, daily 30 days, monthly 12 months) under
+# a hard size / free-space cap, so disk use stays bounded.
 #
 # Cron example (every 15 min), as the deploy user:
 #   */15 * * * * cd /opt/delphic && ./scripts/db-backup.sh >> /var/log/delphic-backup.log 2>&1
@@ -12,8 +13,8 @@
 # systemd timer: see docs/guides/DEPLOY-RUNBOOK.md.
 #
 # Env:
-#   BACKUP_KEEP          how many auto-*.dump files to retain (default 7)
-#   BACKUP_MIN_FREE_GB   abort if backups volume has less free space than this (default 2)
+#   BACKUP_MAX_TOTAL_MB  size cap for all dumps in ./backups (default 1500), see backup-prune.sh
+#   BACKUP_MIN_FREE_GB   abort if backups volume has less free space than this (default 3)
 #   BACKUP_OFFSITE_CMD   optional shell command run with the dump path as $1
 #                        (e.g. 'aws s3 cp "$1" s3://delphic-backups/')
 set -euo pipefail
@@ -22,8 +23,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 BACKUP_DIR="${ROOT}/backups"
-BACKUP_KEEP="${BACKUP_KEEP:-7}"
-BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-2}"
+BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-3}"
+export BACKUP_MIN_FREE_GB
 DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 PG_USER="${POSTGRES_USER:-postgres}"
 PG_DB="${POSTGRES_DB:-requirement_dashboard}"
@@ -77,8 +78,5 @@ if [ -n "${BACKUP_OFFSITE_CMD:-}" ]; then
   fi
 fi
 
-# Keep exactly the newest $BACKUP_KEEP auto-*.dump files; delete older ones.
-# shellcheck disable=SC2012
-ls -1t "$BACKUP_DIR"/auto-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
-  rm -f "$old" && log "rotated out $(basename "$old")"
-done
+# Tiered retention + hard disk caps (see scripts/backup-prune.sh). A prune failure never fails the backup.
+BACKUP_DIR="$BACKUP_DIR" bash "$ROOT/scripts/backup-prune.sh" || log "WARN: backup-prune.sh failed - backups were not rotated"

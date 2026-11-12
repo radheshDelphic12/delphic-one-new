@@ -81,7 +81,8 @@ async function loadContext(orgId, { period_month, period_year }, filters = {}) {
     where: {
       org_id: orgId,
       joined_at: { lte: end },
-      OR: [{ left_at: null }, { left_at: { gte: start } }],
+      // Someone who left earlier still appears in the month their full & final settlement is paid in.
+      OR: [{ left_at: null }, { left_at: { gte: start } }, { salary_adjustments: { some: { kind: 'fnf', period_month, period_year } } }],
       ...membershipFilterWhere(filters, { start, end }),
     },
     select: MEMBER_SELECT,
@@ -209,6 +210,15 @@ function salaryLine(ctx, membership, asOf = null, { payBasis = payBasisOf(member
     is_it: isItDepartment(membership),
   };
   if (membership.worker_type === 'contractor') return { ...base, skipped: 'contractor_paid_by_vendor' };
+  // A month after they left: no attendance pay at all, only what was added to it (their full & final settlement).
+  if (membership.left_at && ymd(membership.left_at) < ymd(ctx.period.start)) {
+    const adjustments = salaryAdjustments.summarize(ctx.adjustmentsByMember.get(membership.id) || []);
+    return {
+      ...base, pay_basis: payBasisOf(membership), salary_structure_id: null, calendar: null, ctc: 0, gross: 0, deductions: 0, base_net: 0, adjustments,
+      net: adjustments.net_effect, earned_to_date: 0, per_day: 0, projected_net: adjustments.net_effect, pending_amount: 0, ot_amount: 0,
+      breakdown: { exited: true, note: 'Paid after leaving: full & final settlement only' },
+    };
+  }
   const structure = ctx.latestStructure.get(membership.id);
   if (!structure) return { ...base, skipped: 'no_salary_structure' };
 

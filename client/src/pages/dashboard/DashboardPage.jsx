@@ -28,6 +28,10 @@ import { rangeForPreset } from '../../lib/datePresets.js';
 import { funnelChartData, stageFilterHref, statsForRole } from './dashboardWidgets.js';
 import LightweightDashboard from './LightweightDashboard.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
+import AnnouncementsCard from './AnnouncementsCard.jsx';
+import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
+import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
+import BenchCard from './BenchCard.jsx';
 
 const cardMotion = {
   initial: { opacity: 0, y: 12 },
@@ -351,6 +355,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      <DashboardCheckinCard />
+      <SpeakUpDashboardCard />
       {showDeptFilter && (
         <div className="mt-3 rounded-2xl border border-tertiary-100 bg-white px-4 py-3 shadow-card">
           <FilterBar
@@ -420,6 +426,16 @@ export default function DashboardPage() {
             </div>
             <RecentActivityPanel rows={summary?.recent_activity} />
           </div>
+
+          <motion.div {...cardMotion}>
+            <AnnouncementsCard />
+          </motion.div>
+
+          {role === 'admin' && (
+            <motion.div {...cardMotion}>
+              <BenchCard />
+            </motion.div>
+          )}
 
           {role === 'admin' && (
             <motion.div {...cardMotion}>

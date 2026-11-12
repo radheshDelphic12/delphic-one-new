@@ -3,13 +3,18 @@ import { CalendarClock, CalendarPlus, History, Trash2, Upload, Wrench } from 'lu
 import apiClient from '../../lib/apiClient.js';
 import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
+import { AttendanceDays, AttendanceHeader } from './AttendanceModern.jsx';
+import AttendanceRegularizationRequests from './AttendanceRegularizationRequests.jsx';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -94,9 +99,11 @@ function RegularizeDrawer({ row, open, onClose, onSaved }) {
 }
 
 export default function AttendancePage() {
-  const { user } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
   const { pushError, pushInfo } = useAlerts();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, ['attendance.view', 'attendance.update']);
+  // everyone except the group superadmin gets the refreshed screen; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const [tab, setTab] = useState('mine');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,12 +114,14 @@ export default function AttendancePage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
+  const [employeeId, setEmployeeId] = useState(''); // Team attendance: one employee (everyone when empty)
+  const people = useOrgMembershipOptions(isAdmin && tab === 'team', { includeExited: true }); // someone who has left still has days to correct
 
   async function loadAttendance() {
     setLoading(true);
     try {
       const endpoint = tab === 'team' ? '/attendance' : '/attendance/me';
-      const { data } = await apiClient.get(endpoint, { params: { from, to } });
+      const { data } = await apiClient.get(endpoint, { params: { from, to, ...(tab === 'team' ? { limit: 100, ...(employeeId ? { org_membership_id: employeeId } : {}) } : {}) } });
       // My attendance: holidays on my calendar and approved leave show as rows
       // too, on days with no attendance record.
       const recorded = new Set((data.data || []).map((r) => String(attendanceDate(r)).slice(0, 10)));
@@ -129,7 +138,7 @@ export default function AttendancePage() {
 
   useEffect(() => {
     loadAttendance();
-  }, [tab, from, to]);
+  }, [tab, from, to, employeeId]);
 
   // Admin: remove a wrong record at any stage (a finalized month is flagged
   // for recalculation rather than rewritten).
@@ -162,6 +171,10 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-4">
+      {modern ? (
+        <AttendanceHeader user={user} rows={rows} from={from} to={to} status={status} setFrom={setFrom} setTo={setTo} setStatus={setStatus} statusOptions={STATUS_OPTIONS} tab={tab} setTab={setTab} isAdmin={isAdmin} />
+      ) : (
+        <>
       <div className="flex flex-col gap-4 rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">People</p>
@@ -181,18 +194,26 @@ export default function AttendancePage() {
         <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'mine' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('mine')}>My attendance</button>
         {isAdmin && <button type="button" className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'team' ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setTab('team')}>Team attendance</button>}
       </div>
+        </>
+      )}
       {tab === 'team' && (
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <label className="block w-72 text-xs font-medium text-tertiary-600">Employee
+            <div className="mt-1"><SearchableSelect value={employeeId} onChange={setEmployeeId} options={people} placeholder="All employees" allowClear /></div>
+          </label>
+          <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setMonthOpen(true)}><History className="h-4 w-4" /> Backfill previous month</button>
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setManualOpen(true)}><CalendarPlus className="h-4 w-4" /> Add past attendance</button>
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setBulkOpen(true)}><Upload className="h-4 w-4" /> Bulk upload</button>
+          </div>
         </div>
       )}
       {isAdmin && tab === 'team' && <AffectedCalculationsBanner refreshKey={rows} />}
-      {!loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
+      {modern && tab === 'mine' && !(!loading && rows.filter((row) => !status || row.status === status).length === 0) ? <AttendanceDays rows={rows.filter((row) => !status || row.status === status)} loading={loading} /> : !loading && rows.filter((row) => !status || row.status === status).length === 0 ? <EmptyState icon={CalendarClock} title="No attendance records" description="There are no attendance records for the selected period." /> : <DataTable columns={columns} rows={rows.filter((row) => !status || row.status === status)} loading={loading} maxHeight="calc(100dvh - 22rem)" emptyLabel="No attendance records" />}
       {isAdmin && <ManualAttendanceDrawer open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => { setManualOpen(false); pushInfo('Attendance recorded'); loadAttendance(); }} />}
       {isAdmin && <BackfillMonthDrawer open={monthOpen} onClose={() => setMonthOpen(false)} onApplied={loadAttendance} />}
       {isAdmin && <BulkAttendanceDrawer open={bulkOpen} onClose={() => setBulkOpen(false)} onApplied={loadAttendance} />}
+      {tab === 'mine' && <AttendanceRegularizationRequests />}
       <RegularizeDrawer row={regularize} open={Boolean(regularize)} onClose={() => setRegularize(null)} onSaved={handleRegularized} />
     </div>
   );

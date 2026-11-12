@@ -41,6 +41,22 @@ const manualEntrySchema = z.object({
   reason: z.string().trim().min(1).max(500),
 });
 
+// The admin day editor: attendance (did they work / which leave) and, separately, where they worked.
+// leave_type_id: for status 'leave' the leave type; for 'half_day' the leave covering the other half (null = none, omitted = leave as is).
+const setDaySchema = z.object({
+  org_membership_id: z.string().uuid(),
+  date: requiredDate,
+  status: z.enum(['present', 'half_day', 'absent', 'leave', 'holiday']),
+  leave_type_id: z.string().uuid().nullable().optional(),
+  half_day_session: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional(),
+  work_place: z.enum(['office', 'home']).optional(),
+  // Setting a day that has approved leave to present / half day / absent / holiday: withdraw that leave first.
+  cancel_leave: z.boolean().optional(),
+  // The leave runs over several days: withdraw it and re-apply the other days with the same type (asked after a confirm).
+  confirm_span: z.boolean().optional(),
+  reason: z.string().trim().min(3).max(500),
+});
+
 // Bulk backfill from an uploaded sheet. Rows are validated one by one in the
 // service so a bad row is reported back instead of rejecting the whole file.
 const importSchema = z.object({
@@ -78,6 +94,21 @@ const backfillMonthSchema = z.object({
   dry_run: z.boolean().optional().default(false),
 });
 
+// An employee's own request to correct one day (an admin reviews it). Same fields as an admin's manual entry.
+const regularizationRequestSchema = z.object({
+  date: requiredDate,
+  status: STATUS,
+  check_in_time: TIME.nullable().optional(),
+  check_out_time: TIME.nullable().optional(),
+  reason: z.string().trim().min(3).max(500),
+});
+const regularizationDecisionSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+  decision_reason: z.string().trim().max(500).optional(),
+});
+const regularizationListQuerySchema = z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional() });
+
 module.exports = {
   backfillMonthSchema, listQuerySchema, regularizeSchema,
-  deleteRecordSchema, createShiftSchema, manualEntrySchema, importSchema, templateQuerySchema, STATUS };
+  deleteRecordSchema, createShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, STATUS,
+  regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema };

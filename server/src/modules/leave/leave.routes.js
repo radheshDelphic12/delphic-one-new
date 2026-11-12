@@ -15,6 +15,7 @@ const {
   balancesOverviewQuerySchema,
   setEntitlementSchema,
   revokeSchema,
+  mailingListSchema,
 } = require('./leave.validation');
 
 // Admin or a Leave Manager (a member the admin has made responsible for processing leave requests).
@@ -124,6 +125,17 @@ router.put(
   })
 );
 
+// Leave mailing list (admin edits): mailed, with the reporting manager, whenever someone applies for leave.
+router.get('/mailing-list', authorize('admin'), asyncHandler(async (req, res) => ok(res, { emails: await service.getMailingList(req.user.org_id) })));
+router.put(
+  '/mailing-list',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const { emails } = mailingListSchema.parse(req.body);
+    return ok(res, { emails: await service.setMailingList(req.user.org_id, req.user, emails) });
+  })
+);
+
 // Why a request was refused - shared by self-apply, admin-apply and approval.
 function failRequest(res, result, who = 'You') {
   if (result.error === 'leave_type_not_found') return fail(res, 404, 'Leave type not found');
@@ -145,8 +157,11 @@ router.post(
   authorizeLeaveManager,
   asyncHandler(async (req, res) => {
     const body = adminLeaveRequestSchema.parse(req.body);
+    if (body.override_attendance && req.user.role !== 'admin') return fail(res, 403, 'Only an admin can apply leave over a day the employee was marked present');
     const result = await service.createRequestForEmployee(req.user.org_id, { org_membership_id: req.user.org_membership_id, user_id: req.user.id }, body);
     if (result.error) return failRequest(res, result, 'The employee');
+    // Applied on someone's behalf: the manager and the mailing list still hear about it (an auto-approved one is already decided).
+    if (!body.auto_approve) await service.notifyApplied(req.user.org_id, [result.request, result.overflow?.request], { appliedBy: result.request.org_membership_id === req.user.org_membership_id ? null : 'an admin / Leave Manager' });
     return created(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);
   })
 );
@@ -157,6 +172,7 @@ router.post(
     const body = createLeaveRequestSchema.parse(req.body);
     const result = await service.createRequest(req.user.org_id, req.user.org_membership_id, body);
     if (result.error) return failRequest(res, result);
+    await service.notifyApplied(req.user.org_id, [result.request, result.overflow?.request]);
     return created(res, result.request, result.overflow ? { overflow: result.overflow } : undefined);
   })
 );

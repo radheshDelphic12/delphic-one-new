@@ -38,6 +38,7 @@ const financialLock = require('../calculations/financialLock');
 const { overlaps, periodShares, byMembership } = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
 const { contractState } = require('../../lib/contractState');
+const holdPeriods = require('../../lib/holdPeriods');
 
 // Same default as the billing engine when a project has no benchmark set.
 const DEFAULT_BENCHMARK_HOURS = 160;
@@ -77,7 +78,8 @@ async function projectRevenue(orgId, account, { start, end, days }) {
     // Prorated by calendar days in the months the agreement starts or ends.
     const from = agreementStart && agreementStart > start ? agreementStart : start;
     const to = agreementEnd && agreementEnd < end ? agreementEnd : end;
-    const billedDays = Math.round((to - from) / 86400000) + 1;
+    // Days inside a hold period are not billed.
+    const billedDays = Math.max(0, Math.round((to - from) / 86400000) + 1 - holdPeriods.heldDays(holdPeriods.parse(account.contract_hold_periods), from, to));
     const amount = billedDays >= days ? Number(rate.rate) : (Number(rate.rate) * billedDays) / days;
     return { amount: round2(amount), billing_type: 'monthly', rate: Number(rate.rate), currency: rate.currency, prorated_days: billedDays < days ? billedDays : null };
   }
@@ -134,7 +136,7 @@ async function projectRevenue(orgId, account, { start, end, days }) {
 async function computeProjectPnl(orgId, accountId, { period_month, period_year }, fx = null) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, org_id: orgId, type: 'client' },
-    select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { name: true } }, agreement_start_date: true, agreement_end_date: true, client_billing_currency: true },
+    select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account_id: true, client_account: { select: { name: true } }, agreement_start_date: true, agreement_end_date: true, contract_hold_periods: true, client_billing_currency: true },
   });
   if (!account) return { error: 'account_not_found' };
   const bounds = periodBounds(period_month, period_year);
@@ -282,7 +284,7 @@ async function listProjectsPnl(orgId, { period_month, period_year, project_type 
   const [accounts, fx] = await Promise.all([
     prisma.account.findMany({
       where,
-      select: { id: true, service_category: true, contract_status: true, agreement_start_date: true, agreement_end_date: true, minimum_monthly_hours: true },
+      select: { id: true, service_category: true, contract_status: true, contract_hold_periods: true, agreement_start_date: true, agreement_end_date: true, minimum_monthly_hours: true },
       orderBy: { name: 'asc' },
     }),
     exchangeRates.inrRates(orgId),
@@ -461,7 +463,10 @@ async function monthContractByProject(orgId, accounts, { period_month, period_ye
       row.note = account.agreement_start_date && account.agreement_start_date > end ? 'before_agreement_start' : 'after_agreement_end';
       row.amount = 0;
     } else {
-      const billedDays = Math.round((to - from) / 86400000) + 1;
+      // A monthly rate skips the days inside a hold period (hourly is left to approved hours).
+      const held = rate.rate_type === 'monthly' ? holdPeriods.heldDays(holdPeriods.parse(account.contract_hold_periods), from, to) : 0;
+      const billedDays = Math.max(0, Math.round((to - from) / 86400000) + 1 - held);
+      if (held && billedDays === 0) row.note = 'on_hold';
       const share = billedDays >= days ? 1 : billedDays / days;
       if (billedDays < days) row.prorated_days = billedDays;
       if (rate.rate_type === 'hourly') {

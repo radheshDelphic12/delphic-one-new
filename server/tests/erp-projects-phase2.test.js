@@ -214,6 +214,51 @@ describe('Finance → Projects profile', () => {
     expect((await authed(request(app).patch(`/api/v1/billing/projects/${project.id}`), emp.token).send({ client_account_id: acme.id })).status).toBe(403);
   });
 
+  test('a project can be linked to a requirement of the company, and unlinked again', async () => {
+    const { org, admin, token } = await seedOrgAdmin();
+    await calendar(org, 'Ahmedabad Calendar');
+    const acme = await lead(org, admin, 'Acme Corp');
+    const project = (await addProject(token, { name: 'Tax Portal', client_account_id: acme.id, service_category: 'managed_services' })).body.data;
+    const url = `/api/v1/billing/projects/${project.id}`;
+    const requirement = await prisma.requirement.create({ data: { account_id: acme.id, title: 'Backend Developer', req_type: 'managed_services', sales_owner_id: admin.id, org_id: org.id } });
+
+    // nothing linked yet
+    expect((await authed(request(app).get(url), token)).body.data).toMatchObject({ requirement: '', requirement_id: null, requirement_link: null });
+
+    const linked = await authed(request(app).patch(url), token).send({ requirement_id: requirement.id });
+    expect(linked.status).toBe(200);
+    expect(linked.body.data).toMatchObject({ requirement: 'Backend Developer', requirement_id: requirement.id });
+    expect(linked.body.data.requirement_link).toMatchObject({ id: requirement.id, title: 'Backend Developer', client: 'Acme Corp' });
+    // the Finance list shows it in the Requirement column
+    const row = (await authed(request(app).get('/api/v1/billing/projects'), token)).body.data.find((x) => x.id === project.id);
+    expect(row).toMatchObject({ requirement: 'Backend Developer', requirement_id: requirement.id });
+
+    // an unrelated edit keeps the link
+    await authed(request(app).patch(url), token).send({ benchmark_hours: 170 });
+    expect((await authed(request(app).get(url), token)).body.data.requirement_id).toBe(requirement.id);
+
+    // several projects may point at the same requirement
+    const second = (await addProject(token, { name: 'Tax Portal 2', client_account_id: acme.id, service_category: 'managed_services' })).body.data;
+    expect((await authed(request(app).patch(`/api/v1/billing/projects/${second.id}`), token).send({ requirement_id: requirement.id })).status).toBe(200);
+
+    // a requirement of another company is refused; an unknown id too
+    const otherOrg = await createOrg({ name: 'Other Co', slug: 'other-co' });
+    const otherAdmin = await createUser({ role: 'admin' });
+    const foreign = await prisma.requirement.create({ data: { account_id: acme.id, title: 'Not ours', req_type: 'managed_services', sales_owner_id: otherAdmin.id, org_id: otherOrg.id } });
+    expect((await authed(request(app).patch(url), token).send({ requirement_id: foreign.id })).status).toBe(400);
+    expect((await authed(request(app).patch(url), token).send({ requirement_id: '00000000-0000-4000-8000-000000000000' })).status).toBe(400);
+    expect((await authed(request(app).get(url), token)).body.data.requirement_id).toBe(requirement.id);
+
+    // a plain employee cannot link
+    const emp = await seedEmployee(org);
+    expect((await authed(request(app).patch(url), emp.token).send({ requirement_id: requirement.id })).status).toBe(403);
+
+    // null unlinks
+    const unlinked = await authed(request(app).patch(url), token).send({ requirement_id: null });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body.data).toMatchObject({ requirement: '', requirement_id: null, requirement_link: null });
+  });
+
   test('changing the billing terms adds a new rate version; the profile edit rejects Recruitment', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     await calendar(org, 'Ahmedabad Calendar');

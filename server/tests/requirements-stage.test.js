@@ -66,6 +66,23 @@ describe('requirement status machine', () => {
     expect(drop.body.data.is_locked).toBe(true);
   });
 
+  test('a dropped requirement can be reactivated with a reason, which lifts the lock', async () => {
+    const req = await createRequirement(salesToken, account.id);
+    await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({ to_status: 'dropped', reason: 'client paused' });
+
+    const noReason = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({ to_status: 'open' });
+    expect(noReason.status).toBe(400);
+
+    // any other move out of a dropped (locked) requirement is still refused
+    const other = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({ to_status: 'in_progress' });
+    expect(other.status).toBe(403);
+
+    const back = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({ to_status: 'open', reason: 'client is back' });
+    expect(back.status).toBe(200);
+    expect(back.body.data.status).toBe('open');
+    expect(back.body.data.is_locked).toBe(false);
+  });
+
   test('open -> in_progress -> on_hold -> in_progress is allowed', async () => {
     const req = await createRequirement(salesToken, account.id);
 

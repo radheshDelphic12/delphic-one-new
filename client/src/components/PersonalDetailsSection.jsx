@@ -18,6 +18,7 @@ const BANK_FIELDS = [
 const IDENTITY_FIELDS = [
   ['aadhaar_number', 'Aadhaar number'],
   ['pan_number', 'PAN'],
+  ['date_of_birth', 'Date of birth', 'date'],
 ];
 const EMERGENCY_FIELDS = [
   ['emergency_contact_name', 'Contact name'],
@@ -69,7 +70,7 @@ export default function PersonalDetailsSection({ membershipId, self = false }) {
   if (!details) return null;
 
   function openEdit() {
-    setForm(Object.fromEntries(ALL_FIELDS.map(([key]) => [key, details[key] || ''])));
+    setForm(Object.fromEntries(ALL_FIELDS.map(([key]) => [key, (key === 'date_of_birth' ? String(details[key] || '').slice(0, 10) : details[key]) || ''])));
   }
 
   async function save(event) {
@@ -92,7 +93,7 @@ export default function PersonalDetailsSection({ membershipId, self = false }) {
       <Pencil className="h-3.5 w-3.5" /> Update
     </button>
   );
-  const show = (key) => details[key] || <span className="text-tertiary-400">Not added</span>;
+  const show = (key) => (key === 'date_of_birth' && details[key] ? String(details[key]).slice(0, 10) : details[key]) || <span className="text-tertiary-400">Not added</span>;
   const who = self ? 'your' : `${details.person?.name || 'this employee'}'s`;
 
   return (

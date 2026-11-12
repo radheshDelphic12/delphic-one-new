@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useAuth } from '../lib/authContext.jsx';
-import { can } from '../lib/permissions.js';
+import { can, userCan } from '../lib/permissions.js';
+import { hasNeed, isAdminUser, isPermissionMode } from '../lib/access.js';
+import NoAccess from '../components/NoAccess.jsx';
 import AppLayout from '../components/layout/AppLayout.jsx';
 import HomePreloaderGate from '../components/HomePreloaderGate.jsx';
 import LoginPage from '../pages/auth/LoginPage.jsx';
@@ -16,11 +18,14 @@ import RequirementKanbanPage from '../pages/requirements/RequirementKanbanPage.j
 import ProfilesListPage from '../pages/profiles/ProfilesListPage.jsx';
 import ProfileDetailPage from '../pages/profiles/ProfileDetailPage.jsx';
 import SubmissionsListPage from '../pages/submissions/SubmissionsListPage.jsx';
+import RejectedCandidatesPage from '../pages/submissions/RejectedCandidatesPage.jsx';
 import SubmissionDetailPage from '../pages/submissions/SubmissionDetailPage.jsx';
 import ReportsPage from '../pages/reports/ReportsPage.jsx';
+import WebsitePage from '../pages/website/WebsitePage.jsx';
 import CalendarPage from '../pages/calendar/CalendarPage.jsx';
 import NotificationsPage from '../pages/notifications/NotificationsPage.jsx';
 import SettingsPage from '../pages/settings/SettingsPage.jsx';
+import HiringPage from '../pages/hiring/HiringPage.jsx';
 import PeopleHubPage from '../pages/people/PeopleHubPage.jsx';
 import EmployeeProfilePage from '../pages/people/EmployeeProfilePage.jsx';
 import TimeAttendanceHubPage from '../pages/time/TimeAttendanceHubPage.jsx';
@@ -28,6 +33,16 @@ import FinanceHubPage from '../pages/finance/FinanceHubPage.jsx';
 import PayrollHubPage from '../pages/payroll/PayrollHubPage.jsx';
 import GroupOverviewPage from '../pages/groupOverview/GroupOverviewPage.jsx';
 import GuestPortalPage from '../pages/guest/GuestPortalPage.jsx';
+import GuestProjectPage from '../pages/guest/GuestProjectPage.jsx';
+import OfficesPage from '../pages/offices/OfficesPage.jsx';
+import InternalJobsPage from '../pages/internalJobs/InternalJobsPage.jsx';
+import SpeakUpPage from '../pages/speakup/SpeakUpPage.jsx';
+import EmployeeFeedbackPage from '../pages/employeeFeedback/EmployeeFeedbackPage.jsx';
+import InterviewFeedbackPage from '../pages/interviewFeedback/InterviewFeedbackPage.jsx';
+import CareerRedirect from '../pages/public/CareerRedirect.jsx';
+import AssessmentTakePage from '../pages/public/AssessmentTakePage.jsx';
+import AiInterviewPage from '../pages/public/AiInterviewPage.jsx';
+import HiringSetupPage from '../pages/hiringSetup/HiringSetupPage.jsx';
 import AnalyticsPage from '../pages/analytics/AnalyticsPage.jsx';
 import FinancialsPage from '../pages/financials/FinancialsPage.jsx';
 import TradingHubPage from '../pages/trading/TradingHubPage.jsx';
@@ -35,6 +50,8 @@ import LeadsPage from '../pages/leads/LeadsPage.jsx';
 import ContractsPage from '../pages/contracts/ContractsPage.jsx';
 import ProjectsHubPage from '../pages/projects/ProjectsHubPage.jsx';
 import ProjectDetailPage from '../pages/projects/ProjectDetailPage.jsx';
+import PmProjectsPage from '../pages/pm/PmProjectsPage.jsx';
+import PmProjectDetailPage from '../pages/pm/PmProjectDetailPage.jsx';
 import ZephyrHomePage from '../pages/zephyr/ZephyrHomePage.jsx';
 import ZephyrSectionPage from '../pages/zephyr/ZephyrSectionPage.jsx';
 import ZephyrPartiesPage from '../pages/zephyr/ZephyrPartiesPage.jsx';
@@ -49,6 +66,7 @@ import ZephyrSettingsPage from '../pages/zephyr/ZephyrSettingsPage.jsx';
 import ZephyrPropertiesPage from '../pages/zephyr/ZephyrPropertiesPage.jsx';
 import ZephyrPropertyDetailPage from '../pages/zephyr/ZephyrPropertyDetailPage.jsx';
 import ZephyrRentPage from '../pages/zephyr/ZephyrRentPage.jsx';
+import ZephyrWagesPage from '../pages/zephyr/ZephyrWagesPage.jsx';
 import ZephyrTasksPage from '../pages/zephyr/ZephyrTasksPage.jsx';
 import { isZephyrOrg } from '../lib/zephyr/useZephyr.js';
 import GulatiHomePage from '../pages/gulati/GulatiHomePage.jsx';
@@ -77,7 +95,65 @@ import AcconcyTasksPage from '../pages/acconcy/AcconcyTasksPage.jsx';
 import AcconcyPeoplePage from '../pages/acconcy/AcconcyPeoplePage.jsx';
 import AcconcyMyWorkPage from '../pages/acconcy/AcconcyMyWorkPage.jsx';
 import AcconcySettingsPage from '../pages/acconcy/AcconcySettingsPage.jsx';
+import FoundationHomePage from '../pages/foundation/FoundationHomePage.jsx';
+import FoundationCampaignsPage from '../pages/foundation/FoundationCampaignsPage.jsx';
+import FoundationCampaignDetailPage from '../pages/foundation/FoundationCampaignDetailPage.jsx';
+import FoundationFundsPage from '../pages/foundation/FoundationFundsPage.jsx';
+import FoundationInitiativesPage from '../pages/foundation/FoundationInitiativesPage.jsx';
+import FoundationFinancialsPage from '../pages/foundation/FoundationFinancialsPage.jsx';
+import FoundationReportsPage from '../pages/foundation/FoundationReportsPage.jsx';
+import FoundationPeoplePage from '../pages/foundation/FoundationPeoplePage.jsx';
+import FoundationSettingsPage from '../pages/foundation/FoundationSettingsPage.jsx';
+import ZklyreraHomePage from '../pages/zklyrera/ZklyreraHomePage.jsx';
+import ZklyreraInvestmentsPage from '../pages/zklyrera/ZklyreraInvestmentsPage.jsx';
+import ZklyreraEntriesPage from '../pages/zklyrera/ZklyreraEntriesPage.jsx';
+import ZklyreraTransactionsPage from '../pages/zklyrera/ZklyreraTransactionsPage.jsx';
+import ZklyreraReportsPage from '../pages/zklyrera/ZklyreraReportsPage.jsx';
+import ZklyreraProjectionsPage from '../pages/zklyrera/ZklyreraProjectionsPage.jsx';
+import ZklyreraFinancialsPage from '../pages/zklyrera/ZklyreraFinancialsPage.jsx';
+import ZklyreraPeoplePage from '../pages/zklyrera/ZklyreraPeoplePage.jsx';
+import ZklyreraSettingsPage from '../pages/zklyrera/ZklyreraSettingsPage.jsx';
+import { isZklyreraOrg } from '../lib/zklyrera/useZklyrera.js';
+import ValterraHomePage from '../pages/valterra/ValterraHomePage.jsx';
+import NovarexHomePage from '../pages/novarex/NovarexHomePage.jsx';
+import NovarexOperationsPage from '../pages/novarex/NovarexOperationsPage.jsx';
+import NovarexProductsPage from '../pages/novarex/NovarexProductsPage.jsx';
+import NovarexPurchasingPage from '../pages/novarex/NovarexPurchasingPage.jsx';
+import NovarexStockPage from '../pages/novarex/NovarexStockPage.jsx';
+import NovarexSalesPage from '../pages/novarex/NovarexSalesPage.jsx';
+import NovarexLogisticsPage from '../pages/novarex/NovarexLogisticsPage.jsx';
+import NovarexInvoicesPage from '../pages/novarex/NovarexInvoicesPage.jsx';
+import NovarexReturnsPage from '../pages/novarex/NovarexReturnsPage.jsx';
+import NovarexFranchisePage from '../pages/novarex/NovarexFranchisePage.jsx';
+import ValterraSitesPage from '../pages/valterra/ValterraSitesPage.jsx';
+import NovarexOutletsPage from '../pages/novarex/NovarexOutletsPage.jsx';
+import ValterraSiteDetailPage from '../pages/valterra/ValterraSiteDetailPage.jsx';
+import NovarexOutletDetailPage from '../pages/novarex/NovarexOutletDetailPage.jsx';
+import ValterraInvestmentsPage from '../pages/valterra/ValterraInvestmentsPage.jsx';
+import NovarexInvestmentsPage from '../pages/novarex/NovarexInvestmentsPage.jsx';
+import ValterraEntriesPage from '../pages/valterra/ValterraEntriesPage.jsx';
+import NovarexEntriesPage from '../pages/novarex/NovarexEntriesPage.jsx';
+import ValterraTransactionsPage from '../pages/valterra/ValterraTransactionsPage.jsx';
+import NovarexTransactionsPage from '../pages/novarex/NovarexTransactionsPage.jsx';
+import ValterraReportsPage from '../pages/valterra/ValterraReportsPage.jsx';
+import NovarexReportsPage from '../pages/novarex/NovarexReportsPage.jsx';
+import ValterraProjectionsPage from '../pages/valterra/ValterraProjectionsPage.jsx';
+import NovarexProjectionsPage from '../pages/novarex/NovarexProjectionsPage.jsx';
+import ValterraFinancialsPage from '../pages/valterra/ValterraFinancialsPage.jsx';
+import NovarexFinancialsPage from '../pages/novarex/NovarexFinancialsPage.jsx';
+import ValterraPeoplePage from '../pages/valterra/ValterraPeoplePage.jsx';
+import NovarexPeoplePage from '../pages/novarex/NovarexPeoplePage.jsx';
+import ValterraSettingsPage from '../pages/valterra/ValterraSettingsPage.jsx';
+import NovarexSettingsPage from '../pages/novarex/NovarexSettingsPage.jsx';
+import { isValterraOrg } from '../lib/valterra/useValterra.js';
+import { isDelphicOneOrg } from '../lib/delphicone/useDelphicOne.js';
+import DelphicOneHomePage from '../pages/delphicone/DelphicOneHomePage.jsx';
+import DelphicOneCustomersPage from '../pages/delphicone/DelphicOneCustomersPage.jsx';
+import DelphicOneLeadsPage from '../pages/delphicone/DelphicOneLeadsPage.jsx';
+import DelphicOneInvoicesPage from '../pages/delphicone/DelphicOneInvoicesPage.jsx';
+import { isNovarexOrg } from '../lib/novarex/useNovarex.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
+import { isFoundationOrg } from '../lib/foundation/useFoundation.js';
 import { canSeeMeetingsCalendar } from '../lib/departments.js';
 
 function LoadingScreen() {
@@ -125,8 +201,18 @@ function HomePage() {
   if (isGulatiOrg(user)) return <Navigate to="/gulati" replace />;
   // Acconcy Finance is a standalone workspace with its own home.
   if (isAcconcyOrg(user)) return <Navigate to="/acconcy" replace />;
+  // Gulati Foundation is a standalone workspace with its own home.
+  if (isFoundationOrg(user)) return <Navigate to="/foundation" replace />;
+  // Zklyrera Spirits is a standalone workspace with its own home.
+  if (isZklyreraOrg(user)) return <Navigate to="/zklyrera" replace />;
+  // Valterra Resources is a standalone workspace with its own home.
+  // Novarex Pharmaceuticals is a standalone workspace with its own home.
+  if (isValterraOrg(user)) return <Navigate to="/valterra" replace />;
+  if (isNovarexOrg(user)) return <Navigate to="/novarex" replace />;
+  // Delphic One (the company that sells the product) is a standalone workspace with its own home.
+  if (isDelphicOneOrg(user)) return <Navigate to="/delphic-one" replace />;
   if (user?.worker_type === 'contractor') return <ContractorPortalPage />;
-  if (user?.role === 'admin') return <Navigate to={ADMIN_HOME} replace />;
+  if (isAdminUser(user)) return <Navigate to={ADMIN_HOME} replace />;
   return (
     <HomePreloaderGate>
       <DashboardPage />
@@ -134,11 +220,35 @@ function HomePage() {
   );
 }
 
-function RequirePermission({ capability, children }) {
+function RequirePermission({ capability, need, children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
+  // A company on permissions: a short "no access" page, never an empty one. `need` names the exact permission for the page.
+  if (isPermissionMode(user)) return (need ? hasNeed(user, need) : userCan(user, capability)) ? children : <NoAccess />;
   if (!can(user.role, capability)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/**
+ * /submissions/:id (an old or a new link): the full candidate page for people who can open submissions; everyone else - an interviewer who was
+ * sent the link, for example - lands on the Interview feedback page of that candidate, where they can give the feedback of the round they took.
+ */
+function SubmissionOrFeedback() {
+  const { user, loading } = useAuth();
+  const { id } = useParams();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  const allowed = isPermissionMode(user) ? hasNeed(user, 'submissions.view') : can(user.role, 'viewPipeline');
+  return allowed ? <SubmissionDetailPage /> : <Navigate to={`/interview-feedback/${id}`} replace />;
+}
+
+/** Only acts in a company on permissions: the page needs one of these permissions (a basic item or a grant). */
+function RequireAccess({ need, children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (isPermissionMode(user) && !hasNeed(user, need)) return <NoAccess />;
   return children;
 }
 
@@ -204,6 +314,51 @@ function RequireAcconcy({ children }) {
   return children;
 }
 
+/** The Valterra Resources workspace needs the `valterra` module on the ACTIVE company. */
+function RequireValterra({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isValterraOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Delphic One workspace needs the `delphic_one` module on the ACTIVE company. */
+function RequireDelphicOne({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isDelphicOneOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Novarex Pharmaceuticals workspace needs the `novarex` module on the ACTIVE company. */
+function RequireNovarex({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isNovarexOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Zklyrera Spirits workspace needs the `zklyrera` module on the ACTIVE company. */
+function RequireZklyrera({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isZklyreraOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
+/** The Gulati Foundation workspace needs the `foundation` module on the ACTIVE company. */
+function RequireFoundation({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isFoundationOrg(user)) return <Navigate to="/" replace />;
+  return children;
+}
+
 /** Group Overview is gated on the per-user is_group_superadmin flag, not a role capability. */
 function RequireGroupSuperadmin({ children }) {
   const { user, loading, isGroupSuperadmin } = useAuth();
@@ -218,6 +373,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
+      <Route path="/guest-project" element={<GuestProjectPage />} />
+      <Route path="/assessment/:token" element={<AssessmentTakePage />} />
+      <Route path="/ai-interview/:token" element={<AiInterviewPage />} />
+      <Route path="/careers" element={<CareerRedirect />} />
+      <Route path="/careers/:slug" element={<CareerRedirect />} />
       <Route
         path="/"
         element={
@@ -233,16 +393,16 @@ export default function App() {
         {/* Recruitment pipeline — Delphic Global only (see RequireMasterWorkspace), and only
             for roles with pipeline access (RequirePermission) — keeps a self-service-only
             role (e.g. employee/IT) off these pages even via a typed URL, not just the sidebar. */}
-        <Route path="accounts" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/accounts?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountBoardRedirect /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><AccountDetailPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="accounts/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><EditRedirect base="accounts" /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><Navigate to="/accounts?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountBoardRedirect /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><EditRedirect base="accounts" /></RequirePermission></RequireMasterWorkspace>} />
         <Route
           path="pipeline"
           element={
             <RequireMasterWorkspace>
-              <RequirePermission capability="viewPipeline">
+              <RequirePermission capability="viewPipeline" need="pipeline.view">
                 <PipelineShell />
               </RequirePermission>
             </RequireMasterWorkspace>
@@ -252,17 +412,18 @@ export default function App() {
           path="pipeline/:accountId"
           element={
             <RequireMasterWorkspace>
-              <RequirePermission capability="viewPipeline">
+              <RequirePermission capability="viewPipeline" need="pipeline.view">
                 <AccountPipelineBoardPage />
               </RequirePermission>
             </RequireMasterWorkspace>
           }
         />
-        <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="requirements/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><RequirementDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="hiring-setup" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.update"><HiringSetupPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><Navigate to="/requirements?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id/edit" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><EditRedirect base="requirements" /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementKanbanPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="requirements/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="requirements.view"><RequirementDetailPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route
           path="profiles"
           element={
@@ -285,9 +446,12 @@ export default function App() {
           }
         />
         <Route path="profiles/:id/edit" element={<RequireMasterWorkspace><EditRedirect base="profiles" /></RequireMasterWorkspace>} />
-        <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
-        <Route path="submissions/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline"><SubmissionDetailPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><SubmissionsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="rejected-candidates" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="rejected.view"><RejectedCandidatesPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="submissions.view"><Navigate to="/submissions?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="submissions/:id" element={<RequireMasterWorkspace><SubmissionOrFeedback /></RequireMasterWorkspace>} />
+        <Route path="interview-feedback" element={<RequireMasterWorkspace><RequireAccess need="basic.interview_feedback"><InterviewFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="interview-feedback/:submissionId" element={<RequireMasterWorkspace><RequireAccess need="basic.interview_feedback"><InterviewFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
         {/* Zephyr Infrastructure: standalone workspace. Module + role gating is enforced
             by the server; AppLayout keeps Zephyr users off every Delphic page. */}
         <Route path="zephyr" element={<RequireZephyr><ZephyrHomePage /></RequireZephyr>} />
@@ -301,6 +465,7 @@ export default function App() {
         <Route path="zephyr/properties" element={<RequireZephyr><ZephyrPropertiesPage /></RequireZephyr>} />
         <Route path="zephyr/properties/:id" element={<RequireZephyr><ZephyrPropertyDetailPage /></RequireZephyr>} />
         <Route path="zephyr/rent" element={<RequireZephyr><ZephyrRentPage /></RequireZephyr>} />
+        <Route path="zephyr/wages" element={<RequireZephyr><ZephyrWagesPage /></RequireZephyr>} />
         <Route path="zephyr/tasks" element={<RequireZephyr><ZephyrTasksPage /></RequireZephyr>} />
         <Route path="zephyr/leads" element={<RequireZephyr><ZephyrLeadsPage /></RequireZephyr>} />
         <Route path="zephyr/parties" element={<RequireZephyr><ZephyrPartiesPage /></RequireZephyr>} />
@@ -334,22 +499,90 @@ export default function App() {
         <Route path="acconcy/my-work" element={<RequireAcconcy><AcconcyMyWorkPage /></RequireAcconcy>} />
         <Route path="acconcy/settings" element={<RequireAcconcy><AcconcySettingsPage /></RequireAcconcy>} />
         <Route path="acconcy/*" element={<Navigate to="/acconcy" replace />} />
-        <Route path="calendar" element={<RequireMeetingsCalendar><CalendarPage /></RequireMeetingsCalendar>} />
+        <Route path="foundation" element={<RequireFoundation><FoundationHomePage /></RequireFoundation>} />
+        <Route path="foundation/campaigns" element={<RequireFoundation><FoundationCampaignsPage /></RequireFoundation>} />
+        <Route path="foundation/campaigns/:id" element={<RequireFoundation><FoundationCampaignDetailPage /></RequireFoundation>} />
+        <Route path="foundation/funds" element={<RequireFoundation><FoundationFundsPage /></RequireFoundation>} />
+        <Route path="foundation/initiatives" element={<RequireFoundation><FoundationInitiativesPage /></RequireFoundation>} />
+        <Route path="foundation/financials" element={<RequireFoundation><FoundationFinancialsPage /></RequireFoundation>} />
+        <Route path="foundation/reports" element={<RequireFoundation><FoundationReportsPage /></RequireFoundation>} />
+        <Route path="foundation/people" element={<RequireFoundation><FoundationPeoplePage /></RequireFoundation>} />
+        <Route path="foundation/settings" element={<RequireFoundation><FoundationSettingsPage /></RequireFoundation>} />
+        <Route path="foundation/*" element={<Navigate to="/foundation" replace />} />
+        <Route path="zklyrera" element={<RequireZklyrera><ZklyreraHomePage /></RequireZklyrera>} />
+        <Route path="zklyrera/investments" element={<RequireZklyrera><ZklyreraInvestmentsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/income" element={<RequireZklyrera><ZklyreraEntriesPage type="income" /></RequireZklyrera>} />
+        <Route path="zklyrera/expenses" element={<RequireZklyrera><ZklyreraEntriesPage type="expense" /></RequireZklyrera>} />
+        <Route path="zklyrera/salaries" element={<RequireZklyrera><ZklyreraEntriesPage type="salary" /></RequireZklyrera>} />
+        <Route path="zklyrera/transactions" element={<RequireZklyrera><ZklyreraTransactionsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/reports" element={<RequireZklyrera><ZklyreraReportsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/projections" element={<RequireZklyrera><ZklyreraProjectionsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/financials" element={<RequireZklyrera><ZklyreraFinancialsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/people" element={<RequireZklyrera><ZklyreraPeoplePage /></RequireZklyrera>} />
+        <Route path="zklyrera/settings" element={<RequireZklyrera><ZklyreraSettingsPage /></RequireZklyrera>} />
+        <Route path="zklyrera/*" element={<Navigate to="/zklyrera" replace />} />
+        <Route path="delphic-one" element={<RequireDelphicOne><DelphicOneHomePage /></RequireDelphicOne>} />
+        <Route path="delphic-one/customers" element={<RequireDelphicOne><DelphicOneCustomersPage /></RequireDelphicOne>} />
+        <Route path="delphic-one/leads" element={<RequireDelphicOne><DelphicOneLeadsPage /></RequireDelphicOne>} />
+        <Route path="delphic-one/invoices" element={<RequireDelphicOne><DelphicOneInvoicesPage /></RequireDelphicOne>} />
+        <Route path="valterra" element={<RequireValterra><ValterraHomePage /></RequireValterra>} />
+        <Route path="novarex" element={<RequireNovarex><NovarexHomePage /></RequireNovarex>} />
+        <Route path="valterra/sites" element={<RequireValterra><ValterraSitesPage /></RequireValterra>} />
+        <Route path="novarex/operations" element={<RequireNovarex><NovarexOperationsPage /></RequireNovarex>} />
+        <Route path="novarex/products" element={<RequireNovarex><NovarexProductsPage /></RequireNovarex>} />
+        <Route path="novarex/purchasing" element={<RequireNovarex><NovarexPurchasingPage /></RequireNovarex>} />
+        <Route path="novarex/stock" element={<RequireNovarex><NovarexStockPage /></RequireNovarex>} />
+        <Route path="novarex/sales" element={<RequireNovarex><NovarexSalesPage /></RequireNovarex>} />
+        <Route path="novarex/logistics" element={<RequireNovarex><NovarexLogisticsPage /></RequireNovarex>} />
+        <Route path="novarex/invoices" element={<RequireNovarex><NovarexInvoicesPage /></RequireNovarex>} />
+        <Route path="novarex/returns" element={<RequireNovarex><NovarexReturnsPage /></RequireNovarex>} />
+        <Route path="novarex/franchise" element={<RequireNovarex><NovarexFranchisePage /></RequireNovarex>} />
+        <Route path="novarex/outlets" element={<RequireNovarex><NovarexOutletsPage /></RequireNovarex>} />
+        <Route path="valterra/sites/:id" element={<RequireValterra><ValterraSiteDetailPage /></RequireValterra>} />
+        <Route path="novarex/outlets/:id" element={<RequireNovarex><NovarexOutletDetailPage /></RequireNovarex>} />
+        <Route path="valterra/investments" element={<RequireValterra><ValterraInvestmentsPage /></RequireValterra>} />
+        <Route path="novarex/investments" element={<RequireNovarex><NovarexInvestmentsPage /></RequireNovarex>} />
+        <Route path="valterra/income" element={<RequireValterra><ValterraEntriesPage type="income" /></RequireValterra>} />
+        <Route path="novarex/income" element={<RequireNovarex><NovarexEntriesPage type="income" /></RequireNovarex>} />
+        <Route path="valterra/expenses" element={<RequireValterra><ValterraEntriesPage type="expense" /></RequireValterra>} />
+        <Route path="novarex/expenses" element={<RequireNovarex><NovarexEntriesPage type="expense" /></RequireNovarex>} />
+        <Route path="valterra/salaries" element={<RequireValterra><ValterraEntriesPage type="salary" /></RequireValterra>} />
+        <Route path="novarex/salaries" element={<RequireNovarex><NovarexEntriesPage type="salary" /></RequireNovarex>} />
+        <Route path="valterra/transactions" element={<RequireValterra><ValterraTransactionsPage /></RequireValterra>} />
+        <Route path="novarex/transactions" element={<RequireNovarex><NovarexTransactionsPage /></RequireNovarex>} />
+        <Route path="valterra/reports" element={<RequireValterra><ValterraReportsPage /></RequireValterra>} />
+        <Route path="novarex/reports" element={<RequireNovarex><NovarexReportsPage /></RequireNovarex>} />
+        <Route path="valterra/projections" element={<RequireValterra><ValterraProjectionsPage /></RequireValterra>} />
+        <Route path="novarex/projections" element={<RequireNovarex><NovarexProjectionsPage /></RequireNovarex>} />
+        <Route path="valterra/financials" element={<RequireValterra><ValterraFinancialsPage /></RequireValterra>} />
+        <Route path="novarex/financials" element={<RequireNovarex><NovarexFinancialsPage /></RequireNovarex>} />
+        <Route path="valterra/people" element={<RequireValterra><ValterraPeoplePage /></RequireValterra>} />
+        <Route path="novarex/people" element={<RequireNovarex><NovarexPeoplePage /></RequireNovarex>} />
+        <Route path="valterra/settings" element={<RequireValterra><ValterraSettingsPage /></RequireValterra>} />
+        <Route path="novarex/settings" element={<RequireNovarex><NovarexSettingsPage /></RequireNovarex>} />
+        <Route path="valterra/*" element={<Navigate to="/valterra" replace />} />
+        <Route path="novarex/*" element={<Navigate to="/novarex" replace />} />
+        <Route path="calendar" element={<RequireMeetingsCalendar><RequireAccess need="basic.calendar"><CalendarPage /></RequireAccess></RequireMeetingsCalendar>} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route
           path="notifications/preferences"
           element={<Navigate to="/settings?tab=notifications" replace />}
         />
         <Route path="settings" element={<SettingsPage />} />
-        <Route path="people" element={<PeopleHubPage />} />
-        <Route path="people/:id" element={<EmployeeProfilePage />} />
+        <Route path="hiring" element={<HiringPage />} />
+        <Route path="people" element={<RequireAccess need={['basic.people_directory', 'basic.org_chart', 'basic.policies', 'people.view', 'users.view', 'allocations.view', 'assets.view', 'hr_settings.view']}><PeopleHubPage /></RequireAccess>} />
+        <Route path="offices" element={<RequireGroupSuperadmin><OfficesPage /></RequireGroupSuperadmin>} />
+        <Route path="internal-jobs" element={<RequireMasterWorkspace><RequireAccess need="basic.internal_jobs"><InternalJobsPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="speak-up" element={<RequireMasterWorkspace><RequireAccess need="basic.whistleblower"><SpeakUpPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="employee-feedback" element={<RequireMasterWorkspace><RequireAccess need="basic.employee_feedback"><EmployeeFeedbackPage /></RequireAccess></RequireMasterWorkspace>} />
+        <Route path="people/:id" element={<RequireAccess need="basic.people_directory"><EmployeeProfilePage /></RequireAccess>} />
         {/* Merged into the People / Time & Attendance hubs — keep old links working. */}
         <Route path="people/settings" element={<Navigate to="/people?section=hr-settings" replace />} />
         <Route path="users" element={<Navigate to="/people?section=users" replace />} />
-        <Route path="attendance" element={<TimeAttendanceHubPage />} />
+        <Route path="attendance" element={<RequireAccess need={['basic.attendance', 'basic.leave', 'basic.timesheet']}><TimeAttendanceHubPage /></RequireAccess>} />
         <Route path="leave" element={<Navigate to="/attendance?section=leave" replace />} />
-        <Route path="finance" element={<FinanceHubPage />} />
-        <Route path="payroll" element={<PayrollHubPage />} />
+        <Route path="finance" element={<RequireAccess need={['basic.expenses', 'finance.view', 'billing.view', 'analytics.view']}><FinanceHubPage /></RequireAccess>} />
+        <Route path="payroll" element={<RequireAccess need={['basic.payslips', 'payroll.view']}><PayrollHubPage /></RequireAccess>} />
         <Route path="analytics" element={<RequireMasterWorkspace><RequirePermission capability="viewAnalytics"><AnalyticsPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="financials" element={<RequireMasterWorkspace><RequirePermission capability="viewFinancials"><FinancialsPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="trading" element={<RequireModule module="trading" capability="viewTrading"><TradingHubPage /></RequireModule>} />
@@ -357,6 +590,8 @@ export default function App() {
         <Route path="contracts" element={<RequireModule module="contracts" capability="viewContracts"><ContractsPage /></RequireModule>} />
         <Route path="projects" element={<RequireModule module="projects" capability="viewProjects"><ProjectsHubPage /></RequireModule>} />
         <Route path="projects/:id" element={<RequireModule module="projects" capability="viewProjects"><ProjectDetailPage /></RequireModule>} />
+        <Route path="pm" element={<RequireMasterWorkspace><PmProjectsPage /></RequireMasterWorkspace>} />
+        <Route path="pm/projects/:id" element={<RequireMasterWorkspace><PmProjectDetailPage /></RequireMasterWorkspace>} />
         <Route
           path="group-overview"
           element={
@@ -383,6 +618,7 @@ export default function App() {
             </RequireMasterWorkspace>
           }
         />
+        <Route path="website" element={<RequireMasterWorkspace><RequirePermission capability="manageWebsite"><WebsitePage /></RequirePermission></RequireMasterWorkspace>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

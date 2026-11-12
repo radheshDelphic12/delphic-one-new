@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -51,6 +52,8 @@ function hydrate(round) {
     result: round.result || 'pending',
     feedback: round.feedback || '',
     rating: round.rating != null ? String(round.rating) : '',
+    // a cancelled round is reopened by an edit unless the editor unticks it
+    reopen: round.status === 'cancelled',
   };
 }
 
@@ -64,6 +67,7 @@ function buildPayload(form) {
     result: form.result || 'pending',
     feedback: form.feedback.trim() || undefined,
     rating: form.rating === '' ? undefined : Number(form.rating),
+    reopen: form.reopen ? true : undefined,
   };
 
   if (isInternalRoundType(form.round_type)) {
@@ -195,6 +199,7 @@ export default function InterviewRoundsPanel({ submissionId, submission, rounds,
                         {meta.label}
                       </span>
                       {r.round_name ? ` - ${r.round_name}` : ''}
+                      {r.status === 'cancelled' && <span className="ml-2 rounded-full bg-tertiary-100 px-2 py-0.5 text-xs font-medium text-tertiary-600">Cancelled</span>}
                     </p>
                     <p className="mt-1.5 text-xs text-tertiary-600">
                       <span className="font-medium text-sky-800">Interview:</span>{' '}
@@ -220,8 +225,8 @@ export default function InterviewRoundsPanel({ submissionId, submission, rounds,
                     </span>
                     {r.rating != null && <span className="text-xs text-amber-700">★ {r.rating}</span>}
                     {!locked && canManageInterviewRound(submission, r.round_type, user) && (
-                      <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => openEdit(r)}>
-                        Edit
+                      <button type="button" title="Edit" aria-label="Edit" className="rounded p-1.5 text-tertiary-500 hover:bg-primary-50" onClick={() => openEdit(r)}>
+                        <Pencil className="h-4 w-4" />
                       </button>
                     )}
                     {userCan(user, 'deleteRecords') && (
@@ -259,6 +264,12 @@ export default function InterviewRoundsPanel({ submissionId, submission, rounds,
         }
       >
         <div className="space-y-3">
+          {editingId && form.reopen !== undefined && rounds.find((r) => r.id === editingId)?.status === 'cancelled' && (
+            <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <input type="checkbox" className="mt-0.5" checked={Boolean(form.reopen)} onChange={(e) => updateField('reopen', e.target.checked)} />
+              <span><b>This interview was cancelled.</b> Keep this ticked to put it back on the calendar when you save.</span>
+            </label>
+          )}
           {!editingId && (
             <label className="block text-xs font-medium text-tertiary-600">
               Round type *

@@ -28,7 +28,7 @@ async function seed() {
   const adminToken = (await loginAs(admin)).access_token;
 
   const user = await createUser({ role: 'recruiter' });
-  const membership = await createOrgMembership(user.id, org.id, { role: 'recruiter' });
+  const membership = await createOrgMembership(user.id, org.id, { role: 'recruiter', joined_at: new Date('2020-01-01T00:00:00Z') });
   const empToken = (await loginAs(user)).access_token;
 
   const usClient = await prisma.account.create({ data: { type: 'client', name: 'US Client', stage: 'active', owner_id: admin.id, org_id: org.id } });

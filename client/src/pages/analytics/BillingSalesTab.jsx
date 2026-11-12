@@ -121,6 +121,8 @@ export default function BillingSalesTab() {
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [adjustFor, setAdjustFor] = useState(null);
   const [invoicesKey, setInvoicesKey] = useState(0);
+  const [picked, setPicked] = useState([]);
+  const { pushInfo } = useAlerts();
   const [projects, setProjects] = useState([]);
   const memberOptions = useOrgMembershipOptions(true);
 
@@ -142,6 +144,14 @@ export default function BillingSalesTab() {
   }, [period, filters]);
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/analytics/billing', { params }).then((r) => r.data.data), { deps: [JSON.stringify(params)], intervalMs: 60000 });
   const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
+
+  // Tick several contracts (one customer) -> a single invoice with one line per contract.
+  function generateCombined() {
+    const rows = (data?.projects || []).filter((r) => picked.includes(r.id));
+    if (rows.length < 2) { pushInfo?.('Tick at least two contracts to make one invoice'); return; }
+    if (rows.some((r) => !r.supported || !r.billing_type || r.billing_type === 'one_time')) { pushInfo?.('Only monthly / hourly contracts with a billing rate can be combined; fixed-bid contracts are invoiced one at a time'); return; }
+    setInvoiceFor({ account_ids: rows.map((r) => r.project.id), period_month: rows[0].period_month, period_year: rows[0].period_year });
+  }
 
   const projectCols = [
     { key: 'project', header: 'Project / contract', render: (r) => (
@@ -266,7 +276,7 @@ export default function BillingSalesTab() {
 
       <section className="space-y-2">
         <h2 className="font-heading text-sm font-semibold text-tertiary-900">Projects &amp; contracts <span className="font-normal text-tertiary-500">— generate each project&apos;s invoice, then lock its billing; open one to review its dates</span></h2>
-        <DataTable columns={projectCols} rows={data?.projects || []} loading={loading} emptyLabel="No projects match these filters" />
+        <DataTable columns={projectCols} rows={data?.projects || []} loading={loading} emptyLabel="No projects match these filters" selectable selectedIds={picked} onSelectionChange={setPicked} actions={[{ key: 'combined', label: `Generate one invoice for ${picked.length} contracts`, onClick: generateCombined }]} />
       </section>
 
       <section className="space-y-2">
@@ -282,7 +292,7 @@ export default function BillingSalesTab() {
         onInvoice={setInvoiceFor}
       />
       <BillingAdjustmentDrawer target={adjustFor} onClose={() => setAdjustFor(null)} onChanged={() => { refresh?.(); setInvoicesKey((k) => k + 1); }} />
-      <ClientInvoiceDrawer open={Boolean(invoiceFor)} initial={invoiceFor || {}} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
+      <ClientInvoiceDrawer open={Boolean(invoiceFor)} initial={invoiceFor || {}} onClose={() => setInvoiceFor(null)} onGenerated={() => { setInvoicesKey((k) => k + 1); setPicked([]); refresh?.(); }} />
     </div>
   );
 }

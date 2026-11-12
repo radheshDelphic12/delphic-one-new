@@ -91,6 +91,21 @@ describe('IT timesheet — multi-project daily log (Date / Project / Hours / Des
     expect(second.status).toBe(422);
   });
 
+  test('a long task description (up to 5000 characters) is saved in full; more than that is refused', async () => {
+    const org = await createOrg();
+    const { token, membership } = await seedItUser(org);
+    const project = await createActiveClientAccount(membership.person_id);
+    await prisma.account.update({ where: { id: project.id }, data: { org_id: org.id } });
+    await assign(org, membership, project);
+
+    const long = `- ${'detail '.repeat(700)}`.slice(0, 4800);
+    const saved = await authed(request(app).post('/api/v1/timesheets/entries'), token).send({ date: '2026-07-03', account_id: project.id, hours: 4, notes: long });
+    expect(saved.status).toBe(201);
+    expect((await prisma.timesheetEntry.findFirst({ where: { org_membership_id: membership.id, date: new Date('2026-07-03T00:00:00.000Z') } })).notes).toHaveLength(4800);
+    const tooLong = await authed(request(app).post('/api/v1/timesheets/entries'), token).send({ date: '2026-07-06', account_id: project.id, hours: 2, notes: 'x'.repeat(5001) });
+    expect(tooLong.status).toBe(422);
+  });
+
   test('a non-IT employee can open their own project log and export', async () => {
     const org = await createOrg();
     const { token } = await seedNonItUser(org);

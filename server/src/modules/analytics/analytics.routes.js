@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -11,7 +12,7 @@ const records = require('../calculations/records.service');
 // money view (salaries, margins, vendor payables). Master-workspace only —
 // part of the recruitment/strategic layer other group companies don't use.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, requireMasterWorkspace, authorize('admin'));
+router.use(authenticate, requireOrgMembership, requireMasterWorkspace, canMethod('financials', 'admin'));
 
 const orgId = (req) => req.user.org_id;
 
@@ -31,6 +32,10 @@ router.get('/vendor-payments', asyncHandler(async (req, res) => ok(res, await li
 router.get('/vendor-payments/records', asyncHandler(async (req, res) => ok(res, await live.vendorPaymentRecords(orgId(req), live.monthSchema.partial().parse(req.query)))));
 // Expense records of a month (approved claims + group charges), each lockable.
 router.get('/expense-records', asyncHandler(async (req, res) => ok(res, await records.expenseRecords(orgId(req), live.monthSchema.parse(req.query)))));
+// Earnings and profit up to today (revenue, salary earned so far, expenses, profit), month by month.
+router.get('/earnings-profit', asyncHandler(async (req, res) => ok(res, await live.earningsProfit(orgId(req), live.earningsQuerySchema.parse(req.query)))));
+// Earnings (resource revenue) added up per team, for the same months.
+router.get('/earnings-by-team', asyncHandler(async (req, res) => ok(res, await live.earningsByTeam(orgId(req), live.earningsQuerySchema.parse(req.query)))));
 router.get('/financial-month', asyncHandler(async (req, res) => ok(res, await live.financialMonthLive(orgId(req), live.monthSchema.parse(req.query)))));
 
 // --- Previous Live Analytics reports. No longer shown in the UI (replaced by

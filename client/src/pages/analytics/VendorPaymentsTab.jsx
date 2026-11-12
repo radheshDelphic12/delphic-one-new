@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Building2, IndianRupee, Printer, Truck, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
-import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useVendorAccountOptions } from '../../lib/lookups.js';
@@ -15,9 +14,11 @@ import StatusBadge from '../../components/finance/StatusBadge.jsx';
 import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import { inr } from '../../components/finance/CalculationLockBar.jsx';
-import { amountText, dateText, printVendorInvoice, vendorLineText } from '../../components/finance/financePrint.js';
+import { amountText, dateText, vendorLineText } from '../../components/finance/financePrint.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import { GenerateInvoiceButton } from './ClientInvoices.jsx';
 import { cleanParams } from './AttendanceSalaryTab.jsx';
+import { BillToFields, billToPayload } from './ClientInvoices.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -29,6 +30,8 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
   const { pushError, pushSuccess } = useAlerts();
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState({ invoice_number: '', invoice_date: today(), notes: '' });
+  const [billTo, setBillTo] = useState(null);
+  const [amounts, setAmounts] = useState({});
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -36,11 +39,14 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     if (!target) return undefined;
     let alive = true;
     setPreview(null);
+    setAmounts({});
     setError('');
     apiClient.get('/billing/vendor-invoices/preview', { params: { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year } })
       .then(({ data }) => {
         if (!alive) return;
         setPreview(data.data);
+        setAmounts(Object.fromEntries((data.data.projects || []).map((p) => [`${p.project.id}|${p.currency}`, String(p.amount)])));
+        setBillTo({ ...data.data.bill_to, save: true });
         setForm({ invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || today(), notes: '' });
       })
       .catch((err) => { if (alive) setError(apiErrorMessage(err, 'Nothing to invoice for this vendor')); });
@@ -54,7 +60,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null });
+      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, amounts: (preview?.projects || []).map((p) => ({ project_id: p.project.id, currency: p.currency, amount: Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) })), ...billToPayload(billTo) });
       pushSuccess?.(`Vendor invoice ${form.invoice_number} generated`);
       onGenerated?.();
       onClose();
@@ -75,7 +81,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="vendor-invoice-form" className="btn-primary" disabled={saving || !preview || !form.invoice_number.trim()}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="vendor-invoice-form" className="btn-primary" disabled={saving || !preview || !form.invoice_number.trim() || (preview.projects || []).some((p) => !(Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) > 0))}>{saving ? 'Saving…' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
@@ -90,6 +96,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
+          {billTo && <BillToFields value={billTo} onChange={setBillTo} partyLabel="vendor" />}
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Notes <span className="font-normal text-tertiary-400">(optional)</span>
             <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
@@ -105,7 +112,13 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
           <section key={`${p.project.id}|${p.currency}`} className="space-y-1 rounded-xl border border-tertiary-100 bg-tertiary-50/60 p-3 text-sm">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span><span className="font-medium text-tertiary-900">{p.project.name}</span>{p.project.code && <span className="text-xs text-tertiary-500"> · {p.project.code}</span>}<span className="block text-xs text-tertiary-500">Client: {p.project.client_name || '—'}</span></span>
-              <span className="text-right font-semibold tabular-nums">{amountText(p.amount, p.currency)}{p.currency !== 'INR' && <span className="block text-xs font-normal text-tertiary-500">{p.amount_inr === null ? `No ${p.currency} exchange rate` : `≈ ${amountText(p.amount_inr, 'INR')} @ ₹${p.exchange_rate}`}</span>}</span>
+              <span className="text-right font-semibold tabular-nums">
+                <span className="inline-flex items-center gap-1">
+                  <input type="number" step="0.01" min="0" value={amounts[`${p.project.id}|${p.currency}`] ?? p.amount} onChange={(e) => setAmounts((a) => ({ ...a, [`${p.project.id}|${p.currency}`]: e.target.value }))} className="w-32 rounded-xl border px-2 py-1 text-right text-sm" aria-label={`Amount for ${p.project.name}`} />
+                  <span className="text-xs font-normal text-tertiary-500">{p.currency}</span>
+                </span>
+                {Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) !== Number(p.calculated_amount ?? p.amount) && <span className="block text-xs font-normal text-warning-700">Edited · calculated {amountText(p.calculated_amount ?? p.amount, p.currency)}</span>}
+                {p.currency !== 'INR' && <span className="block text-xs font-normal text-tertiary-500">{p.amount_inr === null ? `No ${p.currency} exchange rate` : `≈ ${amountText(p.amount_inr, 'INR')} @ ₹${p.exchange_rate}`}</span>}</span>
             </div>
             <ul className="space-y-0.5 text-xs text-tertiary-700">
               {p.contractors.map((c) => <li key={c.org_membership_id}><span className="font-medium">{c.contractor}</span>: {vendorLineText(c, p.currency)} · {c.approved_hours}h logged</li>)}
@@ -118,6 +131,114 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
 }
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
+
+/**
+ * Live Analytics > Vendors: an admin's + / - tweak to what a vendor is owed for a month (same idea as the billing
+ * adjustments on Billing & Sales). The contractors' calculated amounts stay the source of truth; each adjustment is a
+ * separate line with a mandatory reason, tied to one of the vendor's projects, in that project's vendor currency.
+ * It is added to the vendor's amount, so the total, the lock, the vendor payment and the invoice follow it.
+ */
+function VendorAdjustmentDrawer({ target, onClose, onChanged }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const [data, setData] = useState({ items: [], totals: {}, projects: [] });
+  const [form, setForm] = useState({ direction: 'add', amount: '', reason: '', key: '' });
+  const [saving, setSaving] = useState(false);
+  const params = target ? { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year } : null;
+
+  function load() {
+    apiClient.get('/billing/vendor-adjustments', { params })
+      .then(({ data: res }) => {
+        setData(res.data);
+        setForm((f) => ({ ...f, key: f.key || (res.data.projects[0] ? `${res.data.projects[0].project.id}|${res.data.projects[0].currency}` : '') }));
+      })
+      .catch((err) => pushError(apiErrorMessage(err, 'Failed to load adjustments'), 'Something went wrong'));
+  }
+
+  useEffect(() => {
+    if (!target) return;
+    setForm({ direction: 'add', amount: '', reason: '', key: '' });
+    load();
+  }, [target?.vendor?.id, target?.period_month, target?.period_year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!target) return <Drawer open={false} title="" onClose={onClose} />;
+  const chosen = data.projects.find((p) => `${p.project.id}|${p.currency}` === form.key);
+  const signed = (form.direction === 'subtract' ? -1 : 1) * Number(form.amount || 0);
+
+  async function add(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await apiClient.post('/billing/vendor-adjustments', { ...params, account_id: chosen.project.id, amount: signed, reason: form.reason.trim() });
+      pushSuccess?.('Adjustment added');
+      setForm((f) => ({ ...f, direction: 'add', amount: '', reason: '' }));
+      load();
+      onChanged?.();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to add the adjustment'), 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(item) {
+    try {
+      await apiClient.delete(`/billing/vendor-adjustments/${item.id}`);
+      load();
+      onChanged?.();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to remove the adjustment'), 'Something went wrong');
+    }
+  }
+
+  return (
+    <Drawer open title={`Adjust vendor amount · ${target.vendor.name}`} onClose={onClose} size="lg">
+      <div className="space-y-4 text-sm">
+        <p className="text-xs text-tertiary-500">
+          {periodLabel(target)} · calculated from the contractors&apos; approved work. Add a + or − tweak; it is added to what the vendor is owed (total, lock, vendor payment and invoice) and audited. A locked vendor is flagged for review.
+        </p>
+        <ul className="divide-y divide-tertiary-100 rounded-xl border border-tertiary-100">
+          {data.items.length === 0 && <li className="px-3 py-2 text-xs text-tertiary-400">No adjustments for this vendor this month.</li>}
+          {data.items.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-2 px-3 py-2">
+              <span>
+                <span className={`font-medium tabular-nums ${a.amount < 0 ? 'text-danger-700' : 'text-success-700'}`}>{a.amount > 0 ? '+' : ''}{amountText(a.amount, a.currency)}</span>
+                <span className="block text-xs text-tertiary-500">{a.project_name} · {a.reason}{a.creator?.name ? ` · ${a.creator.name}` : ''}</span>
+              </span>
+              <button type="button" className="btn-ghost text-xs" onClick={() => remove(a)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+        {Object.keys(data.totals).length > 0 && <p className="text-right font-semibold text-tertiary-900">Adjustments: {Object.entries(data.totals).map(([cur, amt]) => `${amt > 0 ? '+' : ''}${amountText(amt, cur)}`).join(' · ')}</p>}
+        <form onSubmit={add} className="grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/60 p-3 sm:grid-cols-3">
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-3">
+            Project
+            <select required value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              {data.projects.map((p) => <option key={`${p.project.id}|${p.currency}`} value={`${p.project.id}|${p.currency}`}>{[p.project.client_name, p.project.name].filter(Boolean).join(' · ')} ({p.currency})</option>)}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Type
+            <select value={form.direction} onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
+              <option value="add">Add (+)</option>
+              <option value="subtract">Deduct (−)</option>
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Amount ({chosen?.currency || '—'})
+            <input required type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600 sm:col-span-3">
+            Reason (required)
+            <input required minLength={3} maxLength={500} value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder="e.g. Agreed deduction, extra support, advance adjusted" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <div className="sm:col-span-3">
+            <button type="submit" className="btn-primary" disabled={saving || !chosen || !(Number(form.amount) > 0) || form.reason.trim().length < 3}>{saving ? 'Saving…' : 'Add adjustment'}</button>
+          </div>
+        </form>
+      </div>
+    </Drawer>
+  );
+}
 
 /**
  * Edit a vendor invoice (all its project rows): number, date and notes apply to
@@ -208,7 +329,6 @@ function VendorInvoiceEditDrawer({ group, onClose, onSaved }) {
 
 /** Generated vendor invoices of the month, one line per vendor invoice. */
 function VendorInvoicesTable({ period, refreshKey, onEdit }) {
-  const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/billing/vendor-invoices', { params: period }).then((r) => r.data.data), { deps: [period.period_month, period.period_year, refreshKey] });
   // Admin delete of a whole vendor invoice (all its project rows), with a reason (audited).
@@ -226,6 +346,7 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
       pushError(apiErrorMessage(err, 'Failed to delete the vendor invoice'), 'Something went wrong');
     }
   }
+  const [selected, setSelected] = useState([]);
   const groups = useMemo(() => {
     const map = new Map();
     for (const r of data || []) {
@@ -250,12 +371,18 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
         <div className="flex flex-wrap gap-1">
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(g)}>Edit</button>}
           <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => removeGroup(g)}>Delete</button>
-          {g.rows[0].generated && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => { if (!printVendorInvoice(g.rows, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked'); }}><Printer className="h-3.5 w-3.5" /> Download</button>}
+          {g.rows[0].generated && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => downloadFile('/billing/vendor-invoices/pdf', { vendor_account_id: g.rows[0].vendor_account_id, period_month: g.rows[0].period_month, period_year: g.rows[0].period_year }, `${g.rows[0].invoice_number || 'vendor-invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'))}><Printer className="h-3.5 w-3.5" /> Download</button>}
         </div>
       ),
     },
   ];
-  return <DataTable columns={columns} rows={groups} loading={loading} emptyLabel={`No vendor invoices for ${periodLabel(period)} yet`} />;
+  function downloadSelected() {
+    const chosen = groups.filter((g) => selected.includes(g.id) && g.rows[0].generated);
+    if (!chosen.length) { pushError('Tick at least one generated vendor invoice', 'Nothing to download'); return; }
+    downloadFilePost('/billing/vendor-invoices/pdf', { groups: chosen.map((g) => ({ vendor_account_id: g.rows[0].vendor_account_id, period_month: g.rows[0].period_month, period_year: g.rows[0].period_year })) }, 'vendor-invoices.pdf')
+      .catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
+  }
+  return <DataTable columns={columns} rows={groups} loading={loading} emptyLabel={`No vendor invoices for ${periodLabel(period)} yet`} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />;
 }
 
 /**
@@ -271,6 +398,7 @@ export default function VendorPaymentsTab() {
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [invoicesKey, setInvoicesKey] = useState(0);
   const [editGroup, setEditGroup] = useState(null);
+  const [adjustFor, setAdjustFor] = useState(null);
   const vendorOptions = useVendorAccountOptions(true);
   const params = useMemo(() => cleanParams({ ...period, vendor_account_id: vendorId }), [period, vendorId]);
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/analytics/vendor-payments', { params }).then((r) => r.data.data), { deps: [JSON.stringify(params)], intervalMs: 60000 });
@@ -298,10 +426,12 @@ export default function VendorPaymentsTab() {
     { key: 'amount', header: 'Amount', render: (v) => (
       <span className="tabular-nums">
         <span className="font-medium">{inr(v.amount_inr)}</span>
+        {v.adjustment_inr ? <span className="block text-xs text-tertiary-500" title="Admin adjustment included in the amount">incl. {v.adjustment_inr > 0 ? '+' : ''}{inr(v.adjustment_inr)} adjustment</span> : null}
         {Object.entries(v.by_currency || {}).filter(([cur]) => cur !== 'INR').map(([cur, amt]) => <span key={cur} className="block text-xs text-tertiary-500">{inr(amt, cur)}</span>)}
       </span>
     ) },
     { key: 'pending', header: 'Unapproved entries', render: (v) => (v.pending_entries || v.rejected_entries ? <StatusBadge status={v.rejected_entries ? 'rejected' : 'pending'} label={`${v.pending_entries} pending · ${v.rejected_entries} rejected`} size="xs" /> : <StatusBadge status="approved" label="All approved" size="xs" />) },
+    { key: 'adjust', header: 'Adjust', render: (v) => (v.vendor ? <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setAdjustFor({ vendor: v.vendor, ...period })}>± Adjust</button> : <span className="text-xs text-tertiary-400">—</span>) },
     { key: 'lock', header: 'Lock', render: (v) => (v.vendor ? <RecordLockButton kind="vendor_bill" scopeKey={v.vendor.id} period={period} lock={v.lock} label={`${v.vendor.name} billing`} onChanged={changed} /> : '—') },
     { key: 'invoice', header: 'Invoice', render: (v) => (v.vendor ? <GenerateInvoiceButton compact onClick={() => setInvoiceFor({ vendor: v.vendor, ...period })} /> : '—') },
   ];
@@ -342,6 +472,7 @@ export default function VendorPaymentsTab() {
         <h2 className="flex items-center gap-2 font-heading text-sm font-semibold text-tertiary-900"><Truck className="h-4 w-4" /> Vendor payments generated from locked vendors</h2>
         <DataTable columns={recordCols} rows={records.data || []} loading={records.loading} emptyLabel="Lock a vendor to generate its pending payment" />
       </section>
+      <VendorAdjustmentDrawer target={adjustFor} onClose={() => setAdjustFor(null)} onChanged={() => { changed(); setInvoicesKey((k) => k + 1); }} />
       <VendorInvoiceDrawer target={invoiceFor} onClose={() => setInvoiceFor(null)} onGenerated={() => setInvoicesKey((k) => k + 1)} />
       <VendorInvoiceEditDrawer group={editGroup} onClose={() => setEditGroup(null)} onSaved={() => setInvoicesKey((k) => k + 1)} />
     </div>

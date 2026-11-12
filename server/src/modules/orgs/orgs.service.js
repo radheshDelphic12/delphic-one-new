@@ -111,14 +111,61 @@ async function listLocations(orgId) {
   return prisma.location.findMany({ where: { org_id: orgId }, orderBy: { name: 'asc' } });
 }
 
+// The Offices page: every location with how many working people sit there and how many expense claims and calendars point at it.
+// CCTV and biometric devices are not connected yet: each office reports them as "not_connected" until the integration exists.
+// The people counted on an office card can be narrowed: work mode (remote / onsite / hybrid / not set), employee status (the default is
+// everyone still working; 'working' | 'active' | 'on_leave' | 'pending_onboarding' | 'notice_period' | 'terminated' | 'all'), user type
+// (full_time_employee | contractor) and department.
+const OFFICE_STATUSES = ['working', 'active', 'on_leave', 'pending_onboarding', 'notice_period', 'terminated', 'all'];
+const OFFICE_WORK_MODES = ['remote', 'onsite', 'hybrid', 'not_set'];
+const OFFICE_USER_TYPES = ['full_time_employee', 'contractor'];
+function officePeopleWhere(orgId, f = {}) {
+  const status = OFFICE_STATUSES.includes(f.status) ? f.status : 'working';
+  return {
+    org_id: orgId,
+    location_id: { not: null },
+    ...(status === 'all' ? {} : { employment_status: status === 'working' ? { in: WORKING_STATUSES } : status }),
+    ...(OFFICE_WORK_MODES.includes(f.work_mode) ? { work_mode: f.work_mode === 'not_set' ? null : f.work_mode } : {}),
+    ...(OFFICE_USER_TYPES.includes(f.user_type) ? { worker_type: f.user_type } : {}),
+    // the department of the membership, or (when the membership has none) the person's own
+    ...(f.department_id ? { OR: [{ department_id: f.department_id }, { department_id: null, person: { department_id: f.department_id } }] } : {}),
+  };
+}
+
+async function officesOverview(orgId, filters = {}) {
+  const rows = await prisma.location.findMany({
+    where: { org_id: orgId },
+    orderBy: [{ is_default: 'desc' }, { name: 'asc' }],
+    include: { _count: { select: { calendars: true, expense_claims: true } } },
+  });
+  const people = await prisma.orgMembership.groupBy({
+    by: ['location_id'],
+    where: officePeopleWhere(orgId, filters),
+    _count: { _all: true },
+  });
+  const headcount = new Map(people.map((p) => [p.location_id, p._count._all]));
+  return rows.map((l) => ({
+    id: l.id,
+    name: l.name,
+    city: l.city,
+    country: l.country,
+    is_default: l.is_default,
+    people_count: headcount.get(l.id) || 0,
+    calendars: l._count.calendars,
+    expense_claims: l._count.expense_claims,
+    cctv: { status: 'not_connected', cameras: 0 },
+    biometric: { status: 'not_connected', devices: 0 },
+  }));
+}
+
 // An org has ONE default location: marking a location as the default moves
 // the flag, so two defaults never coexist.
-async function createLocation(orgId, { name, city, country, is_default }) {
+async function createLocation(orgId, { name, city, country, address, is_default }) {
   const existing = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
   const location = await prisma.$transaction(async (tx) => {
     if (is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
-    return tx.location.create({ data: { org_id: orgId, name, city, country, is_default } });
+    return tx.location.create({ data: { org_id: orgId, name, city, country, address, is_default } });
   });
   return { location };
 }
@@ -160,9 +207,11 @@ const MEMBERSHIP_DETAIL_SELECT = {
   left_at: true,
   notice_start_date: true,
   notice_end_date: true,
+  bench_start_date: true,
+  bench_end_date: true,
   role: true,
   employment_status: true,
-  person: { select: { id: true, name: true, email: true, phone: true, active: true } },
+  person: { select: { id: true, name: true, email: true, phone: true, active: true, is_group_superadmin: true } },
   location: { select: { id: true, name: true } },
   shift: { select: { id: true, name: true, start_minutes: true, end_minutes: true, grace_minutes: true } },
   manager: { select: { id: true, person: { select: { id: true, name: true } } } },
@@ -170,6 +219,9 @@ const MEMBERSHIP_DETAIL_SELECT = {
   sourcing_poc: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   designation: { select: { id: true, name: true } },
+  custom_role: { select: { id: true, name: true } },
+  legacy_role: true,
+  legacy_locked_until: true,
   team: { select: { id: true, name: true } },
   work_mode: true,
   worker_type: true,
@@ -295,6 +347,8 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
   const noticeStart = data.notice_start_date !== undefined ? data.notice_start_date : membership.notice_start_date;
   const lwd = data.notice_end_date !== undefined ? data.notice_end_date : membership.notice_end_date;
   if (noticeStart && lwd && lwd < noticeStart) return { error: 'lwd_before_notice' };
+  const benchFix = require('../bench/bench.service').normalizeBench(membership, data);
+  if (benchFix.error) return benchFix;
   // Joining date: can't come after the person's last working day / exit date.
   const lastDay = lwd || membership.left_at;
   if (data.joined_at && lastDay && data.joined_at > lastDay) return { error: 'joined_after_exit' };
@@ -322,6 +376,10 @@ async function updateMembership(orgId, membershipId, patch, actorUserId = null) 
     throw err;
   });
   if (updated.error) return updated;
+  // an employee marked exited by hand gets the same FnF record the nightly job creates
+  if (data.employment_status === 'terminated' && membership.employment_status !== 'terminated') {
+    await require('../../lib/fnf').ensureFnf(prisma, orgId, membershipId, updated.left_at || data.left_at || null);
+  }
   return { membership: updated };
 }
 
@@ -341,6 +399,7 @@ const PERSONAL_SELECT = {
   emergency_contact_relation: true,
   emergency_contact_phone: true,
   emergency_contact_email: true,
+  date_of_birth: true,
   personal_details_updated_at: true,
 };
 
@@ -356,6 +415,7 @@ async function updatePersonalDetails(orgId, membershipId, patch) {
 }
 
 module.exports = {
+  officesOverview,
   getReporting,
   getPersonalDetails,
   updatePersonalDetails,

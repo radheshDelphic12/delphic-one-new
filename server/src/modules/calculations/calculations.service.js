@@ -65,6 +65,8 @@ const SOURCE_KINDS = {
   timesheet: ['billing', 'salary', 'salary_employee', 'resource_revenue', 'vendor_payment', 'vendor_bill', 'financials'],
   // An admin's + / - tweak to a project's month (or a change of its billing basis).
   billing_adjustment: ['billing', 'financials'],
+  // An admin's edit of one contractor's vendor line amount for a month.
+  vendor_adjustment: ['vendor_payment', 'vendor_bill', 'financials'],
   // A monthly salary adjustment (TDS, OT adjustment, variable pay, reimbursement, other).
   salary_adjustment: ['salary', 'salary_employee', 'financials'],
   // Effective-dated Resource → Project allocation (cost shares, contractor pay).
@@ -574,7 +576,7 @@ const monthIndex = (year, month) => year * 12 + (month - 1);
 
 // `date` for a one-day change; `from_date` (+ optional `to_date`, open-ended
 // when omitted — e.g. a salary structure effective from a date) for a span.
-async function flagChange(orgId, { source_type, source_id = null, date = null, from_date = null, to_date = null, org_membership_id = null, account_id = null, changed_by = null, description, old_value = null, new_value = null }) {
+async function flagChange(orgId, { source_type, source_id = null, date = null, from_date = null, to_date = null, org_membership_id = null, vendor_account_id = null, account_id = null, changed_by = null, description, old_value = null, new_value = null }) {
   const kinds = SOURCE_KINDS[source_type];
   const first = from_date || date;
   if (!kinds || !first) return { flagged: 0 };
@@ -602,10 +604,10 @@ async function flagChange(orgId, { source_type, source_id = null, date = null, f
   let flagged = 0;
   for (const calc of calcs) {
     if (calc.kind === 'billing' && calc.scope_key !== account_id) continue;
-    if (calc.kind === 'vendor_payment' && !isContractor) continue;
+    if (calc.kind === 'vendor_payment' && !isContractor && !vendor_account_id) continue;
     // Per-record locks: only the employee / the contractor's vendor affected.
     if (calc.kind === 'salary_employee' && calc.scope_key !== org_membership_id) continue;
-    if (calc.kind === 'vendor_bill' && (!isContractor || calc.scope_key !== vendorId)) continue;
+    if (calc.kind === 'vendor_bill' && (vendor_account_id ? calc.scope_key !== vendor_account_id : (!isContractor || calc.scope_key !== vendorId))) continue;
     const period = { period_month: calc.period_month, period_year: calc.period_year };
     const version = await latestVersion(calc);
     let potential = null;
