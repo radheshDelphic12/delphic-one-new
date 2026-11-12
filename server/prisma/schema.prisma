@@ -8558,7 +8558,7 @@ model AiInterviewSettings {
   // Each is a warning; after max_proctor_warnings warnings the next one ends the interview. require_screen_share: the candidate shares the whole screen, recorded beside the face.
   proctoring_enabled       Boolean  @default(true)
   max_proctor_warnings     Int      @default(3)
-  require_screen_share     Boolean  @default(false)
+  require_screen_share     Boolean  @default(true)
   updated_by               String?  @db.Uuid
   updated_at               DateTime @default(now()) @updatedAt
 

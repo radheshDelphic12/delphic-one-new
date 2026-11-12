@@ -169,7 +169,7 @@ export default function AiInterviewTab({ isAdmin }) {
           <Switch checked={form.proctoring_enabled !== false} onChange={set('proctoring_enabled')} disabled={off} label="Watch the camera and microphone" hint="On by default. In the candidate's browser only: no face or a second face, eyes or head turned away from the screen, looking down for long (reading), loud background noise. Each is a warning; after the warnings below the interview ends and a person reviews it. The camera is then required even when recording is off." />
         </div>
         <div className="mt-4">
-          <Switch checked={form.require_screen_share === true} onChange={set('require_screen_share')} disabled={off} label="Candidate shares the entire screen" hint="The candidate must share the whole screen before starting, and again if it stops (a warning). When recording is on, the recording shows the screen with the face in a corner." />
+          <Switch checked={form.require_screen_share === true} onChange={set('require_screen_share')} disabled={off} label="Candidate shares the entire screen" hint="Keep this ON: the candidate must share the whole screen before starting, and again if it stops (a warning), and the recording shows the screen with the face in a corner. When it is off, the screen is not recorded or watched, so reading from another window cannot be seen." />
         </div>
         <div className="mt-4">
           <label className="mb-1 block text-xs font-medium text-tertiary-600">Extra instructions for the AI (optional)</label>

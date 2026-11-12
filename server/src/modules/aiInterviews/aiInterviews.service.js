@@ -24,7 +24,7 @@ const DEFAULTS = {
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
   difficulty: 'easy', marking: 'lenient', require_fullscreen: true,
-  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: false,
+  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: true,
 };
 const MIN_TAB_LIMIT = 3;
 const TAB_EVENTS = ['tab_hidden', 'window_blur', 'fullscreen_exit']; // leaving the interview page; these count towards max_tab_switches
