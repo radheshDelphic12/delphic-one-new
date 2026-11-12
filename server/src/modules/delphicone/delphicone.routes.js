@@ -54,7 +54,7 @@ const problem = (res, r) => {
 };
 const uuid = z.string().uuid();
 
-router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
+router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, provisioning: provisioning.enabled() && req.dox.role === 'admin', meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
 router.get('/summary', need('dashboard'), asyncHandler(async (req, res) => ok(res, await service.summary(req.user.org_id))));
 
 // customers

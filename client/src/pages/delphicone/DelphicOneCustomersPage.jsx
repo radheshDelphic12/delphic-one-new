@@ -51,9 +51,31 @@ function CustomerDrawer({ customer, onClose, onSaved }) {
   );
 }
 
+// Shown once after "Create workspace": the customer's own company with a first admin login. The password is not stored anywhere readable.
+function WorkspaceResult({ result, onClose }) {
+  return (
+    <Drawer open={Boolean(result)} onClose={onClose} size="md" title="Customer workspace created" footer={<button type="button" className="btn-primary" onClick={onClose}>Done</button>}>
+      {result && (
+        <div className="space-y-3 text-sm" data-testid="workspace-result">
+          <p>A separate workspace now exists for this customer. It is not part of our group and holds none of our data. Trial until <b>{result.trial_ends_on}</b>, up to <b>{result.max_users}</b> users.</p>
+          <p>Give the customer this first admin login. The password is shown only now; they should change it after signing in.</p>
+          <dl className="rounded-xl bg-canvas-muted p-3 font-mono text-xs"><dt className="text-tertiary-500">Email</dt><dd className="mb-2">{result.admin_email}</dd><dt className="text-tertiary-500">One-time password</dt><dd>{result.temp_password}</dd></dl>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
 export default function DelphicOneCustomersPage() {
   const { me } = useDelphicOne();
   const canEdit = doxCan(me, 'customersEdit');
+  const save = useSave();
+  const [workspace, setWorkspace] = useState(null);
+  const createWorkspace = async (c) => {
+    if (!window.confirm(`Create a separate workspace for ${c.name}? This creates their company and first admin login (${c.contact_email || 'no email yet'}).`)) return;
+    const r = await save(() => doxApi.provisionCustomer(c.id), null, 'Could not create the workspace');
+    if (r) { setWorkspace(r); reload(); }
+  };
   const [filters, setFilters] = useState({ status: '', q: '' });
   const [rows, reload] = useLoad(() => doxApi.customers(filters), [filters.status, filters.q], []);
   const [editing, setEditing] = useState(null);
@@ -79,7 +101,7 @@ export default function DelphicOneCustomersPage() {
                   <td className={tdr}>{rupees(c.monthly_value)}</td>
                   <td className={`${tdr} ${c.outstanding > 0 ? 'font-semibold text-warning-700' : ''}`}>{c.outstanding > 0 ? rupees(c.outstanding) : '—'}</td>
                   <td className={td}>{c.trial_ends_on || '—'}</td>
-                  <td className={`${td} text-right`}>{canEdit && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
+                  <td className={`${td} text-right`}>{me?.provisioning && c.status === 'trial' && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="create-workspace" onClick={() => createWorkspace(c)}>Create workspace</button>}{canEdit && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -87,6 +109,7 @@ export default function DelphicOneCustomersPage() {
         </div>
       )}
       <CustomerDrawer customer={editing} onClose={() => setEditing(null)} onSaved={reload} />
+      <WorkspaceResult result={workspace} onClose={() => setWorkspace(null)} />
     </div>
   );
 }

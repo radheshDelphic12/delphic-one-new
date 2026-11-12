@@ -14,6 +14,7 @@ export const doxApi = {
   customers: (params) => get('/customers', params),
   createCustomer: (body) => post('/customers', body),
   updateCustomer: (id, body) => patch(`/customers/${id}`, body),
+  provisionCustomer: (id) => post(`/customers/${id}/provision`),
   deleteCustomer: (id) => del(`/customers/${id}`),
   leads: (params) => get('/leads', params),
   createLead: (body) => post('/leads', body),

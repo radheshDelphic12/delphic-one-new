@@ -52,6 +52,14 @@ describe('provisioning a customer workspace', () => {
     expect(await prisma.orgGroup.count({ where: { kind: 'trial' } })).toBe(0);
   });
 
+  test('the workspace screen only offers the button to Delphic One admins, and only when the switch is on', async () => {
+    const me = (token) => authed(request(app).get(`${D}/me`), token);
+    expect((await me(adminToken)).body.data.provisioning).toBe(false);
+    process.env.SAAS_CUSTOMER_PROVISIONING = 'true';
+    expect((await me(adminToken)).body.data.provisioning).toBe(true);
+    expect((await me(salesToken)).body.data.provisioning).toBe(false);
+  });
+
   test('when on: a new trial group with one clean company, a first admin, an admin slot, 15 days and 2 users', async () => {
     const r = await provisioned();
     const group = await prisma.orgGroup.findUnique({ where: { id: r.org_group_id } });

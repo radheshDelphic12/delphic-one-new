@@ -42,7 +42,7 @@ Goal: a restore point before any work, a one-customer restore, release tags. Pur
 - [x] 1.1 Migration: `org_groups.kind` (default `owner`; all existing rows stay `owner`). Tag shown in the Group Dashboard company list. Acceptance: existing group tests unchanged and green.
 - [x] 1.2 Platform-admin gate: table `platform_admins` (named list) + `requirePlatformAdmin` middleware, separate from company roles. Acceptance: company admins and group super admins are refused.
 - [x] 1.3 Module catalogue tables: `saas_modules` (code never changes), `saas_module_dependencies` (all-of and any-of), `saas_price_books` + `saas_module_prices` (dated), seeded with the 28 modules + BASC + admin price. Admin-editable through platform-admin routes.
-- [ ] 1.4 Platform-admin screen (client): catalogue, dependencies, price books, platform admins.
+- [x] 1.4 Platform-admin screen (client): catalogue, dependencies, price books, platform admins.
 - [x] 1.5 Convert lead to customer (Delphic One workspace): creates a customer group (kind `trial`), a clean company, trial row (15 days, 2 users), admin invitation. Flagged by `SAAS_CUSTOMER_PROVISIONING` (off by default). Clean template means no data from our companies.
 - [x] 1.6 Isolation tests: owner-group reports never include customer-group rows, and the reverse; platform routes refuse non-platform admins.
 - Acceptance: targeted tests green; existing group/Delphic One tests green; lint clean.
@@ -74,3 +74,23 @@ Billing portal, gateway, webhook, GST invoices, usage credits. Not started.
   - Isolation tests: owner Group Dashboard never lists a customer company, customer admin gets 403 on the Delphic One workspace, group dashboard and platform routes. Tests: saas-customers-credits (12 green).
   - Platform routes added: customers, slots, credits, move, status, counter/run, entitlements preview.
   - Still open in phase 1: 1.4 (platform-admin screen in the client), audit trail for catalogue edits, a "Provision workspace" button in the Delphic One customers screen (backend route is ready).
+- 2026-11-12 Slice 1.4 done: platform screen `client/src/pages/platform/PlatformPage.jsx` at `/platform` (reached by address only, no menu link; shows "only for platform administrators" to anyone else). Tabs: Modules (price, on/off, coming soon, dependencies as `EMPM, ATLV` = both, `CLHR|INHR` = either), Price books (new = copy of the latest, edit prices), Settings, Customers, Platform admins. Delphic One > Customers gains a "Create workspace" button (trial customers, Delphic One admins, only when `SAAS_CUSTOMER_PROVISIONING=true`); it shows the first admin login once. Client builds (vite) and lints clean; the screens were NOT clicked through in a browser. Tests: saas-customers-credits + delphic-one-workspace 18 green; earlier access-model + delphic-one 31 green.
+
+## Switches (all off by default)
+
+| Switch | What it turns on |
+|--------|------------------|
+| `SAAS_CUSTOMER_PROVISIONING=true` | The "Create workspace" action that makes a customer's own trial group and company |
+| `SAAS_COUNTER_ENABLED=true` | The nightly credit counter job and the manual `POST /platform/counter/run` |
+| `SAAS_ENFORCE_ENTITLEMENTS=true` | The module guard `requireModuleCode` (not attached to any existing route yet) |
+| `PLATFORM_ADMIN_EMAILS=a@x.com,b@y.com` | Names the first platform admins before any row exists |
+
+## Not done / next
+
+- Wire `requireModuleCode(code)` onto routes once the screen-to-module mapping (SaaS plan section 10) is agreed; then the entitlement matrix test (every route x module code).
+- Sidebar: modules the user may use, lock icon for expired ones (needs entitlements in the login payload).
+- Audit trail for catalogue and price edits; limit of two platform admins (assumption A3) is not enforced.
+- Checks for one person in two groups (sign-in, reset, invitation, company switch) before provisioning may attach an existing email.
+- Phase 3 (website early-access form, setup wizard, Excel import, demo company, read-only end of trial) and Phase 4 (billing portal, gateway, GST invoices, usage credits).
+- Dev -> staging -> main: origin/dev is far behind staging; bring it up to date once before using the path in plan section 25.
+- Try `scripts/restore-point.sh` on a machine with pg_dump/psql or in Docker.
