@@ -45,7 +45,12 @@ const overviewQuerySchema = z
 // The one place the group valuation factors live: valuation = profit x 240 + asset value x 3.
 const FORMULA = { profit: 240, asset_value: 3 };
 
-const assetBodySchema = z.object({ month: monthSchema, asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() });
+// A value is set for a DATE (as_of, any day up to today) or, as before, for a whole month. A dated value also becomes the month's value (the latest dated
+// value of the month), which is what the valuation reads.
+const assetBodySchema = z
+  .object({ as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(), month: monthSchema.optional(), asset_value: z.coerce.number().min(0).max(1e13), notes: z.string().trim().max(500).optional() })
+  .refine((b) => b.as_of || b.month, { message: 'Pick the date the value is as at', path: ['as_of'] })
+  .transform((b) => ({ ...b, month: b.as_of ? b.as_of.slice(0, 7) : b.month }));
 
 const isSoon = (org) => Boolean(org.enabled_modules?.includes('coming_soon'));
 const kindOf = (org) => (org.enabled_modules?.includes('gulati') ? 'gulati' : org.enabled_modules?.includes('zephyr') ? 'zephyr' : org.enabled_modules?.includes('acconcy') ? 'acconcy' : org.enabled_modules?.includes('foundation') ? 'foundation' : org.enabled_modules?.includes('zklyrera') ? 'zklyrera' : org.enabled_modules?.includes('valterra') ? 'valterra' : org.enabled_modules?.includes('novarex') ? 'novarex' : 'delphic');
@@ -685,6 +690,14 @@ async function listAssetValues(org) {
   return rows.map((r) => ({ id: r.id, month: `${r.period_year}-${String(r.period_month).padStart(2, '0')}`, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
 }
 const plainAsset = (r) => ({ id: r.id, month: r.month, asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at });
+const isoDay = (d) => new Date(d).toISOString().slice(0, 10);
+const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata' }).format(new Date());
+
+/** Every value set for a date, newest date first. */
+async function listAssetValueDates(org) {
+  const rows = await prisma.groupAssetValue.findMany({ where: { org_id: org.id }, orderBy: { as_of: 'desc' } });
+  return rows.map((r) => ({ id: r.id, as_of: isoDay(r.as_of), asset_value: num(r.asset_value), notes: r.notes, updated_at: r.updated_at }));
+}
 
 async function companyInGroup(orgGroupIds, orgId) {
   return prisma.org.findFirst({ where: { id: orgId, org_group_id: { in: orgGroupIds } }, select: { id: true, name: true, enabled_modules: true } });
@@ -696,9 +709,26 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
   const org = await companyInGroup(orgGroupIds, orgId);
   if (!org) return { error: 'not_found' };
   if (input.month > currentMonth()) return { error: 'future_month' };
+  if (input.as_of && input.as_of > todayIso()) return { error: 'future_month' };
   const kind = kindOf(org);
   invalidateCompany(org.id);
   if (kind === 'acconcy' || kind === 'foundation' || kind === 'zklyrera' || kind === 'valterra' || kind === 'novarex') return { error: 'managed_in_company' };
+  // A value for a date: keep it as its own row (history), and let the month carry the latest dated value of that month.
+  let datedBefore = null;
+  if (input.as_of) {
+    const day = new Date(`${input.as_of}T00:00:00.000Z`);
+    const existing = await prisma.groupAssetValue.findUnique({ where: { org_id_as_of: { org_id: org.id, as_of: day } } });
+    datedBefore = existing ? num(existing.asset_value) : null;
+    await prisma.groupAssetValue.upsert({
+      where: { org_id_as_of: { org_id: org.id, as_of: day } },
+      create: { org_id: org.id, as_of: day, asset_value: input.asset_value, notes: input.notes || null, updated_by: actorId },
+      update: { asset_value: input.asset_value, notes: input.notes || null, updated_by: actorId },
+    });
+    const first = new Date(`${input.month}-01T00:00:00.000Z`);
+    const next = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1));
+    const latest = await prisma.groupAssetValue.findFirst({ where: { org_id: org.id, as_of: { gte: first, lt: next } }, orderBy: { as_of: 'desc' } });
+    input = { ...input, asset_value: num(latest.asset_value), notes: input.notes ? `${isoDay(latest.as_of)}: ${input.notes}` : `As at ${isoDay(latest.as_of)}` };
+  }
   const before = (await listAssetValues(org)).find((r) => r.month === input.month) || null;
   let result;
   if (kind === 'gulati') result = await gulatiFinance.setAssetValue(org.id, actorId, input);
@@ -716,7 +746,7 @@ async function setAssetValue(orgGroupIds, actorId, orgId, input) {
     },
   });
   invalidateCompany(org.id);
-  return { asset: result.asset, previous: before ? before.asset_value : null };
+  return { asset: result.asset, previous: input.as_of ? datedBefore : (before ? before.asset_value : null) };
 }
 
 // Recent changes across the companies the caller may see.
@@ -733,4 +763,4 @@ async function activity(orgGroupIds, limit = 30, days = 7) {
   return rows.map((r) => ({ id: r.id, at: r.created_at, actor: name.get(r.actor_id) || null, company: r.org, action: r.action, entity: r.entity_type, detail: r.reason, snapshot: r.snapshot }));
 }
 
-module.exports = { warmUp, projection, projectionQuerySchema, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };
+module.exports = { warmUp, projection, projectionQuerySchema, drilldown, overviewQuerySchema, assetBodySchema, overview, listAssetValues, listAssetValueDates, companyInGroup, setAssetValue, activity, bucketOf, DEFAULT_THRESHOLDS };

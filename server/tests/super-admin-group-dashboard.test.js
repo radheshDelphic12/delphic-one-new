@@ -104,6 +104,22 @@ describe('super admin group dashboard', () => {
     expect(res.body.data.companies.find((c) => c.org.id === zephyr.id).months[0]).toMatchObject({ asset_value: 250, asset_value_carried: true });
   });
 
+  test('an asset value can be set for a date; the month keeps the latest date, an earlier date does not override it, a future date is refused', async () => {
+    const datesUrl = `${base}/companies/${zephyr.id}/asset-value-dates`;
+    await put(zephyr.id, { as_of: '2026-05-20', asset_value: 500 });
+    await put(zephyr.id, { as_of: '2026-05-05', asset_value: 300 });
+    const rev = await put(zephyr.id, { as_of: '2026-05-20', asset_value: 550, notes: 'revalued' });
+    expect(rev.body.data.previous).toBe(500);
+    const dates = await authed(request(app).get(datesUrl), superToken);
+    expect(dates.body.data.map((r) => [r.as_of, r.asset_value])).toEqual([['2026-05-20', 550], ['2026-05-05', 300]]);
+    const months = await authed(request(app).get(`${base}/companies/${zephyr.id}/asset-values`), superToken);
+    expect(months.body.data.find((r) => r.month === '2026-05').asset_value).toBe(550);
+    const future = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    expect((await put(zephyr.id, { as_of: future, asset_value: 1 })).status).toBe(422);
+    expect((await put(zephyr.id, { asset_value: 1 })).status).toBe(422);
+    expect((await authed(request(app).get(`${base}/companies/${outsider.id}/asset-value-dates`), superToken)).status).toBe(404);
+  });
+
   test('asset value rules: future month, negative and foreign company are refused', async () => {
     const future = new Date();
     future.setUTCMonth(future.getUTCMonth() + 2);

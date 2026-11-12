@@ -19,7 +19,7 @@ import ZklyreraGroupSection from './ZklyreraGroupSection.jsx';
 import ValterraGroupSection from './ValterraGroupSection.jsx';
 import NovarexGroupSection from './NovarexGroupSection.jsx';
 import CompanyInsightSection from './CompanyInsightSection.jsx';
-import { GROUPINGS, GroupFilterBar, FigureSwitch, monthStr, periodBinding, usePeriod } from './groupFilters.jsx';
+import { GROUPINGS, GroupFilterBar, FigureSwitch, periodBinding, usePeriod } from './groupFilters.jsx';
 import { COMPANY_COLORS, CompanyCard, ContributionLines, Disclosure, RankCard, SectionHeading, StatTile, TrendLines } from './groupUi.jsx';
 
 // Series colours are assigned by position, so any number of companies gets a legend entry automatically.
@@ -67,7 +67,8 @@ function TrendChart({ title, subtitle, rows, companies, metric, colorOfOrg }) {
 function AssetValueForm({ company, onSaved }) {
   const { pushError, pushInfo } = useAlerts();
   const [history, setHistory] = useState(null);
-  const [month, setMonth] = useState(monthStr(new Date()));
+  const [asOf, setAsOf] = useState(new Date().toLocaleDateString('en-CA'));
+  const [dated, setDated] = useState(null);
   const [value, setValue] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -75,6 +76,7 @@ function AssetValueForm({ company, onSaved }) {
 
   const load = useCallback(() => {
     apiClient.get(`/super-dashboard/companies/${orgId}/asset-values`).then(({ data }) => setHistory(data.data)).catch((err) => pushError(apiErrorMessage(err, 'Failed to load asset values'), 'Something went wrong'));
+    apiClient.get(`/super-dashboard/companies/${orgId}/asset-value-dates`).then(({ data }) => setDated(data.data)).catch(() => setDated([]));
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(load, [load]);
 
@@ -82,7 +84,7 @@ function AssetValueForm({ company, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const { data } = await apiClient.put(`/super-dashboard/companies/${orgId}/asset-values`, { month, asset_value: Number(value), notes: notes || undefined });
+      const { data } = await apiClient.put(`/super-dashboard/companies/${orgId}/asset-values`, { as_of: asOf, asset_value: Number(value), notes: notes || undefined });
       pushInfo(data.data.previous === null ? 'Asset value added' : `Asset value revised (was ${money(data.data.previous)})`);
       setValue('');
       setNotes('');
@@ -98,8 +100,8 @@ function AssetValueForm({ company, onSaved }) {
   return (
     <div className="space-y-3">
       <form onSubmit={save} className="grid grid-cols-2 gap-2 rounded-xl border border-tertiary-100 p-3">
-        <label className="text-xs font-medium text-tertiary-600">Month
-          <input type="month" required max={monthStr(new Date())} value={month} onChange={(e) => setMonth(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
+        <label className="text-xs font-medium text-tertiary-600">Value as at (date)
+          <input type="date" required max={new Date().toLocaleDateString('en-CA')} value={asOf} onChange={(e) => setAsOf(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" data-testid="asset-as-of" />
         </label>
         <label className="text-xs font-medium text-tertiary-600">Asset value (₹)
           <input type="number" required min="0" step="0.01" value={value} onChange={(e) => setValue(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
@@ -108,10 +110,16 @@ function AssetValueForm({ company, onSaved }) {
           <input value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" />
         </label>
         <div className="col-span-2 flex items-center justify-between">
-          <span className="text-[11px] text-tertiary-500">Saving an existing month revises it; other months are kept. Every change is audited.</span>
+          <span className="text-[11px] text-tertiary-500">Pick any date up to today. Saving a date that already has a value revises it; other dates are kept. The month&apos;s valuation uses the latest date of that month. Every change is audited.</span>
           <button type="submit" className="btn-primary inline-flex items-center gap-1 text-sm" disabled={saving || value === ''}><Plus className="h-4 w-4" />{saving ? 'Saving…' : 'Add / revise'}</button>
         </div>
       </form>
+      {dated && dated.length > 0 && (
+        <table className="w-full text-sm" data-testid="asset-dated-history">
+          <thead><tr className="text-left text-xs text-tertiary-500"><th className="py-1">As at</th><th className="text-right">Asset value</th><th className="pl-3">Note</th></tr></thead>
+          <tbody>{dated.map((h) => <tr key={h.id} className="border-t border-tertiary-100"><td className="py-1">{h.as_of}</td><td className="text-right">{money(h.asset_value)}</td><td className="pl-3 text-xs text-tertiary-500">{h.notes || ''}</td></tr>)}</tbody>
+        </table>
+      )}
       {!history ? <Skeleton className="h-20 w-full" /> : history.length === 0 ? (
         <p className="text-xs text-tertiary-500">No asset value recorded yet - the valuation uses profit only.</p>
       ) : (
