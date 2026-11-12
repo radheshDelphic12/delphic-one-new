@@ -154,7 +154,7 @@ function RouteMap() {
   };
   return (
     <div className="space-y-3">
-      <p className="text-xs text-tertiary-500">Which module each part of the product belongs to. Used only while "Module access checks" is ON and only for customer companies. The longest matching address wins; an address with no row is open to everyone.</p>
+      <p className="text-xs text-tertiary-500">Which module each part of the product belongs to. Used only while &ldquo;Module access checks&rdquo; is ON and only for customer companies. The longest matching address wins; an address with no row is open to everyone.</p>
       <form onSubmit={add} className="flex flex-wrap items-end gap-3 rounded-2xl border border-tertiary-100 bg-white p-4">
         <label className={labelCls}>API address<input required className={inputCls} aria-label="API address" placeholder="/accounts" value={form.path_prefix} onChange={(e) => setForm({ ...form, path_prefix: e.target.value })} /></label>
         <label className={labelCls}>Module<select required className={inputCls} aria-label="Module" value={form.module_code} onChange={(e) => setForm({ ...form, module_code: e.target.value })}><option value="">Choose</option>{mods.modules.map((m) => <option key={m.code} value={m.code}>{m.code} {m.name}</option>)}</select></label>
