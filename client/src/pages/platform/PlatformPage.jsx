@@ -7,7 +7,7 @@ import { inputCls, labelCls, th, td, useSave } from '../delphicone/ui.jsx';
 // SaaS platform administration (SaaS launch plan, phase 1.4). Only people on the platform-admin list get past the first call; everyone else sees a
 // short "not available" message. Everything on the product's catalogue is edited here: modules, what each needs, dated price books, the numbers
 // (trial days, trial users, grace days...), who may administer the platform, and the customer list.
-const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['routes', 'Screen mapping'], ['switches', 'Switches'], ['customers', 'Customers'], ['admins', 'Platform admins'], ['audit', 'Audit trail']];
+const TABS = [['modules', 'Modules'], ['books', 'Price books'], ['settings', 'Settings'], ['routes', 'Screen mapping'], ['switches', 'Switches'], ['customers', 'Customers'], ['orders', 'Orders'], ['admins', 'Platform admins'], ['audit', 'Audit trail']];
 const rupee = (n) => (n == null ? '-' : `Rs ${Number(n).toLocaleString('en-IN')}`);
 const get = (path) => apiClient.get(`/platform${path}`).then((r) => r.data.data);
 
@@ -235,6 +235,69 @@ function Customers() {
   );
 }
 
+function Orders() {
+  const [orders, reload] = useData('/orders');
+  const [customers] = useData('/customers');
+  const save = useSave();
+  const [customerId, setCustomerId] = useState('');
+  const [detail, setDetail] = useState(null);
+  const [pick, setPick] = useState({ slot_id: '', code: '', days: '' });
+  const [mods] = useData('/modules');
+  const [quote, setQuote] = useState(null);
+  const [pay, setPay] = useState({}); // orderId -> { amount, reference }
+  useEffect(() => { setDetail(null); setQuote(null); if (customerId) get(`/customers/${customerId}`).then(setDetail).catch(() => setDetail(false)); }, [customerId]);
+  if (orders === null || customers === null || mods === null) return <Skeleton className="h-40" />;
+  if (orders === false) return <p className="text-sm text-tertiary-500">The orders could not be loaded.</p>;
+  const body = () => ({ lines: [{ slot_id: pick.slot_id, code: pick.code, ...(pick.days ? { days: Number(pick.days) } : {}) }] });
+  const preview = async (e) => { e.preventDefault(); const r = await save(() => apiClient.post(`/platform/customers/${customerId}/quote`, body()), null, 'Could not price the order'); if (r) setQuote(r.data.data); };
+  const create = async () => { const r = await save(() => apiClient.post(`/platform/customers/${customerId}/orders`, body()), 'Order created', 'Could not create the order'); if (r) { setQuote(null); reload(); } };
+  const record = async (o) => {
+    const p = pay[o.id] || {};
+    const amount = Number(p.amount || o.total);
+    if (!window.confirm(`Record a payment of Rs ${amount.toLocaleString('en-IN')} against ${o.order_no}? When the order is fully paid the credit days are added and the GST invoice is raised.`)) return;
+    const r = await save(() => apiClient.post(`/platform/orders/${o.id}/payments`, { amount, method: 'bank_transfer', reference: p.reference || undefined, idempotency_key: `ui-${o.id}-${Date.now()}` }), 'Payment recorded', 'Could not record the payment');
+    if (r) { setPay((x) => ({ ...x, [o.id]: undefined })); reload(); }
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-tertiary-500">Orders buy credit days of modules for a customer&apos;s slots. Prices come from the price book in force today and GST from the settings; nothing is typed in by hand. Payments are recorded here (bank transfer) or arrive through the payment webhook.</p>
+      <form onSubmit={preview} className="flex flex-wrap items-end gap-3 rounded-2xl border border-tertiary-100 bg-white p-4">
+        <label className={labelCls}>Customer<select required className={inputCls} aria-label="Customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)}><option value="">Choose</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        <label className={labelCls}>Slot<select required className={inputCls} aria-label="Slot" value={pick.slot_id} onChange={(e) => setPick({ ...pick, slot_id: e.target.value })}><option value="">Choose</option>{(detail?.slots || []).map((s) => <option key={s.id} value={s.id}>{s.is_admin ? 'Admin' : (s.email || 'Unassigned')}</option>)}</select></label>
+        <label className={labelCls}>Module<select required className={inputCls} aria-label="Order module" value={pick.code} onChange={(e) => setPick({ ...pick, code: e.target.value })}><option value="">Choose</option>{mods.modules.filter((m) => m.active && !m.coming_soon).map((m) => <option key={m.code} value={m.code}>{m.code} {m.name}</option>)}</select></label>
+        <label className={labelCls}>Days<input type="number" min="1" className={inputCls} placeholder="default" value={pick.days} onChange={(e) => setPick({ ...pick, days: e.target.value })} /></label>
+        <button type="submit" className="btn-secondary">Price it</button>
+      </form>
+      {quote && (
+        <div className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4 text-sm" data-testid="order-quote">
+          <table className="min-w-full"><tbody>{quote.lines.map((l, i) => <tr key={i}><td className="py-0.5">{l.module_code}{l.is_prerequisite ? ' (needed)' : ''}</td><td>{l.days} days</td><td className="text-right">{rupee(l.line_amount)}</td></tr>)}</tbody></table>
+          <p className="mt-2 text-right">Subtotal {rupee(quote.subtotal)} + GST {quote.gst_rate}% {rupee(quote.gst_amount)} = <b>{rupee(quote.total)}</b> <span className="text-xs text-tertiary-500">({quote.book.name})</span></p>
+          <div className="mt-2 text-right"><button type="button" className="btn-primary" onClick={create}>Create order</button></div>
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
+        <table className="min-w-full text-sm"><thead><tr><th className={th}>Order</th><th className={th}>Customer</th><th className={th}>Total</th><th className={th}>Status</th><th className={th} /></tr></thead>
+          <tbody>{orders.map((o) => (
+            <tr key={o.id} className="border-t border-tertiary-100 align-top">
+              <td className={`${td} font-mono text-xs`}>{o.order_no}<span className="block text-tertiary-400">{String(o.created_at).slice(0, 10)}</span></td>
+              <td className={td}>{customers.find((c) => c.id === o.customer_id)?.name || '-'}</td>
+              <td className={td}>{rupee(o.total)}<span className="block text-xs text-tertiary-500">paid {rupee(o.payments.reduce((a, p) => a + p.amount, 0))}</span></td>
+              <td className={td}><Pill tone={o.status === 'paid' ? 'green' : o.status === 'cancelled' ? 'gray' : 'amber'}>{o.status}</Pill>{o.dox_invoice_id && <span className="ml-2 text-xs text-tertiary-500">invoiced</span>}</td>
+              <td className={td}>{o.status === 'pending' && (
+                <span className="flex items-center gap-2">
+                  <input type="number" min="1" className={inputCls} aria-label={`Amount for ${o.order_no}`} placeholder={String(o.total)} value={pay[o.id]?.amount || ''} onChange={(e) => setPay((x) => ({ ...x, [o.id]: { ...x[o.id], amount: e.target.value } }))} />
+                  <button type="button" className="btn-primary text-xs" onClick={() => record(o)}>Record payment</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={async () => { if (window.confirm(`Cancel ${o.order_no}?`) && await save(() => apiClient.post(`/platform/orders/${o.id}/cancel`), 'Cancelled', 'Could not cancel')) reload(); }}>Cancel</button>
+                </span>
+              )}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Admins() {
   const [data, reload] = useData('/admins');
   const save = useSave();
@@ -267,7 +330,7 @@ export default function PlatformPage() {
   useEffect(() => { get('/me').then(() => setAllowed(true)).catch(() => setAllowed(false)); }, []);
   if (allowed === null) return <div className="p-6"><Skeleton className="h-40" /></div>;
   if (!allowed) return <div className="p-6 text-sm text-tertiary-500" data-testid="platform-denied">This area is only for the platform administrators.</div>;
-  const Body = { modules: Modules, books: Books, settings: Settings, routes: RouteMap, switches: Switches, customers: Customers, admins: Admins, audit: Audit }[tab];
+  const Body = { modules: Modules, books: Books, settings: Settings, routes: RouteMap, switches: Switches, customers: Customers, orders: Orders, admins: Admins, audit: Audit }[tab];
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6" data-testid="platform-page">
       <div>

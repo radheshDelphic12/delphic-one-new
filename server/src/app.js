@@ -69,6 +69,8 @@ const storageRoutes = require('./modules/storage/storage.routes');
 const lettersRoutes = require('./modules/letters/letters.routes');
 const delphicOneRoutes = require('./modules/delphicone/delphicone.routes');
 const platformRoutes = require('./modules/platform/platform.routes');
+const trialRequestRoutes = require('./modules/platform/trialRequest.routes');
+const saasWebhookRoutes = require('./modules/platform/saasWebhook.routes');
 const tradingRoutes = require('./modules/trading/trading.routes');
 const leadsRoutes = require('./modules/leads/leads.routes');
 const zephyrRoutes = require('./modules/zephyr/zephyr.routes');
@@ -225,6 +227,8 @@ app.use('/api/v1/public', publicJobsRoutes);
 app.use('/api/v1/public', publicAssessmentsRoutes);
 app.use('/api/v1/public', publicAiInterviewsRoutes);
 app.use('/api/v1/public', publicWhistleblowerRoutes);
+app.use('/api/v1/public', saasWebhookRoutes); // SaaS payment webhook stub (signature-checked, closed without SAAS_WEBHOOK_SECRET)
+app.use('/api/v1/public', trialRequestRoutes); // website "Request a trial" -> a lead in Delphic One (closed until a platform admin opens it)
 // Public careers pages (HTML), e.g. /delphic/career/. Only reachable where the web server forwards /<org>/career to the API.
 app.use('/:orgSlug([a-z0-9-]+)/career', careerPagesRoutes);
 app.use('/api/v1/internal-jobs', internalJobsRoutes);

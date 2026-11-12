@@ -24,21 +24,22 @@ async function createSlot(customerId, { email, is_admin = false, label } = {}) {
 }
 
 // Add (or remove, with a negative number) credit days. A balance can never go below 0 here either.
-async function addCredit({ slotId, code, days, reason = 'top-up', actorId = null }) {
+async function addCredit({ slotId, code, days, reason = 'top-up', actorId = null, tx = null }) {
   if (!Number.isInteger(days) || days === 0) return { error: 'bad_days' };
   const slot = await prisma.saasSlot.findUnique({ where: { id: slotId } });
   if (!slot) return { error: 'slot_not_found' };
   const mod = await prisma.saasModule.findUnique({ where: { code } });
   if (!mod) return { error: 'module_not_found' };
   const alertAt = await platform.settingNumber('low_credit_alert_days', 5);
-  return prisma.$transaction(async (tx) => {
+  const body = async (tx) => {
     const row = await tx.saasSlotCredit.upsert({ where: { slot_id_module_code: { slot_id: slotId, module_code: code } }, update: {}, create: { slot_id: slotId, module_code: code, days_left: 0 } });
     const next = row.days_left + days;
     if (next < 0) return { error: 'below_zero' };
     await tx.saasSlotCredit.update({ where: { id: row.id }, data: { days_left: next, ...(next > alertAt ? { alerted_at: null } : {}) } });
     await tx.saasCreditLedger.create({ data: { slot_id: slotId, module_code: code, change_days: days, balance_after: next, reason, actor_id: actorId } });
     return { balance: next };
-  });
+  };
+  return tx ? body(tx) : prisma.$transaction(body);
 }
 
 // Move a slot to another person: the credits stay on the slot. One move per slot_move_days; the old person loses access at once.

@@ -9,6 +9,7 @@ const entitlements = require('./entitlements.service');
 const switches = require('./switches.service');
 const audit = require('./audit.service');
 const saasGate = require('./saasGate');
+const billing = require('./billing.service');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -47,6 +48,17 @@ const ERRORS = {
   too_soon: [409, 'This slot was moved recently'],
   below_zero: [422, 'Credit days cannot go below 0'],
   bad_days: [422, 'Days must be a whole number other than 0'],
+  no_price_book: [422, 'There is no price book in force today'],
+  no_price: [422, 'A module has no price in the price book in force'],
+  coming_soon: [422, 'A module in the order is not for sale yet'],
+  no_lines: [422, 'Add at least one line'],
+  order_not_found: [404, 'Order not found'],
+  not_pending: [409, 'Only a pending order can be cancelled'],
+  has_payments: [409, 'This order already has payments'],
+  cancelled: [409, 'This order is cancelled'],
+  over_payment: [422, 'That is more than the order still owes'],
+  bad_amount: [422, 'The amount must be more than 0'],
+  not_paid: [409, 'The order is not fully paid yet'],
   counter_off: [409, 'The daily counter is not switched on (SAAS_COUNTER_ENABLED)'],
 };
 const problem = (res, r) => { const [status, message] = ERRORS[r.error] || [400, 'Bad request']; return fail(res, status, message); };
@@ -136,6 +148,32 @@ router.post('/slots/:id/status', asyncHandler(async (req, res) => {
 }));
 // Run the daily counter by hand (a catch-up). Only when the counter is switched on.
 router.post('/counter/run', asyncHandler(async (req, res) => ((await switches.isOn('counter')) ? ok(res, await credits.runDailyCounter()) : problem(res, { error: 'counter_off' }))));
+
+// orders and payments (billing foundations: no gateway; payments are recorded by hand or arrive through the signed webhook stub)
+const orderBody = z.object({ lines: z.array(z.object({ slot_id: z.string().uuid(), code, days: z.number().int().min(1).max(3650).optional() })).min(1).max(200), note: z.string().max(300).optional() });
+router.post('/customers/:id/quote', asyncHandler(async (req, res) => {
+  const r = await billing.quote(z.string().uuid().parse(req.params.id), orderBody.parse(req.body));
+  return r.error ? problem(res, r) : ok(res, r);
+}));
+router.post('/customers/:id/orders', asyncHandler(async (req, res) => {
+  const r = await billing.createOrder(z.string().uuid().parse(req.params.id), orderBody.parse(req.body), req.user.id);
+  return r.error ? problem(res, r) : created(res, r.order);
+}));
+router.get('/orders', asyncHandler(async (req, res) => ok(res, await billing.listOrders({ customerId: req.query.customer_id ? z.string().uuid().parse(req.query.customer_id) : undefined }))));
+router.get('/orders/:id', asyncHandler(async (req, res) => {
+  const o = await billing.getOrder(z.string().uuid().parse(req.params.id));
+  return o ? ok(res, o) : problem(res, { error: 'order_not_found' });
+}));
+router.post('/orders/:id/cancel', asyncHandler(async (req, res) => result(res, await billing.cancelOrder(z.string().uuid().parse(req.params.id), req.user.id))));
+router.post('/orders/:id/payments', asyncHandler(async (req, res) => {
+  const body = z.object({ amount: z.number().positive().max(1e9), method: z.enum(['bank_transfer', 'cash', 'cheque', 'upi', 'other']).default('bank_transfer'), reference: z.string().max(100).optional(), idempotency_key: z.string().min(8).max(100) }).parse(req.body);
+  const r = await billing.applyPayment({ orderId: z.string().uuid().parse(req.params.id), amount: body.amount, method: body.method, providerRef: body.reference || null, idempotencyKey: `manual:${body.idempotency_key}`, actorId: req.user.id });
+  return r.error ? problem(res, r) : ok(res, r);
+}));
+router.post('/orders/:id/invoice', asyncHandler(async (req, res) => {
+  const r = await billing.ensureInvoice(z.string().uuid().parse(req.params.id));
+  return r.error ? problem(res, r) : ok(res, r);
+}));
 
 // the three switches: current state, and turning one on or off (a confirm flag is required, every change is audited)
 router.get('/switches', asyncHandler(async (req, res) => ok(res, await switches.state())));

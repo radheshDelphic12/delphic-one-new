@@ -9892,7 +9892,8 @@ model SaasCustomer {
   created_at      DateTime  @default(now())
   updated_at      DateTime  @default(now()) @updatedAt
 
-  slots SaasSlot[]
+  slots  SaasSlot[]
+  orders SaasOrder[]
 
   @@index([org_group_id])
   @@index([status])
@@ -9989,5 +9990,75 @@ model SaasRouteModule {
 
   @@index([module_code])
   @@map("saas_route_modules")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS phase 4 foundations: orders, payments, webhook events. No gateway keys; amounts come from the dated price books and platform settings.
+// ---------------------------------------------------------------------------------------------------------------------
+model SaasOrder {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_no       String    @unique @default(dbgenerated("('SO-'::text || lpad((nextval('saas_order_no_seq'::regclass))::text, 5, '0'::text))"))
+  customer_id    String    @db.Uuid
+  customer       SaasCustomer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  status         String    @default("pending") // pending | paid | cancelled (database check)
+  price_book_id  String?   @db.Uuid
+  subtotal       Decimal   @db.Decimal(14, 2)
+  gst_rate       Decimal   @db.Decimal(5, 2)
+  gst_amount     Decimal   @db.Decimal(14, 2)
+  total          Decimal   @db.Decimal(14, 2)
+  note           String?
+  dox_invoice_id String?   @db.Uuid
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  paid_at        DateTime?
+
+  lines    SaasOrderLine[]
+  payments SaasPayment[]
+
+  @@index([customer_id])
+  @@map("saas_orders")
+}
+
+model SaasOrderLine {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id        String    @db.Uuid
+  order           SaasOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  slot_id         String    @db.Uuid
+  module_code     String    @db.VarChar(8)
+  days            Int
+  unit_price_30d  Decimal   @db.Decimal(12, 2)
+  line_amount     Decimal   @db.Decimal(14, 2)
+  is_prerequisite Boolean   @default(false)
+
+  @@index([order_id])
+  @@map("saas_order_lines")
+}
+
+model SaasPayment {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id        String    @db.Uuid
+  order           SaasOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  amount          Decimal   @db.Decimal(14, 2)
+  method          String
+  provider_ref    String?
+  idempotency_key String    @unique
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+
+  @@index([order_id])
+  @@map("saas_payments")
+}
+
+model SaasWebhookEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider    String
+  event_id    String
+  type        String
+  payload     Json
+  result      String?
+  received_at DateTime @default(now())
+
+  @@unique([provider, event_id])
+  @@map("saas_webhook_events")
 }
 
