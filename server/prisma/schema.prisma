@@ -476,6 +476,7 @@ model User {
   vt_people                       VtPerson[]
   nx_people                       NxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
+  platform_admin                  PlatformAdmin?                  @relation("PlatformAdminUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
   sourcing_poc_for                OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
@@ -2012,6 +2013,9 @@ model VendorCommission {
 model OrgGroup {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name       String
+  // What this group is: owner (our own group), customer, trial (a customer on trial) or demo. A database check keeps it to these four.
+  // Every group that existed before the SaaS launch work is ours, so the default is 'owner'.
+  kind       String   @default("owner")
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
@@ -9767,4 +9771,100 @@ model DoxInvoicePayment {
 
   @@index([invoice_id])
   @@map("dox_invoice_payments")
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS launch (docs/features/SAAS-LAUNCH-BUILD-PLAN.md), phase 1: the module catalogue, dated price books and the platform-admin list.
+// All of it is platform configuration edited by platform admins; nothing here changes how any existing company works.
+// ---------------------------------------------------------------------------------------------------------------------
+
+// The people allowed to run the platform (create customers, change prices, switch modules). Separate from every company role.
+model PlatformAdmin {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @unique @db.Uuid
+  user       User     @relation("PlatformAdminUser", fields: [user_id], references: [id], onDelete: Cascade)
+  added_by   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@map("platform_admins")
+}
+
+// One sellable module. The 4-letter code is issued once and never changes, even if the module is renamed.
+model SaasModule {
+  code        String   @id @db.VarChar(8)
+  name        String
+  description String?
+  // Basic View: every user needs it.
+  is_basic    Boolean  @default(false)
+  // Listed and priced but not sellable yet (for example GST/TDS and Banking until they work without the Group Dashboard).
+  coming_soon Boolean  @default(false)
+  active      Boolean  @default(true)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  needs     SaasModuleDependency[] @relation("DependencyModule")
+  needed_by SaasModuleDependency[] @relation("DependencyNeeds")
+  prices    SaasModulePrice[]
+
+  @@map("saas_modules")
+}
+
+// "module_code needs needs_code". Rows of one module with the same requirement_group are alternatives (any one of them is enough);
+// rows in different groups must all be satisfied.
+model SaasModuleDependency {
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  module_code       String     @db.VarChar(8)
+  module            SaasModule @relation("DependencyModule", fields: [module_code], references: [code], onDelete: Cascade)
+  needs_code        String     @db.VarChar(8)
+  needs             SaasModule @relation("DependencyNeeds", fields: [needs_code], references: [code], onDelete: Cascade)
+  requirement_group Int        @default(1)
+  note              String?
+
+  @@unique([module_code, needs_code])
+  @@index([needs_code])
+  @@map("saas_module_dependencies")
+}
+
+// A dated price list. The book with the latest effective_from not after the subscription start applies to that subscription.
+model SaasPriceBook {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String
+  effective_from DateTime @db.Date
+  // The admin slot, per 30 days, before GST.
+  admin_price    Decimal  @db.Decimal(12, 2)
+  notes          String?
+  created_by     String?  @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  prices SaasModulePrice[]
+
+  @@index([effective_from])
+  @@map("saas_price_books")
+}
+
+// Price of one module per user per 30 days inside one price book, before GST.
+model SaasModulePrice {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  price_book_id String        @db.Uuid
+  price_book    SaasPriceBook @relation(fields: [price_book_id], references: [id], onDelete: Cascade)
+  module_code   String        @db.VarChar(8)
+  module        SaasModule    @relation(fields: [module_code], references: [code], onDelete: Cascade)
+  price_30d     Decimal       @db.Decimal(12, 2)
+
+  @@unique([price_book_id, module_code])
+  @@map("saas_module_prices")
+}
+
+// Platform settings that are numbers an admin may need to change: trial length, trial users, grace days, slot move interval, alert days, yearly discount.
+model SaasSetting {
+  key        String   @id
+  value      Json
+  note       String?
+  updated_by String?  @db.Uuid
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("saas_settings")
 }

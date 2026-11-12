@@ -68,7 +68,7 @@ async function groupOrgs(orgGroupIds, orgIds) {
   const ids = orgIds ? orgIds.split(',').map((s) => s.trim()).filter(Boolean) : null;
   return prisma.org.findMany({
     where: { org_group_id: { in: orgGroupIds }, status: 'active', ...(ids ? { id: { in: ids } } : {}) },
-    select: { id: true, name: true, slug: true, logo_url: true, default_currency: true, enabled_modules: true },
+    select: { id: true, name: true, slug: true, logo_url: true, default_currency: true, enabled_modules: true, org_group: { select: { kind: true } } },
     orderBy: { name: 'asc' },
   });
 }
@@ -373,7 +373,7 @@ async function overview(orgGroupIds, query = {}) {
     if (isSoon(org)) {
       // Not built yet: listed so it is visible, but it has no figures and is left out of every total.
       companies.push({
-        org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: 'coming_soon', coming_soon: true },
+        org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: 'coming_soon', coming_soon: true, group_kind: org.org_group?.kind || 'owner' },
         coming_soon: true, has_data: false, months: [], series: [],
         totals: { revenue: 0, expenses: 0, profit: 0, margin_pct: null }, assets: 0, valuation: null, people: { employees: 0, contractors: 0 },
       });
@@ -389,7 +389,7 @@ async function overview(orgGroupIds, query = {}) {
     const totals = series.reduce((a, r) => ({ revenue: a.revenue + r.revenue, expenses: a.expenses + r.expenses, profit: a.profit + r.profit }), { revenue: 0, expenses: 0, profit: 0 });
     const hasBooks = months.some((m) => m.revenue || m.profit || m.asset_value);
     companies.push({
-      org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org) },
+      org: { id: org.id, name: org.name, slug: org.slug, logo_url: org.logo_url, currency: org.default_currency, kind: kindOf(org), group_kind: org.org_group?.kind || 'owner' },
       has_data: hasBooks || Boolean(foundationData[i]?.campaigns.total) || Boolean(zklyreraData[i]?.investments.total) || Boolean(valterraData[i]?.investments.total) || Boolean(valterraData[i]?.sites.total) || Boolean(novarexData[i]?.investments.total) || Boolean(novarexData[i]?.outlets.total),
       ...(foundationData[i] ? { foundation: foundationData[i] } : {}),
       ...(zklyreraData[i] ? { zklyrera: zklyreraData[i] } : {}),

@@ -39,7 +39,7 @@ Goal: a restore point before any work, a one-customer restore, release tags. Pur
 
 ## Phase 1 - Catalogue, group kind, platform admin, customer groups
 
-- [ ] 1.1 Migration: `org_groups.kind` (default `owner`; all existing rows stay `owner`). Tag shown in the Group Dashboard company list. Acceptance: existing group tests unchanged and green.
+- [x] 1.1 Migration: `org_groups.kind` (default `owner`; all existing rows stay `owner`). Tag shown in the Group Dashboard company list. Acceptance: existing group tests unchanged and green.
 - [ ] 1.2 Platform-admin gate: table `platform_admins` (named list) + `requirePlatformAdmin` middleware, separate from company roles. Acceptance: company admins and group super admins are refused.
 - [ ] 1.3 Module catalogue tables: `saas_modules` (code never changes), `saas_module_dependencies` (all-of and any-of), `saas_price_books` + `saas_module_prices` (dated), seeded with the 28 modules + BASC + admin price. Admin-editable through platform-admin routes.
 - [ ] 1.4 Platform-admin screen (client): catalogue, dependencies, price books, platform admins.
@@ -65,3 +65,4 @@ Billing portal, gateway, webhook, GST invoices, usage credits. Not started.
 
 - 2026-11-12 plan written; worktree created from 0d86f4e (super_admin_branch).
 - 2026-11-12 Phase 0 done. `scripts/restore-point.sh` (dump, row counts, uploads list, git tag, settings without secrets, `--compare`), `server/scripts/restore-org.js` (one-company restore, dry run by default, tested against a cloned database: only the named company is restored, other companies untouched), `scripts/release-tag.sh`, `scripts/branch-diff-report.sh`. restore-point.sh is syntax-checked only: this machine has no pg_dump/psql, so the dump path must be tried once on a machine with Postgres tools or in Docker. Finding from branch-diff-report: origin/dev is far behind staging (hotfixes and features went to staging/main directly), so the dev->staging->main path needs dev brought up to date once before it can be the rule.
+- 2026-11-12 Slice 1.1 done: `org_groups.kind` (migration 20261212100000_saas_group_kind, default owner, check constraint), Group Dashboard company cards carry `org.group_kind` and show the tag. Catalogue tables created (migration 20261212110000_saas_catalogue: platform_admins, saas_modules, saas_module_dependencies, saas_price_books, saas_module_prices, saas_settings) and seeded with the 29 modules (28 = Rs 215 + BASC Rs 50), 31 dependency rows, a launch price book (admin Rs 500, effective 2026-11-12) and the settings. Tests: saas-group-kind, group-insights, super-admin-group-dashboard, group-tasks all green (36). Routes/screens for the catalogue come next (1.2-1.4).
