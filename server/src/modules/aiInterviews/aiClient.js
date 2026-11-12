@@ -1,0 +1,96 @@
+const env = require('../../config/env');
+
+// One thin wrapper around the Anthropic Messages API (plain fetch, no SDK). Tests swap the provider with setProvider().
+const API_URL = 'https://api.anthropic.com/v1/messages';
+const TIMEOUT_MS = 45000;
+const SEARCH_TIMEOUT_MS = 90000; // a reply that reads reference pages first takes longer
+const MAX_SEARCHES = 3;
+
+class AiUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AiUnavailableError';
+  }
+}
+
+// PDFs (the candidate's CV) go in front of the first user message as document blocks.
+function withDocuments(messages, documents) {
+  if (!documents.length) return messages;
+  const [first, ...rest] = messages;
+  const blocks = documents.map((d) => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.base64 } }));
+  return [{ ...first, content: [...blocks, { type: 'text', text: first.content }] }, ...rest];
+}
+
+// `webSearchDomains`: the AI may search ONLY these sites (the Anthropic web search tool with allowed_domains). If the account or
+// model does not allow the tool, the same request is sent again without it, so the interview never depends on it.
+async function anthropicProvider({ system, messages, maxTokens, documents = [], webSearchDomains = [] }) {
+  if (webSearchDomains.length) {
+    try {
+      return await callAnthropic({ system, messages, maxTokens, documents, webSearchDomains });
+    } catch (err) {
+      if (!(err instanceof AiUnavailableError)) throw err; // fall through: ask again without the search tool
+    }
+  }
+  return callAnthropic({ system, messages, maxTokens, documents, webSearchDomains: [] });
+}
+
+async function callAnthropic({ system, messages, maxTokens, documents, webSearchDomains }) {
+  const { apiKey, model, workspaceId } = env.aiInterview;
+  if (!apiKey) throw new AiUnavailableError('ANTHROPIC_API_KEY is not set');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), webSearchDomains.length ? SEARCH_TIMEOUT_MS : TIMEOUT_MS);
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
+        ...(workspaceId ? { 'anthropic-workspace-id': workspaceId } : {}),
+      },
+      body: JSON.stringify({
+        model, max_tokens: maxTokens || env.aiInterview.maxOutputTokens, system, messages: withDocuments(messages, documents),
+        ...(webSearchDomains.length ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: MAX_SEARCHES, allowed_domains: webSearchDomains }] } : {}),
+      }),
+    });
+    if (!res.ok) throw new AiUnavailableError(`AI provider answered ${res.status}`);
+    const body = await res.json();
+    const text = (body.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    return { text, usage: { input: body.usage?.input_tokens || 0, output: body.usage?.output_tokens || 0 } };
+  } catch (err) {
+    if (err instanceof AiUnavailableError) throw err;
+    throw new AiUnavailableError(err.name === 'AbortError' ? 'AI provider timed out' : `AI provider unreachable: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let provider = anthropicProvider;
+const setProvider = (fn) => { provider = fn || anthropicProvider; };
+
+// Asks for JSON only and parses it; tolerates a ```json fence. Returns { data, usage }; throws AiUnavailableError when the
+// reply is not usable JSON, so every caller has one failure path.
+// A reply that is not usable JSON (an occasional cut-off or stray prose) is asked for once more before giving up.
+async function askJson(args) {
+  try {
+    return await askJsonOnce(args);
+  } catch (err) {
+    if (!(err instanceof AiUnavailableError) || !/JSON/.test(err.message)) throw err;
+    const again = await askJsonOnce(args);
+    return again;
+  }
+}
+
+async function askJsonOnce({ system, user, maxTokens, documents, webSearchDomains }) {
+  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents, webSearchDomains: webSearchDomains || [] });
+  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start < 0 || end < start) throw new AiUnavailableError('AI reply was not JSON');
+  try {
+    return { data: JSON.parse(cleaned.slice(start, end + 1)), usage };
+  } catch {
+    throw new AiUnavailableError('AI reply was not valid JSON');
+  }
+}
+
+module.exports = { askJson, setProvider, AiUnavailableError };

@@ -9,7 +9,9 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
+import EntityHistory from '../../components/EntityHistory.jsx';
 import LeadClientSelect from '../../components/LeadClientSelect.jsx';
+import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import ProjectCostingSection from './ProjectCostingSection.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import { AddProjectModal } from '../people/ProjectCalendarPanel.jsx';
@@ -108,12 +110,18 @@ function ContractPill({ contract }) {
 function emptyForm(profile) {
   return {
     project_name: profile.project_name || '',
+    face_resource: profile.face_resource || '',
+    hsn_sac: profile.hsn_sac || '',
     client_account_id: profile.client_account_id || '',
+    requirement_id: profile.requirement_id || '',
     service_category: profile.service_category || '',
     agreement_start_date: profile.agreement_start_date || '',
     agreement_end_date: profile.agreement_end_date || '',
     contract_status: profile.contract_status || '',
+    contract_hold_periods: (profile.contract_hold_periods || []).map((p) => ({ from: p.from || '', resume: p.resume || '' })),
     benchmark_hours: profile.benchmark_hours ?? 160,
+    work_start_time: profile.work_start_time || '',
+    work_end_time: profile.work_end_time || '',
     overtime_billable: Boolean(profile.overtime_billable),
     overtime_multiplier: profile.overtime_multiplier ?? 1,
     estimated_monthly_hours: profile.estimated_monthly_hours ?? '',
@@ -125,6 +133,37 @@ function emptyForm(profile) {
     rate: profile.rate ?? '',
     currency: profile.currency || 'INR',
   };
+}
+
+// Pick the requirement a project is for: the client's requirements when a client is chosen, otherwise every requirement of the company.
+// The linked one is always in the list (it may be closed or belong to another client), so it never disappears from the field.
+function RequirementSelect({ value, onChange, clientAccountId, current, disabled }) {
+  const [rows, setRows] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get('/requirements', { params: { limit: 100, sort_by: 'created_at', sort_order: 'desc', ...(clientAccountId ? { account_id: clientAccountId } : {}) } })
+      .then(({ data }) => { if (!cancelled) setRows(data.data || []); })
+      .catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+  }, [clientAccountId]);
+  const options = useMemo(() => {
+    const list = rows.map((r) => ({ value: r.id, label: `${r.title}${r.account?.name && !clientAccountId ? ` · ${r.account.name}` : ''}${r.status && r.status !== 'open' ? ` (${String(r.status).replace(/_/g, ' ')})` : ''}` }));
+    if (value && !list.some((o) => o.value === value) && current) list.unshift({ value, label: current.title });
+    return list;
+  }, [rows, value, current, clientAccountId]);
+  return (
+    <SearchableSelect
+      ariaLabel="Requirement"
+      value={value}
+      onChange={(v) => onChange(v || '')}
+      options={options}
+      allowClear
+      disabled={disabled}
+      placeholder={clientAccountId ? "Link one of this client's requirements" : 'Link a requirement'}
+      searchPlaceholder="Search requirements…"
+    />
+  );
 }
 
 /**
@@ -151,21 +190,29 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
     event.preventDefault();
     const patch = {
       project_name: form.project_name.trim(),
+      face_resource: form.face_resource.trim() || null,
+      hsn_sac: form.hsn_sac.trim() || null,
       agreement_start_date: form.agreement_start_date || null,
       agreement_end_date: form.agreement_end_date || null,
       contract_status: form.contract_status || null,
       benchmark_hours: Number(form.benchmark_hours) || 160,
+      work_start_time: form.work_start_time || null,
+      work_end_time: form.work_end_time || null,
       overtime_billable: form.overtime_billable,
       overtime_multiplier: Number(form.overtime_multiplier) || 1,
       client_billing_basis: form.client_billing_basis,
       vendor_payout_basis: form.vendor_payout_basis,
       billable_day_hours: Number(form.billable_day_hours) || 8,
     };
+    // Hold periods only apply to a monthly rate (an hourly project bills approved hours); rows without a start date are dropped.
+    if (monthly) patch.contract_hold_periods = form.contract_hold_periods.filter((p) => p.from).map((p) => ({ from: p.from, resume: p.resume || null }));
     // The client's hour estimate only applies to hourly billing; leave it alone otherwise.
     if (hourly) patch.estimated_monthly_hours = Number(form.estimated_monthly_hours) > 0 ? Number(form.estimated_monthly_hours) : null;
     if (hourly) patch.minimum_monthly_hours = Number(form.minimum_monthly_hours) > 0 ? Number(form.minimum_monthly_hours) : null;
     // Only send the client when it changed, so a legacy free-text client isn't wiped by an unrelated edit.
     if (form.client_account_id !== (project.client_account_id || '')) patch.client_account_id = form.client_account_id || null;
+    // Only send the requirement when it changed (an empty value unlinks it).
+    if (form.requirement_id !== (project.requirement_id || '')) patch.requirement_id = form.requirement_id || null;
     if (form.service_category) patch.service_category = form.service_category;
     const billingChanged =
       form.billing_type && form.rate !== '' &&
@@ -216,6 +263,16 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 A label only — another contract may share it. This project is <span className="font-medium text-tertiary-600">{project.project_code || 'identified by its id'}</span>, with its own resources, dates, rates, billing and P&amp;L.
               </span>
             </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              Resource
+              <input value={form.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource the invoice is billed for" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+              <span className="mt-1 block font-normal text-tertiary-400">Optional text. Printed on this project&apos;s client invoice with the other details.</span>
+            </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              HSN / SAC code
+              <input value={form.hsn_sac} inputMode="numeric" maxLength={8} onChange={(e) => set('hsn_sac', e.target.value.replace(/\D/g, ''))} placeholder="998519" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" aria-label="HSN / SAC code" />
+              <span className="mt-1 block font-normal text-tertiary-400">Printed on the GST invoice of this project. Blank = 998519 (manpower services).</span>
+            </label>
             <div className="block text-xs font-medium text-tertiary-600">
               Client name
               <LeadClientSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} current={project.client_account} />
@@ -223,10 +280,17 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 <span className="mt-1 block font-normal text-tertiary-500">Saved as text: &ldquo;{project.client_name}&rdquo;. Pick the matching client to link it.</span>
               )}
             </div>
-            <label className="block text-xs font-medium text-tertiary-600">
-              Requirement <span className="font-normal text-tertiary-400">(not linked yet)</span>
-              <input disabled value="" placeholder="—" className="mt-1 w-full rounded-xl border bg-tertiary-50 px-3 py-2 text-sm" />
-            </label>
+            <div className="block text-xs font-medium text-tertiary-600" data-testid="project-requirement">
+              Requirement
+              <div className="mt-1 font-normal">
+                <RequirementSelect value={form.requirement_id} onChange={(v) => set('requirement_id', v)} clientAccountId={form.client_account_id} current={project.requirement_link} disabled={!project.editable} />
+              </div>
+              {form.requirement_id ? (
+                <Link to={`/requirements/${form.requirement_id}`} className="mt-1 inline-block font-normal text-primary-700 hover:underline">Open this requirement</Link>
+              ) : (
+                <span className="mt-1 block font-normal text-tertiary-400">Optional. Link the requirement this project is for.</span>
+              )}
+            </div>
             <label className="block text-xs font-medium text-tertiary-600">
               Category
               <select value={form.service_category} onChange={(e) => { set('service_category', e.target.value); if (e.target.value === 'project') set('billing_type', 'one_time'); else if (form.billing_type === 'one_time') set('billing_type', ''); }} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
@@ -276,6 +340,15 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 Agreement end date
                 <input type="date" min={form.agreement_start_date || undefined} value={form.agreement_end_date} onChange={(e) => set('agreement_end_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
               </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Work start time
+                <input type="time" value={form.work_start_time} onChange={(e) => set('work_start_time', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" data-testid="work-start-time" />
+              </label>
+              <label className="block text-xs font-medium text-tertiary-600">
+                Work end time
+                <input type="time" value={form.work_end_time} onChange={(e) => set('work_end_time', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" data-testid="work-end-time" />
+                <span className="mt-0.5 block font-normal text-tertiary-400">For reporting and the 24-hour day schedule only. An end before the start means the day runs past midnight.</span>
+              </label>
               {(monthly || hourly) && (
                 <label className="block text-xs font-medium text-tertiary-600">
                   Monthly benchmark (hours)
@@ -313,6 +386,33 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
                 Automatic: not started before the start date, about to end in its last 30 days, completed after the end date.
               </p>
             </div>
+            {monthly && (
+              <div className="mt-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-tertiary-700">
+                    Hold periods <span className="font-normal text-tertiary-500">— the monthly fee is not billed for these days (prorated by days). Add one row each time the contract is put on hold.</span>
+                  </p>
+                  <button type="button" className="btn-secondary shrink-0 !px-2 !py-1 text-xs" onClick={() => set('contract_hold_periods', [...form.contract_hold_periods, { from: '', resume: '' }])}>Add hold</button>
+                </div>
+                {form.contract_hold_periods.map((p, i) => {
+                  const change = (key, value) => set('contract_hold_periods', form.contract_hold_periods.map((row, j) => (j === i ? { ...row, [key]: value } : row)));
+                  return (
+                    <div key={i} className="mt-2 grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <label className="block text-xs font-medium text-tertiary-600">
+                        On hold from
+                        <input type="date" value={p.from} onChange={(e) => change('from', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                      </label>
+                      <label className="block text-xs font-medium text-tertiary-600">
+                        Resumed on <span className="font-normal text-tertiary-400">(empty = still on hold)</span>
+                        <input type="date" min={p.from || undefined} value={p.resume} onChange={(e) => change('resume', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+                      </label>
+                      <button type="button" className="btn-secondary !px-2 !py-2 text-xs" aria-label="Remove hold period" onClick={() => set('contract_hold_periods', form.contract_hold_periods.filter((_, j) => j !== i))}>Remove</button>
+                    </div>
+                  );
+                })}
+                {!form.contract_hold_periods.length && <p className="mt-2 text-xs text-tertiary-400">No hold periods.</p>}
+              </div>
+            )}
             <div className="mt-3 grid gap-3 rounded-xl border border-tertiary-100 bg-tertiary-50/50 p-3 sm:grid-cols-3">
               <label className="flex items-center gap-2 text-xs font-medium text-tertiary-700 sm:col-span-2">
                 <input type="checkbox" checked={form.overtime_billable} onChange={(e) => set('overtime_billable', e.target.checked)} className="h-4 w-4 rounded border-tertiary-300" />
@@ -365,6 +465,8 @@ function ProjectProfileDrawer({ project, rates = [], onClose, onSaved }) {
         <FilesPanel entityType="account" entityId={project.id} title="Client agreements" defaultLabel="Client Agreement" multiple />
 
         <div className="rounded-2xl border border-tertiary-100 p-4"><ProjectCostingSection accountId={project.id} /></div>
+
+        <EntityHistory entityType="account" entityId={project.id} title="Project history" />
       </div>
     </Drawer>
   );
@@ -384,6 +486,9 @@ export default function ProjectsTab() {
   const [category, setCategory] = useState('all');
   const [contract, setContract] = useState('all');
   const [search, setSearch] = useState('');
+  // Agreement period: keeps projects whose agreement overlaps [from, to]; an open start / end counts as unbounded.
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const { rates, reload: reloadRates } = useExchangeRates();
 
   const matchesContract = (row, key) => key === 'all' || row.contract?.state === key;
@@ -391,8 +496,9 @@ export default function ProjectsTab() {
     const q = search.trim().toLowerCase();
     // Search by project name, project ID, client name or requirement.
     const matchesSearch = (row) => !q || [row.project_name, row.project_code, row.client_name, row.requirement].some((v) => String(v || '').toLowerCase().includes(q));
-    return rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract) && matchesSearch(row));
-  }, [rows, category, contract, search]);
+    const inPeriod = (row) => (!to || !row.agreement_start_date || row.agreement_start_date.slice(0, 10) <= to) && (!from || !row.agreement_end_date || row.agreement_end_date.slice(0, 10) >= from);
+    return rows.filter((row) => matchesCategory(row.service_category, category) && (contract === 'all' || row.contract?.state === contract) && matchesSearch(row) && inPeriod(row));
+  }, [rows, category, contract, search, from, to]);
 
   // This month's CONTRACT billing of the filtered projects, in INR, from the
   // server: the fixed monthly fee, or contract hours (minimum, else benchmark)
@@ -453,6 +559,13 @@ export default function ProjectsTab() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tertiary-400" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search project, ID or client" aria-label="Search projects" className="w-64 max-w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
             </div>
+            <label className="flex items-center gap-1 text-xs text-tertiary-600">Agreement from
+              <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="rounded-xl border px-2 py-1.5 text-sm" />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-tertiary-600">to
+              <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-xl border px-2 py-1.5 text-sm" />
+            </label>
+            {(from || to) && <button type="button" className="btn-ghost text-xs" onClick={() => { setFrom(''); setTo(''); }}>Clear dates</button>}
             <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddOpen(true)}>
               <FolderPlus className="h-4 w-4" /> Add project
             </button>

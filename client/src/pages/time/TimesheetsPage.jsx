@@ -53,7 +53,7 @@ function EntryDrawer({ open, onClose, onSubmit }) {
       footer={
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="timesheet-entry-form" className="btn-primary" disabled={saving || !fields.hours || leave.is_leave_day}>
+          <button type="submit" form="timesheet-entry-form" className="btn-primary" disabled={saving || !fields.hours}>
             {saving ? 'Saving…' : 'Log time'}
           </button>
         </>

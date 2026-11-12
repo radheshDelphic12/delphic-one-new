@@ -37,6 +37,7 @@ export function emptyProfileForm() {
     vendor_account_id: '',
     vendor_profile_id: '',
     recruiter_notes: '',
+    added_by: '',
   };
 }
 
@@ -81,6 +82,7 @@ export function profileToForm(profile) {
     vendor_account_id: profile.vendor_account?.id || profile.vendor_account_id || '',
     vendor_profile_id: profile.vendor_profile_id || '',
     recruiter_notes: profile.recruiter_notes || '',
+    added_by: profile.added_by?.id || '',
   };
 }
 
@@ -151,6 +153,8 @@ export function formToProfileBody(form) {
     vendor_profile_id: optionalText(form.vendor_profile_id),
     recruiter_notes: optionalText(form.recruiter_notes),
   };
+
+  if (form.added_by) body.added_by = form.added_by; // only set when editing; the server restricts it to admins
 
   if (form.source === 'vendor') {
     body.vendor_account_id = form.vendor_account_id || undefined;

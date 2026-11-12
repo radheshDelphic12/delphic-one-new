@@ -18,6 +18,16 @@ import {
   FileSignature,
   HardHat,
   Settings,
+  Globe,
+  MapPin,
+  UserPlus,
+  Megaphone,
+  MessageSquareHeart,
+  ClipboardCheck,
+  UserX,
+  ClipboardList,
+  KanbanSquare,
+  DatabaseBackup,
 } from 'lucide-react';
 
 /**
@@ -33,14 +43,22 @@ export const NAV_ITEMS = [
   // Hidden for admins for now: the admin dashboard's figures are not correct
   // yet. The page and its APIs stay in the codebase (see App.jsx HomePage) —
   // drop `hiddenForAdmin` to bring it back.
-  { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard, hiddenForAdmin: true },
-  { to: '/accounts', label: 'Accounts', icon: Building2, capability: 'viewPipeline', masterOnly: true },
-  { to: '/pipeline', label: 'Pipeline', icon: Columns3, capability: 'viewPipeline', masterOnly: true },
-  { to: '/requirements', label: 'Requirements', icon: Briefcase, capability: 'viewPipeline', masterOnly: true },
-  { to: '/profiles', label: 'Profiles', icon: Users, capability: 'viewProfiles', masterOnly: true },
-  { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', masterOnly: true },
+  { to: '/', label: 'Dashboard', end: true, icon: LayoutDashboard, hiddenForAdmin: true, need: 'basic.home' },
+  { to: '/accounts', label: 'Accounts', icon: Building2, capability: 'viewPipeline', need: 'accounts.view', masterOnly: true },
+  { to: '/pipeline', label: 'Pipeline', icon: Columns3, capability: 'viewPipeline', need: 'pipeline.view', masterOnly: true },
+  { to: '/requirements', label: 'Requirements', icon: Briefcase, capability: 'viewPipeline', need: 'requirements.view', masterOnly: true },
+  { to: '/hiring-setup', label: 'Hiring Setup', icon: ClipboardList, capability: 'viewPipeline', need: 'requirements.update', masterOnly: true },
+  { to: '/profiles', label: 'Profiles', icon: Users, capability: 'viewProfiles', need: 'profiles.view', masterOnly: true },
+  { to: '/submissions', label: 'Submissions', icon: Send, capability: 'viewPipeline', need: 'submissions.view', masterOnly: true },
+  { to: '/rejected-candidates', label: 'Rejected', icon: UserX, capability: 'viewPipeline', need: 'rejected.view', masterOnly: true },
   // Sales, HR and Management departments only (see lib/departments.js).
-  { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true },
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays, meetingsCalendar: true, need: 'basic.calendar' },
+  { to: '/offices', label: 'Offices', icon: MapPin, capability: 'viewPeople', groupSuperadminOnly: true },
+  { to: '/internal-jobs', label: 'Internal Jobs', icon: UserPlus, masterOnly: true, need: 'basic.internal_jobs' },
+  // Speak Up - Confidential Reporting: shown only while an admin has it switched on (or to the people who set it up).
+  { to: '/speak-up', label: 'Speak Up', icon: Megaphone, masterOnly: true, need: 'basic.whistleblower', speakUp: true },
+  { to: '/interview-feedback', label: 'Interview feedback', icon: ClipboardCheck, masterOnly: true, need: 'basic.interview_feedback' },
+  { to: '/employee-feedback', label: 'Employee Feedback', icon: MessageSquareHeart, masterOnly: true, need: 'basic.employee_feedback' },
   { to: '/people', label: 'People', icon: Users, capability: 'viewPeople' },
   { to: '/attendance', label: 'Time & Attendance', icon: Clock, capability: 'viewAttendance' },
   { to: '/finance', label: 'Finance', icon: Wallet, capability: 'viewExpenses' },
@@ -51,7 +69,16 @@ export const NAV_ITEMS = [
   { to: '/leads', label: 'Leads', icon: Target, capability: 'viewLeads', module: 'leads' },
   { to: '/contracts', label: 'Contracts', icon: FileSignature, capability: 'viewContracts', module: 'contracts' },
   { to: '/projects', label: 'Self Projects', icon: HardHat, capability: 'viewProjects', module: 'projects' },
+  // Project Management (Delphic Global): projects with their own tickets; every member sees the projects they belong to.
+  { to: '/pm', label: 'Project Management', icon: KanbanSquare, masterOnly: true },
   { to: '/reports', label: 'Reports', icon: BarChart3, capability: 'viewReports', masterOnly: true },
+  { to: '/website', label: 'Website', icon: Globe, capability: 'manageWebsite', need: ['website.view', 'website.update'], masterOnly: true },
   { to: '/group-overview', label: 'Group Overview', icon: Network, groupSuperadminOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/settings', label: 'Settings', icon: Settings, need: 'basic.settings' },
 ];
+
+/**
+ * Database snapshot viewer (dbviewer/): a separate app served under /dbviewer/ by the host nginx, super admin only.
+ * `external` items are plain links (not router routes) and open in a new tab; AppLayout adds this one for is_superadmin.
+ */
+export const DB_SNAPSHOTS_NAV_ITEM = { to: '/dbviewer/', label: 'Database snapshots', icon: DatabaseBackup, external: true };

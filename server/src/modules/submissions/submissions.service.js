@@ -1,8 +1,11 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
 const env = require('../../config/env');
 const { SUBMISSION_STAGE_TRANSITIONS, CLIENT_ROUND_TYPES, INTERNAL_ROUND_TYPES, computeMargin, computeMissingMandatoryRounds, isBackwardTransition, roundTypeLabel } = require('./stageMachines');
 const { computeClosureDetail } = require('../../utils/closureProgress');
-const { notify, interviewRoundParticipants, submissionParticipants, admins } = require('../../lib/notifications');
+const templates = require('../interviewTemplates/interviewTemplates.service');
+const rateLog = require('../rateChanges/rateChanges.service');
+const { notify, interviewRoundParticipants, submissionParticipants, admins, isAssignedInterviewer } = require('../../lib/notifications');
 const { interviewRoundInvite } = require('../../lib/email/invites');
 
 /**
@@ -42,10 +45,11 @@ function fmtWhen(date) {
 const INTERVIEWER_INCLUDE = {
   interviewers: { include: { user: { select: { id: true, name: true, email: true } } } },
   scheduler: { select: { id: true, name: true, email: true } },
+  skill_ratings: { orderBy: { skill_name: 'asc' } },
 };
 
 const INCLUDE = {
-  seat: { include: { requirement: { include: { account: { select: { id: true, name: true } } } } } },
+  seat: { include: { requirement: { include: { account: { select: { id: true, name: true, is_premium: true } } } } } },
   profile: {
     select: {
       id: true, name: true, current_company: true, total_experience_years: true,
@@ -78,14 +82,17 @@ function serialize(row) {
   return {
     ...rest,
     profile_id,
+    // A closed candidate is "joining date pending" until the actual joining date is entered; derived, so it can never disagree with the date.
+    joining_status: row.stage === 'closed' ? (row.actual_joining_date ? 'set' : 'pending') : null,
     seat: seat ? { id: seat.id, seat_label: seat.seat_label, requirement_id: seat.requirement_id } : null,
     requirement: seat
-      ? { id: seat.requirement.id, title: seat.requirement.title, account_name: seat.requirement.account.name, sales_owner_id: seat.requirement.sales_owner_id }
+      ? { id: seat.requirement.id, title: seat.requirement.title, account_name: seat.requirement.account.name, account_is_premium: Boolean(seat.requirement.account.is_premium), sales_owner_id: seat.requirement.sales_owner_id }
       : null,
     profile,
     submitted_by: submitted_by_user,
     interview_rounds: interview_rounds ? interview_rounds.map(serializeInterviewRound) : undefined,
-    missing_mandatory_rounds: interview_rounds ? computeMissingMandatoryRounds(interview_rounds) : undefined,
+    // Legacy (no template) warning only: a bench profile's first / last round are optional, so it never lists them as missing.
+    missing_mandatory_rounds: interview_rounds ? (profile?.source === 'direct' ? [] : computeMissingMandatoryRounds(interview_rounds)) : undefined,
     progress: interview_rounds ? computeClosureDetail(row.stage, interview_rounds) : null,
   };
 }
@@ -93,13 +100,14 @@ function serialize(row) {
 async function list(filters) {
   const {
     account_id, requirement_id, seat_id, profile_id, sales_owner_id, stage, submitted_by,
-    joined_from, joined_to, search, sort_by, sort_order, page, limit,
+    joined_from, joined_to, joining, premium, vendor_id, search, sort_by, sort_order, page, limit,
   } = filters;
 
   const seatFilter = {};
   if (requirement_id) seatFilter.requirement_id = requirement_id;
   if (account_id) seatFilter.requirement = { ...(seatFilter.requirement || {}), account_id };
   if (sales_owner_id) seatFilter.requirement = { ...(seatFilter.requirement || {}), sales_owner_id };
+  if (premium) seatFilter.requirement = { ...(seatFilter.requirement || {}), account: { is_premium: premium === 'yes' } };
 
   const stages = stage
     ? String(stage).split(',').map((s) => s.trim()).filter(Boolean)
@@ -113,9 +121,11 @@ async function list(filters) {
     ...(Object.keys(seatFilter).length ? { seat: seatFilter } : {}),
     ...(seat_id ? { requirement_seat_id: seat_id } : {}),
     ...(profile_id ? { profile_id } : {}),
+    ...(vendor_id ? { profile: { vendor_account_id: vendor_id } } : {}),
     ...(stages.length ? { stage: { in: stages } } : {}),
     ...(submitted_by ? { submitted_by } : {}),
     ...(Object.keys(joinedRange).length ? { actual_joining_date: joinedRange } : {}),
+    ...(joining ? { stage: 'closed', actual_joining_date: joining === 'pending' ? null : { not: null } } : {}),
     ...(search
       ? {
           OR: [
@@ -153,7 +163,7 @@ async function create(data, user) {
   // Sales may only put forward bench candidates (source = direct/"Bench" AND
   // currently on_bench) — everything else (vendor-sourced, market, off-bench) stays
   // recruiter/admin-only.
-  if (user.role === 'sales' && !(profile.source === 'direct' && profile.on_bench)) {
+  if (user.role === 'sales' && !user.custom_permissions && !(profile.source === 'direct' && profile.on_bench)) {
     return { error: 'sales_bench_only' };
   }
 
@@ -174,8 +184,11 @@ async function create(data, user) {
   return { submission: serialize(row) };
 }
 
-async function update(id, patch) {
+async function update(id, input, user) {
+  const { rate_change_reason, ...patch } = input;
   const existing = await prisma.submission.findUnique({ where: { id } });
+  const rateChanges = rateLog.diff(existing, patch, rateLog.SUBMISSION_FIELDS);
+  if (rateLog.needsReason(rateChanges) && !rate_change_reason) return { error: 'rate_reason_required' };
   const proposed_rate = patch.proposed_rate ?? existing.proposed_rate;
   const proposed_rate_currency = patch.proposed_rate_currency ?? existing.proposed_rate_currency;
   const vendor_rate = patch.vendor_rate ?? existing.vendor_rate;
@@ -187,7 +200,11 @@ async function update(id, patch) {
     data: { ...patch, margin, margin_percentage },
     include: INCLUDE,
   });
-  return serialize(row);
+  await rateLog.record(prisma, { entityType: 'submission', entityId: id, orgId: existing.org_id, userId: user?.id, currency: patch.vendor_rate_currency || existing.vendor_rate_currency || existing.proposed_rate_currency, reason: rate_change_reason, changes: rateChanges });
+  if (existing.stage === 'closed' && 'actual_joining_date' in patch) {
+    await prisma.requirementSeat.update({ where: { id: existing.requirement_seat_id }, data: { joined_at: row.actual_joining_date } });
+  }
+  return { submission: serialize(row) };
 }
 
 async function changeStage(id, { to_stage, reason, backout_reason, rejection_reason }, user) {
@@ -213,9 +230,10 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
     if (to_stage === 'rejected' && !(rejection_reason || reason)) return { error: 'rejection_reason_required' };
 
     if (to_stage === 'offer_sent') {
-      const rounds = await tx.interviewRound.findMany({ where: { submission_id: id } });
-      const allResolved = rounds.length > 0 && rounds.every((r) => r.result !== 'pending');
-      if (!allResolved) return { error: 'rounds_not_resolved' };
+      // Rounds are optional unless the template marks them mandatory (checked below): a ticket may go to offer with no round scheduled at all.
+      // A cancelled (e.g. rescheduled) round never gets a result, so it must not hold the offer back; rounds that were never scheduled have no row.
+      // A scheduled round that is still pending (optional or ad-hoc) never holds the offer back: only the template's mandatory rounds need a result.
+      if (!(await templates.mandatoryRoundsDone(tx, id))) return { error: 'mandatory_rounds_pending' };
     }
     if (to_stage === 'closed') {
       if (submission.bgv_status !== 'cleared') return { error: 'bgv_not_cleared' };
@@ -256,7 +274,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
           seat_status: 'closed',
           is_locked: true,
           closed_at: new Date(),
-          joined_at: updated.actual_joining_date || new Date(),
+          joined_at: updated.actual_joining_date || null,
         },
       });
     }
@@ -266,6 +284,7 @@ async function changeStage(id, { to_stage, reason, backout_reason, rejection_rea
       rejected: 'candidate_rejected',
       backout: 'candidate_backout',
       offer_sent: 'candidate_offer',
+      closed: 'candidate_closed',
     };
     if (NOTIFY_STAGES[to_stage]) {
       const ctx = await loadNotifyContext(tx, id);
@@ -335,6 +354,8 @@ async function getHistory(id) {
 }
 
 function canManageInterviewRound(submission, requirementSalesOwnerId, roundType, user) {
+  const decided = decide(user, 'meetings.schedule');
+  if (decided !== null) return decided;
   if (user.role === 'admin') return true;
   if (user.role === 'recruiter') return submission.submitted_by === user.id;
   if (user.role === 'sales') {
@@ -380,7 +401,65 @@ async function loadInterviewRound(tx, id) {
     where: { id },
     include: INTERVIEWER_INCLUDE,
   });
-  return serializeInterviewRound(round);
+  const out = serializeInterviewRound(round);
+  if (out && out.template_round_id) {
+    // The manager decides what a below-pass score means; the round only carries the flag.
+    const requirement = await templates.loadRequirementForSubmission(tx, out.submission_id);
+    out.pass_percentage = templates.passMarkFor(requirement);
+    out.below_pass = out.score_percent != null && Number(out.score_percent) < out.pass_percentage;
+  }
+  return out;
+}
+
+// Feedback is mandatory to finish a template round; rounds that require ratings need every skill rated (at least one skill).
+function checkRoundCompletion(templateRound, { feedback, skillRatings }) {
+  if (!feedback || !String(feedback).trim()) return 'feedback_required';
+  if (templateRound.rating_required && !(skillRatings && skillRatings.length)) return 'ratings_required';
+  return null;
+}
+
+// Legacy 1-10 rating (kept for old screens) = the average of the skill ratings; score_percent = overall %.
+function ratingFields(skillRatings) {
+  if (!skillRatings || !skillRatings.length) return { score_percent: null, rating: null };
+  const avg = skillRatings.reduce((s, r) => s + r.rating, 0) / skillRatings.length;
+  return { score_percent: templates.scorePercent(skillRatings), rating: Math.min(10, Math.max(1, Math.round(avg))) };
+}
+
+// The first round of an interview plan is optional for every profile and may be skipped: recorded as a completed round with result
+// "skipped" (no interview, no score) so the next round opens and the offer gate counts it as done.
+async function skipFirstRound(submissionId, { template_round_id, reason }, user) {
+  return prisma.$transaction(async (tx) => {
+    const submission = await tx.submission.findUnique({ where: { id: submissionId }, include: { profile: { select: { source: true } } } });
+    if (!submission) return { error: 'not_found' };
+
+    const requirement = await templates.loadRequirementForSubmission(tx, submissionId);
+    const first = requirement?.interview_template?.rounds?.[0];
+    if (!first || first.id !== template_round_id) return { error: 'skip_first_round_only' };
+
+    const roundType = first.conducted_by === 'client' ? 'template_client' : 'template_internal';
+    const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
+    if (!canManageInterviewRound(submission, salesOwnerId, roundType, user)) return { error: 'forbidden' };
+
+    const existing = await tx.interviewRound.findFirst({ where: { submission_id: submissionId, template_round_id, status: { not: 'cancelled' } } });
+    if (existing) return { error: 'round_already_exists' };
+
+    const last = await tx.interviewRound.findFirst({ where: { submission_id: submissionId }, orderBy: { round_number: 'desc' } });
+    const created = await tx.interviewRound.create({
+      data: {
+        submission_id: submissionId,
+        round_number: last ? last.round_number + 1 : 1,
+        round_type: roundType,
+        round_name: first.name,
+        template_round_id,
+        status: 'completed',
+        result: 'skipped',
+        feedback: (reason && reason.trim()) || 'Skipped: optional round',
+        completed_at: new Date(),
+        scheduled_by: user.id,
+      },
+    });
+    return { round: await loadInterviewRound(tx, created.id) };
+  });
 }
 
 async function addInterviewRound(submissionId, data, user) {
@@ -390,13 +469,31 @@ async function addInterviewRound(submissionId, data, user) {
     if (!submission) return { error: 'not_found' };
 
     const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
+
+    // Template flow: the type comes from the template round, and the earlier mandatory rounds must be done first.
+    let templateRound = null;
+    if (data.template_round_id) {
+      const check = await templates.checkCanStart(tx, submissionId, data.template_round_id);
+      if (check.error) return { error: check.error };
+      templateRound = check.templateRound;
+      data = {
+        ...data,
+        round_type: templateRound.conducted_by === 'client' ? 'template_client' : 'template_internal',
+        round_name: data.round_name || templateRound.name,
+      };
+    }
     if (!canManageInterviewRound(submission, salesOwnerId, data.round_type, user)) return { error: 'forbidden' };
 
     const last = await tx.interviewRound.findFirst({ where: { submission_id: submissionId }, orderBy: { round_number: 'desc' } });
     const round_number = last ? last.round_number + 1 : 1;
 
-    const { interviewer_ids, ...roundFields } = data;
+    const { interviewer_ids, skill_ratings, ...roundFields } = data;
     const payload = { ...roundFields, submission_id: submissionId, round_number, scheduled_by: userId };
+    if (skill_ratings && skill_ratings.length) Object.assign(payload, ratingFields(skill_ratings));
+    if (templateRound && ['pass', 'fail'].includes(payload.result)) {
+      const problem = checkRoundCompletion(templateRound, { feedback: payload.feedback, skillRatings: skill_ratings });
+      if (problem) return { error: problem };
+    }
     if (payload.scheduled_at) payload.scheduled_at = new Date(payload.scheduled_at);
     if (payload.completed_at) payload.completed_at = new Date(payload.completed_at);
     if (['pass', 'fail', 'no_show'].includes(payload.result) && !payload.completed_at) {
@@ -410,6 +507,7 @@ async function addInterviewRound(submissionId, data, user) {
     }
 
     const created = await tx.interviewRound.create({ data: payload });
+    if (skill_ratings && skill_ratings.length) await templates.saveSkillRatings(tx, created.id, skill_ratings);
 
     if (INTERNAL_ROUND_TYPES.includes(data.round_type) && interviewer_ids !== undefined) {
       await syncInterviewers(tx, created.id, interviewer_ids);
@@ -470,12 +568,42 @@ async function updateInterviewRound(id, patch, user) {
     const salesOwnerId = await loadRequirementSalesOwnerId(tx, submission);
     const isManager = canManageInterviewRound(submission, salesOwnerId, existing.round_type, user);
     const isScheduler = canRescheduleInterviewRound(existing, submission, salesOwnerId, user);
-    if (!isManager && !isScheduler) return { error: 'forbidden' };
+    // The person who took the round (an assigned interviewer) can write and amend the result, the feedback and the skill ratings of
+    // THAT round, before and after it is completed - they do not need scheduling rights for that.
+    const isInterviewer = await isAssignedInterviewer(tx, id, user.id);
+    // HR (the recruiter role) can write the feedback of any round too, so the Interview feedback page works for them whoever sent the candidate
+    const isHr = user.role === 'recruiter';
+    if (!isManager && !isScheduler && !isInterviewer && !isHr) return { error: 'forbidden' };
+    const mayGiveFeedback = isManager || isInterviewer || isHr;
 
-    const { interviewer_ids, ...patchFields } = patch;
+    const { interviewer_ids, skill_ratings, ...patchFields } = patch;
     const finalPatch = { ...patchFields };
+
+    // Template rounds: finishing one (pass / fail) needs feedback, and ratings where the template asks for them.
+    let skillsToSave;
+    if (mayGiveFeedback && existing.template_round_id) {
+      const templateRound = await tx.interviewTemplateRound.findUnique({ where: { id: existing.template_round_id } });
+      const finalResult = patch.result !== undefined ? patch.result : existing.result;
+      const touched = patch.result !== undefined || patch.feedback !== undefined || skill_ratings !== undefined;
+      if (templateRound && ['pass', 'fail'].includes(finalResult) && touched) {
+        const currentSkills = skill_ratings !== undefined
+          ? skill_ratings
+          : await tx.interviewRoundSkillRating.findMany({ where: { interview_round_id: id } });
+        const problem = checkRoundCompletion(templateRound, {
+          feedback: patch.feedback !== undefined ? patch.feedback : existing.feedback,
+          skillRatings: currentSkills,
+        });
+        if (problem) return { error: problem };
+      }
+      if (skill_ratings !== undefined) {
+        skillsToSave = skill_ratings;
+        Object.assign(finalPatch, ratingFields(skill_ratings));
+      }
+    }
     if (!isManager) {
-      const allowed = ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'];
+      // the scheduler may move the interview; an interviewer may only write the outcome of their round
+      const allowed = isScheduler ? ['scheduled_at', 'duration_minutes', 'meeting_link', 'round_name'] : [];
+      if (isInterviewer || isHr) allowed.push('result', 'feedback', 'rating', 'completed_at');
       for (const key of Object.keys(finalPatch)) {
         if (!allowed.includes(key)) delete finalPatch[key];
       }
@@ -484,8 +612,19 @@ async function updateInterviewRound(id, patch, user) {
     if (finalPatch.scheduled_at) finalPatch.scheduled_at = new Date(finalPatch.scheduled_at);
     if (finalPatch.completed_at) finalPatch.completed_at = new Date(finalPatch.completed_at);
     if (finalPatch.interviewer_email === '') finalPatch.interviewer_email = null;
-    if (isManager && ['pass', 'fail', 'no_show'].includes(patch.result) && !patch.completed_at) {
+    if (mayGiveFeedback && ['pass', 'fail', 'no_show'].includes(patch.result) && !patch.completed_at) {
       finalPatch.completed_at = new Date();
+    }
+    // A cancelled round comes back to life when it is given a new date/time or the editor asks to reopen it;
+    // otherwise an edit would leave it struck through on the calendar.
+    const reopen = finalPatch.reopen === true;
+    delete finalPatch.reopen;
+    const timeMoved = finalPatch.scheduled_at
+      && (!existing.scheduled_at || finalPatch.scheduled_at.getTime() !== new Date(existing.scheduled_at).getTime());
+    if (existing.status === 'cancelled' && (reopen || timeMoved)) {
+      finalPatch.status = 'scheduled';
+      finalPatch.cancelled_at = null;
+      finalPatch.cancellation_reason = null;
     }
 
     if (isManager && INTERNAL_ROUND_TYPES.includes(existing.round_type) && interviewer_ids !== undefined) {
@@ -494,6 +633,7 @@ async function updateInterviewRound(id, patch, user) {
     }
 
     await tx.interviewRound.update({ where: { id }, data: finalPatch });
+    if (skillsToSave !== undefined) await templates.saveSkillRatings(tx, id, skillsToSave);
 
     if (isManager && INTERNAL_ROUND_TYPES.includes(existing.round_type) && interviewer_ids !== undefined) {
       await syncInterviewers(tx, id, interviewer_ids);
@@ -506,7 +646,7 @@ async function updateInterviewRound(id, patch, user) {
 
     const rescheduled = finalPatch.scheduled_at
       && (!existing.scheduled_at || new Date(finalPatch.scheduled_at).getTime() !== new Date(existing.scheduled_at).getTime());
-    const feedbackTouched = patch.result !== undefined || patch.feedback !== undefined || patch.rating !== undefined;
+    const feedbackTouched = patch.result !== undefined || patch.feedback !== undefined || patch.rating !== undefined || skill_ratings !== undefined;
 
     if (rescheduled || feedbackTouched) {
       const ctx = await loadNotifyContext(tx, existing.submission_id);
@@ -550,6 +690,7 @@ async function updateInterviewRound(id, patch, user) {
 }
 
 module.exports = {
+  skipFirstRound,
   list,
   getById,
   create,

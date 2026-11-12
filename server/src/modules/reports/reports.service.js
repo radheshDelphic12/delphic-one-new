@@ -45,6 +45,20 @@ function reportTo(value) {
     : new Date(value);
 }
 
+/**
+ * The same filter for a calendar-DATE column (e.g. actual_joining_date, `@db.Date`). A DATE holds no time of day and
+ * Prisma compares it with the UTC day of the value it is given, so the IST instants of optionalDateRange would reach
+ * one day too far back: "1 Oct 00:00 IST" is 30 Sep in UTC, and a 30 Sep joining then counted in October. Plain
+ * YYYY-MM-DD input is used as that calendar day, both ends inclusive.
+ */
+function dateOnlyRange(date_from, date_to) {
+  const plain = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00.000Z`) : null);
+  const range = {};
+  if (date_from) range.gte = plain(date_from) || reportFrom(date_from);
+  if (date_to) range.lte = plain(date_to) || reportTo(date_to);
+  return Object.keys(range).length ? range : undefined;
+}
+
 /** Build a Prisma date filter from optional YYYY-MM-DD (or ISO) strings; IST, end day inclusive. */
 function optionalDateRange(date_from, date_to) {
   const range = {};
@@ -130,7 +144,8 @@ async function loadSubmissionTimingMaps(submissionIds) {
 }
 
 function summarizeInterviewRounds(rounds, from, to) {
-  const inPeriod = rounds.filter((r) => {
+  // a skipped round (bench profile's first round) was never held, so it is not an interview
+  const inPeriod = rounds.filter((r) => r.result !== 'skipped').filter((r) => {
     const anchor = r.completed_at || r.scheduled_at;
     if (!anchor) return true;
     const t = new Date(anchor);
@@ -295,7 +310,7 @@ async function salesPerformance({ date_from, date_to, sales_id, department_id })
         ? await prisma.submission.findMany({
             where: {
               seat: { requirement_id: { in: allOwnedReqIds } },
-              actual_joining_date: { gte: from, lte: to },
+              actual_joining_date: dateOnlyRange(date_from, date_to),
             },
           })
         : [];
@@ -729,7 +744,7 @@ async function closure({ date_from, date_to, group_by = 'month', department_id }
   const rows = await prisma.submission.findMany({
     where: {
       stage: 'closed',
-      actual_joining_date: { gte: reportFrom(date_from), lte: reportTo(date_to) },
+      actual_joining_date: dateOnlyRange(date_from, date_to),
       ...(department_id ? { submitted_by_user: { department_id } } : {}),
     },
     include: {
@@ -1100,6 +1115,26 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
     }
   }
 
+  // Table 5 - profiles submitted to the client, per sourcer per day. A submission counts on the day it FIRST moved to
+  // "submitted to client" (the stage history), the same anchor the Sales report uses.
+  const toClientHistory = await prisma.stageHistory.findMany({
+    where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+    orderBy: { changed_at: 'asc' },
+    select: { entity_id: true, changed_at: true },
+  });
+  const toClientAt = new Map();
+  for (const h of toClientHistory) if (!toClientAt.has(h.entity_id)) toClientAt.set(h.entity_id, h.changed_at);
+  const toClientSubs = toClientAt.size
+    ? await prisma.submission.findMany({
+        where: { id: { in: [...toClientAt.keys()] }, profile: { ...profileWhere, ...(sourcer_id ? { added_by: sourcer_id } : {}) } },
+        select: { id: true, profile: { select: { added_by: true, source: true, added_by_user: { select: { id: true, name: true } } } } },
+      })
+    : [];
+  const toClientMap = new Map();
+  for (const s of toClientSubs) {
+    addTyped(toClientMap, s.profile.added_by, s.profile.added_by_user?.name, dayKey(toClientAt.get(s.id)), s.profile.source);
+  }
+
   const byDateThenName = (nameKey) => (a, b) =>
     (b.date || '').localeCompare(a.date || '') || (a[nameKey] || '').localeCompare(b[nameKey] || '');
 
@@ -1116,6 +1151,12 @@ async function hrReport({ date_from, date_to, sourcer_id, interviewer_id, source
         total: submissions.length,
         title: 'Submissions',
         rows: [...submissionMap.values()].sort(byDateThenName('sourcer')),
+      },
+      {
+        key: 'submitted_to_client',
+        total: toClientSubs.length,
+        title: 'Submitted to client',
+        rows: [...toClientMap.values()].sort(byDateThenName('sourcer')),
       },
       {
         key: 'round1_by_sourcer',
@@ -1157,7 +1198,7 @@ const dur = (fromDate, toDate) => {
 
 // A joining = a submission that reached `closed` with a joining date in range.
 async function joinings({ date_from, date_to }) {
-  const range = optionalDateRange(date_from, date_to);
+  const range = dateOnlyRange(date_from, date_to);
   const rows = await prisma.submission.findMany({
     where: { stage: 'closed', actual_joining_date: range },
     select: {
@@ -1235,6 +1276,7 @@ async function joinings({ date_from, date_to }) {
           month: mk.label,
           sort: mk.sort,
           vendor: p.vendor_account?.name || 'Unknown vendor',
+          vendor_id: p.vendor_account_id,
           joinings: 0,
         });
       }
@@ -1296,7 +1338,8 @@ const byDateThenNameDesc = (nameKey) => (a, b) =>
  * BDA reports — 5 tables, all keyed off `origin_owner_id` ("Brought by", the
  * immutable account creator). `bda_id` scopes every table to one person;
  * `client_id` scopes every table to one account (client or vendor);
- * `account_type` further narrows `accounts_created` to client/vendor/unclassified.
+ * `account_type` (client / vendor / unclassified) narrows every table to accounts of that type: accounts brought,
+ * the meetings (by the account's current type) and the requirements (only client accounts have any).
  *   1. accounts_created        - accounts brought per BDA per day (+ type split on hover)
  *   2. meetings_scheduled      - account meetings scheduled per BDA per day, with how
  *                                many of those accounts are active now
@@ -1342,14 +1385,18 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     row.by_type[label] = (row.by_type[label] || 0) + 1;
   }
 
-  // 2 & 3. meetings scheduled (stage_history: account -> meeting_scheduled)
+  // 2 & 3. meetings scheduled (stage_history: account -> meeting_scheduled). With an account type chosen only
+  // accounts of that type count, the same way the "Accounts brought" table is narrowed.
+  const typedAccountIds = account_type
+    ? (await prisma.account.findMany({ where: { ...accountScope, ...typeScope }, select: { id: true } })).map((a) => a.id)
+    : null;
   const meetingEvents = await prisma.stageHistory.findMany({
     where: {
       entity_type: 'account',
       to_stage: 'meeting_scheduled',
       ...(range ? { changed_at: range } : {}),
       ...(bda_id ? { changed_by: bda_id } : {}),
-      ...(client_id ? { entity_id: client_id } : {}),
+      ...(typedAccountIds ? { entity_id: { in: typedAccountIds } } : client_id ? { entity_id: client_id } : {}),
     },
     select: {
       changed_at: true,
@@ -1372,10 +1419,19 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
 
   const meetingsScheduled = new Map();
   const meetingsConversion = new Map();
+  // An account rescheduled several times has several meeting events but converts to
+  // active once — count each account's conversion once per row, so "converted" can
+  // never exceed the number of accounts (or meetings) it is measured against.
+  const convertedSeen = new Set();
   for (const e of meetingEvents) {
     const day = dayKey(e.changed_at);
-    const converted = activeNow.has(e.entity_id) ? 1 : 0;
     const dayKeyStr = `${e.changed_by}|${day}`;
+    const dayConvertedKey = `${dayKeyStr}|${e.entity_id}`;
+    const dayConverted = activeNow.has(e.entity_id) && !convertedSeen.has(dayConvertedKey) ? 1 : 0;
+    if (dayConverted) convertedSeen.add(dayConvertedKey);
+    const rollupConvertedKey = `${e.changed_by}|${e.entity_id}`;
+    const rollupConverted = activeNow.has(e.entity_id) && !convertedSeen.has(rollupConvertedKey) ? 1 : 0;
+    if (rollupConverted) convertedSeen.add(rollupConvertedKey);
     if (!meetingsScheduled.has(dayKeyStr)) {
       meetingsScheduled.set(dayKeyStr, {
         bda: e.changed_by_user?.name || 'Unknown',
@@ -1387,7 +1443,7 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     }
     const dRow = meetingsScheduled.get(dayKeyStr);
     dRow.meetings_scheduled += 1;
-    dRow.converted_to_active += converted;
+    dRow.converted_to_active += dayConverted;
 
     if (!meetingsConversion.has(e.changed_by)) {
       meetingsConversion.set(e.changed_by, {
@@ -1399,11 +1455,12 @@ async function bdaReports({ date_from, date_to, bda_id, client_id, account_type 
     }
     const cRow = meetingsConversion.get(e.changed_by);
     cRow.meetings_scheduled += 1;
-    cRow.converted_to_active += converted;
+    cRow.converted_to_active += rollupConverted;
   }
 
   // 4 & 5. requirements on BDA-brought *client* accounts
-  const requirements = await prisma.requirement.findMany({
+  // Only client accounts have requirements, so a vendor / unclassified type filter leaves this table empty.
+  const requirements = account_type && account_type !== 'client' ? [] : await prisma.requirement.findMany({
     where: {
       ...(range ? { created_at: range } : {}),
       account: { type: 'client', ...ownerScope, ...accountScope },
@@ -1664,6 +1721,75 @@ async function salesReports({ date_from, date_to, sales_id, client_id }) {
   };
 }
 
+/**
+ * Recruiter reports — one table today: profiles submitted to the client, per recruiter (the submission's
+ * `submitted_by`) per day. A submission counts on the day it FIRST moved to "submitted to client" (stage history),
+ * the same anchor the HR and Sales reports use. `recruiter_id` narrows to one recruiter (forced for a recruiter caller).
+ */
+async function recruiterReports({ date_from, date_to, recruiter_id, client_id }) {
+  const range = optionalDateRange(date_from, date_to);
+  const history = await prisma.stageHistory.findMany({
+    where: { entity_type: 'submission', to_stage: 'submitted_to_client', ...(range ? { changed_at: range } : {}) },
+    orderBy: { changed_at: 'asc' },
+    select: { entity_id: true, changed_at: true },
+  });
+  const at = new Map();
+  for (const h of history) if (!at.has(h.entity_id)) at.set(h.entity_id, h.changed_at);
+
+  const subs = at.size
+    ? await prisma.submission.findMany({
+        where: {
+          id: { in: [...at.keys()] },
+          ...(recruiter_id ? { submitted_by: recruiter_id } : {}),
+          ...(client_id ? { seat: { requirement: { account_id: client_id } } } : {}),
+        },
+        select: {
+          id: true,
+          submitted_by: true,
+          submitted_by_user: { select: { id: true, name: true } },
+          profile: { select: { name: true } },
+          seat: { select: { requirement: { select: { title: true, account: { select: { id: true, name: true } } } } } },
+        },
+      })
+    : [];
+
+  const rows = new Map();
+  for (const s of subs) {
+    const day = dayKey(at.get(s.id));
+    const key = `${s.submitted_by}|${day}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        recruiter: s.submitted_by_user?.name || 'Unknown',
+        recruiter_id: s.submitted_by,
+        date: day,
+        count: 0,
+        profiles: {},
+        details: [],
+      });
+    }
+    const row = rows.get(key);
+    row.count += 1;
+    const profileName = s.profile?.name || '—';
+    row.profiles[profileName] = (row.profiles[profileName] || 0) + 1;
+    row.details.push({
+      profile: { name: profileName },
+      requirement: { title: s.seat?.requirement?.title || '—' },
+      client: { name: s.seat?.requirement?.account?.name || '—', id: s.seat?.requirement?.account?.id || null },
+    });
+  }
+
+  return {
+    tables: [
+      {
+        key: 'profiles_submitted_to_client',
+        title: 'Profiles submitted to client',
+        total: subs.length,
+        rows: [...rows.values()].sort(byDateThenNameDesc('recruiter')),
+      },
+    ],
+  };
+}
+
 // One row per submission. All three duration columns are measured from the
 // requirement's creation time: requirement created -> submission created,
 // -> first internal round 1 scheduled, -> submitted to client.
@@ -1771,4 +1897,11 @@ module.exports = {
   timeToSubmit,
   bdaReports,
   salesReports,
+  recruiterReports,
+  // shared with drilldown.service so a drill-down uses the exact same IST day/range rules
+  dayKey,
+  reportFrom,
+  reportTo,
+  optionalDateRange,
+  dateOnlyRange,
 };

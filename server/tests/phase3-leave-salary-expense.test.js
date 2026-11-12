@@ -29,7 +29,8 @@ async function seedOrgAdmin(orgOverrides = { name: 'Delphic', slug: 'delphic' })
 
 async function seedEmployee(org, extra = {}) {
   const user = await createUser({ role: 'employee' });
-  const membership = await createOrgMembership(user.id, org.id, { role: 'employee', ...extra });
+  // An established employee by default: the standard quota is pro-rata only for someone who joined part-way through the year.
+  const membership = await createOrgMembership(user.id, org.id, { role: 'employee', joined_at: d('2020-01-01'), ...extra });
   const { access_token } = await loginAs(user);
   return { user, membership, token: access_token };
 }
@@ -145,9 +146,12 @@ describe('Admin leave balances: overview, entitlement control, withdrawing leave
     await leave(org, ravi.membership, ul, '2026-04-06', '2026-04-10'); // unpaid, 5 days
     const left = await seedEmployee(org);
     await prisma.orgMembership.update({ where: { id: left.membership.id }, data: { left_at: new Date('2026-05-01') } });
+    const contractor = await seedEmployee(org);
+    await prisma.orgMembership.update({ where: { id: contractor.membership.id }, data: { worker_type: 'contractor' } });
 
     const res = await authed(request(app).get('/api/v1/leave/balances/overview').query({ year: 2026 }), token);
     expect(res.status).toBe(200);
+    expect(res.body.data.employees.map((e) => e.org_membership_id)).not.toContain(contractor.membership.id); // contractors do not earn leave
     expect(res.body.data.types.map((t) => t.code).sort()).toEqual(['CL', 'CO', 'EL', 'SL', 'UL']);
     expect(res.body.data.employees.map((e) => e.org_membership_id)).not.toContain(left.membership.id); // ex-employees are not listed
 
@@ -429,5 +433,31 @@ describe('Expenses → edit a submitted claim', () => {
     expect(late.status).toBe(409);
     const remaining = (await authed(request(app).get(`/api/v1/documents?entity_type=expense_claim&entity_id=${c.id}`), emp.token)).body.data;
     expect((await authed(request(app).delete(`/api/v1/documents/${remaining[0].id}`), emp.token)).status).toBe(409);
+  });
+});
+
+describe('A new joiner gets the standard quota pro-rata from the joining month', () => {
+  test('joined mid-year: quota / 12 per remaining month (to the half day); joined in January or before: the full quota; an admin-set figure is kept', async () => {
+    const { org, token } = await seedOrgAdmin();
+    const cl = await typeByName(org, 'Casual Leave');
+    const oct = await seedEmployee(org, { joined_at: d('2026-10-15') }); // Oct..Dec = 3 months -> 12 * 3 / 12
+    const nov = await seedEmployee(org, { joined_at: d('2026-11-03') }); // 2 months
+    const jan = await seedEmployee(org, { joined_at: d('2026-01-05') });
+    const old = await seedEmployee(org, { joined_at: d('2025-06-01') });
+    const set = await seedEmployee(org, { joined_at: d('2026-10-15') });
+    await authed(request(app).put(`/api/v1/leave/balances/${set.membership.id}`), token).send({ leave_type_id: cl.id, year: 2026, allocated: 7 });
+
+    const res = await authed(request(app).get('/api/v1/leave/balances/overview').query({ year: 2026 }), token);
+    expect(res.status).toBe(200);
+    const casual = (e) => res.body.data.employees.find((x) => x.org_membership_id === e.membership.id).balances.find((b) => b.code === 'CL');
+    expect(casual(oct)).toMatchObject({ allocated: 3, customised: false });
+    expect(casual(nov)).toMatchObject({ allocated: 2 });
+    expect(casual(jan)).toMatchObject({ allocated: 12 });
+    expect(casual(old)).toMatchObject({ allocated: 12 });
+    expect(casual(set)).toMatchObject({ allocated: 7, customised: true });
+
+    // The employee's own screen agrees (Casual leave overflows to unpaid, so a request beyond the balance is accepted, not refused).
+    const mine = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), oct.token);
+    expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ allocated: 3, remaining: 3 });
   });
 });

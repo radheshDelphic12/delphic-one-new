@@ -4,6 +4,7 @@ const {
   NOTIFICATION_LABELS,
   ROLE_EVENT_MATRIX,
   eventsForRole,
+  defaultEmailFor,
 } = require('../../lib/notifications/eventCatalog');
 
 function serialize(row) {
@@ -67,8 +68,17 @@ async function markAllRead(userId) {
  * Effective preferences for the user: one entry per NotificationType relevant to
  * their role, matrix defaults merged with any stored NotificationPreference rows.
  */
+// The role notify() delivers by is the person's own account role (users.role), not the role they hold in the company they are working in.
+// A group admin who is only an employee in another company still receives everything an admin does, so the preference list has to show
+// (and let them switch off) all of it, from whichever company they open it in.
+async function deliveryRole(user) {
+  const row = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true } });
+  return row?.role || user.role;
+}
+
 async function getPreferences(user) {
-  const relevant = eventsForRole(user.role);
+  const role = await deliveryRole(user);
+  const relevant = eventsForRole(role);
   const rows = await prisma.notificationPreference.findMany({
     where: { user_id: user.id, type: { in: relevant } },
   });
@@ -82,14 +92,14 @@ async function getPreferences(user) {
       description,
       in_app: stored ? stored.in_app : ROLE_EVENT_MATRIX[type].defaultInApp !== false,
       // Same default notify() uses, so the toggle shows what is actually sent.
-      email: stored ? stored.email : ROLE_EVENT_MATRIX[type].defaultEmail === true,
+      email: stored ? stored.email : defaultEmailFor(type, role),
       is_overridden: Boolean(stored),
     };
   });
 }
 
 async function setPreferences(user, items) {
-  const relevant = new Set(eventsForRole(user.role));
+  const relevant = new Set(eventsForRole(await deliveryRole(user)));
   const valid = items.filter((i) => relevant.has(i.type));
   await prisma.$transaction(
     valid.map((i) =>

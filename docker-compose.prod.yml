@@ -55,3 +55,12 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
+
+  dbviewer:
+    ports: !override
+      - '127.0.0.1:${DBVIEWER_PORT:-8090}:8090'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

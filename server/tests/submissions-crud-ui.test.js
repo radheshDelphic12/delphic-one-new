@@ -136,7 +136,12 @@ describe('RD-107 submission detail data (API)', () => {
     });
     const id = created.body.data.id;
 
+    // changing a rate that is already set needs a reason
+    const noReason = await authed(request(app).patch(`/api/v1/submissions/${id}`), recruiterToken).send({ vendor_rate: 75 });
+    expect(noReason.status).toBe(422);
+
     const patch = await authed(request(app).patch(`/api/v1/submissions/${id}`), recruiterToken).send({
+      rate_change_reason: 'Rates revised after negotiation',
       proposed_rate: 110,
       vendor_rate: 75,
       proposed_rate_currency: 'INR',

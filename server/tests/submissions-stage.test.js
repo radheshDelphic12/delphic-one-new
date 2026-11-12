@@ -26,6 +26,8 @@ beforeEach(async () => {
   ({ access_token: recruiterToken } = await loginAs(recruiter));
   account = await createActiveClientAccount(sales.id);
   requirement = await createRequirement(salesToken, account.id);
+  // These cases exercise the older internal_r1 / client_r1 rounds, so the requirement has no interview template.
+  await prisma.requirement.update({ where: { id: requirement.id }, data: { interview_template_id: null } });
   const seats = await authed(request(app).get(`/api/v1/requirements/${requirement.id}/seats`), salesToken);
   seatId = seats.body.data[0].id;
   profile = await createProfile(recruiterToken);
@@ -223,11 +225,12 @@ describe('submission stage machine', () => {
     // interview_scheduled → interview_result is allowed by the machine even with pending rounds
     expect(pendingOffer.status).toBe(200);
 
-    const blocked = await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({
+    // a pending round that no template marks mandatory never holds the offer back
+    const notBlocked = await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({
       to_stage: 'offer_sent',
     });
-    expect(blocked.status).toBe(400);
-    expect(blocked.body.message).toMatch(/round/i);
+    expect(notBlocked.status).toBe(200);
+    await prisma.submission.update({ where: { id: sub.id }, data: { stage: 'interview_result' } });
 
     await authed(request(app).patch(`/api/v1/interview-rounds/${round.body.data.id}`), recruiterToken).send({
       result: 'pass',
@@ -239,6 +242,33 @@ describe('submission stage machine', () => {
     });
     expect(offer.status).toBe(200);
     expect(offer.body.data.stage).toBe('offer_sent');
+  });
+
+  test('rounds are optional: a ticket with no round scheduled can go to offer (no mandatory template rounds)', async () => {
+    const sub = await createSubmission();
+    await advanceTo(sub.id, ['internal_screening', 'submitted_to_client', 'interview_scheduled', 'interview_result']);
+    const offer = await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' });
+    expect(offer.status).toBe(200);
+    expect(offer.body.data.stage).toBe('offer_sent');
+  });
+
+  test('neither a cancelled round nor a pending scheduled one holds the offer back (only template-mandatory rounds do)', async () => {
+    const sub = await createSubmission();
+    await advanceTo(sub.id, ['internal_screening', 'submitted_to_client']);
+    const first = await authed(request(app).post(`/api/v1/submissions/${sub.id}/interview-rounds`), recruiterToken).send({ round_type: 'client_r1', scheduled_at: new Date().toISOString() });
+    expect(first.status).toBe(201);
+    const cancel = await authed(request(app).post(`/api/v1/interviews/${first.body.data.id}/cancel`), recruiterToken).send({ reason: 'rescheduled' });
+    expect(cancel.status).toBe(200);
+    await advanceTo(sub.id, ['interview_result']);
+    expect((await authed(request(app).post(`/api/v1/submissions/${sub.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' })).status).toBe(200);
+
+    // a live round with its result still pending does not block the offer either
+    const sub2 = await createSubmission({ profile_id: (await createProfile(recruiterToken)).id });
+    await advanceTo(sub2.id, ['internal_screening', 'submitted_to_client']);
+    const live = await authed(request(app).post(`/api/v1/submissions/${sub2.id}/interview-rounds`), recruiterToken).send({ round_type: 'client_r1', scheduled_at: new Date().toISOString() });
+    expect(live.status).toBe(201);
+    await advanceTo(sub2.id, ['interview_result']);
+    expect((await authed(request(app).post(`/api/v1/submissions/${sub2.id}/stage`), recruiterToken).send({ to_stage: 'offer_sent' })).status).toBe(200);
   });
 
   test('cannot close without bgv_status cleared; full happy path locks on close', async () => {

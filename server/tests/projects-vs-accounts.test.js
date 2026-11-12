@@ -94,6 +94,41 @@ describe('Finance only edits projects, never the Accounts catalogue', () => {
   });
 });
 
+describe('A sales drop never removes a project from billing', () => {
+  test('a dropped older client row with a rate stays in billing projects and the account detail lists it as live', async () => {
+    const ctx = await seed();
+    const legacy = await prisma.account.create({ data: { type: 'client', name: unique('ByU '), stage: 'active', owner_id: ctx.admin.id, org_id: ctx.org.id, project_name: 'Tsel', project_code: 'P9001', service_category: 'managed_services' } });
+    await prisma.billingRate.create({ data: { org_id: ctx.org.id, account_id: legacy.id, rate_type: 'monthly', rate: 100000, currency: 'INR', effective_from: new Date('2026-09-01'), created_by: ctx.admin.id } });
+    // A plain client with no project data, dropped: not a project.
+    const plain = await prisma.account.create({ data: { type: 'client', name: unique('Plain '), stage: 'dropped', owner_id: ctx.admin.id, org_id: ctx.org.id } });
+    await prisma.account.update({ where: { id: legacy.id }, data: { stage: 'dropped' } });
+
+    const profiles = (await authed(request(app).get('/api/v1/billing/projects'), ctx.token)).body.data;
+    expect(profiles.map((p) => p.id)).toContain(legacy.id);
+    expect(profiles.map((p) => p.id)).not.toContain(plain.id);
+
+    // Every other path that lists projects keeps it too: the billing engine, the P&L table and the timesheet project list.
+    const engine = require('../src/modules/calculations/engines/billing.engine');
+    expect((await engine.listProjects(ctx.org.id)).map((p) => p.id)).toContain(legacy.id);
+    expect((await engine.listProjects(ctx.org.id)).map((p) => p.id)).not.toContain(plain.id);
+    const pnl = await authed(request(app).get('/api/v1/billing/projects-pnl?period_month=10&period_year=2026'), ctx.token);
+    expect(JSON.stringify(pnl.body.data)).toContain(legacy.id);
+    expect(JSON.stringify(pnl.body.data)).not.toContain(plain.id);
+    const teamProjects = await authed(request(app).get('/api/v1/timesheets/project-team/projects?year=2026&month=10'), ctx.token);
+    expect(JSON.stringify(teamProjects.body.data)).toContain(legacy.id);
+
+    const detail = (await authed(request(app).get(`/api/v1/accounts/${legacy.id}`), ctx.token)).body.data;
+    expect(detail.live_projects).toEqual([expect.objectContaining({ id: legacy.id, project_code: 'P9001' })]);
+    const plainDetail = (await authed(request(app).get(`/api/v1/accounts/${plain.id}`), ctx.token)).body.data;
+    expect(plainDetail.live_projects).toEqual([]);
+
+    // Finance ending it (Completed) takes it off the live list.
+    await prisma.account.update({ where: { id: legacy.id }, data: { contract_status: 'completed' } });
+    const after = (await authed(request(app).get(`/api/v1/accounts/${legacy.id}`), ctx.token)).body.data;
+    expect(after.live_projects).toEqual([]);
+  });
+});
+
 describe('Assets can belong to a vendor', () => {
   test('Belongs to = vendor requires the vendor name', async () => {
     const ctx = await seed();

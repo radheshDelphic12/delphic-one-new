@@ -24,6 +24,11 @@ const directoryQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  // Filter bars only: also return people who have left, so their records stay findable.
+  include_former: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
 });
 
 const createSchema = z.object({

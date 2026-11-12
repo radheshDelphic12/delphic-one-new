@@ -8,7 +8,7 @@ import {
   audienceForRoundType,
   eventTypeLabel,
   hasSubmittedFeedback,
-  isClientMeeting,
+  isMeetingLike,
 } from '../../lib/interviewRounds.js';
 import { formatTimeRange } from './monthGrid.js';
 
@@ -58,7 +58,7 @@ export default function EventHoverCard({
   }, [anchorRect, event]);
 
   const look = eventAppearance(event);
-  const meeting = isClientMeeting(event);
+  const meeting = isMeetingLike(event);
   const cancelled = event.status === 'cancelled';
   const when = event.scheduled_at ? new Date(event.scheduled_at) : null;
   const dateLabel = when

@@ -1,4 +1,5 @@
 import { ROLE_COPY } from '../../pages/dashboard/dashboardWidgets.js';
+import { DELPHIC_ONE_TITLES } from '../../lib/delphicone/sections.js';
 
 const ZEPHYR_TITLES = {
   '/zephyr': ['Dashboard', 'Your business at a glance.'],
@@ -7,6 +8,7 @@ const ZEPHYR_TITLES = {
   '/zephyr/projects': ['Projects', 'Own and client projects, milestones and work orders.'],
   '/zephyr/properties': ['Properties', 'Properties and units: investment, valuation, loans, tenants and sales.'],
   '/zephyr/rent': ['Rent', 'Monthly rent due, collected, pending and overdue.'],
+  '/zephyr/wages': ['Daily Wages', 'Attendance and payouts of daily-wage workers, by project.'],
   '/zephyr/tasks': ['Tasks', 'Operational tasks for employees and contractors.'],
   '/zephyr/overview': ['Revenue & Profit', 'Revenue, expense, salaries, profit and valuation.'],
   '/zephyr/people': ['Employee / Contractor', 'People roster, project assignments and monthly salary slips.'],
@@ -51,6 +53,70 @@ const ACCONCY_TITLES = {
   '/acconcy/my-work': ['My work', 'Your assigned leads, deals and tasks.'],
   '/acconcy/settings': ['Acconcy setup', 'Valuation formula, categories, numbering and audit log.'],
 };
+const FOUNDATION_TITLES = {
+  '/foundation': ['Dashboard', 'Campaigns, budgets, spending and projections for the foundation.'],
+  '/foundation/campaigns': ['Campaigns', 'Every campaign with its location, dates, budget, spending and projection.'],
+  '/foundation/funds': ['Funds & Expenses', 'Investments, expenses, donations and transfers, with approvals.'],
+  '/foundation/initiatives': ['Initiatives & Categories', 'Child care, education, healthcare ... and the categories of spending and funding.'],
+  '/foundation/reports': ['Reports', 'Budget, spending, funding and projection reports.'],
+  '/foundation/financials': ['Financials', 'Income, expenses and fund balance by month, with month close.'],
+  '/foundation/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/foundation/settings': ['Foundation setup', 'Budget rules, projection method and the audit log.'],
+};
+const ZKLYRERA_TITLES = {
+  '/zklyrera': ['Overview', 'Investments, returns, income, expenses and salaries of Zklyrera Spirits.'],
+  '/zklyrera/investments': ['Investments', 'Capital placed, principal returned and earnings, investment by investment.'],
+  '/zklyrera/income': ['Income & Returns', 'Investment earnings, principal recovered and other income received.'],
+  '/zklyrera/expenses': ['Expenses', 'Operating and other business expenses by category.'],
+  '/zklyrera/salaries': ['Salaries', 'Salary paid and payable, by employee.'],
+  '/zklyrera/reports': ['Monthly Reports', 'The monthly financial report and every other report, with export.'],
+  '/zklyrera/projections': ['Projections', 'Plan future months and compare them with the actuals.'],
+  '/zklyrera/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
+  '/zklyrera/financials': ['Financials', 'Income, expenses and capital by month, with month close.'],
+  '/zklyrera/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/zklyrera/settings': ['Zklyrera setup', 'Opening balance, financial year, categories and the audit log.'],
+};
+const zklyreraEntry = (pathname) => ZKLYRERA_TITLES[pathname] || ZKLYRERA_TITLES['/zklyrera'];
+const VALTERRA_TITLES = {
+  '/valterra': ['Overview', 'Mining sites, investments, revenue, expenses and salaries of Valterra Resources.'],
+  '/valterra/sites': ['Mining Sites', 'Every site with its location, mining type, material and status.'],
+  '/valterra/investments': ['Investments', 'Capital placed, principal recovered and earnings, outlet by outlet.'],
+  '/valterra/income': ['Revenue & Returns', 'Sales revenue, franchise fees, investment earnings, principal recovered and other income.'],
+  '/valterra/expenses': ['Expenses', 'Site operating costs and company overheads by category.'],
+  '/valterra/salaries': ['Salaries', 'Salary and labour cost paid and payable, by employee and outlet.'],
+  '/valterra/reports': ['Monthly Reports', 'The monthly financial report, outlet-wise results and every other report, with export.'],
+  '/valterra/projections': ['Projections', 'Plan future months by outlet and compare them with the actuals.'],
+  '/valterra/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
+  '/valterra/financials': ['Financials', 'Valuation, income, expenses and capital by month, with month close.'],
+  '/valterra/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/valterra/settings': ['Valterra setup', 'Opening balance, financial year, categories, ownership types and the audit log.'],
+};
+const valterraEntry = (pathname) => (pathname.startsWith('/valterra/sites/') ? ['Mining site', 'The outlet profile, its dashboard, investments and transactions.'] : VALTERRA_TITLES[pathname] || VALTERRA_TITLES['/valterra']);
+const NOVAREX_TITLES = {
+  '/novarex': ['Overview', 'Outlets, investments, sales, expenses and salaries of Novarex Pharmaceuticals.'],
+  '/novarex/operations': ['Operations', 'Sales, gross profit, stock value, receivables, franchise fees and logistics, with live filters and reports.'],
+  '/novarex/products': ['Products', 'The pharmaceutical product master with tax, price and handling.'],
+  '/novarex/purchasing': ['Purchasing', 'Suppliers, purchase orders and goods receipts.'],
+  '/novarex/stock': ['Stock', 'Stock by batch and location, expiry, transfers, adjustments and alerts.'],
+  '/novarex/sales': ['Sales orders', 'Customers, outlets and sales orders.'],
+  '/novarex/logistics': ['Shipments', 'Dispatch, delivery, freight, partners and vehicles.'],
+  '/novarex/invoices': ['Invoices', 'Sales, purchase and franchise invoices, credit notes and payments.'],
+  '/novarex/returns': ['Returns and recalls', 'Returns, inspection of returned goods and product recalls.'],
+  '/novarex/franchise': ['Franchise', 'Agreements, fees, royalties and settlements.'],
+  '/novarex/outlets': ['Outlets', 'Every outlet with its location, ownership type, format and status.'],
+  '/novarex/investments': ['Investments', 'Capital placed, principal recovered and earnings, outlet by outlet.'],
+  '/novarex/income': ['Revenue & Returns', 'Sales revenue, franchise fees, investment earnings, principal recovered and other income.'],
+  '/novarex/expenses': ['Expenses', 'Outlet operating costs and company overheads by category.'],
+  '/novarex/salaries': ['Salaries', 'Salary and labour cost paid and payable, by employee and outlet.'],
+  '/novarex/reports': ['Monthly Reports', 'The monthly financial report, outlet-wise results and every other report, with export.'],
+  '/novarex/projections': ['Projections', 'Plan future months by outlet and compare them with the actuals.'],
+  '/novarex/transactions': ['Transactions', 'Every movement of money in one searchable register.'],
+  '/novarex/financials': ['Financials', 'Valuation, income, expenses and capital by month, with month close.'],
+  '/novarex/people': ['Employee / Contractor', 'People roster, logins and access roles.'],
+  '/novarex/settings': ['Novarex setup', 'Opening balance, financial year, categories, ownership types and the audit log.'],
+};
+const novarexEntry = (pathname) => (pathname.startsWith('/novarex/outlets/') ? ['Outlet', 'The outlet profile, its dashboard, investments and transactions.'] : NOVAREX_TITLES[pathname] || NOVAREX_TITLES['/novarex']);
+const foundationEntry = (pathname) => (/^\/foundation\/campaigns\/[^/]+/.test(pathname) ? ['Campaign', 'Budget, spending, timeline and projection for one campaign.'] : FOUNDATION_TITLES[pathname] || FOUNDATION_TITLES['/foundation']);
 const acconcyEntry = (pathname) => (/^\/acconcy\/deals\/[^/]+/.test(pathname) ? ['Deal', 'Revenue, expenses and profit for one deal.'] : ACCONCY_TITLES[pathname] || ACCONCY_TITLES['/acconcy']);
 
 /** Page title shown in the app header for the active route. */
@@ -58,12 +124,18 @@ export function headerTitleForPath(pathname, user) {
   if (pathname === '/') return user?.name ? `${user.name}'s Dashboard` : 'Dashboard';
   if (pathname.startsWith('/zephyr')) return zephyrTitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[0];
+  if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[0];
+  if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[0];
+  if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[0];
+  if (pathname.startsWith('/delphic-one')) return (DELPHIC_ONE_TITLES[pathname] || DELPHIC_ONE_TITLES['/delphic-one'])[0];
+  if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[0];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[0];
   if (pathname.startsWith('/pipeline')) return 'Pipeline';
   if (pathname.startsWith('/accounts')) return 'Clients & vendors';
   if (pathname.startsWith('/requirements')) return 'Requirements';
   if (pathname.startsWith('/profiles')) return 'Candidates';
   if (pathname.startsWith('/submissions')) return 'Submissions';
+  if (pathname.startsWith('/rejected-candidates')) return 'Rejected candidates';
   if (pathname.startsWith('/calendar')) return 'Calendar';
   if (pathname.startsWith('/notifications')) return 'Notifications';
   if (pathname.startsWith('/settings')) return 'Settings';
@@ -89,6 +161,11 @@ export function headerTitleForPath(pathname, user) {
 export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/zephyr')) return zephyrSubtitle(pathname);
   if (pathname.startsWith('/gulati')) return gulatiEntry(pathname)[1];
+  if (pathname.startsWith('/foundation')) return foundationEntry(pathname)[1];
+  if (pathname.startsWith('/zklyrera')) return zklyreraEntry(pathname)[1];
+  if (pathname.startsWith('/valterra')) return valterraEntry(pathname)[1];
+  if (pathname.startsWith('/delphic-one')) return (DELPHIC_ONE_TITLES[pathname] || DELPHIC_ONE_TITLES['/delphic-one'])[1];
+  if (pathname.startsWith('/novarex')) return novarexEntry(pathname)[1];
   if (pathname.startsWith('/acconcy')) return acconcyEntry(pathname)[1];
   if (pathname === '/') return ROLE_COPY[user?.role || 'admin']?.subtitle || ROLE_COPY.admin.subtitle;
   if (/^\/pipeline\/[^/]+/.test(pathname)) {
@@ -101,6 +178,7 @@ export function headerSubtitleForPath(pathname, user) {
   if (pathname.startsWith('/requirements')) return 'Open jobs, seats, and recruiter assignments.';
   if (pathname.startsWith('/profiles')) return 'Profiles with skills, CTC, and resume attachments.';
   if (pathname.startsWith('/submissions')) return 'Candidates put forward for jobs, by pipeline stage.';
+  if (pathname.startsWith('/rejected-candidates')) return 'Candidates who were rejected, with the reason. Reactivate one to put it back in the pipeline.';
   if (pathname.startsWith('/calendar')) return 'Your scheduled and upcoming interviews - month grid or agenda.';
   if (pathname.startsWith('/notifications')) return 'Assignments, interviews, and stage changes across your work.';
   if (pathname.startsWith('/settings')) return 'Your profile, password, notifications, and account history.';

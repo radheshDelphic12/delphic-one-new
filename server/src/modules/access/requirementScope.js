@@ -6,11 +6,12 @@ const NO_MATCH_ID = '00000000-0000-0000-0000-000000000000';
  * Role-scoped requirement filter used by pipeline board and reports explorer.
  * admin + bda see all (BDAs work the whole requirement map across the team),
  * sales sees own (sales_owner_id), recruiter sees assigned only.
+ * `sharedSales: true` (pipeline board) lets the whole Sales team see every requirement; `mine` narrows back to their own.
  */
-async function requirementScopeWhere(user) {
+async function requirementScopeWhere(user, { sharedSales = false, mine = false } = {}) {
   if (!user) return { id: NO_MATCH_ID };
   if (user.role === 'admin' || user.role === 'bda') return {};
-  if (user.role === 'sales') return { sales_owner_id: user.id };
+  if (user.role === 'sales') return sharedSales && !mine ? {} : { sales_owner_id: user.id };
   if (user.role === 'recruiter') {
     const assignments = await prisma.requirementAssignment.findMany({
       where: { user_id: user.id, role_on_req: 'recruiter', unassigned_at: null },

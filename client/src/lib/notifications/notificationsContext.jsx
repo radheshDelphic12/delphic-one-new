@@ -33,7 +33,7 @@ export function NotificationsProvider({ children }) {
     if (!user) return;
     setLoading(true);
     try {
-      const { data } = await apiClient.get('/notifications', { params: { limit: PAGE_SIZE } });
+      const { data } = await apiClient.get('/notifications', { params: { limit: PAGE_SIZE, unread: '1' } });
       setItems(data.data || []);
       setHasMore(Boolean(data.has_more));
       cursorRef.current = data.next_cursor || null;
@@ -52,13 +52,15 @@ export function NotificationsProvider({ children }) {
       if (next > lastUnreadRef.current && announcedRef.current) {
         pushInfo('You have new notifications', '');
       }
+      // Pull the fresh list so new notifications show up at the top.
+      if (next !== lastUnreadRef.current) reload();
       lastUnreadRef.current = next;
       announcedRef.current = true;
       setUnreadCount(next);
     } catch {
       /* keep last-known count */
     }
-  }, [user, pushInfo]);
+  }, [user, pushInfo, reload]);
 
   const loadMore = useCallback(async () => {
     if (!user || !cursorRef.current) return;
@@ -77,7 +79,7 @@ export function NotificationsProvider({ children }) {
   const markRead = useCallback(async (ids) => {
     if (!ids?.length) return;
     const idSet = new Set(ids);
-    setItems((prev) => prev.map((n) => (idSet.has(n.id) && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n)));
+    setItems((prev) => prev.filter((n) => !idSet.has(n.id)));
     setUnreadCount((c) => Math.max(0, c - ids.length));
     try {
       await apiClient.post('/notifications/read', { ids });
@@ -88,7 +90,8 @@ export function NotificationsProvider({ children }) {
   }, [refreshCount]);
 
   const markAllRead = useCallback(async () => {
-    setItems((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() })));
+    setItems([]);
+    setHasMore(false);
     setUnreadCount(0);
     try {
       await apiClient.post('/notifications/read-all');

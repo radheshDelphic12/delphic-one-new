@@ -8,6 +8,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { adminFor } from '../../lib/access.js';
 
 const CREATABLE_ROLES = [
   { value: 'bda', label: 'BDA' },
@@ -272,7 +273,7 @@ export default function UsersPage() {
   }
 
   useEffect(() => {
-    if (user?.role === 'admin') {
+    if (adminFor(user, 'users.view')) {
       loadUsers();
       loadDepartments();
       // Vendor companies (Accounts → vendor) a contractor can be supplied by.
@@ -387,7 +388,7 @@ export default function UsersPage() {
     [user.id, isSuperadmin]
   );
 
-  if (user?.role !== 'admin') return <Navigate to="/" replace />;
+  if (!adminFor(user, 'users.view')) return <Navigate to="/" replace />;
 
   return (
     <div className="space-y-2">

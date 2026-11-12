@@ -7,6 +7,7 @@ import { useAcconcy, axCan } from '../../lib/acconcy/useAcconcy.js';
 import { SERVICE_TYPES, pctLabel } from '../../lib/acconcy/meta.js';
 import { Empty, Kpi, Money, Select, card, inputCls, labelCls } from '../../components/acconcy/ui.jsx';
 import { shortMonth } from '../../lib/format.js';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 function greeting() {
   const h = new Date().getHours();
@@ -152,6 +153,8 @@ export default function AcconcyHomePage() {
           )}
         </>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

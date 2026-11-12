@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { can } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./allocations.service');
@@ -7,7 +8,7 @@ const v = require('./allocations.validation');
 
 // People → Capacity & Allocation (admin). Reports read live, effective-dated data.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, authorize('admin'));
+router.use(authenticate, requireOrgMembership, can('allocations.manage', 'admin'));
 
 const ERRORS = {
   not_found: [404, 'Allocation not found'],
@@ -32,6 +33,7 @@ router.put('/settings', asyncHandler(async (req, res) => ok(res, await service.u
 router.get('/reports/team-capacity', asyncHandler(async (req, res) => ok(res, await service.teamCapacity(req.user.org_id, v.capacityQuerySchema.parse(req.query)))));
 router.get('/reports/ending-soon', asyncHandler(async (req, res) => ok(res, await service.endingSoon(req.user.org_id, v.endingSoonQuerySchema.parse(req.query)))));
 router.get('/reports/resources', asyncHandler(async (req, res) => ok(res, await service.resourceAllocations(req.user.org_id, v.resourcesQuerySchema.parse(req.query)))));
+router.get('/reports/employee-projects', asyncHandler(async (req, res) => ok(res, await service.employeeProjects(req.user.org_id, v.capacityQuerySchema.parse(req.query)))));
 router.get('/reports/movements', asyncHandler(async (req, res) => ok(res, await service.movements(req.user.org_id, v.movementsQuerySchema.parse(req.query)))));
 
 router.post(

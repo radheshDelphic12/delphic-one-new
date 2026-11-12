@@ -50,7 +50,7 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 - **Org Chart** (group): one chart, Group Super Admin at the bottom, every company above, each company's teams and people above it (`layoutGroupChart` in `TeamChart.jsx`). For one company, Team, Designation/Role and Department views all use the same team-chart design (`regroupForTeamChart`).
 - Navigation: **Group Dashboard** pinned at the top of every sidebar; in group view the sidebar shows only group items plus an "Open a company" list; the switcher reads "All Companies"; inside a company a banner offers "Back to Group Dashboard".
 - Look: group view uses a light sage-green theme (`.theme-group` in `client/src/styles/theme.css`, switched on by `AppLayout` while the path is under `/group-overview`). Company logos in the switcher, sidebar list and login picker come from `lib/orgLogo.js` (the company's own `logo_url`, else the brand logo for known slugs delphic/gulati/zephyr/acconcy, else an initial tile).
-- Logo: `client/public/group-logo.svg` is a redrawn Gulati Foundation logo; replace it with the original file.
+- Logo: `client/public/group-logo.svg` is the uploaded Gulati Industries icon (same file as gulati-logo.svg); the banner and switcher are named Gulati Industries.
 
 ## Tests
 
@@ -62,3 +62,43 @@ A company marked `coming_soon` (marker string in `Org.enabled_modules`, set from
 
 - Gulati and Zephyr must share the Delphic org group on staging/production for the superadmin to see them (they were seeded in separate groups; join them first).
 - Local dev: `group.admin@delphic.in` was removed from the local dev DB and `super@delphic.in` (`Password123!`) created; Acconcy is marked coming soon locally.
+
+## Performance on a remote database (2026-10-09)
+
+The Delphic finance engine runs ~3500 queries per 12-month window, so over Neon (~100 ms/query) the overview took ~270 s and timed out (504) on Render staging; production (local DB) was never slow. `groupFinance.service.js` now computes companies in parallel and caches each company/window/state stale-while-revalidate (120 s fresh, shared in-flight, cleared on asset-value edits, off when NODE_ENV=test) and `index.js` warms the default window 15 s after start. The first call after a deploy can still 504 until the warm-up finishes; the next is ~0.5 s.
+
+## Filters on every tab (2026-10-09)
+
+- Shared `groupOverview/groupFilters.jsx`: Period (This / Last month, Pick a month, This / Last quarter, Financial year, Last financial year, Last 12 months, Custom start and end month), Group by (Monthly / Quarterly / Yearly, April-March FY), Figures (All / Locked / Unlocked).
+- **Group Finance**, **Dashboard** and **Projections & Valuation** all use them and read the same books. The Dashboard tab was rebuilt on `/group/overview` (it used the legacy profitability tables, fixed 30-day tiles and a hard-coded range).
+- `GET /super-dashboard/group/projection?from&to&horizon&state&org_ids`: history = start..end month; the projection starts the month after the end month for 1-12 months (straight-line fit of the last six months with figures, revenue and costs separately); projected valuation = projected profit x 240 + latest asset value x 3. The old valuation methods (manual / revenue multiple / EBITDA multiple) no longer drive this tab; its Settings drawer keeps modules and Coming soon.
+- Speed on a remote DB: the cache is now per company-month, so any window is assembled from cached months and a filter change only computes months not seen before; warm-up covers the last 24 months and the financial year to date.
+
+Projection basis (2026-10-09): the projection starts the month after the history end but never later than the current month (a history ending this month still projects this month), and its basis is the last six complete months before the start, independent of the history window - so This month / Last month / Pick a month all project properly.
+
+Filter UI (2026-10-09, Zephyr pattern): one Filters button opens a panel with custom dropdowns (Period grouped into Months / Quarters / Years / Custom with a date hint, Group by, Project, Companies as toggles, month inputs when needed), active filters show as removable chips with Clear all, and **Figures** (All live / Locked / Unlocked) are pills under the filters, outside the panel. Shared in groupOverview/groupFilters.jsx (GroupFilterBar, ChoiceMenu, FigureSwitch, periodBinding).
+
+## Visual refresh (2026-10-12, local, not pushed)
+Presentation only; no API, calculation or data change. New shared building blocks in `client/src/pages/groupOverview/groupUi.jsx`:
+- `GroupHero` (emerald gradient + dot grid, date, greeting) and `GroupTabs` (pill tab bar, same `role=tab` contract).
+- `StatTile` (tinted card, icon chip, change pill - rising expenses count as bad - and a line sparkline when the period has more than one point); `KpiTile` adapts the old `KpiCard` props so the Foundation and Zklyrera blocks match.
+- compact `CompanyCard` grid above the comparison table (logo, status, revenue / profit / margin, share-of-group bar, valuation; 3 per row, 4 on very wide screens); `ContributionLines` (share of the group total over time, one line per company; only companies in profit count so shares add to 100%); `RankCard` with medal ranks; `TrendLines` with a ranked tooltip and legend pills.
+- Styles: `.group-hero` and `.group-tab-active` in `client/src/styles/theme.css`.
+Applied to the Group Finance and Dashboard tabs and the page shell; Projections, Tasks, Org Chart, Billing Charges and Settings keep their content and get the new hero and tab bar.
+Charts on the group pages are line graphs only (no bars, areas or pies): Dashboard revenue / expenses / profit, trends, contribution, sparklines and the Foundation projection.
+Section order on Group Finance (most-used first): 1 Group at a glance, with a one-line "Needs attention" disclosure (closed until clicked); 2 Companies - one grid where every company has the same card (logo, status, revenue / profit / margin, share-of-group bar, valuation, a revenue / profit line when the period has several points) followed by the sortable comparison table; 3 Trends; 4 Contribution and rankings; 5 Company insights - Gulati Foundation and Zklyrera Spirits views that open only on click, with their own attention lists also closed by default. Recent activity is no longer a page section: it opens in a right-hand drawer from the Activity button (with a count) next to Refresh. The Dashboard tab uses the same company cards. Reusable pieces: CompanyCard and Disclosure in groupUi.jsx.
+Line charts share one style (groupUi.jsx: lineProps, GRID_PROPS, ChartFrame, ShortPeriodHint): smooth rounded lines with a soft glow, white-ringed dots and value labels while a series is short, a dotted grid on a tinted panel, legend pills with the latest values; a short-period hint appears when the range has fewer than three points.
+Charts always draw a wave: when the chosen period has fewer than six months, the trend charts, KPI sparklines and company-card lines read the last 12 months ending at the period's end (`trendWindow.js`, same `/group/overview` endpoint, finished months are cached server-side). Tiles, cards and tables still follow the selected period; the chart subtitle says when the window was widened.
+
+### Design rules (professional pass, 2026-10-12)
+The look is deliberately restrained; keep new group-dashboard UI to these rules:
+- One neutral surface: white cards, 1px `tertiary-200` border, `shadow-sm`, 12px radius, no gradients, glows or hover lifts. The page banner and the underline tab bar are kept exactly as originally designed (green gradient banner with the large logo).
+- Colour carries meaning, not decoration: green / red text only for good / bad change, a small dot + word for status (Profit, Loss, No data); KPI tiles are all neutral with a grey icon.
+- Each company has one muted key colour (`COMPANY_COLORS`) used as a small square, its card line and its chart line.
+- Navigation is an underline tab bar; section headings are plain text with a hairline, no numbers or badges.
+- Charts: thin (2px) smooth lines, hairline solid grid, no markers or labels until hover, plain legend with the latest values, no tinted panels.
+- Numbers use tabular figures and Indian compact units (L, Cr).
+
+## Company insights for every company (2026-10-13)
+
+Group Finance > 5. Company insights now has a button for every live company. Gulati Foundation, Zklyrera Spirits and Valterra keep their dedicated sections; **Delphic Global, Gulati Industries, Zephyr and Acconcy** use one generic section (`CompanyInsightSection.jsx`) fed by `server/src/modules/superDashboard/groupInsights.service.js`, which returns the same shape for each (KPI tiles, an attention list, a top list) and rides on `/group/overview` as `companies[].insight`. Figures come from each company's own services (Delphic: requirements, TAT, clients, submissions; Gulati Industries and Acconcy: leads, deals, receivables / payables; Zephyr: properties, occupancy, projects, overdue rent). Cached 60s per company; one failing company shows "not available" and never breaks the dashboard. Test: `server/tests/group-insights.test.js`. Open: add a company to `BUILDERS` for any future vertical.

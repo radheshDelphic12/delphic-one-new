@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 320" role="img" aria-label="Novarex Pharmaceuticals">
+  <title>Novarex Pharmaceuticals</title>
+  <g transform="translate(200 112) rotate(-40)">
+    <rect x="-78" y="-34" width="156" height="68" rx="34" fill="#0F766E"/>
+    <path d="M0 -34 H44 A34 34 0 0 1 44 34 H0 Z" fill="#2563A8"/>
+    <rect x="-66" y="-22" width="52" height="9" rx="4.5" fill="#fff" opacity="0.35"/>
+  </g>
+  <path d="M142 70 C150 40 182 28 208 34 C204 62 178 82 142 70 Z" fill="#14A096" opacity="0.9"/>
+  <path d="M150 66 C165 56 184 46 202 38" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <text x="200" y="228" text-anchor="middle" font-family="Montserrat, 'Segoe UI', Arial, sans-serif" font-size="56" font-weight="800" letter-spacing="4" fill="#0F766E">NOVAREX</text>
+  <rect x="86" y="244" width="228" height="3" rx="1.5" fill="#2563A8"/>
+  <text x="200" y="280" text-anchor="middle" font-family="Montserrat, 'Segoe UI', Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="8" fill="#2563A8">PHARMACEUTICALS</text>
+</svg>

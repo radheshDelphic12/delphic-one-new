@@ -89,6 +89,46 @@ jobs:
         working-directory: server
         run: npx jest --runInBand --ci --shard=${{ matrix.shard }}/4
 
+  dbviewer:
+    name: Database snapshot viewer tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Separate package (dbviewer/, no workspace); its tests read two tiny committed dumps with the Postgres 16 client tools.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: dbviewer/package-lock.json
+
+      - name: Install Postgres 16 client tools
+        run: |
+          # The runner's own apt index has no postgresql-client-16: add the PostgreSQL project's apt repository first.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-16
+          ls /usr/lib/postgresql/16/bin/pg_restore
+
+      - name: Install dependencies
+        working-directory: dbviewer
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Test
+        working-directory: dbviewer
+        env:
+          PG_RESTORE: /usr/lib/postgresql/16/bin/pg_restore
+        run: npx jest --runInBand --ci
+
+      - name: Build the UI
+        working-directory: dbviewer
+        run: npx vite build web
+
+      - name: Prune script
+        run: bash scripts/test-backup-prune.sh
+
   docker-smoke:
     name: Docker compose smoke (login)
     runs-on: ubuntu-latest
@@ -114,6 +154,8 @@ jobs:
             server.cache-to=type=gha,scope=server,mode=max
             client.cache-from=type=gha,scope=client
             client.cache-to=type=gha,scope=client,mode=max
+            dbviewer.cache-from=type=gha,scope=dbviewer
+            dbviewer.cache-to=type=gha,scope=dbviewer,mode=max
 
       - name: Start stack
         run: docker compose up -d

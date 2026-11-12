@@ -20,6 +20,7 @@ const usersSvc = require('./users.service');
 const account = require('./account.service');
 const finance = require('./finance.service');
 const investments = require('./investments.service');
+const investees = require('./investees.service');
 const salaries = require('./salaries.service');
 const { SERVICE_TYPES } = require('./serviceTypes');
 
@@ -47,6 +48,10 @@ const ERRORS = {
   period_closed: [409, 'That month is closed. An admin must reopen it first'],
   period_reason_required: [422, 'That month is closed. Enter a reason to edit it as admin'],
   already_realised: [409, 'This investment is already fully realised'],
+  investee_not_found: [422, 'Company not found'],
+  lead_not_found: [422, 'Lead not found'],
+  investee_has_investments: [409, 'This company already has money invested in it; it cannot be deleted'],
+  investee_dropped: [409, 'This company was dropped; reopen it before funding it'],
   auto_posted: [409, 'This entry was posted from an investment realisation; change it on the investment'],
   salary_locked: [409, 'Approved or paid salary rows can only be changed by an admin, with a reason'],
   bad_transition: [409, 'That salary row cannot move to that status'],
@@ -173,6 +178,13 @@ router.patch('/investments/:id', can('investments'), A(async (req, res) => send(
 router.delete('/investments/:id', can('delete'), A(async (req, res) => idOk(res, await investments.remove(orgId(req), actor(req), ctxOf(req), req.params.id), { ok: true })));
 router.post('/investments/:id/realise', can('investments'), A(async (req, res) => send('investment')(res, await investments.realise(orgId(req), actor(req), ctxOf(req), req.params.id, investments.realiseSchema.parse(req.body)))));
 router.delete('/investments/:id/realisations/:rid', can('override'), A(async (req, res) => send('investment')(res, await investments.removeRealisation(orgId(req), actor(req), ctxOf(req), req.params.id, req.params.rid))));
+// the companies Acconcy funds or takes over: pipeline (under discussion), funded / taken over, with company-wise returns
+router.get('/investees', can('investments'), A(async (req, res) => { const r = await investees.list(orgId(req), investees.listQuerySchema.parse(req.query)); return ok(res, r.data, { totals: r.totals }); }));
+router.post('/investees', can('investments'), A(async (req, res) => send('investee', 201)(res, await investees.create(orgId(req), actor(req), investees.createSchema.parse(req.body)))));
+router.get('/investees/:id', can('investments'), A(async (req, res) => send('investee')(res, await investees.get(orgId(req), req.params.id))));
+router.patch('/investees/:id', can('investments'), A(async (req, res) => send('investee')(res, await investees.update(orgId(req), actor(req), req.params.id, investees.updateSchema.parse(req.body)))));
+router.delete('/investees/:id', can('delete'), A(async (req, res) => idOk(res, await investees.remove(orgId(req), actor(req), req.params.id, req.query.reason), { ok: true })));
+router.post('/investees/:id/fund', can('investments'), A(async (req, res) => send('investee')(res, await investees.fund(orgId(req), actor(req), ctxOf(req), req.params.id, investees.fundSchema.parse(req.body)))));
 router.get('/assets', can('investments', 'valuation'), A(async (req, res) => { const r = await investments.listAssets(orgId(req), investments.assetListSchema.parse(req.query)); return ok(res, r.data, { total_active: r.total_active }); }));
 router.post('/assets', can('valuation'), A(async (req, res) => send('asset', 201)(res, await investments.createAsset(orgId(req), actor(req), ctxOf(req), investments.createAssetSchema.parse(req.body)))));
 router.patch('/assets/:id', can('valuation'), A(async (req, res) => send('asset')(res, await investments.updateAsset(orgId(req), actor(req), ctxOf(req), req.params.id, investments.updateAssetSchema.parse(req.body)))));

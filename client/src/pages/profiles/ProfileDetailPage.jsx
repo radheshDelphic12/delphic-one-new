@@ -17,6 +17,9 @@ import { userCan } from '../../lib/permissions.js';
 import ProfileFormPage from './ProfileFormPage.jsx';
 import { apiErrorMessage, canEditProfile, formatProfileValue, profileKey } from './profileUtils.js';
 
+/** A date-only value (YYYY-MM-DD); the API sends these as full timestamps. */
+const dateOnly = (v) => (v ? String(v).slice(0, 10) : null);
+
 function DetailField({ label, value, children }) {
   return (
     <div className="min-w-0">
@@ -141,7 +144,7 @@ export default function ProfileDetailPage() {
               {profile.email ? <a href={`mailto:${profile.email}`} className="normal-case text-primary-700 hover:underline">{profile.email}</a> : '—'}
             </DetailField>
             <DetailField label="Phone" value={profile.phone} />
-            <DetailField label="Date of birth" value={profile.date_of_birth} />
+            <DetailField label="Date of birth" value={dateOnly(profile.date_of_birth)} />
             <DetailField label="Gender" value={profile.gender} />
             <DetailField label="Location" value={profile.current_location} />
             <DetailField label="Willing to relocate" value={profile.willing_to_relocate} />
@@ -160,14 +163,14 @@ export default function ProfileDetailPage() {
           </DetailSection>
 
           <DetailSection title="Compensation & availability">
-            <DetailField label="Current CTC" value={profile.current_ctc != null ? `${profile.current_ctc_currency} ${profile.current_ctc}` : null} />
-            <DetailField label="Expected CTC" value={profile.expected_ctc != null ? `${profile.expected_ctc_currency} ${profile.expected_ctc}` : null} />
+            <DetailField label="Current CTC" value={profile.current_ctc != null ? `${profile.current_ctc_currency} ${Number(profile.current_ctc).toLocaleString('en-IN')}` : null} />
+            <DetailField label="Expected CTC" value={profile.expected_ctc != null ? `${profile.expected_ctc_currency} ${Number(profile.expected_ctc).toLocaleString('en-IN')}` : null} />
             <DetailField label="Negotiable" value={profile.ctc_negotiable} />
             <DetailField label="Notice period" value={profile.notice_period_days != null ? `${profile.notice_period_days} days` : null} />
             <DetailField label="Serving notice" value={profile.is_serving_notice} />
             <DetailField label="Work mode" value={profile.preferred_work_mode} />
-            <DetailField label="Last working day" value={profile.last_working_day} />
-            <DetailField label="Earliest join" value={profile.earliest_join_date} />
+            <DetailField label="Last working day" value={dateOnly(profile.last_working_day)} />
+            <DetailField label="Earliest join" value={dateOnly(profile.earliest_join_date)} />
             <DetailField label="CTC notes" value={profile.ctc_notes} />
           </DetailSection>
 

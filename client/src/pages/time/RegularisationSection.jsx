@@ -49,7 +49,7 @@ function RequestDrawer({ open, requireProject, projectOptions, onClose, onSubmit
     }
   }
 
-  const canSubmit = fields.date && fields.hours && fields.reason.trim() && (!requireProject || fields.account_id) && !leave.is_leave_day;
+  const canSubmit = fields.date && fields.hours && fields.reason.trim() && (!requireProject || fields.account_id);
 
   return (
     <Drawer
@@ -75,7 +75,7 @@ function RequestDrawer({ open, requireProject, projectOptions, onClose, onSubmit
           Date
           <input required type="date" max={todayIso()} value={fields.date} onChange={(e) => set('date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
-        <LeaveDayNotice leave={leave} what="timesheet entries and regularisation" />
+        <LeaveDayNotice leave={leave} />
         {requireProject && (
           <div>
             <label className="mb-1 block text-xs font-medium text-tertiary-600">Project</label>

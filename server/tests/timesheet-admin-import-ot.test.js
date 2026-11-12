@@ -100,3 +100,32 @@ describe('Approval inbox: many at once, and filtered totals', () => {
     expect(list.body.totals).toEqual({ hours: 15, overtime_hours: 2 });
   });
 });
+
+describe('time for an employee who has left', () => {
+  test('an admin can still enter hours for the days before their last working day: one by one, by CSV, and in the employee lists', async () => {
+    const ctx = await seed();
+    const mali = await createUser({ role: 'employee', name: 'Mali Exited' });
+    const m = await createOrgMembership(mali.id, ctx.org.id, { role: 'employee', employee_code: 'EMP9' });
+    // last working day 20 Oct; the nightly job has already marked them Exited
+    await prisma.orgMembership.update({ where: { id: m.id }, data: { joined_at: new Date('2026-01-01'), employment_status: 'terminated', left_at: new Date('2026-10-20') } });
+
+    // the pick-lists can include exited people (and mark them), the default list still hides them
+    const named = async (q) => (await authed(request(app).get(`/api/v1/orgs/memberships${q}`), ctx.token)).body.data.map((r) => r.person?.name);
+    expect(await named('')).not.toContain('Mali Exited');
+    expect(await named('?include_terminated=true')).toContain('Mali Exited');
+
+    // one entry
+    const one = await authed(request(app).post('/api/v1/timesheets/entries/admin'), ctx.token).send({ org_membership_id: m.id, date: '2026-10-05', hours: 8, account_id: ctx.project.id, reason: 'Entered after exit' });
+    expect(one.status).toBe(201);
+    // a sheet for the rest of the month, by employee code
+    const rows = ['2026-10-06', '2026-10-07', '2026-10-20'].map((date) => ({ employee: 'EMP9', date, project: 'P0042', hours: '8', overtime_hours: '', billable: '', notes: '' }));
+    const sheet = await authed(request(app).post(importUrl), ctx.token).send({ rows, reason: 'Entered after exit' });
+    expect(sheet.body.data).toMatchObject({ created: 3, applied: true, errors: [] });
+    expect(await prisma.timesheetEntry.count({ where: { org_membership_id: m.id } })).toBe(4);
+
+    // they stay in the monitoring overview for the month they worked, but not for a later month
+    const overview = async (month) => (await authed(request(app).get(`/api/v1/timesheets/overview?month=${month}&year=2026`), ctx.token)).body.data.members.map((x) => x.name);
+    expect(await overview(10)).toContain('Mali Exited');
+    expect(await overview(11)).not.toContain('Mali Exited');
+  });
+});

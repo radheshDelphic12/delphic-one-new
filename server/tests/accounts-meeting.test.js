@@ -72,6 +72,27 @@ describe('POST /accounts/:id/meeting — edit meeting details without a stage ch
     expect(last.to_stage).toBe('meeting_scheduled');
   });
 
+  test('duration defaults to 60 and can be customised', async () => {
+    const account = await createAccount();
+    const scheduled = await scheduleMeeting(account.id, []);
+    expect(scheduled.meeting_duration_minutes).toBe(60);
+
+    const res = await authed(request(app).post(`/api/v1/accounts/${account.id}/meeting`), bdaToken).send({
+      meeting_mode: 'online',
+      meeting_date: new Date('2026-09-05T12:00:00Z').toISOString(),
+      meeting_duration_minutes: 90,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.meeting_duration_minutes).toBe(90);
+
+    const bad = await authed(request(app).post(`/api/v1/accounts/${account.id}/meeting`), bdaToken).send({
+      meeting_mode: 'online',
+      meeting_date: new Date('2026-09-05T12:00:00Z').toISOString(),
+      meeting_duration_minutes: 1,
+    });
+    expect(bad.status).toBe(422);
+  });
+
   test('still editable after the account moves past meeting_scheduled', async () => {
     const sales1 = await createUser({ role: 'sales' });
     const account = await createAccount();

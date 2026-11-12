@@ -12,6 +12,7 @@ import NoteText from '../../components/NoteText.jsx';
 import AdminEntryDrawer, { adminDeleteEntry } from './AdminEntryDrawer.jsx';
 import { AddTimesheetEntryDrawer, BulkTimesheetDrawer } from './TimesheetBackfill.jsx';
 import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
+import ProjectTimesheetDownload from './ProjectTimesheetDownload.jsx';
 import { useProjectOptions } from '../../lib/lookups.js';
 import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
@@ -272,6 +273,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       </div>
 
       <AffectedCalculationsBanner refreshKey={changesKey} />
+
+      <ProjectTimesheetDownload month={period.month} year={period.year} members={members} />
 
       {overview && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

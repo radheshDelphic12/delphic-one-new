@@ -9,11 +9,12 @@ const CAPS = {
     'leads', 'parties', 'projects', 'projectsEdit', 'people', 'peoplePay', 'salaries', 'ledger', 'ledgerSalaries',
     'overview', 'overviewValuation', 'financials', 'settings', 'users', 'audit', 'delete', 'myWork',
     'properties', 'propertiesEdit', 'propertyFinance', 'rent', 'rentEdit', 'trading', 'tasks', 'tasksAll',
+    'wages', 'wagesPay', 'wagesView',
   ],
-  manager: ['leads', 'parties', 'projects', 'projectsEdit', 'people', 'ledger', 'overview', 'myWork', 'properties', 'propertiesEdit', 'rent', 'rentEdit', 'tasks', 'tasksAll'],
+  manager: ['leads', 'parties', 'projects', 'projectsEdit', 'people', 'ledger', 'overview', 'myWork', 'properties', 'propertiesEdit', 'rent', 'rentEdit', 'tasks', 'tasksAll', 'wages', 'wagesView'],
   staff: ['myWork', 'tasks'],
   // Finance: money, rent and property finance, but no people pay, leads, settings or month closing.
-  finance: ['parties', 'ledger', 'ledgerSalaries', 'overview', 'properties', 'propertyFinance', 'rent', 'rentEdit', 'myWork', 'tasks'],
+  finance: ['parties', 'ledger', 'ledgerSalaries', 'overview', 'properties', 'propertyFinance', 'rent', 'rentEdit', 'myWork', 'tasks', 'wagesPay', 'wagesView'],
 };
 
 function capsFor(role) {

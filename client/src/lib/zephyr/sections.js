@@ -1,4 +1,4 @@
-import { Banknote, Building2, FileBarChart2, HardHat, KeyRound, LayoutDashboard, LineChart, ListChecks, Target, UserCog, Users } from 'lucide-react';
+import { Banknote, Building2, Hammer, FileBarChart2, HardHat, KeyRound, LayoutDashboard, LineChart, ListChecks, Target, UserCog, Users } from 'lucide-react';
 
 /**
  * The whole Zephyr product: six sections plus a home. `cap` is the Zephyr
@@ -13,6 +13,7 @@ export const ZEPHYR_SECTIONS = [
   { key: 'rent', to: '/zephyr/rent', label: 'Rent', blurb: 'Monthly rent due, collected, pending and overdue; tenants and leases.', icon: KeyRound, cap: 'rent', phase: 'R4', built: true },
   { key: 'overview', to: '/zephyr/overview', label: 'Revenue & Profit', blurb: 'Revenue, expense, salaries, profit and valuation, live.', icon: FileBarChart2, cap: 'overview', phase: 'Z6', built: true },
   { key: 'people', to: '/zephyr/people', label: 'Employee / Contractor', blurb: 'People roster, assignments and monthly salary records.', icon: UserCog, cap: 'people', phase: 'Z4', built: true },
+  { key: 'wages', to: '/zephyr/wages', label: 'Daily Wages', blurb: 'Daily-wage workers: attendance by project and payouts.', icon: Hammer, cap: 'wagesView', phase: 'W1', built: true },
   { key: 'tasks', to: '/zephyr/tasks', label: 'Tasks', blurb: 'Visits, rent collection and follow-ups for employees and contractors.', icon: ListChecks, cap: 'tasks', phase: 'R8', built: true },
   { key: 'financials', to: '/zephyr/financials', label: 'Financials', blurb: 'Revenue, profit and valuation, month on month.', icon: LineChart, cap: 'overviewValuation', phase: 'Z7', built: true },
 ];

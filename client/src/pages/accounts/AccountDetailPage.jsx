@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Pencil } from 'lucide-react';
+import { Eye, EyeOff, Pencil } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -16,8 +16,9 @@ import AccountFormPage from './AccountFormPage.jsx';
 import AccountStageMoveDrawer from './AccountStageMoveDrawer.jsx';
 import AccountStageOverrideDrawer from './AccountStageOverrideDrawer.jsx';
 import AccountMeetingEditDrawer from './AccountMeetingEditDrawer.jsx';
+import AccountClientMeetings from './AccountClientMeetings.jsx';
 import { accountAccent } from '../../lib/accountAccent.js';
-import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canMutateAccount, formatAccountValue } from './accountUtils.js';
+import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canEditAccountDetails, canMutateAccount, formatAccountValue, vendorTypeLabel } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
 
 function DetailField({ label, value, children }) {
@@ -41,6 +42,47 @@ function DetailSection({ title, actions, children }) {
   );
 }
 
+/** A vendor's bank details. The account number is masked; people who may edit the vendor can reveal the full number (every reveal is logged). */
+function VendorBankDetails({ account, canMutate }) {
+  const { pushError } = useAlerts();
+  const [full, setFull] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const any = ['vendor_bank_holder', 'vendor_bank_name', 'vendor_bank_branch', 'vendor_bank_ifsc', 'vendor_bank_swift', 'vendor_upi_id'].some((k) => account[k]) || account.has_bank_account_number;
+  useEffect(() => { setFull(null); }, [account.id, account.vendor_bank_account_number]);
+  async function reveal() {
+    setBusy(true);
+    try {
+      const { data } = await apiClient.get(`/accounts/${account.id}/bank-details`);
+      setFull(data.data.account_number || '');
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not show the account number'), 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!any) return <DetailField label="Bank details" value={null} />;
+  return (
+    <>
+      {/* shown exactly as saved (the detail screen would otherwise capitalise a UPI ID or a bank name) */}
+      <DetailField label="Account holder"><span className="normal-case">{account.vendor_bank_holder || '—'}</span></DetailField>
+      <DetailField label="Bank"><span className="normal-case">{[account.vendor_bank_name, account.vendor_bank_branch].filter(Boolean).join(' - ') || '—'}</span></DetailField>
+      <DetailField label="Account number">
+        {account.has_bank_account_number ? (
+          <span className="inline-flex items-center gap-2 normal-case" data-testid="vendor-account-number">
+            <span className="font-mono">{full ?? account.vendor_bank_account_number}</span>
+            {canMutate && (full === null
+              ? <button type="button" className="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline" disabled={busy} onClick={reveal}><Eye className="h-3.5 w-3.5" />Show</button>
+              : <button type="button" className="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline" onClick={() => setFull(null)}><EyeOff className="h-3.5 w-3.5" />Hide</button>)}
+          </span>
+        ) : '—'}
+      </DetailField>
+      <DetailField label="IFSC"><span className="normal-case">{account.vendor_bank_ifsc || '—'}</span></DetailField>
+      <DetailField label="SWIFT / BIC"><span className="normal-case">{account.vendor_bank_swift || '—'}</span></DetailField>
+      <DetailField label="UPI ID"><span className="normal-case">{account.vendor_upi_id || '—'}</span></DetailField>
+    </>
+  );
+}
+
 export default function AccountDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -57,6 +99,7 @@ export default function AccountDetailPage() {
   const [classifying, setClassifying] = useState(false);
   const [meetingEditOpen, setMeetingEditOpen] = useState(false);
   const [savingMeeting, setSavingMeeting] = useState(false);
+  const [activity, setActivity] = useState([]);
 
   async function loadAccount() {
     setLoading(true);
@@ -67,6 +110,7 @@ export default function AccountDetailPage() {
       ]);
       setAccount(accountResponse.data.data);
       setHistory(historyResponse.data.data || []);
+      apiClient.get(`/accounts/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
     } catch (requestError) {
       pushError(apiErrorMessage(requestError, 'Failed to load account'), 'Something went wrong');
     } finally {
@@ -152,6 +196,7 @@ export default function AccountDetailPage() {
   }
 
   const canMutate = canMutateAccount(account, user);
+  const canEditDetails = canEditAccountDetails(account, user);
   const canOverride = Boolean(user?.is_superadmin);
   const canUnlock = userCan(user, 'unlockAccount');
   const nextStages = ACCOUNT_TRANSITIONS[account.stage] || [];
@@ -192,13 +237,15 @@ export default function AccountDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to={`/pipeline/${id}`} className="btn-secondary">Pipeline board</Link>
-            {((canMutate && !account.is_locked) || canOverride) && (
+            {((canEditDetails && !account.is_locked) || canOverride) && (
               <button type="button" className="btn-secondary" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-4 w-4" /> Edit
               </button>
             )}
-            {canMutate && !account.is_locked && nextStages.length > 0 && (
-              <button type="button" onClick={() => setIsStageModalOpen(true)} className="btn-primary">Move stage</button>
+            {canMutate && (!account.is_locked || account.stage === 'dropped') && nextStages.length > 0 && (
+              <button type="button" onClick={() => setIsStageModalOpen(true)} className="btn-primary">
+                {account.stage === 'dropped' ? 'Reactivate' : 'Move stage'}
+              </button>
             )}
             {canOverride && (
               <button type="button" onClick={() => setOverrideOpen(true)} className="btn-secondary">Override stage</button>
@@ -231,7 +278,7 @@ export default function AccountDetailPage() {
       {account.is_locked && (
         <div className="rounded-lg border border-danger-100 bg-danger-50 px-3 py-2 text-sm text-danger-700">
           This account is locked because it reached a terminal stage. It remains available for viewing.
-          {canUnlock ? ' Use Unlock to allow edits again.' : ''}
+          {account.stage === 'dropped' ? ' Use Reactivate to bring it back to Active.' : canUnlock ? ' Use Unlock to allow edits again.' : ''}
         </div>
       )}
 
@@ -246,7 +293,9 @@ export default function AccountDetailPage() {
             </DetailField>
             <DetailField label="Location" value={[account.location_city, account.location_country].filter(Boolean).join(', ')} />
             <DetailField label="GST / Tax ID" value={account.gst_or_tax_id} />
+            <DetailField label="Billing address" value={account.billing_address} />
             <DetailField label="Source" value={account.source} />
+            <DetailField label="Premium" value={account.is_premium ? 'Yes' : 'No'} />
             <DetailField label="Owner (POC)" value={account.owner?.name} />
             <DetailField label="Brought by" value={account.origin_owner?.name} />
             <DetailField label="Lead location" value={account.location} />
@@ -281,6 +330,7 @@ export default function AccountDetailPage() {
             <DetailField label="Mode" value={account.meeting_mode} />
             <DetailField label="Date" value={account.meeting_date ? new Date(account.meeting_date).toLocaleString() : null} />
             <DetailField label="Location" value={account.meeting_location} />
+            <DetailField label="Duration" value={account.meeting_date ? `${account.meeting_duration_minutes || 60} min` : null} />
             <DetailField label="Notes" value={account.meeting_notes} />
             <DetailField label="Attendees">
               {account.meeting_attendees?.length
@@ -293,16 +343,20 @@ export default function AccountDetailPage() {
             </DetailField>
           </DetailSection>
 
+          {!account.is_project && <AccountClientMeetings account={account} canMutate={canMutate} />}
+
           {account.type && (
           <DetailSection title={account.type === 'vendor' ? 'Vendor details' : 'Client details'}>
             {account.type === 'vendor' ? (
               <>
+                <DetailField label="Vendor type" value={vendorTypeLabel(account.vendor_type)} />
                 <DetailField label="Specializations" value={(account.vendor_specializations || []).join(', ')} />
                 <DetailField
                   label="Rate range"
                   value={account.vendor_rate_range ? `${account.vendor_rate_range.currency} ${account.vendor_rate_range.min}–${account.vendor_rate_range.max}` : null}
                 />
                 <DetailField label="Payment terms" value={account.vendor_payment_terms} />
+                <VendorBankDetails account={account} canMutate={canMutate} />
                 <DetailField label="Agreement URL">
                   {account.vendor_agreement_url ? (
                     <a href={account.vendor_agreement_url} target="_blank" rel="noreferrer" className="normal-case text-primary-700 hover:underline">
@@ -362,6 +416,33 @@ export default function AccountDetailPage() {
         </div>
 
         <aside className="space-y-3.5 self-start xl:sticky xl:top-0">
+          <section className="overflow-hidden rounded-xl border border-tertiary-200 bg-white" aria-label="Activity">
+            <h2 className="border-b border-tertiary-100 bg-tertiary-50/60 px-3.5 py-2.5 font-heading text-sm font-semibold tracking-tight text-tertiary-900">
+              Activity - who did what
+            </h2>
+            {activity[0]?.by && (
+              <p className="border-b border-tertiary-100 bg-primary-50/50 px-3.5 py-2 text-xs text-primary-900">
+                Last worked on by <b>{activity[0].by.name}</b> · {new Date(activity[0].at).toLocaleString()}
+              </p>
+            )}
+            <ol className="max-h-96 divide-y divide-tertiary-100 overflow-y-auto">
+              {activity.map((a) => (
+                <li key={a.id} className="px-3.5 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800" title={a.by?.role}>{a.by?.name || 'Unknown'}</span>
+                    <span className="text-tertiary-800">{a.summary}</span>
+                  </div>
+                  {a.kind === 'update' && a.details?.changes && (
+                    <p className="mt-1 text-xs text-tertiary-500">
+                      {Object.entries(a.details.changes).map(([field, c]) => (c.changed ? field : `${field}: ${c.from ?? '-'} → ${c.to ?? '-'}`)).join(' · ')}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-tertiary-400">{new Date(a.at).toLocaleString()}</p>
+                </li>
+              ))}
+              {activity.length === 0 && <li className="px-3.5 py-4 text-sm text-tertiary-400">No activity recorded yet.</li>}
+            </ol>
+          </section>
           <section className="overflow-hidden rounded-xl border border-tertiary-200 bg-white">
             <h2 className="border-b border-tertiary-100 bg-tertiary-50/60 px-3.5 py-2.5 font-heading text-sm font-semibold tracking-tight text-tertiary-900">
               Stage history

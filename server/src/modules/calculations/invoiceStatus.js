@@ -49,8 +49,31 @@ async function load(orgId, projectIds, months) {
     select: { id: true, client_account_id: true, period_month: true, period_year: true, status: true, sent_at: true, paid_at: true, invoice_number: true, invoice_date: true, amount: true, currency: true },
   });
   for (const r of rows) out.set(`${r.client_account_id}|${r.period_year}-${r.period_month}`, describe(r));
+  // A combined invoice is stored on one contract's row but bills several: every contract it covers shows that invoice
+  const wanted = new Set(projectIds);
+  for (const r of await consolidatedInvoices(orgId, months)) {
+    for (const it of r.line_items.items || []) {
+      if (!wanted.has(it.account_id)) continue;
+      out.set(`${it.account_id}|${r.period_year}-${r.period_month}`, { ...describe(r), ...itemAmount(it), consolidated: true });
+    }
+  }
   return out;
 }
+
+/** The combined (several contracts, one invoice) client invoices of the given months, with their per-contract items. */
+async function consolidatedInvoices(orgId, months) {
+  if (!months.length) return [];
+  return prisma.clientInvoice.findMany({
+    where: { org_id: orgId, deleted_at: null, line_items: { path: ['consolidated'], equals: true }, OR: months.map((m) => ({ period_month: m.period_month, period_year: m.period_year })) },
+    select: { id: true, client_account_id: true, period_month: true, period_year: true, status: true, sent_at: true, paid_at: true, invoice_number: true, invoice_date: true, amount: true, currency: true, line_items: true },
+  });
+}
+
+// The part of a combined invoice that belongs to one contract (so the contract's row shows its own amount, not the whole invoice's).
+const itemAmount = (it) => {
+  const v = Number(it.details?.total_amount ?? it.details?.amount);
+  return Number.isFinite(v) ? { amount: v } : {};
+};
 
 const keyOf = (projectId, month, year) => `${projectId}|${year}-${month}`;
 
@@ -75,4 +98,4 @@ function summarize(infos) {
   };
 }
 
-module.exports = { FILTERS, describe, matches, load, keyOf, summarize, billingTypeOf };
+module.exports = { FILTERS, describe, matches, load, keyOf, summarize, billingTypeOf, consolidatedInvoices, itemAmount };

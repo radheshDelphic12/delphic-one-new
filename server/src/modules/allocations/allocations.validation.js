@@ -17,6 +17,9 @@ const capacityQuerySchema = z.object({
     .transform((v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined))
     .pipe(z.array(z.string().uuid()).optional()),
   window_days: z.coerce.number().int().min(1).max(365).default(30),
+  // Billable (a billing rate above 0 on the date) / non-billable projects; both on by default. '0' / 'false' switches one off.
+  billable: z.enum(['1', '0', 'true', 'false']).optional().transform((v) => !(v === '0' || v === 'false')),
+  non_billable: z.enum(['1', '0', 'true', 'false']).optional().transform((v) => !(v === '0' || v === 'false')),
 });
 
 const endingSoonQuerySchema = z.object({

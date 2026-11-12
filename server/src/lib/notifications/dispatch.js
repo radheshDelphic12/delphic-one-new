@@ -1,5 +1,5 @@
 const logger = require('../../config/logger');
-const { ROLE_EVENT_MATRIX, renderNotification } = require('./eventCatalog');
+const { ROLE_EVENT_MATRIX, defaultEmailFor, renderNotification } = require('./eventCatalog');
 const emailOutbox = require('../email/outbox');
 
 /**
@@ -59,7 +59,8 @@ async function notify(client, { type, actorId = null, recipientIds = [], context
     const emailMap = new Map(prefs.map((p) => [p.user_id, p.email]));
     const inAppIds = eligible.filter((id) => (prefMap.has(id) ? prefMap.get(id) : matrix.defaultInApp !== false));
     // Email is independent of in-app: a user can mute the bell and still get mail.
-    const emailIds = eligible.filter((id) => (emailMap.has(id) ? emailMap.get(id) : matrix.defaultEmail === true));
+    const roleOf = new Map(users.map((u) => [u.id, u.role]));
+    const emailIds = eligible.filter((id) => (emailMap.has(id) ? emailMap.get(id) : defaultEmailFor(type, roleOf.get(id))));
     if (inAppIds.length === 0 && emailIds.length === 0) return;
 
     const env = renderNotification(type, context);

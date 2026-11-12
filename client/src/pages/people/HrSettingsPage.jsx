@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Download, FolderPlus, MapPin, Pencil, Plus, Settings2, Trash2, UsersRound } from 'lucide-react';
+import { CalendarDays, Download, FolderPlus, MapPin, Pencil, Plus, Settings2, Share2, Trash2, UsersRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../../components/ui/DataTable.jsx';
@@ -140,17 +141,17 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
 // location" is exclusive: ticking it moves the default here.
 function LocationDrawer({ open, location = null, onClose, onSubmit }) {
   const isEditing = Boolean(location);
-  const [fields, setFields] = useState({ name: '', city: '', country: '', is_default: false });
+  const [fields, setFields] = useState({ name: '', city: '', country: '', address: '', is_default: false });
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', is_default: location.is_default } : { name: '', city: '', country: '', is_default: false });
+    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', address: location.address || '', is_default: location.is_default } : { name: '', city: '', country: '', address: '', is_default: false });
   }, [open, location]);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
+      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), address: fields.address.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
       onClose();
     } finally { setSaving(false); }
   }
@@ -161,6 +162,7 @@ function LocationDrawer({ open, location = null, onClose, onSubmit }) {
         <label className="block text-xs font-medium text-tertiary-600">Location name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">City<input value={fields.city} onChange={(event) => set('city', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">Country<input value={fields.country} onChange={(event) => set('country', event.target.value)} className={input} /></label>
+        <label className="block text-xs font-medium text-tertiary-600">Complete address<textarea rows={3} maxLength={500} value={fields.address} onChange={(event) => set('address', event.target.value)} placeholder="Building, street, area, city, state, PIN code" className={input} /></label>
         <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default location <span className="text-xs text-tertiary-400">(only one — replaces the current default)</span></label>
       </form>
     </Drawer>
@@ -203,15 +205,17 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
   const [date, setDate] = useState('');
   const [label, setLabel] = useState('');
   const [workingDay, setWorkingDay] = useState(false);
+  const [shareAll, setShareAll] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (!open) return;
+    setShareAll(false);
     setDate(holiday ? String(holiday.date).slice(0, 10) : '');
     setLabel(holiday?.label || '');
     setWorkingDay(Boolean(holiday?.is_working_day));
   }, [open, holiday]);
-  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label, is_working_day: workingDay }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={workingDay} onChange={(event) => setWorkingDay(event.target.checked)} /><span>Working day exception<span className="block text-xs text-tertiary-500">This date is a WORKING day on this calendar although it would normally be off — e.g. a client that works this Saturday / Sunday. Use it on client/project calendars; the employee&apos;s company calendar is unchanged, and their hours that day go to overtime / comp off.</span></span></label></form></Drawer>;
+  async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ date, label, is_working_day: workingDay, ...(!isEditing && shareAll && !workingDay ? { applies_to_all: true } : {}) }); onClose(); } finally { setSaving(false); } }
+  return <Drawer open={open} title={isEditing ? 'Edit holiday' : `Add holiday to ${calendarName || 'calendar'}`} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="holiday-form" className="btn-primary" disabled={saving || !date || !label.trim()}>{saving ? 'Saving...' : isEditing ? 'Save changes' : 'Add holiday'}</button></>}><form id="holiday-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Date<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="block text-xs font-medium text-tertiary-600">Label<input required value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={workingDay} onChange={(event) => setWorkingDay(event.target.checked)} /><span>Working day exception<span className="block text-xs text-tertiary-500">This date is a WORKING day on this calendar although it would normally be off — e.g. a client that works this Saturday / Sunday. Use it on client/project calendars; the employee&apos;s company calendar is unchanged, and their hours that day go to overtime / comp off.</span></span></label>{!isEditing && !workingDay && <label className="flex items-start gap-2 text-sm text-tertiary-700"><input type="checkbox" className="mt-1" checked={shareAll} onChange={(event) => setShareAll(event.target.checked)} /><span>Applies to all calendars<span className="block text-xs text-tertiary-500">Also put this holiday on every other holiday calendar of the company (every office), so it shows in attendance, leave and the project calendars alike.</span></span></label>}</form></Drawer>;
 }
 
 /**
@@ -220,7 +224,7 @@ function HolidayFormDrawer({ open, holiday, calendarName, onClose, onSubmit }) {
  * holiday. Replaces the old bottom-corner popup, which only ever showed a
  * bare list with no way to change anything once added.
  */
-export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport }) {
+export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, onDelete, onExport, onShare }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState(null);
 
@@ -267,8 +271,14 @@ export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, o
                         </span>
                         {' — '}{h.label}
                         {h.is_working_day && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Working day</span>}
+                        {h.applies_to_all && <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700" title={h.copy_of_id ? 'A copy of a holiday shared from another calendar' : 'Shared with every calendar'}>{h.copy_of_id ? 'Shared (copy)' : 'All calendars'}</span>}
                       </span>
                       <span className="flex shrink-0 gap-1">
+                        {onShare && !h.is_working_day && !h.copy_of_id && (
+                          <button type="button" aria-label={h.applies_to_all ? 'Stop sharing holiday' : 'Share holiday with all calendars'} title={h.applies_to_all ? 'Stop sharing with the other calendars' : 'Share with all calendars'} className={`rounded-lg p-1.5 hover:bg-tertiary-50 ${h.applies_to_all ? 'text-green-600' : 'text-tertiary-400 hover:text-tertiary-700'}`} onClick={() => onShare(h, !h.applies_to_all)}>
+                            <Share2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button type="button" aria-label="Edit holiday" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-tertiary-50 hover:text-tertiary-700" onClick={() => setEditingHoliday(h)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -295,12 +305,15 @@ export function HolidaysDrawer({ calendar, holidays, onClose, onAdd, onUpdate, o
   );
 }
 
-export default function HrSettingsPage() {
+/** `only` (optional): show just these tabs and keep the tab in local state, so the page can sit inside another screen (a company's own settings). */
+export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [params, setParams] = useSearchParams();
-  const requestedTab = params.get('tab') || 'departments';
-  const tab = TABS.some((item) => item.key === requestedTab) ? requestedTab : 'departments';
+  const tabList = only ? only.map((key) => TABS.find((item) => item.key === key)).filter(Boolean) : TABS;
+  const [localTab, setLocalTab] = useState(tabList[0]?.key || 'departments');
+  const requestedTab = only ? localTab : params.get('tab') || 'departments';
+  const tab = tabList.some((item) => item.key === requestedTab) ? requestedTab : tabList[0]?.key || 'departments';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState(null);
@@ -321,6 +334,8 @@ export default function HrSettingsPage() {
   }
 
   useEffect(() => { load(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // lets a screen that embeds this page (a company's Teams & reporting) refresh what depends on the list
+  useEffect(() => { onChanged?.(); }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [editingTeam, setEditingTeam] = useState(null);
   async function updateTeam(payload) {
@@ -396,9 +411,20 @@ export default function HrSettingsPage() {
     try { const { data } = await apiClient.get(`/calendars/${calendar.id}/holidays`); setHolidays(data.data || []); } catch (err) { pushError(apiErrorMessage(err, 'Failed to load holidays'), 'Something went wrong'); }
   }
 
+  async function shareHoliday(holiday, share) {
+    try {
+      const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays/${holiday.id}/share`, { share });
+      pushInfo(share ? `Shared with ${data.copied} other calendar${data.copied === 1 ? '' : 's'}${data.kept ? ` (${data.kept} already had something that day)` : ''}` : 'Not shared any more');
+      await openHolidays(holidayCalendar);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not change sharing'), 'Something went wrong');
+    }
+  }
+
   async function addHoliday(payload) {
     try {
       const { data } = await apiClient.post(`/calendars/${holidayCalendar.id}/holidays`, payload);
+      if (payload.applies_to_all) await openHolidays(holidayCalendar);
       setHolidays((current) => [...current, data.data].sort((a, b) => (a.date < b.date ? -1 : 1)));
       setRows((current) => current.map((r) => (r.id === holidayCalendar.id ? { ...r, _count: { ...r._count, holidays: (r._count?.holidays || 0) + 1 } } : r)));
       pushInfo('Holiday added');
@@ -442,7 +468,7 @@ export default function HrSettingsPage() {
     }
   }
 
-  const canManage = user?.role === 'admin';
+  const canManage = adminFor(user, 'hr_settings.update');
   const names = { departments: 'department', designations: 'designation' };
   const columns = tab === 'departments' || tab === 'designations'
     ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }]
@@ -463,6 +489,7 @@ export default function HrSettingsPage() {
         { key: 'name', header: 'Location' },
         { key: 'city', header: 'City', render: (row) => row.city || 'Not set' },
         { key: 'country', header: 'Country', render: (row) => row.country || 'Not set' },
+        { key: 'address', header: 'Address', render: (row) => row.address || <span className="text-tertiary-400">Not set</span> },
         { key: 'default', header: 'Default', render: (row) => (row.is_default ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700">Default</span> : <span className="text-tertiary-400">—</span>) },
         ...(canManage ? [{ key: 'actions', header: '', render: (row) => (
           <span className="flex justify-end gap-1">
@@ -503,7 +530,7 @@ export default function HrSettingsPage() {
       ];
 
   return <div className="space-y-4">
-    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">{TABS.map(({ key, label, icon: Icon }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tab === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setParams({ section: 'hr-settings', tab: key })}><Icon className="h-4 w-4" />{label}</button>)}</div>
+    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">{tabList.map(({ key, label, icon: Icon }) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tab === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => (only ? setLocalTab(key) : setParams({ section: 'hr-settings', tab: key }))}><Icon className="h-4 w-4" />{label}</button>)}</div>
     <div className="flex flex-wrap justify-end gap-2">{canManage && <button type="button" className={tab === 'calendars' ? 'btn-secondary inline-flex items-center gap-2' : 'btn-primary inline-flex items-center gap-2'} onClick={() => setDrawer(tab)}><Plus className="h-4 w-4" /> Add {names[tab] || tab.slice(0, -1)}</button>}{canManage && tab === 'calendars' && <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setAddProjectOpen(true)}><FolderPlus className="h-4 w-4" /> Add Project</button>}</div>
     {!loading && rows.length === 0 ? <EmptyState icon={Settings2} title={`No ${tab} configured`} description="Create the first setting when your organization is ready." action={canManage ? <button type="button" className="btn-secondary" onClick={() => setDrawer(tab)}>Add {names[tab] || tab.slice(0, -1)}</button> : null} /> : <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No ${tab} configured`} />}
     <NameDrawer open={drawer === 'departments' || drawer === 'designations'} title={`Add ${names[tab] || 'setting'}`} onClose={() => setDrawer(null)} value="" onSubmit={(name) => createResource({ name })} />
@@ -523,6 +550,7 @@ export default function HrSettingsPage() {
       onAdd={addHoliday}
       onUpdate={updateHoliday}
       onDelete={deleteHoliday}
+      onShare={shareHoliday}
       onExport={exportHolidays}
     />
   </div>;

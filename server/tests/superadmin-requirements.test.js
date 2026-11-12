@@ -41,13 +41,20 @@ async function dropRequirement() {
 }
 
 describe('superadmin requirement status override', () => {
-  test('a dropped requirement has no way back via the normal status route', async () => {
+  test('a dropped requirement can only come back via the normal status route as a reactivation to open', async () => {
     const req = await dropRequirement();
+    const other = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({
+      to_status: 'in_progress',
+      reason: 'reopen',
+    });
+    expect(other.status).toBe(403); // still locked for any other move
     const res = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), salesToken).send({
       to_status: 'open',
       reason: 'reopen',
     });
-    expect(res.status).toBe(403); // locked
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('open');
+    expect(res.body.data.is_locked).toBe(false);
   });
 
   test('non-superadmin cannot use the status override route', async () => {

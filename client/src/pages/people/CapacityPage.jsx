@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Gauge, History, Save } from 'lucide-react';
+import { CalendarClock, Gauge, History, Save, Search, Users } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -14,6 +14,7 @@ import ProjectsHover from './ProjectsHover.jsx';
 
 const TABS = [
   { key: 'capacity', label: 'Team Capacity', icon: Gauge },
+  { key: 'employees', label: 'Employees & Projects', icon: Users },
   { key: 'ending', label: 'Projects Ending Soon', icon: CalendarClock },
   { key: 'movements', label: 'Movement History', icon: History },
 ];
@@ -44,6 +45,7 @@ function localToday(offset = 0) {
 
 const formatDay = (ymd) => (ymd ? new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const num = (n) => (Number.isInteger(n) ? String(n) : Number(n).toFixed(1));
+const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const clean = (params) => Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined));
 
 function Filter({ label, children }) {
@@ -89,7 +91,8 @@ function TeamDetailDrawer({ row, date, onClose }) {
                       <span className="font-medium text-tertiary-900">{p.name}<span className="ml-2 text-xs font-normal text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span>
                       <span className="text-xs text-tertiary-500">
                         {p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'}
-                        {p.ending_soon && <span className="ml-2"><Pill tone="amber">Ending soon · {p.days_remaining}d</Pill></span>}
+                        {p.not_started && <span className="ml-2"><Pill tone="blue">Not started · starts in {p.starts_in_days}d</Pill></span>}
+                        {p.ending_soon &&<span className="ml-2"><Pill tone="amber">Ending soon · {p.days_remaining}d</Pill></span>}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-tertiary-600">{p.resources.map((r) => `${r.name}${r.allocation_percent != null ? ` (${r.allocation_percent}%)` : ''}`).join(', ')}</p>
@@ -102,6 +105,12 @@ function TeamDetailDrawer({ row, date, onClose }) {
             <section>
               <h3 className="mb-2 font-semibold text-tertiary-900">Members on {formatDay(date)}</h3>
               <p className="text-tertiary-600">{row.member_list.map((m) => m.name).join(', ') || '—'}</p>
+              {(row.joining_list?.length > 0 || row.leaving_list?.length > 0) && (
+                <ul className="mt-2 space-y-0.5 text-xs text-tertiary-600">
+                  {row.joining_list.map((m) => <li key={`j${m.id}`}>{m.name} joins on {m.date}</li>)}
+                  {row.leaving_list.map((m) => <li key={`l${m.id}`}>{m.name} last working day {m.date}</li>)}
+                </ul>
+              )}
             </section>
           )}
         </div>
@@ -113,9 +122,9 @@ function TeamDetailDrawer({ row, date, onClose }) {
 function TeamCapacityReport() {
   const { pushError, pushInfo } = useAlerts();
   const teams = useTeamOptions(true);
-  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [], window_days: 30 }));
+  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [], window_days: 30, billable: true, non_billable: true }));
   // Several teams at once — sent as one comma-separated team_ids.
-  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(','), billable: filters.billable ? '1' : '0', non_billable: filters.non_billable ? '1' : '0' }), [filters]);
   const { data, loading, reload } = useReport('/allocations/reports/team-capacity', query);
   const [perResource, setPerResource] = useState('');
   const [open, setOpen] = useState(null);
@@ -141,28 +150,43 @@ function TeamCapacityReport() {
         {r.lead && <span className="block text-xs text-tertiary-500">Lead: {r.lead.name}</span>}
       </span>
     ) },
-    { key: 'members', header: 'Team members', render: (r) => (r.team ? r.members : '—') },
+    { key: 'members', header: 'Team members', render: (r) => (r.team ? <CountButton label={`${r.team.name}: ${r.members} members`} onClick={() => setOpen(r)}>{r.members}</CountButton> : '—') },
     { key: 'per', header: 'Capacity / person', render: (r) => (r.team ? <span title={r.uses_org_default ? 'Company default' : 'Team override'}>{num(r.capacity_per_resource)}{r.uses_org_default ? '' : ' *'}</span> : '—') },
     { key: 'max', header: 'Max possible allocation', render: (r) => (r.team ? num(r.total_capacity) : '—') },
     { key: 'current', header: 'Current allocation', render: (r) => (
-      <ProjectsHover projects={r.projects} title={`${r.team?.name || 'No team'} · running projects`}>
+      <ProjectsHover projects={r.projects} title={`${r.team?.name || 'No team'} · running projects`} onOpen={() => setOpen(r)}>
         <span className={r.over_capacity_by > 0 ? 'font-medium text-danger-700' : ''}>{r.current_allocation}</span>
       </ProjectsHover>
     ) },
     { key: 'available', header: 'Current capability', render: (r) => (r.team ? num(r.available_capability) : '—') },
     { key: 'ending', header: "Projects ending soon", render: (r) => (
-      <ProjectsHover projects={(r.projects || []).filter((p) => p.ending_soon)} title={`${r.team?.name || 'No team'} · ending soon`}>
+      <ProjectsHover projects={(r.projects || []).filter((p) => p.ending_soon)} title={`${r.team?.name || 'No team'} · ending soon`} onOpen={() => setOpen(r)}>
         {r.projects_ending_soon}
       </ProjectsHover>
     ) },
+    { key: 'moves', header: 'Joining / leaving', render: (r) => (r.team ? (
+      <span title={[...(r.joining_list || []).map((m) => `${m.name} joins ${m.date}`), ...(r.leaving_list || []).map((m) => `${m.name} last day ${m.date}`)].join('\n')}>
+        <span className="text-success-700">+{r.members_joining || 0}</span> / <span className="text-danger-700">−{r.members_leaving || 0}</span>
+      </span>
+    ) : '—') },
     { key: 'can', header: 'Can allocate', render: (r) => (r.team ? <span className="font-semibold">{num(r.can_allocate)}</span> : '—') },
+    { key: 'billing', header: 'Total monthly billing', render: (r) => (r.team ? inr(r.monthly_billing) : '—') },
+    { key: 'salary', header: 'Total team salary', render: (r) => (r.team ? inr(r.team_salary) : '—') },
+    { key: 'vendor', header: 'Total vendor cost', render: (r) => (r.team ? inr(r.vendor_cost) : '—') },
+    { key: 'profit', header: 'Profit', render: (r) => (r.team ? <span className={`font-semibold ${r.profit < 0 ? 'text-danger-700' : 'text-success-700'}`}>{inr(r.profit)}</span> : '—') },
     { key: 'status', header: 'Status', render: (r) => { const [label, tone] = CAPACITY_STATUS[r.status] || [r.status, 'gray']; return <Pill tone={tone}>{label}</Pill>; } },
   ];
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
         <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
+        <Filter label="Projects counted">
+          <div className="flex items-center gap-4 pt-2 text-sm text-tertiary-700" data-testid="capacity-billing-filter">
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={filters.billable} onChange={(e) => set('billable', e.target.checked)} />Billable</label>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={filters.non_billable} onChange={(e) => set('non_billable', e.target.checked)} />Non-billable</label>
+          </div>
+        </Filter>
         <Filter label="Teams">
           <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
         </Filter>
@@ -177,8 +201,9 @@ function TeamCapacityReport() {
       <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpen} emptyLabel="No teams yet — add them under HR Settings → Teams." />
       {data && (
         <p className="text-xs text-tertiary-500">
-          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Can allocate = current capability + projects ending within {data.window_days} days.
-          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)}.
+          Max possible allocation = team members × projects per person (* = team override, set under HR Settings → Teams). Current allocation counts each running project once per team, however many of its members work on it. Current capability = max − current, rounded up to a whole number (0.5 → 1, 2.5 → 3), never below 0. Team members are counted by joining date and last working day on the as-of date. Can allocate = current capability + projects ending within {data.window_days} days, after adding people who join and removing people whose last working day falls in those days (Joining / leaving column).
+          {' '}Totals: {data.totals.members} people · capacity {num(data.totals.total_capacity)} · allocated {data.totals.current_allocation} · can allocate {num(data.totals.can_allocate)} · monthly billing {inr(data.totals.monthly_billing)} · team salary {inr(data.totals.team_salary)} · vendor cost {inr(data.totals.vendor_cost)} · profit {inr(data.totals.profit)}.
+          {' '}Monthly billing = the contract monthly value of the team&apos;s running Managed Services projects (Fixed cost and Recruitment projects count as 0). Team salary = monthly CTC of employees; vendor cost = monthly vendor rate of contractors. Profit = total monthly billing − total team salary − total vendor cost.
         </p>
       )}
       <TeamDetailDrawer row={open} date={data?.date} onClose={() => setOpen(null)} />
@@ -186,7 +211,127 @@ function TeamCapacityReport() {
   );
 }
 
+/** Every employee with the projects they are allocated to; empty = no project. */
+/** A number that opens the records behind it. */
+function CountButton({ children, onClick, label }) {
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} aria-label={label} className="rounded px-1 font-medium text-primary-700 underline decoration-dotted underline-offset-4 hover:bg-primary-50 focus-visible:ring-2 focus-visible:ring-primary-300">
+      {children}
+    </button>
+  );
+}
+
+/** One employee's projects on the chosen date: each project with its client, share, status and dates. */
+function EmployeeProjectsDrawer({ row, date, onClose }) {
+  return (
+    <Drawer open={Boolean(row)} title={row ? `${row.name} · projects on ${formatDay(date)}` : ''} onClose={onClose} size="lg">
+      {row && (
+        <div className="space-y-3 text-sm">
+          <p className="text-tertiary-600">{row.team?.name || 'No team'} · {row.project_count} project{row.project_count === 1 ? '' : 's'}</p>
+          {row.projects.length === 0 ? <p className="text-tertiary-500">No running or upcoming project allocation on this date.</p> : (
+            <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100">
+              {row.projects.map((p) => (
+                <li key={p.id} className="px-4 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-tertiary-900">{p.name}<span className="ml-2 text-xs font-normal text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span>
+                    <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.status === 'upcoming' ? 'Upcoming' : 'Running'}{p.allocation_percent != null ? ` · ${p.allocation_percent}%` : ''}</Pill>
+                  </div>
+                  <p className="mt-1 text-xs text-tertiary-600">{p.agreement_start_date ? `Starts ${formatDay(p.agreement_start_date)}` : 'No start date'} · {p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+function EmployeeProjectsReport() {
+  const [openRow, setOpenRow] = useState(null);
+  const teams = useTeamOptions(true);
+  const [filters, setFilters] = useState(() => ({ date: localToday(), team_ids: [] }));
+  const [assignment, setAssignment] = useState('all'); // all | with | without
+  const [search, setSearch] = useState('');
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const { data, loading } = useReport('/allocations/reports/employee-projects', query);
+  const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
+
+  const all = useMemo(() => data?.rows || [], [data]);
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return all.filter((r) => {
+      if (assignment === 'with' && !r.project_count) return false;
+      if (assignment === 'without' && r.project_count) return false;
+      if (!q) return true;
+      return [r.name, r.employee_code, r.team?.name, ...r.projects.map((p) => p.name)].some((v) => String(v || '').toLowerCase().includes(q));
+    });
+  }, [all, assignment, search]);
+
+  const columns = [
+    { key: 'name', header: 'Employee', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span>{r.employee_code && <span className="block text-xs text-tertiary-500">{r.employee_code}</span>}</span> },
+    { key: 'team', header: 'Team', render: (r) => r.team?.name || <span className="text-tertiary-400">No team</span> },
+    { key: 'count', header: 'Projects', render: (r) => <CountButton label={`${r.name}: ${r.project_count} projects`} onClick={() => setOpenRow(r)}>{r.project_count}</CountButton> },
+    { key: 'projects', header: 'Assigned projects', render: (r) => (r.projects.length === 0 ? <Pill tone="gray">No project assigned</Pill> : (
+      <div className="flex flex-wrap gap-1.5">
+        {r.projects.map((p) => (
+          <span key={p.id} title={[p.code, p.client_name, p.agreement_end_date ? `Ends ${formatDay(p.agreement_end_date)}` : 'No end date'].filter(Boolean).join(' · ')}>
+            <Pill tone={p.status === 'upcoming' ? 'blue' : 'green'}>{p.name}{p.allocation_percent != null ? ` (${p.allocation_percent}%)` : ''}{p.status === 'upcoming' ? ' · upcoming' : ''}</Pill>
+          </span>
+        ))}
+      </div>
+    )) },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Filter label="As of date"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
+        <Filter label="Teams">
+          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams yet" />
+        </Filter>
+        <Filter label="Project status">
+          <select value={assignment} onChange={(e) => setAssignment(e.target.value)} className={dateInput}>
+            <option value="all">All employees</option>
+            <option value="with">With a project</option>
+            <option value="without">No project assigned</option>
+          </select>
+        </Filter>
+        <Filter label="Search">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-tertiary-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Employee, team or project" className={`${dateInput} pl-9`} />
+          </div>
+        </Filter>
+      </div>
+      <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpenRow} emptyLabel="No employees match the current filters." />
+      {data && <p className="text-xs text-tertiary-500">Showing {rows.length} of {all.length} employees · <CountButton label="Show employees with no project" onClick={() => setAssignment('without')}>{data.unassigned} with no project</CountButton> on {formatDay(data.date)}. Team and projects are as of the chosen date.</p>}
+      <EmployeeProjectsDrawer row={openRow} date={data?.date} onClose={() => setOpenRow(null)} />
+    </div>
+  );
+}
+
+/** One ending project: its dates, client and the people on it. */
+function EndingProjectDrawer({ row, onClose }) {
+  return (
+    <Drawer open={Boolean(row)} title={row ? `${row.project.name}${row.project.code ? ` · ${row.project.code}` : ''}` : ''} onClose={onClose} size="lg">
+      {row && (
+        <div className="space-y-3 text-sm">
+          <p className="text-tertiary-600">Client: {row.project.client_name || '—'} · Ends {formatDay(row.end_date)} ({row.days_remaining} days left)</p>
+          <h3 className="font-semibold text-tertiary-900">People on it ({row.resource_count})</h3>
+          {row.resources.length === 0 ? <p className="text-tertiary-500">Nobody is allocated.</p> : (
+            <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100">
+              {row.resources.map((x) => <li key={x.id || x.name} className="px-4 py-2">{x.name}{x.allocation_percent != null ? <span className="ml-2 text-xs text-tertiary-500">{x.allocation_percent}%</span> : null}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
 function EndingSoonReport() {
+  const [openRow, setOpenRow] = useState(null);
   const teams = useTeamOptions(true);
   const clients = useLeadClientOptions(true);
   const [filters, setFilters] = useState(() => ({ from: localToday(), to: localToday(30), team_id: '', client_account_id: '' }));
@@ -199,7 +344,7 @@ function EndingSoonReport() {
     { key: 'team', header: 'Team', render: (r) => (r.teams.length ? r.teams.map((t) => t.name).join(', ') : <span className="text-tertiary-400">No team</span>) },
     { key: 'end', header: 'End date', render: (r) => formatDay(r.end_date) },
     { key: 'days', header: 'Days remaining', render: (r) => <Pill tone={r.days_remaining <= 7 ? 'red' : r.days_remaining <= 15 ? 'amber' : 'blue'}>{r.days_remaining} days</Pill> },
-    { key: 'resources', header: 'Resources', render: (r) => <span title={r.resources.map((x) => x.name).join(', ')}>{r.resource_count}{r.resource_count ? <span className="block text-xs text-tertiary-500">{r.resources.map((x) => x.name).join(', ')}</span> : null}</span> },
+    { key: 'resources', header: 'Resources', render: (r) => <span title={r.resources.map((x) => x.name).join(', ')}><CountButton label={`${r.project.name}: ${r.resource_count} resources`} onClick={() => setOpenRow(r)}>{r.resource_count}</CountButton>{r.resource_count ? <span className="block text-xs text-tertiary-500">{r.resources.map((x) => x.name).join(', ')}</span> : null}</span> },
   ];
   return (
     <div className="space-y-4">
@@ -209,7 +354,8 @@ function EndingSoonReport() {
         <Filter label="Team"><SearchableSelect value={filters.team_id} onChange={(v) => set('team_id', v)} options={teams} placeholder="All teams" allowClear /></Filter>
         <Filter label="Client"><SearchableSelect value={filters.client_account_id} onChange={(v) => set('client_account_id', v)} options={clients} placeholder="All clients" allowClear /></Filter>
       </div>
-      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No running project/contract ends in this window." />
+      <DataTable columns={columns} rows={rows} loading={loading} onRowClick={setOpenRow} emptyLabel="No running project/contract ends in this window." />
+      <EndingProjectDrawer row={openRow} onClose={() => setOpenRow(null)} />
       <p className="text-xs text-tertiary-500">Uses each project&apos;s agreement end date (Finance → Projects). Team = the teams of the people allocated to it.</p>
     </div>
   );
@@ -257,6 +403,7 @@ export default function CapacityPage() {
     <div className="space-y-4">
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'capacity' && <TeamCapacityReport />}
+      {tab === 'employees' && <EmployeeProjectsReport />}
       {tab === 'ending' && <EndingSoonReport />}
       {tab === 'movements' && <MovementReport />}
     </div>

@@ -1,18 +1,27 @@
 const express = require('express');
+const { z } = require('zod');
+const { canMethod } = require('../../lib/permissions');
 const { authenticate, authorize, authorizeGroupSuperadmin, authorizeSuperadmin, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./billing.service');
 const pnlService = require('./projectPnl.service');
 const invoices = require('./invoices.service');
+const vendorPayout = require('./vendorPayout');
+const invoicePdf = require('./invoices.pdf');
 const adjustments = require('./adjustments.service');
+const vendorAdjustments = require('./vendorAdjustments.service');
 const resourceBilling = require('./resourceBilling.service');
 const vendorTracking = require('./vendorTracking.service');
 const charges = require('./charges.service');
+const vendorCharges = require('./vendorCharges.service');
 const exchangeRates = require('./exchangeRates.service');
 const allocationsService = require('../allocations/allocations.service');
 const { failFor: allocationsFailFor } = require('../allocations/allocations.routes');
 const { WORKER_ERRORS } = require('../../lib/workerType');
+const cashHooks = require('../cashPosition/cash.hooks');
+const invoicePaymentsService = require('./invoicePayments.service');
+const paymentsService = require('../payments/payments.service');
 const {
   exchangeRatesSchema,
   createRateSchema,
@@ -25,10 +34,12 @@ const {
   billingAdjustmentSchema,
   listBillingAdjustmentsQuerySchema,
   createInvoiceSchema,
+  consolidatedInvoiceSchema,
   updateInvoiceSchema,
   previewInvoiceQuerySchema,
   listInvoicesQuerySchema,
   vendorInvoicePeriodSchema,
+  vendorAdjustmentSchema,
   resourceRateSchema,
   applyProjectRateSchema,
   resourceRateQuerySchema,
@@ -53,16 +64,32 @@ const {
   updateVendorInvoiceSchema,
 } = require('./billing.validation');
 
+const vendorPayoutQuerySchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  sent_only: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  format: z.enum(['json', 'xlsx']).default('xlsx'),
+});
+
 const router = express.Router();
 router.use(authenticate);
 
 const ERRORS = {
+  ...cashHooks.HOOK_ERRORS,
+  ...require('../payments/payments.service').PAYMENT_ERRORS,
   account_not_found: [404, 'Account not found'],
   requirement_not_found: [404, 'Requirement not found for that account'],
   not_found: [404, 'Not found'],
   invoice_exists: [409, 'An invoice already exists for that client and period'],
   no_revenue_computed: [422, 'No daily revenue computed for that account/period yet — run compute first'],
   financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
+  consolidated_min: [422, 'Pick at least two contracts for a combined invoice'],
+  consolidated_customer: [422, 'A combined invoice is for one customer - the selected contracts belong to different customers'],
+  consolidated_already_invoiced: [409, 'One of the selected contracts already has an invoice for this month - delete it first, or leave that contract out'],
+  consolidated_fixed_bid: [422, 'Fixed-bid contracts are invoiced one at a time (each invoice bills an amount against the contract value) - leave them out'],
+  consolidated_currency: [422, 'The selected contracts bill in different currencies - choose one invoice currency to convert them all'],
+  consolidated_currency_edit: [422, 'A combined invoice keeps the currency it was generated in - delete it and generate again to change it'],
+  in_consolidated: [409, 'This contract is already part of a combined invoice for this month'],
   invoice_sent: [409, 'The invoice for this project and month has already been sent — it can no longer be changed'],
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
   percent_too_large: [422, 'A percentage cannot be above 100'],
@@ -84,8 +111,13 @@ const ERRORS = {
   charge_raised_by_group: [403, 'This charge was raised by the group — only a group superadmin can edit it'],
   client_not_lead: [422, 'Client must be one of this company\'s client accounts'],
   end_before_start: [422, 'The agreement end date cannot be before its start date'],
+  hold_periods_invalid: [422, 'A hold period needs a valid start date'],
+  hold_resume_before_from: [422, 'A hold period must resume after the day it starts'],
+  hold_periods_overlap: [422, 'Hold periods cannot overlap - leave only the last one without a resume date'],
+  project_requirement_not_found: [400, 'That requirement was not found in this company'],
   catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
+  vendor_line_not_found: [404, 'This vendor has no contractor work on that project for the month'],
 };
 
 function failFor(res, error, result) {
@@ -105,11 +137,14 @@ function failFor(res, error, result) {
 // Finance → Projects: monthly P&L (client billing - internal salary allocation
 // - vendor contractor cost) and per-project vendor invoices. See
 // projectPnl.service for the rules.
-const adminInOrg = [requireOrgMembership, authorize('admin')];
+const adminInOrg = [requireOrgMembership, canMethod('financials', 'admin')];
 
+// The vendor account list is a pick-list (People profile, Assets, Users: assigning a contractor's vendor), not a money screen,
+// so it stays open to every admin, including a custom role that has no financials permission.
 router.get(
   '/vendors',
-  ...adminInOrg,
+  requireOrgMembership,
+  authorize('admin'),
   asyncHandler(async (req, res) => ok(res, await pnlService.listVendors(req.user.org_id)))
 );
 
@@ -166,14 +201,62 @@ router.post(
 router.get(
   '/vendor-invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await invoices.listVendorInvoices(req.user.org_id, listVendorInvoicesQuerySchema.parse(req.query))))
+);
+
+// Vendor bank payout: the unpaid vendor invoices of a month added up per vendor with the bank details on the vendor record.
+// `format=json` previews it, otherwise an Excel file downloads. Same access as the vendor invoices (finance / admin).
+router.get(
+  '/vendor-invoices/payout',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { format, ...query } = vendorPayoutQuerySchema.parse(req.query);
+    if (format === 'json') return ok(res, await vendorPayout.payoutData(req.user.org_id, query));
+    const buffer = await vendorPayout.payoutWorkbook(req.user.org_id, query);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="vendor-payout-${query.period_year}-${String(query.period_month).padStart(2, '0')}.xlsx"`);
+    return res.send(Buffer.from(buffer));
+  })
+);
+
+// Several vendor invoices in one PDF: [{ vendor_account_id, period_month, period_year }].
+router.post(
+  '/vendor-invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { groups } = z.object({ groups: z.array(vendorInvoicePeriodSchema).min(1).max(100) }).parse(req.body);
+    const rowGroups = [];
+    for (const g of groups) {
+      const rows = (await invoices.listVendorInvoices(req.user.org_id, g)).filter((r) => r.generated);
+      if (rows.length) rowGroups.push(rows);
+    }
+    if (!rowGroups.length) return fail(res, 404, 'No generated vendor invoices found');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="vendor-invoices.pdf"', 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.vendorInvoicesPdf(req.user.org_id, rowGroups));
+  })
+);
+
+router.get(
+  '/vendor-invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const query = listVendorInvoicesQuerySchema.parse(req.query);
+    if (!query.vendor_account_id || !query.period_month || !query.period_year) return fail(res, 422, 'Give the vendor, month and year of the invoice');
+    const rows = (await invoices.listVendorInvoices(req.user.org_id, query)).filter((r) => r.generated);
+    if (!rows.length) return fail(res, 404, 'No generated vendor invoice for that vendor and month');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${String(rows[0].invoice_number || 'vendor-invoice').replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.vendorInvoicePdf(req.user.org_id, rows));
+  })
 );
 
 router.get(
   '/vendor-invoices/preview',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { vendor_account_id, ...period } = vendorInvoicePeriodSchema.parse(req.query);
     const result = await invoices.previewVendorInvoice(req.user.org_id, vendor_account_id, period);
@@ -185,7 +268,7 @@ router.get(
 router.post(
   '/vendor-invoices/generate',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = generateVendorInvoiceSchema.parse(req.body);
     const result = await invoices.generateVendorInvoice(req.user.org_id, req.user, body);
@@ -299,14 +382,14 @@ router.delete(
 router.get(
   '/projects',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => ok(res, await service.listProjectProfiles(req.user.org_id)))
 );
 
 router.get(
   '/projects/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await service.getProjectProfile(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
@@ -317,7 +400,7 @@ router.get(
 router.patch(
   '/projects/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = updateProjectProfileSchema.parse(req.body);
     const result = await service.updateProjectProfile(req.user.org_id, req.user.id, req.params.id, body);
@@ -329,7 +412,7 @@ router.patch(
 router.post(
   '/rates',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createRateSchema.parse(req.body);
     const result = await service.createRate(req.user.org_id, req.user.id, body);
@@ -341,7 +424,7 @@ router.post(
 router.get(
   '/rates',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listRatesQuerySchema.parse(req.query);
     const rows = await service.listRates(req.user.org_id, query);
@@ -352,7 +435,7 @@ router.get(
 router.post(
   '/daily-revenue/compute',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { date_from, date_to } = computeDailyRevenueSchema.parse(req.body);
     const result = await service.computeRevenueRange(req.user.org_id, date_from, date_to);
@@ -363,7 +446,7 @@ router.post(
 router.get(
   '/daily-revenue',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listDailyRevenueQuerySchema.parse(req.query);
     const rows = await service.listDailyRevenue(req.user.org_id, query);
@@ -409,6 +492,43 @@ router.delete(
   })
 );
 
+// Vendor charges - GST, TDS or any other line a vendor's invoices carry; set up exactly like contract charges.
+router.get(
+  '/vendors/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await vendorCharges.listCharges(req.user.org_id, req.params.id)))
+);
+
+router.post(
+  '/vendors/:id/charges',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.createCharge(req.user.org_id, req.user, req.params.id, contractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.charge);
+  })
+);
+
+router.patch(
+  '/vendor-charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.updateCharge(req.user.org_id, req.user, req.params.id, updateContractChargeSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.charge);
+  })
+);
+
+router.delete(
+  '/vendor-charges/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorCharges.removeCharge(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
 // Billing adjustments — an admin's + / - tweak to a project's month (reason required, audited).
 router.get(
   '/adjustments',
@@ -440,12 +560,45 @@ router.delete(
   })
 );
 
+// Vendor adjustments (Live Analytics > Vendors) - an admin's + / - tweak to what a vendor is owed for a month (reason required, audited).
+router.get(
+  '/vendor-adjustments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { vendor_account_id, ...period } = vendorInvoicePeriodSchema.parse(req.query);
+    return ok(res, await vendorAdjustments.listAdjustments(req.user.org_id, vendor_account_id, period));
+  })
+);
+
+router.post(
+  '/vendor-adjustments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await vendorAdjustments.createAdjustment(req.user.org_id, req.user, vendorAdjustmentSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.adjustment);
+  })
+);
+
+router.delete(
+  '/vendor-adjustments/:id',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await vendorAdjustments.removeAdjustment(req.user.org_id, req.user, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, { deleted: true });
+  })
+);
+
 // Client invoices — one builder (invoices.service) for every path: the
 // project's contract month (its locked version when billing is locked).
 router.post(
   '/invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { client_account_id, ...body } = createInvoiceSchema.parse(req.body);
     const result = await invoices.generateClientInvoice(req.user.org_id, req.user, { account_id: client_account_id, ...body });
@@ -457,7 +610,7 @@ router.post(
 router.get(
   '/invoices',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listInvoicesQuerySchema.parse(req.query);
     return ok(res, await invoices.listClientInvoices(req.user.org_id, query));
@@ -468,7 +621,7 @@ router.get(
 router.get(
   '/invoices/preview',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id, currency, amount, ...period } = previewInvoiceQuerySchema.parse(req.query);
     const result = await invoices.previewClientInvoice(req.user.org_id, account_id, period, currency, amount);
@@ -477,10 +630,51 @@ router.get(
   })
 );
 
+// One invoice for several contracts of the same customer.
+router.post(
+  '/invoices/consolidated',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await invoices.generateConsolidatedInvoice(req.user.org_id, req.user, consolidatedInvoiceSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error, result);
+    return created(res, result.invoice);
+  })
+);
+
+// Several client invoices in one PDF, in the order given.
+router.post(
+  '/invoices/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(100) }).parse(req.body);
+    const found = [];
+    for (const id of ids) {
+      const result = await invoices.getClientInvoice(req.user.org_id, id);
+      if (!result.error) found.push(result.invoice);
+    }
+    if (!found.length) return fail(res, 404, 'No invoices found');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="invoices.pdf"', 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.clientInvoicesPdf(req.user.org_id, found));
+  })
+);
+
+router.get(
+  '/invoices/:id/pdf',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${String(result.invoice.invoice_number || 'invoice').replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
+    return res.send(await invoicePdf.clientInvoicePdf(req.user.org_id, result.invoice));
+  })
+);
+
 router.get(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.getClientInvoice(req.user.org_id, req.params.id);
     if (result.error) return failFor(res, result.error);
@@ -491,7 +685,7 @@ router.get(
 router.patch(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.updateClientInvoice(req.user.org_id, req.user, req.params.id, updateInvoiceSchema.parse(req.body));
     if (result.error) return failFor(res, result.error, result);
@@ -502,7 +696,7 @@ router.patch(
 router.delete(
   '/invoices/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await invoices.deleteClientInvoice(req.user.org_id, req.user, req.params.id, deleteInvoiceSchema.parse(req.body || {}));
     if (result.error) return failFor(res, result.error, result);
@@ -510,13 +704,93 @@ router.delete(
   })
 );
 
+// Part payments on a client invoice. Recording is for Finance; undoing one is for the group admin only (with a reason).
+router.get(
+  '/invoices/:id/payments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoicePaymentsService.list(req.user.org_id, req.params.id);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.payments);
+  })
+);
+
+router.post(
+  '/invoices/:id/payments',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoicePaymentsService.record(req.user.org_id, req.user, req.params.id, paymentsService.paymentInputSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result);
+  })
+);
+
+router.patch(
+  '/invoices/:id/payments/:paymentId',
+  authorizeGroupSuperadmin,
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const input = paymentsService.paymentInputSchema.extend({ reason: z.string().trim().max(500).optional() }).parse(req.body || {});
+    const result = await invoicePaymentsService.edit(req.user.org_id, req.user, req.params.id, req.params.paymentId, input);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
+  })
+);
+
+router.delete(
+  '/invoices/:id/payments/:paymentId',
+  authorizeGroupSuperadmin,
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const { reason } = paymentsService.undoSchema.parse(req.body || {});
+    const result = await invoicePaymentsService.undo(req.user.org_id, req.user, req.params.id, req.params.paymentId, reason);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.invoice);
+  })
+);
+
+// Payment collection: due date, next follow-up date, and the log of every chase of an unpaid invoice.
+const followupsService = require('./invoiceFollowups.service');
+const COLLECTION_ERRORS = { not_found: [404, 'Invoice not found'], nothing_to_change: [422, 'Nothing to change'], cancelled: [409, 'A cancelled invoice cannot be changed'] };
+const collectionFail = (res, error) => { const [status, message] = COLLECTION_ERRORS[error] || [400, 'Bad request']; return fail(res, status, message); };
+router.patch(
+  '/invoices/:id/collection',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.setTerms('client_invoice', { orgId: req.user.org_id }, req.params.id, followupsService.termsSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : ok(res, result.terms);
+  })
+);
+router.get(
+  '/invoices/:id/followups',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.list('client_invoice', { orgId: req.user.org_id }, req.params.id);
+    return result.error ? collectionFail(res, result.error) : ok(res, result);
+  })
+);
+router.post(
+  '/invoices/:id/followups',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.add('client_invoice', { orgId: req.user.org_id }, req.user, req.params.id, followupsService.followupSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : created(res, result.followup);
+  })
+);
+
 router.post(
   '/invoices/:id/status',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { status } = transitionInvoiceSchema.parse(req.body);
-    const result = await service.transitionInvoice(req.user.org_id, req.params.id, status);
+    const walletPayment = cashHooks.walletPaymentSchema.optional().parse(req.body?.wallet_payment);
+    const result = await service.transitionInvoice(req.user.org_id, req.params.id, status, { user: req.user, walletPayment });
     if (result.error) return failFor(res, result.error);
     return ok(res, result.invoice);
   })
@@ -538,7 +812,7 @@ router.post(
 router.post(
   '/group-charges/mine',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = createOwnGroupChargeSchema.parse(req.body);
     const result = await service.createGroupCharge(req.user.id, { ...body, org_id: req.user.org_id });
@@ -551,7 +825,7 @@ router.post(
 router.patch(
   '/group-charges/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = updateGroupChargeSchema.parse(req.body);
     const result = await service.updateGroupCharge(req.user.org_id, req.user.id, req.params.id, body);
@@ -575,7 +849,7 @@ router.delete(
 router.get(
   '/group-charges',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listMyGroupChargesQuerySchema.parse(req.query);
     const rows = await service.listMyGroupCharges(req.user.org_id, query);
@@ -602,7 +876,7 @@ router.get(
 router.post(
   '/cost-assignments',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const body = costAssignmentSchema.parse(req.body);
     const result = await allocationsService.assign(req.user.org_id, req.user.id, body);
@@ -614,7 +888,7 @@ router.post(
 router.delete(
   '/cost-assignments/:id',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const result = await allocationsService.deleteAllocation(req.user.org_id, req.user.id, req.params.id);
     if (result.error) return allocationsFailFor(res, result.error);
@@ -625,7 +899,7 @@ router.delete(
 router.get(
   '/cost-assignments',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id, include_ended } = listCostAssignmentsQuerySchema.parse(req.query);
     return ok(res, await allocationsService.listForProject(req.user.org_id, account_id, { include_ended }));
@@ -635,7 +909,7 @@ router.get(
 router.get(
   '/budget-summary',
   requireOrgMembership,
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { account_id } = accountBudgetQuerySchema.parse(req.query);
     const result = await service.getAccountBudgetSummary(req.user.org_id, account_id);

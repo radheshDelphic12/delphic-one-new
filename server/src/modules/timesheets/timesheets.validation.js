@@ -12,7 +12,7 @@ const createEntrySchema = z.object({
   // Extra hours beyond the regular ones, claimed as overtime (project time only).
   overtime_hours: z.coerce.number().min(0).max(24).default(0),
   billable: z.boolean().default(true),
-  notes: z.string().max(1000).optional(),
+  notes: z.string().max(5000).optional(),
 });
 
 // Patch semantics — only while the entry is still 'submitted' and the day
@@ -22,7 +22,7 @@ const updateEntrySchema = z.object({
   hours: z.coerce.number().positive().max(24).optional(),
   overtime_hours: z.coerce.number().min(0).max(24).optional(),
   billable: z.boolean().optional(),
-  notes: z.string().max(1000).nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
 });
 
 // Admin correction of any entry — any status, even on a locked day. The reason
@@ -246,7 +246,7 @@ const requestedChangeSchema = z
   .object({
     hours: z.coerce.number().positive().max(24).optional(),
     billable: z.boolean().optional(),
-    notes: z.string().max(1000).nullable().optional(),
+    notes: z.string().max(5000).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'requested_change must set at least one field' });
 
