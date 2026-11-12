@@ -21,10 +21,10 @@ const DEFAULTS = {
   is_enabled: false, question_count: 12, max_followups: 3, pass_percentage: 60, borderline_margin: 10,
   weight_knowledge: 30, weight_communication: 20, weight_depth: 15, aptitude_enabled: true, aptitude_question_count: 12, weight_aptitude: 10,
   recording_enabled: false, recording_retention_days: 7, auto_reject: false, extra_instructions: null, link_valid_days: 7,
-  answer_time_seconds: 180, max_tab_switches: 3,
+  answer_time_seconds: 180, max_tab_switches: 0,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
   difficulty: 'easy', marking: 'lenient', require_fullscreen: true,
-  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: true,
+  proctoring_enabled: true, max_proctor_warnings: 0, require_screen_share: true,
 };
 const MIN_TAB_LIMIT = 3;
 const TAB_EVENTS = ['tab_hidden', 'window_blur', 'fullscreen_exit']; // leaving the interview page; these count towards max_tab_switches

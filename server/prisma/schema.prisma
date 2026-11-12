@@ -8551,7 +8551,7 @@ model AiInterviewSettings {
   link_valid_days          Int      @default(7)
   // Time allowed per question (seconds, 0 = no limit) and how many tab switches end the interview (0 = never ends it, only logs).
   answer_time_seconds      Int      @default(180)
-  max_tab_switches         Int      @default(3)
+  max_tab_switches         Int      @default(0)
   // More rubric parameters, each with its own weight, and the reference sites the interviewer may read (through the AI web search) to ground its questions.
   weight_problem_solving   Int      @default(15)
   weight_experience_fit    Int      @default(10)
@@ -8568,7 +8568,7 @@ model AiInterviewSettings {
   // Camera and microphone watching: no face, a second face, eyes away from the screen, looking down (reading), background noise, the shared screen stopping.
   // Each is a warning; after max_proctor_warnings warnings the next one ends the interview. require_screen_share: the candidate shares the whole screen, recorded beside the face.
   proctoring_enabled       Boolean  @default(true)
-  max_proctor_warnings     Int      @default(3)
+  max_proctor_warnings     Int      @default(0)
   require_screen_share     Boolean  @default(true)
   updated_by               String?  @db.Uuid
   updated_at               DateTime @default(now()) @updatedAt
