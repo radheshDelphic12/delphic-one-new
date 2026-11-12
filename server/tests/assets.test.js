@@ -73,6 +73,46 @@ describe('People → Assets register', () => {
     expect(await prisma.asset.count()).toBe(1);
   });
 
+  test('dispatched status, several users (active or exited) and an office location, filtered and shown in the list', async () => {
+    const { org, token } = await seedOrgAdmin();
+    const [asha, ravi] = await Promise.all([createUser({ role: 'employee', name: 'Asha Active' }), createUser({ role: 'employee', name: 'Ravi Exited' })]);
+    const ashaM = await createOrgMembership(asha.id, org.id, { role: 'employee' });
+    const raviM = await createOrgMembership(ravi.id, org.id, { role: 'employee', employment_status: 'terminated' });
+    const indore = await prisma.location.create({ data: { org_id: org.id, name: 'Indore Office' } });
+    const gurgaon = await prisma.location.create({ data: { org_id: org.id, name: 'Gurgaon Office' } });
+
+    const one = await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Mac Book', status: 'dispatched', used_by_ids: [ashaM.id, raviM.id], location_id: indore.id });
+    expect(one.status).toBe(201);
+    expect(one.body.data).toMatchObject({ status: 'dispatched', location: { id: indore.id, name: 'Indore Office' } });
+    expect(one.body.data.used_by.map((u) => u.name).sort()).toEqual(['Asha Active', 'Ravi Exited']);
+    const two = await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Monitor', used_by_ids: [ashaM.id], location_id: gurgaon.id });
+    await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Cube' });
+
+    const list = (query) => authed(request(app).get(`/api/v1/assets${query}`), token).then((r) => r.body.data.map((a) => a.asset_type).sort());
+    expect(await list('?status=dispatched')).toEqual(['Mac Book']);
+    expect(await list(`?location_id=${gurgaon.id}`)).toEqual(['Monitor']);
+    expect(await list(`?used_by=${ashaM.id}`)).toEqual(['Mac Book', 'Monitor']);
+    expect(await list(`?used_by=${raviM.id}`)).toEqual(['Mac Book']); // an exited employee can be a user and a filter
+    expect(await list('')).toEqual(['Cube', 'Mac Book', 'Monitor']);
+
+    // edit: change users and office, clear the office, move to returned
+    const edited = await authed(request(app).patch(`/api/v1/assets/${two.body.data.id}`), token).send({ used_by_ids: [raviM.id], location_id: null, status: 'returned', return_date: '2026-11-12' });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toMatchObject({ status: 'returned', location: null, used_by: [{ id: raviM.id, name: 'Ravi Exited' }] });
+    expect((await authed(request(app).patch(`/api/v1/assets/${two.body.data.id}`), token).send({ used_by_ids: [] })).body.data.used_by).toEqual([]);
+    expect((await authed(request(app).get('/api/v1/assets?status=nope'), token)).status).toBe(422);
+  });
+
+  test('users and office must belong to this company', async () => {
+    const { token } = await seedOrgAdmin();
+    const other = await seedOrgAdmin({ name: 'Other', slug: 'other' });
+    const foreignOffice = await prisma.location.create({ data: { org_id: other.org.id, name: 'Elsewhere' } });
+    expect((await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Cube', location_id: foreignOffice.id })).status).toBe(422);
+    expect((await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Cube', used_by_ids: [other.membership.id] })).status).toBe(422);
+    expect((await authed(request(app).post('/api/v1/assets'), token).send({ asset_type: 'Cube', used_by_ids: ['not-a-uuid'] })).status).toBe(422);
+    expect(await prisma.asset.count({ where: { org_id: other.org.id } })).toBe(0);
+  });
+
   test('refuses another org\'s records, a client as vendor, and non-admins', async () => {
     const { org, admin, token } = await seedOrgAdmin();
     const client = await account(org, admin, 'Devlabs', 'client');

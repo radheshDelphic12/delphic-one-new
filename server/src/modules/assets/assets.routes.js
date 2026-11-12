@@ -13,6 +13,8 @@ const LINK_ERRORS = {
   vendor_not_found: 'Vendor account not found',
   vendor_required: 'Pick the vendor this asset belongs to',
   client_not_found: 'Client account not found',
+  location_not_found: 'Office location not found',
+  used_by_not_found: 'One of the people picked as user was not found in this organisation',
 };
 
 router.get(
