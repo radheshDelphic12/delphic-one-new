@@ -41,7 +41,11 @@ afterEach(async () => {
   await prisma.saasRouteModule.deleteMany({ where: { path_prefix: '/notifications' } });
   switches.clearCache(); saasGate.clearCache();
 });
-afterAll(async () => { await prisma.$disconnect(); });
+afterAll(async () => {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE saas_customers CASCADE'); // leave no customer rows behind for other suites
+  require('../src/config/tenantGuard').clearCache();
+  await prisma.$disconnect();
+});
 
 const allCodes = () => [...new Set(rows.map((r) => r.module_code))];
 

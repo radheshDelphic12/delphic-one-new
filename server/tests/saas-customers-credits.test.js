@@ -34,7 +34,11 @@ afterEach(async () => {
   await prisma.saasSetting.update({ where: { key: 'slot_move_days' }, data: { value: 7 } });
   await prisma.saasSetting.update({ where: { key: 'low_credit_alert_days' }, data: { value: 5 } });
 });
-afterAll(async () => { await prisma.$disconnect(); });
+afterAll(async () => {
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE saas_customers CASCADE'); // leave no customer rows behind for other suites
+  require('../src/config/tenantGuard').clearCache();
+  await prisma.$disconnect();
+});
 
 async function provisioned() {
   process.env.SAAS_CUSTOMER_PROVISIONING = 'true';

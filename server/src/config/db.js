@@ -176,4 +176,7 @@ prisma.$use(async (params, next) => {
   return next(params);
 });
 
+// Tenant read guard for SaaS customer companies: does nothing while no company is a customer (see tenantGuard.js).
+require('./tenantGuard').install(prisma);
+
 module.exports = prisma;

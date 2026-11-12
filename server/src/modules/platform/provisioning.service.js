@@ -48,6 +48,7 @@ async function provision({ doxCustomerId, doxOrgId, actorId }) {
     await tx.doxCustomer.update({ where: { id: dox.id }, data: { status: 'trial', trial_ends_on: credits.toDate(endsOn), started_on: dox.started_on || credits.toDate(today), users_count: trialUsers } });
     return { group, org, user, customer };
   }));
+  require('../../config/tenantGuard').clearCache(); // the new company is a customer from this moment: the tenant read guard must know at once
   return { customer_id: made.customer.id, org_id: made.org.id, org_group_id: made.group.id, admin_email: email, temp_password: password, trial_ends_on: endsOn, max_users: trialUsers };
 }
 
