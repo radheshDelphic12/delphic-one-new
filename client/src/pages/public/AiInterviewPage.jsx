@@ -30,7 +30,7 @@ function Shell({ children }) {
 
 /**
  * The candidate's AI interview: opened from the link, no login. A mic test and consent first, then the AI asks one question at
- * a time; answers are spoken (live transcript); only the aptitude / numerical questions are typed. Closing the tab keeps progress (the link resumes where it stopped).
+ * a time; answers are spoken (no text box, the words are not shown to the candidate); only the aptitude / numerical questions are typed. Closing the tab keeps progress (the link resumes where it stopped).
  * When the company records interviews, the recording is mandatory: camera and microphone must stay on and audio + video are sent
  * to the server in small parts. Every question has a countdown. Copying, pasting and right-click are blocked, and leaving the page
  * is logged and warned about; too many tab switches end the interview for a person to review.
@@ -403,7 +403,7 @@ export default function AiInterviewPage() {
     }
   }
 
-  // ---- speaking: live transcript into the answer box. Only aptitude / numerical answers may be typed; the box is read-only otherwise. ----
+  // ---- speaking: speech is kept in state for sending but is never shown. Only aptitude / numerical answers may be typed. ----
   const SPEECH_PROBLEMS = {
     'not-allowed': 'The browser is not allowing the microphone for speech. Allow it (the lock icon in the address bar) and press Speak again.',
     'service-not-allowed': 'Speech to text is blocked on this browser. Please open the interview in a recent Chrome or Edge.',
@@ -573,7 +573,7 @@ export default function AiInterviewPage() {
           <li>Use a quiet place and a recent Chrome or Edge browser. Speaking is required, so a browser that cannot turn speech into text cannot be used.</li>
           <li>You can use this link once. If you close the page, open the same link to carry on where you stopped.</li>
           <li>There are a few short aptitude questions too. Work them out in your head and type the answer.</li>
-          {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have typed or said so far is sent and the next question comes.</li>}
+          {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have answered so far is sent and the next question comes.</li>}
           {view.require_fullscreen && <li>The interview runs in full screen on a single display. Leaving full screen, or connecting a second display, is recorded and counted like leaving the page.</li>}
           <li>Stay on this page. Copying, pasting and right-click are blocked, and switching to another tab or window is recorded{view.max_tab_switches ? `; you get ${view.max_tab_switches - 1} warnings, and the next time the interview ends automatically` : ''}.</li>
           {mustRecord && <li>This interview is recorded (camera and microphone) and the recording is required. Keep them on until you finish.</li>}
@@ -703,18 +703,29 @@ export default function AiInterviewPage() {
         {current && (
           <div ref={questionRef} className="mt-4 rounded-xl border border-primary-200 bg-primary-50/40 p-4">
             <p className="text-sm font-medium text-tertiary-900">{current.kind === 'follow_up' ? 'Follow-up: ' : ''}{current.text}</p>
-            <textarea
-              className={`mt-3 min-h-[110px] w-full select-text rounded-lg border border-tertiary-200 p-3 text-sm focus:outline-none ${typedAnswer ? 'focus:border-primary-500' : 'bg-tertiary-50'}`}
-              placeholder={typedAnswer ? 'Type your answer' : "Press 'Speak your answer' and talk. Your words appear here. Typing is not possible."}
-              value={text}
-              readOnly={!typedAnswer}
-              onChange={(e) => { if (typedAnswer) setText(e.target.value); }}
-              onPaste={(e) => e.preventDefault()}
-              onCopy={(e) => e.preventDefault()}
-              onCut={(e) => e.preventDefault()}
-              onDrop={(e) => e.preventDefault()}
-              disabled={busy || blocked}
-            />
+            {typedAnswer ? (
+              <textarea
+                className="mt-3 min-h-[110px] w-full select-text rounded-lg border border-tertiary-200 p-3 text-sm focus:border-primary-500 focus:outline-none"
+                placeholder="Type your answer"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={(e) => e.preventDefault()}
+                onCopy={(e) => e.preventDefault()}
+                onCut={(e) => e.preventDefault()}
+                onDrop={(e) => e.preventDefault()}
+                disabled={busy || blocked}
+              />
+            ) : (
+              // Spoken answers: no text box and no live transcript. The words are captured for the interviewer but never shown to the candidate.
+              <div data-testid="spoken-answer-status" className="mt-3 flex min-h-[80px] items-center gap-3 rounded-lg border border-tertiary-200 bg-tertiary-50 p-3 text-sm text-tertiary-700">
+                <Mic className={`h-5 w-5 shrink-0 ${listening ? 'animate-pulse text-danger-600' : 'text-tertiary-400'}`} />
+                <span>
+                  {listening ? 'Listening... speak your answer, then press "Stop speaking".'
+                    : text.trim().length >= 2 ? 'Your answer has been recorded. Press "Send answer", or "Clear and speak again".'
+                      : 'Press "Speak your answer" and talk. Answers are spoken only; nothing is typed or shown on screen.'}
+                </span>
+              </div>
+            )}
             {speechNote && <p data-testid="speech-note" className="mt-2 text-xs text-warning-800">{speechNote}</p>}
             {waitingForCamera && !stalled && <p className="mt-2 text-xs text-tertiary-500">Waiting for the camera recording to start...</p>}
             {waitingForCamera && stalled && (
