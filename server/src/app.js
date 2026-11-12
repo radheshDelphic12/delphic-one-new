@@ -68,6 +68,7 @@ const groupTaxRoutes = require('./modules/groupTax/groupTax.routes');
 const storageRoutes = require('./modules/storage/storage.routes');
 const lettersRoutes = require('./modules/letters/letters.routes');
 const delphicOneRoutes = require('./modules/delphicone/delphicone.routes');
+const platformRoutes = require('./modules/platform/platform.routes');
 const tradingRoutes = require('./modules/trading/trading.routes');
 const leadsRoutes = require('./modules/leads/leads.routes');
 const zephyrRoutes = require('./modules/zephyr/zephyr.routes');
@@ -199,6 +200,8 @@ app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/storage', storageRoutes);
 app.use('/api/v1/letters', lettersRoutes);
 app.use('/api/v1/delphic-one', delphicOneRoutes);
+// SaaS platform administration: its own gate (the platform-admin list), not the company roles
+app.use('/api/v1/platform', platformRoutes);
 app.use('/api/v1/trading', tradingRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 app.use('/api/v1/zephyr', zephyrRoutes);
