@@ -12,6 +12,9 @@ const SELECT = {
   vendor_account: { select: { id: true, name: true } },
   client_account_id: true,
   client_account: { select: { id: true, name: true } },
+  used_by_ids: true,
+  location_id: true,
+  location: { select: { id: true, name: true } },
   issue_date: true,
   return_date: true,
   device_details: true,
@@ -23,9 +26,11 @@ function ymd(date) {
   return date ? date.toISOString().slice(0, 10) : null;
 }
 
-function serialize(row) {
+// `people` maps a membership id to { id, name, employee_code } (the users of the listed assets, exited ones included).
+function serialize(row, people = new Map()) {
   return {
     ...row,
+    used_by: (row.used_by_ids || []).map((id) => people.get(id) || { id, name: 'Unknown', employee_code: null }),
     org_membership: row.org_membership
       ? { id: row.org_membership.id, name: row.org_membership.person?.name || null, employee_code: row.org_membership.employee_code }
       : null,
@@ -36,7 +41,15 @@ function serialize(row) {
 
 // Every linked record must belong to this org: the employee, a vendor account
 // as the supplier and a client account as the client.
-async function checkLinks(orgId, { org_membership_id, vendor_account_id, client_account_id }) {
+async function checkLinks(orgId, { org_membership_id, vendor_account_id, client_account_id, location_id, used_by_ids }) {
+  if (location_id) {
+    const location = await prisma.location.findFirst({ where: { id: location_id, org_id: orgId }, select: { id: true } });
+    if (!location) return 'location_not_found';
+  }
+  if (used_by_ids?.length) {
+    const found = await prisma.orgMembership.count({ where: { id: { in: used_by_ids }, org_id: orgId } });
+    if (found !== used_by_ids.length) return 'used_by_not_found';
+  }
   if (org_membership_id) {
     const member = await prisma.orgMembership.findFirst({ where: { id: org_membership_id, org_id: orgId }, select: { id: true } });
     if (!member) return 'employee_not_found';
@@ -55,13 +68,22 @@ async function checkLinks(orgId, { org_membership_id, vendor_account_id, client_
   return null;
 }
 
-async function list(orgId, { status } = {}) {
+// The people named in `used_by_ids` of these assets, by membership id.
+async function peopleOf(orgId, rows) {
+  const ids = [...new Set(rows.flatMap((r) => r.used_by_ids || []))];
+  if (!ids.length) return new Map();
+  const members = await prisma.orgMembership.findMany({ where: { id: { in: ids }, org_id: orgId }, select: { id: true, employee_code: true, person: { select: { name: true } } } });
+  return new Map(members.map((m) => [m.id, { id: m.id, name: m.person?.name || null, employee_code: m.employee_code }]));
+}
+
+async function list(orgId, { status, location_id, used_by } = {}) {
   const rows = await prisma.asset.findMany({
-    where: { org_id: orgId, ...(status ? { status } : {}) },
+    where: { org_id: orgId, ...(status ? { status } : {}), ...(location_id ? { location_id } : {}), ...(used_by ? { used_by_ids: { has: used_by } } : {}) },
     select: SELECT,
     orderBy: [{ issue_date: { sort: 'desc', nulls: 'last' } }, { created_at: 'desc' }],
   });
-  return rows.map(serialize);
+  const people = await peopleOf(orgId, rows);
+  return rows.map((r) => serialize(r, people));
 }
 
 // An asset that belongs to a vendor must say which vendor.
@@ -73,7 +95,7 @@ async function create(orgId, body) {
   const error = vendorOwnerError(body) || (await checkLinks(orgId, body));
   if (error) return { error };
   const row = await prisma.asset.create({ data: { org_id: orgId, ...body }, select: SELECT });
-  return { asset: serialize(row) };
+  return { asset: serialize(row, await peopleOf(orgId, [row])) };
 }
 
 async function update(orgId, id, patch) {
@@ -87,7 +109,7 @@ async function update(orgId, id, patch) {
   if (error) return { error };
   const data = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
   const row = await prisma.asset.update({ where: { id }, data, select: SELECT });
-  return { asset: serialize(row) };
+  return { asset: serialize(row, await peopleOf(orgId, [row])) };
 }
 
 async function remove(orgId, id) {

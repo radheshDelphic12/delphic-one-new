@@ -683,6 +683,7 @@ model Location {
   office_assignments EmployeeOfficeAssignment[]
   expense_claims     ExpenseClaim[]
   group_charges      GroupBillingCharge[]
+  assets             Asset[]
 
   @@unique([org_id, name])
   @@index([org_id])
@@ -3767,6 +3768,7 @@ model ResourceMapping {
 enum AssetStatus {
   issued
   returned
+  dispatched
 }
 
 // Who owns the device: Delphic's own hardware, the client's, or a vendor's
@@ -3814,6 +3816,10 @@ model Asset {
   vendor_account    Account?       @relation("AssetVendor", fields: [vendor_account_id], references: [id], onDelete: SetNull)
   client_account_id String?        @db.Uuid
   client_account    Account?       @relation("AssetClient", fields: [client_account_id], references: [id], onDelete: SetNull)
+  // The people who use the device (several; active or exited employees: org membership ids) and the office it is at.
+  used_by_ids       String[]       @default([]) @db.Uuid
+  location_id       String?        @db.Uuid
+  location          Location?      @relation(fields: [location_id], references: [id], onDelete: SetNull)
   issue_date        DateTime?      @db.Date
   return_date       DateTime?      @db.Date
   device_details    String?
@@ -3822,6 +3828,7 @@ model Asset {
 
   @@index([org_id, status])
   @@index([org_membership_id])
+  @@index([location_id])
   @@map("assets")
 }
 

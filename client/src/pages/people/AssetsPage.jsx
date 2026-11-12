@@ -3,9 +3,10 @@ import { Plus, Search } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
-import { useLeadClientOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
+import { useLeadClientOptions, useLocationOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
+import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 
@@ -14,10 +15,13 @@ const ASSET_TYPES = ['Windows Laptop', 'Mac Book', 'Cube', 'Monitor', 'Mobile', 
 
 const STATUS_FILTERS = [
   { key: 'issued', label: 'Issued' },
+  { key: 'dispatched', label: 'Dispatched' },
   { key: 'returned', label: 'Returned' },
   { key: 'all', label: 'All' },
 ];
 
+const STATUS_LABEL = { issued: 'Issued', dispatched: 'Dispatched', returned: 'Returned' };
+const STATUS_TONE = { issued: 'blue', dispatched: 'green', returned: 'gray' };
 const OWNER_LABEL = { delphic: 'Delphic', client: 'Client', vendor: 'Vendor' };
 const OWNER_TONE = { delphic: 'amber', client: 'purple', vendor: 'cyan' };
 
@@ -43,6 +47,8 @@ function emptyForm(asset) {
     org_membership_id: asset?.org_membership_id || '',
     vendor_account_id: asset?.vendor_account_id || '',
     client_account_id: asset?.client_account_id || '',
+    used_by_ids: asset?.used_by_ids || [],
+    location_id: asset?.location_id || '',
     issue_date: asset?.issue_date || (asset ? '' : todayYmd()),
     return_date: asset?.return_date || '',
     device_details: asset?.device_details || '',
@@ -67,6 +73,10 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
     apiClient.get('/billing/vendors').then(({ data }) => setVendors((data.data || []).map((v) => ({ value: v.id, label: v.name })))).catch(() => setVendors([]));
   }, [open]);
   const clients = useLeadClientOptions(open);
+  // Who uses the asset: every employee of the company, active or exited. The office: the company's locations (HR settings).
+  const everyone = useOrgMembershipOptions(open, { includeExited: true });
+  const userOptions = useMemo(() => everyone.map((o) => ({ id: o.value, label: o.label, hint: o.hint })), [everyone]);
+  const locations = useLocationOptions(open);
 
   useEffect(() => { if (open) setForm(emptyForm(asset)); }, [open, asset]);
 
@@ -90,6 +100,8 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
       // The vendor that supplied it — recorded for any asset, required when it belongs to the vendor.
       vendor_account_id: values.vendor_account_id || null,
       client_account_id: values.client_account_id || null,
+      used_by_ids: values.used_by_ids || [],
+      location_id: values.location_id || null,
       issue_date: values.issue_date || null,
       return_date: values.return_date || null,
     };
@@ -138,7 +150,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
             <button type="button" className="btn-ghost mr-auto text-red-600" onClick={remove} disabled={saving}>Delete</button>
           )}
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          {asset?.status === 'issued' && (
+          {['issued', 'dispatched'].includes(asset?.status) && (
             <button type="button" className="btn-secondary" onClick={() => save({ status: 'returned', return_date: form.return_date || todayYmd() })} disabled={saving}>
               Mark returned
             </button>
@@ -169,6 +181,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
           Status
           <select value={form.status} onChange={(e) => setStatus(e.target.value)} className={input}>
             <option value="issued">Issued</option>
+            <option value="dispatched">Dispatched</option>
             <option value="returned">Returned</option>
           </select>
         </label>
@@ -199,6 +212,16 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
           Client name
           <SearchableSelect value={form.client_account_id} onChange={(v) => set('client_account_id', v)} options={clientOptions} allowClear className="mt-1" placeholder="None" searchPlaceholder="Search clients…" noResultsMessage="No client accounts found" ariaLabel="Client" />
         </div>
+        <div className={`${label} sm:col-span-2`} data-testid="asset-used-by">
+          Used by
+          <div className="mt-1">
+            <MultiSelectDropdown value={form.used_by_ids} onChange={(ids) => set('used_by_ids', ids)} options={userOptions} placeholder="Select one or more employees" searchPlaceholder="Search employees…" emptyMessage="No employees found." />
+          </div>
+        </div>
+        <div className={`${label} sm:col-span-2`} data-testid="asset-office">
+          Office location
+          <SearchableSelect value={form.location_id} onChange={(v) => set('location_id', v)} options={locations} allowClear className="mt-1" placeholder="Not set" searchPlaceholder="Search offices…" noResultsMessage="No office locations found" ariaLabel="Office location" />
+        </div>
         <label className={label}>
           Issue date
           <input type="date" value={form.issue_date} onChange={(e) => set('issue_date', e.target.value)} className={input} />
@@ -226,7 +249,12 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('issued');
   const [query, setQuery] = useState('');
+  const [officeFilter, setOfficeFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('');
   const [drawer, setDrawer] = useState({ open: false, asset: null });
+
+  const offices = useLocationOptions(true);
+  const everyone = useOrgMembershipOptions(true, { includeExited: true });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -240,6 +268,7 @@ export default function AssetsPage() {
 
   const counts = useMemo(() => ({
     issued: rows.filter((r) => r.status === 'issued').length,
+    dispatched: rows.filter((r) => r.status === 'dispatched').length,
     returned: rows.filter((r) => r.status === 'returned').length,
     all: rows.length,
   }), [rows]);
@@ -248,17 +277,19 @@ export default function AssetsPage() {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (status !== 'all' && r.status !== status) return false;
+      if (officeFilter && r.location_id !== officeFilter) return false;
+      if (userFilter && !(r.used_by_ids || []).includes(userFilter)) return false;
       if (!q) return true;
-      return [r.serial_number, r.asset_type, r.org_membership?.name, r.org_membership?.employee_code, r.vendor_account?.name, r.client_account?.name, r.device_details]
+      return [r.serial_number, r.asset_type, r.org_membership?.name, r.org_membership?.employee_code, r.vendor_account?.name, r.client_account?.name, r.location?.name, r.device_details, ...(r.used_by || []).map((u) => u.name)]
         .some((v) => v && v.toLowerCase().includes(q));
     });
-  }, [rows, status, query]);
+  }, [rows, status, query, officeFilter, userFilter]);
 
   const open = (asset) => setDrawer({ open: true, asset });
 
   const columns = [
     { key: 'serial', header: 'Serial number', render: (r) => (r.serial_number ? <span className="font-medium text-tertiary-900">{r.serial_number}</span> : muted()) },
-    { key: 'status', header: 'Status', render: (r) => <Pill tone={r.status === 'issued' ? 'blue' : 'gray'}>{r.status === 'issued' ? 'Issued' : 'Returned'}</Pill> },
+    { key: 'status', header: 'Status', render: (r) => <Pill tone={STATUS_TONE[r.status] || 'gray'}>{STATUS_LABEL[r.status] || r.status}</Pill> },
     { key: 'type', header: 'Type', render: (r) => r.asset_type },
     {
       key: 'employee',
@@ -267,6 +298,14 @@ export default function AssetsPage() {
         <span>{r.org_membership.name}{r.org_membership.employee_code && <span className="ml-1 text-xs text-tertiary-500">{r.org_membership.employee_code}</span>}</span>
       ) : muted()),
     },
+    {
+      key: 'used_by',
+      header: 'Used by',
+      render: (r) => ((r.used_by || []).length ? (
+        <span data-testid="asset-used-by-cell" className="line-clamp-2 max-w-[14rem]" title={r.used_by.map((u) => u.name).join(', ')}>{r.used_by.map((u) => u.name).join(', ')}</span>
+      ) : muted()),
+    },
+    { key: 'office', header: 'Office location', render: (r) => (r.location?.name ? <span data-testid="asset-office-cell">{r.location.name}</span> : muted()) },
     { key: 'owner', header: 'Belongs to', render: (r) => <Pill tone={OWNER_TONE[r.belongs_to] || 'gray'}>{OWNER_LABEL[r.belongs_to] || r.belongs_to}</Pill> },
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor_account?.name || muted() },
     { key: 'client', header: 'Client name', render: (r) => r.client_account?.name || muted() },
@@ -298,7 +337,7 @@ export default function AssetsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tertiary-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search serial, employee, client…" aria-label="Search assets" className="w-64 max-w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search serial, employee, client, office…" aria-label="Search assets" className="w-64 max-w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
           </label>
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => open(null)}>
             <Plus className="h-4 w-4" /> Add asset
@@ -306,11 +345,23 @@ export default function AssetsPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3" data-testid="asset-filters">
+        <div className="w-56 text-xs font-medium text-tertiary-600">
+          Office location
+          <SearchableSelect value={officeFilter} onChange={setOfficeFilter} options={offices} allowClear className="mt-1" placeholder="All offices" searchPlaceholder="Search offices…" ariaLabel="Filter by office location" />
+        </div>
+        <div className="w-64 text-xs font-medium text-tertiary-600">
+          Used by
+          <SearchableSelect value={userFilter} onChange={setUserFilter} options={everyone} allowClear className="mt-1" placeholder="All employees" searchPlaceholder="Search employees…" ariaLabel="Filter by user" />
+        </div>
+        {(officeFilter || userFilter) && <button type="button" className="btn-ghost text-xs" onClick={() => { setOfficeFilter(''); setUserFilter(''); }}>Clear filters</button>}
+      </div>
+
       <DataTable
         columns={columns}
         rows={visible}
         loading={loading}
-        emptyLabel={query ? 'No assets match your search.' : status === 'returned' ? 'No returned assets yet.' : 'No assets yet — add the first one.'}
+        emptyLabel={query || officeFilter || userFilter ? 'No assets match your search or filters.' : status === 'returned' ? 'No returned assets yet.' : 'No assets yet — add the first one.'}
         onRowClick={open}
       />
 
