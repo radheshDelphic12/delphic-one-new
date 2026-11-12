@@ -37,6 +37,54 @@ function marksSheet(parameters = []) {
 const when = (value) => (value ? new Date(value).toLocaleString() : '-');
 
 /**
+ * The recording player. A browser recording (WebM) has no length or index written in it, so the player cannot jump around in it: the
+ * seek bar does nothing. Asking the player for a far-away time makes the browser read to the end and learn the real length; after that it
+ * is stepped back to the start and the file can be rewound and forwarded. The buttons jump 10 seconds either way; the speed list helps
+ * to get through a long interview.
+ */
+function RecordingPlayer({ url, onError }) {
+  const ref = useRef(null);
+  const [speed, setSpeed] = useState(1);
+  const fixing = useRef(false);
+
+  function onMeta() {
+    const v = ref.current;
+    if (!v || v.duration !== Infinity || fixing.current) return;
+    fixing.current = true;
+    const restore = () => {
+      v.removeEventListener('timeupdate', restore);
+      v.currentTime = 0;
+      fixing.current = false;
+      v.play().catch(() => {});
+    };
+    v.addEventListener('timeupdate', restore);
+    v.currentTime = 1e101;
+  }
+  const jump = (seconds) => {
+    const v = ref.current;
+    if (!v) return;
+    const end = Number.isFinite(v.duration) ? v.duration : Infinity;
+    v.currentTime = Math.max(0, Math.min(end, v.currentTime + seconds));
+  };
+  const changeSpeed = (value) => { setSpeed(value); if (ref.current) ref.current.playbackRate = value; };
+
+  return (
+    <div className="mb-2">
+      <video ref={ref} key={url} src={url} controls preload="metadata" autoPlay className="w-full rounded-lg bg-black" data-testid="recording-video" onLoadedMetadata={onMeta} onError={onError} />
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+        <button type="button" className="rounded-lg border border-tertiary-200 px-2 py-1 hover:bg-tertiary-50" data-testid="recording-back" onClick={() => jump(-10)}>« 10 s back</button>
+        <button type="button" className="rounded-lg border border-tertiary-200 px-2 py-1 hover:bg-tertiary-50" data-testid="recording-forward" onClick={() => jump(10)}>10 s forward »</button>
+        <label className="ml-auto flex items-center gap-1 text-tertiary-600">Speed
+          <select className="rounded-lg border border-tertiary-200 px-1 py-0.5" value={speed} onChange={(e) => changeSpeed(Number(e.target.value))}>
+            {[0.5, 1, 1.25, 1.5, 2].map((s) => <option key={s} value={s}>{s}x</option>)}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Optional AI interview for the candidate's first round: a separate link next to the interview plan. It renders nothing until
  * an admin switches the feature on (Hiring setup > AI interview), and it never blocks or changes any interview round.
  */
@@ -347,7 +395,7 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
                   <>
                     <p className="mb-2 text-xs text-tertiary-500">Available until {when(review.recording_expires_at)}, then deleted automatically.</p>
                     {review.recording_parts.length > 1 && <p className="mb-2 text-xs text-tertiary-600">The candidate closed the page and came back, so this interview has {review.recording_parts.length} recording parts.</p>}
-                    {video.url && <video key={video.url} src={video.url} controls preload="metadata" autoPlay className="mb-2 w-full rounded-lg bg-black" onError={() => loadVideoAgain(video.part)} />}
+                    {video.url && <RecordingPlayer url={video.url} onError={() => loadVideoAgain(video.part)} />}
                     {video.error && <p className="mb-2 text-xs text-danger-700">{video.error}</p>}
                     <div className="flex flex-wrap gap-2">
                       {review.recording_parts.map((p, idx) => (
