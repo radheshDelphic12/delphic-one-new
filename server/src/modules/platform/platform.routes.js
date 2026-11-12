@@ -4,6 +4,9 @@ const { authenticate } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./platform.service');
+const credits = require('./credits.service');
+const entitlements = require('./entitlements.service');
+const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
 // because the platform is a separate job from running a company.
@@ -28,6 +31,15 @@ const ERRORS = {
   cycle: [422, 'A module cannot need itself, directly or through other modules'],
   duplicate: [422, 'The same module is listed twice'],
   unknown_module: [422, 'A listed module does not exist'],
+  customer_not_found: [404, 'Customer not found'],
+  slot_not_found: [404, 'Slot not found'],
+  module_not_found: [404, 'Module not found'],
+  over_trial_users: [409, 'A trial has no more user slots'],
+  admin_slot: [409, 'The admin slot cannot be moved'],
+  too_soon: [409, 'This slot was moved recently'],
+  below_zero: [422, 'Credit days cannot go below 0'],
+  bad_days: [422, 'Days must be a whole number other than 0'],
+  counter_off: [409, 'The daily counter is not switched on (SAAS_COUNTER_ENABLED)'],
 };
 const problem = (res, r) => { const [status, message] = ERRORS[r.error] || [400, 'Bad request']; return fail(res, status, message); };
 const result = (res, r, data = {}) => (r.error ? problem(res, r) : ok(res, data));
@@ -84,6 +96,43 @@ router.get('/settings', asyncHandler(async (req, res) => ok(res, await service.l
 router.patch('/settings/:key', asyncHandler(async (req, res) => {
   const { value } = z.object({ value: z.number().min(0).max(100000) }).parse(req.body);
   return result(res, await service.updateSetting(z.string().max(60).parse(req.params.key), value, req.user.id));
+}));
+
+// customers, slots and credit days
+router.get('/customers', asyncHandler(async (req, res) => {
+  const rows = await prisma.saasCustomer.findMany({ orderBy: { created_at: 'desc' }, include: { slots: { select: { id: true } } } });
+  return ok(res, rows.map((c) => ({ id: c.id, name: c.name, status: c.status, org_id: c.org_id, org_group_id: c.org_group_id, trial_ends_on: c.trial_ends_on, max_users: c.max_users, slots: c.slots.length })));
+}));
+router.get('/customers/:id', asyncHandler(async (req, res) => {
+  const c = await prisma.saasCustomer.findUnique({ where: { id: z.string().uuid().parse(req.params.id) }, include: { slots: { include: { credits: true }, orderBy: { created_at: 'asc' } } } });
+  return c ? ok(res, c) : problem(res, { error: 'customer_not_found' });
+}));
+router.post('/customers/:id/slots', asyncHandler(async (req, res) => {
+  const body = z.object({ email: z.string().email().optional(), label: z.string().max(80).optional() }).parse(req.body || {});
+  const r = await credits.createSlot(z.string().uuid().parse(req.params.id), body);
+  return r.error ? problem(res, r) : created(res, { id: r.slot.id });
+}));
+router.post('/slots/:id/credits', asyncHandler(async (req, res) => {
+  const body = z.object({ code, days: z.number().int().min(-3650).max(3650), reason: z.string().max(120).optional() }).parse(req.body);
+  const r = await credits.addCredit({ slotId: z.string().uuid().parse(req.params.id), code: body.code, days: body.days, reason: body.reason || 'top-up', actorId: req.user.id });
+  return r.error ? problem(res, r) : ok(res, r);
+}));
+router.post('/slots/:id/move', asyncHandler(async (req, res) => {
+  const { email } = z.object({ email: z.string().email() }).parse(req.body);
+  const r = await credits.moveSlot(z.string().uuid().parse(req.params.id), email, req.user.id);
+  return r.error ? problem(res, r) : ok(res, r);
+}));
+router.post('/slots/:id/status', asyncHandler(async (req, res) => {
+  const { status } = z.object({ status: z.enum(['active', 'paused']) }).parse(req.body);
+  return result(res, await credits.setSlotStatus(z.string().uuid().parse(req.params.id), status));
+}));
+// Run the daily counter by hand (a catch-up). Only when the counter is switched on.
+router.post('/counter/run', asyncHandler(async (req, res) => (process.env.SAAS_COUNTER_ENABLED === 'true' ? ok(res, await credits.runDailyCounter()) : problem(res, { error: 'counter_off' }))));
+// What a person would be allowed to use (works whether or not enforcement is on): for checking a customer's setup before switching it on.
+router.get('/entitlements', asyncHandler(async (req, res) => {
+  const q = z.object({ user_id: z.string().uuid(), org_id: z.string().uuid() }).parse(req.query);
+  const user = await prisma.user.findUnique({ where: { id: q.user_id }, select: { id: true, email: true } });
+  return ok(res, { enforcing: entitlements.enforcing(), ...(user ? await entitlements.entitlementsFor(user, q.org_id) : { applies: false }) });
 }));
 
 module.exports = router;

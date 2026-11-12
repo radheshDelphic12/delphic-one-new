@@ -9807,6 +9807,7 @@ model SaasModule {
   needs     SaasModuleDependency[] @relation("DependencyModule")
   needed_by SaasModuleDependency[] @relation("DependencyNeeds")
   prices    SaasModulePrice[]
+  credits   SaasSlotCredit[]
 
   @@map("saas_modules")
 }
@@ -9867,4 +9868,94 @@ model SaasSetting {
   updated_at DateTime @default(now()) @updatedAt
 
   @@map("saas_settings")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS launch, phases 1.5 and 2.1: customers, slots, credit days, ledger, counter runs. See docs/features/SAAS-LAUNCH-BUILD-PLAN.md.
+// org_group_id / org_id / dox_customer_id are plain ids (no foreign keys to existing tables) so no existing model changes.
+// ---------------------------------------------------------------------------------------------------------------------
+
+// One row per customer company on the platform; its group has kind trial or customer.
+model SaasCustomer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dox_customer_id String?   @unique @db.Uuid
+  org_group_id    String    @db.Uuid
+  org_id          String    @unique @db.Uuid
+  name            String
+  status          String    @default("trial") // trial | active | read_only | suspended | churned (database check)
+  plan_name       String?
+  trial_starts_on DateTime? @db.Date
+  trial_ends_on   DateTime? @db.Date
+  max_users       Int       @default(2)
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  slots SaasSlot[]
+
+  @@index([org_group_id])
+  @@index([status])
+  @@map("saas_customers")
+}
+
+// A seat. The admin slot always burns credit days; other slots burn only while someone is assigned (email set) and the slot is active.
+model SaasSlot {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customer_id   String       @db.Uuid
+  customer      SaasCustomer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  email         String?
+  user_id       String?      @db.Uuid
+  is_admin      Boolean      @default(false)
+  label         String?
+  status        String       @default("active") // active | paused (database check)
+  last_moved_at DateTime?
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
+
+  credits SaasSlotCredit[]
+  ledger  SaasCreditLedger[]
+
+  @@index([customer_id])
+  @@map("saas_slots")
+}
+
+// Days left of one module on one slot. Never below 0 (database check).
+model SaasSlotCredit {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slot_id     String     @db.Uuid
+  slot        SaasSlot   @relation(fields: [slot_id], references: [id], onDelete: Cascade)
+  module_code String     @db.VarChar(8)
+  module      SaasModule @relation(fields: [module_code], references: [code])
+  days_left   Int        @default(0)
+  alerted_at  DateTime?
+  updated_at  DateTime   @default(now()) @updatedAt
+
+  @@unique([slot_id, module_code])
+  @@index([module_code])
+  @@map("saas_slot_credits")
+}
+
+// Every change to a credit: top-up, daily burn, transfer, correction. The audit trail of what a customer has paid for and used.
+model SaasCreditLedger {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slot_id       String   @db.Uuid
+  slot          SaasSlot @relation(fields: [slot_id], references: [id], onDelete: Cascade)
+  module_code   String   @db.VarChar(8)
+  change_days   Int
+  balance_after Int
+  reason        String
+  actor_id      String?  @db.Uuid
+  created_at    DateTime @default(now())
+
+  @@index([slot_id, module_code])
+  @@map("saas_credit_ledger")
+}
+
+// One row per day the daily counter has run; the primary key makes a second run on the same day do nothing.
+model SaasCounterRun {
+  run_date        DateTime @id @db.Date
+  credits_touched Int      @default(0)
+  ran_at          DateTime @default(now())
+
+  @@map("saas_counter_runs")
 }
