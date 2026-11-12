@@ -39,6 +39,7 @@ async function main(argv) {
       process.stdin.pipe(out);
     });
     file = tmp;
+    if ((await fs.promises.stat(tmp)).size === 0) { await fs.promises.unlink(tmp).catch(() => {}); throw new Error(`${name}: nothing was received on stdin (empty file not uploaded)`); }
   }
   try {
     const up = await sp.uploadFile(file, name);

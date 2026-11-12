@@ -296,10 +296,10 @@ export default function AiInterviewPage() {
     let face = null;
     let cancelled = false;
     const paused = () => document.hidden || (needScreen && !screenRef.current?.getVideoTracks().some((t) => t.readyState === 'live'));
-    createFaceMonitor({ stream: streamRef.current, onEvent: proctorWarn, isPaused: paused }).then((m) => { if (cancelled) m?.stop(); else face = m; });
+    createFaceMonitor({ stream: streamRef.current, onEvent: proctorWarn, isPaused: paused }).then((m) => { if (cancelled) m?.stop(); else { face = m; if (!m) report('monitor_unavailable'); } }); // no monitor: the team is told the face watching was off
     const noise = createNoiseMonitor({ stream: streamRef.current, onEvent: proctorWarn, isCandidateSpeaking: () => speakingRef.current || busyRef.current, isPaused: paused });
     return () => { cancelled = true; face?.stop(); noise?.stop(); };
-  }, [active, proctoring, cameraReady, needScreen, proctorWarn]);
+  }, [active, proctoring, cameraReady, needScreen, proctorWarn, report]);
   // an interview reopened without recording still needs the camera for the watching
   useEffect(() => {
     if (view?.status !== 'started' || !view.proctoring || view.recording_on || streamRef.current) return;

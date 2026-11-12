@@ -24,11 +24,11 @@ const DEFAULTS = {
   answer_time_seconds: 180, max_tab_switches: 3,
   weight_problem_solving: 15, weight_experience_fit: 10, use_reference_sites: true, reference_sites: 'w3schools.com,javatpoint.com', recording_viewer_ids: [],
   difficulty: 'easy', marking: 'lenient', require_fullscreen: true,
-  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: false,
+  proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: true,
 };
 const MIN_TAB_LIMIT = 3;
 const TAB_EVENTS = ['tab_hidden', 'window_blur', 'fullscreen_exit']; // leaving the interview page; these count towards max_tab_switches
-const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off', 'multiple_displays'];
+const OTHER_EVENTS = ['copy', 'cut', 'paste', 'context_menu', 'blocked_key', 'camera_off', 'multiple_displays', 'monitor_unavailable']; // monitor_unavailable: the face watching could not start in the candidate's browser (not a warning)
 // Watched through the camera, microphone and shared screen; each one is a warning, and once the company's number of warnings is used up the next ends the interview.
 const PROCTOR_EVENTS = ['no_face', 'multiple_faces', 'eyes_away', 'looking_down', 'noise', 'screen_share_stopped'];
 const EVENT_TYPES = [...TAB_EVENTS, ...OTHER_EVENTS, ...PROCTOR_EVENTS];
@@ -39,7 +39,7 @@ const tabSwitchesOf = (a) => eventsOf(a).filter((e) => TAB_EVENTS.includes(e.typ
 function integritySummary(a) {
   const ev = eventsOf(a);
   const n = (types) => ev.filter((e) => types.includes(e.type)).length;
-  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), fullscreen_exits: n(['fullscreen_exit']), multiple_displays: n(['multiple_displays']), proctor: Object.fromEntries(PROCTOR_EVENTS.map((t) => [t, n([t])])), total: ev.length };
+  return { tab_switches: n(TAB_EVENTS), copy_paste: n(['copy', 'cut', 'paste', 'context_menu', 'blocked_key']), camera_off: n(['camera_off']), fullscreen_exits: n(['fullscreen_exit']), multiple_displays: n(['multiple_displays']), monitoring_off: n(['monitor_unavailable']), proctor: Object.fromEntries(PROCTOR_EVENTS.map((t) => [t, n([t])])), total: ev.length };
 }
 const RECORDING_DIR = () => path.join(env.uploadDir, 'ai-interviews');
 const MAX_RECORDING_BYTES = 250 * 1024 * 1024;

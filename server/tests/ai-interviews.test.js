@@ -804,7 +804,8 @@ describe('resend, restart, timer and page integrity', () => {
 
   test('camera / microphone / screen warnings: three warnings come first, the fourth ends the interview for a person; the settings are admin editable', async () => {
     const S = '/api/v1/ai-interviews/settings';
-    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: false });
+    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: true }); // on by default: the screen is recorded and watched
+    expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: false })).body.data.require_screen_share).toBe(false); // an admin can switch it off
     expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: true })).body.data.require_screen_share).toBe(true);
     const token = tokenOf((await invite()).body.data.link);
     const started = await post(`${token}/start`, { consent: true });

@@ -2349,6 +2349,7 @@ model Org {
   assets                  Asset[]
   policies                Policy[]
   financial_asset_values  FinancialAssetValue[]
+  group_asset_values      GroupAssetValue[]
   exchange_rates          ExchangeRate[]
 
   // Finance categories + the calculation lock/version system.
@@ -4809,6 +4810,23 @@ model FinancialAssetValue {
 
   @@unique([org_id, period_year, period_month])
   @@map("financial_asset_values")
+}
+
+// Group Dashboard: the asset value of a company on a given DATE (any day up to today). The monthly asset value that the valuation reads is
+// the latest dated value of that month, written alongside; the dated rows keep the history of what was set and when.
+model GroupAssetValue {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  org         Org      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  as_of       DateTime @db.Date
+  asset_value Decimal  @db.Decimal(16, 2)
+  notes       String?
+  updated_by  String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, as_of])
+  @@map("group_asset_values")
 }
 
 // ---------------------------------------------------------------------------
@@ -8544,7 +8562,7 @@ model AiInterviewSettings {
   // Each is a warning; after max_proctor_warnings warnings the next one ends the interview. require_screen_share: the candidate shares the whole screen, recorded beside the face.
   proctoring_enabled       Boolean  @default(true)
   max_proctor_warnings     Int      @default(3)
-  require_screen_share     Boolean  @default(false)
+  require_screen_share     Boolean  @default(true)
   updated_by               String?  @db.Uuid
   updated_at               DateTime @default(now()) @updatedAt
 
