@@ -18,8 +18,11 @@ import {
   accountKey,
   apiErrorMessage,
   canCreateAccount,
+  canEditAccountDetails,
   canMutateAccount,
   canOverrideStage,
+  VENDOR_TYPES,
+  vendorTypeLabel,
 } from './accountUtils.js';
 
 function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestStageOverride }) {
@@ -38,6 +41,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
   }, [row]);
 
   const canEdit = canMutateAccount(detail, user) && !detail.is_locked;
+  const canEditDetails = canEditAccountDetails(detail, user) && !detail.is_locked;
   const nextStages = ACCOUNT_TRANSITIONS[detail.stage] || [];
   const canOverride = canOverrideStage(user);
 
@@ -56,6 +60,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
         <PeekField label="Industry">{detail.industry || '—'}</PeekField>
         {detail.type === 'vendor' && (
           <>
+            <PeekField label="Vendor type">{vendorTypeLabel(detail.vendor_type) || '—'}</PeekField>
             <PeekField label="Specializations">
               {(detail.vendor_specializations || []).join(', ') || '—'}
             </PeekField>
@@ -80,7 +85,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
         <Link to={`/accounts/${detail.id}`} className="btn-secondary">
           Open details
         </Link>
-        {canEdit && (
+        {canEditDetails && (
           <button type="button" className="btn-secondary" onClick={() => navigate(`/accounts/${detail.id}?edit=1`)}>
             Edit account
           </button>
@@ -124,7 +129,11 @@ export default function AccountsListPage() {
   const [stuck, setStuck] = useState(() => searchParams.get('stuck') || '');
   const [ownerId, setOwnerId] = useState(() => searchParams.get('owner_id') || '');
   const [broughtById, setBroughtById] = useState(() => searchParams.get('origin_owner_id') || '');
+  const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
+  const [vendorType, setVendorType] = useState(() => searchParams.get('vendor_type') || '');
   const [specialization, setSpecialization] = useState(() => searchParams.get('specialization') || '');
+  const [location, setLocation] = useState(() => searchParams.get('location') || '');
+  const [appliedLocation, setAppliedLocation] = useState(() => searchParams.get('location') || '');
   const [people, setPeople] = useState([]);
   const [specializationOptions, setSpecializationOptions] = useState([]);
   const [page, setPage] = useState(1);
@@ -143,7 +152,10 @@ export default function AccountsListPage() {
     if (stuck) params.stuck = stuck;
     if (ownerId) params.owner_id = ownerId;
     if (broughtById) params.origin_owner_id = broughtById;
+    if (premium) params.premium = premium;
+    if (vendorType) params.vendor_type = vendorType;
     if (specialization) params.specialization = specialization;
+    if (appliedLocation) params.location = appliedLocation;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
       .get('/accounts', { params })
@@ -158,14 +170,14 @@ export default function AccountsListPage() {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, specialization]);
+  }, [appliedSearch, page, stage, stuck, type, ownerId, broughtById, premium, vendorType, specialization, appliedLocation]);
 
   useEffect(() => {
     // /users/directory is readable by every role and includes inactive users, so
     // the Owner / Brought-by filters show the whole roster (BDAs included) no
     // matter who is signed in.
     apiClient
-      .get('/users/directory')
+      .get('/users/directory', { params: { include_former: true } })
       .then(({ data }) =>
         setPeople(
           (data.data || []).map((u) => ({
@@ -195,6 +207,8 @@ export default function AccountsListPage() {
     setOwnerId(searchParams.get('owner_id') || '');
     setBroughtById(searchParams.get('origin_owner_id') || '');
     setSpecialization(searchParams.get('specialization') || '');
+    setPremium(searchParams.get('premium') || '');
+    setVendorType(searchParams.get('vendor_type') || '');
   }, [searchParams]);
 
   // Keep the active filters shareable via the URL.
@@ -210,13 +224,15 @@ export default function AccountsListPage() {
     sync('owner_id', ownerId);
     sync('origin_owner_id', broughtById);
     sync('specialization', specialization);
+    sync('premium', premium);
+    sync('vendor_type', vendorType);
     if (searchParams.get('create') === '1') next.set('create', '1');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, stage, stuck, ownerId, broughtById, specialization]);
+  }, [type, stage, stuck, ownerId, broughtById, premium, vendorType, specialization]);
 
   const hasActiveFilters = Boolean(
-    type || stage || stuck || ownerId || broughtById || specialization || appliedSearch
+    type || stage || stuck || ownerId || broughtById || premium || vendorType || specialization || appliedSearch
   );
 
   function clearAllFilters() {
@@ -227,6 +243,8 @@ export default function AccountsListPage() {
     setOwnerId('');
     setBroughtById('');
     setSpecialization('');
+    setPremium('');
+    setVendorType('');
     setSearch('');
     setAppliedSearch('');
     const kept = new URLSearchParams();
@@ -294,6 +312,7 @@ export default function AccountsListPage() {
       },
       { key: 'type', header: 'Type', render: (row) => <span className="capitalize text-tertiary-700">{row.type || 'Unclassified'}</span> },
       { key: 'industry', header: 'Industry', render: (row) => row.industry || '—' },
+      { key: 'location', header: 'Location', render: (row) => [row.location, row.location_city, row.location_country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—' },
       {
         key: 'specialization',
         header: 'Specialization',
@@ -313,6 +332,8 @@ export default function AccountsListPage() {
         },
       },
       { key: 'stage', header: 'Stage', render: (row) => <Badge value={row.stage} /> },
+      { key: 'vendor_type', header: 'Vendor type', render: (row) => (row.type === 'vendor' ? vendorTypeLabel(row.vendor_type) || '—' : '—') },
+      { key: 'premium', header: 'Premium', render: (row) => (row.is_premium ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Yes</span> : <span className="text-tertiary-400">No</span>) },
       {
         key: 'owner',
         header: 'Owner',
@@ -354,7 +375,7 @@ export default function AccountsListPage() {
       {canCreateAccount(user) && (
         <div className="flex justify-end">
           <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> Create account
+            <Plus className="h-4 w-4" /> Create client / vendor account
           </button>
         </div>
       )}
@@ -403,6 +424,21 @@ export default function AccountsListPage() {
                 <option value="vendor">Vendor</option>
                 <option value="unclassified">Unclassified</option>
               </select>
+              <input
+                type="search"
+                value={location}
+                onChange={(event) => {
+                  setLocation(event.target.value);
+                  if (!event.target.value) { setPage(1); setAppliedLocation(''); }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') { setPage(1); setAppliedLocation(location.trim()); }
+                }}
+                onBlur={() => { if (location.trim() !== appliedLocation) { setPage(1); setAppliedLocation(location.trim()); } }}
+                placeholder="Location: any"
+                aria-label="Filter by location"
+                className="w-40 rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              />
               <SearchableSelect
                 className="w-44"
                 allowClear
@@ -420,6 +456,19 @@ export default function AccountsListPage() {
                   { value: 'rescheduled', label: 'Rescheduled' },
                   { value: 'dropped', label: 'Dropped' },
                 ]}
+              />
+              <SearchableSelect
+                className="w-40"
+                allowClear
+                ariaLabel="Filter by vendor type"
+                value={vendorType}
+                onChange={(next) => {
+                  setPage(1);
+                  setVendorType(next);
+                }}
+                placeholder="Vendor type: All"
+                searchPlaceholder="Search…"
+                options={VENDOR_TYPES}
               />
               <SearchableSelect
                 className="w-48"
@@ -459,6 +508,22 @@ export default function AccountsListPage() {
                 placeholder="Brought by: All"
                 searchPlaceholder="Search people…"
                 options={people}
+              />
+              <SearchableSelect
+                className="w-40"
+                allowClear
+                ariaLabel="Filter by premium"
+                value={premium}
+                onChange={(next) => {
+                  setPage(1);
+                  setPremium(next);
+                }}
+                placeholder="Premium: All"
+                searchPlaceholder="Search…"
+                options={[
+                  { value: 'yes', label: 'Premium: Yes' },
+                  { value: 'no', label: 'Premium: No' },
+                ]}
               />
               {hasActiveFilters && (
                 <button type="button" className="btn-secondary px-2.5 py-1.5 text-xs" onClick={clearAllFilters}>

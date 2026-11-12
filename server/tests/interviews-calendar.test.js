@@ -298,3 +298,32 @@ describe('POST /interviews/:id/cancel', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('editing a round', () => {
+  const cancel = () => authed(request(app).post(`/api/v1/interviews/${inRangeRoundId}/cancel`), recruiterAToken).send({ reason: 'The req is on hold' });
+  const edit = (body) => authed(request(app).patch(`/api/v1/interview-rounds/${inRangeRoundId}`), recruiterAToken).send(body);
+
+  test('a new round name is saved (it used to be dropped)', async () => {
+    const res = await edit({ round_name: 'Client final round' });
+    expect(res.status).toBe(200);
+    expect((await prisma.interviewRound.findUnique({ where: { id: inRangeRoundId } })).round_name).toBe('Client final round');
+  });
+
+  test('moving a cancelled round to a new time puts it back on the calendar', async () => {
+    await cancel();
+    const res = await edit({ scheduled_at: new Date(Date.now() + 2 * DAY).toISOString() });
+    expect(res.status).toBe(200);
+    const round = await prisma.interviewRound.findUnique({ where: { id: inRangeRoundId } });
+    expect(round.status).toBe('scheduled');
+    expect(round.cancelled_at).toBeNull();
+    expect(round.cancellation_reason).toBeNull();
+  });
+
+  test('"reopen" revives a cancelled round even when the time is unchanged, and a plain edit leaves it cancelled', async () => {
+    await cancel();
+    await edit({ round_name: 'Typo fix' });
+    expect((await prisma.interviewRound.findUnique({ where: { id: inRangeRoundId } })).status).toBe('cancelled');
+    await edit({ reopen: true });
+    expect((await prisma.interviewRound.findUnique({ where: { id: inRangeRoundId } })).status).toBe('scheduled');
+  });
+});

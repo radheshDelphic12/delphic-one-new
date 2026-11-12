@@ -58,6 +58,8 @@ services:
       # Optional, add later in the dashboard for real email/invite delivery:
       #   NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465), NOTIFICATIONS_EMAIL_FROM.
       # Unset = queued mail is marked "skipped".
+      # Optional, website control (Apps Script bridge): WEBSITE_SCRIPT_SECRET plus
+      #   WEBSITE_{JOBS,CONTACT,CAREER,SECURE}_SCRIPT_URL. Unset = feature off.
       # Build-time: "true" hides the dev quick-login bar (leave "false" for internal testing).
       - key: VITE_DISABLE_QUICK_LOGIN
         value: "false"

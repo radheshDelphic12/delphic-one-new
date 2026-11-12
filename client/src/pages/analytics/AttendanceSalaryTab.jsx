@@ -12,7 +12,7 @@ import RecordLockButton from '../../components/finance/RecordLockButton.jsx';
 
 /** Employee / Department / Team filters — combinable (Payroll + Live Analytics). */
 export function PeopleFilters({ value, onChange }) {
-  const members = useOrgMembershipOptions(true);
+  const members = useOrgMembershipOptions(true, { includeExited: true }); // an exited employee's salary still needs to be viewed and settled
   const departments = useDepartmentOptions(true);
   const teams = useTeamOptions(true);
   const set = (key, v) => onChange({ ...value, [key]: v });

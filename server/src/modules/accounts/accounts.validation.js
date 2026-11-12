@@ -1,5 +1,11 @@
 const { z } = require('zod');
 
+// A trimmed text field of the vendor's bank details: empty clears it (null); when a pattern is given the normalised value must match it.
+const bankText = (max, pattern, message, normalise = (v) => v) => z.preprocess(
+  (v) => (typeof v === 'string' ? (v.trim() === '' ? null : normalise(v.replace(/[ \t]+/g, ' ').trim())) : v),
+  (pattern ? z.string().regex(pattern, message) : z.string()).max(max).nullable().optional()
+);
+
 const contactSchema = z.object({
   name: z.string(),
   email: z.string().email().optional().or(z.literal('')),
@@ -15,6 +21,7 @@ const baseFields = {
   location_city: z.string().optional(),
   location_country: z.string().optional(),
   gst_or_tax_id: z.string().optional(),
+  billing_address: z.string().max(500).optional(),
 
   location: z.string().optional(),
   linkedin_url: z.string().optional(),
@@ -27,11 +34,23 @@ const baseFields = {
   additional_contacts: z.array(contactSchema).optional(),
 
   source: z.string().optional(),
+  is_premium: z.boolean().optional(),
+  // Vendor type: assets or bgv; empty clears it.
+  vendor_type: z.preprocess((v) => (v === '' ? null : v), z.enum(['assets', 'bgv']).nullable().optional()),
 
   vendor_specializations: z.array(z.string()).optional(),
   vendor_rate_range: z.object({ min: z.number(), max: z.number(), currency: z.string() }).optional(),
   vendor_payment_terms: z.string().optional(),
   vendor_agreement_url: z.string().optional(),
+
+  // Vendor bank details. Empty clears a field; the formats are checked so a typo is caught before a payment is made.
+  vendor_bank_holder: bankText(120),
+  vendor_bank_name: bankText(120),
+  vendor_bank_branch: bankText(120),
+  vendor_bank_account_number: bankText(34, /^[A-Za-z0-9]{5,34}$/, 'Account number: 5 to 34 letters or digits', (v) => v.replace(/[\s-]/g, '')),
+  vendor_bank_ifsc: bankText(11, /^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC: 4 letters, a zero, then 6 letters or digits (for example HDFC0001234)', (v) => v.toUpperCase()),
+  vendor_bank_swift: bankText(11, /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/, 'SWIFT / BIC: 8 or 11 characters (for example HDFCINBB)', (v) => v.toUpperCase()),
+  vendor_upi_id: bankText(80, /^[A-Za-z0-9._-]{2,}@[A-Za-z0-9]{2,}$/, 'UPI ID looks like name@bank'),
 
   client_billing_currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional(),
   client_payment_terms: z.string().optional(),
@@ -66,6 +85,7 @@ const stageOverrideSchema = z.object({
   meeting_date: z.string().datetime().optional(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 
@@ -76,6 +96,7 @@ const stageSchema = z.object({
   meeting_date: z.string().datetime().optional(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
 
@@ -88,8 +109,25 @@ const meetingSchema = z.object({
   meeting_date: z.string().datetime(),
   meeting_location: z.string().optional(),
   meeting_notes: z.string().optional(),
+  meeting_duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
   meeting_attendee_ids: z.array(z.string().uuid()).optional(),
 });
+
+// Extra meetings with an active client / vendor (does not change the account stage).
+const clientMeetingBase = {
+  title: z.string().trim().min(1).max(200),
+  mode: z.enum(['online', 'offline']).optional(),
+  scheduled_at: z.string().datetime(),
+  duration_minutes: z.coerce.number().int().min(5).max(1440).optional(),
+  location: z.string().trim().max(300).optional(),
+  link: z.string().trim().max(500).optional(),
+  notes: z.string().max(5000).optional(),
+  attendee_ids: z.array(z.string().uuid()).optional(),
+};
+const clientMeetingCreateSchema = z.object(clientMeetingBase);
+const clientMeetingUpdateSchema = z
+  .object({ ...clientMeetingBase, status: z.enum(['scheduled', 'completed', 'cancelled']).optional() })
+  .partial();
 
 const classifySchema = z.object({
   type: z.enum(['client', 'vendor']),
@@ -118,9 +156,14 @@ const listQuerySchema = z.object({
   // (mirrors the dashboard "Stuck leads" tile so its click-through is exact).
   stuck: z.enum(['stuck', 'not_stuck']).optional(),
   industry: z.string().optional(),
+  // Location filter: matches the Location text, the city or the country.
+  location: z.string().trim().max(100).optional(),
   /** Exact vendor specialization tag (matches `vendor_specializations` array element). */
   specialization: z.string().min(1).max(120).optional(),
   search: z.string().optional(),
+  // Premium accounts only (yes) or the rest (no).
+  premium: z.enum(['yes', 'no']).optional(),
+  vendor_type: z.enum(['assets', 'bgv']).optional(),
   created_from: z.string().optional(),
   created_to: z.string().optional(),
   sort_by: z.enum(['name', 'created_at', 'updated_at']).default('created_at'),
@@ -135,6 +178,8 @@ module.exports = {
   stageSchema,
   stageOverrideSchema,
   meetingSchema,
+  clientMeetingCreateSchema,
+  clientMeetingUpdateSchema,
   classifySchema,
   listQuerySchema,
 };

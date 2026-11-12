@@ -59,6 +59,27 @@ function UnitForm({ initial, canFinance, saving, onSubmit, onCancel }) {
   );
 }
 
+const ACQUISITION_TYPES = [['purchase', 'Purchase price'], ['brokerage', 'Brokerage'], ['documentation', 'Documentation'], ['registration', 'Registration / stamp duty'], ['construction', 'Construction'], ['renovation', 'Renovation'], ['other', 'Other']];
+const ACQUISITION_LABEL = Object.fromEntries(ACQUISITION_TYPES);
+
+function AcquisitionForm({ saving, onSubmit, onCancel }) {
+  const [v, setV] = useState({ cost_type: 'purchase', amount: '', entry_date: today(), payment_mode: '', reference: '', notes: '' });
+  const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSubmit(toBody(v, { numbers: ['amount'] })); }} className="space-y-4">
+      <Section title="Acquisition cost" hint="Money spent to buy or build this property. It is booked as an expense in the books (Property acquisition) and added to this property's total investment.">
+        <label className={labelCls}>Cost type<select className={inputCls} value={v.cost_type} onChange={set('cost_type')}>{ACQUISITION_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className={labelCls}>Amount (₹)<input type="number" min="1" className={inputCls} value={v.amount} onChange={set('amount')} required autoFocus /></label>
+        <label className={labelCls}>Date paid<input type="date" className={inputCls} max={today()} value={v.entry_date} onChange={set('entry_date')} required /></label>
+        <label className={labelCls}>Payment mode<select className={inputCls} value={v.payment_mode} onChange={set('payment_mode')}><option value="">Not recorded</option>{['cash', 'bank', 'upi', 'cheque', 'card', 'other'].map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+        <label className={labelCls}>Reference (optional)<input className={inputCls} value={v.reference} onChange={set('reference')} maxLength={120} /></label>
+        <label className={`${labelCls} sm:col-span-2`}>Notes<textarea className={inputCls} rows={2} value={v.notes} onChange={set('notes')} maxLength={500} /></label>
+      </Section>
+      <Actions saving={saving} onCancel={onCancel} label="Save cost" />
+    </form>
+  );
+}
+
 function ValuationForm({ initial, units, saving, onSubmit, onCancel }) {
   const [v, setV] = useState({ unit_id: initial?.unit_id || '', value: initial?.value ?? '', as_of: initial ? dayOf(initial.as_of) : today(), notes: initial?.notes || '' });
   const set = (key) => (e) => setV((cur) => ({ ...cur, [key]: e.target.value }));
@@ -325,6 +346,12 @@ export default function ZephyrPropertyDetailPage() {
   async function removeLoan(l) {
     if (window.confirm('Remove this loan?')) await run(() => zephyrApi.deleteLoan(p.id, l.id), 'Loan removed', 'Could not remove');
   }
+  async function saveAcquisition(values) {
+    if (await run(() => zephyrApi.addAcquisitionCost(p.id, values), 'Acquisition cost added')) close();
+  }
+  async function removeAcquisition(c) {
+    if (window.confirm('Remove this acquisition cost? It is also removed from the books.')) await run(() => zephyrApi.deleteAcquisitionCost(p.id, c.id), 'Cost removed', 'Could not remove');
+  }
   async function saveValuation(values) {
     const edit = drawer.valuation;
     if (await run(() => (edit ? zephyrApi.updateValuation(p.id, edit.id, values) : zephyrApi.addValuation(p.id, values)), 'Valuation saved')) close();
@@ -489,6 +516,21 @@ export default function ZephyrPropertyDetailPage() {
           </section>
 
           <section className={card}>
+            <div className="mb-3 flex items-center justify-between"><h3 className="font-heading text-sm font-semibold text-tertiary-900">Acquisition costs (investment)</h3><button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => setDrawer({ kind: 'acquisition' })}><Plus className="h-4 w-4" />Add cost</button></div>
+            <p className="mb-3 text-xs text-tertiary-500">Each cost is booked as an expense (Property acquisition) and counts toward the total invested above. Recorded so far: <strong className="tabular-nums">{rupees(p.acquisition_total || 0)}</strong>.</p>
+            {p.acquisition_costs?.length ? (
+              <ul className="divide-y rounded-xl border bg-white text-sm">
+                {p.acquisition_costs.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0 truncate text-tertiary-700">{dateLabel(c.entry_date)} · {ACQUISITION_LABEL[c.cost_type] || c.cost_type}{c.reference ? ` · ${c.reference}` : ''}{c.notes ? ` · ${c.notes}` : ''}</span>
+                    <span className="inline-flex shrink-0 items-center gap-2"><span className="font-medium tabular-nums">{rupees(c.amount)}</span><button type="button" className="rounded-lg p-1 text-tertiary-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove acquisition cost" onClick={() => removeAcquisition(c)}><Trash2 className="h-4 w-4" /></button></span>
+                  </li>
+                ))}
+              </ul>
+            ) : <Empty>No acquisition cost entered yet.</Empty>}
+          </section>
+
+          <section className={card}>
             <div className="mb-3 flex items-center justify-between"><h3 className="font-heading text-sm font-semibold text-tertiary-900">Manual valuation</h3><button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={() => setDrawer({ kind: 'valuation' })}><Plus className="h-4 w-4" />Update valuation</button></div>
             <p className="mb-3 text-xs text-tertiary-500">Current value {p.valuation == null ? 'not entered' : rupees(p.valuation)}. Appreciation {p.appreciation == null ? '—' : `${rupees(p.appreciation)} (${p.appreciation_pct ?? '—'}%)`} is <strong>unrealized</strong>: it is not in the P&amp;L until the property or a unit is sold.</p>
             {p.valuations?.length ? (
@@ -511,18 +553,18 @@ export default function ZephyrPropertyDetailPage() {
                 <tbody className="divide-y">
                   {p.loans.map((l) => (
                     <tr key={l.id}>
-                      <td className="py-2 font-medium text-tertiary-900">{l.lender || FINANCING_TYPES.find((t) => t.value === l.financing_type)?.label}{l.interest_rate != null && <span className="block text-xs font-normal text-tertiary-500">{l.interest_rate}% interest</span>}</td>
+                      <td className="py-2 font-medium text-tertiary-900">{l.lender || FINANCING_TYPES.find((t) => t.value === l.financing_type)?.label}{l.interest_rate != null && <span className="block text-xs font-normal text-tertiary-500">{l.interest_rate}% interest</span>}{l.source === 'group_debt' && <span className="block text-xs font-normal text-primary-700" data-testid="group-debt-loan">From Group Debt · {l.name}{l.next_due ? ` · next EMI ${dateLabel(l.next_due.due_date)}` : ''}{l.emis_overdue > 0 ? ` · ${l.emis_overdue} overdue` : ''}</span>}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.loan_amount)}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.outstanding_amount)}</td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.emi_amount)} <span className="text-xs text-tertiary-400">{l.emi_frequency}</span></td>
                       <td className="py-2 text-right tabular-nums">{rupees(l.monthly_cost)}</td>
                       <td className="py-2"><Pill tone={l.status === 'active' ? 'green' : 'gray'}>{l.status === 'active' ? 'Active' : 'Closed'}</Pill></td>
-                      <td className="py-2 text-right"><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit loan" onClick={() => setDrawer({ kind: 'loan', loan: l })}><Pencil className="h-4 w-4" /></button><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove loan" onClick={() => removeLoan(l)}><Trash2 className="h-4 w-4" /></button></td>
+                      <td className="py-2 text-right">{l.read_only ? <span className="text-xs text-tertiary-400">Edit in Group Debt</span> : (<><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" aria-label="Edit loan" onClick={() => setDrawer({ kind: 'loan', loan: l })}><Pencil className="h-4 w-4" /></button><button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" aria-label="Remove loan" onClick={() => removeLoan(l)}><Trash2 className="h-4 w-4" /></button></>)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table></div>
-            ) : <Empty>No loan or financing recorded for this property.</Empty>}
+            ) : <Empty>No loan or financing recorded for this property. A loan entered under Group Dashboard &gt; Debt Management &quot;against&quot; this property shows here too.</Empty>}
             {p.loans?.length > 0 && <p className="mt-2 text-xs text-tertiary-500">Outstanding {rupees(p.outstanding_loan)} · monthly financing cost {rupees(p.monthly_financing)}.</p>}
           </section>
 
@@ -571,13 +613,14 @@ export default function ZephyrPropertyDetailPage() {
       {tab === 'documents' && <section className={card}><ZephyrDocuments ownerType="property" ownerId={p.id} canEdit={canEdit} /></section>}
 
       <Drawer open={Boolean(drawer)} onClose={close} size="xl" tone={['unit', 'property', 'loan'].includes(drawer?.kind) && (drawer.unit || drawer.loan || drawer.kind === 'property') ? 'edit' : 'create'}
-        title={{ property: `Edit ${p.code}`, unit: drawer?.unit ? `Edit ${drawer.unit.name}` : 'Add unit', lease: drawer?.lease ? 'Edit lease' : 'New lease', tenant: 'New tenant', valuation: drawer?.valuation ? 'Edit valuation' : 'Update valuation', loan: drawer?.loan ? 'Edit loan' : 'Add loan', sale: drawer?.sale ? 'Edit sale' : drawer?.unit ? `Sell ${drawer.unit.name}` : 'Sell property', event: drawer?.event ? 'Edit timeline entry' : 'Add to timeline' }[drawer?.kind] || ''}>
+        title={{ property: `Edit ${p.code}`, unit: drawer?.unit ? `Edit ${drawer.unit.name}` : 'Add unit', lease: drawer?.lease ? 'Edit lease' : 'New lease', tenant: 'New tenant', acquisition: 'Add acquisition cost', valuation: drawer?.valuation ? 'Edit valuation' : 'Update valuation', loan: drawer?.loan ? 'Edit loan' : 'Add loan', sale: drawer?.sale ? 'Edit sale' : drawer?.unit ? `Sell ${drawer.unit.name}` : 'Sell property', event: drawer?.event ? 'Edit timeline entry' : 'Add to timeline' }[drawer?.kind] || ''}>
         {drawer?.kind === 'property' && <PropertyForm initial={p} canFinance={canFinance} saving={saving} onSubmit={saveProperty} onCancel={close} />}
         {drawer?.kind === 'unit' && <UnitForm initial={drawer.unit} canFinance={canFinance} saving={saving} onSubmit={saveUnit} onCancel={close} />}
         {drawer?.kind === 'lease' && (
           <LeaseForm initial={drawer.lease} tenants={tenants} unit={drawer.unit} units={units.filter((u) => !u.tenant && u.status !== 'sold' && u.ownership === 'zephyr')} saving={saving} onSubmit={saveLease} onCancel={close} onNewTenant={() => setDrawer({ ...drawer, kind: 'tenant', back: 'lease' })} />
         )}
         {drawer?.kind === 'tenant' && <TenantForm saving={saving} onSubmit={saveTenant} onCancel={() => setDrawer({ ...drawer, kind: drawer.back || 'lease' })} />}
+        {drawer?.kind === 'acquisition' && <AcquisitionForm saving={saving} onSubmit={saveAcquisition} onCancel={close} />}
         {drawer?.kind === 'valuation' && <ValuationForm initial={drawer.valuation} units={units} saving={saving} onSubmit={saveValuation} onCancel={close} />}
         {drawer?.kind === 'loan' && <LoanForm initial={drawer.loan} saving={saving} onSubmit={saveLoan} onCancel={close} />}
         {drawer?.kind === 'sale' && <SaleForm initial={drawer.sale} property={p} unit={drawer.unit} parties={parties} saving={saving} onSubmit={saveSale} onCancel={close} />}

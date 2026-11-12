@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const { ok } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./profitability.service');
@@ -10,7 +11,7 @@ router.use(authenticate, requireOrgMembership);
 
 router.post(
   '/compute',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { date_from, date_to } = computeSchema.parse(req.body);
     const result = await service.computeRangeForOrg(req.user.org_id, date_from, date_to);
@@ -29,7 +30,7 @@ router.get(
 
 router.get(
   '/team',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const query = listQuerySchema.parse(req.query);
     const result = await service.listTeam(req.user.org_id, query);
@@ -39,7 +40,7 @@ router.get(
 
 router.get(
   '/rollup',
-  authorize('admin'),
+  canMethod('financials', 'admin'),
   asyncHandler(async (req, res) => {
     const { from, to, group_by, org_membership_id } = rollupQuerySchema.parse(req.query);
     const rows = await service.rollup({ orgId: req.user.org_id, orgMembershipId: org_membership_id, from, to, groupBy: group_by });

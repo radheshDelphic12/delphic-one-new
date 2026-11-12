@@ -91,6 +91,22 @@ async function resolveFile(filename, user) {
     return finish(filename, axDoc.file_name || axDoc.title);
   }
 
+  // Group cash: an attachment of a wallet entry, for the group superadmin or an admin of the owning workspace.
+  if (filename.startsWith('wallet-')) {
+    const access = await require('../cashPosition/cash.service').canReadAttachment(user, fileUrl);
+    if (access === false) return { error: 'forbidden' };
+    if (access) return finish(filename, access.label);
+  }
+
+  // Deployment expenses: the bill of an expense, for the group admin, Finance, whoever submitted it and the deployment's managers.
+  if (filename.startsWith('deployment-')) {
+    const deployments = require('../deployments/deployments.service');
+    const ctx = await deployments.ctxOf(user);
+    const access = await deployments.canReadBill(user, fileUrl, ctx);
+    if (access === false) return { error: 'forbidden' };
+    if (access) return finish(filename, access.label);
+  }
+
   return { error: 'not_found' };
 }
 

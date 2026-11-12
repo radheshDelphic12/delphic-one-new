@@ -66,6 +66,8 @@ const updateSchema = z.object({
   source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
   vendor_account_id: z.string().uuid().optional(),
   is_active: z.boolean().optional(),
+  // Admin-only (enforced in the controller): re-attribute who sourced the profile.
+  added_by: z.string().uuid().optional(),
   ...baseFields,
 });
 

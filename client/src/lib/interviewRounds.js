@@ -13,6 +13,9 @@ export const ROUND_TYPES = [
   { value: 'client_r2', label: 'Client Round 2', group: 'client', color: 'bg-indigo-50 text-indigo-800 border-indigo-200' },
   { value: 'client_r3', label: 'Client Round 3', group: 'client', color: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200' },
   { value: 'hr_cto_ceo', label: 'HR, CTO & CEO Round', group: 'hr', color: 'bg-amber-50 text-amber-900 border-amber-200' },
+  // rounds that come from an interview template (named by the template round)
+  { value: 'template_internal', label: 'Interview Round', group: 'internal', color: 'bg-sky-50 text-sky-800 border-sky-200', template: true },
+  { value: 'template_client', label: 'Client Round', group: 'client', color: 'bg-violet-50 text-violet-800 border-violet-200', template: true },
 ];
 
 export const RESULT_COLORS = {
@@ -21,6 +24,7 @@ export const RESULT_COLORS = {
   fail: 'bg-danger-50 text-danger-700',
   no_show: 'bg-warning-50 text-warning-800',
   rescheduled: 'bg-sky-50 text-sky-800',
+  skipped: 'bg-tertiary-100 text-tertiary-700',
 };
 
 export const RESULT_LABELS = {
@@ -29,6 +33,7 @@ export const RESULT_LABELS = {
   fail: 'Fail',
   no_show: 'Candidate did not join',
   rescheduled: 'Rescheduled',
+  skipped: 'Skipped (bench profile)',
 };
 
 export const ROUND_RESULTS = ['pending', 'pass', 'fail', 'no_show', 'rescheduled'];
@@ -118,15 +123,39 @@ export function isClientMeeting(event) {
   return event?.kind === 'client_meeting';
 }
 
+/** A Group Dashboard trip shown on the calendar (Group Super Admin only). */
+export function isTrip(event) {
+  return event?.kind === 'trip';
+}
+
+/** Meetings and trips share the "no interview actions" layout. */
+export function isMeetingLike(event) {
+  return isClientMeeting(event) || isTrip(event);
+}
+
+const TRIP_LOOK = {
+  key: 'trip',
+  pill: 'bg-indigo-500/15 text-indigo-900 border-indigo-200',
+  pillBar: 'bg-indigo-500',
+  block: 'bg-indigo-500 text-white',
+  accent: 'border-l-indigo-500',
+  card: 'border-indigo-200 bg-indigo-50/50',
+  isMuted: false,
+  isStruck: false,
+};
+
 /** Primary line for a calendar event: candidate for interviews, client for meetings. */
 export function eventPrimaryLabel(event, fallback = 'Interview') {
+  if (isTrip(event)) return event.trip?.title || 'Trip';
   if (isClientMeeting(event)) return event?.account_name || 'Client meeting';
   return event?.candidate_name || fallback;
 }
 
 /** Type line: the round label for interviews, the meeting mode for meetings. */
 export function eventTypeLabel(event) {
+  if (isTrip(event)) return `Trip · ${event.trip?.destination || ''} (day ${event.day_number}/${event.days})`;
   if (isClientMeeting(event)) {
+    if (event?.round_name) return event.round_type_label;
     return event?.meeting_mode === 'offline' ? 'Client meeting · In person' : 'Client meeting · Online';
   }
   return roundTypeMeta(event?.round_type).label;
@@ -214,6 +243,7 @@ const CANCELLED_LOOK = {
  */
 export function eventAppearance(event) {
   if (event?.status === 'cancelled') return CANCELLED_LOOK;
+  if (isTrip(event)) return TRIP_LOOK;
   if (isClientMeeting(event)) {
     return CLIENT_MEETING_LOOK[event.meeting_mode === 'offline' ? 'offline' : 'online'];
   }

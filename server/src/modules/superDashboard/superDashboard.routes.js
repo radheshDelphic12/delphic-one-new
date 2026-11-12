@@ -1,4 +1,5 @@
 const express = require('express');
+const { z } = require('zod');
 const { authenticate, authorizeGroupSuperadmin } = require('../../middleware/auth');
 const { ok } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -7,6 +8,9 @@ const superDashboardService = require('./superDashboard.service');
 const { computeSchema, rollupQuerySchema, financialsRollupQuerySchema } = require('./superDashboard.validation');
 const financialsService = require('../financials/financials.service');
 const groupFinance = require('./groupFinance.service');
+const groupTasks = require('./groupTasks.service');
+const groupTravel = require('./groupTravel.service');
+const groupDebt = require('./groupDebt.service');
 const { fail } = require('../../utils/response');
 
 // HLD §7: a single cross-org read API, org_id-agnostic by design, gated to
@@ -16,6 +20,8 @@ const { fail } = require('../../utils/response');
 // profitability.service.rollup, never live OLTP tables directly.
 const router = express.Router();
 router.use(authenticate, authorizeGroupSuperadmin);
+// Group travel > deployments (client onsite deployments, budgets, approvals, expenses): its own module
+router.use('/group/deployments', require('../deployments/deployments.routes').groupRouter);
 
 router.post(
   '/compute',
@@ -83,6 +89,87 @@ router.get(
 );
 
 router.get(
+  '/group/projection',
+  asyncHandler(async (req, res) => ok(res, await groupFinance.projection(req.user.org_group_ids, req.query)))
+);
+
+// --- Group task management: one-time and recurring tasks across the companies, and the weekly company-day table ---
+const TASK_ERRORS = {
+  not_found: [404, 'Task not found'],
+  company_not_found: [422, 'That company is not in this group'],
+  due_date_required: [422, 'A one-time task needs a due date'],
+  frequency_required: [422, 'A recurring task needs a frequency'],
+  start_date_required: [422, 'A recurring task needs a start date'],
+  weekdays_required: [422, 'Pick at least one weekday for a weekly task'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  bad_date: [422, 'Use YYYY-MM-DD'],
+  not_an_occurrence: [422, 'That task does not fall due on that date'],
+};
+const taskResult = (res, r, key, status = 200) => {
+  if (r.error) { const m = TASK_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+// --- Group debt management: loans and credit limits with their repayment schedules, and the loan ratio against the group's size ---
+const DEBT_ERRORS = {
+  not_found: [404, 'Loan not found'],
+  installment_not_found: [404, 'That instalment does not exist'],
+  company_not_in_group: [422, 'That company is not in this group'],
+};
+const debtResult = (res, r, key, status = 200) => {
+  if (r.error === 'invalid') return fail(res, 422, r.message || 'Invalid request');
+  if (r.error) { const m = DEBT_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+// what a loan of one company can be against (its properties and deals); feeds the "Against" picker
+router.get('/group/debt/link-options', asyncHandler(async (req, res) => {
+  const { org_id: orgId } = z.object({ org_id: z.string().uuid() }).parse(req.query);
+  return debtResult(res, await groupDebt.linkOptions(req.user.org_group_ids, orgId), 'options');
+}));
+router.get('/group/debt', asyncHandler(async (req, res) => ok(res, await groupDebt.overview(req.user.org_group_ids, req.query))));
+router.get('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.get(req.user.org_group_ids, req.params.id), 'loan')));
+router.post('/group/debt/loans', asyncHandler(async (req, res) => debtResult(res, await groupDebt.create(req.user.org_group_ids, req.user.id, groupDebt.createSchema.parse(req.body)), 'loan', 201)));
+router.patch('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.update(req.user.org_group_ids, req.user.id, req.params.id, groupDebt.updateSchema.parse(req.body)), 'loan')));
+router.delete('/group/debt/loans/:id', asyncHandler(async (req, res) => debtResult(res, await groupDebt.remove(req.user.org_group_ids, req.params.id))));
+router.put('/group/debt/loans/:id/installments/:seq', asyncHandler(async (req, res) => debtResult(res, await groupDebt.setInstallment(req.user.org_group_ids, req.params.id, Number(req.params.seq), groupDebt.installmentSchema.parse(req.body)), 'loan')));
+router.put('/group/debt/settings', asyncHandler(async (req, res) => ok(res, await groupDebt.saveSettings(req.user.org_group_ids, req.user.id, groupDebt.settingsSchema.parse(req.body)))));
+// --- Group travel: trips by anyone in the group, one total budget, linked to Delphic Global meetings ---
+const TRAVEL_ERRORS = {
+  not_found: [404, 'Trip not found'],
+  company_not_found: [422, 'That company is not in this group'],
+  bad_dates: [422, 'The end date must be on or after the start date'],
+  bad_date: [422, 'Enter a valid date and time'],
+  bad_meeting: [422, 'Not a valid calendar meeting'],
+  meeting_not_found: [404, 'That meeting no longer exists'],
+  client_not_found: [422, 'Pick a client or vendor of that company'],
+};
+const travelResult = (res, r, key, status = 200) => {
+  if (r.error) { const m = TRAVEL_ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }
+  return key ? ok(res, r[key], {}, status) : ok(res, r, {}, status);
+};
+router.get('/group/travel', asyncHandler(async (req, res) => ok(res, await groupTravel.list(req.user.org_group_ids, req.query))));
+router.get('/group/travel/options',asyncHandler(async (req, res) => ok(res, await groupTravel.options(req.user.org_group_ids))));
+router.get('/group/travel/:id', asyncHandler(async (req, res) => {
+  const trip = await groupTravel.one(req.user.org_group_ids, req.params.id);
+  return trip ? ok(res, trip) : fail(res, 404, 'Trip not found');
+}));
+router.post('/group/travel', asyncHandler(async (req, res) => travelResult(res, await groupTravel.create(req.user.org_group_ids, req.user.id, req.body), 'trip', 201)));
+router.patch('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.update(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip')));
+router.delete('/group/travel/:id', asyncHandler(async (req, res) => travelResult(res, await groupTravel.remove(req.user.org_group_ids, req.user.id, req.params.id))));
+router.post('/group/travel/:id/meetings', asyncHandler(async (req, res) => travelResult(res, await groupTravel.linkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body?.meeting_key), 'trip', 201)));
+router.post('/group/travel/:id/meetings/new', asyncHandler(async (req, res) => travelResult(res, await groupTravel.createMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'trip', 201)));
+router.patch('/group/travel/:id/meetings/:key', asyncHandler(async (req, res) => travelResult(res, await groupTravel.updateMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.params.key, req.body), 'trip')));
+router.delete('/group/travel/:id/meetings/:key', asyncHandler(async (req, res) => travelResult(res, await groupTravel.unlinkMeeting(req.user.org_group_ids, req.user.id, req.params.id, req.params.key), 'trip')));
+
+router.get('/group/tasks', asyncHandler(async (req, res) => ok(res, await groupTasks.listMonth(req.user.org_group_ids, req.query))));
+router.get('/group/tasks/upcoming', asyncHandler(async (req, res) => ok(res, await groupTasks.upcoming(req.user.org_group_ids, req.query))));
+router.post('/group/tasks', asyncHandler(async (req, res) => taskResult(res, await groupTasks.create(req.user.org_group_ids, req.user.id, req.body), 'task', 201)));
+router.patch('/group/tasks/:id', asyncHandler(async (req, res) => taskResult(res, await groupTasks.update(req.user.org_group_ids, req.user.id, req.params.id, req.body), 'task')));
+router.delete('/group/tasks/:id', asyncHandler(async (req, res) => taskResult(res, await groupTasks.remove(req.user.org_group_ids, req.user.id, req.params.id))));
+router.put('/group/tasks/:id/occurrences/:date', asyncHandler(async (req, res) => taskResult(res, await groupTasks.setDone(req.user.org_group_ids, req.user.id, req.params.id, req.params.date, req.body))));
+router.get('/group/weekly-plan', asyncHandler(async (req, res) => ok(res, await groupTasks.weeklyPlan(req.user.org_group_ids, req.query))));
+router.put('/group/weekly-plan', asyncHandler(async (req, res) => { const r = await groupTasks.setWeeklyPlan(req.user.org_group_ids, req.user.id, req.body); return r.error ? taskResult(res, r) : ok(res, r); }));
+
+router.get(
   '/group/activity',
   asyncHandler(async (req, res) => ok(res, await groupFinance.activity(req.user.org_group_ids, Number(req.query.limit) || 30, Number(req.query.days) || 7)))
 );
@@ -94,6 +181,16 @@ router.get(
     const org = await groupFinance.companyInGroup(req.user.org_group_ids, req.params.orgId);
     if (!org) return fail(res, 404, 'Company not found');
     return ok(res, await groupFinance.listAssetValues(org));
+  })
+);
+
+// The values set for a date (any day up to today), newest first.
+router.get(
+  '/companies/:orgId/asset-value-dates',
+  asyncHandler(async (req, res) => {
+    const org = await groupFinance.companyInGroup(req.user.org_group_ids, req.params.orgId);
+    if (!org) return fail(res, 404, 'Company not found');
+    return ok(res, await groupFinance.listAssetValueDates(org));
   })
 );
 
@@ -112,8 +209,8 @@ router.put(
     const body = groupFinance.assetBodySchema.parse(req.body);
     const result = await groupFinance.setAssetValue(req.user.org_group_ids, req.user.id, req.params.orgId, body);
     if (result.error === 'not_found') return fail(res, 404, 'Company not found');
-    if (result.error === 'managed_in_company') return fail(res, 422, 'Acconcy asset value is calculated from its Assets and Investments; edit them in the Acconcy workspace');
-    if (result.error === 'future_month') return fail(res, 422, 'An asset value can only be recorded for the current or an earlier month');
+    if (result.error === 'managed_in_company') return fail(res, 422, "This company's asset value is calculated inside its own workspace (Acconcy: assets and investments; Gulati Foundation: the fund balance); change it there");
+    if (result.error === 'future_month') return fail(res, 422, 'An asset value can only be recorded for today or an earlier date');
     return ok(res, result);
   })
 );

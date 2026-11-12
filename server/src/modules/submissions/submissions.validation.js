@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { optionalDate } = require('../../lib/zodDate');
+const { optionalDate, nullableDate } = require('../../lib/zodDate');
 
 const rateType = z.enum(['monthly', 'hourly', 'annual']);
 const currency = z.enum(['INR', 'USD', 'AED', 'SAR']);
@@ -26,17 +26,18 @@ const updateSchema = z.object({
   vendor_rate_currency: currency.optional(),
   final_agreed_rate: z.number().optional(),
   final_agreed_rate_type: rateType.optional(),
+  rate_change_reason: z.string().trim().min(3).max(500).optional(),
   submission_notes: z.string().optional(),
   client_feedback: z.string().optional(),
   relevancy_score: z.number().int().min(1).max(10).optional(),
-  offer_date: optionalDate,
+  offer_date: nullableDate,
   offer_ctc: z.number().optional(),
   offer_ctc_currency: currency.optional(),
-  expected_joining_date: optionalDate,
-  actual_joining_date: optionalDate,
-  bgv_initiated_date: optionalDate,
+  expected_joining_date: nullableDate,
+  actual_joining_date: nullableDate,
+  bgv_initiated_date: nullableDate,
   bgv_status: z.enum(['pending', 'in_progress', 'cleared', 'failed']).optional(),
-  bgv_completed_date: optionalDate,
+  bgv_completed_date: nullableDate,
   bgv_notes: z.string().optional(),
 });
 
@@ -74,6 +75,12 @@ const listQuerySchema = z.object({
   // actual_joining_date window (ISO strings) — used by the dashboard "Closures this month" tile.
   joined_from: z.string().optional(),
   joined_to: z.string().optional(),
+  // Closed candidates only: whether the actual joining date is still to come (pending) or has been entered (set).
+  joining: z.enum(['pending', 'set']).optional(),
+  // Candidates that came through this vendor account (the candidate's vendor).
+  vendor_id: z.string().uuid().optional(),
+  // Premium customers only (yes) or the rest (no): decided by the client account the requirement belongs to.
+  premium: z.enum(['yes', 'no']).optional(),
   search: z.string().optional(),
   sort_by: z.enum(['created_at', 'stage', 'margin']).default('created_at'),
   sort_order: z.enum(['asc', 'desc']).default('desc'),
@@ -81,8 +88,18 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+// One skill the interviewer rated, 0 to 10.
+const skillRatingSchema = z.object({
+  skill_name: z.string().trim().min(1, 'Enter the skill name'),
+  rating: z.number().int().min(0).max(10),
+  comment: z.string().optional(),
+});
+
 const interviewRoundCreateSchema = z.object({
-  round_type: z.enum(['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo']),
+  // Template flow: send template_round_id and the type is derived; legacy flow: send round_type.
+  round_type: z.enum(['internal_r1', 'internal_r2', 'client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo']).optional(),
+  template_round_id: z.string().uuid().optional(),
+  skill_ratings: z.array(skillRatingSchema).optional(),
   round_name: z.string().optional(),
   scheduled_at: z.string().min(1, 'Interview date & time is required'),
   duration_minutes: z.number().int().optional(),
@@ -95,9 +112,19 @@ const interviewRoundCreateSchema = z.object({
   feedback: z.string().optional(),
   rating: z.number().int().min(1).max(10).optional(),
   completed_at: z.string().optional(),
+}).refine((d) => d.round_type || d.template_round_id, { message: 'round_type or template_round_id is required', path: ['round_type'] });
+
+const interviewRoundSkipSchema = z.object({
+  template_round_id: z.string().uuid(),
+  reason: z.string().max(500).optional(),
 });
 
 const interviewRoundUpdateSchema = z.object({
+  skill_ratings: z.array(skillRatingSchema).optional(),
+  // the name was missing here, so an edited name was silently dropped
+  round_name: z.string().optional(),
+  // put a cancelled round back on the calendar
+  reopen: z.boolean().optional(),
   scheduled_at: z.string().optional(),
   duration_minutes: z.number().int().optional(),
   interviewer_name: z.string().optional(),
@@ -117,5 +144,6 @@ module.exports = {
   stageOverrideSchema,
   listQuerySchema,
   interviewRoundCreateSchema,
+  interviewRoundSkipSchema,
   interviewRoundUpdateSchema,
 };

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Banknote, CheckCircle2, Clock3, Pencil } from 'lucide-react';
+import { trackInWallet } from '../../lib/payments/trackInWallet.js';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -111,10 +112,16 @@ export default function SalaryPaymentsTab({ filters }) {
   async function save(body) {
     setSaving(true);
     try {
-      await apiClient.put('/payroll/salary-payments', { org_membership_id: edit.org_membership_id, period_month: edit.period_month, period_year: edit.period_year, ...body });
+      const { data: res } = await apiClient.put('/payroll/salary-payments', { org_membership_id: edit.org_membership_id, period_month: edit.period_month, period_year: edit.period_year, ...body });
       pushSuccess(body.status === 'paid' ? 'Marked as paid' : 'Marked as not paid');
+      const wasPaid = edit.status === 'paid';
       setEdit(null);
       load();
+      // a newly paid salary: "track in a wallet?" (the same popup as everywhere; Cancel skips)
+      const saved = res?.data; // the route sends the saved payment itself as data
+      if (body.status === 'paid' && !wasPaid && saved?.id) {
+        await trackInWallet({ kind: 'salary', reference_id: saved.id, amount: saved.amount_paid, title: `Salary paid - ${edit.employee || ''}`.trim(), party: edit.employee, category: 'Salary' });
+      }
     } catch (err) {
       pushError(apiErrorMessage(err, 'Could not save the payment'), 'Save failed');
     } finally {

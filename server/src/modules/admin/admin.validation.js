@@ -12,7 +12,7 @@ const unlockBodySchema = z.object({
 });
 
 // --- Superadmin soft-delete --------------------------------------------------
-const SOFT_DELETE_ENTITY_TYPES = ['account', 'requirement', 'submission', 'profile', 'interview_round'];
+const SOFT_DELETE_ENTITY_TYPES = ['account', 'requirement', 'submission', 'profile', 'interview_round', 'job_applicant', 'project', 'employee', 'expense_claim', 'invoice'];
 
 const softDeleteParamsSchema = z.object({
   entity_type: z.enum(SOFT_DELETE_ENTITY_TYPES),

@@ -56,8 +56,15 @@ describe('pipeline board role scoping', () => {
     expect(ids).toEqual(expect.arrayContaining([ownRequirement.id, otherSalesRequirement.id]));
   });
 
-  test('sales sees only their own requirements', async () => {
+  test('sales sees every sales requirement by default (shared Sales team)', async () => {
     const res = await authed(request(app).get('/api/v1/pipeline/board'), salesToken);
+    expect(res.status).toBe(200);
+    const ids = res.body.data.requirements.map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining([ownRequirement.id, otherSalesRequirement.id]));
+  });
+
+  test('sales can narrow the board to their own with scope=mine', async () => {
+    const res = await authed(request(app).get('/api/v1/pipeline/board'), salesToken).query({ scope: 'mine' });
     expect(res.status).toBe(200);
     const ids = res.body.data.requirements.map((r) => r.id);
     expect(ids).toContain(ownRequirement.id);
@@ -265,5 +272,39 @@ describe('pipeline board submission cells', () => {
         vendor_account: expect.objectContaining({ id: vendor.id, name: 'Acme Staffing' }),
       })
     );
+  });
+  test('vendor_ids narrows the board to candidates sourced through those vendors', async () => {
+    const mkVendor = (name) => prisma.account.create({ data: { type: 'vendor', name, stage: 'active', owner_id: sales.id, origin_owner_id: sales.id } });
+    const [vendorA, vendorB] = [await mkVendor('Vendor A'), await mkVendor('Vendor B')];
+    const submit = async (requirement, token, vendor, name) => {
+      const seats = await authed(request(app).get(`/api/v1/requirements/${requirement.id}/seats`), token);
+      const profile = await createProfile(recruiterToken, { name, source: 'vendor', vendor_account_id: vendor.id });
+      const sub = await authed(request(app).post('/api/v1/submissions'), recruiterToken).send({
+        requirement_seat_id: seats.body.data[0].id,
+        profile_id: profile.id,
+        proposed_rate: 100,
+        proposed_rate_currency: 'INR',
+        vendor_rate: 80,
+        vendor_rate_currency: 'INR',
+      });
+      expect(sub.status).toBe(201);
+      return sub.body.data;
+    };
+    const subA = await submit(ownRequirement, salesToken, vendorA, 'Candidate via A');
+    const subB = await submit(otherSalesRequirement, sales2Token, vendorB, 'Candidate via B');
+    const board = (q) => authed(request(app).get('/api/v1/pipeline/board').query(q || {}), adminToken);
+
+    const onlyA = (await board({ vendor_ids: vendorA.id })).body.data;
+    expect(onlyA.requirements.map((r) => r.id)).toEqual([ownRequirement.id]);
+    expect(onlyA.submissions.map((s) => s.id)).toEqual([subA.id]);
+
+    const both = (await board({ vendor_ids: `${vendorA.id},${vendorB.id}` })).body.data;
+    expect(both.requirements.map((r) => r.id).sort()).toEqual([ownRequirement.id, otherSalesRequirement.id].sort());
+    expect(both.submissions.map((s) => s.id).sort()).toEqual([subA.id, subB.id].sort());
+
+    // a value that is not an account id is ignored rather than failing the board
+    const junk = await board({ vendor_ids: 'not-an-id' });
+    expect(junk.status).toBe(200);
+    expect(junk.body.data.requirements.length).toBeGreaterThanOrEqual(2);
   });
 });

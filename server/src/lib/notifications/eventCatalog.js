@@ -39,13 +39,39 @@ const ROLE_EVENT_MATRIX = {
   candidate_rejected: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true },
   candidate_backout: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true },
   candidate_offer: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true, defaultEmail: true },
+  candidate_closed: { roles: ['recruiter', 'sales', 'bda', 'admin'], defaultInApp: true },
+  // The AI interview a recruiter sent has a result (to the sender and the admins).
+  ai_interview_completed: { roles: ['recruiter', 'sales', 'admin'], defaultInApp: true, defaultEmail: true },
+  pm_ticket_assigned: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_status_changed: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_commented: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  pm_ticket_due_soon: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_entry_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_regularization_requested: { roles: TIMESHEET_ROLES, defaultInApp: true },
   timesheet_regularization_decided: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  // Sent only to Super Admin users (the job names them); the bell shows it until the reminder is decided.
+  increment_review_due: { roles: ['admin'], defaultInApp: true },
+  // To the person on the bench and the admins: days left on the bench.
+  bench_countdown: { roles: ['admin', 'employee'], defaultInApp: true },
+  // Resignations also go by email (HR and the Admin act on them, so the Admin is mailed too, unlike the copy-everything events).
+  resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
+  resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
+  resignation_decided: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true },
+  // Speak Up: written straight to the bell by the module (never by email, never with the subject or the reporter). Anyone can be a
+  // handler or a reporter, so everyone lists them in their preferences, and the module honours a person's choice to mute them.
+  whistleblower_new: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  whistleblower_update: { roles: TIMESHEET_ROLES, defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
+
+// Whether email is on for someone who has not set a preference. Admins are copied on every event (see above), so for them email
+// is opt-in: otherwise an admin who never subscribed gets every interview mail in the company. They can still switch it on per event.
+function defaultEmailFor(type, role) {
+  const entry = ROLE_EVENT_MATRIX[type];
+  return (role !== 'admin' || entry?.defaultEmailAdmins === true) && entry?.defaultEmail === true;
+}
 
 // One-line human labels + descriptions for the preferences UI.
 const NOTIFICATION_LABELS = {
@@ -63,10 +89,23 @@ const NOTIFICATION_LABELS = {
   candidate_rejected: ['Candidate rejected', 'A candidate is marked rejected.'],
   candidate_backout: ['Candidate backed out', 'A candidate backs out.'],
   candidate_offer: ['Offer sent', 'An offer is sent to a candidate.'],
+  ai_interview_completed: ['AI interview result', 'A candidate finishes the AI interview you sent, with the score and outcome.'],
+  candidate_closed: ['Ticket closed', 'A candidate ticket is closed (BGV cleared, candidate joined).'],
+  pm_ticket_assigned: ['Project ticket assigned', 'A project ticket is assigned to you.'],
+  pm_ticket_status_changed: ['Project ticket status changed', 'The status of a project ticket you raised or work on changes.'],
+  pm_ticket_commented: ['Project ticket comment', 'Someone comments on a project ticket you raised or work on.'],
+  pm_ticket_due_soon: ['Project ticket due soon', 'A project ticket assigned to you is due today or tomorrow.'],
   timesheet_submitted: ['Timesheet submitted', 'A direct report submits timesheet hours for your approval.'],
   timesheet_entry_decided: ['Timesheet decision', 'Your manager approves or rejects a timesheet entry.'],
   timesheet_regularization_requested: ['Regularisation requested', 'A direct report asks to regularise a locked timesheet day.'],
   timesheet_regularization_decided: ['Regularisation decision', 'Your regularisation request is approved or rejected.'],
+  whistleblower_new: ['Speak Up: new complaint', 'A complaint is raised or assigned to you as a handler.'],
+  whistleblower_update: ['Speak Up: update', 'A reply or a status change on a complaint.'],
+  resignation_submitted: ['Resignation submitted', 'An employee submits a resignation (to their reporting manager, HR and admins).'],
+  resignation_manager_updated: ['Resignation: manager update', 'A manager records the retention call on a resignation (to HR and admins).'],
+  resignation_decided: ['Resignation decision', 'Your resignation is approved, rejected or closed as retained, or the F&F is started.'],
+  bench_countdown: ['Bench countdown', "Days left of an employee's bench period."],
+  increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
 
 function eventsForRole(role) {
@@ -127,6 +166,18 @@ function renderNotification(type, ctx = {}) {
         `${actorPrefix(ctx)}set "${truncate(requirement)}" to ${ctx.toStatus || 'a new status'}.`,
         'requirement', ctx.requirementId, ctx
       );
+    case 'bench_countdown':
+      return envelope(
+        'Bench period ending',
+        `${ctx.employeeName || 'An employee'} has ${Number(ctx.daysLeft) === 0 ? 'their last day' : `${ctx.daysLeft} day${Number(ctx.daysLeft) === 1 ? '' : 's'} left`} on the bench (ends ${ctx.endDate || 'soon'}).`,
+        null, null, ctx
+      );
+    case 'increment_review_due':
+      return envelope(
+        'Increment review due',
+        `${ctx.employeeName || 'An employee'} completes ${ctx.years || 1} year${Number(ctx.years) === 1 ? '' : 's'} on ${ctx.dueDate || 'today'}. An increment review is due; salary is not changed automatically.`,
+        null, null, ctx
+      );
     case 'interview_scheduled':
       return envelope(
         'Interview scheduled',
@@ -163,6 +214,14 @@ function renderNotification(type, ctx = {}) {
         `${actorPrefix(ctx)}submitted ${candidate} to ${account} for "${truncate(requirement)}".`,
         'submission', ctx.submissionId, ctx
       );
+    case 'ai_interview_completed': {
+      const outcomeText = { pass: 'Pass', borderline: 'Borderline', below_pass: 'Below pass', pending_review: 'Needs a person to review' }[ctx.outcome] || 'Done';
+      return envelope(
+        'AI interview result',
+        `${candidate} finished the AI interview for "${truncate(requirement)}": ${outcomeText}${ctx.score != null ? `, ${ctx.score}% (pass mark ${ctx.passPercentage}%)` : ''}.`,
+        'submission', ctx.submissionId, ctx
+      );
+    }
     case 'candidate_rejected':
       return envelope(
         'Candidate rejected',
@@ -180,6 +239,45 @@ function renderNotification(type, ctx = {}) {
         'Offer sent',
         `${actorPrefix(ctx)}sent an offer to ${candidate} for "${truncate(requirement)}" (${account}).`,
         'submission', ctx.submissionId, ctx
+      );
+    case 'candidate_closed':
+      return envelope(
+        'Ticket closed',
+        `${actorPrefix(ctx)}closed the ticket for ${candidate} on "${truncate(requirement)}" (${account}).`,
+        'submission', ctx.submissionId, ctx
+      );
+    case 'resignation_submitted':
+      return envelope('Resignation submitted', `${ctx.employeeName || 'An employee'} has resigned (proposed last working day ${ctx.lwd || 'not set'}).`, 'resignation', ctx.resignationId, ctx);
+    case 'resignation_manager_updated':
+      return envelope('Resignation: manager update', `${ctx.managerName || 'The manager'} updated the retention call for ${ctx.employeeName || 'an employee'}: ${ctx.outcomeLabel || 'update recorded'}.`, 'resignation', ctx.resignationId, ctx);
+    case 'whistleblower_new':
+    case 'whistleblower_update':
+      return envelope(ctx.title || 'Speak Up', ctx.body || '', 'whistle_case', ctx.caseId, ctx);
+    case 'resignation_decided':
+      return envelope('Resignation update', ctx.message || 'Your resignation request was updated.', 'resignation', ctx.resignationId, ctx);
+    case 'pm_ticket_assigned':
+      return envelope(
+        'Project ticket assigned',
+        `${actorPrefix(ctx)}assigned you #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" in ${ctx.projectCode} ${ctx.projectName || ''}.`.replace(/\s+\./, '.'),
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_status_changed':
+      return envelope(
+        'Project ticket status changed',
+        `${actorPrefix(ctx)}moved #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode}) to ${ctx.statusLabel || 'a new status'}.`,
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_commented':
+      return envelope(
+        'New comment on a project ticket',
+        `${actorPrefix(ctx)}commented on #${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode})${ctx.comment ? `: ${truncate(ctx.comment)}` : '.'}`,
+        'pm_ticket', ctx.ticketId, ctx
+      );
+    case 'pm_ticket_due_soon':
+      return envelope(
+        'Project ticket due soon',
+        `#${ctx.ticketNumber} "${truncate(ctx.ticketTitle)}" (${ctx.projectCode}) is due ${ctx.dueLabel || 'soon'}.`,
+        'pm_ticket', ctx.ticketId, ctx
       );
     case 'timesheet_submitted':
       return envelope(
@@ -221,5 +319,6 @@ module.exports = {
   NOTIFICATION_TYPES,
   NOTIFICATION_LABELS,
   eventsForRole,
+  defaultEmailFor,
   renderNotification,
 };

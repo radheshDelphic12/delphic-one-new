@@ -5,7 +5,7 @@ export const REQUIREMENT_STATUS_TRANSITIONS = {
   in_progress: ['on_hold', 'closed', 'dropped'],
   on_hold: ['open', 'in_progress', 'dropped'],
   closed: [],
-  dropped: [],
+  dropped: ['open'], // reactivate (reason required)
 };
 
 export const SEAT_STATUS_TRANSITIONS = {
@@ -44,7 +44,7 @@ export function requiresJoinedAt(toStatus) {
 export function canMutateRequirement(requirement, user) {
   if (!requirement || !user) return false;
   if (user.role === 'admin') return true;
-  return user.role === 'sales' && requirement.sales_owner?.id === user.id;
+  return user.role === 'sales'; // the whole Sales team manages every requirement; changes are tagged with who made them
 }
 
 export function canChangeSeatStage(user) {

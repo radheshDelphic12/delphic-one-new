@@ -3,7 +3,8 @@ const REQUIREMENT_STATUS_TRANSITIONS = {
   in_progress: ['on_hold', 'closed', 'dropped'],
   on_hold: ['open', 'in_progress', 'dropped'],
   closed: [],
-  dropped: [],
+  // A dropped requirement can be reactivated (back to open) with a reason; the lock set by the drop is lifted with it.
+  dropped: ['open'],
 };
 
 const SEAT_STATUS_TRANSITIONS = {

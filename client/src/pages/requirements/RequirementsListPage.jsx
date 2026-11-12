@@ -8,11 +8,17 @@ import { useClientAccountOptions, useUserOptions } from '../../lib/lookups.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
+import TatTag from '../../components/ui/TatTag.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import RequirementScopeToggle from '../../components/ui/RequirementScopeToggle.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
 import { canAssignRecruiters } from '../profiles/profileUtils.js';
 import AssignRecruiterDrawer from './AssignRecruiterDrawer.jsx';
 import RequirementFormPage from './RequirementFormPage.jsx';
+import VendorEmailDrawer from './VendorEmailDrawer.jsx';
+import { userCan } from '../../lib/permissions.js';
+import { allowed } from '../../lib/access.js';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 
 function reqKey(id) {
   return `REQ-${String(id).slice(0, 8).toUpperCase()}`;
@@ -22,6 +28,7 @@ const REQ_TYPE_OPTIONS = [
   { value: 'managed_services', label: 'Managed services' },
   { value: 'recruitment', label: 'Recruitment' },
   { value: 'project', label: 'Project' },
+  { value: 'internal_hiring', label: 'Internal hiring' },
 ];
 
 const SORT_OPTIONS = [
@@ -36,12 +43,18 @@ function RequirementPeek({ row, onClose, onAssign }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState(row);
   const [loading, setLoading] = useState(true);
+  // The API decides who may read a requirement; the screen follows it. A recruiter opens only requirements they are assigned to, but
+  // someone whose access comes from the permission model (e.g. an HR lead) may read more than their plain role suggests: if the
+  // detail loads, the person may open it. The role rule below only covers the moment before it has loaded.
+  const [readable, setReadable] = useState(false);
+  const canOpen = readable || user?.role !== 'recruiter' || (row.assigned_recruiters || []).some((r) => r.id === user.id);
 
   useEffect(() => {
     setLoading(true);
+    setReadable(false);
     apiClient
       .get(`/requirements/${row.id}`)
-      .then(({ data }) => setDetail(data.data || row))
+      .then(({ data }) => { setDetail(data.data || row); setReadable(true); })
       .catch(() => setDetail(row))
       .finally(() => setLoading(false));
   }, [row]);
@@ -68,6 +81,7 @@ function RequirementPeek({ row, onClose, onAssign }) {
           </span>
         </PeekField>
         <PeekField label="Priority"><Badge value={detail.priority} /></PeekField>
+        {(detail.tat?.tag || detail.tat?.state === 'expired') && <PeekField label="TAT"><TatTag tat={detail.tat} /></PeekField>}
         <PeekField label="Type">{detail.req_type ? <Badge value={detail.req_type} /> : '—'}</PeekField>
         <PeekField label="Work mode"><span className="capitalize">{detail.work_mode || '—'}</span></PeekField>
         <PeekField label="Seats">{`${detail.seats_closed ?? 0}/${detail.seats_total ?? 0}`}</PeekField>
@@ -88,12 +102,16 @@ function RequirementPeek({ row, onClose, onAssign }) {
         </div>
       </dl>
       <PeekActions>
-        <Link to={`/requirements/${detail.id}`} className="btn-primary">
-          Job details
-        </Link>
-        <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
-          Open board
-        </Link>
+        {canOpen && (
+          <>
+            <Link to={`/requirements/${detail.id}`} className="btn-primary">
+              Job details
+            </Link>
+            <Link to={`/requirements/${detail.id}/board`} className="btn-secondary">
+              Open board
+            </Link>
+          </>
+        )}
         <button
           type="button"
           className="btn-secondary"
@@ -131,9 +149,15 @@ export default function RequirementsListPage() {
   const [closedFrom, setClosedFrom] = useState(() => searchParams.get('closed_from') || '');
   const [closedTo, setClosedTo] = useState(() => searchParams.get('closed_to') || '');
   const [reqType, setReqType] = useState(() => searchParams.get('req_type') || '');
+  const [premium, setPremium] = useState(() => searchParams.get('premium') || '');
   const [accountId, setAccountId] = useState(() => searchParams.get('account_id') || '');
   const [salesOwnerId, setSalesOwnerId] = useState(() => searchParams.get('sales_owner_id') || '');
+  const isSales = user?.role === 'sales';
+  const [scope, setScope] = useState(() => (searchParams.get('scope') === 'mine' ? 'mine' : 'all'));
   const [recruiterId, setRecruiterId] = useState(() => searchParams.get('recruiter_id') || '');
+  // 'active' = the TAT Active tab: every requirement whose TAT clock is still running.
+  const [tat, setTat] = useState(() => (searchParams.get('tat') === 'active' ? 'active' : ''));
+  const [tatCount, setTatCount] = useState(null);
   const [workMode, setWorkMode] = useState(() => searchParams.get('work_mode') || '');
   const [techStack, setTechStack] = useState(() => searchParams.get('tech_stack') || '');
   const [appliedTechStack, setAppliedTechStack] = useState(() => searchParams.get('tech_stack') || '');
@@ -142,6 +166,10 @@ export default function RequirementsListPage() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [assignTarget, setAssignTarget] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [emailOpen, setEmailOpen] = useState(false);
+  // Emailing requirements to vendors: Sales and Admin, or anyone with Email > Send, or a custom role that may edit requirements.
+  const canEmailVendors = allowed(user, ['email.send'], ['sales', 'admin'].includes(user?.role) || userCan(user, 'email.send') || userCan(user, 'requirements.update'));
   const [peek, setPeek] = useState(null);
   const [createOpen, setCreateOpen] = useState(searchParams.get('create') === '1');
 
@@ -167,16 +195,19 @@ export default function RequirementsListPage() {
     sync('closed_from', closedFrom);
     sync('closed_to', closedTo);
     sync('req_type', reqType);
+    sync('premium', premium);
     sync('account_id', accountId);
     sync('sales_owner_id', salesOwnerId);
+    sync('scope', isSales ? scope : '', 'all');
     sync('recruiter_id', recruiterId);
     sync('work_mode', workMode);
+    sync('tat', tat);
     sync('tech_stack', appliedTechStack);
     sync('sort_by', sortBy, 'created_at');
     sync('sort_order', sortOrder, 'desc');
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, priority, stuck, closedFrom, closedTo, reqType, accountId, salesOwnerId, recruiterId, workMode, appliedTechStack, sortBy, sortOrder]);
+  }, [status, priority, stuck, closedFrom, closedTo, reqType, premium, accountId, salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder]);
 
   // Re-hydrate filter state FROM the URL (browser Back, shared link, new tab).
   // Guarded so it converges with the mirror effect above instead of looping.
@@ -189,10 +220,13 @@ export default function RequirementsListPage() {
     set(setClosedFrom, g('closed_from'));
     set(setClosedTo, g('closed_to'));
     set(setReqType, g('req_type'));
+    set(setPremium, g('premium'));
     set(setAccountId, g('account_id'));
     set(setSalesOwnerId, g('sales_owner_id'));
+    set(setScope, g('scope') === 'mine' ? 'mine' : 'all');
     set(setRecruiterId, g('recruiter_id'));
     set(setWorkMode, g('work_mode'));
+    set(setTat, g('tat') === 'active' ? 'active' : '');
     set(setAppliedTechStack, g('tech_stack'));
     set(setTechStack, g('tech_stack'));
     set(setSortBy, g('sort_by', 'created_at'));
@@ -200,8 +234,8 @@ export default function RequirementsListPage() {
   }, [searchParams]);
 
   const hasActiveFilters = Boolean(
-    status || priority || stuck || closedFrom || closedTo || reqType || accountId || salesOwnerId ||
-      recruiterId || workMode || appliedTechStack || appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
+    status || priority || stuck || closedFrom || closedTo || reqType || premium || accountId || salesOwnerId ||
+      recruiterId || workMode || tat || appliedTechStack || appliedSearch || sortBy !== 'created_at' || sortOrder !== 'desc'
   );
 
   function clearAllFilters() {
@@ -212,10 +246,12 @@ export default function RequirementsListPage() {
     setClosedFrom('');
     setClosedTo('');
     setReqType('');
+    setPremium('');
     setAccountId('');
     setSalesOwnerId('');
     setRecruiterId('');
     setWorkMode('');
+    setTat('');
     setTechStack('');
     setAppliedTechStack('');
     setSortBy('created_at');
@@ -236,10 +272,13 @@ export default function RequirementsListPage() {
     if (closedFrom) params.closed_from = closedFrom;
     if (closedTo) params.closed_to = closedTo;
     if (reqType) params.req_type = reqType;
+    if (premium) params.premium = premium;
     if (accountId) params.account_id = accountId;
     if (salesOwnerId) params.sales_owner_id = salesOwnerId;
+    if (isSales && scope === 'mine') params.scope = 'mine';
     if (recruiterId) params.recruiter_id = recruiterId;
     if (workMode) params.work_mode = workMode;
+    if (tat) params.tat = tat;
     if (appliedTechStack) params.tech_stack = appliedTechStack;
     if (appliedSearch) params.search = appliedSearch;
     apiClient
@@ -255,9 +294,14 @@ export default function RequirementsListPage() {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, accountId,
-    salesOwnerId, recruiterId, workMode, appliedTechStack, sortBy, sortOrder,
+    appliedSearch, page, priority, status, stuck, closedFrom, closedTo, reqType, premium, accountId,
+    salesOwnerId, scope, recruiterId, workMode, tat, appliedTechStack, sortBy, sortOrder,
   ]);
+
+  // The TAT Active tab badge: how many requirements are hot right now (refreshed with the list).
+  useEffect(() => {
+    apiClient.get('/requirements', { params: { tat: 'active', limit: 1 } }).then(({ data }) => setTatCount(data.pagination?.total ?? 0)).catch(() => setTatCount(null));
+  }, [rows]);
 
   useEffect(() => {
     if (searchParams.get('create') === '1') setCreateOpen(true);
@@ -287,10 +331,11 @@ export default function RequirementsListPage() {
           <div className="min-w-0">
             <div className="text-sm font-medium text-primary-600">{reqKey(row.id)}</div>
             <div className="font-semibold text-tertiary-900">{row.title}</div>
+            {(row.tat?.tag || row.tat?.state === 'expired') && <div className="mt-1"><TatTag tat={row.tat} /></div>}
           </div>
         ),
       },
-      { key: 'client', header: 'Client', render: (row) => row.account?.name || '—' },
+      { key: 'client', header: 'Client', render: (row) => (<span className="inline-flex flex-wrap items-center gap-1.5">{row.account?.name || '—'}{row.account?.is_premium && <PremiumBadge />}</span>) },
       {
         key: 'status',
         header: 'Status',
@@ -337,13 +382,32 @@ export default function RequirementsListPage() {
 
   return (
     <div className="space-y-2">
-      {canCreateRequirement(user) && (
-        <div className="flex justify-end">
-          <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> New requirement
-          </button>
+      {(isSales || canCreateRequirement(user)) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {isSales ? <RequirementScopeToggle value={scope} onChange={(v) => { setScope(v); setPage(1); }} /> : <span />}
+          {canCreateRequirement(user) && (
+            <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" /> New requirement
+            </button>
+          )}
         </div>
       )}
+
+      <div className="flex gap-1 border-b border-tertiary-100" role="tablist" aria-label="Requirement views">
+        {[{ key: '', label: 'All requirements' }, { key: 'active', label: 'TAT Active', count: tatCount }].map((t) => (
+          <button
+            key={t.key || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={tat === t.key}
+            onClick={() => { setPage(1); setTat(t.key); }}
+            className={`-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${tat === t.key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500 hover:text-tertiary-800'}`}
+          >
+            {t.label}
+            {t.count != null && t.key && <span className="rounded-full bg-green-50 px-1.5 text-xs font-semibold text-green-700">{t.count}</span>}
+          </button>
+        ))}
+      </div>
 
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <div className="space-y-2 border-b border-tertiary-100 px-4 py-2.5">
@@ -400,6 +464,16 @@ export default function RequirementsListPage() {
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low</option>
+            </select>
+            <select
+              value={premium}
+              onChange={(event) => resetToFirstPage(setPremium)(event.target.value)}
+              className="rounded-lg border border-tertiary-100 bg-white px-3 py-1.5 text-sm text-tertiary-700 shadow-soft"
+              aria-label="Premium customer"
+            >
+              <option value="">Premium: All</option>
+              <option value="yes">Premium: Yes</option>
+              <option value="no">Premium: No</option>
             </select>
             <select
               value={reqType}
@@ -524,12 +598,18 @@ export default function RequirementsListPage() {
           loading={loading}
           emptyLabel="No requirements match these filters."
           onRowClick={setPeek}
+          selectable={canEmailVendors}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          actions={[{ key: 'email-vendors', label: 'Email to vendors', onClick: () => setEmailOpen(true) }]}
           headerClassName="bg-[#F9FAFB]"
           striped
           embedded
-          maxHeight="calc(100dvh - 18rem)"
+          maxHeight="max(22rem, calc(100dvh - 18rem))"
         />
       </section>
+
+      <VendorEmailDrawer open={emailOpen} requirements={rows.filter((r) => selectedIds.includes(r.id)).map((r) => ({ id: r.id, title: r.title }))} onClose={() => setEmailOpen(false)} onSent={() => setSelectedIds([])} />
 
       <div className="flex items-center justify-between px-1 text-xs text-tertiary-500">
         <span>

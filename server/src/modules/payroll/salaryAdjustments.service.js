@@ -14,6 +14,7 @@ const KINDS = {
   variable_pay: 1,
   reimbursement: 1,
   addition: 1,
+  fnf: 1, // the final settlement paid in this month's payroll (set from People > Exits > FnF, not from the adjustment form)
 };
 const KIND_LABELS = {
   tds: 'TDS adjustment',
@@ -22,6 +23,7 @@ const KIND_LABELS = {
   variable_pay: 'Variable pay',
   reimbursement: 'Reimbursement',
   addition: 'Other addition',
+  fnf: 'Full & final settlement',
 };
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -38,6 +40,7 @@ function summarize(items = []) {
     variable_pay: by.variable_pay,
     reimbursement: by.reimbursement,
     other_additions: by.addition,
+    fnf: by.fnf,
     other_deductions: by.deduction,
     additions,
     deductions,

@@ -44,11 +44,11 @@ function CalendarSelect({ value, onChange, calendars }) {
 export function AddProjectModal({ open, onClose, onCreated }) {
   const { pushError, pushInfo } = useAlerts();
   const calendars = useCalendars(open);
-  const [fields, setFields] = useState({ name: '', client_account_id: '', service_category: 'managed_services', calendar_id: '' });
+  const [fields, setFields] = useState({ name: '', face_resource: '', client_account_id: '', service_category: 'managed_services', calendar_id: '' });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setFields({ name: '', client_account_id: '', service_category: 'managed_services', calendar_id: '' });
+    if (open) setFields({ name: '', face_resource: '', client_account_id: '', service_category: 'managed_services', calendar_id: '' });
   }, [open]);
   // Preselect the fallback once the calendars have loaded (and keep the user's own pick after that).
   useEffect(() => {
@@ -61,7 +61,7 @@ export function AddProjectModal({ open, onClose, onCreated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/calendars/projects', { ...fields, name: fields.name.trim(), client_account_id: fields.client_account_id || undefined });
+      await apiClient.post('/calendars/projects', { ...fields, name: fields.name.trim(), face_resource: fields.face_resource.trim() || undefined, client_account_id: fields.client_account_id || undefined });
       pushInfo(`Project "${fields.name.trim()}" added`);
       onCreated?.();
       onClose();
@@ -91,6 +91,11 @@ export function AddProjectModal({ open, onClose, onCreated }) {
         <label className="block text-xs font-medium text-tertiary-600">
           Project name <span className="text-danger-600">*</span>
           <input required autoFocus value={fields.name} onChange={(e) => set('name', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Resource
+          <input value={fields.face_resource} maxLength={200} onChange={(e) => set('face_resource', e.target.value)} placeholder="Name of the resource the invoice is billed for (optional)" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          <span className="mt-1 block font-normal text-tertiary-500">Printed on this project&apos;s client invoices.</span>
         </label>
         <div className="block text-xs font-medium text-tertiary-600">
           Client name

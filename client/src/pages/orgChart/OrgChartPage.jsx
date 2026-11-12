@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
@@ -37,7 +37,7 @@ function tierIndexFor(node) {
   return ROLE_FALLBACK_TIER_INDEX[node.role] ?? DEFAULT_TIER_INDEX;
 }
 
-function flattenTree(roots) {
+export function flattenTree(roots) {
   const flat = [];
   const walk = (node) => {
     flat.push(node);
@@ -107,12 +107,12 @@ function categoryCounts(roots, viewMode, teams = []) {
  *   target    — current + open, the team's size once hiring is done
  * Contractors and people in no team are listed with current / new hires only.
  */
-function teamCounts(people, teams) {
+export function teamCounts(people, teams) {
   const teamById = new Map(teams.map((t) => [t.id, t]));
   const leadTeam = new Map(teams.filter((t) => t.lead_membership_id).map((t) => [t.lead_membership_id, t]));
-  const tally = new Map(teams.map((t) => [t.id, { key: t.id, label: t.name, order: t.sort_order ?? 0, current: 0, new_hires: 0, open: t.open_positions || 0, isTeam: true }]));
+  const tally = new Map(teams.map((t) => [t.id, { key: t.id, label: t.name, order: t.sort_order ?? 0, current: 0, new_hires: 0, open: t.open_positions || 0, isTeam: true, people: [] }]));
   const row = (key, label, order) => {
-    if (!tally.has(key)) tally.set(key, { key, label, order, current: 0, new_hires: 0, open: 0, isTeam: false });
+    if (!tally.has(key)) tally.set(key, { key, label, order, current: 0, new_hires: 0, open: 0, isTeam: false, people: [] });
     return tally.get(key);
   };
   for (const p of people) {
@@ -120,6 +120,7 @@ function teamCounts(people, teams) {
     const team = teamById.get(p.team_id) || leadTeam.get(p.id);
     const r = team ? tally.get(team.id) : p.worker_type === 'contractor' ? row('__contractor__', 'Contractors', 1e6) : row('__none__', 'Not in a team', 1e6 + 1);
     r.current += 1;
+    r.people.push(p);
     if (p.employment_status === 'pending_onboarding') r.new_hires += 1;
   }
   return [...tally.values()]
@@ -178,6 +179,34 @@ function TeamCounts({ rows }) {
         )}
       </table>
     </div>
+  );
+}
+
+/**
+ * Group org chart: the same Team / Current / New hires / Open / Target table a company shows in Team View, for any company
+ * of the group. Pick a company; the data is the group chart's own, so it matches that company's Org Chart > Team View.
+ */
+function GroupTeamHeadcount({ companies }) {
+  const [orgId, setOrgId] = useState(companies[0]?.org.id || '');
+  const company = companies.find((c) => c.org.id === orgId) || companies[0];
+  const rows = useMemo(() => (company ? teamCounts(flattenTree(company.roots), company.teams || []) : []), [company]);
+  return (
+    <section className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card" aria-label="Team headcount and hiring">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="font-heading text-sm font-semibold text-tertiary-900">Team headcount and hiring</h3>
+          <p className="mt-0.5 text-xs text-tertiary-500">Current people, new hires still to join, open positions and the target size, team by team. Pick a company.</p>
+        </div>
+        <label className="text-xs font-medium text-tertiary-600">Company
+          <select value={company?.org.id || ''} onChange={(e) => setOrgId(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2 text-sm">
+            {companies.map((c) => <option key={c.org.id} value={c.org.id}>{c.org.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {rows.length === 0 ? (
+        <p className="rounded-xl border border-dashed p-4 text-sm text-tertiary-500">{company?.org.name} has no people or teams yet. Teams are set in the company&apos;s Settings &gt; Teams &amp; reporting.</p>
+      ) : <TeamCounts rows={rows} />}
+    </section>
   );
 }
 
@@ -271,6 +300,7 @@ export default function OrgChartPage({ groupOrgs }) {
         <p className="text-sm text-tertiary-500">
           {user?.name} manages every company of the group. Each company shows its teams and people above its name.
         </p>
+        <GroupTeamHeadcount companies={groupOrgs} />
         <TeamChart group={{ companies: groupOrgs, adminName: user?.name || 'Group Super Admin' }} hint="Group Super Admin at the bottom, then each company, then its teams and people." />
       </div>
     );

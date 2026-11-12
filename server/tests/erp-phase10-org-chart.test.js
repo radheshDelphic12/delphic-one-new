@@ -72,6 +72,32 @@ describe('Phase 10 — the tree follows OrgMembership.manager_id', () => {
     expect(withTerminated.body.data.headcount).toBe(2);
   });
 
+  test('exited people stay out of the chart when the page itself asks include_terminated=false', async () => {
+    const { org, access_token: adminToken, membership: adminMembership } = await seedOrgAdmin();
+    const { membership: gone } = await seedEmployeeUnder(org, adminMembership.id);
+    await prisma.orgMembership.update({ where: { id: gone.id }, data: { employment_status: 'terminated', left_at: new Date('2026-09-30T00:00:00Z') } });
+    // the text "false" used to be read as true, so the exited person showed up
+    const res = await authed(request(app).get('/api/v1/org-chart?include_terminated=false'), adminToken);
+    expect(res.body.data.headcount).toBe(1);
+    expect((await authed(request(app).get('/api/v1/org-chart?include_terminated=true'), adminToken)).body.data.headcount).toBe(2);
+    expect((await authed(request(app).get('/api/v1/org-chart?include_terminated=1'), adminToken)).body.data.headcount).toBe(2);
+  });
+
+  test('someone whose last working day has passed is out of the chart even before the nightly exit job has run', async () => {
+    const { org, access_token: adminToken, membership: adminMembership } = await seedOrgAdmin();
+    const { membership: pastLwd } = await seedEmployeeUnder(org, adminMembership.id);
+    await prisma.orgMembership.update({ where: { id: pastLwd.id }, data: { employment_status: 'notice_period', notice_end_date: new Date('2026-09-01T00:00:00Z') } });
+    const { membership: leftNoStatus } = await seedEmployeeUnder(org, adminMembership.id);
+    await prisma.orgMembership.update({ where: { id: leftNoStatus.id }, data: { left_at: new Date('2026-09-01T00:00:00Z') } });
+    const { membership: stillServing } = await seedEmployeeUnder(org, adminMembership.id);
+    await prisma.orgMembership.update({ where: { id: stillServing.id }, data: { employment_status: 'notice_period', notice_end_date: new Date(Date.now() + 5 * 86400000) } });
+
+    const res = await authed(request(app).get('/api/v1/org-chart'), adminToken);
+    expect(res.body.data.headcount).toBe(2); // the admin and the person still serving notice
+    expect(res.body.data.roots[0].direct_reports.map((r) => r.id)).toEqual([stillServing.id]);
+    expect((await authed(request(app).get('/api/v1/org-chart?include_terminated=true'), adminToken)).body.data.headcount).toBe(4);
+  });
+
   test('pending_onboarding and notice_period carry through as lifecycle indicators', async () => {
     const { org, access_token: adminToken, membership: adminMembership } = await seedOrgAdmin();
     const { membership: onboarding } = await seedEmployeeUnder(org, adminMembership.id);
@@ -126,6 +152,75 @@ describe('Phase 10 — combined group chart is gated to group superadmins', () =
     const chartB = res.body.data.find((c) => c.org.id === orgB.id);
     expect(chartA.headcount).toBe(2);
     expect(chartB.headcount).toBe(2);
+    // under each company comes its own admin (the group chart shows Super Admin > company > its admin > its teams)
+    expect(chartA.admins.map((a) => a.id)).toEqual([adminAMembership.id]);
+    expect(chartB.admins.map((a) => a.id)).toEqual([adminBMembership.id]);
+    expect(chartA.admins[0]).toMatchObject({ name: expect.any(String) });
+  });
+
+  test('the group superadmin is left out of a company chart, unless they lead or sit in one of its teams', async () => {
+    const { org, membership: adminMembership } = await seedOrgAdmin();
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    const { access_token } = await loginAs(groupSuper);
+    const superMembership = await prisma.orgMembership.upsert({
+      where: { person_id_org_id: { person_id: groupSuper.id, org_id: org.id } },
+      update: {},
+      create: { person_id: groupSuper.id, org_id: org.id, role: 'admin', employee_code: 'GS1' },
+    });
+    const ids = async () => {
+      const res = await authed(request(app).get('/api/v1/org-chart/group'), access_token);
+      expect(res.status).toBe(200);
+      return res.body.data.find((c) => c.org.id === org.id);
+    };
+    const flat = (nodes) => nodes.flatMap((n) => [n.id, ...flat(n.direct_reports)]);
+    expect(flat((await ids()).roots)).not.toContain(superMembership.id);
+
+    // a new, still empty team is in the payload too, and the superadmin leading it keeps them in the chart
+    const team = await prisma.team.create({ data: { org_id: org.id, name: 'Board of Directors', lead_membership_id: superMembership.id } });
+    const after = await ids();
+    expect(after.teams.map((t) => t.id)).toContain(team.id);
+    expect(flat(after.roots)).toContain(superMembership.id);
+    expect(flat(after.roots)).toContain(adminMembership.id);
+  });
+
+  test('the group superadmin as only the "reports-to" of a team is not drawn again inside the company; the company admin is named for the chart', async () => {
+    const { org, membership: adminMembership } = await seedOrgAdmin();
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    const { access_token } = await loginAs(groupSuper);
+    const superMembership = await prisma.orgMembership.upsert({
+      where: { person_id_org_id: { person_id: groupSuper.id, org_id: org.id } },
+      update: {},
+      create: { person_id: groupSuper.id, org_id: org.id, role: 'admin', employee_code: 'GS2' },
+    });
+    await prisma.team.create({ data: { org_id: org.id, name: 'Board of Directors', lead_membership_id: adminMembership.id, manager_membership_id: superMembership.id } });
+    const res = await authed(request(app).get('/api/v1/org-chart/group'), access_token);
+    expect(res.status).toBe(200);
+    const chart = res.body.data.find((c) => c.org.id === org.id);
+    const flat = (nodes) => nodes.flatMap((n) => [n.id, ...flat(n.direct_reports)]);
+    expect(flat(chart.roots)).not.toContain(superMembership.id);
+    expect(flat(chart.roots)).toContain(adminMembership.id);
+    expect(chart.company_admin_id).toBe(adminMembership.id);
+  });
+
+  test('the company admin of the chart is the company\'s own Admin account, even when another admin leads a team', async () => {
+    const { org, membership: teamLeadAdmin } = await seedOrgAdmin();
+    await prisma.user.update({ where: { id: teamLeadAdmin.person_id }, data: { is_superadmin: false } });
+    const owner = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: owner.id }, data: { is_superadmin: true } });
+    const ownerMembership = await prisma.orgMembership.upsert({
+      where: { person_id_org_id: { person_id: owner.id, org_id: org.id } },
+      update: {},
+      create: { person_id: owner.id, org_id: org.id, role: 'admin', employee_code: 'OWN1' },
+    });
+    await prisma.team.create({ data: { org_id: org.id, name: 'LeadMinds', lead_membership_id: teamLeadAdmin.id } });
+    const groupSuper = await createUser({ role: 'admin', withOrg: false });
+    await prisma.user.update({ where: { id: groupSuper.id }, data: { is_group_superadmin: true } });
+    const { access_token } = await loginAs(groupSuper);
+    const res = await authed(request(app).get('/api/v1/org-chart/group'), access_token);
+    expect(res.status).toBe(200);
+    expect(res.body.data.find((c) => c.org.id === org.id).company_admin_id).toBe(ownerMembership.id);
   });
 });
 

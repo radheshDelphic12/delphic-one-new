@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./accounting.service');
@@ -18,7 +19,7 @@ const {
 const router = express.Router();
 // Every route here is finance data — admin-only, no employee-facing routes
 // like expenses' /claims/me, so authorize('admin') is safe router-wide.
-router.use(authenticate, requireOrgMembership, authorize('admin'));
+router.use(authenticate, requireOrgMembership, canMethod('financials', 'admin'));
 
 const ERRORS = {
   account_exists: [409, 'A ledger account with that name already exists'],

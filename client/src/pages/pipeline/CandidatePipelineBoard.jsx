@@ -26,10 +26,12 @@ import SubmissionStageOverrideDrawer from '../submissions/SubmissionStageOverrid
 import { formatStageLabel, shortKey } from './pipelineBoardUtils.js';
 import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSensors } from './pipelineDnd.jsx';
 import { usePipelineBoard } from './usePipelineBoard.js';
+import { JoiningPendingBadge, PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import PipelineFilters from './PipelineFilters.jsx';
 
-const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout', 'rejected'];
-const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'recruiter_id', 'submission_stage'];
+// Rejected candidates are not a column: they leave the board and are listed on the Rejected page (sidebar).
+const CANDIDATE_COLUMNS = [...SUBMISSION_PIPELINE, 'backout'];
+const CANDIDATE_FILTER_FIELDS = ['search', 'account_id', 'premium', 'recruiter_id', 'submission_stage', 'joining'];
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-tertiary-200 px-2.5 py-1.5 text-sm focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -156,6 +158,12 @@ function CandidateCard({ submission, canMove, canMoveBackward, isDragging, onReq
             {submission.requirement?.title || '—'}
             {submission.requirement?.account_name ? ` · ${submission.requirement.account_name}` : ''}
           </div>
+          {(submission.requirement?.account_is_premium || submission.joining_status === 'pending') && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {submission.requirement?.account_is_premium && <PremiumBadge />}
+              {submission.joining_status === 'pending' && <JoiningPendingBadge />}
+            </div>
+          )}
           {submission.profile?.source === 'vendor' && submission.profile?.vendor_account?.name && (
             <div className="mt-0.5 truncate text-[11px] text-tertiary-500">
               via {submission.profile.vendor_account.name}
@@ -186,10 +194,9 @@ export default function CandidatePipelineBoard() {
     if (filterParams.search) params.search = filterParams.search;
     if (filterParams.account_id) params.account_id = filterParams.account_id;
     if (filterParams.recruiter_id) params.submitted_by = filterParams.recruiter_id;
-    if (filterParams.submission_stage) {
-      const stages = String(filterParams.submission_stage).split(',').filter(Boolean);
-      if (stages.length) params.stage = stages.join(',');
-    }
+    // only the board's own stages are ever asked for, so rejected candidates neither show nor take up the page
+    const stages = String(filterParams.submission_stage || '').split(',').filter((stage) => CANDIDATE_COLUMNS.includes(stage));
+    params.stage = (stages.length ? stages : CANDIDATE_COLUMNS).join(',');
     return params;
   }, [filterParams]);
   const handleFiltersChange = useCallback((params) => setFilterParams(params), []);
@@ -294,7 +301,8 @@ export default function CandidatePipelineBoard() {
         <div>
           <h2 className="font-heading text-base font-semibold text-tertiary-900">Candidate pipeline</h2>
           <p className="mt-1 text-sm text-tertiary-500">
-            Drag candidates between stages, or use the ⋯ menu on a card.
+            Drag candidates between stages, or use the ⋯ menu on a card. Rejected candidates move to{' '}
+            <Link to="/rejected-candidates" className="font-medium text-primary-700 hover:underline">Rejected</Link>.
           </p>
         </div>
         {canCreate && (

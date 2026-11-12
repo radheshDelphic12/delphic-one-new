@@ -13,12 +13,16 @@ const boolFlag = z
 
 const boardQuerySchema = z.object({
   search: z.string().optional(),
+  scope: z.enum(['all', 'mine']).optional(),
   stuck: z.enum(['all', 'stuck', 'not_stuck']).optional(),
   past_sla_only: boolFlag,
   account_id: optionalUuid,
   account_ids: z.string().optional(),
   profile_source: z.string().optional(),
+  // Candidates that came through these vendor accounts (comma separated account ids).
+  vendor_ids: z.string().optional(),
   req_type: z.string().optional(),
+  premium: z.enum(['yes', 'no']).optional(),
   bda_id: optionalUuid,
   sales_id: optionalUuid,
   admin_id: optionalUuid,

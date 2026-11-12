@@ -1,14 +1,21 @@
 import { userCan } from '../../lib/permissions.js';
+import { allowed } from '../../lib/access.js';
 
 export const ACCOUNT_TRANSITIONS = {
   lead: ['meeting_scheduled'],
   meeting_scheduled: ['active', 'rescheduled', 'dropped'],
   rescheduled: ['meeting_scheduled', 'dropped'],
   active: ['dropped'],
-  dropped: [],
+  dropped: ['active'], // reactivate (reason required)
 };
 
 // Every stage, for the superadmin override drawer (backward moves + straight to lead).
+export const VENDOR_TYPES = [
+  { value: 'assets', label: 'Assets' },
+  { value: 'bgv', label: 'BGV' },
+];
+export const vendorTypeLabel = (value) => VENDOR_TYPES.find((t) => t.value === value)?.label || '';
+
 export const ACCOUNT_ALL_STAGES = ['lead', 'meeting_scheduled', 'active', 'rescheduled', 'dropped'];
 
 export function canOverrideStage(user) {
@@ -29,13 +36,20 @@ export function accountKey(id) {
 }
 
 export function canCreateAccount(user) {
-  return user?.role === 'bda' || user?.role === 'admin';
+  return allowed(user, ['accounts.create'], user?.role === 'bda' || user?.role === 'admin');
 }
 
 export function canMutateAccount(account, user) {
   if (!account || !user) return false;
   // Admin and BDA may edit any account and schedule / move meeting stages.
-  return user.role === 'admin' || user.role === 'bda';
+  return allowed(user, ['accounts.update', 'meetings.schedule', 'vendors.onboard'], user.role === 'admin' || user.role === 'bda');
+}
+
+// Saving the account's details (PATCH /accounts/:id) needs accounts.update on its own; meetings.schedule / vendors.onboard only
+// cover stages and meetings, so they must not open the edit form (it would fail on Save).
+export function canEditAccountDetails(account, user) {
+  if (!account || !user || account.is_project) return false;
+  return allowed(user, ['accounts.update'], user.role === 'admin' || user.role === 'bda');
 }
 
 export function canClassifyAccount(account, user) {
@@ -57,6 +71,7 @@ export const EMPTY_FORM = {
   location_city: '',
   location_country: '',
   gst_or_tax_id: '',
+  billing_address: '',
   location: '',
   linkedin_url: '',
   poc_name: '',
@@ -65,12 +80,23 @@ export const EMPTY_FORM = {
   poc_designation: '',
   additional_contacts: [{ ...EMPTY_CONTACT }],
   source: '',
+  is_premium: false,
+  vendor_type: '',
   vendor_specializations: '',
   vendor_rate_min: '',
   vendor_rate_max: '',
   vendor_rate_currency: 'INR',
   vendor_payment_terms: '',
   vendor_agreement_url: '',
+  vendor_bank_holder: '',
+  vendor_bank_name: '',
+  vendor_bank_branch: '',
+  vendor_bank_account_number: '', // never prefilled: the saved number is masked, a new value replaces it
+  vendor_bank_account_masked: '',
+  clear_bank_account_number: false,
+  vendor_bank_ifsc: '',
+  vendor_bank_swift: '',
+  vendor_upi_id: '',
   client_billing_currency: 'INR',
   client_payment_terms: '',
   client_agreement_url: '',
@@ -111,11 +137,16 @@ export function formFromAccount(account) {
       ? contacts.map((contact) => ({ ...EMPTY_CONTACT, ...sanitizeContact(contact) }))
       : [{ ...EMPTY_CONTACT }],
     vendor_specializations: (account.vendor_specializations || []).join(', '),
+    // the account number arrives masked: keep it only as a hint, so the masked text is never saved back
+    vendor_bank_account_masked: account.vendor_bank_account_number || '',
+    vendor_bank_account_number: '',
+    clear_bank_account_number: false,
     vendor_rate_min: rateRange.min ?? '',
     vendor_rate_max: rateRange.max ?? '',
     vendor_rate_currency: rateRange.currency || 'INR',
     client_billing_currency: account.client_billing_currency || 'INR',
     budget_amount: account.budget_amount != null ? String(account.budget_amount) : '',
+    is_premium: Boolean(account.is_premium),
   };
   Object.keys(EMPTY_FORM).forEach((key) => {
     if (typeof EMPTY_FORM[key] === 'string' && typeof merged[key] !== 'string') {
@@ -135,6 +166,7 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
     location_city: str(form.location_city),
     location_country: str(form.location_country),
     gst_or_tax_id: str(form.gst_or_tax_id),
+    billing_address: str(form.billing_address),
     location: str(form.location),
     linkedin_url: str(form.linkedin_url),
     poc_name: str(form.poc_name),
@@ -145,6 +177,7 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
       .map((contact) => Object.fromEntries(Object.entries(contact).map(([key, value]) => [key, str(value)])))
       .filter((contact) => contact.name),
     source: str(form.source),
+    is_premium: Boolean(form.is_premium),
   };
 
   if (form.type && (!isEditing || canEditType)) body.type = form.type;
@@ -152,9 +185,14 @@ export function buildAccountBody(form, isEditing, canEditType, canEditOriginOwne
   if (isEditing && canEditOriginOwner && form.origin_owner_id) body.origin_owner_id = form.origin_owner_id;
 
   if (form.type === 'vendor') {
+    body.vendor_type = form.vendor_type || null;
     body.vendor_specializations = str(form.vendor_specializations).split(',').map((value) => value.trim()).filter(Boolean);
     body.vendor_payment_terms = str(form.vendor_payment_terms);
     body.vendor_agreement_url = str(form.vendor_agreement_url);
+    for (const key of ['vendor_bank_holder', 'vendor_bank_name', 'vendor_bank_branch', 'vendor_bank_ifsc', 'vendor_bank_swift', 'vendor_upi_id']) body[key] = str(form[key]);
+    // a typed number replaces the saved one; empty keeps it, unless it is being removed on purpose
+    if (str(form.vendor_bank_account_number)) body.vendor_bank_account_number = str(form.vendor_bank_account_number);
+    else if (form.clear_bank_account_number) body.vendor_bank_account_number = '';
     if (form.vendor_rate_min !== '' && form.vendor_rate_max !== '') {
       body.vendor_rate_range = {
         min: Number(form.vendor_rate_min),

@@ -108,6 +108,7 @@ const salaryPaymentSchema = z.object({
   transaction_id: optText(120),
   bank_name: optText(120),
   notes: optText(500),
+  wallet_payment: require('../cashPosition/cash.hooks').walletPaymentSchema.optional(),
 });
 const deleteSalaryAdjustmentSchema = z.object({ reason: z.string().trim().min(3).max(500) });
 

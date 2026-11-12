@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Filter, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
+import { fetchAllPages } from '../../lib/fetchAllPages.js';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import {
@@ -37,6 +38,7 @@ const REQ_TYPE_OPTIONS = [
   { id: 'managed_services', label: 'Managed Services' },
   { id: 'recruitment', label: 'Recruitment' },
   { id: 'project', label: 'Project' },
+  { id: 'internal_hiring', label: 'Internal Hiring' },
 ];
 
 const STAGE_OPTIONS = [
@@ -67,6 +69,7 @@ export default function PipelineFilters({
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams]);
   const [draftSearch, setDraftSearch] = useState(filters.search);
   const [accounts, setAccounts] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [bdas, setBdas] = useState([]);
   const [salesUsers, setSalesUsers] = useState([]);
   const [admins, setAdmins] = useState([]);
@@ -93,13 +96,21 @@ export default function PipelineFilters({
   useEffect(() => {
     let cancelled = false;
     if (fieldSet.has('account_id') || fieldSet.has('account_ids')) {
-      apiClient
-        .get('/accounts', { params: { type: 'client', limit: 100, sort_by: 'name', sort_order: 'asc' } })
-        .then(({ data }) => {
-          if (!cancelled) setAccounts((data.data || []).map((row) => ({ id: row.id, label: row.name })));
+      fetchAllPages('/accounts', { type: 'client', sort_by: 'name', sort_order: 'asc' })
+        .then((rows) => {
+          if (!cancelled) setAccounts((rows || []).map((row) => ({ id: row.id, label: row.name })));
         })
         .catch(() => {
           if (!cancelled) setAccounts([]);
+        });
+    }
+    if (fieldSet.has('vendor_ids')) {
+      fetchAllPages('/accounts', { type: 'vendor', sort_by: 'name', sort_order: 'asc' })
+        .then((rows) => {
+          if (!cancelled) setVendors((rows || []).map((row) => ({ id: row.id, label: row.name })));
+        })
+        .catch(() => {
+          if (!cancelled) setVendors([]);
         });
     }
     if (fieldSet.has('bda_id')) {
@@ -226,6 +237,18 @@ export default function PipelineFilters({
         </div>
       )}
 
+      {fieldSet.has('vendor_ids') && (
+        <div className="min-w-[180px]">
+          <MultiSelectDropdown
+            value={filters.vendor_ids}
+            onChange={(vendor_ids) => patchFilters({ vendor_ids })}
+            options={vendors}
+            placeholder="Vendors…"
+            searchPlaceholder="Search vendors…"
+          />
+        </div>
+      )}
+
       {fieldSet.has('req_type') && (
         <div className="min-w-[180px]">
           <MultiSelectDropdown
@@ -312,6 +335,38 @@ export default function PipelineFilters({
             searchPlaceholder="Search recruiters…"
           />
         </div>
+      )}
+
+      {fieldSet.has('premium') && (
+        <SearchableSelect
+          className="w-40"
+          allowClear
+          ariaLabel="Premium customer"
+          value={filters.premium}
+          onChange={(premium) => patchFilters({ premium: premium || '' })}
+          placeholder="Premium: All"
+          searchPlaceholder="Search…"
+          options={[
+            { value: 'yes', label: 'Premium: Yes' },
+            { value: 'no', label: 'Premium: No' },
+          ]}
+        />
+      )}
+
+      {fieldSet.has('joining') && (
+        <SearchableSelect
+          className="w-48"
+          allowClear
+          ariaLabel="Joining date"
+          value={filters.joining}
+          onChange={(joining) => patchFilters({ joining: joining || '' })}
+          placeholder="Joining: All"
+          searchPlaceholder="Search…"
+          options={[
+            { value: 'pending', label: 'Joining date pending' },
+            { value: 'set', label: 'Joining date set' },
+          ]}
+        />
       )}
 
       {fieldSet.has('status') && (

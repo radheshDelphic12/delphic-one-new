@@ -72,6 +72,46 @@ const hrSchema = z.object({
   source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
 });
 
+// Hiring funnel: profiles sourced in the dates, optionally narrowed to one sourcer / client / service type (internal vs client hiring).
+const hiringFunnelSchema = z.object({
+  date_from: z.string().min(1),
+  date_to: z.string().min(1),
+  sourcer_id: optionalUuid,
+  client_id: optionalUuid,
+  service_type: z.enum(['internal', 'client']).optional(),
+  group_by: z.enum(['none', 'week', 'month']).default('month'),
+});
+
+// The profiles behind one count of the hiring funnel: a profile-level metric, or a stage cell (track + stage + outcome), optionally one period.
+const hiringFunnelDetailsSchema = hiringFunnelSchema.extend({
+  metric: z.enum(['sourced', 'submitted', 'not_submitted', 'first_round_cleared', 'reached_client_round', 'selected', 'dropped', 'in_progress']).optional(),
+  track: z.enum(['internal', 'client']).optional(),
+  stage: z.string().max(40).optional(),
+  outcome: z.string().max(80).optional(),
+  bucket: z.string().max(40).optional(),
+});
+
+// Hiring panels (one table per interview template, layer by layer): submissions made in the dates, narrowed by vendor, team, recruiter,
+// client, sales owner, who brought the client and the profile type.
+const hiringPanelsSchema = z.object({
+  date_from: z.string().min(1),
+  date_to: z.string().min(1),
+  vendor_account_id: optionalUuid,
+  team_id: optionalUuid,
+  sourcer_id: optionalUuid,
+  client_id: optionalUuid,
+  sales_owner_id: optionalUuid,
+  brought_by_id: optionalUuid,
+  profile_type: z.enum(['vendor', 'market', 'bench']).optional(),
+});
+
+// The candidates behind one count of a layer: the template, the layer number (1-based) and the column.
+const hiringPanelDetailsSchema = hiringPanelsSchema.extend({
+  template_id: z.string().uuid(),
+  layer: z.coerce.number().int().min(1).max(50),
+  metric: z.enum(['bucket', 'scheduled', 'attended', 'pending', 'rejected', 'passed', 'skipped']).default('bucket'),
+});
+
 // Joinings by month (by sourcer / interviewer L1+L2 / vendor).
 const joiningsSchema = z.object({
   date_from: z.string().min(1),
@@ -114,13 +154,37 @@ const explorerSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
+// Drill-down: the records behind one count. `table` is the report's table key, `metric` the
+// clicked count column; the rest are the identifiers of the clicked row plus the report filters.
+const drilldownSchema = z.object({
+  report: z.string().min(1),
+  table: z.string().min(1),
+  metric: z.string().optional(),
+  person_id: optionalUuid,
+  person_name: z.string().optional(),
+  account_id: optionalUuid,
+  recruiter_id: optionalUuid,
+  client_id: optionalUuid,
+  account_type: z.enum(['client', 'vendor', 'unclassified']).optional(),
+  source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  date_from: z.string().optional(),
+  date_to: z.string().optional(),
+});
+
 module.exports = {
+  drilldownSchema,
   dateRangeSchema,
   agingSchema,
   closureSchema,
   explorerSchema,
   coverageSchema,
   hrSchema,
+  hiringFunnelSchema,
+  hiringFunnelDetailsSchema,
+  hiringPanelsSchema,
+  hiringPanelDetailsSchema,
   joiningsSchema,
   timeToSubmitSchema,
 };

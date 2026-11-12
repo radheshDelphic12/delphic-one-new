@@ -1,35 +1,42 @@
-# Requirement Management Dashboard
+# Delphic One
 
-Internal recruitment pipeline for Delphic. Tracks **client / vendor accounts → requirements → seats → candidate profiles → submissions → interview rounds**, with role-based dashboards, margin tracking, locking, and reporting.
+Multi-company group platform for the Delphic holding group. It started as the internal **Requirement Management Dashboard** (recruitment pipeline) and has grown into a shared-database, multi-company ERP: each company gets its own workspace, and a **group superadmin** sees and controls all of them from one **Group Dashboard**.
+
+- **Recruitment core:** **client / vendor accounts → requirements → seats → candidate profiles → submissions → interview rounds**, with role-based dashboards, margin tracking, locking, and reporting.
+- **Company platform:** HR directory, calendars, attendance, leave, project-centric timesheets, payroll, billing, expenses and vendor payments, accounting, org chart, and Live Analytics / Financials.
+- **Company workspaces:** standalone **Zephyr Infrastructure**, **Gulati Industries** (trading), **Acconcy Finance**, **Gulati Foundation** and **Zklyrera Spirits** (investments) modules, plus "coming soon" companies.
 
 | | |
 |---|---|
-| **Tenancy** | Single tenant |
+| **Tenancy** | Multi-company: `Org` / `OrgGroup` / `OrgMembership`, shared database with row-level isolation by `org_id` |
 | **UI rule** | Jira-like dense lists and filters — [docs/ui/UI-UX-JIRA.md](docs/ui/UI-UX-JIRA.md) |
 | **Detailed HLD** | [docs/architecture/HLD.md](docs/architecture/HLD.md) |
 | **Field model** | [docs/architecture/Requirement-Dashboard-System-Design-v2.md](docs/architecture/Requirement-Dashboard-System-Design-v2.md) |
 | **API contract** | [docs/architecture/API-Spec-and-Build-Plan.md](docs/architecture/API-Spec-and-Build-Plan.md) |
+| **Multi-company design** | [docs/architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md](docs/architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md) |
 | **Diagrams & journeys** | [docs/architecture/ARCHITECTURE-OVERVIEW.md](docs/architecture/ARCHITECTURE-OVERVIEW.md) |
+| **Agent / contributor context** | [docs/AGENTS.md](docs/AGENTS.md) |
 
 ## Table of contents
 
 1. [What it does](#what-it-does)
 2. [Design principles](#design-principles)
 3. [Architecture](#architecture)
-4. [Feature map](#feature-map)
-5. [Domain model](#domain-model)
-6. [User journeys](#user-journeys)
-7. [Stage pipelines](#stage-pipelines)
-8. [Roles and permissions](#roles-and-permissions)
-9. [Security](#security)
-10. [Reporting](#reporting)
-11. [API surface](#api-surface)
-12. [Codebase structure](#codebase-structure)
-13. [Stack](#stack)
-14. [Branching](#branching)
-15. [Local setup](#local-setup)
-16. [Deployment](#deployment)
-17. [Further reading](#further-reading)
+4. [Multi-company platform](#multi-company-platform)
+5. [Feature map](#feature-map)
+6. [Domain model](#domain-model)
+7. [User journeys](#user-journeys)
+8. [Stage pipelines](#stage-pipelines)
+9. [Roles and permissions](#roles-and-permissions)
+10. [Security](#security)
+11. [Reporting](#reporting)
+12. [API surface](#api-surface)
+13. [Codebase structure](#codebase-structure)
+14. [Stack](#stack)
+15. [Branching](#branching)
+16. [Local setup](#local-setup)
+17. [Deployment](#deployment)
+18. [Further reading](#further-reading)
 
 ---
 
@@ -40,8 +47,7 @@ Internal recruitment pipeline for Delphic. Tracks **client / vendor accounts →
 | **BDA** | Own the full account (lead) flow: capture, classify, schedule meetings, convert clients / vendors |
 | **Sales** | Open job requirements and seats; assign recruiters |
 | **Recruiter** | Source candidates, submit to seats, run interviews through join, track margin |
-| **Admin** | Manage users, unlock any locked entity, read org-wide reports |
-| **Superadmin** | Admin plus free-form stage overrides and locked-row edits |
+| **Admin / Group superadmin** | One role: manage users, unlock any locked entity, read org-wide reports, free-form stage overrides, locked-row edits, soft-delete / restore. As group admin: admin of every company in the holding group (on-demand membership) and owner of the Group Dashboard |
 
 ### In scope
 
@@ -55,13 +61,16 @@ Internal recruitment pipeline for Delphic. Tracks **client / vendor accounts →
 - Reports with date range and Excel / PDF export
 - Comments and documents on core entities
 - Jira-like dense list / filter UX
+- Multi-company tenancy with a group superadmin, Group Dashboard and per-company workspaces (see [Multi-company platform](#multi-company-platform))
+- HR, attendance, leave, timesheets, payroll, billing, expenses, accounting and Live Analytics per company
+- Admin-editable everything: every feature has an admin edit path, audited ([docs/guides/ADMIN-EDITABILITY.md](docs/guides/ADMIN-EDITABILITY.md))
 
 ### Deferred
 
 - Notifications
 - Vendor / client external portals
 - JIRA / Sheets migration tooling
-- Multi-tenant SaaS isolation
+- Database-per-tenant isolation (current model is shared DB, row-level)
 - Real-time collaboration (WebSockets)
 - SSO
 
@@ -89,15 +98,18 @@ flowchart LR
     BDA[BDA]
     Sales[Sales]
     Rec[Recruiter]
-    Admin[Admin]
   end
 
-  RMD[Requirement Management Dashboard]
+  Admin[Admin / Group superadmin]
+  Ext[External CA / Legal]
+
+  RMD[Delphic One platform]
 
   BDA --> RMD
   Sales --> RMD
   Rec --> RMD
   Admin --> RMD
+  Ext -->|read-only access| RMD
 
   RMD --> PG[(PostgreSQL)]
   RMD --> Files[Document store]
@@ -118,7 +130,7 @@ flowchart TB
   end
 
   subgraph ReqWrite[Requirement mutations]
-    ReqW[Create · edit · status · assign]
+    ReqW[Create · edit · status · assign · seats · delete]
   end
 
   BDA[BDA] --> AccR
@@ -144,6 +156,8 @@ flowchart TB
   Super --> Override[Stage override]
 ```
 
+The whole **Sales team shares every requirement**: any Sales user sees all of them (Requirements list, Pipeline, notes and files) and can edit, assign, add seats or delete any of them; a "My requirements" toggle narrows to their own. Only changing the *sales owner* is admin-only. Every change is tagged with who made it in the activity log. Details: [docs/features/SALES-REQUIREMENTS-SHARED-ACCESS.md](docs/features/SALES-REQUIREMENTS-SHARED-ACCESS.md).
+
 POC credit stays on the account: `owner_id` is the current internal POC (reassignable); `origin_owner_id` is “Brought by” (set at create; admin/BDA/superadmin may correct).
 
 ### Containers and request path
@@ -161,6 +175,7 @@ flowchart TB
   Nginx -->|/| Client
   Nginx -->|/api| API
   Client -->|REST + JWT| API
+  Cron[Background jobs — reminders, locks] --> API
   API --> DB
   API --> Store
 ```
@@ -189,6 +204,95 @@ Services do not import Express request types. Controllers stay thin.
 
 ---
 
+## Multi-company platform
+
+One database, many companies. Every tenant-owned row carries an `org_id`; a user belongs to one or more companies through `OrgMembership`, and companies are grouped by `OrgGroup`. The active company is chosen at login or with `POST /auth/switch-org`, and all module queries are scoped to it.
+
+### Tenancy model
+
+```mermaid
+flowchart TB
+  Group[OrgGroup — Delphic holding group]
+  Group --> O1[Org — Delphic Global]
+  Group --> O2[Org — Zephyr Infrastructure]
+  Group --> O3[Org — Gulati Industries]
+  Group --> O4[Org — Acconcy Finance]
+  Group --> O5[Org — Gulati Foundation]
+  Group --> O6[Org — Zklyrera Spirits]
+  Group --> O7[Org — Coming soon]
+
+  User[User] --> M[OrgMembership — role per company]
+  M --> O1
+  M --> O2
+  GM[OrgGroupMembership] --> Group
+  User --> GM
+```
+
+Each company has `enabled_modules`; route groups such as `/expenses/vendor-payments`, `/accounting` and `/external-access` are additionally gated by a per-company finance-module switch.
+
+### Company workspaces
+
+| Workspace | Module (API prefix) | Scope |
+|---|---|---|
+| **Delphic Global** | recruitment core + shared platform modules | Recruitment pipeline, HR, timesheets, payroll, billing, Live Analytics / Financials |
+| **Zephyr Infrastructure** | `/zephyr` (`Zx`) | Real estate and construction: services, properties, units, rent, trading, consulting, tasks, finance, service P&L |
+| **Gulati Industries** | `/gulati` (`Gx`) | Trading workspace (Copper Cathode and other deals): leads, deals, parties, ledger, finance, tasks |
+| **Acconcy Finance** | `/acconcy` (`Ax`) | Finance services: leads, deals, investments, parties, ledger, salaries, valuation |
+| **Gulati Foundation** | `/foundation` (`fx_`) | Campaigns, initiatives, budgets with revision history, planned vs actual investment, funding vs spending, projections |
+| **Zklyrera Spirits** | `/zklyrera` (`zk_`) | Investments with principal vs earnings returns, income, expenses, salaries, monthly reports, projections; principal returned is never income and there is no valuation (group assets = principal still invested) |
+| **Coming soon** | marker in `enabled_modules` | Listed but not openable; excluded from all totals |
+
+Zephyr, Gulati, Acconcy, Gulati Foundation and Zklyrera are standalone modules (own tables prefixed `zx_` / `gx_` / `ax_` / `fx_` / `zk_`, own access and audit helpers) that mirror one another's layout rather than sharing Delphic Global code. A new company needs its migration **and** its org row: the migration only creates tables, so run that company's non-destructive `*:seed-admin` script (for example `npm run zklyrera:seed-admin`) once per environment, otherwise it never appears on the Group Dashboard.
+
+### Group Dashboard and on-demand admin access
+
+```mermaid
+sequenceDiagram
+  participant GSA as Group superadmin
+  participant API as API
+  participant GA as groupAccess
+  participant Fin as groupFinance.service
+  participant Co as Per-company finance services
+
+  GSA->>API: Login
+  API-->>GSA: Lands on Group Dashboard
+  GSA->>API: GET /super-dashboard/group/overview
+  API->>Fin: Build consolidated view
+  Fin->>Co: Ask each live company for its own numbers
+  Co-->>Fin: Revenue, profit, assets, valuation
+  Fin-->>GSA: Totals, per-company rows, trends, alerts
+  GSA->>API: POST /auth/switch-org (company)
+  API->>GA: Ensure admin membership in own group
+  GA-->>API: Membership created and audited (group_admin_access)
+  API-->>GSA: Company admin experience
+```
+
+`groupFinance.service.js` holds no money logic: it calls each company's own service, then normalises and compares. Valuation = profit x 240 + asset value x 3. Coming-soon companies are excluded from totals. Details: [docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md](docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md).
+
+### Time to money
+
+```mermaid
+flowchart LR
+  Att[Attendance — presence only] -.-> TS
+  Cal[Company calendar] --> TS[Timesheets — project entries]
+  TS --> OT[Overtime approval]
+  TS --> WH[workHours.service — approved hours]
+  OT --> WH
+  Leave[Leave balance — approval gated] --> WH
+  WH --> Pay[Payroll run + payslips]
+  TS --> Bill[Billing — invoices]
+  Alloc[Allocations + resource rates] --> Bill
+  Pay --> Fin[Financials / Live Analytics]
+  Bill --> Fin
+  Exp[Expenses + vendor payments] --> Fin
+  Fin --> Lock[Per-record locks, versions, change detection]
+  Lock --> Grp[Group Dashboard]
+```
+
+Pay comes from **approved timesheet hours**, never raw check-in / check-out. Weeks run Sunday to Saturday and lock Sunday 00:00 IST. See [docs/features/FINANCE-CALCULATIONS-AND-LOCKING.md](docs/features/FINANCE-CALCULATIONS-AND-LOCKING.md).
+
+---
+
 ## Feature map
 
 | Domain | Covers |
@@ -200,7 +304,13 @@ Services do not import Express request types. Controllers stay thin.
 | **Submissions** | Put candidate forward, pipeline stages, margin, kanban by stage |
 | **Interviews** | Six named rounds (`internal_r1/r2`, `client_r1/r2/r3`, `hr_cto_ceo`), schedule, feedback, rating, result; soft warning on missing mandatory rounds |
 | **Collaboration** | Comments, documents, stage history audit |
-| **Ops & insights** | Role-scoped dashboard with click-through KPI cards, stuck lists, reports (incl. client / vendor performance), Excel / PDF export |
+| **Org & HR** | Orgs, departments, designations, teams, assets, org chart, invites, external CA / Legal access |
+| **Time & leave** | Company and project calendars, attendance, leave balances, project-centric timesheets, overtime approval |
+| **Money** | Payroll runs and payslips, billing / invoices, expenses and vendor payments, vendor commissions, accounting ledger and tax, finance categories, profitability |
+| **Live Analytics** | Financials, calculations, contracts, projects, per-record locks, valuation trends |
+| **Group** | Group Dashboard, org-wide alerts, company switching, coming-soon companies |
+| **Company workspaces** | Zephyr (`/zephyr`), Gulati (`/gulati`), Acconcy (`/acconcy`), Gulati Foundation (`/foundation`), Zklyrera Spirits (`/zklyrera`), trading (`/trading`), leads (`/leads`) |
+| **Ops & insights** | Role-scoped dashboard with click-through KPI cards, stuck lists, reports (incl. client / vendor performance) with click-a-count / click-a-row record drill-down, Excel / PDF export |
 
 ---
 
@@ -387,8 +497,8 @@ From **any** stage: `backout` or `rejected` (reason required).
 | Accounts (edit / stage / meeting / type / brought-by) | All | — | — | All |
 | Unlock accounts | Yes | — | — | Yes |
 | Unlock requirements / seats / submissions | — | — | — | Yes |
-| Requirements + seats (view) | All | Own + assigned | Assigned | All |
-| Requirements + seats (mutate) | — | Own | — | All |
+| Requirements + seats (view) | All | All (shared Sales team) | Assigned | All |
+| Requirements + seats (mutate) | — | All (shared Sales team; owner change admin-only) | — | All |
 | Assign recruiters | — | Yes | — | Yes |
 | Profiles + submissions | View | View | CRUD | Full |
 | Stage override (any → any) | — | — | — | Superadmin only |
@@ -425,6 +535,10 @@ Response envelope: `{ success: boolean, data: T, message?: string, errors?: [] }
 | Aging / SLA | Stuck leads, requirements with no submissions, submissions stuck in stage, past `sla_days` |
 | Closure | Joins with dates, final rates, margins — by period / client / recruiter |
 
+The Reports page lists these: **HR reports** (sourcing, submissions, internal round 1 by sourcer / interviewer), **Joinings**, **Time to submit**, **BDA reports**, **Sales reports**, **Clients without requirements** and **Recruiter-vendor gaps** (the performance, aging and closure reports above stay reachable by API but are hidden from the picker).
+
+**Drill-down:** click any count, or any row, and a right-side panel lists the individual records behind it (candidates, submissions, requirements, accounts, interview rounds) with links to their detail pages. `GET /reports/drilldown` rebuilds the same filters the report used, so the list always adds up to the number clicked, and it applies each report's role scope (a BDA or Sales user cannot widen it to other people). Up to 500 records are shown. Details: [docs/features/REPORTS-DRILLDOWN.md](docs/features/REPORTS-DRILLDOWN.md).
+
 In-app tables and charts plus server-side **Excel / PDF export**. Dashboard adds live widgets: counts, stuck lists, recent activity — different per role. Each KPI card is a **click-through** into its list page, pre-filtered to exactly what the card counts.
 
 ---
@@ -447,6 +561,13 @@ Base path: `/api/v1` (full contracts in the API spec).
 | Admin | `POST /admin/:entity/:id/unlock` |
 | Dashboard | Role-scoped summary + stuck lists |
 | Reports | Recruiter / sales / vendor / client / bda / aging / closure + export |
+| Orgs & access | `/orgs`, `POST /auth/switch-org`, `/invites`, `/teams`, `/departments`, `/designations`, `/org-chart` |
+| Time & leave | `/calendars`, `/attendance`, `/leave`, `/timesheets`, `/allocations`, `/tasks` |
+| Money | `/payroll`, `/billing`, `/expenses`, `/vendor-commissions`, `/accounting`, `/profitability`, `/finance-categories` |
+| Analytics | `/financials`, `/analytics`, `/calculations`, `/contracts`, `/projects` |
+| Group | `/super-dashboard` (`/group/overview`, `/group/activity`), `/external-access` |
+| Workspaces | `/zephyr`, `/gulati`, `/acconcy`, `/trading`, `/leads` |
+| Platform | `/notifications`, `/interviews` (calendar feed), `/pipeline` (board), `/client-errors`, `GET /health` |
 
 ---
 
@@ -456,7 +577,7 @@ Base path: `/api/v1` (full contracts in the API spec).
 delphic_one/
   client/                   # React SPA
     src/app/                # Router + layout
-    src/pages/<domain>/     # Screens by domain
+    src/pages/<domain>/     # Screens by domain (accounts, requirements, payroll, time, finance, zephyr, gulati, acconcy, groupOverview, ...)
     src/components/         # UI primitives + layout
     src/lib/                # apiClient, auth context
   server/                   # Express API
@@ -464,12 +585,22 @@ delphic_one/
     src/modules/            # domain: routes → controller → service → validation
     src/middleware/         # auth, lock, errors, request logging
     src/config/             # env, Prisma client, logger
+    src/jobs/               # background jobs (e.g. interview reminders)
+    src/lib/                # shared helpers (e.g. groupAccess)
     tests/
-  docs/                     # architecture/, ui/, testing/, progress/, guides/ + AGENTS.md
-  docker-compose.yml
+  docs/                     # architecture/, features/, ui/, testing/, progress/, guides/ + AGENTS.md
+  scripts/                  # lint-changed, db-backup, ...
+  docker-compose.yml        # local; docker-compose.prod.yml for production
+  start-platform.sh|ps1     # one-command local dev
+  start-delphic.sh          # production deploy script
 ```
 
-**Domain modules (examples):** `auth`, `users`, `accounts`, `requirements` (incl. seats), `profiles`, `submissions` (incl. interview rounds), `comments`, `documents`, `admin`, `dashboard`, `reports`.
+**Domain modules (examples):**
+
+- **Recruitment:** `auth`, `users`, `accounts`, `requirements` (incl. seats), `profiles`, `submissions` (incl. interview rounds), `comments`, `documents`, `admin`, `dashboard`, `reports`, `pipeline`, `interviews`, `notifications`.
+- **Platform:** `orgs`, `access`, `invites`, `teams`, `departments`, `designations`, `assets`, `calendars`, `attendance`, `leave`, `timesheets`, `allocations`, `tasks`, `orgChart`, `externalAccess`.
+- **Money:** `payroll`, `billing`, `expenses`, `vendorCommissions`, `accounting`, `profitability`, `financeCategories`, `financials`, `analytics`, `calculations`, `contracts`, `projects`.
+- **Group and workspaces:** `superDashboard`, `zephyr`, `gulati`, `acconcy`, `trading`, `leads`.
 
 ---
 
@@ -479,6 +610,7 @@ delphic_one/
 - **Server:** Node.js / Express + Prisma ORM (PostgreSQL)
 - **Edge:** Nginx (TLS, SPA, `/api` proxy)
 - **Runtime:** Docker Compose (`db`, `server`, `client`) — see below
+- **Jobs:** in-process background jobs for reminders and similar scheduled work
 - **Logging:** Structured backend logger — [docs/guides/BACKEND-LOGGING.md](docs/guides/BACKEND-LOGGING.md)
 
 ---
@@ -488,12 +620,24 @@ delphic_one/
 - `main` — production; pushes here trigger CI and the deploy workflow
 - `staging` — pre-production integration
 - `dev` — trunk for feature work before promotion to `staging`
+- Feature branches (for example `super_admin_branch`, `acconcy-finance-workspace`) are built and tested locally; an agent never pushes to `main`, the human advances it
 
 ---
 
 ## Local setup
 
-### Docker (recommended)
+### One command (Postgres in Docker, API and client with hot reload)
+
+```bash
+./start-platform.sh            # db + migrate deploy, then API :4000 + client :5173
+./start-platform.sh --restore  # restore the newest backup-*.dump, migrate, run
+./start-platform.sh --seed     # synthetic CSV seed chain
+./start-platform.sh --down     # stop the db container
+```
+
+PowerShell: `.\start-platform.ps1` with `-Restore`, `-Seed`, `-Fresh`, `-DbOnly`, `-Down`. Company demo data: `npm run zephyr:seed`, `npm run gulati:seed`, `npm run acconcy:seed`.
+
+### Docker
 
 ```bash
 docker compose up -d --build
@@ -536,21 +680,41 @@ Full roster: `server/prisma/team-roster.js`. Domain data: `npm run seed:accounts
 
 ## Deployment
 
-`.github/workflows/deploy.yml` runs on push to `main`. Enable it with repository variable `DEPLOY_ENABLED=true` and secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+### Pipeline
 
-Production edge layout:
+```mermaid
+flowchart LR
+  Dev[Feature branch] --> CI[CI — lint, client build, 4 test shards, compose smoke]
+  CI --> Stg[staging]
+  Stg --> Main[main]
+  Main --> CIMain[CI on main must pass]
+  CIMain --> Deploy[deploy.yml — SSH to VPS]
+  Deploy --> Script[start-delphic.sh --prod]
+  Script --> Bak[Verified pg_dump to backups/]
+  Bak --> Mig[prisma migrate deploy]
+  Mig --> Up[Docker Compose up]
+  Up --> Health[Health check]
+```
+
+`.github/workflows/ci.yml` skips docs-only changes and runs `build` plus four Jest shards (each with its own Postgres service) in parallel. `.github/workflows/deploy.yml` runs after CI passes for a push to `main` and deploys exactly the commit CI tested, so **a push to `main` is a production deploy**. It needs secrets `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` and is paused only by setting the repository variable `DEPLOY_ENABLED=false`. Staging is a separate Render service deployed from the `staging` branch (`render deploys create <service> --commit <sha>`); its boot step (`scripts/staging-bootstrap.js`) runs `prisma migrate deploy`.
+
+New-company checklist per environment (staging and production): deploy, confirm `prisma migrate status` is up to date, then run the company's `seed-admin` script once. On production: `docker exec -w /app/server delphic-server-1 node prisma/zklyrera/seed-admin.js`.
+
+### Production layout
 
 ```text
-Internet → Nginx (TLS)
-             ├── /     → React static build
-             └── /api  → Node (Compose or PM2)
-                           → PostgreSQL
+Internet → host Nginx (TLS, Let's Encrypt)
+             ├── /     → client container (React build)
+             └── /api  → server container (Node)
+                           → db container (PostgreSQL)
                            → upload volume
 ```
 
-Compose defines Docker images for `db` / `server` / `client`. An older PM2 + Nginx layout (`ecosystem.config.js`, `nginx.conf.example`) also exists; align the deploy workflow with the chosen runtime before enabling auto-deploy.
+Images are defined in `docker-compose.yml` and `docker-compose.prod.yml`; `setup-vm.sh` prepares a VM and `nginx.conf.example` is the edge template.
 
-Operational expectations: health checks, `prisma migrate deploy` on server start, nightly `pg_dump`, secrets only via environment.
+Data safety: `start-delphic.sh --prod` takes a verified backup before building or migrating and aborts if it fails; seed scripts refuse to run against production; migrations shipped with feature code must be additive (no `DROP`, destructive type change, rename or `TRUNCATE`). Runbook: [docs/guides/DEPLOY-RUNBOOK.md](docs/guides/DEPLOY-RUNBOOK.md).
+
+Operational expectations: health checks, `prisma migrate deploy` on server start, scheduled `scripts/db-backup.sh`, secrets only via environment.
 
 ---
 
@@ -562,6 +726,9 @@ Operational expectations: health checks, `prisma migrate deploy` on server start
 | [docs/architecture/ARCHITECTURE-OVERVIEW.md](docs/architecture/ARCHITECTURE-OVERVIEW.md) | Shareable diagrams and journeys |
 | [docs/architecture/Requirement-Dashboard-System-Design-v2.md](docs/architecture/Requirement-Dashboard-System-Design-v2.md) | Field-level data model |
 | [docs/architecture/API-Spec-and-Build-Plan.md](docs/architecture/API-Spec-and-Build-Plan.md) | Exact HTTP contracts |
+| [docs/architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md](docs/architecture/MULTI-COMPANY-ERP-PLATFORM-HLD.md) | Multi-company design and phase status |
+| [docs/features/README.md](docs/features/README.md) | Feature specs (finance, Zephyr, Gulati, Acconcy, Group Dashboard) |
+| [docs/guides/DEPLOY-RUNBOOK.md](docs/guides/DEPLOY-RUNBOOK.md) | Manual deploy, backup, rollback |
 | [docs/ui/UI-UX-JIRA.md](docs/ui/UI-UX-JIRA.md) | Frontend UX standing rule |
 | [docs/testing/TESTING-DEMO-SEED.md](docs/testing/TESTING-DEMO-SEED.md) | Demo seed + UI walkthroughs |
 | [docs/progress/SPRINT-PLAN.md](docs/progress/SPRINT-PLAN.md) | Sprint tickets |

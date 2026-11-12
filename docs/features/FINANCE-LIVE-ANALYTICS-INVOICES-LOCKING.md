@@ -170,7 +170,8 @@ Source of truth is **approved timesheet hours**; admin can configure and tweak.
   `contract` keeps the old retainer behaviour (every working day). Pending / rejected entries block the lock under `approved_hours`.
   Lines expose `payout_basis`, `payable_days`, `contract_working_days`.
 - **Client billing basis** (`billing.engine.js`): per project `Account.client_billing_basis`.
-  `contract` (default, unchanged) or `approved_hours` (monthly rate, each working day counted by approved hours).
+  `contract` (default, unchanged) or `approved_hours` (monthly rate, each working day counted by approved hours, so leave is not billed; set per project).
+  Resource-wise monthly rates (`resourceBilling.js`, 2026-11-22): a day bills only when approved hours were logged on it (attendance alone does not bill), and PL / NPL / comp off bill nothing unless the project's billing status rules say otherwise.
   Hourly rates always bill approved hours x rate. `billable_day_hours` (default 8) defines a full day.
   Configured in Finance > Projects > project profile (`PATCH /billing/projects/:id`).
 - **Adjustments** (`BillingAdjustment`, `billing/adjustments.service.js`): admin + / - tweak per project and month,

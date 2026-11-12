@@ -1,6 +1,8 @@
 const prisma = require('../../config/db');
+const { decide } = require('../../lib/permissions');
 const { notify, accountParticipants, admins } = require('../../lib/notifications');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const STUCK_LEAD_STAGES = ['lead', 'meeting_scheduled', 'rescheduled'];
 const stuckLeadCutoff = () => new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
@@ -10,14 +12,20 @@ const TRANSITIONS = {
   meeting_scheduled: ['active', 'rescheduled', 'dropped'],
   rescheduled: ['meeting_scheduled', 'dropped'],
   active: ['dropped'],
-  dropped: [],
+  // A dropped client / vendor can be reactivated with a reason; the lock set by the drop is lifted with it.
+  dropped: ['active'],
 };
+
+// The account number is shown masked (last 4 only) in every response; the full number comes from getBankDetails().
+const maskAccountNumber = (value) => (value ? `${'•'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}` : null);
 
 function serialize(row) {
   if (!row) return null;
   const { owner_id, owner, origin_owner_id, origin_owner, classified_by, classified_by_user, meeting_attendees, ...rest } = row;
   return {
     ...rest,
+    vendor_bank_account_number: maskAccountNumber(rest.vendor_bank_account_number),
+    has_bank_account_number: Boolean(rest.vendor_bank_account_number),
     owner: owner ? { id: owner.id, name: owner.name } : null,
     origin_owner: origin_owner ? { id: origin_owner.id, name: origin_owner.name } : null,
     classified_by: classified_by_user ? { id: classified_by_user.id, name: classified_by_user.name } : null,
@@ -32,7 +40,7 @@ const ACCOUNT_INCLUDE = {
   meeting_attendees: { include: { user: { select: { id: true, name: true } } } },
 };
 
-async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, industry, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
+async function list({ type, include_unclassified, stage, stuck, owner_id, origin_owner_id, premium, vendor_type, industry, location, specialization, search, created_from, created_to, sort_by, sort_order, page, limit }) {
   // Accumulate into an AND array so multiple OR-bearing clauses (type scope +
   // search) can coexist without one clobbering the other in the object literal.
   // Projects share this table (type 'client', is_project) but are managed in
@@ -50,7 +58,10 @@ async function list({ type, include_unclassified, stage, stuck, owner_id, origin
   }
   if (owner_id) and.push({ owner_id });
   if (origin_owner_id) and.push({ origin_owner_id });
+  if (premium) and.push({ is_premium: premium === 'yes' });
+  if (vendor_type) and.push({ vendor_type });
   if (industry) and.push({ industry: { contains: industry, mode: 'insensitive' } });
+  if (location) and.push({ OR: [{ location: { contains: location, mode: 'insensitive' } }, { location_city: { contains: location, mode: 'insensitive' } }, { location_country: { contains: location, mode: 'insensitive' } }] });
   if (specialization) and.push({ vendor_specializations: { has: specialization } });
   if (search) {
     and.push({
@@ -101,15 +112,84 @@ async function listSpecializations() {
   return [...tags].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The full bank details of a vendor, for the people who may edit that account (admin, BDA, or the account's own permissions).
+ * Every read is written to the audit log, so there is a record of who looked at the account number.
+ */
+async function getBankDetails(id, user) {
+  const row = await prisma.account.findUnique({ where: { id } });
+  if (!row || row.type !== 'vendor') return { error: 'not_found' };
+  if (!canMutateAccount(row, user)) return { error: 'forbidden' };
+  await logActivity(user.id, id, 'view_bank_details', 'Viewed the full bank details', {});
+  return {
+    details: {
+      holder: row.vendor_bank_holder, bank_name: row.vendor_bank_name, account_number: row.vendor_bank_account_number, ifsc: row.vendor_bank_ifsc,
+      branch: row.vendor_bank_branch, swift: row.vendor_bank_swift, upi_id: row.vendor_upi_id,
+    },
+  };
+}
+
 async function getById(id) {
   const row = await prisma.account.findUnique({ where: { id }, include: ACCOUNT_INCLUDE });
   return serialize(row);
 }
 
-function canMutateAccount(account, user) {
+// The projects still running under a client: the client's own row when it doubles as a project (older
+// projects), plus its project rows. Dropping the client in Sales does not stop them billing, so the drop
+// screen warns with this list. Completed projects are not live.
+async function liveProjects(account) {
+  if (!account) return [];
+  const rows = await prisma.account.findMany({
+    where: {
+      AND: [
+        projectListWhere(account.org_id),
+        { deleted_at: null },
+        { OR: [{ id: account.id }, { client_account_id: account.id }] },
+        { OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+      ],
+    },
+    select: { id: true, project_code: true, project_name: true, name: true, contract_status: true, agreement_end_date: true },
+    orderBy: { project_code: 'asc' },
+  });
+  return rows.map((r) => ({ id: r.id, project_code: r.project_code, project_name: r.project_name || r.name, contract_status: r.contract_status, agreement_end_date: r.agreement_end_date }));
+}
+
+// `perms`: what a custom role needs for this action (any one of them); a plain role keeps the old rule.
+const CLASSIFY_PERMS = ['accounts.update', 'accounts.create', 'vendors.onboard'];
+const MEETING_PERMS = ['meetings.schedule', 'accounts.update'];
+
+function canMutateAccount(account, user, perms = ['accounts.update']) {
   if (!account || account.is_project) return false;
+  const decided = perms.map((key) => decide(user, key, account.owner_id));
+  if (decided[0] !== null) return decided.some(Boolean);
   // Admin and BDA may edit any account (clients, vendors, unclassified) and move stages / schedule meetings.
   return user.role === 'admin' || user.role === 'bda';
+}
+
+// ---- who did what ----
+// Every edit of a lead / client / vendor by a person writes one audit_logs row (entity_type 'account'), so the detail page can
+// say "edited by Chahak". Stage moves and meeting edits are already in stage_history; getActivity() merges both.
+const IGNORED_FIELDS = new Set(['updated_at', 'created_at']);
+// empty text, empty list and null all mean "not set", so saving a form without touching a field is not a change
+const plainValue = (v) => {
+  const x = v instanceof Date ? v.toISOString() : Array.isArray(v) ? (v.length ? v.join(', ') : null) : v;
+  return x === '' || x === undefined ? null : x;
+};
+function changedFields(before, after, patch) {
+  const out = {};
+  for (const key of Object.keys(patch)) {
+    if (IGNORED_FIELDS.has(key)) continue;
+    const a = plainValue(before[key]) ?? null;
+    const b = plainValue(after[key]) ?? null;
+    if (JSON.stringify(a) === JSON.stringify(b)) continue;
+    const simple = (x) => x === null || ['string', 'number', 'boolean'].includes(typeof x);
+    // the full account number is never written to the audit log: only that it changed
+    out[key.replace(/_/g, ' ')] = key === 'vendor_bank_account_number' ? { changed: true } : simple(a) && simple(b) ? { from: a, to: b } : { changed: true };
+  }
+  return out;
+}
+async function logActivity(userId, accountId, action, reason, snapshot = {}) {
+  await prisma.auditLog.create({ data: { actor_id: userId, action, entity_type: 'account', entity_id: accountId, reason, snapshot } });
 }
 
 async function create(data, ownerId) {
@@ -118,6 +198,7 @@ async function create(data, ownerId) {
     data: { ...data, owner_id: ownerId, origin_owner_id: ownerId },
     include: ACCOUNT_INCLUDE,
   });
+  await logActivity(ownerId, row.id, 'create', 'Added this account', { name: row.name, stage: row.stage });
   return serialize(row);
 }
 
@@ -160,18 +241,20 @@ async function update(id, patch, user) {
     data,
     include: ACCOUNT_INCLUDE,
   });
+  const changes = changedFields(existing, row, data);
+  if (Object.keys(changes).length) await logActivity(user.id, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
   return { account: serialize(row) };
 }
 
 function canClassifyAccount(account, user) {
-  return canMutateAccount(account, user) && account?.type == null;
+  return canMutateAccount(account, user, CLASSIFY_PERMS) && account?.type == null;
 }
 
 async function classifyLead(id, { type }, user) {
   const account = await prisma.account.findUnique({ where: { id } });
   if (!account) return { error: 'not_found' };
   if (account.is_project) return { error: 'is_project' };
-  if (!canMutateAccount(account, user)) return { error: 'forbidden' };
+  if (!canMutateAccount(account, user, CLASSIFY_PERMS)) return { error: 'forbidden' };
   if (account.type != null) return { error: 'already_classified' };
 
   const [row] = await prisma.$transaction([
@@ -192,6 +275,7 @@ async function classifyLead(id, { type }, user) {
     }),
   ]);
 
+  await logActivity(user.id, id, 'classify', `Classified as ${type}`, { type });
   return { account: serialize(row) };
 }
 
@@ -199,15 +283,17 @@ function canTransition(from, to) {
   return (TRANSITIONS[from] || []).includes(to);
 }
 
-async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids }, user) {
+async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids }, user) {
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
     if (account.is_project) return { error: 'is_project' };
-    if (!canMutateAccount(account, user)) return { error: 'forbidden' };
-    if (account.is_locked) return { error: 'locked' };
+    if (!canMutateAccount(account, user, MEETING_PERMS)) return { error: 'forbidden' };
+    // Reactivating a dropped account is the one move allowed while it is locked (the drop locks it).
+    const reactivating = account.stage === 'dropped' && to_stage === 'active';
+    if (account.is_locked && !reactivating) return { error: 'locked' };
     if (!canTransition(account.stage, to_stage)) return { error: 'invalid_transition' };
-    if (to_stage === 'dropped' && !reason) return { error: 'reason_required' };
+    if ((to_stage === 'dropped' || reactivating) && !reason) return { error: 'reason_required' };
     if (to_stage === 'meeting_scheduled' && (!meeting_mode || !meeting_date)) {
       return { error: 'meeting_fields_required' };
     }
@@ -221,8 +307,10 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
       patch.meeting_date = new Date(meeting_date);
       patch.meeting_location = meeting_mode === 'offline' ? meeting_location : null;
       if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+      if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
     }
     if (to_stage === 'dropped') patch.is_locked = true;
+    if (reactivating) patch.is_locked = false;
 
     const updated = await tx.account.update({
       where: { id },
@@ -251,7 +339,7 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
         from_stage: account.stage,
         to_stage,
         changed_by: user.id,
-        reason: reason || null,
+        reason: reason ? (reactivating ? `[reactivated] ${reason}` : reason) : null,
       },
     });
 
@@ -275,12 +363,12 @@ async function changeStage(id, { to_stage, reason, meeting_mode, meeting_date, m
 // whether the meeting is upcoming (`meeting_scheduled`) or already happened
 // (the account has since moved to `active`/`rescheduled`). Lets BDA/admin fix a
 // wrong attendee list or correct the date/location after the fact.
-async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids }, user) {
+async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids }, user) {
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
     if (!account) return { error: 'not_found' };
     if (account.is_project) return { error: 'is_project' };
-    if (!canMutateAccount(account, user)) return { error: 'forbidden' };
+    if (!canMutateAccount(account, user, MEETING_PERMS)) return { error: 'forbidden' };
     if (account.is_locked) return { error: 'locked' };
     if (meeting_mode === 'offline' && !meeting_location) return { error: 'meeting_location_required' };
 
@@ -290,6 +378,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
       meeting_location: meeting_mode === 'offline' ? meeting_location : null,
     };
     if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+    if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
 
     await tx.account.update({ where: { id }, data: patch });
 
@@ -323,7 +412,7 @@ async function updateMeeting(id, { meeting_mode, meeting_date, meeting_location,
 // Superadmin-only: move an account to any stage (backward, or straight to `lead`),
 // ignoring ownership, the lock, and the transition map. Still audited in stage_history.
 async function changeStageOverride(id, body, user) {
-  const { to_stage, reason, is_locked, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_attendee_ids } =
+  const { to_stage, reason, is_locked, meeting_mode, meeting_date, meeting_location, meeting_notes, meeting_duration_minutes, meeting_attendee_ids } =
     body;
   return prisma.$transaction(async (tx) => {
     const account = await tx.account.findUnique({ where: { id } });
@@ -336,6 +425,7 @@ async function changeStageOverride(id, body, user) {
       if (meeting_date) patch.meeting_date = new Date(meeting_date);
       if (meeting_mode === 'offline' && meeting_location) patch.meeting_location = meeting_location;
       if (meeting_notes !== undefined) patch.meeting_notes = meeting_notes || null;
+      if (meeting_duration_minutes !== undefined) patch.meeting_duration_minutes = meeting_duration_minutes;
     }
 
     const updated = await tx.account.update({ where: { id }, data: patch, include: ACCOUNT_INCLUDE });
@@ -369,6 +459,23 @@ async function changeStageOverride(id, body, user) {
   });
 }
 
+/** Everything that happened to an account, newest first, each tagged with the person who did it. */
+async function getActivity(id) {
+  const [logs, stages] = await Promise.all([
+    prisma.auditLog.findMany({ where: { entity_type: 'account', entity_id: id, action: { not: 'soft_delete' } }, orderBy: { created_at: 'desc' }, take: 200 }),
+    prisma.stageHistory.findMany({ where: { entity_type: 'account', entity_id: id }, orderBy: { changed_at: 'desc' }, take: 200 }),
+  ]);
+  const ids = [...new Set([...logs.map((l) => l.actor_id), ...stages.map((s) => s.changed_by)].filter(Boolean))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, role: true } }) : [];
+  const by = new Map(users.map((u) => [u.id, u]));
+  const who = (uid) => (by.get(uid) ? { id: uid, name: by.get(uid).name, role: by.get(uid).role } : null);
+  const rows = [
+    ...logs.map((l) => ({ id: l.id, kind: l.action, summary: l.reason, details: l.snapshot, by: who(l.actor_id), at: l.created_at })),
+    ...stages.map((s) => ({ id: s.id, kind: 'stage', summary: s.reason === 'Meeting details updated' ? 'Meeting details updated' : `Stage ${(s.from_stage || '-').replace(/_/g, ' ')} → ${s.to_stage.replace(/_/g, ' ')}${s.reason && s.reason !== 'Lead classified' ? ` (${s.reason})` : ''}`, details: { reason: s.reason }, by: who(s.changed_by), at: s.changed_at })),
+  ];
+  return rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
 async function getHistory(id) {
   const rows = await prisma.stageHistory.findMany({
     where: { entity_type: 'account', entity_id: id },
@@ -389,6 +496,8 @@ module.exports = {
   list,
   listSpecializations,
   getById,
+  liveProjects,
+  getBankDetails,
   create,
   update,
   changeStage,
@@ -396,6 +505,7 @@ module.exports = {
   updateMeeting,
   classifyLead,
   getHistory,
+  getActivity,
   canTransition,
   canMutateAccount,
   canClassifyAccount,

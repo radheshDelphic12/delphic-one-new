@@ -56,6 +56,17 @@ export const INVESTMENT_STATUSES = [
 ];
 export const INVESTMENT_STATUS_META = Object.fromEntries(INVESTMENT_STATUSES.map((s) => [s.value, s]));
 
+// Companies Acconcy funds or takes over: stage of the relationship.
+export const INVESTEE_STAGES = [
+  { value: 'discussion', label: 'Under discussion', tone: 'amber' },
+  { value: 'committed', label: 'Committed', tone: 'blue' },
+  { value: 'funded', label: 'Funded', tone: 'green' },
+  { value: 'taken_over', label: 'Taken over', tone: 'green' },
+  { value: 'exited', label: 'Exited', tone: 'gray' },
+  { value: 'dropped', label: 'Dropped', tone: 'red' },
+];
+export const INVESTEE_STAGE_META = Object.fromEntries(INVESTEE_STAGES.map((s) => [s.value, s]));
+
 export const ASSET_CATEGORIES = [
   { value: 'cash_bank', label: 'Cash & bank' },
   { value: 'property', label: 'Property' },

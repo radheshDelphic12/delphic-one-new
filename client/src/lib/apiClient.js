@@ -1,16 +1,16 @@
 import axios from 'axios';
+import { clearSession, getSessionItem, setSessionItem } from './sessionStore.js';
 
 const apiClient = axios.create({ baseURL: '/api/v1' });
 
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
+  const token = getSessionItem('access_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 function clearSessionAndRedirect() {
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
+  clearSession();
   if (window.location.pathname !== '/login') {
     window.location.href = '/login';
   }
@@ -47,7 +47,7 @@ apiClient.interceptors.response.use(
     }
 
     original._retry = true;
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = getSessionItem('refresh_token');
     if (!refreshToken) {
       clearSessionAndRedirect();
       return Promise.reject(error);
@@ -58,8 +58,8 @@ apiClient.interceptors.response.use(
         refreshPromise = axios
           .post('/api/v1/auth/refresh', { refresh_token: refreshToken })
           .then(({ data }) => {
-            localStorage.setItem('access_token', data.data.access_token);
-            localStorage.setItem('refresh_token', data.data.refresh_token);
+            setSessionItem('access_token', data.data.access_token);
+            setSessionItem('refresh_token', data.data.refresh_token);
             return data.data.access_token;
           })
           .finally(() => {
@@ -82,7 +82,7 @@ apiClient.interceptors.response.use(
  */
 /** Fetch a protected /uploads file with the bearer token and return the Blob. */
 export async function fetchAuthenticatedBlob(fileUrl) {
-  const token = localStorage.getItem('access_token');
+  const token = getSessionItem('access_token');
   const response = await fetch(fileUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

@@ -1,7 +1,11 @@
 /**
  * Central role → capability map. All UI role checks go through can() / usePermissions / Can.
  * Backend authorize() remains the source of truth for API access.
+ *
+ * A company on the permission model (Settings > Permissions) does not use this map: userCan() answers from the person's
+ * default basic access + permission set + grants (lib/access.js), so the menu, tabs and buttons follow the same list the API checks.
  */
+import { capabilityAllowed, isPermissionMode } from './access.js';
 
 const ROLE_CAPS = {
   admin: new Set([
@@ -35,6 +39,7 @@ const ROLE_CAPS = {
     'viewJobPipeline',
     'viewCandidatePipeline',
     'viewRequirementMatrix',
+    'viewApplicants',
     'viewOrgChart',
     'viewTimesheets',
     'manageTimesheets',
@@ -55,6 +60,8 @@ const ROLE_CAPS = {
     'viewTrading',
     'viewContracts',
     'viewProjects',
+    // Marketing website control (job postings + form submissions), master workspace only.
+    'manageWebsite',
   ]),
   sales: new Set([
     'viewPeople',
@@ -72,6 +79,7 @@ const ROLE_CAPS = {
     'viewPipeline',
     'viewJobPipeline',
     'viewRequirementMatrix',
+    'viewApplicants',
     'viewOrgChart',
     'viewTimesheets',
     'viewExpenses',
@@ -93,6 +101,7 @@ const ROLE_CAPS = {
     'viewPipeline',
     'viewCandidatePipeline',
     'viewRequirementMatrix',
+    'viewApplicants',
     'viewOrgChart',
     'viewTimesheets',
     'viewExpenses',
@@ -144,6 +153,20 @@ export function can(role, capability) {
   return ROLE_CAPS[role]?.has(capability) === true;
 }
 
+// The older capability names the screens use, and the custom-role permission that now decides them.
+const CAP_TO_PERMISSION = {
+  editAccount: 'accounts.update',
+  editRequirement: 'requirements.update',
+  editProfile: 'profiles.update',
+  createProfile: 'profiles.create',
+  editSubmission: 'submissions.update',
+  viewFinancials: 'financials.view',
+  viewAnalytics: 'financials.view',
+  viewBillingRates: 'financials.view',
+  manageBillingRates: 'financials.view',
+  viewProjects: 'financials.view',
+};
+
 // Capabilities no ordinary role has — only a superadmin (is_superadmin flag).
 const SUPERADMIN_ONLY = new Set(['overrideStage', 'editAnyUser', 'deleteRecords']);
 
@@ -161,8 +184,14 @@ const SUPERADMIN_ONLY = new Set(['overrideStage', 'editAnyUser', 'deleteRecords'
  */
 export function userCan(user, capability) {
   if (!capability) return false;
+  if (isPermissionMode(user)) return capabilityAllowed(user, capability);
   if (user?.is_superadmin) return true;
   if (SUPERADMIN_ONLY.has(capability)) return false;
+  // A custom role (Settings > Roles & permissions) decides the actions it lists; everything else follows its plain base role.
+  if (user?.permissions) {
+    const key = capability.includes('.') ? capability : CAP_TO_PERMISSION[capability];
+    if (key) return Boolean(user.permissions[key]);
+  }
   return can(user?.role, capability);
 }
 

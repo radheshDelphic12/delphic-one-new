@@ -2,6 +2,19 @@
 
 Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md](TODO.md) for what's next and [AGENTS.md](../AGENTS.md) for project context.
 
+## 2026-10-23 — Time & Attendance crash for permission-mode users
+
+- Fixed the hub crash caused by a tab without a permission key reaching `hasNeed()` and calling `startsWith` on `undefined`. Missing/invalid permission needs now fail closed; the IT Log time tab explicitly requires `basic.timesheet`.
+- Kept manager Approvals visible when the API confirms the user's reporting scope; that tab is conditional on server-provided approval scope, not a global `timesheets.approve` permission.
+- Added a focused permission-helper regression test.
+
+## 2026-10-08 - Leave: admin override for days marked present (branch `dev-deepanshu`, pushed to `staging` and `main` as 5101ada, test fix 4e74524 on `staging`)
+
+- Special case: an admin can apply a **full-day** leave for an employee on dates they were already marked present (previously refused with `present_on_date`). `POST /leave/requests/admin` takes `override_attendance: true`, which requires `auto_approve: true` and a reason (min 3 chars). Leave Managers who are not admins get 403. Half-day leave never needed it.
+- The leave is approved right away; the employee's present / wfh / half_day attendance rows in the range become `leave` (`regularized_by` = admin, `regularized_reason` = `[leave override] <reason>`), each runs `detectFinanceChange` (a locked month is flagged, not rewritten), and one `audit_logs` row `attendance_leave_override` lists the days and their previous status. Timesheet conflicts are still enforced.
+- UI: "Apply for employee" drawer (Leave page) gets an admin-only "Override attendance (special case)" checkbox; it forces "Approve immediately" and makes the reason required. No migration.
+- Test added in `server/tests/leave-timesheet-integration.test.js` ("admin override ..."); not run locally (no test DB on this machine). First CI run failed only because the test expected 400 for a validation error - this app returns 422 (`errorHandler.js`); fixed in 4e74524.
+
 ## 2026-10-08 - Super Admin: Group Dashboard + full company control (branch `super_admin_branch`, committed locally as d4d86ee, not pushed)
 
 - **Group Finance** tab (default of Group Overview): consolidated + per-company revenue, expenses, profit, assets and valuation (profit x 240 + asset x 3), filters (period, FY quarter/year, Locked/Unlocked/All, company chips), sortable/searchable company table, one-legend-per-company graphs, contribution, rankings, alerts (configurable thresholds), activity feed, company panel with valuation breakdown, drill-down (`GET /super-dashboard/companies/:orgId/drilldown`) and monthly asset values (history kept, revisions audited), CSV and PDF (print view) export. Logo `client/public/group-logo.svg` (a redrawn Gulati Foundation logo; replace with the original file).
@@ -55,6 +68,26 @@ Reverse-chronological log of what's been done. Newest entry on top. See [TODO.md
 - Gulati Industries trading workspace (copper cathode + trading of deals) built Zephyr-style; plan, decisions and admin-editability matrix in [features/GULATI-INDUSTRIES.md](../features/GULATI-INDUSTRIES.md), test guide [testing/TESTING-GULATI.md](../testing/TESTING-GULATI.md); demo seed `npm run gulati:seed` (server).
 - Financials: valuation = (Delphic profit x 240) + (asset value x 3); month filters made fast (4-way month concurrency in records.service) with an "Updating..." state; salary slip uses the sharp `/delphic-logo.svg`. Zeros on staging/prod mean missing locked records / asset values, not a code fault.
 - Time & Attendance > OT Tickets: admin can apply and edit OT for any employee (`POST /timesheets/overtime-tickets/admin`, admin edit with reason, lock audit + finance-change detection). The Project dropdown lists only projects assigned to the chosen employee on that date (`GET /timesheets/overtime-tickets/employee-projects`); the server rejects unassigned projects with 422 `project_not_assigned`. Tests in server/tests/overtime-tickets.test.js pass.
+
+## 2026-10-08 — Gulati: separate "Financials" sidebar section with Financial trends (local, uncommitted)
+
+- New sidebar entry **Financials** (`/gulati/financials`, just above "Gulati setup", admin capability `valuation`) with one section, **Financial trends**, laid out like Delphic Global and Zephyr: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table with a **Lock month / Reopen** button per month, and the asset value form (with remove). Page: `GulatiFinancialsPage.jsx`.
+- **Finance** (`/gulati/finance`) keeps its original tabs (Overview, P&L, By trading type, Expenses, Month close); only the Valuation tab I had added there was moved out into Financials. The home page Valuation KPI links to Financials.
+- `GET /gulati/finance/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months, Unlocked = live figures of months not closed, All = live. Test gulati-trading (13/13).
+
+## 2026-10-07 — Gulati valuation section (local, uncommitted)
+
+- Gulati Finance > Valuation tab: (net profit x 240) + (asset value x 3) per month, admin-entered asset values (`gx_asset_values`, carry-forward), live or closed-months-only profit. Tests in server/tests/gulati-trading.test.js pass (13/13) and gulati-admin-edits (8/8).
+
+## 2026-10-08 — Zephyr Financials reduced to one section: Financial trends (local, uncommitted)
+
+- Zephyr > Financials now has a single section, **Financial trends**, laid out like Delphic Global: Locked / Unlocked / All toggle, start / end month, Revenue, Profit and Valuation month-on-month graphs, the "how each month's valuation is worked out" table and the asset value form (with remove). Plan vs actual, Projection, Month close and Statements are no longer on the page (their APIs are untouched). Page and nav need the admin capability `overviewValuation`.
+- API `GET /zephyr/financials/valuation?state=locked|unlocked|all`: Locked = frozen figures of closed months (`snapshot.summary`), Unlocked = live figures of months not closed, All = live. Test zephyr-financials (10/10).
+
+## 2026-10-07 — Zephyr valuation section (local, uncommitted)
+
+- Zephyr Financials > Valuation tab: (Zephyr profit x 240) + (asset value x 3) per month, same as Delphic Global, with Revenue / Profit / Valuation month-on-month graphs. Profit = revenue - expense - approved salaries. Admin-entered asset values (`zx_asset_values`, migration `20261007160000`, carry-forward); live or closed-months-only profit. The Overview valuation tile uses the same figure; the old method / multiple / manual setting is retired from the UI. Test in server/tests/zephyr-financials.test.js (10/10).
+
 
 ## 2026-10-06 — Zephyr real-estate / construction build R0-R9 done locally (not pushed)
 
@@ -2767,3 +2800,45 @@ Smoke coverage in `server/tests/modules-split.test.js` (comments CRUD-ish, docum
 - Routes-only (no controller/service split yet) for: **admin, comments, dashboard, documents**; requirements/seats and submissions/interviewRounds routes exist as extra route files within those modules.
 - CI workflow and deploy workflow (`deploy.yml`, currently a no-op pending `DEPLOY_ENABLED` + VPS secrets) added under `.github/workflows/`.
 - `docs/AGENTS.md`, `docs/progress/PROGRESS.md`, `docs/progress/TODO.md` created to track context going forward.
+
+## 2026-10-08 - Acconcy Financials = Gulati layout; group light-green theme + company logos
+
+- Acconcy > Financials opens on "Financial trends" (same as Gulati): Locked/Unlocked/All, month range, Revenue/Profit/Valuation charts, valuation breakdown table with Lock month/Reopen. `GET /acconcy/finance/valuation` gained `?state=` and per-month `revenue`. Extra tabs (Service-wise, Valuation, Month close) kept. Component `client/src/components/acconcy/AcconcyFinancialTrends.jsx`; test `acconcy financial trends` in `tests/acconcy-workspace.test.js` (30/30 on `acconcy_test`). Details: docs/features/ACCONCY-FINANCE.md.
+- Group view uses the light-green `.theme-group`; company logos via `client/src/lib/orgLogo.js` in switcher, sidebar list and login picker (docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md).
+- All uncommitted on branch `acconcy-finance-workspace`; nothing pushed. Temp e2e files (`client/vite.pw.config.js`, `api4100.log`, `vite5190.log`) must not be committed.
+
+## 2026-10-09 - Meetings with active clients / vendors
+
+- Accounts that are **active** (client or vendor) can now have any number of extra tracked meetings: Account detail > **Meetings** > Schedule meeting (title, online/in person, date and time, duration, location or link, notes, attendees). Edit, Done, Cancel, Reopen, Delete. The account stage is never changed (no stage_history row); the onboarding meeting on the account is untouched.
+- They appear on the Calendar feed (kind client_meeting, id cm-<id>, status scheduled/completed/cancelled, honours the status / mine / audience filters).
+- API: GET|POST /accounts/:id/meetings, PATCH|DELETE /accounts/:id/meetings/:meetingId (write = admin + BDA, same as other account edits; 409 when the account is not active, 400 offline without a location).
+- Schema: additive migration 20261009090000_client_meetings (tables client_meetings, client_meeting_attendees, enum ClientMeetingStatus). Test: tests/accounts-client-meetings.test.js (4) + accounts-meeting + interviews-calendar green on acconcy_test. Not committed/pushed.
+
+## 2026-10-09 - Group Dashboard speed on a remote DB; Acconcy on staging
+
+- Group Dashboard (/super-dashboard/group/overview) timed out (504) on Render: the Delphic engine runs ~3500 queries per 12-month window (x2 windows) = ~270 s at ~100 ms/query to Neon. Now: companies computed in parallel (126 s cold with a pool of 9), per company/window cache served stale-while-revalidate (FRESH_MS 120 s, shared in-flight, 0.5 s warm), invalidated on asset-value edits, off in tests, and warmed 15 s after server start (index.js). Production (local DB) was never slow.
+- Staging Neon: Acconcy org created with seed-admin.js (admin = paras.gulati@delphic.in) and moved into the Delphic group, so the Group Dashboard lists 4 companies. Staging super admin: paras.gulati@delphic.in.
+
+## 2026-10-09 - Group Dashboard filters, projections, Gulati Industries logo
+
+- Group view logo/name = Gulati Industries icon. Period / group-by / figures filters (incl. pick a month, custom start-end) on Group Finance, Dashboard (rebuilt on /group/overview) and Projections & Valuation (new /group/projection, month-by-month history + projection, horizon 3-12 months). Per-month cache for the remote-DB slowness. Tests: 3 new in tests/super-admin-group-dashboard.test.js (19 green); Playwright e2e of the filters passed locally. Removed the accidentally committed client/vite.pw.config.js. Local commit only.
+
+## 2026-10-09 - Gulati Foundation (5th company)
+
+- New foundation / NGO workspace and Group Dashboard integration: campaigns, initiatives (data-driven), budgets with revision history, planned vs actual investment, funding vs spending, approvals, overspend guard with admin override, projections (plan / run-rate), 13 reports, financials with month close. Migration 20261010090000_gulati_foundation (9 fx_ tables). Group login now creates admin memberships so a newly added company shows up straight away. Full write-up: docs/features/GULATI-FOUNDATION.md. Tests: foundation-workspace (12), super-admin-group-dashboard (21), auth / orgs / workspace-isolation / acconcy regression green. Local seed applied to the dev DB (demo foundation visible at localhost:5173). Not pushed.
+
+## 2026-10-12 - Sales shared requirements, Reports drill-down, Zklyrera Spirits live
+
+- **Sales requirements**: the whole Sales team sees and manages every requirement. Fixed "Not permitted" on the requirement panel (`entityAccess.canAccessRequirement` still had the owner-only rule) and the Pipeline board (Sales were pinned to their own requirements server-side; `scope=mine` is now honoured). Doc: docs/features/SALES-REQUIREMENTS-SHARED-ACCESS.md.
+- **Reports drill-down**: click a count or a row to see the records behind it (`GET /reports/drilldown`, `drilldown.service.js`, `DrilldownDrawer.jsx`). BDA meeting-conversion double count fixed; coverage chart labels follow the selected view. Doc: docs/features/REPORTS-DRILLDOWN.md. Tests: tests/reports-drilldown.test.js.
+- **Zklyrera Spirits** (6th company) pushed and deployed. Migrations 20261013090000_zklyrera_spirits + 20261013090100_zk_expense_class (additive) applied on staging (Render boot) and production (87/87 up to date). Staging showed only 5 companies until `prisma/zklyrera/seed-admin.js` created the org; it was run on staging (Neon) and on production (`docker exec -w /app/server delphic-server-1 node prisma/zklyrera/seed-admin.js`).
+- **Release**: main = staging = super_admin_branch = 89b69b1. Push to main auto-deploys production after CI (deploy.yml); production was already at 89b69b1 when checked. Docs/README/ARCHITECTURE-OVERVIEW updated for the 6 companies, the shared Sales rule and the deploy flow.
+- **Group Dashboard redesign (client only)**: line/wave charts only (12-month window, thin smooth lines), one compact card shape for every company, sections ordered by frequency of use, Recent activity in a right-side drawer, attention lists and company insights open on click. The original banner and tab bar were kept as designed. No server, schema or migration change, so no data impact. Details in `docs/features/SUPER-ADMIN-GROUP-DASHBOARD.md`.
+- **Release**: super_admin_branch = staging = main = 183d161 (Render staging deploy dep-db6cal876l7s73chueug live; the push to main triggers CI then the production auto-deploy, to be confirmed with `git log --oneline -1` on the prod host). Open: convert the remaining bar/pie/area charts in the other workspaces to line graphs (not started, awaiting the user's answer).
+- **HR reports - Submitted to client**: new table per sourcer per day (first move to `submitted_to_client`), with drill-down and export; test in `reports-drilldown.test.js`. Local only until pushed.
+- **Trips on the calendar + company insights (2026-10-13, local, uncommitted)**: Group Dashboard trips now appear on the Delphic Global calendar for the Group Super Admin (one `trip` event per day) with a manage drawer (`TripEventDrawer.jsx`: edit, status, meetings, delete) on the same record as the Travel tab; `GET /super-dashboard/group/travel/:id` added. Group Finance > Company insights now has Delphic Global, Gulati Industries, Zephyr and Acconcy through `groupInsights.service.js` + `CompanyInsightSection.jsx` (60s cache, same shape for all). Tests: `group-travel.test.js` (+1), `group-insights.test.js`. Details in `docs/features/TAT-TRAVEL-APPLICANTS.md` and `SUPER-ADMIN-GROUP-DASHBOARD.md`.
+- **Local demo data**: local DB seeded for all features (`prisma/seed-demo-gaps.js` plus the existing demo seeds; fixed a `YEAR` bug in `seed-vendor-contractor-scenario.js`). Dumps and logins in `D:\Delphic-DB-Dumps\` (README.txt).
+- **Website forms**: flow, assignment and env/VPS setup written down in `docs/features/WEBSITE-FORMS-FLOW.md`. `WEBSITE_*` are passed through docker-compose (c545abe); the five values are set in the VPS `/opt/delphic/.env` and local `server/.env`.
+- **Release 2026-10-14**: super_admin_branch = staging = main = 2ec0cd3 (trips on calendar, company insights for every company, Recruiter reports hidden; no schema change, no migration). Staging Render deploy `dep-db7inu4s728c73d6p6m0` live (Render autoDeploy on push to `staging`; Neon 93/93 up to date). The production Deploy of 2ec0cd3 failed (run 38528197180), but the next deploy, of da87af8 (08:11 UTC, which contains 2ec0cd3), succeeded: production = main = da87af8. da87af8 adds migration `20261015100000_valterra_company_registration` (company row + group Super Admin access only, no data), so Valterra Resources shows as the 7th company with no manual seed; Neon staging is 94/94 up to date.
+- **TAT scroll (2026-10-14, local, uncommitted)**: the Requirements table now keeps a minimum height (`max(22rem, calc(100dvh - 18rem))`) and the detail page TAT row gets `min-w-0`; no scroll defect was found in the create/edit drawer (its body already scrolls). Not reproduced in a browser: if it still fails, get the screen + viewport size.
+- **Projects vs sales drop, work locations, register totals (2026-11-05, local, not pushed)**: a client drop no longer hides its projects (`projectListWhere` has no stage; drop screen warns with `live_projects`); dated work-location assignments + work sites move check-in to a client site / other office (migration `20261119100000_work_locations`); register totals split office / WFH / worked / leave by code and the day editor cancels a day's (or a several-day) leave. Details: `docs/features/PROJECTS-WORK-LOCATION-REGISTER.md`. Tests written, not run (local DB login failed).

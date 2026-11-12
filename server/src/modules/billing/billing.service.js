@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const { contractState } = require('../../lib/contractState');
+const holdPeriods = require('../../lib/holdPeriods');
 const calendarsService = require('../calendars/calendars.service');
 const allocations = require('../../lib/allocations');
 const { projectListWhere } = require('../../lib/projectScope');
@@ -201,16 +202,20 @@ async function listDailyRevenue(orgId, { account_id, requirement_id, from, to })
 // draft -> sent -> paid, forward only (see schema.prisma's ClientInvoice comment).
 const FORWARD_TRANSITIONS = { draft: 'sent', sent: 'paid' };
 
-async function transitionInvoice(orgId, invoiceId, status) {
+async function transitionInvoice(orgId, invoiceId, status, ctx = {}) {
   const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
   if (!invoice) return { error: 'not_found' };
   if (FORWARD_TRANSITIONS[invoice.status] !== status) return { error: 'invalid_transition' };
   const frozen = await require('../calculations/financialLock').assertOpen(orgId, invoice.period_month, invoice.period_year);
   if (frozen) return frozen;
 
+  // Marking an invoice paid is a payment of what is still pending (part payments: POST /invoices/:id/payments). The wallet is optional.
+  if (status === 'paid') {
+    const paidRow = await require('./invoicePayments.service').record(orgId, ctx.user, invoiceId, { bank_charges: '0', other_deductions: '0', ...(ctx.walletPayment ? { wallet_payment: ctx.walletPayment } : {}) });
+    return paidRow.error ? { error: paidRow.error } : { invoice: paidRow.invoice };
+  }
   const data = { status };
   if (status === 'sent') data.sent_at = new Date();
-  if (status === 'paid') data.paid_at = new Date();
   const updated = await prisma.clientInvoice.update({ where: { id: invoiceId }, data });
   return { invoice: updated };
 }
@@ -424,9 +429,13 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     id: account.id,
     project_code: account.project_code || null,
     project_name: calendarsService.projectName(account),
+    face_resource: account.face_resource || null,
+    hsn_sac: account.hsn_sac || null,
     ...calendarsService.clientFields(account),
-    // Left blank on purpose (client brief) — linking a requirement comes later.
-    requirement: '',
+    // The requirement this project is linked to (Finance picks it in the project drawer): its title for lists, the full link for the picker.
+    requirement: account.requirement?.title || '',
+    requirement_id: account.requirement_id || null,
+    requirement_link: account.requirement ? { id: account.requirement.id, title: account.requirement.title, status: account.requirement.status, client: account.requirement.account?.name || null } : null,
     service_category: account.service_category,
     billing_type: rate ? rate.rate_type : null,
     rate: rate ? Number(rate.rate) : null,
@@ -441,8 +450,11 @@ function serializeProfile(account, rates, calendar, { editable = Boolean(account
     agreement_start_date: account.agreement_start_date ? ymd(account.agreement_start_date) : null,
     agreement_end_date: account.agreement_end_date ? ymd(account.agreement_end_date) : null,
     contract_status: account.contract_status,
+    contract_hold_periods: Array.isArray(account.contract_hold_periods) ? account.contract_hold_periods : [],
     contract: contractState(account),
     benchmark_hours: account.benchmark_hours,
+    work_start_time: account.work_start_time || null,
+    work_end_time: account.work_end_time || null,
     overtime_billable: account.overtime_billable,
     overtime_multiplier: Number(account.overtime_multiplier ?? 1),
     estimated_monthly_hours: account.estimated_monthly_hours !== null && account.estimated_monthly_hours !== undefined ? Number(account.estimated_monthly_hours) : null,
@@ -469,6 +481,8 @@ const PROFILE_SELECT = {
   name: true,
   project_name: true,
   project_code: true,
+  face_resource: true,
+  hsn_sac: true,
   overtime_billable: true,
   overtime_multiplier: true,
   estimated_monthly_hours: true,
@@ -480,11 +494,16 @@ const PROFILE_SELECT = {
   client_name: true,
   client_account_id: true,
   client_account: calendarsService.CLIENT_ACCOUNT_SELECT,
+  requirement_id: true,
+  requirement: { select: { id: true, title: true, status: true, account: { select: { name: true } } } },
   service_category: true,
   agreement_start_date: true,
   agreement_end_date: true,
   contract_status: true,
+  contract_hold_periods: true,
   benchmark_hours: true,
+  work_start_time: true,
+  work_end_time: true,
   client_billing_currency: true,
   project_calendar: { select: { calendar: { select: { id: true, name: true, kind: true } } } },
 };
@@ -563,19 +582,36 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   // Accounts section owns and linked projects show as their client name.
   const data = {};
   if (renamed) data.project_name = patch.project_name;
+  if (patch.face_resource !== undefined) data.face_resource = patch.face_resource;
+  if (patch.hsn_sac !== undefined) data.hsn_sac = patch.hsn_sac;
   // null clears the client; an id links the client account and snapshots its name.
   if (patch.client_account_id !== undefined) {
     data.client_account_id = client?.id || null;
     data.client_name = client?.name || null;
   }
+  // null unlinks; an id must be a requirement of this company.
+  if (patch.requirement_id !== undefined) {
+    if (patch.requirement_id) {
+      const requirement = await prisma.requirement.findFirst({ where: { id: patch.requirement_id, org_id: orgId }, select: { id: true } });
+      if (!requirement) return { error: 'project_requirement_not_found' };
+    }
+    data.requirement_id = patch.requirement_id || null;
+  }
   if (patch.service_category !== undefined) data.service_category = patch.service_category;
   if (patch.agreement_start_date !== undefined) data.agreement_start_date = patch.agreement_start_date;
   if (patch.agreement_end_date !== undefined) data.agreement_end_date = patch.agreement_end_date;
   if (patch.contract_status !== undefined) data.contract_status = patch.contract_status;
+  if (patch.contract_hold_periods !== undefined) {
+    const holdError = holdPeriods.validate(patch.contract_hold_periods);
+    if (holdError) return { error: holdError };
+    data.contract_hold_periods = patch.contract_hold_periods;
+  }
   const start = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
   const end = patch.agreement_end_date !== undefined ? patch.agreement_end_date : existing.agreement_end_date;
   if (start && end && end < start) return { error: 'end_before_start' };
   if (patch.benchmark_hours !== undefined) data.benchmark_hours = patch.benchmark_hours;
+  if (patch.work_start_time !== undefined) data.work_start_time = patch.work_start_time;
+  if (patch.work_end_time !== undefined) data.work_end_time = patch.work_end_time;
   if (patch.overtime_billable !== undefined) data.overtime_billable = patch.overtime_billable;
   if (patch.overtime_multiplier !== undefined) data.overtime_multiplier = patch.overtime_multiplier;
   if (patch.estimated_monthly_hours !== undefined) data.estimated_monthly_hours = patch.estimated_monthly_hours;
@@ -585,6 +621,21 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
   if (patch.billable_day_hours !== undefined) data.billable_day_hours = patch.billable_day_hours;
 
   const effectiveStart = patch.agreement_start_date !== undefined ? patch.agreement_start_date : existing.agreement_start_date;
+  // A rate saved with no date normally starts on the agreement start. A rate already in force from a LATER date (added in Billing
+  // Setup, or before the start date was corrected) would then outrank it for ever and the edit would change nothing: start it
+  // from that rate's date instead (rates sharing a date resolve to the one added last). A contract that has not started keeps its start.
+  let defaultFrom = effectiveStart || todayUtc();
+  // A contract that has not started yet bills nothing before its start, so the saved rate governs from today: starting it on the
+  // future start date would leave an older rate (from before the start date was moved) in force, and the edit would not show.
+  if (patch.billing && !patch.billing.effective_from && defaultFrom > todayUtc()) defaultFrom = todayUtc();
+  if (patch.billing && !patch.billing.effective_from && defaultFrom <= todayUtc()) {
+    const latest = await prisma.billingRate.findFirst({
+      where: { org_id: orgId, account_id: accountId, requirement_id: null, effective_from: { gt: defaultFrom, lte: todayUtc() } },
+      orderBy: { effective_from: 'desc' },
+      select: { effective_from: true },
+    });
+    if (latest) defaultFrom = latest.effective_from;
+  }
   await prisma.$transaction(async (tx) => {
     if (Object.keys(data).length) await tx.account.update({ where: { id: accountId }, data });
     if (patch.billing) {
@@ -598,7 +649,7 @@ async function updateProjectProfile(orgId, actorUserId, accountId, patch) {
           rate_type,
           rate,
           currency,
-          effective_from: patch.billing.effective_from || effectiveStart || todayUtc(),
+          effective_from: patch.billing.effective_from || defaultFrom,
           created_by: actorUserId,
         },
       });

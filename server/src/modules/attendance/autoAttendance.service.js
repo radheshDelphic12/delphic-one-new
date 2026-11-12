@@ -71,7 +71,7 @@ async function skipReason(orgId, member, date) {
   return leaves.length === 1 ? 'half_day_leave' : null;
 }
 
-async function markPresent(orgId, member, date, { actorUserId = null, reason }) {
+async function markPresent(orgId, member, date, { actorUserId = null, reason, source = 'manual' }) {
   if (date > todayIst()) return { skipped: 'future_date' };
   const skipped = await skipReason(orgId, member, date);
   if (skipped && skipped !== 'half_day_leave') return { skipped };
@@ -82,7 +82,7 @@ async function markPresent(orgId, member, date, { actorUserId = null, reason }) 
       org_membership_id: member.id,
       date,
       status,
-      source: 'manual',
+      source,
       regularized_by: actorUserId,
       regularized_reason: reason,
     },
@@ -111,7 +111,7 @@ async function runDaily(orgId, now = new Date()) {
   let created = 0;
   for (const member of members) {
     if (!startTimePassed(member, now)) continue;
-    const result = await markPresent(orgId, member, date, { reason: 'auto_daily' });
+    const result = await markPresent(orgId, member, date, { reason: 'auto_daily', source: 'auto' });
     if (result.record) created += 1;
   }
   return { date: ymd(date), considered: members.length, created };
@@ -174,4 +174,51 @@ async function listBackfillRuns(orgId, limit = 20) {
   return rows.map((r) => ({ id: r.id, actor_id: r.actor_id, created_at: r.created_at, reason: r.reason, ...r.snapshot }));
 }
 
-module.exports = { applicableMembers, startTimePassed, runDaily, backfillMonth, listBackfillRuns };
+/**
+ * An approved leave takes over the days the automatic "present" entry had filled in, so the leave shows at once
+ * instead of waiting for someone to delete the entry. Only `auto` entries are touched: a manual, regularised or
+ * real check-in entry is never removed. A day in a month an admin has locked for that employee is left alone.
+ *  - a full day (or two half days) off  -> the automatic entry is removed
+ *  - a single half day off              -> the automatic "present" becomes "half day"
+ */
+async function resolveAutoForLeave(orgId, orgMembershipId, from, to, { actorUserId = null, requestId = null } = {}) {
+  const records = await prisma.attendanceRecord.findMany({
+    where: { org_id: orgId, org_membership_id: orgMembershipId, source: 'auto', date: { gte: from, lte: to } },
+  });
+  const result = { removed: 0, half_day: 0, skipped_locked: 0 };
+  if (!records.length) return result;
+  const [leaves, locks] = await Promise.all([
+    prisma.leaveRequest.findMany({
+      where: { org_id: orgId, org_membership_id: orgMembershipId, status: 'approved', from_date: { lte: to }, to_date: { gte: from } },
+      select: { from_date: true, to_date: true, is_half_day: true },
+    }),
+    prisma.timesheetMonthLock.findMany({ where: { org_id: orgId, org_membership_id: orgMembershipId }, select: { period_year: true, period_month: true } }),
+  ]);
+  const locked = (d) => locks.some((l) => l.period_year === d.getUTCFullYear() && l.period_month === d.getUTCMonth() + 1);
+  const touched = [];
+  for (const record of records) {
+    const covering = leaves.filter((l) => l.from_date <= record.date && l.to_date >= record.date);
+    if (!covering.length) continue;
+    if (locked(record.date)) {
+      result.skipped_locked += 1;
+      continue;
+    }
+    if (covering.some((l) => !l.is_half_day) || covering.length >= 2) {
+      await prisma.attendanceRecord.delete({ where: { id: record.id } });
+      result.removed += 1;
+      touched.push({ date: ymd(record.date), was: record.status, now: 'removed' });
+    } else if (record.status === 'present') {
+      await prisma.attendanceRecord.update({ where: { id: record.id }, data: { status: 'half_day' } });
+      result.half_day += 1;
+      touched.push({ date: ymd(record.date), was: 'present', now: 'half_day' });
+    }
+  }
+  if (touched.length && actorUserId && requestId) {
+    await prisma.auditLog.create({
+      data: { org_id: orgId, actor_id: actorUserId, action: 'attendance_auto_replaced_by_leave', entity_type: 'leave_request', entity_id: requestId, reason: 'Approved leave replaced the automatic present entry', snapshot: { employee: orgMembershipId, days: touched } },
+    });
+  }
+  return result;
+}
+
+module.exports = { applicableMembers, startTimePassed, runDaily, backfillMonth, listBackfillRuns, resolveAutoForLeave };

@@ -18,6 +18,8 @@ import UnlockButton from '../../components/UnlockButton.jsx';
 import DeleteRecordButton from '../../components/DeleteRecordButton.jsx';
 import { userCan } from '../../lib/permissions.js';
 import InterviewRoundsPanel from './InterviewRoundsPanel.jsx';
+import InterviewPlanPanel from './InterviewPlanPanel.jsx';
+import AiInterviewCard from './AiInterviewCard.jsx';
 import SubmissionStageOverrideDrawer from './SubmissionStageOverrideDrawer.jsx';
 import {
   SUBMISSION_PIPELINE,
@@ -101,8 +103,11 @@ export default function SubmissionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { pushError } = useAlerts();
+  const { pushError, pushSuccess } = useAlerts();
   const [submission, setSubmission] = useState(null);
+  // a closed (locked) candidate: only the actual joining date can still be entered, on its own
+  const [joinDate, setJoinDate] = useState('');
+  const [joinSaving, setJoinSaving] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyError, setHistoryError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -111,10 +116,27 @@ export default function SubmissionDetailPage() {
   const [form, setForm] = useState(null);
   const [stageModal, setStageModal] = useState(null);
   const [stageReason, setStageReason] = useState('');
+  const [rateReason, setRateReason] = useState('');
+  const [rateHistory, setRateHistory] = useState([]);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const canOverrideStage = canOverrideSubmissionStage(user);
 
   const canEdit = canMutateSubmission(user) && submission && !submission.is_locked;
+  const canSetJoining = Boolean(submission && submission.stage === 'closed' && submission.is_locked && canMutateSubmission(user));
+  useEffect(() => { setJoinDate(dateInputValue(submission?.actual_joining_date)); }, [submission]);
+
+  async function saveJoinDate() {
+    setJoinSaving(true);
+    try {
+      await apiClient.patch(`/submissions/${id}`, { actual_joining_date: joinDate || null });
+      pushSuccess(joinDate ? 'Joining date saved' : 'Joining date cleared');
+      await load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to save the joining date'), 'Something went wrong');
+    } finally {
+      setJoinSaving(false);
+    }
+  }
 
   // Stage moves: sales, recruiter and admin do forward transitions on any
   // submission (backward moves stay admin-only via canMoveSubmissionBackward).
@@ -131,8 +153,15 @@ export default function SubmissionDetailPage() {
     );
   }, [form]);
 
+  // The interview template plan; stays null (older rounds panel) for requirements made before templates existed.
+  const [plan, setPlan] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
+    apiClient
+      .get(`/submissions/${id}/interview-plan`)
+      .then((res) => setPlan(res.data.data || null))
+      .catch(() => setPlan(null));
     // The stage-history request is secondary — a failure there must never blank the
     // whole ticket (candidate, commercials, rounds). Fetch it separately.
     apiClient
@@ -145,6 +174,10 @@ export default function SubmissionDetailPage() {
         setHistory([]);
         setHistoryError(apiErrorMessage(err, 'Could not load stage history'));
       });
+    apiClient
+      .get(`/submissions/${id}/rate-changes`)
+      .then((r) => setRateHistory(r.data.data || []))
+      .catch(() => setRateHistory([]));
     try {
       const subRes = await apiClient.get(`/submissions/${id}`);
       const sub = subRes.data.data;
@@ -187,12 +220,23 @@ export default function SubmissionDetailPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  // A rate that was already set and is now different needs a reason; the server records it in the rate history.
+  const rateChangedFields = submission && form
+    ? ['proposed_rate', 'vendor_rate', 'final_agreed_rate'].filter((k) => submission[k] != null && toOptionalNumber(form[k]) !== undefined && Number(form[k]) !== Number(submission[k]))
+    : [];
+  const needsRateReason = rateChangedFields.length > 0;
+
   async function handleSave(e) {
     e.preventDefault();
     if (!canEdit) return;
+    if (needsRateReason && rateReason.trim().length < 3) {
+      pushError('Write a reason for the rate change (at least 3 characters).', 'Reason needed');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
+        ...(needsRateReason ? { rate_change_reason: rateReason.trim() } : {}),
         proposed_rate: toOptionalNumber(form.proposed_rate),
         proposed_rate_type: form.proposed_rate_type || undefined,
         proposed_rate_currency: form.proposed_rate_currency || undefined,
@@ -204,17 +248,18 @@ export default function SubmissionDetailPage() {
         relevancy_score: toOptionalNumber(form.relevancy_score),
         submission_notes: form.submission_notes.trim() || undefined,
         client_feedback: form.client_feedback.trim() || undefined,
-        offer_date: form.offer_date || undefined,
+        offer_date: form.offer_date || null,
         offer_ctc: toOptionalNumber(form.offer_ctc),
         offer_ctc_currency: form.offer_ctc_currency || undefined,
-        expected_joining_date: form.expected_joining_date || undefined,
-        actual_joining_date: form.actual_joining_date || undefined,
-        bgv_initiated_date: form.bgv_initiated_date || undefined,
+        expected_joining_date: form.expected_joining_date || null,
+        actual_joining_date: form.actual_joining_date || null,
+        bgv_initiated_date: form.bgv_initiated_date || null,
         bgv_status: form.bgv_status || undefined,
-        bgv_completed_date: form.bgv_completed_date || undefined,
+        bgv_completed_date: form.bgv_completed_date || null,
         bgv_notes: form.bgv_notes.trim() || undefined,
       };
       await apiClient.patch(`/submissions/${id}`, payload);
+      setRateReason('');
       await load();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to save changes'), 'Something went wrong');
@@ -300,6 +345,12 @@ export default function SubmissionDetailPage() {
             {submission.is_locked && (
               <span className="rounded bg-tertiary-100 px-2 py-0.5 text-xs text-tertiary-600">Locked</span>
             )}
+            {submission.joining_status === 'pending' && (
+              <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700" data-testid="joining-status">Joining date pending</span>
+            )}
+            {submission.joining_status === 'set' && (
+              <span className="rounded bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700" data-testid="joining-status">Joining date set</span>
+            )}
           </div>
           <p className="mt-1 text-sm text-tertiary-500">
             {submission.requirement?.title || '—'}
@@ -343,6 +394,21 @@ export default function SubmissionDetailPage() {
           This submission is locked. It remains available for viewing.
           {user?.role === 'admin' ? ' Use Unlock to allow edits again.' : ''}
         </div>
+      )}
+
+      {canSetJoining && (
+        <section className="rounded-lg border bg-white p-4" data-testid="joining-date-panel">
+          <h2 className="text-sm font-semibold text-tertiary-800">Joining date</h2>
+          <p className="mt-1 text-sm text-tertiary-500">
+            This ticket is closed. Enter the actual joining date once the candidate joins; the recruiter&apos;s joinings count from this date. Leave it empty while it is still to come.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <input type="date" aria-label="Actual joining date" value={joinDate} onChange={(e) => setJoinDate(e.target.value)} className="rounded-md border px-3 py-2 text-sm" />
+            <button type="button" className="btn-primary" disabled={joinSaving || joinDate === dateInputValue(submission.actual_joining_date)} onClick={saveJoinDate}>
+              {joinSaving ? 'Saving…' : 'Save joining date'}
+            </button>
+          </div>
+        </section>
       )}
 
       <section className="rounded-lg border bg-white p-4">
@@ -397,7 +463,7 @@ export default function SubmissionDetailPage() {
         )}
         {(submission.stage === 'interview_result' || nextSubmissionStages(submission.stage).includes('offer_sent')) && (
           <p className="mt-2 text-xs text-tertiary-400">
-            Moving to offer sent requires every interview round to have a non-pending result.
+            Moving to offer sent requires a result on every scheduled mandatory interview round. Optional rounds can stay pending.
           </p>
         )}
         {submission.stage === 'bgv' && (
@@ -481,14 +547,27 @@ export default function SubmissionDetailPage() {
         </section>
       </div>
 
-      <InterviewRoundsPanel
-        submissionId={id}
-        submission={submission}
-        rounds={submission.interview_rounds || []}
-        user={user}
-        missingMandatoryRounds={submission.missing_mandatory_rounds}
-        onChanged={load}
-      />
+      {plan ? (
+        <InterviewPlanPanel
+          submissionId={id}
+          submission={submission}
+          plan={plan}
+          rounds={submission.interview_rounds || []}
+          user={user}
+          onChanged={load}
+        />
+      ) : (
+        <InterviewRoundsPanel
+          submissionId={id}
+          submission={submission}
+          rounds={submission.interview_rounds || []}
+          user={user}
+          missingMandatoryRounds={submission.missing_mandatory_rounds}
+          onChanged={load}
+        />
+      )}
+
+      <AiInterviewCard submissionId={id} submission={submission} user={user} />
 
       <form onSubmit={handleSave} className="space-y-4">
         <section className="rounded-lg border bg-white p-4">
@@ -744,6 +823,34 @@ export default function SubmissionDetailPage() {
             </div>
           </fieldset>
         </section>
+
+        {canEdit && needsRateReason && (
+          <div data-testid="rate-reason-box" className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <label className="mb-1 block text-xs font-medium text-tertiary-700">Reason for changing the rate (required)</label>
+            <input
+              data-testid="rate-reason"
+              value={rateReason}
+              onChange={(e) => setRateReason(e.target.value)}
+              maxLength={500}
+              placeholder="e.g. Vendor renegotiated, client approved new rate"
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            />
+          </div>
+        )}
+
+        {rateHistory.length > 0 && (
+          <section data-testid="rate-history" className="rounded-md border p-3">
+            <h3 className="mb-2 text-sm font-semibold text-tertiary-900">Rate change history</h3>
+            <ul className="divide-y text-sm">
+              {rateHistory.map((h) => (
+                <li key={h.id} className="py-1.5">
+                  <span className="font-medium">{h.field.replace(/_/g, ' ')}</span>: {h.old_value ?? '—'} → {h.new_value ?? '—'} {h.currency || ''}
+                  <span className="block text-xs text-tertiary-500">{h.reason || 'No reason recorded'} · {h.changed_by || 'Unknown'} · {new Date(h.changed_at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {canEdit && (
           <button type="submit" disabled={saving} className="btn-primary">

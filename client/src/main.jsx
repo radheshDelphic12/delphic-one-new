@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { AuthProvider } from './lib/authContext.jsx';
 import { AlertProvider } from './lib/alerts/alertContext.jsx';
 import { NotificationsProvider } from './lib/notifications/notificationsContext.jsx';
+import TrackInWalletHost from './components/payments/TrackInWalletHost.jsx';
 import './styles/theme.css';
 import './styles/global.css';
 
@@ -22,6 +23,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <ErrorBoundary fullPage>
               <App />
             </ErrorBoundary>
+            <TrackInWalletHost />
           </NotificationsProvider>
         </AlertProvider>
       </AuthProvider>

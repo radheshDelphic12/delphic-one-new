@@ -5,12 +5,14 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { acconcyApi, acconcyError } from '../../lib/acconcy/api.js';
 import { useAcconcy, axCan } from '../../lib/acconcy/useAcconcy.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import { Empty, Num, Select, Text, card, dayOf } from '../../components/acconcy/ui.jsx';
 import { titleCase } from '../../lib/format.js';
 
 const TABS = [
   { key: 'general', label: 'Company and valuation' },
   { key: 'categories', label: 'Categories' },
+  { key: 'teams', label: 'Teams & reporting' },
   { key: 'audit', label: 'Audit log' },
 ];
 
@@ -135,6 +137,7 @@ export default function AcconcySettingsPage() {
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} className="min-w-0" />
       {tab === 'general' && <General />}
       {tab === 'categories' && <MasterEditor title="Revenue and expense categories" hint="Revenue and expense entries (professional fees, travel, legal, consulting fees...) use these." rows={cats} labelKey="name" extraAdd={{ label: 'Kind', initial: 'expense', options: [{ value: 'expense', label: 'Expense' }, { value: 'revenue', label: 'Income' }] }} onAdd={attempt((name, kind) => acconcyApi.createCategory({ name, kind }))} onUpdate={attempt((r, body) => acconcyApi.updateCategory(r.id, body))} onDelete={attempt(async (r) => { if (window.confirm(`Delete ${r.name}?`)) await acconcyApi.deleteCategory(r.id); })} />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <Audit />}
     </div>
   );

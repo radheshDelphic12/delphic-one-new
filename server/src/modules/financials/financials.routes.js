@@ -1,5 +1,6 @@
 const express = require('express');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { canMethod } = require('../../lib/permissions');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const requireMasterWorkspace = require('../../middleware/requireMasterWorkspace');
 const { ok, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -9,7 +10,7 @@ const service = require('./financials.service');
 // the strategic/recruitment layer other group companies don't use; every
 // source table stays org-scoped regardless.
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, requireMasterWorkspace, authorize('admin'));
+router.use(authenticate, requireOrgMembership, requireMasterWorkspace, canMethod('financials', 'admin'));
 
 router.get(
   '/monthly',

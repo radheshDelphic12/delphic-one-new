@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, Printer } from 'lucide-react';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -10,10 +12,42 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import PeriodPicker, { periodLabel } from '../../components/finance/PeriodPicker.jsx';
-import { amountText, billingCalculationLines, dateText, printClientInvoice } from '../../components/finance/financePrint.js';
+import { amountText, billingCalculationLines, dateText } from '../../components/finance/financePrint.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
+
+/** Bill-to details printed on an invoice: GST number + billing address of the customer / vendor, editable and optionally saved back to the account. */
+export function BillToFields({ value, onChange, partyLabel = 'customer' }) {
+  const v = value || { gstin: '', address: '', save: true };
+  const set = (patch) => onChange({ ...v, ...patch });
+  return (
+    <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3 sm:col-span-2">
+      <legend className="px-1 text-xs font-semibold text-tertiary-700">Bill to · {v.name || partyLabel}</legend>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-medium text-tertiary-600">
+          GST number
+          <input maxLength={20} value={v.gstin} onChange={(e) => set({ gstin: e.target.value.toUpperCase() })} placeholder="e.g. 27ABCDE1234F1Z5" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Billing address
+          <textarea rows={2} maxLength={500} value={v.address} onChange={(e) => set({ address: e.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+        </label>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-tertiary-600">
+        <input type="checkbox" checked={v.save !== false} onChange={(e) => set({ save: e.target.checked })} />
+        Update the {partyLabel} account with these details
+      </label>
+    </fieldset>
+  );
+}
+
+/** Request fields for the server from the BillToFields value. */
+export function billToPayload(value) {
+  if (!value) return {};
+  return { bill_to: { gstin: value.gstin || '', address: value.address || '' }, save_to_account: value.save !== false };
+}
 
 /** Invoice fields + the live preview of how the amount is worked out. */
 function InvoicePreview({ preview, fixedAmount }) {
@@ -67,18 +101,24 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   const [form, setForm] = useState(null);
   const [numberEdited, setNumberEdited] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [billTo, setBillTo] = useState(null);
   const [previewError, setPreviewError] = useState('');
   const [saving, setSaving] = useState(false);
   const editing = initial?.invoice || null;
+  // Combined invoice: one invoice for several contracts of the same customer (account_ids), or the edit of one.
+  const accountIds = initial?.account_ids || null;
+  const consolidatedCreate = Boolean(accountIds);
+  const consolidatedEdit = Boolean(editing?.line_items?.consolidated);
 
   useEffect(() => {
     if (!open) return;
     setForm({
-      account_id: initial?.account_id || '',
+      account_id: accountIds?.[0] || initial?.account_id || '',
       period: { period_month: initial.period_month, period_year: initial.period_year },
       invoice_number: editing?.invoice_number || '',
       invoice_date: editing?.invoice_date || today(),
       notes: editing?.notes || '',
+      lineNotes: { ...(editing?.line_notes || {}) },
       currency: editing?.currency || '',
       amount: '',
       fixedAmount: '',
@@ -86,7 +126,8 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
     });
     setNumberEdited(Boolean(editing));
     setPreview(null);
-  }, [open, initial?.account_id, initial?.period_month, initial?.period_year, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    setBillTo(null);
+  }, [open, initial?.account_id, accountIds?.join(','), initial?.period_month, initial?.period_year, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open || !form?.account_id) { setPreview(null); return undefined; }
@@ -96,6 +137,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
       .then(({ data }) => {
         if (!alive) return;
         setPreview(data.data);
+        setBillTo((b) => b || { ...data.data.bill_to, save: true });
         if (!numberEdited) setForm((f) => ({ ...f, invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || f.invoice_date }));
         if (editing) setForm((f) => ({ ...f, amount: f.amount === '' ? String(editing.amount) : f.amount }));
       })
@@ -105,25 +147,30 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
 
   if (!open || !form) return <Drawer open={false} title="" onClose={onClose} />;
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
-  const sentStatus = editing ? editing.status !== 'draft' : preview?.existing && preview.existing.status !== 'draft';
+  const sentStatus = editing ? editing.status !== 'draft' : !consolidatedCreate && preview?.existing && preview.existing.status !== 'draft';
   const locked = !editing && sentStatus;
   const reasonMissing = Boolean(editing) && sentStatus && !form.reason.trim();
   // Fixed bid: the contract value is split into several invoices, each for an amount entered here.
-  const fixed = preview?.fixed_bid || (editing?.details?.billing_type === 'one_time' ? editing.details.fixed_bid : null);
+  const fixedBidPreview = consolidatedCreate ? null : preview?.fixed_bid;
+  const fixed = fixedBidPreview || (editing?.details?.billing_type === 'one_time' ? editing.details.fixed_bid : null);
 
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      const fields = { invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...(form.currency ? { currency: form.currency } : {}) };
-      if (!editing && preview?.fixed_bid) fields.amount = Number(form.fixedAmount || preview.amount);
+      const fields = { invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, ...(form.currency ? { currency: form.currency } : {}), ...billToPayload(billTo) };
+      if (!editing && fixedBidPreview) fields.amount = Number(form.fixedAmount || preview.amount);
       if (editing) {
         if (form.amount !== '' && Number(form.amount) !== Number(editing.amount)) fields.amount = Number(form.amount);
         if (form.reason.trim()) fields.reason = form.reason.trim();
+        // descriptions under each entry (an emptied box removes that description)
+        fields.line_notes = Object.fromEntries((editing.print_rows || []).map((r) => [r.key, (form.lineNotes[r.key] || '').trim()]));
       }
       const { data } = editing
         ? await apiClient.patch(`/billing/invoices/${editing.id}`, fields)
-        : await apiClient.post('/billing/invoices', { client_account_id: form.account_id, ...form.period, ...fields });
+        : consolidatedCreate
+          ? await apiClient.post('/billing/invoices/consolidated', { account_ids: accountIds, ...form.period, ...fields })
+          : await apiClient.post('/billing/invoices', { client_account_id: form.account_id, ...form.period, ...fields });
       pushSuccess?.(`Invoice ${data.data.invoice_number} ${editing || preview?.existing ? 'updated' : 'generated'}`);
       onGenerated?.(data.data);
       onClose();
@@ -137,26 +184,30 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   return (
     <Drawer
       open
-      title={editing ? 'Edit invoice' : preview?.existing ? 'Update invoice' : 'Generate invoice'}
+      title={editing ? 'Edit invoice' : consolidatedCreate ? `Generate combined invoice (${accountIds.length} contracts)` : preview?.existing ? 'Update invoice' : 'Generate invoice'}
       onClose={onClose}
       size="lg"
       tone="create"
       footer={(
         <>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || reasonMissing || !form.invoice_number.trim() || (!editing && Boolean(preview?.fixed_bid) && !(Number(form.fixedAmount) > 0))}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
+          <button type="submit" form="client-invoice-form" className="btn-primary" disabled={saving || !preview || locked || reasonMissing || !form.invoice_number.trim() || (!editing && Boolean(fixedBidPreview) && !(Number(form.fixedAmount) > 0))}>{saving ? 'Saving…' : editing ? 'Save changes' : preview?.existing ? 'Update invoice' : 'Generate invoice'}</button>
         </>
       )}
     >
       <form id="client-invoice-form" onSubmit={submit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
-            Project
-            <div className="mt-1"><SearchableSelect value={form.account_id} onChange={(v) => set('account_id', v)} options={projectOptions} placeholder="Select project" searchPlaceholder="Search projects…" disabled={Boolean(editing)} /></div>
+            {consolidatedCreate ? 'Contracts on this invoice (one customer, one line each)' : 'Project'}
+            {consolidatedCreate ? (
+              <ul className="mt-1 space-y-0.5 rounded-xl border border-tertiary-100 bg-tertiary-50/60 px-3 py-2 text-sm font-normal text-tertiary-800">
+                {accountIds.map((id) => <li key={id}>{projectOptions.find((o) => o.value === id)?.label || 'Contract'}</li>)}
+              </ul>
+            ) : <div className="mt-1"><SearchableSelect value={form.account_id} onChange={(v) => set('account_id', v)} options={projectOptions} placeholder="Select project" searchPlaceholder="Search projects…" disabled={Boolean(editing)} /></div>}
           </label>
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Invoice currency
-            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={(Boolean(editing) && sentStatus) || Boolean(fixed)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
+            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} disabled={(Boolean(editing) && sentStatus) || Boolean(fixed) || consolidatedEdit} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm disabled:bg-tertiary-50">
               <option value="">Project billing currency{preview && !form.currency ? ` (${preview.currency})` : ''}</option>
               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -172,7 +223,7 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
-          {!editing && preview?.fixed_bid && (
+          {!editing && fixedBidPreview && (
             <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
               Invoice amount ({preview.currency})
               <input required type="number" step="0.01" min="0.01" max={preview.fixed_bid.remaining_to_invoice} value={form.fixedAmount} onChange={(e) => set('fixedAmount', e.target.value)} placeholder={String(preview.fixed_bid.remaining_to_invoice)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
@@ -192,15 +243,29 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
               <input maxLength={500} value={form.reason} onChange={(e) => set('reason', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
             </label>
           )}
+          {billTo && <BillToFields value={billTo} onChange={setBillTo} partyLabel="client" />}
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">
             Notes <span className="font-normal text-tertiary-400">(optional, printed on the invoice)</span>
             <textarea rows={2} maxLength={1000} value={form.notes} onChange={(e) => set('notes', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
           </label>
         </div>
+        {editing && (editing.print_rows || []).length > 0 && (
+          <fieldset className="space-y-2 rounded-xl border border-tertiary-100 p-3" data-testid="invoice-line-notes">
+            <legend className="px-1 text-xs font-semibold text-tertiary-700">Description for each entry <span className="font-normal text-tertiary-400">(optional, printed under that entry on the invoice)</span></legend>
+            {editing.print_rows.map((r) => (
+              <label key={r.key} className="block text-xs font-medium text-tertiary-600">
+                <span className="block truncate" title={r.title}>{r.title}</span>
+                <textarea rows={2} maxLength={1000} value={form.lineNotes[r.key] || ''} onChange={(e) => setForm((f) => ({ ...f, lineNotes: { ...f.lineNotes, [r.key]: e.target.value } }))} placeholder="Add a description for this entry" className="mt-1 w-full rounded-xl border px-3 py-2 text-sm font-normal" />
+              </label>
+            ))}
+          </fieldset>
+        )}
         {previewError && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">{previewError}</p>}
         {locked && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Invoice {preview.existing.invoice_number} for this project and month is already {preview.existing.status} — it can no longer be changed.</p>}
-        {preview?.existing && !locked && <p className="text-xs text-tertiary-500">A draft invoice ({preview.existing.invoice_number}) exists for this project and month — saving refreshes it.</p>}
-        <InvoicePreview preview={preview} fixedAmount={form.fixedAmount} />
+        {consolidatedCreate && <p className="text-xs text-tertiary-500">Each contract is worked out from its own billing (locked version where it is locked) and printed as its own line; the total is their sum. Contracts that bill in different currencies need one invoice currency chosen above.</p>}
+        {consolidatedEdit && <p className="text-xs text-tertiary-500">This is a combined invoice of {editing.line_items.items?.length || 0} contracts. Its number, date, notes and bill-to details can be edited; to change the contracts, delete it and generate it again.</p>}
+        {!consolidatedCreate && preview?.existing && !locked && <p className="text-xs text-tertiary-500">A draft invoice ({preview.existing.invoice_number}) exists for this project and month — saving refreshes it.</p>}
+        {!consolidatedCreate && !consolidatedEdit && <InvoicePreview preview={preview} fixedAmount={form.fixedAmount} />}
       </form>
     </Drawer>
   );
@@ -239,6 +304,9 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     }
   }
 
+  const [selected, setSelected] = useState([]);
+  const paymentDialog = usePaymentDialog();
+  const [paymentsFor, setPaymentsFor] = useState(null);
   async function transition(row, status) {
     try {
       await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
@@ -248,13 +316,27 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
       pushError(apiErrorMessage(err, 'Failed to update the invoice'), 'Something went wrong');
     }
   }
+  // Marking paid is a payment: how much arrived (part payments leave the rest pending), the rate, bank charges, and the wallet (optional).
+  async function recordPayment(row) {
+    try {
+      await paymentDialog.pay(
+        { title: `Payment received · ${row.invoice_number || ''}`, direction: 'in', currency: row.currency, amount: row.pending_amount ?? row.amount, party: row.project?.name || row.project?.client_name || '' },
+        (body) => apiClient.post(`/billing/invoices/${row.id}/payments`, body),
+      );
+      pushInfo(`Payment recorded for invoice ${row.invoice_number || ''}`);
+      load();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to record the payment'), 'Something went wrong');
+    }
+  }
 
   const columns = [
     { key: 'number', header: 'Invoice no.', render: (r) => <span className="font-mono text-xs font-medium text-tertiary-900">{r.invoice_number || '—'}</span> },
     { key: 'project', header: 'Project', render: (r) => <span>{r.project?.name || '—'}{r.project?.code && <span className="block text-xs text-tertiary-500">{r.project.code}</span>}</span> },
-    { key: 'client', header: 'Client', render: (r) => r.project?.client_name || '—' },
+    { key: 'client', header: 'Client', render: (r) => <span>{r.project?.client_name || '—'}{r.line_items?.bill_to?.gstin && <span className="block font-mono text-[11px] text-tertiary-500">GST {r.line_items.bill_to.gstin}</span>}</span> },
+    { key: 'date', header: 'Invoice date', render: (r) => (r.invoice_date ? dateText(r.invoice_date) : '—') },
     { key: 'period', header: 'Period', render: (r) => (r.details?.period_from ? `${dateText(r.details.period_from)} – ${dateText(r.details.period_to)}` : periodLabel(r)) },
-    { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'one_time' ? 'One time' : r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
+    { key: 'type', header: 'Billing', render: (r) => (r.details ? `${r.details.billing_type === 'consolidated' ? `Combined (${r.details.contracts} contracts)` : r.details.billing_type === 'one_time' ? 'One time' : r.details.billing_type === 'monthly' ? 'Monthly' : 'Hourly'} · ${amountText(r.details.rate, r.currency)}` : '—') },
     { key: 'amount', header: 'Amount', render: (r) => (
       <span className="tabular-nums">
         <span className="font-medium">{amountText(r.total_amount ?? r.amount, r.currency)}</span>
@@ -262,7 +344,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
       </span>
     ) },
     { key: 'currency', header: 'Currency', render: (r) => r.currency },
-    { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
+    { key: 'status', header: 'Status', render: (r) => <span><Badge value={r.status} />{r.payment_status === 'partly_paid' && <span className="block text-[11px] text-warning-700">Paid {amountText(r.paid_amount, r.currency)} · pending {amountText(r.pending_amount, r.currency)}</span>}{r.line_items?.source === 'locked' && <span className="block text-[11px] text-success-700">from locked v{r.line_items.calculation_version}</span>}</span> },
     {
       key: 'actions',
       header: 'Action',
@@ -272,17 +354,31 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
           <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => remove(r)}>Delete</button>
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
-          {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'paid')}>Mark paid</button>}
+          {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(r)}>{r.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
+          {r.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(r)}>Payments</button>}
         </div>
       ),
     },
   ];
 
-  function printInvoice(r) {
-    if (!printClientInvoice(r, user?.active_org?.name)) pushError('Allow pop-ups for this site to download the invoice.', 'Pop-up blocked');
+  // Every ticked invoice, in the order of the list, as one PDF.
+  function downloadSelected() {
+    const ids = rows.filter((r) => selected.includes(r.id)).map((r) => r.id);
+    if (!ids.length) return;
+    downloadFilePost('/billing/invoices/pdf', { ids }, 'invoices.pdf').catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
   }
 
-  return <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} />;
+  function printInvoice(r) {
+    downloadFile(`/billing/invoices/${r.id}/pdf`, undefined, `${r.invoice_number || 'invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'));
+  }
+
+  return (
+    <>
+      {paymentDialog.dialog}
+      <InvoicePaymentsModal invoice={paymentsFor} canUndo={Boolean(user?.is_group_superadmin)} onClose={() => setPaymentsFor(null)} onChanged={load} />
+      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />
+    </>
+  );
 }
 
 export function GenerateInvoiceButton({ onClick, label = 'Generate invoice', compact = false }) {

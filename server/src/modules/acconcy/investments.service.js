@@ -22,6 +22,7 @@ const investmentFields = {
   name: z.string().trim().min(1).max(200),
   type: z.enum(TYPES),
   deal_id: uuidOrNull,
+  investee_id: uuidOrNull,
   service_type: z.preprocess((v) => (v === '' ? null : v), z.enum(SERVICE_KEYS).nullable().optional()),
   investment_date: reqDate,
   amount: z.coerce.number().positive().max(1e13),
@@ -131,8 +132,13 @@ async function checkDeal(orgId, dealId) {
   return null;
 }
 
+async function checkInvestee(orgId, investeeId) {
+  if (investeeId && !(await prisma.axInvestee.findFirst({ where: { id: investeeId, org_id: orgId, deleted_at: null }, select: { id: true } }))) return { error: 'investee_not_found' };
+  return null;
+}
+
 async function create(orgId, actorId, ctx, input) {
-  const bad = await checkDeal(orgId, input.deal_id);
+  const bad = (await checkDeal(orgId, input.deal_id)) || (await checkInvestee(orgId, input.investee_id));
   if (bad) return bad;
   const blocked = await lock.guard(orgId, [input.investment_date], ctx);
   if (blocked) return blocked;
@@ -153,7 +159,7 @@ const FINANCIAL = ['amount', 'investment_date', 'quantity', 'purchase_price'];
 async function update(orgId, actorId, ctx, id, input) {
   const before = await prisma.axInvestment.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
   if (!before) return { error: 'not_found' };
-  const bad = await checkDeal(orgId, input.deal_id);
+  const bad = (await checkDeal(orgId, input.deal_id)) || (await checkInvestee(orgId, input.investee_id));
   if (bad) return bad;
   const { reason, investment_date, ...rest } = input;
   const dates = [];

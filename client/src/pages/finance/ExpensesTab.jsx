@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useFinanceCategories, useLocationOptions, useOrgMembershipOptions } from '../../lib/lookups.js';
@@ -12,6 +15,8 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import { chargeColumns, chargeQuery } from './GroupChargesTab.jsx';
+import ReimbursementPayoutPanel from './ReimbursementPayoutPanel.jsx';
+import ReimbursementProcessedPanel from './ReimbursementProcessedPanel.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
@@ -28,6 +33,15 @@ function ClaimStatus({ row }) {
       <Badge value={row.status} />
       {row.status === 'pending' && row.approval_stage && <span className="text-[11px] text-tertiary-500">Awaiting {STAGE_LABEL[row.approval_stage]}</span>}
     </span>
+  );
+}
+
+// Read-only receipts of a claim (view in the app or download), for the people who decide or reimburse it.
+function ReceiptsDrawer({ claim, onClose }) {
+  return (
+    <Drawer open={Boolean(claim)} title="Receipts" onClose={onClose} size="md" tone="info">
+      {claim && <FilesPanel entityType="expense_claim" entityId={claim.id} title={`${claim.currency} ${Number(claim.amount).toLocaleString()} · ${claim.category_ref?.name || claim.category || 'Claim'}`} canUpload={false} />}
+    </Drawer>
   );
 }
 
@@ -167,9 +181,16 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
   );
 }
 
-const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '' };
+const EMPTY_FILTERS = { org_membership_id: '', month: '', category_id: '', location_id: '', status: '' };
 
-const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', group: 'Group expenses' };
+const CLAIM_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'reimbursed', label: 'Reimbursed' },
+  { value: 'rejected', label: 'Rejected' },
+];
+
+const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', payout: 'Bank payout', processed: 'Processed', group: 'Group expenses' };
 
 /**
  * Finance → Expenses. Everyone: their own claims. Admins also get
@@ -179,7 +200,7 @@ const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimburse
  */
 export default function ExpensesTab() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = adminFor(user, 'finance.view');
   // A superadmin may correct or remove a claim in any status (approved, reimbursed…).
   const isSuperadmin = Boolean(user?.is_superadmin);
   const { pushError, pushInfo } = useAlerts();
@@ -189,6 +210,7 @@ export default function ExpensesTab() {
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [receiptsOf, setReceiptsOf] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   // Managers, HR and Finance see the claims waiting on their step.
   const [approvalCount, setApprovalCount] = useState(0);
@@ -202,10 +224,13 @@ export default function ExpensesTab() {
   const params = useMemo(() => {
     const base = chargeQuery({ month: filters.month, date: '', category_id: filters.category_id, location_id: filters.location_id });
     if (view === 'team' && filters.org_membership_id) base.org_membership_id = filters.org_membership_id;
+    // Group charges have no claim status.
+    if ((view === 'mine' || view === 'team') && filters.status) base.status = filters.status;
     return base;
   }, [filters, view]);
 
   async function load() {
+    if (view === 'payout' || view === 'processed') { setLoading(false); return; } // these panels load their own data
     setLoading(true);
     try {
       if (view === 'group') {
@@ -325,13 +350,19 @@ export default function ExpensesTab() {
     apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
   }
 
+  const paymentDialog = usePaymentDialog();
+  const [undoClaim, setUndoClaim] = useState(null);
+  // Reimbursing is a payment out: the rate (foreign claims), bank charges, and which wallet it comes from (optional, default no wallet).
   async function reimburse(row) {
     try {
-      await apiClient.post(`/expenses/claims/${row.id}/reimburse`);
+      await paymentDialog.pay(
+        { title: 'Reimburse expense', direction: 'out', currency: row.currency, amount: row.amount, fixedAmount: true, party: [row.submitter?.name, row.category].filter(Boolean).join(' · ') },
+        (body) => apiClient.post(`/expenses/claims/${row.id}/reimburse`, body),
+      );
       pushInfo('Marked reimbursed');
       load();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to mark reimbursed'), 'Something went wrong');
     }
   }
 
@@ -357,6 +388,7 @@ export default function ExpensesTab() {
       header: 'Actions',
       render: (row) => (
         <div className="flex gap-2">
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setReceiptsOf(row)}><Paperclip className="h-3.5 w-3.5" /> Receipts</button>
           {/* A pending claim can be edited by its owner (My claims) or by an admin; any claim by a superadmin. */}
           {((row.status === 'pending' && (view === 'mine' || isAdmin)) || isSuperadmin) && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(row)}><Pencil className="h-3.5 w-3.5" /> Edit</button>
@@ -372,6 +404,7 @@ export default function ExpensesTab() {
             </>
           )}
           {isAdmin && row.status === 'approved' && <button type="button" className="btn-ghost text-xs" onClick={() => reimburse(row)}>Mark reimbursed</button>}
+          {user?.is_group_superadmin && row.status === 'reimbursed' && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setUndoClaim(row)}>Undo reimbursement</button>}
         </div>
       ),
     },
@@ -386,9 +419,22 @@ export default function ExpensesTab() {
 
   return (
     <div className="space-y-4">
+      {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(undoClaim)}
+        title="Undo this reimbursement"
+        description="The payment stops counting, its wallet entry (if any) is removed, and the claim goes back to approved so it can be reimbursed properly. Only the group admin can do this."
+        onClose={() => setUndoClaim(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/expenses/claims/${undoClaim.id}/undo-reimbursement`, { reason });
+          setUndoClaim(null);
+          pushInfo('Reimbursement undone');
+          load();
+        }}
+      />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'group'] : [])].map((key) => (
+          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'payout', 'processed', 'group'] : [])].map((key) => (
             <button key={key} type="button" role="tab" aria-selected={view === key} className={`border-b-2 px-3 py-2 text-sm font-medium ${view === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setView(key)}>
               {VIEW_LABEL[key]}
               {key === 'approvals' && approvalCount > 0 && <span className="ml-1.5 rounded-full bg-primary-100 px-1.5 text-[11px] font-semibold text-primary-700">{approvalCount}</span>}
@@ -401,7 +447,7 @@ export default function ExpensesTab() {
             {bulkBusy ? 'Working…' : `Approve all pending (${rows.filter((row) => row.status === 'pending').length})`}
           </button>
         )}
-        {view !== 'group' && (
+        {view !== 'group' && view !== 'payout' && view !== 'processed' && (
           <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setDrawerOpen(true)}>
             <Plus className="h-4 w-4" /> Submit claim
           </button>
@@ -409,7 +455,11 @@ export default function ExpensesTab() {
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-5">
+      {view === 'payout' && <ReimbursementPayoutPanel />}
+      {view === 'processed' && <ReimbursementProcessedPanel />}
+
+      {view !== 'payout' && view !== 'processed' && (<>
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
         {view === 'team' && (
           <label className="block text-xs font-medium text-tertiary-600">Employee<div className="mt-1"><SearchableSelect value={filters.org_membership_id} onChange={(v) => setFilter('org_membership_id', v)} options={memberOptions} placeholder="All employees" allowClear /></div></label>
         )}
@@ -426,6 +476,14 @@ export default function ExpensesTab() {
             {locationOptions.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
         </label>
+        {(view === 'mine' || view === 'team') && (
+          <label className="block text-xs font-medium text-tertiary-600">Status
+            <select value={filters.status} onChange={(e) => setFilter('status', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm">
+              <option value="">All statuses</option>
+              {CLAIM_STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </label>
+        )}
         <div className="flex items-end justify-between gap-2">
           <button type="button" className="btn-ghost text-xs" onClick={() => setFilters(EMPTY_FILTERS)} disabled={!filtered}>Clear filters</button>
           {!loading && rows.length > 0 && <span className="pb-1 text-xs font-medium text-tertiary-700">Total {total}</span>}
@@ -451,8 +509,10 @@ export default function ExpensesTab() {
           ]}
         />
       )}
+      </>)}
       <ClaimDrawer open={drawerOpen} locations={locations} categories={expenseCategories} members={isAdmin ? memberOptions : null} onClose={() => setDrawerOpen(false)} onSubmit={createClaim} />
       <ClaimDrawer open={Boolean(editing)} claim={editing} locations={locations} categories={expenseCategories} onClose={() => setEditing(null)} onSubmit={updateClaim} />
+      <ReceiptsDrawer claim={receiptsOf} onClose={() => setReceiptsOf(null)} />
     </div>
   );
 }

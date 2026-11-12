@@ -6,6 +6,7 @@ import { gulatiApi, gulatiError } from '../../lib/gulati/api.js';
 import { useGulati, gxCan } from '../../lib/gulati/useGulati.js';
 import { pctLabel, qtyLabel } from '../../lib/gulati/meta.js';
 import { Empty, Kpi, Money, card } from '../../components/gulati/ui.jsx';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 function greeting() {
   const h = new Date().getHours();
@@ -111,6 +112,8 @@ export default function GulatiHomePage() {
           </div>
         </section>
       )}
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

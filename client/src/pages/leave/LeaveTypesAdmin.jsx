@@ -16,6 +16,8 @@ export default function LeaveTypesAdmin() {
   const [open, setOpen] = useState(false);
   const [managers, setManagers] = useState([]);
   const [pick, setPick] = useState('');
+  const [mailingList, setMailingList] = useState([]);
+  const [newEmail, setNewEmail] = useState('');
   const members = useOrgMembershipOptions(open);
 
   const load = useCallback(() => {
@@ -24,7 +26,21 @@ export default function LeaveTypesAdmin() {
   const loadManagers = useCallback(() => {
     apiClient.get('/leave/managers').then(({ data }) => setManagers(data.data || [])).catch(() => setManagers([]));
   }, []);
-  useEffect(() => { if (open) { load(); loadManagers(); } }, [open, load, loadManagers]);
+  const loadMailingList = useCallback(() => {
+    apiClient.get('/leave/mailing-list').then(({ data }) => setMailingList(data.data?.emails || [])).catch(() => setMailingList([]));
+  }, []);
+  useEffect(() => { if (open) { load(); loadManagers(); loadMailingList(); } }, [open, load, loadManagers, loadMailingList]);
+
+  async function saveMailingList(emails, message) {
+    try {
+      const { data } = await apiClient.put('/leave/mailing-list', { emails });
+      setMailingList(data.data?.emails || emails);
+      setNewEmail('');
+      pushSuccess(message);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the leave mailing list'), 'Something went wrong');
+    }
+  }
 
   async function setManager(membershipId, value) {
     try {
@@ -84,6 +100,18 @@ export default function LeaveTypesAdmin() {
               <div className="flex-1"><SearchableSelect value={pick} onChange={setPick} options={members} placeholder="Add a Leave Manager" /></div>
               <button type="button" className="btn-secondary" disabled={!pick} onClick={() => setManager(pick, true)}>Add</button>
             </div>
+          </div>
+          <div className="mt-4 border-t border-tertiary-100 pt-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Leave mailing list</h4>
+            <p className="text-xs text-tertiary-500">When someone applies for leave, an email goes to their reporting manager and to every address here (for example HR or a shared inbox).</p>
+            <ul className="mt-2 flex flex-wrap gap-2 text-sm">
+              {mailingList.map((email) => <li key={email} className="inline-flex items-center gap-2 rounded-full bg-tertiary-50 px-3 py-1">{email}<button type="button" className="text-xs text-danger-600" onClick={() => saveMailingList(mailingList.filter((e) => e !== email), 'Removed from the leave mailing list')}>Remove</button></li>)}
+              {mailingList.length === 0 && <li className="text-xs text-tertiary-400">No addresses yet - only the reporting manager is emailed.</li>}
+            </ul>
+            <form className="mt-2 flex max-w-md items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (newEmail.trim()) saveMailingList([...mailingList, newEmail.trim()], 'Added to the leave mailing list'); }}>
+              <input type="email" className="flex-1 rounded-lg border border-tertiary-200 px-3 py-2 text-sm" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="hr@company.com" aria-label="Leave mailing list email" />
+              <button type="submit" className="btn-secondary" disabled={!newEmail.trim()}>Add</button>
+            </form>
           </div>
         </div>
       )}

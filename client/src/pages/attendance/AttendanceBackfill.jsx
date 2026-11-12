@@ -103,7 +103,7 @@ const inputClass = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 /** One employee, one past day — creates the record if none exists. */
 export function ManualAttendanceDrawer({ open, onClose, onSaved }) {
   const { pushError } = useAlerts();
-  const members = useOrgMembershipOptions(open);
+  const members = useOrgMembershipOptions(open, { includeExited: true }); // an exited employee's past days can still be entered
   const empty = { org_membership_id: '', date: '', status: 'present', reason: '' };
   const [fields, setFields] = useState(empty);
   const [saving, setSaving] = useState(false);

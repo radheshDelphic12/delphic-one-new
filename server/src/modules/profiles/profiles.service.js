@@ -128,6 +128,10 @@ async function update(id, patch) {
   return decorateOne(row);
 }
 
+async function userExists(id) {
+  return Boolean(await prisma.user.findUnique({ where: { id }, select: { id: true } }));
+}
+
 async function getSubmissions(profileId) {
   const rows = await prisma.submission.findMany({
     where: { profile_id: profileId },
@@ -147,4 +151,4 @@ async function getSubmissions(profileId) {
   }));
 }
 
-module.exports = { list, getById, create, update, getSubmissions };
+module.exports = { list, getById, create, update, getSubmissions, userExists };

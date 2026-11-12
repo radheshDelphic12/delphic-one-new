@@ -15,7 +15,7 @@ function toLocalInputValue(iso) {
 }
 
 /**
- * RHS drawer to edit an account's meeting details (mode / date / location /
+ * RHS drawer to edit an account's meeting details (mode / date / duration / location /
  * notes / attendees) — with no stage change. Unlike `AccountStageMoveDrawer`
  * (which only sets these fields while transitioning INTO `meeting_scheduled`),
  * this stays available for as long as the account has a meeting on record, so
@@ -31,6 +31,7 @@ export default function AccountMeetingEditDrawer({ account, open, saving, onClos
   const [meetingDate, setMeetingDate] = useState('');
   const [meetingLocation, setMeetingLocation] = useState('');
   const [meetingNotes, setMeetingNotes] = useState('');
+  const [duration, setDuration] = useState(60);
   const [attendeeIds, setAttendeeIds] = useState([]);
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export default function AccountMeetingEditDrawer({ account, open, saving, onClos
     setMeetingDate(toLocalInputValue(account?.meeting_date));
     setMeetingLocation(account?.meeting_location || '');
     setMeetingNotes(account?.meeting_notes || '');
+    setDuration(account?.meeting_duration_minutes || 60);
     setAttendeeIds((account?.meeting_attendees || []).map((a) => a.id));
   }, [open, account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -49,6 +51,7 @@ export default function AccountMeetingEditDrawer({ account, open, saving, onClos
       meeting_date: new Date(meetingDate).toISOString(),
       meeting_location: meetingMode === 'offline' ? meetingLocation.trim() : undefined,
       meeting_notes: meetingNotes.trim(),
+      meeting_duration_minutes: Number(duration) || 60,
       meeting_attendee_ids: attendeeIds,
     });
   }
@@ -82,6 +85,18 @@ export default function AccountMeetingEditDrawer({ account, open, saving, onClos
             type="datetime-local"
             value={meetingDate}
             onChange={(event) => setMeetingDate(event.target.value)}
+            className={INPUT_CLASS}
+          />
+        </label>
+        <label className="block text-xs font-medium text-tertiary-600">
+          Duration (minutes)
+          <input
+            type="number"
+            min={5}
+            max={1440}
+            step={5}
+            value={duration}
+            onChange={(event) => setDuration(event.target.value)}
             className={INPUT_CLASS}
           />
         </label>

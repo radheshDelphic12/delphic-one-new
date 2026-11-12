@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, LineChart, Lock, Receipt, Truck, Users2 } from 'lucide-react';
+import { Banknote, LineChart, Lock, Receipt, TrendingUp, Truck, Users2 } from 'lucide-react';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import BillingSalesTab from './BillingSalesTab.jsx';
 import ResourceRevenueTab from './ResourceRevenueTab.jsx';
@@ -7,6 +7,7 @@ import AttendanceSalaryTab from './AttendanceSalaryTab.jsx';
 import VendorPaymentsTab from './VendorPaymentsTab.jsx';
 import { ExpensesTab } from './CostTabs.jsx';
 import LockedTab from './LockedTab.jsx';
+import EarningsProfitTab from './EarningsProfitTab.jsx';
 // Previous Live Analytics reports — replaced by the attendance / timesheet
 // based tabs above. Kept in the codebase (not deleted) and their APIs still
 // work; to bring one back, re-import it and add it to TABS.
@@ -20,6 +21,8 @@ const TABS = [
   { key: 'salary', label: 'Salary', icon: Banknote },
   { key: 'expenses', label: 'Expenses', icon: Receipt },
   { key: 'vendors', label: 'Vendors', icon: Truck },
+  // Earnings, expenses and profit up to today (a locked month shows its locked figures).
+  { key: 'earnings', label: 'Earnings & profit', icon: TrendingUp },
   // Every finalized record (billing, salary, expenses, vendors).
   { key: 'locked', label: 'Locked', icon: Lock },
 ];
@@ -45,6 +48,7 @@ export default function AnalyticsPage() {
       {section === 'salary' && <AttendanceSalaryTab />}
       {section === 'expenses' && <ExpensesTab />}
       {section === 'vendors' && <VendorPaymentsTab />}
+      {section === 'earnings' && <EarningsProfitTab />}
       {section === 'locked' && <LockedTab />}
     </div>
   );

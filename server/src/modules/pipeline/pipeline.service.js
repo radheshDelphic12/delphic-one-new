@@ -8,6 +8,7 @@ const REQUIREMENT_INCLUDE = {
     select: {
       id: true,
       name: true,
+      is_premium: true,
       owner: { select: { id: true, name: true } },
     },
   },
@@ -21,7 +22,7 @@ const REQUIREMENT_INCLUDE = {
 
 // Profile source (UI labels: direct = Bench, vendor = Vendor, linkedin = Market).
 const PROFILE_SOURCES = ['direct', 'vendor', 'linkedin'];
-const REQ_TYPES = ['managed_services', 'recruitment', 'project'];
+const REQ_TYPES = ['managed_services', 'recruitment', 'project', 'internal_hiring'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseCsvList(value) {
@@ -42,6 +43,7 @@ function serializeRequirement(row, cutoff) {
       ? {
           id: row.account.id,
           name: row.account.name,
+          is_premium: Boolean(row.account.is_premium),
           owner: row.account.owner || null,
         }
       : null,
@@ -81,13 +83,15 @@ async function getBoard(user, filters = {}) {
     priority,
     submission_stage,
     profile_source,
+    vendor_ids,
     req_type,
+    premium,
     date_from,
     date_to,
   } = filters;
 
   const cutoff = new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
-  const scopeWhere = await requirementScopeWhere(user);
+  const scopeWhere = await requirementScopeWhere(user, { sharedSales: true, mine: filters.scope === 'mine' });
   const statuses = parseCsvList(status);
   const priorities = parseCsvList(priority);
   const stages = parseCsvList(submission_stage);
@@ -95,6 +99,7 @@ async function getBoard(user, filters = {}) {
   if (recruiter_id) recruiterIds.push(recruiter_id);
   const submittedByIds = parseCsvList(submitted_by_ids);
   const profileSources = parseCsvList(profile_source).filter((s) => PROFILE_SOURCES.includes(s));
+  const vendorIds = parseCsvList(vendor_ids).filter((id) => UUID_RE.test(id));
   const accountIds = parseCsvList(account_ids).filter((id) => UUID_RE.test(id));
   if (account_id) accountIds.push(account_id);
 
@@ -109,6 +114,7 @@ async function getBoard(user, filters = {}) {
     };
   }  if (statuses.length) where.status = { in: statuses };
   if (priorities.length) where.priority = { in: priorities };
+  if (premium) where.account = { ...(where.account || {}), is_premium: premium === 'yes' };
   const reqTypes = parseCsvList(req_type).filter((t) => REQ_TYPES.includes(t));
   if (reqTypes.length) where.req_type = { in: reqTypes };
   if (date_from || date_to) {
@@ -164,7 +170,9 @@ async function getBoard(user, filters = {}) {
           requirement_seat_id: { in: seatIds },
           ...(stages.length ? { stage: { in: stages } } : {}),
           ...(submittedByIds.length ? { submitted_by: { in: submittedByIds } } : {}),
-          ...(profileSources.length ? { profile: { source: { in: profileSources } } } : {}),
+          ...(profileSources.length || vendorIds.length
+            ? { profile: { ...(profileSources.length ? { source: { in: profileSources } } : {}), ...(vendorIds.length ? { vendor_account_id: { in: vendorIds } } : {}) } }
+            : {}),
         },
         include: {
           profile: {
@@ -183,9 +191,9 @@ async function getBoard(user, filters = {}) {
       })
     : [];
 
-  // Candidate filters (stage / submitted-by / source): only keep requirements that
+  // Candidate filters (stage / submitted-by / source / vendor): only keep requirements that
   // actually have a matching candidate (submissionRows is already filtered above).
-  if (stages.length || submittedByIds.length || profileSources.length) {
+  if (stages.length || submittedByIds.length || profileSources.length || vendorIds.length) {
     const reqIdsWithMatch = new Set(submissionRows.map((row) => row.seat.requirement_id));
     requirements = requirements.filter((r) => reqIdsWithMatch.has(r.id));
   }

@@ -8,6 +8,7 @@ import { DEAL_STATUS_META, PRIORITY_META, STAGE_META, TASK_TYPE_LABEL, serviceLa
 import Pill from '../../components/ui/Pill.jsx';
 import { Empty, card } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 /** The signed-in employee's or contractor's assigned leads, deals and tasks (no money figures). */
 export default function AcconcyMyWorkPage() {
@@ -66,6 +67,8 @@ export default function AcconcyMyWorkPage() {
           )}
         </section>
       </div>
+      {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <AnnouncementsCard />
     </div>
   );
 }

@@ -17,6 +17,7 @@ const prisma = require('../../config/db');
 const { todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const A = require('../../lib/allocations');
+const { projectListWhere } = require('../../lib/projectScope');
 
 const DEFAULT_ENDING_WINDOW = 30;
 // Flag "from the beginning" spans (null start) against every locked month.
@@ -349,6 +350,10 @@ const ACCOUNT_SELECT = {
   agreement_start_date: true,
   agreement_end_date: true,
   contract_status: true,
+  // for the monthly billing figure on Team Capacity
+  client_billing_currency: true,
+  minimum_monthly_hours: true,
+  benchmark_hours: true,
 };
 
 function describeProject(a) {
@@ -364,10 +369,20 @@ function describeProject(a) {
   };
 }
 
-// A client contract that is running on `date` (the thing capacity counts).
+// A signed client contract (not completed) whose start date is still ahead: its people are reserved for it.
+// The client's sales stage is not part of this: a project runs by its own contract status and dates, so a client
+// dropped in Sales does not take its people off the project.
+function contractUpcoming(a, date) {
+  const d = A.toDate(date);
+  return a.type === 'client' && a.contract_status !== 'completed'
+    && Boolean(a.agreement_start_date) && A.toDate(a.agreement_start_date) > d
+    && (!a.agreement_end_date || A.toDate(a.agreement_end_date) >= d);
+}
+
+// A client contract that is running on `date` (the thing capacity counts). Same rule: its own status and dates only.
 function contractRunning(a, date) {
   const d = A.toDate(date);
-  return a.type === 'client' && a.stage === 'active' && a.contract_status !== 'completed'
+  return a.type === 'client' && a.contract_status !== 'completed'
     && (!a.agreement_start_date || A.toDate(a.agreement_start_date) <= d)
     && (!a.agreement_end_date || A.toDate(a.agreement_end_date) >= d);
 }
@@ -378,7 +393,7 @@ function employedOn(m, date) {
 }
 
 async function loadPeopleAndTeams(orgId) {
-  const [teams, periods, memberships] = await Promise.all([
+  const [teams, periods, rawMemberships] = await Promise.all([
     prisma.team.findMany({
       where: { org_id: orgId },
       orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
@@ -387,9 +402,11 @@ async function loadPeopleAndTeams(orgId) {
     prisma.teamMembershipPeriod.findMany({ where: { org_id: orgId }, select: { org_membership_id: true, team_id: true, start_date: true, end_date: true } }),
     prisma.orgMembership.findMany({
       where: { org_id: orgId },
-      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, employment_status: true, worker_type: true, person: { select: { name: true } } },
+      select: { id: true, team_id: true, employee_code: true, joined_at: true, left_at: true, notice_end_date: true, employment_status: true, worker_type: true, vendor_rate: true, vendor_rate_currency: true, person: { select: { name: true } } },
     }),
   ]);
+  // Someone serving notice has no left_at yet (the exit job sets it after the last working day): their notice end date is the day they leave.
+  const memberships = rawMemberships.map((m) => ({ ...m, left_at: m.left_at || (m.employment_status === 'notice_period' ? m.notice_end_date : null) }));
   const periodsBy = A.byMembership(periods);
   // Anyone on a team with no recorded period yet counts as on it all along.
   for (const m of memberships) if (m.team_id && !periodsBy.has(m.id)) periodsBy.set(m.id, [{ org_membership_id: m.id, team_id: m.team_id, start_date: null, end_date: null }]);
@@ -412,18 +429,48 @@ function capacityStatus(members, total, current) {
  * Available = max(0, capacity − allocation); Can allocate = available +
  * projects ending within `window_days` (their people free up).
  */
-async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFAULT_ENDING_WINDOW } = {}) {
+async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFAULT_ENDING_WINDOW, billable = true, non_billable: nonBillable = true } = {}) {
   const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
   const day = A.toDate(date) || todayIst();
   const windowEnd = A.addDays(day, window_days);
-  const [{ projects_per_resource: orgDefault }, ctx, spans] = await Promise.all([
+  const [{ projects_per_resource: orgDefault }, ctx, allSpans] = await Promise.all([
     getSettings(orgId),
     loadPeopleAndTeams(orgId),
     prisma.projectMemberAssignment.findMany({
-      where: { org_id: orgId, AND: [{ OR: [{ start_date: null }, { start_date: { lte: day } }] }, { OR: [{ end_date: null }, { end_date: { gte: day } }] }] },
-      select: { org_membership_id: true, account_id: true, allocation_percent: true, account: { select: ACCOUNT_SELECT } },
+      where: { org_id: orgId, OR: [{ end_date: null }, { end_date: { gte: day } }] },
+      select: { org_membership_id: true, account_id: true, allocation_percent: true, start_date: true, account: { select: { ...ACCOUNT_SELECT, billing_rates: { select: { rate: true, effective_from: true } } } } },
     }),
   ]);
+
+  // Billable = a billing rate above 0 in force on the date; the two checkboxes narrow which running projects are counted.
+  const isBillable = (a) => (a.billing_rates || []).some((b) => Number(b.rate) > 0 && b.effective_from <= day);
+  const spans = allSpans.filter((s) => (isBillable(s.account) ? billable : nonBillable));
+
+  // Money for the month of `day`: monthly contract billing per running Managed Services project (Fixed cost / Recruitment count as 0),
+  // each employee's monthly salary (CTC) and each contractor's vendor rate, all in INR.
+  const accountsById = new Map(spans.map((s) => [s.account_id, s.account]));
+  const exchangeRates = require('../billing/exchangeRates.service');
+  const { monthContractByProject } = require('../billing/projectPnl.service');
+  const memberships = [...ctx.memberships];
+  const [fx, salaryRows] = await Promise.all([
+    exchangeRates.inrRates(orgId),
+    prisma.salaryStructure.findMany({
+      where: { org_id: orgId, org_membership_id: { in: memberships.filter((m) => m.worker_type !== 'contractor').map((m) => m.id) }, effective_from: { lte: day } },
+      select: { org_membership_id: true, ctc: true, effective_from: true, created_at: true },
+    }),
+  ]);
+  const contract = await monthContractByProject(orgId, [...accountsById.values()].filter((a) => a.service_category === 'managed_services'), { period_month: day.getUTCMonth() + 1, period_year: day.getUTCFullYear() }, fx);
+  const { toInr } = exchangeRates.inrConverter(fx);
+  const billingOf = (accountId) => {
+    const a = accountsById.get(accountId);
+    if (!a || a.service_category !== 'managed_services') return 0;
+    return contract.get(accountId)?.amount_inr || 0;
+  };
+  const salaryOf = new Map();
+  for (const s of salaryRows) {
+    const cur = salaryOf.get(s.org_membership_id);
+    if (!cur || s.effective_from > cur.effective_from || (+s.effective_from === +cur.effective_from && s.created_at > cur.created_at)) salaryOf.set(s.org_membership_id, s);
+  }
 
   const rows = new Map();
   const rowFor = (team) => {
@@ -435,6 +482,8 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
         capacity_per_resource: team?.projects_per_resource !== null && team?.projects_per_resource !== undefined ? Number(team.projects_per_resource) : orgDefault,
         uses_org_default: !(team?.projects_per_resource !== null && team?.projects_per_resource !== undefined),
         members: [],
+        joining: [],
+        leaving: [],
         projects: new Map(),
       });
     }
@@ -442,21 +491,37 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
   };
   for (const t of ctx.teams) rowFor(t);
   for (const m of ctx.memberships) {
-    if (!employedOn(m, day)) continue;
+    if (!employedOn(m, day)) {
+      // Joining inside the window: counts towards what the team can take on once they are in (their team on the joining date).
+      const joins = m.joined_at ? A.toDate(m.joined_at) : null;
+      if (joins && joins > day && joins <= windowEnd && !(m.left_at && A.toDate(m.left_at) < joins) && m.employment_status !== 'terminated') {
+        const joinTeam = ctx.teamOf(m.id, joins);
+        if (joinTeam) rowFor(ctx.teamsById.get(joinTeam)).joining.push({ id: m.id, name: m.person.name, date: A.ymd(joins) });
+      }
+      continue;
+    }
     const teamId = ctx.teamOf(m.id, day);
     if (!teamId) continue;
-    rowFor(ctx.teamsById.get(teamId)).members.push({ id: m.id, name: m.person.name });
+    const row = rowFor(ctx.teamsById.get(teamId));
+    row.members.push({ id: m.id, name: m.person.name, contractor: m.worker_type === 'contractor' });
+    // Last working day inside the window: their capacity goes away.
+    const leaves = m.left_at ? A.toDate(m.left_at) : null;
+    if (leaves && leaves <= windowEnd) row.leaving.push({ id: m.id, name: m.person.name, date: A.ymd(leaves) });
   }
   for (const s of spans) {
     const m = ctx.membershipsById.get(s.org_membership_id);
-    if (!m || !employedOn(m, day) || !contractRunning(s.account, day)) continue;
+    const started = !s.start_date || A.toDate(s.start_date) <= day;
+    const upcoming = contractUpcoming(s.account, day);
+    if (!m || !employedOn(m, day) || !((started && contractRunning(s.account, day)) || upcoming)) continue;
     const teamId = ctx.teamOf(m.id, day);
     const row = rowFor(teamId ? ctx.teamsById.get(teamId) : null);
     if (!row.projects.has(s.account_id)) {
       const end = s.account.agreement_end_date ? A.toDate(s.account.agreement_end_date) : null;
       row.projects.set(s.account_id, {
         ...describeProject(s.account),
-        ending_soon: Boolean(end && end >= day && end <= windowEnd),
+        ending_soon: Boolean(end && end >= day && end <= windowEnd) && !upcoming,
+        not_started: upcoming,
+        starts_in_days: upcoming ? Math.round((A.toDate(s.account.agreement_start_date) - day) / A.DAY) : null,
         days_remaining: end ? Math.round((end - day) / A.DAY) : null,
         resources: [],
       });
@@ -475,7 +540,23 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       // Projects are whole units: a fractional remainder (0.5, 2.5) counts as one more project, so capability is a whole number.
       const available = Math.ceil(round2(Math.max(0, total - current)));
       const endingSoon = projects.filter((p) => p.ending_soon).length;
+      // People who join or leave (last working day) inside the window change what the team can take on.
+      const joining = r.team ? r.joining : [];
+      const leaving = r.team ? r.leaving : [];
+      const capacityDelta = round2((joining.length - leaving.length) * r.capacity_per_resource);
+      const runningNow = projects.filter((p) => !p.not_started);
+      const monthlyBilling = round2(runningNow.reduce((s, p) => s + billingOf(p.id), 0));
+      const teamSalary = round2(r.members.reduce((s, mem) => s + (mem.contractor ? 0 : Number(salaryOf.get(mem.id)?.ctc || 0)), 0));
+      const vendorCost = round2(r.members.reduce((s, mem) => {
+        if (!mem.contractor) return s;
+        const m = ctx.membershipsById.get(mem.id);
+        return s + (m?.vendor_rate != null ? toInr(Number(m.vendor_rate), m.vendor_rate_currency) : 0);
+      }, 0));
       return {
+        monthly_billing: monthlyBilling,
+        team_salary: teamSalary,
+        vendor_cost: vendorCost,
+        profit: round2(monthlyBilling - teamSalary - vendorCost),
         team: r.team,
         lead: r.lead,
         members,
@@ -487,12 +568,19 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
         available_capability: available,
         over_capacity_by: round2(Math.max(0, current - total)),
         projects_ending_soon: endingSoon,
-        can_allocate: round2(available + endingSoon),
+        members_joining: joining.length,
+        members_leaving: leaving.length,
+        joining_list: joining,
+        leaving_list: leaving,
+        // capability after the window: capacity with joiners added and leavers removed, less the projects that stay, plus those that end
+        can_allocate: round2(Math.max(0, Math.ceil(round2(Math.max(0, total + capacityDelta - current))) + endingSoon)),
         status: r.team ? capacityStatus(members, total, current) : 'unassigned',
         projects,
       };
     });
   const sum = (key) => round2(out.filter((r) => r.team).reduce((s, r) => s + r[key], 0));
+  // a project shared by two teams is billed once in the grand total
+  const billedProjects = new Set(out.filter((r) => r.team).flatMap((r) => r.projects.filter((p) => !p.not_started).map((p) => p.id)));
   return {
     date: A.ymd(day),
     window_days,
@@ -504,7 +592,14 @@ async function teamCapacity(orgId, { date, team_id, team_ids, window_days = DEFA
       current_allocation: sum('current_allocation'),
       available_capability: sum('available_capability'),
       projects_ending_soon: sum('projects_ending_soon'),
+      members_joining: sum('members_joining'),
+      members_leaving: sum('members_leaving'),
       can_allocate: sum('can_allocate'),
+      monthly_billing: round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)),
+      team_salary: sum('team_salary'),
+      vendor_cost: sum('vendor_cost'),
+      // Profit = Total monthly billing - Total team salary - Total vendor cost (same formula as each team row)
+      profit: round2(round2([...billedProjects].reduce((s, id) => s + billingOf(id), 0)) - sum('team_salary') - sum('vendor_cost')),
     },
   };
 }
@@ -516,7 +611,13 @@ async function endingSoon(orgId, { from, to, team_id, client_account_id } = {}) 
   const end = A.toDate(to) || A.addDays(start, DEFAULT_ENDING_WINDOW);
   const [accounts, ctx] = await Promise.all([
     prisma.account.findMany({
-      where: { org_id: orgId, type: 'client', stage: 'active', agreement_end_date: { gte: start, lte: end }, ...(client_account_id ? { client_account_id } : {}), OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+      where: {
+        AND: [
+          projectListWhere(orgId),
+          { agreement_end_date: { gte: start, lte: end }, ...(client_account_id ? { client_account_id } : {}) },
+          { OR: [{ contract_status: null }, { contract_status: { not: 'completed' } }] },
+        ],
+      },
       select: { ...ACCOUNT_SELECT, project_cost_rates: { select: { org_membership_id: true, start_date: true, end_date: true } } },
       orderBy: { agreement_end_date: 'asc' },
     }),
@@ -592,6 +693,56 @@ async function resourceAllocations(orgId, { team_id, org_membership_id, account_
   }
   rows.sort((a, b) => a.resource.name.localeCompare(b.resource.name) || (a.start_date || '').localeCompare(b.start_date || ''));
   return { rows, resources: new Set(rows.map((r) => r.resource.id)).size };
+}
+
+/**
+ * Employees & Projects on `date` (default today): every employee employed that
+ * day with their team and the projects they are allocated to. A project counts
+ * by exactly the rule Team Capacity uses (a running client contract, or one
+ * signed but not yet started), so the two screens always agree. Employees with
+ * none come back with an empty list so "no project" is visible. `team_ids`
+ * narrows by the team the person was in on that date.
+ */
+async function employeeProjects(orgId, { date, team_id, team_ids } = {}) {
+  const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
+  const day = A.toDate(date) || todayIst();
+  const [ctx, spans] = await Promise.all([
+    loadPeopleAndTeams(orgId),
+    prisma.projectMemberAssignment.findMany({
+      where: { org_id: orgId, OR: [{ end_date: null }, { end_date: { gte: day } }] },
+      select: { org_membership_id: true, allocation_percent: true, start_date: true, end_date: true, account: { select: ACCOUNT_SELECT } },
+    }),
+  ]);
+  const byMember = new Map();
+  for (const s of spans) {
+    const started = !s.start_date || A.toDate(s.start_date) <= day;
+    const upcoming = contractUpcoming(s.account, day);
+    if (!((started && contractRunning(s.account, day)) || upcoming)) continue;
+    if (!byMember.has(s.org_membership_id)) byMember.set(s.org_membership_id, new Map());
+    byMember.get(s.org_membership_id).set(s.account.id, {
+      ...describeProject(s.account), // includes the project's own agreement start / end dates
+      allocation_percent: s.allocation_percent !== null ? Number(s.allocation_percent) : null,
+      status: upcoming ? 'upcoming' : 'active',
+    });
+  }
+  const rows = [];
+  for (const m of ctx.memberships) {
+    if (!employedOn(m, day)) continue;
+    const teamId = ctx.teamOf(m.id, day);
+    if (onlyTeams.size && !onlyTeams.has(teamId)) continue;
+    const projects = [...(byMember.get(m.id)?.values() || [])].sort((a, b) => a.name.localeCompare(b.name));
+    rows.push({
+      id: m.id,
+      name: m.person.name,
+      employee_code: m.employee_code,
+      worker_type: m.worker_type,
+      team: teamId ? { id: teamId, name: ctx.teamsById.get(teamId)?.name || null } : null,
+      projects,
+      project_count: projects.length,
+    });
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return { date: A.ymd(day), rows, unassigned: rows.filter((r) => !r.project_count).length };
 }
 
 /**
@@ -685,6 +836,7 @@ module.exports = {
   teamCapacity,
   endingSoon,
   resourceAllocations,
+  employeeProjects,
   movements,
   serializeSpan,
   SPAN_INCLUDE,

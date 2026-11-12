@@ -1,3 +1,5 @@
+import { allowed, isPermissionMode } from './access.js';
+
 /** Keep in sync with server/src/modules/submissions/stageMachines.js */
 
 export const SUBMISSION_STAGE_TRANSITIONS = {
@@ -35,6 +37,8 @@ export function canOverrideSubmissionStage(user) {
 // Admins (and superadmins) may step a submission back one stage or reactivate a
 // rejected / backed-out candidate on the same ticket. Everyone else is forward-only.
 export function canMoveSubmissionBackward(user) {
+  // In a company on permissions the server lets "Edit and move stages" at Everyone scope (or an Admin) step back; mirror that.
+  if (isPermissionMode(user)) return user.access.level !== 'employee' || user.access.permissions?.['submissions.update'] === 'all';
   return user?.role === 'admin' || Boolean(user?.is_superadmin);
 }
 
@@ -58,10 +62,12 @@ export const ROUND_TYPE_LABELS = {
   client_r2: 'Client Round 2',
   client_r3: 'Client Round 3',
   hr_cto_ceo: 'HR, CTO & CEO Round',
+  template_internal: 'Interview Round',
+  template_client: 'Client Round',
 };
 
-export const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo'];
-export const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2'];
+export const CLIENT_ROUND_TYPES = ['client_r1', 'client_r2', 'client_r3', 'hr_cto_ceo', 'template_client'];
+export const INTERNAL_ROUND_TYPES = ['internal_r1', 'internal_r2', 'template_internal'];
 
 // Soft rule only - UI warns when a mandatory round/stage is missing, never blocks.
 export const MANDATORY_ROUND_TYPES = ['internal_r1', 'hr_cto_ceo'];
@@ -77,6 +83,8 @@ export function isInternalRoundType(roundType) {
 
 export function canManageInterviewRound(submission, roundType, user) {
   if (!user) return false;
+  // In a permission-mode company the server decides by the Meetings > Schedule permission alone (not the derived role).
+  if (isPermissionMode(user)) return allowed(user, ['meetings.schedule'], false);
   if (user.role === 'admin') return true;
   if (user.role === 'recruiter') return submission?.submitted_by?.id === user.id;
   if (user.role === 'sales') {
@@ -118,6 +126,8 @@ export function computeMarginPreview(proposed_rate, proposed_rate_currency, vend
 // forward, but only ones on the bench (see canOnlyPutForwardBench) — enforced
 // again server-side in submissions.service.create.
 export function canCreateSubmission(user) {
+  // In a company on permissions: Submissions > Submit a profile (what the server asks for), not the derived role.
+  if (isPermissionMode(user)) return allowed(user, ['submissions.create'], false);
   return user && ['recruiter', 'sales', 'admin'].includes(user.role);
 }
 
@@ -128,6 +138,7 @@ export function canOnlyPutForwardBench(user) {
 
 // Who can edit submission fields (rates, notes, files) — PATCH /submissions/:id.
 export function canMutateSubmission(user) {
+  if (isPermissionMode(user)) return allowed(user, ['submissions.update'], false); // Submissions > Edit and move stages
   return user && ['recruiter', 'admin'].includes(user.role);
 }
 
@@ -136,6 +147,7 @@ export function canMutateSubmission(user) {
 // backward moves / reactivations are gated separately by canMoveSubmissionBackward
 // (admin / superadmin only).
 export function canMoveSubmissionStage(user) {
+  if (isPermissionMode(user)) return allowed(user, ['submissions.update'], false); // Submissions > Edit and move stages (its scope is applied by the server)
   return user && ['recruiter', 'sales', 'admin'].includes(user.role);
 }
 

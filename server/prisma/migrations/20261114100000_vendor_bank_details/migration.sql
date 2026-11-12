@@ -1,0 +1,2 @@
+-- Vendor bank details (where the vendor is paid). Additive: seven nullable columns on accounts; no existing row changes.
+ALTER TABLE "accounts" ADD COLUMN "vendor_bank_holder" TEXT, ADD COLUMN "vendor_bank_name" TEXT, ADD COLUMN "vendor_bank_account_number" TEXT, ADD COLUMN "vendor_bank_ifsc" TEXT, ADD COLUMN "vendor_bank_branch" TEXT, ADD COLUMN "vendor_bank_swift" TEXT, ADD COLUMN "vendor_upi_id" TEXT;

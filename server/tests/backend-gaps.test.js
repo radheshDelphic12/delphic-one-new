@@ -133,24 +133,30 @@ describe('ownership', () => {
     expect(stage.body.data.stage).toBe('meeting_scheduled');
   });
 
-  test('sales cannot edit another sales requirement', async () => {
+  test('the whole Sales team can edit another sales requirement, but only an admin can change its owner; a non-sales role cannot edit', async () => {
     const bda = await createUser({ role: 'bda' });
     const salesA = await createUser({ role: 'sales' });
     const salesB = await createUser({ role: 'sales' });
+    const recruiter = await createUser({ role: 'recruiter' });
     const { access_token: tokenA } = await loginAs(salesA);
     const { access_token: tokenB } = await loginAs(salesB);
+    const { access_token: tokenR } = await loginAs(recruiter);
     const account = await createActiveClientAccount(bda.id);
     const req = await createRequirement(tokenA, account.id);
 
-    const edit = await authed(request(app).patch(`/api/v1/requirements/${req.id}`), tokenB).send({
-      title: 'Stolen title',
-    });
-    expect(edit.status).toBe(403);
+    const url = `/api/v1/requirements/${req.id}`;
+    const edit = await authed(request(app).patch(url), tokenB).send({ title: 'Shared edit' });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data.title).toBe('Shared edit');
 
-    const status = await authed(request(app).post(`/api/v1/requirements/${req.id}/status`), tokenB).send({
-      to_status: 'in_progress',
-    });
-    expect(status.status).toBe(403);
+    const status = await authed(request(app).post(`${url}/status`), tokenB).send({ to_status: 'in_progress' });
+    expect(status.status).toBe(200);
+
+    const owner = await authed(request(app).patch(url), tokenB).send({ sales_owner_id: salesB.id });
+    expect(owner.status).toBe(403);
+
+    const other = await authed(request(app).patch(url), tokenR).send({ title: 'Nope' });
+    expect(other.status).toBe(403);
   });
 });
 

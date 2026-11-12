@@ -111,6 +111,23 @@ export default function FinalizedFinancialsTab() {
         <KpiCard label="Expenses" value={inr(t?.expenses)} hint="claims, group charges, vendors" icon={PiggyBank} theme="red" />
         <KpiCard label="Profit" value={inr(t?.profit)} icon={TrendingUp} theme={(t?.profit || 0) < 0 ? 'red' : 'blue'} />
       </div>
+      {data?.payments && (
+        <section className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="financials-payments">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-heading text-sm font-semibold text-tertiary-900">Payments (cash, in INR)</h3>
+            <p className="text-xs text-tertiary-500">
+              {state === 'locked' ? 'Counted once the month is locked (Live Analytics > Financials lock), whether or not a wallet was used.' : state === 'unlocked' ? 'Payments of months that are not locked yet.' : 'Locked and not yet locked months together.'}
+            </p>
+          </div>
+          <dl className="mt-2 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+            {[['Received', data.payments.received], ['Paid out', data.payments.paid], ['Net', data.payments.net], ['Bank charges', data.payments.bank_charges], ['Deductions', data.payments.deductions]].map(([label, value]) => (
+              <div key={label}><dt className="text-xs text-tertiary-500">{label}</dt><dd className="font-semibold tabular-nums text-tertiary-900">{inr(value)}</dd></div>
+            ))}
+          </dl>
+          {split && <p className="mt-1 text-xs text-tertiary-500">Of which locked: received {inr(data.payments.locked.received)} · paid {inr(data.payments.locked.paid)}.</p>}
+          <p className="mt-1 text-[11px] text-tertiary-400">{data.payments.count} payment(s). Cash movement: it sits beside the profit figures and is not part of them.</p>
+        </section>
+      )}
       {data?.missing_rates?.length > 0 && <p className="rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800">Set the {data.missing_rates.join(', ')} exchange rate — those unlocked amounts count as 0 until then.</p>}
 
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">

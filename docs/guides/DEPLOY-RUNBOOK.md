@@ -102,14 +102,22 @@ WantedBy=timers.target
 sudo systemctl enable --now delphic-backup.timer
 ```
 
-Retention (count-based, not age-based — disk will not grow without bound):
+Retention (tiered by age, with a hard disk cap - `scripts/backup-prune.sh`, called after every dump by `db-backup.sh` and by each deploy):
 
-| Source | Files | Kept |
-|---|---|---|
-| Each `./start-delphic.sh --prod` (every push/deploy) | `backups/predeploy-*.dump` | newest **7** (`BACKUP_KEEP`) |
-| Cron / systemd timer | `backups/auto-*.dump` | newest **7** (`BACKUP_KEEP`) |
+| Files | Kept |
+|---|---|
+| `backups/auto-*.dump` | every dump for the last 6 h, then one per hour up to 48 h, one per day up to 30 days, one per month up to 12 months |
+| `backups/predeploy-*.dump` | 30 days |
+| `backups/viewer/now-*.dump` (snapshot viewer "compare with now") | newest 5 |
 
-Each run writes one new dump, then deletes anything past the 7 newest of that family. Override with `BACKUP_KEEP=N` if you need more. Both scripts also abort when the backups volume has less than `BACKUP_MIN_FREE_GB` (default **2**) free.
+The newest **7** auto and the newest **7** predeploy dumps are never pruned. Caps (env): `BACKUP_MAX_TOTAL_MB` (default **1500**) and `BACKUP_MIN_FREE_GB` (default **3**; both backup scripts also refuse to write a dump below it). When either is breached the oldest dumps go first - hourly, then daily, then predeploy, then monthly - and every deletion is logged as `rotated out ...` (see `/var/log/delphic-backup.log`). Preview what a run would delete with `scripts/backup-prune.sh --dry-run`. Files with other names (`pre-restore-safety-*`, `*.sql`) are never touched. Self-test: `bash scripts/test-backup-prune.sh`.
+
+Database snapshot viewer (`/dbviewer/`, super admin only; [features/DB-SNAPSHOT-VIEWER.md](../features/DB-SNAPSHOT-VIEWER.md)): a separate `dbviewer` container that opens these dumps read-only. One-time steps on the box, in this order:
+
+1. Disk check before enabling the tiered retention: `docker system df` and `sudo du -sh /var/lib/docker /var/log /home/ubuntu /opt/delphic` (22 GB was in use for a database of about 6 MB). Clean old images / build cache only after confirming the running images are kept. Target at least 8 GB free. Each deploy now also prunes build cache older than 7 days, once a week.
+2. `bash scripts/create-dump-reader-role.sh` (read-only `dump_reader` role, password goes to `.env` as `DUMP_READER_PASSWORD`), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d dbviewer`. Not a Prisma migration: it needs a password.
+3. Add the `location /dbviewer/` block from `nginx.conf.example` to the live nginx site, `sudo nginx -t && sudo systemctl reload nginx`.
+4. `docker stats` while running a compare and an XLSX export: stays under 192 MB.
 
 - `./backups/` is git-ignored.
 - **Copy them off the box.** Set `BACKUP_OFFSITE_CMD` (e.g. `BACKUP_OFFSITE_CMD='aws s3 cp "$1" s3://delphic-backups/'`) in the service environment.
@@ -216,3 +224,35 @@ This is the only path that drops the database, and it is a deliberate, manual re
 - **`ENABLE_JOBS`** (default `true`): the API runs an in-process `node-cron` job every 15 min for interview reminders (T-24h / T-1h in-app notifications). Leave it on for the single prod container. **If the API is ever scaled to more than one instance, set `ENABLE_JOBS=false` on every instance but one** — otherwise each instance sends duplicate reminders. Always off under `NODE_ENV=test`. Reserved (unused) `NOTIFICATIONS_*` / `MS_GRAPH_*` vars are placeholders for the future email + MS Teams channels.
 - Loopback binds in prod: API `127.0.0.1:4000`, client `127.0.0.1:8081` (nginx fronts them).
 - Rehearse risky migrations first: restore the latest `auto-*.dump` into a scratch DB, run `prisma migrate deploy`, smoke-test.
+
+## `.env` quoting and failed deploys (2026-10-22)
+
+- `start-delphic.sh` loads `/opt/delphic/.env` with **bash** (`set -a; source .env`, under `set -e`), while `docker compose` reads the same file with its own parser. A value containing spaces or `< > & ; ( ) $` must be in **double quotes**, e.g. `NOTIFICATIONS_EMAIL_FROM="Delphic One <noreply.secure@delphic.in>"`. Never leave placeholder text in a value (`<your secret>`). One unquoted line made the Deploy workflow fail at the "Deploy to EC2" step in about 22 seconds while the running containers (read by compose) looked healthy.
+- Check before a deploy: `bash -c 'set -a; source /opt/delphic/.env; set +a; echo env ok'`.
+- A change to `.env` reaches a container only when it is recreated: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d server`.
+- To retry a failed Deploy, open it in GitHub Actions and use **Re-run failed jobs**; it deploys the same commit CI tested. The failing step's last lines (Actions log) give the exact cause.
+- Render staging runs with `ENABLE_JOBS=false` (free plan sleeps), so the email outbox job never runs there: queued mail stays `queued`. Production runs the jobs.
+- Mail: see [EMAIL-SMTP-PRODUCTION.md](EMAIL-SMTP-PRODUCTION.md) (Microsoft Graph or SMTP variables).
+- **Root-owned files break the deploy.** If a past deploy or fix was done with `sudo`, some files in `/opt/delphic` end up owned by root and the next `git reset --hard` fails with `unable to unlink ...: Permission denied` (Deploy to EC2 fails in ~20 s, containers stay on the old version). Find them with `find /opt/delphic -not -user ubuntu | head`, fix with `sudo chown -R ubuntu:ubuntu /opt/delphic`, then re-run the failed Deploy.
+- A Deploy cancelled midway can leave the server and client already rebuilt on the new commit (the production frontend bundle changed although the run showed "cancelled"). Check what really runs: the frontend bundle name matches staging, and `git log --oneline -1` on the box.
+- GitHub's API allows 60 unauthenticated calls per hour per IP: polling Actions runs from a script runs out quickly. Watch the production bundle name / health instead, or look at the Actions page.
+
+## Which commit is live? (build meta tags)
+
+Every build puts the commit it was built from in the page head. Open the site, right-click > **View page source** (or DevTools > Elements > `<head>`) and read:
+
+```html
+<meta name="build-commit" content="<full commit id>" />
+<meta name="build-commit-short" content="<7 characters>" />
+<meta name="build-commit-message" content="<first line of the commit message>" />
+<meta name="build-commit-date" content="<commit date, ISO>" />  <meta name="build-commit-date-ist" ... />
+<meta name="build-deployed-at" content="<when the build ran = when it went on the server, UTC>" />  <meta name="build-deployed-at-ist" ... />
+<meta name="build-branch" content="main" />
+```
+
+Compare `build-commit` with `git rev-parse origin/main` (production) or `origin/staging` (Render). `index.html` is served `no-store`, so a reload always shows the current build.
+
+- Code: `client/build-info.js` (Vite plugin, test: `node --test client/build-info.test.mjs`), `scripts/build-info.sh`.
+- Production: the Deploy workflow and `start-delphic.sh` run `eval "$(bash scripts/build-info.sh)"`, and `docker-compose.yml` passes `BUILD_COMMIT_*` into the client image build (the Docker context has no `.git`).
+- Render staging: the root `Dockerfile` reads Render's `RENDER_GIT_COMMIT` and asks the GitHub API for the message and date (any failure shows "unknown" for those two, never breaks the build).
+- A value of `unknown` means the build was made without that information (for example a manual `docker build` without the build args).

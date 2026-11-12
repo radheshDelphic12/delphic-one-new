@@ -200,7 +200,7 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
   const byCalc = new Map(versions.map((v) => [v.calculation_id, v]));
   const billingCalcs = calcs.filter((c) => c.kind === 'billing');
   const vendorCalcs = calcs.filter((c) => c.kind === 'vendor_bill');
-  const [clientInvoices, vendorInvoices, names] = await Promise.all([
+  const [clientInvoices, vendorInvoices, names, combinedInvoices] = await Promise.all([
     billingCalcs.length
       ? prisma.clientInvoice.findMany({ where: { org_id: orgId, OR: billingCalcs.map((c) => ({ client_account_id: c.scope_key, period_month: c.period_month, period_year: c.period_year })) }, select: { id: true, client_account_id: true, period_month: true, period_year: true, invoice_number: true, status: true, amount: true, currency: true } })
       : [],
@@ -208,12 +208,15 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
       ? prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, OR: vendorCalcs.map((c) => ({ vendor_account_id: c.scope_key, period_month: c.period_month, period_year: c.period_year })) }, select: { id: true, vendor_account_id: true, period_month: true, period_year: true, invoice_number: true, amount: true, currency: true, details: true } })
       : [],
     userNames(calcs.map((c) => c.locked_by)),
+    billingCalcs.length ? require('./invoiceStatus').consolidatedInvoices(orgId, billingCalcs.map((c) => ({ period_month: c.period_month, period_year: c.period_year }))) : [],
   ]);
   return calcs.filter((c) => byCalc.has(c.id)).map((c) => {
     const v = byCalc.get(c.id);
     const summary = summarize(c.kind, v.snapshot, Number(v.amount), fx);
     const sameMonth = (r) => r.period_month === c.period_month && r.period_year === c.period_year;
-    const invoice = c.kind === 'billing' ? clientInvoices.find((i) => i.client_account_id === c.scope_key && sameMonth(i)) || null : null;
+    // a combined invoice covers several contracts: each of them points at it
+    const combined = c.kind === 'billing' ? combinedInvoices.find((i) => sameMonth(i) && (i.line_items.items || []).some((it) => it.account_id === c.scope_key)) : null;
+    const invoice = c.kind === 'billing' ? clientInvoices.find((i) => i.client_account_id === c.scope_key && sameMonth(i)) || combined || null : null;
     return {
       id: c.id,
       kind: c.kind,
@@ -230,7 +233,7 @@ async function lockedList(orgId, { period_year, period_month, kind } = {}) {
       currency: summary.currency,
       amount_inr: summary.amount_inr,
       summary,
-      invoice: invoice ? { ...invoice, amount: Number(invoice.amount) } : null,
+      invoice: invoice ? { ...invoice, line_items: undefined, amount: Number(invoice.amount) } : null,
       vendor_invoices: c.kind === 'vendor_bill' ? vendorInvoices.filter((i) => i.vendor_account_id === c.scope_key && sameMonth(i)).map((i) => ({ ...i, amount: Number(i.amount) })) : [],
     };
   });
@@ -266,6 +269,37 @@ function parent(key, label, nodes) {
 const monthIdx = (y, m) => y * 12 + (m - 1);
 
 const MONTH_CONCURRENCY = 4;
+
+// The payments (payment popup / wallet link) of a range, in INR, whether or not a wallet was used. A payment is "locked" - and counts in
+// the Financials numbers by default - once the financial lock of its month is on (Live Analytics > Financials); until then it is live.
+async function paymentTotals(orgId, { period_year, from_month, to_month, state }) {
+  const [rows, locks] = await Promise.all([
+    prisma.paymentRecord.findMany({
+      where: { org_id: orgId, deleted_at: null, paid_on: { gte: new Date(Date.UTC(period_year, from_month - 1, 1)), lt: new Date(Date.UTC(period_year, to_month, 1)) } },
+      select: { direction: true, paid_on: true, inr_amount: true, bank_charges: true, other_deductions: true, exchange_rate: true },
+    }),
+    prisma.financialCalculation.findMany({
+      where: { org_id: orgId, kind: 'financials', period_year, period_month: { gte: from_month, lte: to_month }, status: { in: ['locked', 'change_detected'] } },
+      select: { period_month: true },
+    }),
+  ]);
+  const lockedMonths = new Set(locks.map((l) => l.period_month));
+  const blank = () => ({ count: 0, received: 0, paid: 0, bank_charges: 0, deductions: 0 });
+  const bucket = { locked: blank(), unlocked: blank() };
+  for (const r of rows) {
+    const b = lockedMonths.has(r.paid_on.getUTCMonth() + 1) ? bucket.locked : bucket.unlocked;
+    const rate = r.exchange_rate === null ? 1 : Number(r.exchange_rate);
+    b.count += 1;
+    if (r.direction === 'in') b.received += Number(r.inr_amount); else b.paid += Number(r.inr_amount);
+    b.bank_charges += Number(r.bank_charges) * rate;
+    b.deductions += Number(r.other_deductions) * rate;
+  }
+  const fin = (b) => ({ count: b.count, received: round2(b.received), paid: round2(b.paid), bank_charges: round2(b.bank_charges), deductions: round2(b.deductions), net: round2(b.received - b.paid) });
+  const locked = fin(bucket.locked);
+  const unlocked = fin(bucket.unlocked);
+  const all = fin({ count: bucket.locked.count + bucket.unlocked.count, received: bucket.locked.received + bucket.unlocked.received, paid: bucket.locked.paid + bucket.unlocked.paid, bank_charges: bucket.locked.bank_charges + bucket.unlocked.bank_charges, deductions: bucket.locked.deductions + bucket.unlocked.deductions });
+  return { ...(state === 'locked' ? locked : state === 'unlocked' ? unlocked : all), locked, unlocked };
+}
 
 async function financialRecords(orgId, { period_year, from_month = 1, to_month = 12, state = 'locked' }, now = new Date()) {
   const wantLocked = state !== 'unlocked';
@@ -429,7 +463,8 @@ async function financialRecords(orgId, { period_year, from_month = 1, to_month =
     expenses: expensesNode.amount,
     profit: round2(revenueNode.amount - salariesNode.amount - expensesNode.amount),
   };
-  return { state, period_year, from_month, to_month, months, categories: [revenueNode, salariesNode, expensesNode], totals, counts, missing_rates: [...missing] };
+  const payments = await paymentTotals(orgId, { period_year, from_month, to_month, state });
+  return { state, period_year, from_month, to_month, months, categories: [revenueNode, salariesNode, expensesNode], totals, payments, counts, missing_rates: [...missing] };
 }
 
 module.exports = { expenseRecords, lockedList, financialRecords, summarize, monthExpenseRows };

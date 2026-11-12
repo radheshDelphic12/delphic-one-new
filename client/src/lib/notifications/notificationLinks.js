@@ -13,6 +13,14 @@ export function entityLink({ entity_type, entity_id, metadata } = {}) {
       return entity_id ? `/submissions/${entity_id}` : '/submissions';
     case 'profile':
       return entity_id ? `/profiles/${entity_id}` : '/profiles';
+    // managers and HR land on Settings > Resignations; an employee has no such tab, so they land on Account (their own card)
+    case 'resignation':
+      return '/settings?tab=resignations';
+    // Speak Up: a handler lands in the inbox, the person who raised it in My complaints
+    case 'whistle_case':
+      return metadata?.audience === 'reporter' ? '/speak-up?tab=mine' : '/speak-up?tab=inbox';
+    case 'pm_ticket':
+      return metadata?.project_id && entity_id ? `/pm/projects/${metadata.project_id}?ticket=${entity_id}` : '/pm';
     case 'interview_round': {
       const submissionId = metadata?.submission_id;
       return submissionId ? `/submissions/${submissionId}#interview-rounds` : '/calendar';

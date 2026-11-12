@@ -3,6 +3,7 @@ const env = require('./config/env');
 const logger = require('./config/logger');
 const prisma = require('./config/db');
 const { startJobs } = require('./jobs');
+const groupFinance = require('./modules/superDashboard/groupFinance.service');
 
 const server = app.listen(env.port, () => {
   const hostApiPort = process.env.HOST_API_PORT || String(env.port);
@@ -22,6 +23,11 @@ const server = app.listen(env.port, () => {
     client: `http://localhost:${hostClientPort}`,
     listen_port: env.port,
   });
+
+  // Compute the Group Dashboard figures in the background so the first visit is not slow.
+  if (env.nodeEnv !== 'test') {
+    setTimeout(() => groupFinance.warmUp().catch((err) => logger.warn('group_dashboard_warmup_failed', { error: err.message })), 15_000).unref();
+  }
 
   if (env.jobs.enabled) {
     startJobs();

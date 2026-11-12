@@ -51,7 +51,24 @@ const listClaimsQuerySchema = listMyClaimsQuerySchema.extend({
   org_membership_id: z.string().uuid().optional(),
 });
 
-const createVendorPaymentSchema = z.object({
+// Bank payout of reimbursements: one month (by expense date) and one status (approved = still to be paid out); json previews, xlsx downloads.
+const claimsPayoutQuerySchema = z.object({
+  status: z.enum(['pending', 'approved', 'rejected', 'reimbursed']).default('approved'),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  format: z.enum(['json', 'xlsx']).default('xlsx'),
+});
+
+// Processed reimbursements: claims marked reimbursed between two dates (the day the payout was recorded); json previews, xlsx downloads.
+const dateDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const claimsProcessedQuerySchema = z.object({
+  from: dateDay.optional(),
+  to: dateDay.optional(),
+  org_membership_id: z.string().uuid().optional(),
+  format: z.enum(['json', 'xlsx']).default('json'),
+});
+
+const createVendorPaymentSchema =z.object({
   vendor_name: z.string().min(1).max(200),
   vendor_type: z.enum(['contractor', 'external_resource', 'third_party']),
   amount: z.coerce.number().positive(),
@@ -78,6 +95,8 @@ module.exports = {
   decideClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
+  claimsPayoutQuerySchema,
+  claimsProcessedQuerySchema,
   createVendorPaymentSchema,
   decideVendorPaymentSchema,
   listVendorPaymentsQuerySchema,

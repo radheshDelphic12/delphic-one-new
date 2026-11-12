@@ -13,12 +13,14 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import DealForm from '../../components/acconcy/DealForm.jsx';
 import EntryForm from '../../components/acconcy/EntryForm.jsx';
 import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
+import TrackedPaymentsPanel from '../../components/payments/TrackedPaymentsPanel.jsx';
 import { DateInput, Detail, Empty, Kpi, Money, Select, Text, card, today, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
   { key: 'money', label: 'Revenue & expenses' },
+  { key: 'payments', label: 'Payments received' },
   { key: 'investments', label: 'Investments' },
   { key: 'tasks', label: 'Tasks' },
   { key: 'documents', label: 'Documents' },
@@ -182,7 +184,7 @@ export default function AcconcyDealDetailPage() {
         </div>
       )}
 
-      <SectionTabs tabs={TABS.filter((t) => (t.key !== 'money' || showMoney) && (t.key !== 'investments' || axCan(me, 'investments')))} value={tab} onChange={setTab} className="min-w-0" />
+      <SectionTabs tabs={TABS.filter((t) => (!['money', 'payments'].includes(t.key) || showMoney) && (t.key !== 'investments' || axCan(me, 'investments')))} value={tab} onChange={setTab} className="min-w-0" />
 
       {tab === 'overview' && (
         <section className={card}>
@@ -233,6 +235,11 @@ export default function AcconcyDealDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {tab === 'payments' && (
+        <TrackedPaymentsPanel kind="deal_client_payment" referenceId={deal.id} direction="in" total={deal.deal_amount !== null && deal.deal_amount !== undefined ? Number(deal.deal_amount) : null}
+          title="Payments received" party={deal.name} category="Deal payment received" canRecord={canMoney} />
       )}
 
       {tab === 'investments' && (

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, UserRound } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { adminFor } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -12,6 +13,7 @@ import { PeekField } from '../../components/ui/PeekFields.jsx';
 import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
+import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -24,17 +26,6 @@ const EMPTY_OPTIONS = {
   personOptions: [],
 };
 
-const WORK_MODE_OPTIONS = [
-  { value: 'onsite', label: 'Onsite' },
-  { value: 'hybrid', label: 'Hybrid' },
-  { value: 'remote', label: 'Remote' },
-];
-
-const WORKER_TYPE_OPTIONS = [
-  { value: 'full_time_employee', label: 'Full-Time Employee' },
-  { value: 'contractor', label: 'Contractor' },
-];
-
 function formatMoney(value, currency) {
   if (value === null || value === undefined) return 'Not set';
   return `${currency || 'INR'} ${Number(value).toLocaleString('en-IN')}`;
@@ -43,14 +34,6 @@ function formatMoney(value, currency) {
 function workModeLabel(value) {
   return WORK_MODE_OPTIONS.find((option) => option.value === value)?.label || 'Not set';
 }
-
-const EMPLOYMENT_STATUS_OPTIONS = [
-  { value: 'active', label: 'Active' },
-  { value: 'notice_period', label: 'Serving notice' },
-  { value: 'on_leave', label: 'On long leave' },
-  { value: 'pending_onboarding', label: 'Joining soon' },
-  { value: 'terminated', label: 'Exited' },
-];
 
 // Calendar days from the notice date to the last working day, both included.
 function noticeDays(start, end) {
@@ -91,6 +74,8 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
         joined_at: row.joined_at ? String(row.joined_at).slice(0, 10) : '',
         notice_start_date: row.notice_start_date ? String(row.notice_start_date).slice(0, 10) : '',
         notice_end_date: row.notice_end_date ? String(row.notice_end_date).slice(0, 10) : '',
+        bench_start_date: row.bench_start_date ? String(row.bench_start_date).slice(0, 10) : '',
+        bench_end_date: row.bench_end_date ? String(row.bench_end_date).slice(0, 10) : '',
         department_id: row.department?.id || '',
         designation_id: row.designation?.id || '',
         team_id: row.team?.id || '',
@@ -106,6 +91,15 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
       });
     }
   }, [open, row]);
+
+  // Bench: the end follows the start by 30 days until someone sets it by hand.
+  function setBenchStart(value) {
+    setFields((current) => {
+      const end = value ? new Date(`${value}T00:00:00Z`) : null;
+      if (end) end.setUTCDate(end.getUTCDate() + 30);
+      return { ...current, bench_start_date: value, bench_end_date: end ? end.toISOString().slice(0, 10) : '' };
+    });
+  }
 
   function setField(key, value) {
     setFields((current) => ({ ...current, [key]: value }));
@@ -212,6 +206,15 @@ function EditMembershipDrawer({ open, row, options, onClose, onSaved }) {
               </label>
             </>
           )}
+          <label className="text-xs font-medium text-tertiary-600">
+            Bench start date
+            <input type="date" value={fields.bench_start_date} onChange={(event) => setBenchStart(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">
+            Bench end date
+            <input type="date" min={fields.bench_start_date || undefined} disabled={!fields.bench_start_date} value={fields.bench_end_date} onChange={(event) => setField('bench_end_date', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            <span className="mt-1 block font-normal text-tertiary-400">30 days from the start by default. Ends when the person is allocated to a project.</span>
+          </label>
           <label className="text-xs font-medium text-tertiary-600">
             User type
             <select value={fields.worker_type} onChange={(event) => setField('worker_type', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm">
@@ -322,15 +325,18 @@ export default function EmployeeProfilePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // Only the profile itself is essential. The pick-lists (departments, vendors, shifts...) must never stop the page from opening:
+    // if one of them is refused for this role the list is simply empty.
+    const optional = (request) => request.catch(() => ({ data: { data: [] } }));
     Promise.all([
       apiClient.get(`/orgs/memberships/${id}`),
-      user?.role === 'admin' ? apiClient.get('/departments') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/designations') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/teams') : Promise.resolve({ data: { data: [] } }),
-      user?.role === 'admin' ? apiClient.get('/billing/vendors') : Promise.resolve({ data: { data: [] } }),
-      apiClient.get('/orgs/locations'),
-      apiClient.get('/attendance/shifts'),
-      apiClient.get('/orgs/memberships'),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/departments')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/designations')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/teams')) : Promise.resolve({ data: { data: [] } }),
+      adminFor(user, 'people.update') ? optional(apiClient.get('/billing/vendors')) : Promise.resolve({ data: { data: [] } }),
+      optional(apiClient.get('/orgs/locations')),
+      optional(apiClient.get('/attendance/shifts')),
+      optional(apiClient.get('/orgs/memberships')),
     ])
       .then(([profile, departments, designations, teams, vendors, locations, shifts, people]) => {
         if (cancelled) return;
@@ -370,7 +376,7 @@ export default function EmployeeProfilePage() {
   if (loading) return <div className="rounded-2xl border border-tertiary-100 bg-white p-8 text-sm text-tertiary-500">Loading employee profile...</div>;
   if (!row) return <div className="rounded-2xl border border-danger-100 bg-danger-50 p-6 text-sm text-danger-700">Employee profile could not be found.</div>;
 
-  const canEdit = user?.role === 'admin';
+  const canEdit = adminFor(user, 'people.update');
   // HR department members (not admins) can change the joining date only.
   const canEditJoining = !canEdit && Boolean(row.can_edit_joining_date);
   const selectOptions = {
@@ -411,7 +417,7 @@ export default function EmployeeProfilePage() {
         <h3 className="mb-4 font-heading text-base font-semibold text-tertiary-900">Employment details</h3>
         <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <PeekField label="Role"><span className="capitalize">{row.role}</span></PeekField>
-          <PeekField label="Employment status"><Badge value={row.employment_status} /></PeekField>
+          <PeekField label="Employment status"><Badge value={row.employment_status} label={employmentStatusLabel(row.employment_status)} /></PeekField>
           <PeekField label="User type">{row.worker_type === 'contractor' ? 'Contractor' : 'Full-Time Employee'}</PeekField>
           {row.worker_type === 'contractor' && (
             <>
@@ -446,6 +452,12 @@ export default function EmployeeProfilePage() {
                   <span className="ml-1.5 text-xs text-tertiary-500">· {noticeDays(row.notice_start_date, row.notice_end_date)}-day notice</span>
                 )}
               </PeekField>
+            </>
+          )}
+          {row.bench_start_date && (
+            <>
+              <PeekField label="Bench start">{formatDate(row.bench_start_date)}</PeekField>
+              <PeekField label="Bench end">{formatDate(row.bench_end_date)}</PeekField>
             </>
           )}
         </dl>

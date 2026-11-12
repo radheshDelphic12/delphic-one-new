@@ -7,6 +7,7 @@ import { useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
 import { SERVICE_META, useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 
 const TABS = [
   { key: 'company', label: 'Company', icon: Building2 },
@@ -14,6 +15,7 @@ const TABS = [
   { key: 'valuation', label: 'Valuation', icon: Landmark },
   { key: 'categories', label: 'Categories', icon: Tags },
   { key: 'users', label: 'Users', icon: Users },
+  { key: 'teams', label: 'Teams & reporting', icon: Users },
   { key: 'audit', label: 'Audit log', icon: History },
 ];
 
@@ -489,6 +491,7 @@ export default function ZephyrSettingsPage() {
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'company' && <CompanyTab />}
       {tab === 'users' && <UsersTab />}
+      {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <AuditTab />}
     </div>
   );

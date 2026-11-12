@@ -19,6 +19,9 @@ const today = () => {
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
 };
 const inDays = (n) => ymd(new Date(today().getTime() + n * DAY));
+// Last day of the current month: a project ending then is billed in full for this month (no proration), yet is still inside the 30-day ending-soon window.
+const monthEnd = () => ymd(new Date(Date.UTC(today().getUTCFullYear(), today().getUTCMonth() + 1, 0)));
+const daysToMonthEnd = () => Math.round((new Date(`${monthEnd()}T00:00:00Z`) - today()) / DAY);
 
 async function seed() {
   const org = await createOrg({ name: 'Delphic', slug: unique('delphic-') });
@@ -39,11 +42,11 @@ async function person(ctx, name) {
   return { user, membership, token: (await loginAs(user)).access_token };
 }
 
-async function project(ctx, name, { end } = {}) {
+async function project(ctx, name, { end, start = '2026-01-01' } = {}) {
   const res = await authed(request(app).post('/api/v1/calendars/projects'), ctx.adminToken).send({ name, service_category: 'managed_services', client_account_id: ctx.client.id });
   expect(res.status).toBe(201);
   await authed(request(app).patch(`/api/v1/billing/projects/${res.body.data.id}`), ctx.adminToken).send({
-    agreement_start_date: '2026-01-01',
+    agreement_start_date: start,
     ...(end ? { agreement_end_date: end } : {}),
     billing: { rate_type: 'monthly', rate: 210000, currency: 'INR' },
   });
@@ -159,6 +162,64 @@ describe('Resource Revenue splits a month by the allocation in force each day', 
   });
 });
 
+describe('Employees & Projects report', () => {
+  test('lists every employee, shows no-project ones, and filters by team', async () => {
+    const ctx = await seed();
+    const { assign, report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Alpha' })).body.data;
+    const busy = await person(ctx, 'Busy Bee');
+    const idle = await person(ctx, 'Idle Ida');
+    const other = await person(ctx, 'Other Olu');
+    await teamChange({ org_membership_id: busy.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    await teamChange({ org_membership_id: idle.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    const proj = await project(ctx, 'Project X', { end: inDays(60) });
+    await assign({ account_id: proj.id, org_membership_id: busy.membership.id });
+    // finished projects must not be listed: one marked completed, one whose agreement ended in the past
+    const done = await project(ctx, 'Project Done', { end: inDays(60) });
+    const lapsed = await project(ctx, 'Project Lapsed', { end: inDays(60) });
+    await assign({ account_id: done.id, org_membership_id: busy.membership.id });
+    await assign({ account_id: lapsed.id, org_membership_id: busy.membership.id });
+    await prisma.account.update({ where: { id: done.id }, data: { contract_status: 'completed' } });
+    await prisma.account.update({ where: { id: lapsed.id }, data: { agreement_end_date: new Date(`${inDays(-3)}T00:00:00.000Z`) } });
+
+    const all = (await report('employee-projects', {})).body.data;
+    const byName = Object.fromEntries(all.rows.map((r) => [r.name, r]));
+    expect(byName['Busy Bee'].projects.map((p) => p.name)).toEqual(['Project X']); // same rule as Team Capacity
+    expect(byName['Busy Bee'].project_count).toBe(1);
+    expect(byName['Busy Bee'].projects[0].agreement_end_date).toBe(inDays(60));
+    expect(byName['Idle Ida'].project_count).toBe(0);
+    expect(byName['Other Olu'].team).toBeNull();
+    expect(all.unassigned).toBeGreaterThanOrEqual(2);
+
+    const filtered = (await report('employee-projects', { team_ids: team.id })).body.data;
+    expect(filtered.rows.map((r) => r.name).sort()).toEqual(['Busy Bee', 'Idle Ida']);
+    expect(other.membership.id).toBeTruthy();
+  });
+});
+
+describe('A client dropped in Sales keeps its project allocations', () => {
+  test('people stay on the project in Employees & Projects and Team capacity after the client is dropped', async () => {
+    const ctx = await seed();
+    const dev = await person(ctx, 'Dev Dropped');
+    const proj = await project(ctx, 'Project Kept', { end: inDays(60) });
+    await api(ctx).assign({ account_id: proj.id, org_membership_id: dev.membership.id });
+    const before = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(before.rows.find((r) => r.name === 'Dev Dropped').project_count).toBe(1);
+
+    // Sales drops the client: only the sales stage changes, the project's contract status and dates do not.
+    await prisma.account.update({ where: { id: ctx.client.id }, data: { stage: 'dropped' } });
+    await prisma.account.update({ where: { id: proj.id }, data: { stage: 'dropped' } });
+    const after = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(after.rows.find((r) => r.name === 'Dev Dropped').projects.map((p) => p.name)).toEqual(['Project Kept']);
+    expect(after.unassigned).toBe(before.unassigned);
+
+    // Finance marking it Completed is what takes the people off.
+    await prisma.account.update({ where: { id: proj.id }, data: { contract_status: 'completed' } });
+    const done = (await api(ctx).report('employee-projects', {})).body.data;
+    expect(done.rows.find((r) => r.name === 'Dev Dropped').project_count).toBe(0);
+  });
+});
+
 describe('Team capacity', () => {
   test('same-team members on one project count once; capacity = members × projects per resource; never below zero', async () => {
     const ctx = await seed();
@@ -171,7 +232,7 @@ describe('Team capacity', () => {
       people.push(p);
     }
     await authed(request(app).patch(`/api/v1/teams/${team.id}`), ctx.adminToken).send({ lead_membership_id: people[0].membership.id });
-    const a = await project(ctx, 'Project A', { end: inDays(10) });
+    const a = await project(ctx, 'Project A', { end: monthEnd() });
     const b = await project(ctx, 'Project B', { end: inDays(60) });
     await assign({ account_id: a.id, org_membership_id: people[0].membership.id }); // Harshit → A
     await assign({ account_id: a.id, org_membership_id: people[1].membership.id }); // Ankita → A
@@ -189,7 +250,17 @@ describe('Team capacity', () => {
       projects_ending_soon: 1,
       can_allocate: 5,
       status: 'available',
+      team_salary: 168000, // 4 x 42,000 CTC
+      vendor_cost: 0,
+      monthly_billing: 420000, // two Managed Services projects at 210,000 a month
+      profit: 252000, // 420,000 billing - 168,000 salary - 0 vendor
     });
+
+    // Billable / non-billable checkboxes (both on by default): every running project is one or the other, so the two halves add up to the whole
+    const only = async (billable, non_billable) => (await row({ billable, non_billable })).current_allocation;
+    expect(await only('1', '1')).toBe(2);
+    expect(await only('0', '0')).toBe(0);
+    expect((await only('1', '0')) + (await only('0', '1'))).toBe(2);
 
     // Capability is a whole number, rounded up: capacity 4.52 - allocation 2 = 2.52 shows as 3; can allocate follows it.
     await authed(request(app).put('/api/v1/allocations/settings'), ctx.adminToken).send({ projects_per_resource: 1.13 });
@@ -202,10 +273,67 @@ describe('Team capacity', () => {
     await authed(request(app).patch(`/api/v1/teams/${team.id}`), ctx.adminToken).send({ projects_per_resource: 2 });
     expect(await row()).toMatchObject({ capacity_per_resource: 2, total_capacity: 8, uses_org_default: false });
 
-    // Ending soon: A (ends in 10 days) is inside the 30-day window, B (60) is not.
+    // Ending soon: A (ends this month) is inside the 30-day window, B (60) is not.
     const soon = (await report('ending-soon', {})).body.data.projects;
     expect(soon.map((p) => p.project.name)).toEqual(['Project A']);
-    expect(soon[0]).toMatchObject({ days_remaining: 10, resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
+    expect(soon[0]).toMatchObject({ days_remaining: daysToMonthEnd(), resource_count: 2, teams: [{ id: team.id, name: 'Data Smith' }] });
+  });
+
+  test('someone serving notice counts as leaving on their notice end date (no left_at yet)', async () => {
+    const ctx = await seed();
+    const { report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Notice' })).body.data;
+    const p = await person(ctx, 'Serving Notice');
+    await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+    await prisma.orgMembership.update({ where: { id: p.membership.id }, data: { employment_status: 'notice_period', notice_end_date: new Date(`${inDays(10)}T00:00:00.000Z`) } });
+    const row = async (query = {}) => (await report('team-capacity', query)).body.data.teams.find((t) => t.team?.id === team.id);
+    expect(await row()).toMatchObject({ members: 1, members_leaving: 1 });
+    expect((await row()).leaving_list.map((m) => m.name)).toEqual(['Serving Notice']);
+    expect(await row({ window_days: 5 })).toMatchObject({ members_leaving: 0 });
+  });
+
+  test('people joining or leaving inside the window change "can allocate"; those outside it do not', async () => {
+    const ctx = await seed();
+    const { report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Moves' })).body.data;
+    const mk = async (name, patch = {}) => {
+      const p = await person(ctx, name);
+      await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' });
+      await prisma.orgMembership.update({ where: { id: p.membership.id }, data: patch });
+      return p;
+    };
+    await mk('Stay1');
+    await mk('Stay2');
+    await mk('Leaver', { left_at: new Date(`${inDays(10)}T00:00:00.000Z`) }); // last working day inside the 30-day window
+    await mk('JoinsSoon1', { joined_at: new Date(`${inDays(8)}T00:00:00.000Z`) });
+    await mk('JoinsSoon2', { joined_at: new Date(`${inDays(15)}T00:00:00.000Z`) });
+    await mk('JoinsLater', { joined_at: new Date(`${inDays(60)}T00:00:00.000Z`) }); // outside the window
+    await mk('Gone', { left_at: new Date('2026-08-05T00:00:00.000Z') }); // already left: never counted
+
+    const row = async (query = {}) => (await report('team-capacity', query)).body.data.teams.find((t) => t.team?.id === team.id);
+    // today: Stay1, Stay2 and the Leaver are in the team (3 x 1.5 = 4.5); nobody allocated
+    expect(await row()).toMatchObject({ members: 3, total_capacity: 4.5, members_joining: 2, members_leaving: 1, current_allocation: 0 });
+    // after the window: +2 joiners, -1 leaver = +1.5 capacity -> ceil(6) = 6 can be taken on (without the moves it would be 5)
+    expect((await row()).can_allocate).toBe(6);
+    expect((await row()).joining_list.map((m) => m.name).sort()).toEqual(['JoinsSoon1', 'JoinsSoon2']);
+    expect((await row()).leaving_list.map((m) => m.name)).toEqual(['Leaver']);
+    // a 5-day window sees none of them: back to today's capability
+    expect(await row({ window_days: 5 })).toMatchObject({ members_joining: 0, members_leaving: 0, can_allocate: 5 });
+    // totals carry the counts
+    expect((await report('team-capacity', {})).body.data.totals).toMatchObject({ members_joining: 2, members_leaving: 1 });
+  });
+
+  test('a signed project that has not started yet still reserves its team (shown as not started)', async () => {
+    const ctx = await seed();
+    const { assign, report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'Future Team' })).body.data;
+    const p = await person(ctx, 'Meera');
+    expect((await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' })).status).toBe(200);
+    const later = await project(ctx, 'Starts Later', { start: inDays(20), end: inDays(200) });
+    expect((await assign({ account_id: later.id, org_membership_id: p.membership.id })).status).toBeLessThan(300);
+    const row = (await report('team-capacity', {})).body.data.teams.find((t) => t.team?.id === team.id);
+    expect(row).toMatchObject({ current_allocation: 1, projects_ending_soon: 0 });
+    expect(row.projects[0]).toMatchObject({ not_started: true, starts_in_days: 20 });
   });
 
   test('team capacity is date-aware: a member who moves team on 17 Aug counts for the old team before it', async () => {

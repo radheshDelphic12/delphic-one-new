@@ -6,6 +6,10 @@ const BRAND_LOGOS = {
   gulati: '/gulati-logo.svg',
   zephyr: '/zephyr-logo.png',
   acconcy: '/acconcy-logo.png',
+  foundation: '/foundation-mark.svg',
+  zklyrera: '/zklyrera-mark.png',
+  valterra: '/valterra-mark.png',
+  novarex: '/novarex-mark.svg',
 };
 
 export function orgLogo(org) {

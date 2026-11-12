@@ -33,6 +33,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { usePermissions, userCan, Can } from '../../lib/permissions.js';
+import { hasNeed, isPermissionMode } from '../../lib/access.js';
 import { CHART_COLORS, CHART_PALETTE, chartTooltipStyle } from '../../lib/chartTheme.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import { rangeForPreset } from '../../lib/datePresets.js';
@@ -41,6 +42,13 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import FilterBar from '../../components/ui/FilterBar.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { ExcelIcon, PdfIcon } from '../../components/ui/ExportIcons.jsx';
+import DrilldownDrawer from './DrilldownDrawer.jsx';
+import MonthlyReview from './MonthlyReview.jsx';
+import HiringFunnel from './HiringFunnel.jsx';
+import JoiningAttrition from './JoiningAttrition.jsx';
+import ClosureMatrix from './ClosureMatrix.jsx';
+import AiInterviewReport from './AiInterviewReport.jsx';
+import DaySchedule from './DaySchedule.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -48,6 +56,8 @@ import {
   chartTypeForReport,
   columnsForReport,
   defaultDateRange,
+  drillMetrics,
+  drillParams,
   formatReportDate,
   formatReportDateShort,
   hrSections,
@@ -55,7 +65,9 @@ import {
   joiningsSections,
   bdaReportsSections,
   salesReportsSections,
+  recruiterReportsSections,
   sectionTabBadge,
+  reportsForPermissions,
   reportsForRole,
   tableRowsForReport,
   timeToSubmitColumns,
@@ -78,6 +90,7 @@ async function fetchAllAccountOptions(extraParams = {}) {
 const HR_TAB_META = {
   sourcing: { hint: 'Profiles sourced per day (excludes on-bench)', Icon: UserPlus },
   submissions: { hint: 'Submissions created per day (excludes on-bench)', Icon: Send },
+  submitted_to_client: { hint: 'Profiles submitted to the client per day, by sourcer (excludes on-bench)', Icon: Send },
   round1_by_sourcer: { hint: 'Internal round 1 per day, grouped by the sourcer', Icon: ClipboardCheck },
   round1_by_interviewer: { hint: 'Internal round 1 per day, grouped by the interviewer', Icon: UserCheck },
 };
@@ -230,6 +243,23 @@ function ReportChart({ reportKey, chartRows, chartBars }) {
   );
 }
 
+/** A report count that opens the records behind it. Plain text when there is nothing to open. */
+function DrillCount({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      title="Show the records behind this count"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="font-semibold text-primary-600 underline decoration-dotted underline-offset-2 hover:text-primary-800"
+    >
+      {children}
+    </button>
+  );
+}
+
 function DetailField({ label, value }) {
   return (
     <div className="rounded-xl bg-tertiary-50 px-3 py-2">
@@ -285,11 +315,27 @@ function CoveragePersonCell({ row, field, people, saving, onSave }) {
   );
 }
 
+// Reports that are whole screens of their own (own filters, own data) rather than the shared table.
+const OWN_SCREENS = {
+  'monthly-review': MonthlyReview,
+  'hiring-funnel': HiringFunnel,
+  'joining-attrition': JoiningAttrition,
+  'client-wins': () => <ClosureMatrix kind="client" />,
+  'vendor-joinings': () => <ClosureMatrix kind="vendor" />,
+  'ai-interviews': AiInterviewReport,
+  'day-schedule': DaySchedule,
+};
+
 export default function ReportsPage() {
   const { user } = useAuth();
   const { pushError } = useAlerts();
   const { can } = usePermissions(user);
-  const available = useMemo(() => reportsForRole(user?.role || 'recruiter'), [user?.role]);
+  const available = useMemo(() => {
+    const byRole = reportsForRole(user?.role || 'recruiter');
+    if (!isPermissionMode(user) || user.access.level !== 'employee') return byRole;
+    const byPermission = reportsForPermissions((key) => hasNeed(user, key));
+    return [...byPermission, ...byRole.filter((r) => !byPermission.some((p) => p.key === r.key))];
+  }, [user]);
   const defaults = useMemo(() => defaultDateRange(), []);
 
   const [active, setActive] = useState(available[0]?.key || 'recruiter-performance');
@@ -332,6 +378,7 @@ export default function ReportsPage() {
   const [joiningsTab, setJoiningsTab] = useState('by_sourcer');
   const [bdaReportsTab, setBdaReportsTab] = useState('accounts_created');
   const [salesReportsTab, setSalesReportsTab] = useState('requirements_created');
+  const [recruiterReportsTab, setRecruiterReportsTab] = useState('profiles_submitted_to_client');
   const [ttsClientId, setTtsClientId] = useState('');
   const [ttsRequirementId, setTtsRequirementId] = useState('');
   const [ttsSourcerId, setTtsSourcerId] = useState('');
@@ -354,6 +401,8 @@ export default function ReportsPage() {
   const reportRequestId = useRef(0);
   const [exporting, setExporting] = useState(false);
   const [drawerRow, setDrawerRow] = useState(null);
+  // The count the user clicked: { params, label } for GET /reports/drilldown.
+  const [drill, setDrill] = useState(null);
 
   const isExplorer = active === 'pipeline-explorer';
   const isHr = active === 'hr';
@@ -361,7 +410,9 @@ export default function ReportsPage() {
   const isTimeToSubmit = active === 'time-to-submit';
   const isBdaReports = active === 'bda-reports';
   const isSalesReports = active === 'sales-reports';
-  const isDateOnly = isHr || isJoinings || isTimeToSubmit || isBdaReports || isSalesReports; // reports that take only a date range
+  const isRecruiterReports = active === 'recruiter-reports';
+  const isDateOnly =
+    isHr || isJoinings || isTimeToSubmit || isBdaReports || isSalesReports || isRecruiterReports; // reports that take only a date range
   const isCoverage = active === 'clients-without-requirements' || active === 'recruiter-vendor-gaps';
   const isClientsWithoutReqs = active === 'clients-without-requirements';
   const isRvg = active === 'recruiter-vendor-gaps';
@@ -373,13 +424,15 @@ export default function ReportsPage() {
     'recruiter-vendor-gaps': 'recruiter',
     'bda-reports': 'bda',
     'sales-reports': 'sales',
+    'recruiter-reports': 'recruiter',
   };
   // bda-reports / sales-reports self-scope a bda/sales caller server-side regardless
   // of this filter, so hide it for them — only useful to an admin looking across people.
   const showIndividual =
     can('filterByIndividual') &&
     Boolean(INDIVIDUAL_ROLE_BY_REPORT[active]) &&
-    !((active === 'bda-reports' && user?.role === 'bda') || (active === 'sales-reports' && user?.role === 'sales'));
+    !((active === 'bda-reports' && user?.role === 'bda') || (active === 'sales-reports' && user?.role === 'sales') ||
+      (active === 'recruiter-reports' && user?.role === 'recruiter'));
   const showCoveragePeople = can('filterByIndividual') && isClientsWithoutReqs;
   const canEditCoverage = (isClientsWithoutReqs || isRvg) && userCan(user, 'editBroughtBy');
 
@@ -606,6 +659,7 @@ export default function ReportsPage() {
     if (individualId && active === 'recruiter-vendor-gaps') params.recruiter_id = individualId;
     if (individualId && active === 'bda-reports') params.bda_id = individualId;
     if (individualId && active === 'sales-reports') params.sales_id = individualId;
+    if (individualId && active === 'recruiter-reports') params.recruiter_id = individualId;
     if (isBdaReports && bdaReportsAccountId) params.client_id = bdaReportsAccountId;
     if (isBdaReports && bdaReportsAccountType) params.account_type = bdaReportsAccountType;
     if (isSalesReports && salesReportsAccountId) params.client_id = salesReportsAccountId;
@@ -623,21 +677,36 @@ export default function ReportsPage() {
     return params;
   }
 
-  async function runReport() {
+  // silent = a background refresh: no spinner, and a failed refresh keeps what is on screen instead of blanking it.
+  async function runReport({ silent = false } = {}) {
+    if (OWN_SCREENS[active]) return; // their own screens load their own data
     const requestId = ++reportRequestId.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const { data } = await apiClient.get(`/reports/${active}`, { params: buildParams() });
       if (requestId !== reportRequestId.current) return;
       setPayload(data.data);
     } catch (err) {
       if (requestId !== reportRequestId.current) return;
+      if (silent) return;
       setPayload(null);
       pushError(apiErrorMessage(err, 'Failed to load report'), 'Something went wrong');
     } finally {
-      if (requestId === reportRequestId.current) setLoading(false);
+      if (requestId === reportRequestId.current && !silent) setLoading(false);
     }
   }
+
+  // Live data: the open report refreshes itself every 30 seconds and when the tab is shown again, with the filters
+  // that are on screen, so the numbers follow what the team is doing without pressing anything.
+  const runReportRef = useRef(runReport);
+  runReportRef.current = runReport;
+  useEffect(() => {
+    if (!available.length) return undefined;
+    const tick = () => { if (document.visibilityState === 'visible') runReportRef.current({ silent: true }); };
+    const timer = setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
+  }, [available.length]);
 
   useEffect(() => {
     if (available.length) runReport();
@@ -705,6 +774,84 @@ export default function ReportsPage() {
     }
   }
 
+  // Current report filters the drill-down must repeat so its list matches the clicked count.
+  function drillFilters() {
+    const filters = isCoverage ? {} : { date_from: dateFrom, date_to: dateTo };
+    if (isHr && hrSource) filters.source = hrSource;
+    if (isBdaReports && bdaReportsAccountId) filters.client_id = bdaReportsAccountId;
+    if (isBdaReports && bdaReportsAccountType) filters.account_type = bdaReportsAccountType;
+    if (isSalesReports && salesReportsAccountId) filters.client_id = salesReportsAccountId;
+    return filters;
+  }
+
+  function drillLabel(row, col) {
+    // Rows name their subject as plain text (HR / BDA / Sales / Joinings) or as { id, name } (coverage reports).
+    const nameOf = (value) => (value && typeof value === 'object' ? value.name : value);
+    const who =
+      [row.vendor, row.client, row.sourcer, row.interviewer, row.bda, row.sales_poc, row.recruiter].map(nameOf).find(Boolean) || '';
+    const when = row.date ? formatReportDate(row.date) : row.month || '';
+    return [col.header, who, when].filter(Boolean).join(' · ');
+  }
+
+  /** Turn the count columns of a report table into links that open the records behind each count. */
+  function withDrill(columns, tableKey = 'main') {
+    const metrics = drillMetrics(active, tableKey);
+    if (!metrics.length) return columns;
+    return columns.map((col) => {
+      if (!metrics.includes(col.key)) return col;
+      return {
+        ...col,
+        render: (row) => {
+          const inner = col.render ? col.render(row) : (row[col.key] ?? 0);
+          const params = drillParams(active, tableKey, col.key, row, drillFilters());
+          if (!params || !Number(row[col.key])) return inner;
+          return (
+            <DrillCount onClick={() => setDrill({ title: drillLabel(row, col), lists: [{ params }] })}>{inner}</DrillCount>
+          );
+        },
+      };
+    });
+  }
+
+  /**
+   * Row click: open the panel with the records behind every count of that row (plus the row's
+   * own fields). Rows with nothing to drill into keep the plain summary panel.
+   */
+  function openRow(row, tableKey, tableColumns) {
+    const lists = drillMetrics(active, tableKey)
+      .filter((metric) => Number(row[metric]) > 0)
+      .map((metric) => {
+        const params = drillParams(active, tableKey, metric, row, drillFilters());
+        const header = tableColumns.find((c) => c.key === metric)?.header || metric;
+        return params ? { params, heading: `${header}: ${row[metric]}` } : null;
+      })
+      .filter(Boolean);
+    if (!lists.length) {
+      setDrawerRow(row);
+      return;
+    }
+    // One list carries its own title; several need the count they belong to.
+    if (lists.length === 1) lists[0].heading = undefined;
+    const fields = Object.entries(row).filter(
+      ([key, value]) => key !== 'id' && key !== 'details' && key !== 'sort' && !key.endsWith('_id') && value != null && typeof value !== 'object'
+    );
+    setDrill({
+      title: drillLabel(row, { header: '' }) || 'Records',
+      summary: (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {fields.slice(0, 12).map(([key, value]) => (
+            <DetailField
+              key={key}
+              label={key.replace(/_/g, ' ')}
+              value={/(_at|date)$/.test(key) ? formatReportDate(value) : String(value)}
+            />
+          ))}
+        </div>
+      ),
+      lists,
+    });
+  }
+
   const tableRows = tableRowsForReport(active, payload);
   const baseColumns = columnsForReport(active);
   const columns = canEditCoverage
@@ -741,7 +888,23 @@ export default function ReportsPage() {
       })
     : baseColumns;
   const chartRows = chartDataForReport(active, payload);
-  const chartBars = chartBarsForReport(active);
+  // The coverage charts count every row of the selected view, so name the bars after that
+  // view instead of a fixed "…w/o reqs / submissions" label that is wrong for the other views.
+  const COVERAGE_BAR_NAME = {
+    all: 'Active clients',
+    with_requirements: 'Clients with requirements',
+    no_active: 'Clients without requirements',
+    active: 'Active vendors',
+    inactive: 'Inactive vendors',
+    has_live: 'Vendors with live submissions',
+  };
+  const chartBars = chartBarsForReport(active).map((bar) =>
+    isClientsWithoutReqs
+      ? { ...bar, name: COVERAGE_BAR_NAME[coverageBucket] || bar.name }
+      : isRvg
+        ? { ...bar, name: COVERAGE_BAR_NAME[rvgActivity] || bar.name }
+        : bar
+  );
   const sections =
     active === 'aging'
       ? agingSections(payload)
@@ -753,13 +916,23 @@ export default function ReportsPage() {
             ? bdaReportsSections(payload)
             : active === 'sales-reports'
               ? salesReportsSections(payload)
-              : [];
+              : active === 'recruiter-reports'
+                ? recruiterReportsSections(payload)
+                : [];
   const hrSection = isHr ? sections.find((s) => s.key === hrTab) || sections[0] : null;
   const joiningsSection = isJoinings ? sections.find((s) => s.key === joiningsTab) || sections[0] : null;
   const bdaReportsSection = isBdaReports ? sections.find((s) => s.key === bdaReportsTab) || sections[0] : null;
   const salesReportsSection = isSalesReports
     ? sections.find((s) => s.key === salesReportsTab) || sections[0]
     : null;
+  const recruiterReportsSection = isRecruiterReports
+    ? sections.find((s) => s.key === recruiterReportsTab) || sections[0]
+    : null;
+  const tablesSection = isBdaReports
+    ? bdaReportsSection
+    : isRecruiterReports
+      ? recruiterReportsSection
+      : salesReportsSection;
   // Count cell reveals the per-source split (Bench 3 · Vendor 2 · Market 1) on hover.
   const hrColumns = (hrSection?.columns || []).map((col) =>
     col.key === 'count'
@@ -788,12 +961,32 @@ export default function ReportsPage() {
     drawerRow?.group_label ||
     'Row details';
 
+  if (OWN_SCREENS[active]) {
+    const Screen = OWN_SCREENS[active];
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchableSelect
+            className="w-56"
+            ariaLabel="Report type"
+            value={active}
+            onChange={(v) => { setActive(v); setPayload(null); setDrawerRow(null); setDrill(null); }}
+            searchPlaceholder="Search reports�"
+            options={available.map((r) => ({ value: r.key, label: r.label }))}
+          />
+        </div>
+        <Screen />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
           <SearchableSelect
             className="w-56"
             ariaLabel="Report type"
+
             value={active}
             onChange={(v) => {
               setActive(v);
@@ -825,6 +1018,7 @@ export default function ReportsPage() {
               setBdaReportsAccountType('');
               setSalesReportsAccountId('');
               setDrawerRow(null);
+              setDrill(null);
             }}
             searchPlaceholder="Search reports…"
             options={available.map((r) => ({ value: r.key, label: r.label }))}
@@ -1358,10 +1552,11 @@ export default function ReportsPage() {
           {!loading && <HrChart section={hrSection} />}
 
           <DataTable
-            columns={hrColumns}
+            columns={withDrill(hrColumns, hrSection?.key)}
             rows={hrSection?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
+            onRowClick={(row) => openRow(row, hrSection?.key, hrColumns)}
           />
         </div>
       ) : isJoinings ? (
@@ -1388,30 +1583,37 @@ export default function ReportsPage() {
                       selected ? 'bg-primary-600 text-white' : 'bg-tertiary-100 text-tertiary-700'
                     }`}
                   >
-                    {section.rows.length}
+                    {section.count ?? section.rows.length}
                   </span>
                 </button>
               );
             })}
           </div>
           <DataTable
-            columns={joiningsSection?.columns || []}
+            columns={withDrill(joiningsSection?.columns || [], joiningsSection?.key)}
             rows={joiningsSection?.rows || []}
             loading={loading}
             emptyLabel="No joinings in this range"
+            onRowClick={(row) => openRow(row, joiningsSection?.key, joiningsSection?.columns || [])}
           />
         </div>
-      ) : isBdaReports || isSalesReports ? (
+      ) : isBdaReports || isSalesReports || isRecruiterReports ? (
         <div className="space-y-4">
           <div
             className="grid gap-2 grid-cols-1 sm:grid-cols-3 lg:grid-cols-5"
             role="tablist"
-            aria-label={isBdaReports ? 'BDA report tables' : 'Sales report tables'}
+            aria-label={
+              isBdaReports ? 'BDA report tables' : isRecruiterReports ? 'Recruiter report tables' : 'Sales report tables'
+            }
           >
             {sections.map((section) => {
-              const activeSection = isBdaReports ? bdaReportsSection : salesReportsSection;
+              const activeSection = tablesSection;
               const selected = activeSection?.key === section.key;
-              const setTab = isBdaReports ? setBdaReportsTab : setSalesReportsTab;
+              const setTab = isBdaReports
+                ? setBdaReportsTab
+                : isRecruiterReports
+                  ? setRecruiterReportsTab
+                  : setSalesReportsTab;
               return (
                 <button
                   key={section.key}
@@ -1438,11 +1640,20 @@ export default function ReportsPage() {
             })}
           </div>
           <DataTable
-            columns={(isBdaReports ? bdaReportsSection : salesReportsSection)?.columns || []}
-            rows={(isBdaReports ? bdaReportsSection : salesReportsSection)?.rows || []}
+            columns={withDrill(
+              tablesSection?.columns || [],
+              tablesSection?.key
+            )}
+            rows={tablesSection?.rows || []}
             loading={loading}
             emptyLabel="No rows for this range"
-            onRowClick={setDrawerRow}
+            onRowClick={(row) =>
+              openRow(
+                row,
+                tablesSection?.key,
+                tablesSection?.columns || []
+              )
+            }
           />
         </div>
       ) : isTimeToSubmit ? (
@@ -1472,13 +1683,15 @@ export default function ReportsPage() {
         </div>
       ) : (
         <DataTable
-          columns={columns}
+          columns={withDrill(columns)}
           rows={tableRows}
           loading={loading}
           emptyLabel="No rows for this range"
-          onRowClick={setDrawerRow}
+          onRowClick={(row) => openRow(row, 'main', columns)}
         />
       )}
+
+      <DrilldownDrawer request={drill} onClose={() => setDrill(null)} />
 
       <Drawer open={Boolean(drawerRow)} title={drawerTitle} onClose={() => setDrawerRow(null)} size="md" tone="info">
         {drawerRow && (
@@ -1488,7 +1701,11 @@ export default function ReportsPage() {
                 .filter(([key, value]) => key !== 'id' && key !== 'details' && typeof value !== 'object')
                 .slice(0, 16)
                 .map(([key, value]) => (
-                  <DetailField key={key} label={key.replace(/_/g, ' ')} value={String(value)} />
+                  <DetailField
+                    key={key}
+                    label={key.replace(/_/g, ' ')}
+                    value={/(_at|date)$/.test(key) ? formatReportDate(value) : String(value)}
+                  />
                 ))}
             </div>
             {Array.isArray(drawerRow.details) && drawerRow.details.length > 0 && (

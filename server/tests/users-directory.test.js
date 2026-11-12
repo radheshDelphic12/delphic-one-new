@@ -52,6 +52,20 @@ describe('GET /users/directory', () => {
     expect(viaDir.body.data.some((u) => u.id === bda.id)).toBe(true);
   });
 
+  test('a resigned member is hidden by default but returned with ?include_former=true', async () => {
+    const resigned = await createUser({ withOrg: true, role: 'sales', name: 'Shivani Resigned' });
+    await prisma.orgMembership.updateMany({ where: { person_id: resigned.id }, data: { employment_status: 'terminated' } });
+
+    const def = await authed(request(app).get('/api/v1/users/directory'), recruiterToken);
+    expect(def.body.data.some((u) => u.id === resigned.id)).toBe(false);
+
+    const withFormer = await authed(
+      request(app).get('/api/v1/users/directory').query({ include_former: 'true' }),
+      recruiterToken
+    );
+    expect(withFormer.body.data.some((u) => u.id === resigned.id)).toBe(true);
+  });
+
   test('?role= narrows the directory', async () => {
     const res = await authed(request(app).get('/api/v1/users/directory').query({ role: 'bda' }), recruiterToken);
     expect(res.status).toBe(200);

@@ -7,6 +7,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
+import { useAuth } from '../../lib/authContext.jsx';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
@@ -20,7 +21,7 @@ const labelCls = 'text-xs font-medium text-tertiary-600';
  */
 function AdminTicketModal({ mode, ticket, onClose, onDone }) {
   const { pushError, pushSuccess } = useAlerts();
-  const members = useOrgMembershipOptions(mode === 'apply');
+  const members = useOrgMembershipOptions(mode === 'apply', { includeExited: true }); // overtime worked before someone left can still be recorded
   const editing = mode === 'edit';
   const [projects, setProjects] = useState([]);
   const [f, setF] = useState(() => ({
@@ -141,6 +142,9 @@ function AdminTicketModal({ mode, ticket, onClose, onDone }) {
  */
 export default function OvertimeTicketsTab({ isAdmin }) {
   const { pushError, pushSuccess } = useAlerts();
+  const { isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
   const [mine, setMine] = useState({ tickets: [], uses_tickets: false });
   const [queue, setQueue] = useState([]);
   const [all, setAll] = useState([]);
@@ -149,6 +153,11 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState(null);
   const [adminModal, setAdminModal] = useState(null); // { mode: 'apply' } | { mode: 'edit', ticket }
+  const [picked, setPicked] = useState(() => new Set()); // ticket ids ticked in "Waiting for your approval"
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [queueName, setQueueName] = useState('');
+  // filters on the admin "All overtime tickets" list: status, ticket date range, employee
+  const [allFilter, setAllFilter] = useState({ status: '', from: '', to: '', name: '' });
 
   const fail = (err, text) => pushError(apiErrorMessage(err, text), 'Something went wrong');
 
@@ -191,6 +200,42 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const showHistory = (t) => apiClient.get(`/timesheets/overtime-tickets/${t.id}/history`).then(({ data }) => setHistory({ ticket: t, events: data.data.events })).catch((e) => fail(e, 'Failed to load the history'));
   const historyButton = (t) => <button type="button" className="btn-ghost text-xs" onClick={() => showHistory(t)}>History</button>;
   const cancel = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/cancel`), 'Ticket cancelled');
+  // Several tickets at once: one decision each (the same rules and audit as one by one), and what did not go through is listed.
+  const shownQueue = queueName.trim() ? queue.filter((t) => (t.employee || '').toLowerCase().includes(queueName.trim().toLowerCase())) : queue;
+  const pickedTickets = shownQueue.filter((t) => picked.has(t.id));
+  const togglePick = (id) => setPicked((cur) => { const next = new Set(cur); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const allShownPicked = shownQueue.length > 0 && pickedTickets.length === shownQueue.length;
+  const togglePickAll = () => setPicked(allShownPicked ? new Set() : new Set(shownQueue.map((t) => t.id)));
+  async function decideMany(status) {
+    if (!pickedTickets.length) return;
+    let reason;
+    if (status === 'rejected') {
+      reason = window.prompt(`Reject ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}? Give the reason (required, kept on each ticket):`);
+      if (reason === null) return;
+      if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return; }
+    } else if (!window.confirm(`Approve ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy(true);
+    const failed = [];
+    for (const t of pickedTickets) {
+      try { await apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status, ...(reason ? { reason: reason.trim() } : {}) }); } catch (err) { failed.push(`${t.employee} ${t.date}: ${apiErrorMessage(err, 'not decided')}`); }
+    }
+    setBulkBusy(false);
+    setPicked(new Set());
+    const done = pickedTickets.length - failed.length;
+    if (failed.length) pushError(`${done} ${status === 'approved' ? 'approved' : 'rejected'}; ${failed.length} skipped - ${failed.slice(0, 3).join('; ')}${failed.length > 3 ? '; ...' : ''}`, 'Some tickets were skipped');
+    else pushSuccess(`${done} ticket${done === 1 ? '' : 's'} ${status === 'approved' ? 'approved' : 'rejected'}`);
+    load();
+  }
+  const shownAll = all.filter((t) => {
+    const day = String(t.date || '').slice(0, 10);
+    if (allFilter.status && t.status !== allFilter.status) return false;
+    if (allFilter.from && day < allFilter.from) return false;
+    if (allFilter.to && day > allFilter.to) return false;
+    if (allFilter.name.trim() && !(t.employee || '').toLowerCase().includes(allFilter.name.trim().toLowerCase())) return false;
+    return true;
+  });
+  const allFiltered = Boolean(allFilter.status || allFilter.from || allFilter.to || allFilter.name.trim());
+  const setAllF = (key) => (e) => setAllFilter((f) => ({ ...f, [key]: e.target.value }));
   const adminEdit = (t) => setAdminModal({ mode: 'edit', ticket: t });
   const adminDelete = (t) => {
     const reason = window.prompt(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
@@ -205,10 +250,10 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     { key: 'hours', header: 'Hours', render: (t) => t.hours },
     { key: 'project', header: 'Project', render: (t) => t.project || '—' },
     { key: 'reason', header: 'Reason', render: (t) => <span className="text-xs text-tertiary-600">{t.reason}</span> },
-    { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decided_by?.name ? `${t.decided_by.name}: ` : ''}{t.decision_reason}</span>}</span> },
+    { key: 'status', header: 'Status', render: (t) => <span><Badge value={t.status === 'cancelled' ? 'rejected' : t.status} label={STATUS[t.status]} />{(t.status === 'approved' || t.status === 'rejected') && t.decided_by?.name && <span className="block text-xs text-tertiary-500">by {t.decided_by.name}{t.decided_at ? ` · ${new Date(t.decided_at).toLocaleDateString()}` : ''}</span>}{t.decision_reason && <span className="block text-xs text-tertiary-500">{t.decision_reason}</span>}</span> },
   ];
   const mineColumns = [...base.filter((c) => c.key !== 'employee'), { key: 'actions', header: '', render: (t) => <span className="flex gap-1">{t.status === 'pending' && <button type="button" className="btn-ghost text-xs" onClick={() => cancel(t)}>Cancel</button>}{historyButton(t)}</span> }];
-  const queueColumns = [...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
+  const queueColumns = [{ key: 'pick', header: <input type="checkbox" checked={allShownPicked} onChange={togglePickAll} aria-label="Select all waiting tickets" />, render: (t) => <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePick(t.id)} aria-label={`Select ${t.employee} ${t.date}`} /> }, ...base, { key: 'actions', header: '', render: (t) => <span className="flex gap-1"><button type="button" className="btn-secondary text-xs" onClick={() => approve(t)}>Approve</button><button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => reject(t)}>Reject</button>{historyButton(t)}</span> }];
   const allColumns = [...base, {
     key: 'actions',
     header: '',
@@ -225,10 +270,17 @@ export default function OvertimeTicketsTab({ isAdmin }) {
 
   return (
     <div className="space-y-8">
+      {modern && (
+        <div className="ta-head rounded-2xl border border-tertiary-100 bg-white p-5 shadow-card">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Time &amp; Attendance</p>
+          <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Overtime tickets</h2>
+          <p className="mt-1 text-sm text-tertiary-500">Raise a ticket for the extra hours you worked. Your manager approves it, and approved overtime is paid.</p>
+        </div>
+      )}
       <section className="space-y-3">
-        <h2 className="font-heading text-sm font-semibold text-tertiary-900">My overtime tickets</h2>
+        {modern ? <h3 className="font-heading text-sm font-semibold text-tertiary-900">Raise a ticket</h3> : <h2 className="font-heading text-sm font-semibold text-tertiary-900">My overtime tickets</h2>}
         {mine.uses_tickets ? (
-          <form onSubmit={raise} className="grid gap-2 rounded-xl border border-tertiary-100 bg-white p-3 sm:grid-cols-[8rem_6rem_1fr_2fr_auto]">
+          <form onSubmit={raise} className={`grid gap-2 border border-tertiary-100 bg-white sm:grid-cols-[8rem_6rem_1fr_2fr_auto] ${modern ? 'rounded-2xl p-4 shadow-card' : 'rounded-xl p-3'}`}>
             <label className="text-xs font-medium text-tertiary-600">Date<input required type="date" max={todayIso()} value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
             <label className="text-xs font-medium text-tertiary-600">Hours<input required type="number" min="0.25" max="12" step="0.25" value={form.hours} onChange={(e) => setForm((f) => ({ ...f, hours: e.target.value }))} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label>
             <label className="text-xs font-medium text-tertiary-600">Project (billed to the client if it bills overtime)
@@ -249,7 +301,12 @@ export default function OvertimeTicketsTab({ isAdmin }) {
       {queue.length > 0 && (
         <section className="space-y-3 border-t border-tertiary-100 pt-6">
           <h2 className="font-heading text-sm font-semibold text-tertiary-900">Waiting for your approval <span className="font-normal text-tertiary-500">({queue.length})</span></h2>
-          <DataTable columns={queueColumns} rows={queue} emptyLabel="Nothing waiting" />
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs font-medium text-tertiary-600">Employee<input value={queueName} onChange={(e) => setQueueName(e.target.value)} placeholder="Search by name" className="mt-1 block w-56 rounded-xl border px-3 py-2 text-sm" /></label>
+            <button type="button" className="btn-primary" disabled={bulkBusy || pickedTickets.length === 0} onClick={() => decideMany('approved')}>{bulkBusy ? 'Working…' : `Approve selected (${pickedTickets.length})`}</button>
+            <button type="button" className="btn-secondary" disabled={bulkBusy || pickedTickets.length === 0} onClick={() => decideMany('rejected')}>Reject selected ({pickedTickets.length})</button>
+          </div>
+          <DataTable columns={queueColumns} rows={shownQueue} emptyLabel={queueName.trim() ? 'No waiting ticket matches that name' : 'Nothing waiting'} />
         </section>
       )}
 
@@ -259,7 +316,20 @@ export default function OvertimeTicketsTab({ isAdmin }) {
             <h2 className="font-heading text-sm font-semibold text-tertiary-900">All overtime tickets</h2>
             <button type="button" className="btn-primary" onClick={() => setAdminModal({ mode: 'apply' })}>Apply overtime for an employee</button>
           </div>
-          <DataTable columns={allColumns} rows={all} emptyLabel="No overtime tickets yet" />
+          <div className="flex flex-wrap items-end gap-2" data-testid="ot-all-filters">
+            <label className="text-xs font-medium text-tertiary-600">Status
+              <select value={allFilter.status} onChange={setAllF('status')} className="mt-1 block w-44 rounded-xl border px-3 py-2 text-sm">
+                <option value="">All</option>
+                {Object.entries(STATUS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="text-xs font-medium text-tertiary-600">From<input type="date" value={allFilter.from} max={allFilter.to || undefined} onChange={setAllF('from')} className="mt-1 block rounded-xl border px-3 py-2 text-sm" /></label>
+            <label className="text-xs font-medium text-tertiary-600">To<input type="date" value={allFilter.to} min={allFilter.from || undefined} onChange={setAllF('to')} className="mt-1 block rounded-xl border px-3 py-2 text-sm" /></label>
+            <label className="text-xs font-medium text-tertiary-600">Employee<input value={allFilter.name} onChange={setAllF('name')} placeholder="Search by name" className="mt-1 block w-48 rounded-xl border px-3 py-2 text-sm" /></label>
+            {allFiltered && <button type="button" className="btn-ghost text-xs" onClick={() => setAllFilter({ status: '', from: '', to: '', name: '' })}>Clear filters</button>}
+            <span className="pb-2 text-xs text-tertiary-500">{shownAll.length} of {all.length}</span>
+          </div>
+          <DataTable columns={allColumns} rows={shownAll} emptyLabel={allFiltered ? 'No ticket matches these filters' : 'No overtime tickets yet'} />
         </section>
       )}
 

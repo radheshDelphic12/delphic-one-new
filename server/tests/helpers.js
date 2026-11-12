@@ -7,7 +7,7 @@ const PASSWORD = 'Password123!';
 
 async function cleanDatabase() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE audit_logs, notifications, notification_preferences, stage_history, documents, comments, interview_round_interviewers, interview_rounds, submissions, requirement_assignments, requirement_seats, requirements, profiles, account_meeting_attendees, accounts, org_memberships, orgs, org_groups, users RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE audit_logs, change_logs, notifications, notification_preferences, stage_history, documents, comments, interview_round_interviewers, interview_rounds, submissions, requirement_assignments, requirement_seats, requirements, profiles, account_meeting_attendees, accounts, org_memberships, orgs, org_groups, users RESTART IDENTITY CASCADE'
   );
 }
 

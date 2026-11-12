@@ -40,7 +40,8 @@ const CLIENT_MEETING_INCLUDE = {
 /** An account's scheduled meeting, shaped like a calendar event (kind: client_meeting). */
 function serializeClientMeeting(account) {
   const startsAt = account.meeting_date;
-  const endsAt = startsAt ? new Date(new Date(startsAt).getTime() + 60 * 60000) : null;
+  const durationMinutes = account.meeting_duration_minutes || 60;
+  const endsAt = startsAt ? new Date(new Date(startsAt).getTime() + durationMinutes * 60000) : null;
   const attendees = (account.meeting_attendees || []).map((a) => ({
     id: a.user.id,
     name: a.user.name,
@@ -54,7 +55,7 @@ function serializeClientMeeting(account) {
     account_id: account.id,
     account_name: account.name,
     scheduled_at: startsAt,
-    duration_minutes: 60,
+    duration_minutes: durationMinutes,
     ends_at: endsAt,
     status: account.stage === 'dropped' ? 'cancelled' : 'scheduled',
     round_type: null,
@@ -82,8 +83,68 @@ function serializeClientMeeting(account) {
   };
 }
 
+/** A tracked follow-up meeting with an active client / vendor, shaped like a calendar event. */
+function serializeFollowUpMeeting(m) {
+  const startsAt = m.scheduled_at;
+  const endsAt = new Date(new Date(startsAt).getTime() + (m.duration_minutes || 60) * 60000);
+  const mode = m.mode === 'offline' ? 'offline' : 'online';
+  return {
+    id: `cm-${m.id}`,
+    kind: 'client_meeting',
+    submission_id: null,
+    account_id: m.account_id,
+    account_name: m.account?.name || null,
+    scheduled_at: startsAt,
+    duration_minutes: m.duration_minutes || 60,
+    ends_at: endsAt,
+    status: m.status,
+    round_type: null,
+    round_type_label: `${m.title} · ${mode === 'offline' ? 'In person' : 'Online'}`,
+    round_name: m.title,
+    audience: 'external',
+    result: null,
+    meeting_mode: mode,
+    meeting_location: m.location || null,
+    meeting_notes: m.notes || null,
+    meeting_link: m.link || null,
+    candidate_name: null,
+    requirement_id: null,
+    requirement_title: null,
+    interviewers: (m.attendees || []).map((a) => ({ id: a.user.id, name: a.user.name, email: a.user.email })),
+    interviewer_name: null,
+    interviewer_email: null,
+    scheduled_by: m.creator ? { id: m.creator.id, name: m.creator.name, email: m.creator.email } : null,
+    cancellation_reason: null,
+    cancelled_at: null,
+    can_submit_feedback: false,
+    can_reschedule: false,
+  };
+}
+
+async function listFollowUpMeetings({ from, to, mine, user, status }) {
+  const where = { scheduled_at: { gte: from, lte: to }, OR: [{ account_id: null }, { account: { deleted_at: null } }] };
+  if (status) where.status = status;
+  if (mine) {
+    where.AND = [{ OR: [
+      { created_by: user.id },
+      { attendees: { some: { user_id: user.id } } },
+      { account: { owner_id: user.id } },
+    ] }];
+  }
+  const rows = await prisma.clientMeeting.findMany({
+    where,
+    include: {
+      account: { select: { name: true } },
+      attendees: { include: { user: { select: { id: true, name: true, email: true } } } },
+      creator: { select: { id: true, name: true, email: true } },
+    },
+  });
+  return rows.map(serializeFollowUpMeeting);
+}
+
 async function listClientMeetings({ from, to, mine, user, status }) {
-  if (status === 'completed') return [];
+  const followUps = await listFollowUpMeetings({ from, to, mine, user, status });
+  if (status === 'completed') return followUps;
   const where = { meeting_date: { gte: from, lte: to }, deleted_at: null };
   if (status === 'scheduled') where.stage = { in: ['meeting_scheduled', 'rescheduled'] };
   if (status === 'cancelled') where.stage = 'dropped';
@@ -95,7 +156,7 @@ async function listClientMeetings({ from, to, mine, user, status }) {
     ];
   }
   const accounts = await prisma.account.findMany({ where, include: CLIENT_MEETING_INCLUDE });
-  return accounts.map(serializeClientMeeting);
+  return accounts.map(serializeClientMeeting).concat(followUps);
 }
 
 function monthRange() {
@@ -165,7 +226,8 @@ async function listForCalendar(user, opts = {}) {
   const def = monthRange();
   const from = opts.from ? new Date(opts.from) : def.from;
   const to = opts.to ? new Date(opts.to) : def.to;
-  const mine = opts.mine === '1';
+  // A plain employee only ever sees the interviews / meetings they are part of, whatever the request says.
+  const mine = opts.mine === '1' || !['admin', 'recruiter', 'sales', 'bda'].includes(user?.role);
   const audience = opts.audience || 'all';
   const sort = opts.sort || 'time';
 
@@ -198,7 +260,16 @@ async function listForCalendar(user, opts = {}) {
   // the user has narrowed the calendar to internal interviews only.
   if (audience !== 'internal') {
     const meetings = await listClientMeetings({ from, to, mine, user, status: opts.status });
-    events = events.concat(meetings);
+    // A meeting that belongs to a Group Dashboard travel plan carries a Travel tag.
+    const tags = await require('../superDashboard/groupTravel.service').tagsFor(meetings.map((m) => m.id));
+    events = events.concat(meetings.map((m) => (tags.has(m.id) ? { ...m, travel: tags.get(m.id) } : m)));
+
+    // Group Dashboard trips are shown (and managed) on the calendar for the Group Super Admin only: they carry budgets.
+    if (!mine && user?.id) {
+      const groupIds = await require('../../lib/groupAccess').groupIdsForSuperadmin(user.id);
+      const trips = await require('../superDashboard/groupTravel.service').calendarEvents(groupIds, from, to);
+      events = events.concat(opts.status ? trips.filter((t) => t.status === opts.status) : trips);
+    }
   }
 
   if (sort === 'audience') {
@@ -299,6 +370,7 @@ module.exports = {
   submitFeedback,
   cancelRound,
   serializeCalendarEvent,
+  listClientMeetings,
   INTERNAL_AUDIENCE_TYPES,
   EXTERNAL_AUDIENCE_TYPES,
 };

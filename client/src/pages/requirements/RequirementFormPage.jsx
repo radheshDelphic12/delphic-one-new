@@ -17,6 +17,8 @@ const emptyForm = {
   account_id: '',
   title: '',
   req_type: 'managed_services',
+  hiring_track: '',
+  pass_percentage: '',
   sales_owner_id: '',
   seats_total: 1,
   description: '',
@@ -41,9 +43,18 @@ const emptyForm = {
   budget_type: '',
   billing_notes: '',
   sla_days: '',
+  tat_value: '1',
+  tat_unit: 'days',
   start_date_target: '',
   notice_period_max_days: '',
 };
+
+// TAT is typed as a number plus hours/days; the API takes hours (empty = the 24 hour default).
+function toTatHours(form) {
+  const n = Math.round(Number(form.tat_value));
+  if (!n || n < 1) return undefined;
+  return form.tat_unit === 'days' ? n * 24 : n;
+}
 
 function toOptionalNumber(value) {
   if (value === '' || value === null || value === undefined) return undefined;
@@ -55,6 +66,8 @@ function buildPayload(form, { isCreate }) {
   const payload = {
     title: form.title.trim(),
     req_type: form.req_type,
+    hiring_track: form.req_type === 'internal_hiring' ? form.hiring_track || undefined : undefined,
+    pass_percentage: form.pass_percentage === '' ? null : Number(form.pass_percentage),
     description: form.description.trim() || undefined,
     job_description: form.job_description.trim() || undefined,
     designation: form.designation.trim() || undefined,
@@ -77,6 +90,7 @@ function buildPayload(form, { isCreate }) {
     budget_type: form.budget_type || undefined,
     billing_notes: form.billing_notes.trim() || undefined,
     sla_days: toOptionalNumber(form.sla_days),
+    tat_hours: toTatHours(form),
     start_date_target: form.start_date_target || undefined,
     notice_period_max_days: toOptionalNumber(form.notice_period_max_days),
   };
@@ -97,6 +111,8 @@ function hydrateForm(req) {
     account_id: req.account?.id || '',
     title: req.title || '',
     req_type: req.req_type || 'recruitment',
+    hiring_track: req.hiring_track || '',
+    pass_percentage: req.pass_percentage != null ? String(req.pass_percentage) : '',
     sales_owner_id: req.sales_owner?.id || '',
     seats_total: req.seats_total || 1,
     description: req.description || '',
@@ -121,6 +137,8 @@ function hydrateForm(req) {
     budget_type: req.budget_type || '',
     billing_notes: req.billing_notes || '',
     sla_days: req.sla_days ?? '',
+    tat_value: req.tat?.hours ? String(req.tat.hours % 24 === 0 ? req.tat.hours / 24 : req.tat.hours) : '',
+    tat_unit: req.tat?.hours && req.tat.hours % 24 !== 0 ? 'hours' : 'days',
     start_date_target: req.start_date_target ? String(req.start_date_target).slice(0, 10) : '',
     notice_period_max_days: req.notice_period_max_days ?? '',
   };
@@ -142,6 +160,7 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState(null);
+  const [budgetReason, setBudgetReason] = useState('');
   const accountLocked = Boolean(initialAccountId) && !isEdit;
 
   useEffect(() => {
@@ -190,10 +209,15 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (budgetChanged && budgetReason.trim().length < 3) {
+      pushError('Write a reason for the budget change (at least 3 characters).', 'Reason needed');
+      return;
+    }
     setSaving(true);
     try {
       const payload = buildPayload(form, { isCreate: !isEdit });
       if (isEdit) {
+        if (budgetChanged) payload.rate_change_reason = budgetReason.trim();
         await apiClient.patch(`/requirements/${id}`, payload);
         if (asPanel && onDone) onDone(id);
         else navigate(`/requirements/${id}`);
@@ -221,6 +245,8 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
     );
   }
 
+  // A budget that was already set and is now different needs a reason; the server keeps it in the budget history.
+  const budgetChanged = Boolean(isEdit && existing && ['budget_min', 'budget_max'].some((k) => existing[k] != null && toOptionalNumber(form[k]) !== undefined && Number(form[k]) !== Number(existing[k])));
   const blocked = isEdit && existing && !canMutateRequirement(existing, user);
 
   function handleCancel() {
@@ -325,7 +351,38 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 <option value="managed_services">Manage Services</option>
                 <option value="project">Projects</option>
                 <option value="recruitment">Recruitment</option>
+                <option value="internal_hiring">Internal Hiring</option>
               </select>
+            </div>
+
+            {form.req_type === 'internal_hiring' && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-tertiary-600">Hiring kind *</label>
+                <select
+                  value={form.hiring_track}
+                  onChange={(e) => updateField('hiring_track', e.target.value)}
+                  required
+                  className={FIELD_INPUT}
+                >
+                  <option value="">Select...</option>
+                  <option value="technical">Technical</option>
+                  <option value="non_technical">Non-Technical (Sales, HR &amp; Operations)</option>
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">Minimum pass % (interviews)</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={form.pass_percentage}
+                onChange={(e) => updateField('pass_percentage', e.target.value)}
+                placeholder="Template default"
+                className={FIELD_INPUT}
+              />
+              <p className="mt-1 text-xs text-tertiary-500">Leave empty to use the interview template&apos;s pass mark.</p>
             </div>
 
             {!isEdit && (
@@ -354,6 +411,25 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
               </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-tertiary-600">TAT (how long recruiters see it as Super Active)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={form.tat_value}
+                  onChange={(e) => updateField('tat_value', e.target.value)}
+                  className={FIELD_INPUT}
+                  aria-label="TAT value"
+                />
+                <select value={form.tat_unit} onChange={(e) => updateField('tat_unit', e.target.value)} className={FIELD_INPUT} aria-label="TAT unit">
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+              <p className="mt-1 text-[11px] text-tertiary-500">Default 1 day. On an older requirement with no TAT, leave empty to keep it without one. Changing it restarts the clock.</p>
             </div>
 
             <p className="sm:col-span-2 mt-3 border-t border-tertiary-100 pt-3 font-heading text-xs font-semibold uppercase tracking-wide text-tertiary-500">
@@ -542,6 +618,12 @@ export default function RequirementFormPage({ asPanel = false, onDone, onCancel,
                 className={FIELD_INPUT}
               />
             </div>
+            {budgetChanged && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <label className="mb-1 block text-xs font-medium text-tertiary-600">Reason for changing the budget (required)</label>
+                <input data-testid="budget-reason" value={budgetReason} onChange={(e) => setBudgetReason(e.target.value)} maxLength={500} placeholder="e.g. Client approved a higher budget" className={FIELD_INPUT} />
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-tertiary-600">Currency</label>
               <SearchableSelect

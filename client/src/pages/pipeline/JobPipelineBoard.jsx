@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import RequirementScopeToggle from '../../components/ui/RequirementScopeToggle.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
@@ -21,9 +22,10 @@ import RequirementStatusOverrideDrawer from '../requirements/RequirementStatusOv
 import { JOB_COLUMNS, formatStageLabel, shortKey } from './pipelineBoardUtils.js';
 import { DndContext, DragOverlay, DroppableColumn, DraggableCard, usePipelineSensors } from './pipelineDnd.jsx';
 import { usePipelineBoard } from './usePipelineBoard.js';
+import { PremiumBadge } from '../../components/ui/PremiumBadge.jsx';
 import PipelineFilters from './PipelineFilters.jsx';
 
-const JOB_FILTER_FIELDS = ['search', 'account_id', 'sales_id', 'recruiter_id', 'status', 'priority'];
+const JOB_FILTER_FIELDS = ['search', 'account_id', 'premium', 'sales_id', 'recruiter_id', 'status', 'priority'];
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-tertiary-200 px-2.5 py-1.5 text-sm focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -155,6 +157,7 @@ function JobCard({
             {requirement.account?.name || '—'}
             {` · ${requirement.seats_closed ?? 0}/${requirement.seats_total ?? 0} seats`}
           </div>
+          {requirement.account?.is_premium && <div className="mt-0.5"><PremiumBadge /></div>}
         </Link>
         <CardActionsMenu items={actions} label={`Actions for ${requirement.title}`} />
       </div>
@@ -200,6 +203,8 @@ export default function JobPipelineBoard() {
   const { pushError } = useAlerts();
   const sensors = usePipelineSensors();
   const [filterParams, setFilterParams] = useState({});
+  const isSales = user?.role === 'sales';
+  const [scope, setScope] = useState('all');
   const boardParams = useMemo(() => {
     const params = { sort_by: 'created_at', sort_order: 'desc' };
     if (filterParams.search) params.search = filterParams.search;
@@ -214,8 +219,9 @@ export default function JobPipelineBoard() {
       const priorities = String(filterParams.priority).split(',').filter(Boolean);
       if (priorities.length === 1) params.priority = priorities[0];
     }
+    if (isSales && scope === 'mine') params.scope = 'mine';
     return params;
-  }, [filterParams]);
+  }, [filterParams, isSales, scope]);
   const handleFiltersChange = useCallback((params) => setFilterParams(params), []);
   const { cells, loading, reload } = usePipelineBoard({
     path: '/requirements',
@@ -344,6 +350,7 @@ export default function JobPipelineBoard() {
             Drag requirements between statuses, or use the ⋯ menu on a card.
           </p>
         </div>
+        {isSales && <RequirementScopeToggle value={scope} onChange={setScope} />}
         {canCreate && (
           <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> New requirement

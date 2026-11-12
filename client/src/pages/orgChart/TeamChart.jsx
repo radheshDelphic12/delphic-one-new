@@ -81,7 +81,7 @@ function sizeBox(unit) {
  * manager takes the lowest order among the teams under them), then by name.
  * Reporting cycles or a missing manager fall back to the company.
  */
-export function layoutTeamChart({ roots, teams = [] }, companyName) {
+export function layoutTeamChart({ roots, teams = [] }, companyName, { attachUnassigned = false, companyAdminId = null } = {}) {
   const people = flatten(roots);
   const byId = new Map(people.map((p) => [p.id, p]));
   const units = [];
@@ -95,10 +95,16 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
     const leadSeat = lead || (vacancies > 0 ? { vacant: true } : null);
     if (!lead && vacancies > 0) vacancies -= 1;
     const seats = [...members, ...Array.from({ length: vacancies }, () => ({ vacant: true }))];
-    if (!lead && seats.length === 0 && !leadSeat) continue;
-    const managerId = team.manager_membership_id && byId.has(team.manager_membership_id) ? team.manager_membership_id : lead?.manager_id;
+    // A team with nobody in it yet (a new "Board of Directors") is still drawn, as an empty box, so planning can start from it.
+    let managerId = team.manager_membership_id && byId.has(team.manager_membership_id) ? team.manager_membership_id : lead?.manager_id;
+    // Group chart: a team nobody manages reports to its company's admin; the team the admin sits in hangs off the company itself.
+    const hasAdmin = Boolean(companyAdminId && byId.has(companyAdminId));
+    const adminInTeam = hasAdmin && (lead?.id === companyAdminId || members.some((m) => m.id === companyAdminId));
+    if (hasAdmin && !adminInTeam && (!managerId || !byId.has(managerId))) managerId = companyAdminId;
     const unit = { id: `team:${team.id}`, kind: 'team', label: team.name, lead: leadSeat, members: seats, managerId, order: team.sort_order ?? 0 };
-    if (!managerId || !byId.has(managerId)) {
+    if (adminInTeam && (!managerId || !byId.has(managerId))) {
+      units.push(unit);
+    } else if (!managerId || !byId.has(managerId)) {
       unit.kind = 'floating';
       floatTeams.push(unit);
     } else {
@@ -111,6 +117,14 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
   const loose = people.filter((p) => !home.has(p.id)).sort(byName);
   const managerIds = new Set(units.map((u) => u.managerId));
   loose.forEach((p) => { if (p.manager_id && byId.has(p.manager_id)) managerIds.add(p.manager_id); });
+  const adminIsLoose = Boolean(companyAdminId && loose.some((p) => p.id === companyAdminId));
+  // Group chart: people with nobody to report to report to their company's admin.
+  const reportsTo = (p) => {
+    if (p.manager_id && byId.has(p.manager_id)) return p.manager_id;
+    return companyAdminId && p.id !== companyAdminId && byId.has(companyAdminId) && p.worker_type !== 'contractor' ? companyAdminId : null;
+  };
+  if (adminIsLoose && loose.some((p) => p.id !== companyAdminId && !(p.manager_id && byId.has(p.manager_id)) && p.worker_type !== 'contractor')) managerIds.add(companyAdminId);
+  else if (adminIsLoose && units.some((u) => u.managerId === companyAdminId)) managerIds.add(companyAdminId);
 
   for (const person of loose) {
     if (!managerIds.has(person.id)) continue;
@@ -122,17 +136,27 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
   const reportsBoxes = new Map();
   const contractors = [];
   const unassigned = [];
+  let companyReports = null;
   for (const person of loose) {
     if (home.has(person.id)) continue;
-    if (person.manager_id && byId.has(person.manager_id)) {
-      if (!reportsBoxes.has(person.manager_id)) {
-        const unit = { id: `reports:${person.manager_id}`, kind: 'reports', label: 'Direct reports', lead: null, members: [], managerId: person.manager_id, order: LAST };
-        reportsBoxes.set(person.manager_id, unit);
+    const mgr = reportsTo(person);
+    if (mgr) {
+      if (!reportsBoxes.has(mgr)) {
+        const unit = { id: `reports:${mgr}`, kind: 'reports', label: 'Direct reports', lead: null, members: [], managerId: mgr, order: LAST };
+        reportsBoxes.set(mgr, unit);
         units.push(unit);
       }
-      reportsBoxes.get(person.manager_id).members.push(person);
+      reportsBoxes.get(mgr).members.push(person);
     } else if (person.worker_type === 'contractor') {
       contractors.push(person);
+    } else if (attachUnassigned) {
+      // A company with no teams and no reporting lines: its people report to the company itself (its admin), so they
+      // hang off the company node instead of floating loose.
+      if (!companyReports) {
+        companyReports = { id: 'reports:company', kind: 'reports', label: 'Direct reports', lead: null, members: [], managerId: null, order: LAST };
+        units.push(companyReports);
+      }
+      companyReports.members.push(person);
     } else {
       unassigned.push(person);
     }
@@ -140,9 +164,11 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
 
   const root = { id: 'root', kind: 'root', label: companyName, width: ROOT_W, height: ROOT_H, children: [] };
   const parent = new Map();
+  // A person's home can be a floating box (drawn unconnected, never given children): hang off the company instead.
+  const placed = new Set(units);
   for (const u of units) {
     const target = home.get(u.managerId);
-    parent.set(u.id, target && target !== u ? target : root);
+    parent.set(u.id, target && target !== u && placed.has(target) ? target : root);
   }
   // Break reporting cycles (A → B → A): the first unit that revisits hangs off the company.
   for (const u of units) {
@@ -193,7 +219,7 @@ export function layoutTeamChart({ roots, teams = [] }, companyName) {
     ...floatTeams,
     { id: 'float:contractors', kind: 'floating', contractor: true, label: 'Contractor', lead: null, members: contractors },
     { id: 'float:unassigned', kind: 'floating', label: 'Not in a team', lead: null, members: unassigned },
-  ].filter((b) => b.members.length > 0 || b.lead);
+  ].filter((b) => b.members.length > 0 || b.lead || b.id.startsWith('team:'));
   floatBoxes.forEach(sizeBox);
   const floatH = floatBoxes.reduce((m, b) => Math.max(m, b.height), 0);
 
@@ -296,8 +322,10 @@ function arrowLine(id, from, to) {
  * "Coming soon" node with nobody under it.
  */
 export function layoutGroupChart(companies, adminName) {
-  const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon'));
-  const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name) }));
+  // "Coming soon" only while the company has nothing in it: once teams or people are added they must show, flag or not.
+  const soonOf = (c) => Boolean(c.org.enabled_modules?.includes('coming_soon')) && !(c.roots || []).length && !(c.teams || []).length;
+  // A company with no teams has nothing to draw its people under, so they hang off the company (its admin is the group superadmin).
+  const parts = companies.map((c) => ({ c, chart: layoutTeamChart({ roots: soonOf(c) ? [] : c.roots, teams: soonOf(c) ? [] : c.teams || [] }, c.org.name, { attachUnassigned: !(c.teams || []).length, companyAdminId: soonOf(c) ? null : c.company_admin_id }) }));
   const top = Math.max(...parts.map((p) => p.chart.height), ROOT_H + ROOT_STUB);
   const units = [];
   const floatBoxes = [];
@@ -389,7 +417,8 @@ const ZOOMS = [0.5, 0.65, 0.8, 1, 1.2];
  * positions and order come from People → HR Settings → Teams.
  */
 export default function TeamChart({ data, companyName, group, hint = 'Teams, leads, reports-to, open positions and order: People → HR Settings → Teams.' }) {
-  const [zoom, setZoom] = useState(group ? 2 : 3);
+  // The group chart puts every company side by side: with many companies start zoomed out so they all fit on screen.
+  const [zoom, setZoom] = useState(group ? (group.companies.length > 5 ? 0 : 2) : 3);
   const chart = useMemo(() => (group ? layoutGroupChart(group.companies, group.adminName) : layoutTeamChart(data, companyName)), [data, companyName, group]);
   const scale = ZOOMS[zoom];
   const boxes = [...chart.units.filter((u) => u.kind !== 'manager'), ...chart.floatBoxes];

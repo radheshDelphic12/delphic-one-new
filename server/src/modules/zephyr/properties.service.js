@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
+const crypto = require('crypto');
 const { writeAudit } = require('./audit');
+const posting = require('./ledgerPosting');
 const calc = require('./property.calc');
 
 const PROPERTY_TYPES = ['plot', 'house', 'building', 'shops', 'office', 'commercial_complex', 'other'];
@@ -85,6 +87,18 @@ const loanFields = {
 const loanCreateSchema = z.object({ ...loanFields, loan_amount: loanFields.loan_amount.default(0), outstanding_amount: loanFields.outstanding_amount.default(0), emi_amount: loanFields.emi_amount.default(0), financing_type: loanFields.financing_type.default('bank_loan'), emi_frequency: loanFields.emi_frequency.default('monthly'), status: loanFields.status.default('active') });
 const loanUpdateSchema = z.object(loanFields).partial();
 const valuationSchema = z.object({ value: z.coerce.number().min(0).max(1e13), as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), unit_id: z.string().uuid().nullable().optional(), notes: text(500) });
+// Acquisition costs are the money spent to get or build a property. Each one is an expense in the books
+// (category "Property acquisition (investment)") and also counts toward the property's total investment.
+const ACQUISITION_FIELD = { purchase: 'purchase_cost', brokerage: 'brokerage', documentation: 'documentation_cost', registration: 'registration_cost', construction: 'construction_cost', renovation: 'renovation_cost', other: 'other_cost' };
+const ACQUISITION_CATEGORY = 'Property acquisition (investment)';
+const acquisitionSchema = z.object({
+  cost_type: z.enum(Object.keys(ACQUISITION_FIELD)),
+  amount: z.coerce.number().positive().max(1e13),
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  payment_mode: z.preprocess((v) => (v === '' ? null : v), z.enum(['cash', 'bank', 'upi', 'cheque', 'card', 'other']).nullable().optional()),
+  reference: z.string().trim().max(120).nullable().optional(),
+  notes: text(500),
+});
 const eventSchema = z.object({ kind: z.enum(EVENT_KINDS).default('note'), event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), title: z.string().trim().min(1).max(200), amount: moneyOrNull, notes: text(1000), unit_id: z.string().uuid().nullable().optional() });
 
 const toDate = (s) => (s ? new Date(`${s}T00:00:00.000Z`) : null);
@@ -158,13 +172,26 @@ async function list(orgId, ctx, query) {
   const rows = await prisma.zxProperty.findMany({ where, orderBy: [{ created_at: 'desc' }], take: 300 });
   const counts = await unitCounts(orgId, rows.map((r) => r.id));
   const loans = ctx.canFinance && rows.length ? await prisma.zxPropertyLoan.findMany({ where: { org_id: orgId, property_id: { in: rows.map((r) => r.id) }, deleted_at: null } }) : [];
+  // loans entered under Group Dashboard > Debt Management against a property count on that property too
+  const linked = ctx.canFinance && rows.length ? await groupLoansFor(orgId, rows.map((r) => r.id)) : new Map();
   return rows.map((r) => {
     const mine = loans.filter((l) => l.property_id === r.id);
+    const gd = linked.get(r.id) || [];
     return propertyOut(r, ctx, {
       units: counts.get(r.id) || { total: 0 },
-      ...(ctx.canFinance ? { outstanding_loan: mine.reduce((a, l) => a + (l.status === 'closed' ? 0 : num(l.outstanding_amount)), 0), monthly_emi: calc.round2(mine.reduce((a, l) => a + calc.monthlyFinancing(l), 0)) } : {}),
+      ...(ctx.canFinance ? { outstanding_loan: calc.round2(mine.reduce((a, l) => a + (l.status === 'closed' ? 0 : num(l.outstanding_amount)), 0) + gd.reduce((a, l) => a + l.summary.outstanding, 0)), monthly_emi: calc.round2(mine.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + gd.reduce((a, l) => a + (l.monthly_emi || 0), 0)) } : {}),
     });
   });
+}
+
+// Debt Management loans that are against these properties, keyed by property id (the same rows the Debt Management tab shows).
+async function groupLoansFor(orgId, propertyIds) {
+  return require('../superDashboard/groupDebt.service').linkedLoans(orgId, 'zephyr_property', propertyIds);
+}
+
+// Debt Management loans tagged to this company (outstanding follows each loan's schedule). Required late: the debt module reads Zephyr too.
+async function groupLoanTotals(groupId, orgId) {
+  return require('../superDashboard/groupDebt.service').companyTotals([groupId], orgId);
 }
 
 async function summary(orgId, ctx) {
@@ -181,6 +208,9 @@ async function summary(orgId, ctx) {
   const valuation = calc.round2(valued.reduce((a, p) => a + num(p.valuation), 0));
   const investedValued = calc.round2(valued.reduce((a, p) => a + calc.totalInvestment(p), 0));
   const app = calc.appreciation(investedValued, valuation);
+  // Loans entered under Group Dashboard > Debt Management for this company count here too (property loans above are not repeated there).
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { org_group_id: true } });
+  const groupLoans = org?.org_group_id ? await groupLoanTotals(org.org_group_id, orgId) : { outstanding: 0, monthly_emi: 0 };
   return {
     ...out,
     total_invested: invested,
@@ -188,22 +218,24 @@ async function summary(orgId, ctx) {
     valued_properties: valued.length,
     appreciation: valued.length ? app.amount : null,
     appreciation_pct: valued.length ? app.pct : null,
-    outstanding_loans: calc.round2(loans.reduce((a, l) => a + num(l.outstanding_amount), 0)),
-    monthly_emi: calc.round2(loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0)),
+    outstanding_loans: calc.round2(loans.reduce((a, l) => a + num(l.outstanding_amount), 0) + groupLoans.outstanding),
+    monthly_emi: calc.round2(loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + groupLoans.monthly_emi),
   };
 }
 
 // Income, operating expenses and financing for one property over a period; rent and expenses come
 // from the money ledger so they match every other report.
 async function cashFlowFor(orgId, propertyId, from, to) {
-  const [entries, loans] = await Promise.all([
+  const [entries, loans, linked] = await Promise.all([
     prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, property_id: propertyId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) } }, select: { type: true, amount: true, source_type: true } }),
     prisma.zxPropertyLoan.findMany({ where: { org_id: orgId, property_id: propertyId, deleted_at: null } }),
+    groupLoansFor(orgId, [propertyId]),
   ]);
   const months = Math.max(1, (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1);
   const income = entries.filter((e) => e.type === 'revenue' && e.source_type === 'rent_payment').reduce((a, e) => a + num(e.amount), 0);
   const expenses = entries.filter((e) => e.type === 'expense').reduce((a, e) => a + num(e.amount), 0);
-  const financing = calc.round2(loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) * months);
+  const monthly = loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + (linked.get(propertyId) || []).reduce((a, l) => a + (l.monthly_emi || 0), 0);
+  const financing = calc.round2(monthly * months);
   return { from, to, months, ...calc.cashFlow({ income, expenses, financing }) };
 }
 
@@ -211,7 +243,7 @@ async function get(orgId, ctx, id) {
   const p = await prisma.zxProperty.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
   if (!p) return { error: 'not_found' };
   const month = todayStr().slice(0, 7);
-  const [units, loans, valuations, events, cash] = await Promise.all([
+  const [units, loans, valuations, events, cash, acquisitions, linkedMap] = await Promise.all([
     prisma.zxPropertyUnit.findMany({
       where: { property_id: id, org_id: orgId, deleted_at: null },
       orderBy: [{ building: 'asc' }, { floor: 'asc' }, { name: 'asc' }],
@@ -221,6 +253,8 @@ async function get(orgId, ctx, id) {
     ctx.canFinance ? prisma.zxPropertyValuation.findMany({ where: { property_id: id, org_id: orgId }, orderBy: [{ as_of: 'desc' }, { created_at: 'desc' }], take: 50 }) : [],
     prisma.zxPropertyEvent.findMany({ where: { property_id: id, org_id: orgId }, orderBy: [{ event_date: 'desc' }, { created_at: 'desc' }], take: 200 }),
     ctx.canFinance ? cashFlowFor(orgId, id, `${month}-01`, todayStr()) : null,
+    ctx.canFinance ? prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, property_id: id, source_type: 'property_acquisition', deleted_at: null }, orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }] }) : [],
+    ctx.canFinance ? groupLoansFor(orgId, [id]) : new Map(),
   ]);
   const unitOut = units.map((u) => {
     const lease = u.leases[0] || null;
@@ -230,7 +264,14 @@ async function get(orgId, ctx, id) {
       tenant: lease ? { id: lease.tenant.id, name: lease.tenant.name, company_name: lease.tenant.company_name, lease_id: lease.id, monthly_rent: num(lease.monthly_rent) } : null,
     };
   });
-  const loanOut = loans.map((l) => ({ ...l, loan_amount: num(l.loan_amount), outstanding_amount: num(l.outstanding_amount), emi_amount: num(l.emi_amount), interest_rate: num(l.interest_rate), monthly_cost: calc.monthlyFinancing(l) }));
+  // the loans kept here, and the Debt Management loans against this property (read only here: one schedule, edited and paid under Group Dashboard > Debt Management)
+  const ownLoans = loans.map((l) => ({ ...l, source: 'property', loan_amount: num(l.loan_amount), outstanding_amount: num(l.outstanding_amount), emi_amount: num(l.emi_amount), interest_rate: num(l.interest_rate), monthly_cost: calc.monthlyFinancing(l) }));
+  const debtLoans = (linkedMap.get(id) || []).map((l) => ({
+    id: `gd-${l.id}`, source: 'group_debt', loan_id: l.id, read_only: true, name: l.name, financing_type: l.loan_type, lender: l.lender, loan_amount: l.principal, outstanding_amount: l.summary.outstanding,
+    emi_amount: l.emi_amount || 0, emi_frequency: l.emi_frequency, interest_rate: l.interest_rate, start_date: l.start_date, end_date: l.summary.end_date || null, status: l.summary.closed ? 'closed' : 'active',
+    notes: l.notes, monthly_cost: l.monthly_emi || 0, emis_paid: l.summary.emis_paid, emis_pending: l.summary.emis_pending, emis_overdue: l.summary.emis_overdue, next_due: l.summary.next_due || null,
+  }));
+  const loanOut = [...ownLoans, ...debtLoans];
   const extra = {
     units: unitOut,
     events: events.map((e) => ({ ...e, amount: num(e.amount) })),
@@ -241,6 +282,8 @@ async function get(orgId, ctx, id) {
           outstanding_loan: calc.round2(loanOut.reduce((a, l) => a + (l.status === 'closed' ? 0 : l.outstanding_amount), 0)),
           monthly_financing: calc.round2(loanOut.reduce((a, l) => a + l.monthly_cost, 0)),
           cash_flow: cash,
+          acquisition_costs: acquisitions.map((a) => ({ id: a.source_id, cost_type: a.service_type, amount: num(a.amount), entry_date: dayOf(a.entry_date), payment_mode: a.payment_mode, reference: a.reference, notes: a.description })),
+          acquisition_total: calc.round2(acquisitions.reduce((t, a) => t + num(a.amount), 0)),
         }
       : {}),
   };
@@ -400,6 +443,36 @@ async function addValuation(orgId, actorId, ctx, propertyId, input) {
   return get(orgId, ctx, propertyId);
 }
 
+async function addAcquisitionCost(orgId, actorId, ctx, propertyId, input) {
+  const property = await liveProperty(orgId, propertyId);
+  if (!property) return { error: 'not_found' };
+  if (input.entry_date > todayStr()) return { error: 'future_cost' };
+  if (!(await posting.periodsOpen(orgId, [input.entry_date]))) return { error: 'period_closed' };
+  const field = ACQUISITION_FIELD[input.cost_type];
+  const sourceId = crypto.randomUUID();
+  await posting.post(orgId, actorId, {
+    type: 'expense', category: ACQUISITION_CATEGORY, amount: input.amount, property_id: propertyId, entry_date: input.entry_date,
+    payment_mode: input.payment_mode || null, reference: input.reference || null, description: input.notes || null,
+    service_type: input.cost_type, source_type: 'property_acquisition', source_id: sourceId,
+  });
+  await prisma.zxProperty.update({ where: { id: propertyId }, data: { [field]: { increment: input.amount } } });
+  await addEvent(prisma, orgId, actorId, { property_id: propertyId, kind: input.cost_type === 'construction' || input.cost_type === 'renovation' ? input.cost_type : 'purchase', event_date: input.entry_date, title: `Acquisition cost: ${input.cost_type}`, amount: input.amount, notes: input.notes });
+  await writeAudit(null, { orgId, actorId, entity: 'property_acquisition', entityId: sourceId, action: 'create', after: { property_id: propertyId, cost_type: input.cost_type, amount: input.amount, entry_date: input.entry_date } });
+  return get(orgId, ctx, propertyId);
+}
+
+async function removeAcquisitionCost(orgId, actorId, ctx, propertyId, costId) {
+  const row = await prisma.zxLedgerEntry.findFirst({ where: { org_id: orgId, property_id: propertyId, source_type: 'property_acquisition', source_id: costId, deleted_at: null } });
+  if (!row) return { error: 'not_found' };
+  if (!(await posting.periodsOpen(orgId, [dayOf(row.entry_date)]))) return { error: 'period_closed' };
+  await posting.voidSource(orgId, actorId, 'property_acquisition', costId);
+  const field = ACQUISITION_FIELD[row.service_type];
+  const property = await liveProperty(orgId, propertyId);
+  if (field && property) await prisma.zxProperty.update({ where: { id: propertyId }, data: { [field]: Math.max(0, Number(property[field] || 0) - Number(row.amount)) } });
+  await writeAudit(null, { orgId, actorId, entity: 'property_acquisition', entityId: costId, action: 'delete', before: { cost_type: row.service_type, amount: num(row.amount), entry_date: dayOf(row.entry_date) } });
+  return get(orgId, ctx, propertyId);
+}
+
 async function removeValuation(orgId, actorId, ctx, propertyId, valuationId) {
   const row = await prisma.zxPropertyValuation.findFirst({ where: { id: valuationId, property_id: propertyId, org_id: orgId } });
   if (!row) return { error: 'not_found' };
@@ -466,7 +539,7 @@ async function addNote(orgId, actorId, ctx, propertyId, input) {
 
 module.exports = {
   PROPERTY_TYPES, PROPERTY_STATUSES, UNIT_STATUSES, FINANCE_FIELDS, EVENT_KINDS,
-  createPropertySchema, updatePropertySchema, listQuerySchema, unitCreateSchema, unitUpdateSchema, loanCreateSchema, loanUpdateSchema, valuationSchema, eventSchema,
+  createPropertySchema, updatePropertySchema, listQuerySchema, unitCreateSchema, unitUpdateSchema, loanCreateSchema, loanUpdateSchema, valuationSchema, acquisitionSchema, eventSchema,
   addEvent, cashFlowFor, propertyOut, liveProperty,
-  list, summary, rentableUnits, get, create, update, remove, addUnit, updateUnit, removeUnit, addLoan, updateLoan, removeLoan, addValuation, updateValuation, removeValuation, addNote, updateEvent, removeEvent,
+  list, summary, rentableUnits, get, create, update, remove, addUnit, updateUnit, removeUnit, addLoan, updateLoan, removeLoan, addValuation, addAcquisitionCost, removeAcquisitionCost, updateValuation, removeValuation, addNote, updateEvent, removeEvent,
 };

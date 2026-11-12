@@ -38,6 +38,15 @@ async function tokenFor(user) {
   return (await loginAs(user)).access_token;
 }
 
+// A signed-in member whose employment then ends: sign-in is refused for an exited employee, so the session is taken
+// while employed and the membership is terminated afterwards (the token must stop working).
+async function exMemberLogin(org, role = 'admin') {
+  const user = await memberOf(org, role);
+  const login = await loginAs(user);
+  await prisma.orgMembership.updateMany({ where: { person_id: user.id }, data: { employment_status: 'terminated' } });
+  return login;
+}
+
 // A master-workspace recruiter uploads a CV against a profile, as the UI does.
 async function seedCv() {
   const master = await createOrg({ name: 'Delphic Global' });
@@ -66,11 +75,9 @@ describe('Flaw #1 — recruitment data needs an active master-workspace membersh
     '/api/v1/dashboard/summary',
   ];
 
-  test('an ex-member (membership terminated, user still active) can log in but gets 403 on every recruitment route', async () => {
+  test('an ex-member (membership terminated, user still active) keeps a session but gets 403 on every recruitment route', async () => {
     const master = await createOrg();
-    const exMember = await memberOf(master, 'admin', 'terminated');
-    const login = await loginAs(exMember);
-    expect(login.active_org).toBeNull();
+    const login = await exMemberLogin(master);
 
     for (const route of RECRUITMENT_ROUTES) {
       const res = await authed(request(app).get(route), login.access_token);
@@ -99,8 +106,7 @@ describe('Flaw #1 — recruitment data needs an active master-workspace membersh
 
   test('an ex-member cannot list or add CV documents / comments on a profile', async () => {
     const { master, profile } = await seedCv();
-    const exMember = await memberOf(master, 'recruiter', 'terminated');
-    const token = await tokenFor(exMember);
+    const token = (await exMemberLogin(master, 'recruiter')).access_token;
 
     const docs = await authed(request(app).get('/api/v1/documents'), token).query({ entity_type: 'profile', entity_id: profile.id });
     expect(docs.status).toBe(403);
@@ -149,7 +155,7 @@ describe('Flaw #2 — /uploads is authorized per file', () => {
 
   test('an ex-member gets 403 for the same file', async () => {
     const { master, document } = await seedCv();
-    const token = await tokenFor(await memberOf(master, 'recruiter', 'terminated'));
+    const token = (await exMemberLogin(master, 'recruiter')).access_token;
     expect((await authed(request(app).get(document.file_url), token)).status).toBe(403);
   });
 

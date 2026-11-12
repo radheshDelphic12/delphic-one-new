@@ -1,4 +1,7 @@
 const prisma = require('../../config/db');
+const cashHooks = require('../cashPosition/cash.hooks');
+const payments = require('../payments/payments.service');
+const { D } = require('../cashPosition/cash.calc');
 const { approverScope, canActOn, actionableWhere, nextStage } = require('../../lib/claimApprovers');
 
 const CLAIM_INCLUDE = {
@@ -186,16 +189,38 @@ async function decideClaim(orgId, claimId, user, { status, reason }) {
 
 // Only reachable from 'approved' — the money is actually paid out here,
 // a separate step from the approve/reject decision.
-async function reimburseClaim(orgId, claimId) {
+async function reimburseClaim(orgId, claimId, ctx = {}) {
   const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId } });
   if (!claim) return { error: 'not_found' };
   if (claim.status !== 'approved') return { error: 'not_approved' };
 
-  const updated = await prisma.expenseClaim.update({
-    where: { id: claimId },
-    data: { status: 'reimbursed', reimbursed_at: new Date() },
+  // The payment: how it was paid (rate, bank charges, deductions) and, only if asked, the wallet it came out of (default: no wallet).
+  const input = await payments.withSavedRate(orgId, claim.currency, ctx.input || { bank_charges: '0', other_deductions: '0' });
+  const prepared = await payments.prepare({
+    orgId, user: ctx.user, input, fixedAmount: claim.amount,
+    record: { kind: 'expense', id: claim.id, currency: claim.currency, pending: D(claim.amount), party: claim.description || null, category: claim.category },
+  });
+  if (prepared.error) return { error: prepared.error };
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.expenseClaim.update({ where: { id: claimId }, data: { status: 'reimbursed', reimbursed_at: new Date() } });
+    await prepared.commit(tx);
+    return row;
   });
   return { claim: updated };
+}
+
+// A reimbursement marked by mistake: the group admin undoes it (reason kept). Its payment stops counting, the wallet entry goes, and the
+// claim is approved again so it can be reimbursed properly.
+async function undoReimbursement(orgId, claimId, user, reason) {
+  const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId } });
+  if (!claim) return { error: 'not_found' };
+  if (claim.status !== 'reimbursed') return { error: 'not_reimbursed' };
+  const row = await prisma.$transaction(async (tx) => {
+    await payments.undoWithin(tx, { orgId, user, kind: 'expense', referenceId: claimId, reason });
+    await cashHooks.unlink(tx, user.id, 'expense', claimId); // an entry from before payments were recorded
+    return tx.expenseClaim.update({ where: { id: claimId }, data: { status: 'approved', reimbursed_at: null }, include: CLAIM_INCLUDE });
+  });
+  return { claim: row };
 }
 
 async function createVendorPayment(orgId, createdByUserId, body) {
@@ -239,15 +264,40 @@ async function decideVendorPayment(orgId, paymentId, adminUserId, { status, reas
 }
 
 // Only reachable from 'approved'.
-async function markVendorPaymentPaid(orgId, paymentId) {
+async function markVendorPaymentPaid(orgId, paymentId, ctx = {}) {
   const payment = await prisma.vendorPayment.findFirst({ where: { id: paymentId, org_id: orgId } });
   if (!payment) return { error: 'not_found' };
   if (payment.status !== 'approved') return { error: 'not_approved' };
   const frozen = await require('../calculations/financialLock').assertOpen(orgId, payment.period_month, payment.period_year);
   if (frozen) return frozen;
 
-  const updated = await prisma.vendorPayment.update({ where: { id: paymentId }, data: { status: 'paid', paid_at: new Date() } });
+  const input = await payments.withSavedRate(orgId, payment.currency, ctx.input || { bank_charges: '0', other_deductions: '0' });
+  const prepared = await payments.prepare({
+    orgId, user: ctx.user, input, fixedAmount: payment.amount,
+    record: { kind: 'vendor_payment', id: payment.id, currency: payment.currency, pending: D(payment.amount), party: payment.vendor_name, category: 'Vendor payment' },
+  });
+  if (prepared.error) return { error: prepared.error };
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.vendorPayment.update({ where: { id: paymentId }, data: { status: 'paid', paid_at: new Date() } });
+    await prepared.commit(tx);
+    return row;
+  });
   return { payment: updated };
+}
+
+// A vendor payment marked paid by mistake: the group admin undoes it (follows the month lock); it is approved again.
+async function undoVendorPaymentPaid(orgId, paymentId, user, reason) {
+  const payment = await prisma.vendorPayment.findFirst({ where: { id: paymentId, org_id: orgId } });
+  if (!payment) return { error: 'not_found' };
+  if (payment.status !== 'paid') return { error: 'not_paid' };
+  const frozen = await require('../calculations/financialLock').assertOpen(orgId, payment.period_month, payment.period_year);
+  if (frozen) return frozen;
+  const row = await prisma.$transaction(async (tx) => {
+    await payments.undoWithin(tx, { orgId, user, kind: 'vendor_payment', referenceId: paymentId, reason });
+    await cashHooks.unlink(tx, user.id, 'vendor_payment', paymentId);
+    return tx.vendorPayment.update({ where: { id: paymentId }, data: { status: 'approved', paid_at: null } });
+  });
+  return { payment: row };
 }
 
 // Delete a claim raised by mistake, with its receipt records (the files stay
@@ -260,14 +310,17 @@ async function deleteClaim(orgId, claimId, actor = { isSuperadmin: true }) {
     if (actor.role !== 'admin' && claim.org_membership_id !== actor.orgMembershipId) return { error: 'not_found' };
     if (claim.status !== 'pending') return { error: 'not_deletable' };
   }
-  await prisma.$transaction([
-    prisma.document.deleteMany({ where: { entity_type: 'expense_claim', entity_id: claimId } }),
-    prisma.expenseClaim.delete({ where: { id: claimId } }),
-  ]);
+  // Soft delete: the claim and its receipts stay (restorable from Group Dashboard > Logs). Its wallet entry is unlinked now.
+  await prisma.$transaction(async (tx) => {
+    await cashHooks.unlink(tx, actor.userId || null, 'expense', claimId);
+    await payments.undoWithin(tx, { orgId, user: { id: actor.userId || null }, kind: 'expense', referenceId: claimId, reason: 'Claim deleted' });
+    await tx.expenseClaim.update({ where: { id: claimId }, data: { deleted_at: new Date(), deleted_by: actor.userId || null, delete_reason: 'Deleted by ' + (actor.isSuperadmin ? 'a superadmin' : 'the owner or an admin') } });
+  });
   return { deleted: true };
 }
 
 module.exports = {
+  claimFilterWhere,
   createClaim,
   updateClaim,
   deleteClaim,
@@ -276,6 +329,8 @@ module.exports = {
   listApprovals,
   decideClaim,
   reimburseClaim,
+  undoReimbursement,
+  undoVendorPaymentPaid,
   createVendorPayment,
   listVendorPayments,
   getVendorPayment,

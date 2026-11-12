@@ -47,7 +47,7 @@ async function canAccessRequirement(user, requirementId) {
   });
   if (!requirement) return { error: 'not_found' };
   if (user.role === 'admin') return { ok: true };
-  if (user.role === 'sales' && requirement.sales_owner_id !== user.id) return { error: 'forbidden' };
+  // The whole Sales team shares every requirement's notes and files; only recruiters are limited to what they're assigned.
   if (user.role === 'recruiter') {
     const assigned = requirement.assignments.some((row) => row.user_id === user.id);
     if (!assigned) return { error: 'forbidden' };

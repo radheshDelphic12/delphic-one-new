@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Drawer from '../../components/ui/Drawer.jsx';
+import apiClient from '../../lib/apiClient.js';
 import AccountAttendeesPicker from './AccountAttendeesPicker.jsx';
 import { ACCOUNT_TRANSITIONS, formatAccountValue } from './accountUtils.js';
 
@@ -31,6 +32,7 @@ export default function AccountStageMoveDrawer({
   const [meetingDate, setMeetingDate] = useState('');
   const [meetingLocation, setMeetingLocation] = useState('');
   const [meetingNotes, setMeetingNotes] = useState('');
+  const [duration, setDuration] = useState(60);
   const [attendeeIds, setAttendeeIds] = useState([]);
 
   useEffect(() => {
@@ -42,18 +44,34 @@ export default function AccountStageMoveDrawer({
     setMeetingDate('');
     setMeetingLocation('');
     setMeetingNotes(account?.meeting_notes || '');
+    setDuration(account?.meeting_duration_minutes || 60);
     setAttendeeIds((account?.meeting_attendees || []).map((a) => a.id));
   }, [open, account?.stage, preferredToStage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dropping, and reactivating a dropped account, both need a reason (written to stage history).
+  const needsReason = toStage === 'dropped' || account?.stage === 'dropped';
+  // The projects still running under this client (GET /accounts/:id). Fetched here because the list and board rows do not carry it.
+  const [fetchedProjects, setFetchedProjects] = useState([]);
+  const accountId = account?.id;
+  useEffect(() => {
+    if (!open || !accountId) return undefined;
+    let current = true;
+    setFetchedProjects([]);
+    apiClient.get(`/accounts/${accountId}`).then((r) => { if (current) setFetchedProjects(r.data.data?.live_projects || []); }).catch(() => {});
+    return () => { current = false; };
+  }, [open, accountId]);
+  const liveProjects = fetchedProjects.length ? fetchedProjects : account?.live_projects || [];
 
   function submit(event) {
     event.preventDefault();
     const body = { to_stage: toStage };
-    if (toStage === 'dropped') body.reason = reason.trim();
+    if (needsReason) body.reason = reason.trim();
     if (toStage === 'meeting_scheduled') {
       body.meeting_mode = meetingMode;
       body.meeting_date = new Date(meetingDate).toISOString();
       if (meetingMode === 'offline') body.meeting_location = meetingLocation.trim();
       body.meeting_notes = meetingNotes.trim();
+      body.meeting_duration_minutes = Number(duration) || 60;
       body.meeting_attendee_ids = attendeeIds;
     }
     onMove(body);
@@ -120,6 +138,18 @@ export default function AccountStageMoveDrawer({
                 className={INPUT_CLASS}
               />
             </label>
+            <label className="block text-xs font-medium text-tertiary-600">
+              Duration (minutes)
+              <input
+                type="number"
+                min={5}
+                max={1440}
+                step={5}
+                value={duration}
+                onChange={(event) => setDuration(event.target.value)}
+                className={INPUT_CLASS}
+              />
+            </label>
             {meetingMode === 'offline' && (
               <label className="block text-xs font-medium text-tertiary-600">
                 Meeting location
@@ -146,7 +176,14 @@ export default function AccountStageMoveDrawer({
             <AccountAttendeesPicker open={open} value={attendeeIds} onChange={setAttendeeIds} />
           </>
         )}
-        {toStage === 'dropped' && (
+        {toStage === 'dropped' && liveProjects.length > 0 && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            This client has {liveProjects.length} live project{liveProjects.length === 1 ? '' : 's'} (
+            {liveProjects.map((p) => `${p.project_name}${p.project_code ? ` – ${p.project_code}` : ''}`).join(', ')}). Dropping the client only
+            affects Sales; the projects keep billing. To stop a project, Finance marks it Completed / On hold.
+          </p>
+        )}
+        {needsReason && (
           <label className="block text-xs font-medium text-tertiary-600">
             Reason
             <textarea

@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
+import { isPermissionMode } from '../../lib/access.js';
 import { orgLogo } from '../../lib/orgLogo.js';
 
 const SEARCH_THRESHOLD = 6;
@@ -55,7 +56,8 @@ export default function WorkspaceSwitcher({ collapsed = false, onCreate }) {
 
   if (!activeOrg) return null;
   const canSwitch = memberships.length > 1;
-  const isAdmin = user?.role === 'admin';
+  // In a company on permissions only the Super Admin creates companies; a company Admin has no switcher.
+  const isAdmin = isPermissionMode(user) ? user.access.level === 'super_admin' : user?.role === 'admin';
   const hasActions = isGroupSuperadmin || (isAdmin && Boolean(onCreate));
 
   async function choose(orgId) {

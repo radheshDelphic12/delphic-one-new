@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Printer, RefreshCw } from 'lucide-react';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
 import apiClient from '../../lib/apiClient.js';
+import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -10,6 +13,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 
 function money(n) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -96,39 +100,12 @@ function ComputeRevenueDrawer({ open, onClose, onSubmit }) {
   );
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // Invoices built from a locked Billing & Sales month carry { lines, project, … };
 // older ones (from computed daily revenue) are a plain array of requirement lines.
 function invoiceLines(row) {
   const items = row.line_items;
   if (Array.isArray(items)) return items.map((li) => ({ label: li.requirement_title || 'Services', hours: li.hours, overtime_hours: 0, amount: li.revenue }));
   return (items?.lines || []).map((li) => ({ label: li.resource, hours: li.hours, overtime_hours: li.overtime_hours, amount: li.revenue }));
-}
-
-/**
- * Review / download: a standalone, printable invoice ("Save as PDF" in the
- * print dialog is the download) — same approach as payslips.
- */
-function printInvoice(row, orgName) {
-  const lines = invoiceLines(row);
-  const meta = Array.isArray(row.line_items) ? {} : row.line_items || {};
-  const win = window.open('', '_blank', 'width=820,height=960');
-  if (!win) return;
-  win.document.write(`<!doctype html><html><head><title>Invoice — ${escapeHtml(row.client_account?.name)} ${row.period_month}/${row.period_year}</title>
-    <style>body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;padding:32px}h1{font-size:18px;margin:0}.sub{color:#64748b;font-size:12px;margin:4px 0 20px}
-    table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;font-size:13px;text-align:left;border-bottom:1px solid #e8ebf2}.r{text-align:right}.total td{font-weight:700;font-size:15px}</style></head><body>
-    <h1>${escapeHtml(orgName || 'Invoice')}</h1>
-    <p class="sub">Invoice for ${escapeHtml(meta.project?.name || row.client_account?.name)}${meta.project?.code ? ` (${escapeHtml(meta.project.code)})` : ''}${meta.project?.client_name ? ` · ${escapeHtml(meta.project.client_name)}` : ''} · Period ${row.period_month}/${row.period_year} · Status ${escapeHtml(row.status)}${meta.calculation_version ? ` · locked billing v${meta.calculation_version}` : ''}</p>
-    <table><thead><tr><th>Item</th><th class="r">Hours</th><th class="r">Overtime hrs</th><th class="r">Amount (${escapeHtml(row.currency)})</th></tr></thead><tbody>
-    ${lines.map((l) => `<tr><td>${escapeHtml(l.label)}</td><td class="r">${escapeHtml(l.hours ?? '')}</td><td class="r">${escapeHtml(l.overtime_hours || '')}</td><td class="r">${escapeHtml(money(l.amount))}</td></tr>`).join('')}
-    <tr class="total"><td colspan="3">Total</td><td class="r">${escapeHtml(row.currency)} ${escapeHtml(money(row.amount))}</td></tr></tbody></table>
-    </body></html>`);
-  win.document.close();
-  win.focus();
-  win.print();
 }
 
 /**
@@ -173,6 +150,13 @@ export default function InvoicingSection() {
     }
   }
 
+  function downloadInvoice(row) {
+    downloadFile(`/billing/invoices/${row.id}/pdf`, undefined, `${row.invoice_number || 'invoice'}.pdf`).catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoice'), 'Something went wrong'));
+  }
+
+  const paymentDialog = usePaymentDialog();
+  const [paymentsFor, setPaymentsFor] = useState(null);
+  const [chaseFor, setChaseFor] = useState(null); // the invoice whose due date / follow-ups are open
   async function transition(row, status) {
     try {
       await apiClient.post(`/billing/invoices/${row.id}/status`, { status });
@@ -182,22 +166,76 @@ export default function InvoicingSection() {
       pushError(apiErrorMessage(err, 'Failed to update invoice status'), 'Something went wrong');
     }
   }
+  async function recordPayment(row) {
+    try {
+      await paymentDialog.pay(
+        { title: `Payment received${row.invoice_number ? ` · ${row.invoice_number}` : ''}`, direction: 'in', currency: row.currency, amount: row.pending_amount ?? row.amount, party: row.line_items?.project?.name || row.client_account?.name || '' },
+        (body) => apiClient.post(`/billing/invoices/${row.id}/payments`, body),
+      );
+      pushInfo('Payment recorded');
+      load();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Failed to record the payment'), 'Something went wrong');
+    }
+  }
+
+  // Month by month: which invoices are paid, partly paid or unpaid; filters combine, totals follow them (one line per currency).
+  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '', collect: '' });
+  const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
+  const years = useMemo(() => [...new Set(rows.map((r) => r.period_year))].sort((a, b) => b - a), [rows]);
+  const shown = useMemo(() => rows.filter((r) => (
+    (!filters.year || String(r.period_year) === filters.year)
+    && (!filters.month || String(r.period_month) === filters.month)
+    && (!filters.status || r.status === filters.status)
+    && (!filters.pay || r.payment_status === filters.pay)
+    && (!filters.collect || (filters.collect === 'overdue' && r.overdue) || (filters.collect === 'followup_due' && r.followup_due) || (filters.collect === 'no_due_date' && r.status === 'sent' && r.payment_status !== 'paid' && !r.due_date))
+    && (!filters.q || `${r.invoice_number || ''} ${r.line_items?.project?.name || ''} ${r.client_account?.name || ''}`.toLowerCase().includes(filters.q.toLowerCase()))
+  )), [rows, filters]);
+  const totals = useMemo(() => {
+    const by = new Map();
+    for (const r of shown) {
+      if (r.status === 'draft') continue;
+      const t = by.get(r.currency) || { invoiced: 0, paid: 0, pending: 0 };
+      t.invoiced += Number(r.amount || 0);
+      t.paid += Number(r.paid_amount || 0);
+      t.pending += Number(r.pending_amount ?? r.amount ?? 0);
+      by.set(r.currency, t);
+    }
+    return [...by];
+  }, [shown]);
+  const anyFilter = Object.values(filters).some(Boolean);
+  const overdueCount = useMemo(() => rows.filter((r) => r.overdue).length, [rows]);
+  const followupDueCount = useMemo(() => rows.filter((r) => r.followup_due).length, [rows]);
+
+  const [selected, setSelected] = useState([]);
+  function downloadSelected() {
+    const ids = shown.filter((r) => selected.includes(r.id)).map((r) => r.id);
+    if (!ids.length) return;
+    downloadFilePost('/billing/invoices/pdf', { ids }, 'invoices.pdf').catch((err) => pushError(apiErrorMessage(err, 'Could not download the invoices'), 'Something went wrong'));
+  }
 
   const columns = [
+    { key: 'number', header: 'Invoice no.', render: (row) => <span className="font-mono text-xs font-medium text-tertiary-900">{row.invoice_number || '—'}</span> },
     { key: 'client', header: 'Project', render: (row) => <span>{row.line_items?.project?.name || row.client_account?.name || '—'}{row.line_items?.project?.code && <span className="block text-xs text-tertiary-500">{row.line_items.project.code}{row.line_items.project.client_name ? ` · ${row.line_items.project.client_name}` : ''}</span>}</span> },
+    { key: 'date', header: 'Invoice date', render: (row) => row.invoice_date || '—' },
+    { key: 'gst', header: 'Customer GST', render: (row) => (row.line_items?.bill_to?.gstin ? <span className="font-mono text-xs">{row.line_items.bill_to.gstin}</span> : <span className="text-tertiary-400">—</span>) },
     { key: 'period', header: 'Period', render: (row) => `${row.period_month}/${row.period_year}` },
     { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
     { key: 'lines', header: 'Line items', render: (row) => invoiceLines(row).length },
     { key: 'source', header: 'Source', render: (row) => (row.calculation_version_id ? <span className="text-xs text-success-700">Locked billing v{row.line_items?.calculation_version}</span> : <span className="text-xs text-tertiary-500">Computed revenue</span>) },
-    { key: 'status', header: 'Status', render: (row) => <Badge value={row.status} /> },
+    { key: 'due', header: 'Due date', render: (row) => <span className="whitespace-nowrap text-xs">{row.due_date || <span className="text-tertiary-400">not set</span>}{row.overdue && <span className="block font-medium text-danger-600">{row.days_overdue} day{row.days_overdue === 1 ? '' : 's'} overdue</span>}</span> },
+    { key: 'followup', header: 'Next follow-up', render: (row) => <span className="text-xs">{row.next_followup_date ? <span className={row.followup_due ? 'font-semibold text-warning-700' : ''}>{row.next_followup_date}</span> : '—'}{row.followup_count > 0 && <span className="block max-w-[14rem] truncate text-tertiary-500" title={row.last_followup_note}>{row.last_followup_note}</span>}</span> },
+    { key: 'status', header: 'Status', render: (row) => <span><Badge value={row.status} />{row.payment_status === 'partly_paid' && <span className="block text-[11px] text-warning-700">Paid {row.currency} {money(row.paid_amount)} · pending {money(row.pending_amount)}</span>}</span> },
     {
       key: 'actions',
       header: 'Actions',
       render: (row) => (
         <div className="flex gap-2">
-          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(row, user?.active_org?.name)}><Printer className="h-3.5 w-3.5" /> View / download</button>
+          <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => downloadInvoice(row)}><Printer className="h-3.5 w-3.5" /> View / download</button>
           {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
-          {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'paid')}>Mark paid</button>}
+          {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(row)}>{row.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
+          {row.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(row)}>Payments</button>}
+          {row.status === 'sent' && row.payment_status !== 'paid' && <button type="button" className="btn-ghost text-xs" data-testid="invoice-followup" onClick={() => setChaseFor(row)}>Follow-up{row.followup_count ? ` (${row.followup_count})` : ''}</button>}
         </div>
       ),
     },
@@ -205,15 +243,39 @@ export default function InvoicingSection() {
 
   return (
     <div className="space-y-3">
+      {paymentDialog.dialog}
+      <InvoicePaymentsModal invoice={paymentsFor} canUndo={Boolean(user?.is_group_superadmin)} onClose={() => setPaymentsFor(null)} onChanged={load} />
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setComputeOpen(true)}><RefreshCw className="h-4 w-4" /> Compute revenue</button>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setGenerateOpen(true)}><Plus className="h-4 w-4" /> Generate invoice</button>
       </div>
+      <div className="flex flex-wrap items-end gap-2" data-testid="invoicing-filters">
+        <input value={filters.q} onChange={setFilter('q')} placeholder="Search invoice or project…" className="w-52 rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" />
+        <select value={filters.year} onChange={setFilter('year')} aria-label="Year" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All years</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+        <select value={filters.month} onChange={setFilter('month')} aria-label="Month" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All months</option>{['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+        <select value={filters.status} onChange={setFilter('status')} aria-label="Status" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any status</option><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option></select>
+        <select value={filters.pay} onChange={setFilter('pay')} aria-label="Payment" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any payment</option><option value="unpaid">Unpaid</option><option value="partly_paid">Partly paid</option><option value="paid">Paid</option></select>
+        <select value={filters.collect} onChange={setFilter('collect')} aria-label="Collection" data-testid="invoicing-collection-filter" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All collection</option><option value="overdue">Overdue ({overdueCount})</option><option value="followup_due">Follow-up due ({followupDueCount})</option><option value="no_due_date">No due date set</option></select>
+        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '', collect: '' })}>Clear filters</button>}
+      </div>
+      {totals.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="invoicing-totals">
+          {totals.map(([cur, t]) => (
+            <div key={cur} className="rounded-xl border border-tertiary-100 bg-white p-3 text-sm">
+              <p className="text-xs font-medium text-tertiary-500">{cur}: sent and paid invoices</p>
+              <p className="mt-1">Invoiced <span className="font-semibold tabular-nums">{money(t.invoiced)}</span></p>
+              <p className="text-success-700">Paid <span className="font-semibold tabular-nums">{money(t.paid)}</span></p>
+              <p className="text-warning-700">Pending <span className="font-semibold tabular-nums">{money(t.pending)}</span></p>
+            </div>
+          ))}
+        </div>
+      )}
       {!loading && rows.length === 0 ? (
         <EmptyState title="No invoices yet" description="Compute revenue for a period, then generate an invoice for a project." />
       ) : (
-        <DataTable columns={columns} rows={rows} loading={loading} emptyLabel="No invoices." />
+        <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />
       )}
+      <InvoiceCollectionDrawer invoice={chaseFor} title={chaseFor ? `Follow-up: ${chaseFor.invoice_number || 'invoice'}` : ''} basePath={chaseFor ? `/billing/invoices/${chaseFor.id}` : ''} onClose={() => setChaseFor(null)} onChanged={load} />
       <GenerateInvoiceDrawer open={generateOpen} onClose={() => setGenerateOpen(false)} onSubmit={generate} />
       <ComputeRevenueDrawer open={computeOpen} onClose={() => setComputeOpen(false)} onSubmit={computeRevenue} />
     </div>

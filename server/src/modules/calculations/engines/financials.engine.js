@@ -134,11 +134,31 @@ async function computeFinancialMonth(orgId, { period_month, period_year }, resol
     ? [{ code: 'unlocked_components', count: unlocked.length, message: `${unlocked.length} component(s) are still live (not locked): ${[...new Set(unlocked.map((s) => s.kind))].join(', ')}.` }]
     : [];
 
+  // The month's payments (payment popup / wallet link), in INR, whether or not a wallet was used. Cash movement, so it sits beside the
+  // profit figures and never inside them; it is part of the snapshot, so it counts once the month is locked.
+  const paymentRows = await prisma.paymentRecord.findMany({
+    where: { org_id: orgId, deleted_at: null, paid_on: { gte: start, lt: endExclusive } },
+    select: { direction: true, inr_amount: true, bank_charges: true, other_deductions: true, exchange_rate: true },
+  });
+  const sumInr = (rows, pick) => round2(rows.reduce((a, r) => a + pick(r), 0));
+  const inRows = paymentRows.filter((r) => r.direction === 'in');
+  const outRows = paymentRows.filter((r) => r.direction === 'out');
+  const rate = (r) => (r.exchange_rate === null ? 1 : Number(r.exchange_rate));
+  const payments = {
+    count: paymentRows.length,
+    received: sumInr(inRows, (r) => Number(r.inr_amount)),
+    paid: sumInr(outRows, (r) => Number(r.inr_amount)),
+    bank_charges: sumInr(paymentRows, (r) => Number(r.bank_charges) * rate(r)),
+    deductions: sumInr(paymentRows, (r) => Number(r.other_deductions) * rate(r)),
+  };
+  payments.net = round2(payments.received - payments.paid);
+
   return {
     period_month,
     period_year,
     currency: 'INR',
     categories: [revenue, salariesNode, expenses],
+    payments,
     totals: { revenue: revenue.amount, salaries: salariesNode.amount, expenses: expenses.amount, profit },
     sources,
     missing_rates: [...missingRates],

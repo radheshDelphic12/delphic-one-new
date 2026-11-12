@@ -1,32 +1,33 @@
+const fs = require('fs');
 const nodemailer = require('nodemailer');
 const env = require('../../config/env');
 const logger = require('../../config/logger');
 const prisma = require('../../config/db');
 const { methodOf } = require('./ics');
+const { createGraphTransport } = require('./graphMail');
+const { renderEmailHtml } = require('./template');
 
 const MAX_ATTEMPTS = 5;
 
 let cachedTransport;
 function getTransport() {
-  const url = env.notifications.email.smtpUrl;
-  if (!url) return null;
-  if (!cachedTransport) cachedTransport = nodemailer.createTransport(url);
+  // Microsoft Graph (works with SMTP AUTH disabled) wins over SMTP; neither configured -> null (mail is marked `skipped`).
+  const { graph, smtp } = env.notifications.email;
+  if (!graph && !smtp) return null;
+  if (!cachedTransport) cachedTransport = graph ? createGraphTransport(graph) : nodemailer.createTransport(smtp);
   return cachedTransport;
 }
 
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-}
-
-function defaultHtml(text) {
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2937">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+// The HTML part of every email: the plain text laid out professionally (lib/email/template.js). A caller can still pass its own `html`.
+function defaultHtml({ subject, text, kind }) {
+  return renderEmailHtml({ subject, text, kind });
 }
 
 /**
  * Queue one email. Never throws (like notify()) — a mail problem must not roll
  * back the business transaction that triggered it. `client` may be a `tx`.
  */
-async function enqueue(client, { orgId = null, kind, to, subject, text, html, ics }) {
+async function enqueue(client, { orgId = null, kind, to, cc, subject, text, html, ics, attachment }) {
   try {
     if (!to?.email) return null;
     return await client.emailOutbox.create({
@@ -35,10 +36,13 @@ async function enqueue(client, { orgId = null, kind, to, subject, text, html, ic
         kind,
         to_email: to.email,
         to_name: to.name || null,
+        cc_email: cc?.email || null,
         subject,
         body_text: text,
-        body_html: html || defaultHtml(text),
+        body_html: html || defaultHtml({ subject, text, kind }),
         ics: ics || null,
+        attachment_path: attachment?.path || null,
+        attachment_name: attachment?.name || null,
       },
     });
   } catch (err) {
@@ -74,11 +78,15 @@ async function processQueue({ limit = 25, transport = getTransport() } = {}) {
       await transport.sendMail({
         from: env.notifications.email.from || 'Delphic One <no-reply@delphic.local>',
         to: row.to_name ? `"${row.to_name.replace(/"/g, '')}" <${row.to_email}>` : row.to_email,
+        cc: row.cc_email || undefined,
         subject: row.subject,
         text: row.body_text,
         html: row.body_html || undefined,
         icalEvent: row.ics ? { method: methodOf(row.ics), content: row.ics } : undefined,
+        attachments: row.attachment_path ? [{ filename: row.attachment_name || 'attachment', content: fs.readFileSync(row.attachment_path), contentType: /\.zip$/i.test(row.attachment_name || '') ? 'application/zip' : 'application/octet-stream' }] : undefined,
       });
+      // the file only had to live until it was sent
+      if (row.attachment_path) fs.promises.unlink(row.attachment_path).catch(() => {});
       await prisma.emailOutbox.update({
         where: { id: row.id },
         data: { status: 'sent', sent_at: new Date(), attempts: { increment: 1 }, last_error: null },

@@ -12,8 +12,9 @@ import {
   apiErrorMessage,
   buildAccountBody,
   canCreateAccount,
+  canEditAccountDetails,
+  VENDOR_TYPES,
   canEditBroughtBy,
-  canMutateAccount,
   formFromAccount,
 } from './accountUtils.js';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
@@ -49,7 +50,7 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
   const [loadFailed, setLoadFailed] = useState(false);
   const [ownerOptions, setOwnerOptions] = useState([]);
   // Anyone who can edit the account can also reassign its owner/POC to any active user.
-  const canEditOwner = isEditing && canMutateAccount(account, user);
+  const canEditOwner = isEditing && canEditAccountDetails(account, user);
   const canEditType = isEditing && (user?.role === 'admin' || user?.role === 'bda');
   // "Brought by" is normally set once at creation — admin or BDA may correct it (not superadmin-only).
   const canEditOriginOwner = isEditing && canEditBroughtBy(user);
@@ -117,8 +118,21 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
     event.preventDefault();
     const vendorRatesMismatch =
       form.type === 'vendor' && (form.vendor_rate_min === '') !== (form.vendor_rate_max === '');
+    const isVendorForm = form.type === 'vendor';
+    const clean = (v) => String(v || '').trim();
+    // spaces and dashes in an account number are tidied (by the server too), so they are not an error
+    const badFormat = (key, pattern, message, upper = false) => {
+      let v = clean(form[key]);
+      if (key === 'vendor_bank_account_number') v = v.replace(/[\s-]/g, '');
+      if (upper) v = v.toUpperCase();
+      return isVendorForm && clean(form[key]) && !pattern.test(v) ? message : null;
+    };
     const validation = runValidations([
       ['vendor_rate_min', vendorRatesMismatch ? 'Enter both minimum and maximum vendor rates, or leave both blank.' : null],
+      ['vendor_bank_account_number', badFormat('vendor_bank_account_number', /^[A-Za-z0-9]{5,34}$/, 'Account number: 5 to 34 letters or digits.')],
+      ['vendor_bank_ifsc', badFormat('vendor_bank_ifsc', /^[A-Z]{4}0[A-Z0-9]{6}$/, 'IFSC: 4 letters, a zero, then 6 letters or digits (for example HDFC0001234).', true)],
+      ['vendor_bank_swift', badFormat('vendor_bank_swift', /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/, 'SWIFT / BIC: 8 or 11 characters (for example HDFCINBB).', true)],
+      ['vendor_upi_id', badFormat('vendor_upi_id', /^[A-Za-z0-9._-]{2,}@[A-Za-z0-9]{2,}$/, 'UPI ID looks like name@bank.')],
     ]);
     if (!validation.valid) {
       setFieldErrors(validation.fieldErrors);
@@ -153,7 +167,7 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
     !asPanel &&
     isEditing &&
     account &&
-    (!canMutateAccount(account, user) || (account.is_locked && !canEditBroughtBy(user)))
+    (!canEditAccountDetails(account, user) || (account.is_locked && !canEditBroughtBy(user)))
   ) {
     return <Navigate to={`/accounts/${id}`} replace />;
   }
@@ -275,6 +289,12 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
             <Field label="Lead source">
               <input value={form.source} onChange={(event) => updateField('source', event.target.value)} className={INPUT_CLASS} />
             </Field>
+            <Field label="Premium">
+              <select value={form.is_premium ? 'yes' : 'no'} onChange={(event) => updateField('is_premium', event.target.value === 'yes')} className={INPUT_CLASS}>
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+              </select>
+            </Field>
             <Field label="Location">
               <input value={form.location} onChange={(event) => updateField('location', event.target.value)} className={INPUT_CLASS} placeholder="e.g. Pune, India" />
             </Field>
@@ -288,7 +308,10 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
               <input value={form.location_country} onChange={(event) => updateField('location_country', event.target.value)} className={INPUT_CLASS} />
             </Field>
             <Field label="GST / Tax ID">
-              <input value={form.gst_or_tax_id} onChange={(event) => updateField('gst_or_tax_id', event.target.value)} className={INPUT_CLASS} />
+              <input value={form.gst_or_tax_id} onChange={(event) => updateField('gst_or_tax_id', event.target.value.toUpperCase())} className={INPUT_CLASS} placeholder="e.g. 27ABCDE1234F1Z5" />
+            </Field>
+            <Field label="Billing address (printed on invoices)">
+              <textarea rows={2} maxLength={500} value={form.billing_address} onChange={(event) => updateField('billing_address', event.target.value)} className={INPUT_CLASS} />
             </Field>
           </div>
         </section>
@@ -382,6 +405,12 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
             </div>
           ) : (
             <div className={`grid gap-4 p-4 sm:grid-cols-2`}>
+              <Field label="Vendor type">
+                <select value={form.vendor_type} onChange={(event) => updateField('vendor_type', event.target.value)} className={INPUT_CLASS}>
+                  <option value="">Select…</option>
+                  {VENDOR_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </Field>
               <div className="sm:col-span-2">
                 <Field label="Specializations (comma separated)">
                   <input
@@ -438,6 +467,48 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
                   />
                 </Field>
               </div>
+              <div className="sm:col-span-2 mt-2 border-t pt-4" data-testid="vendor-bank-form">
+                <h3 className="text-sm font-semibold text-tertiary-900">Bank details</h3>
+                <p className="mt-0.5 text-xs text-tertiary-500">Where this vendor is paid. The account number is shown masked on screen; only people who can edit this vendor can see the full number.</p>
+              </div>
+              <Field label="Account holder name">
+                <input value={form.vendor_bank_holder} onChange={(event) => updateField('vendor_bank_holder', event.target.value)} maxLength={120} className={INPUT_CLASS} aria-label="Account holder name" />
+              </Field>
+              <Field label="Bank name">
+                <input value={form.vendor_bank_name} onChange={(event) => updateField('vendor_bank_name', event.target.value)} maxLength={120} className={INPUT_CLASS} aria-label="Bank name" />
+              </Field>
+              <Field label="Account number">
+                <input
+                  value={form.vendor_bank_account_number}
+                  onChange={(event) => updateField('vendor_bank_account_number', event.target.value)}
+                  autoComplete="off"
+                  maxLength={40}
+                  placeholder={form.vendor_bank_account_masked ? `Saved ${form.vendor_bank_account_masked} - leave blank to keep` : ''}
+                  className={fieldErrorClass(fieldErrors, 'vendor_bank_account_number', INPUT_CLASS)}
+                  aria-label="Account number"
+                />
+                {fieldErrors.vendor_bank_account_number && <p className="mt-1 text-xs text-danger-600">{fieldErrors.vendor_bank_account_number}</p>}
+                {form.vendor_bank_account_masked && (
+                  <label className="mt-1 flex items-center gap-2 text-xs text-tertiary-600">
+                    <input type="checkbox" checked={form.clear_bank_account_number} onChange={(event) => updateField('clear_bank_account_number', event.target.checked)} /> Remove the saved account number
+                  </label>
+                )}
+              </Field>
+              <Field label="IFSC code">
+                <input value={form.vendor_bank_ifsc} onChange={(event) => updateField('vendor_bank_ifsc', event.target.value.toUpperCase())} maxLength={11} placeholder="HDFC0001234" className={fieldErrorClass(fieldErrors, 'vendor_bank_ifsc', INPUT_CLASS)} aria-label="IFSC code" />
+                {fieldErrors.vendor_bank_ifsc && <p className="mt-1 text-xs text-danger-600">{fieldErrors.vendor_bank_ifsc}</p>}
+              </Field>
+              <Field label="Branch">
+                <input value={form.vendor_bank_branch} onChange={(event) => updateField('vendor_bank_branch', event.target.value)} maxLength={120} className={INPUT_CLASS} aria-label="Branch" />
+              </Field>
+              <Field label="SWIFT / BIC (for foreign vendors)">
+                <input value={form.vendor_bank_swift} onChange={(event) => updateField('vendor_bank_swift', event.target.value.toUpperCase())} maxLength={11} placeholder="HDFCINBB" className={fieldErrorClass(fieldErrors, 'vendor_bank_swift', INPUT_CLASS)} aria-label="SWIFT code" />
+                {fieldErrors.vendor_bank_swift && <p className="mt-1 text-xs text-danger-600">{fieldErrors.vendor_bank_swift}</p>}
+              </Field>
+              <Field label="UPI ID">
+                <input value={form.vendor_upi_id} onChange={(event) => updateField('vendor_upi_id', event.target.value)} maxLength={80} placeholder="name@bank" className={fieldErrorClass(fieldErrors, 'vendor_upi_id', INPUT_CLASS)} aria-label="UPI ID" />
+                {fieldErrors.vendor_upi_id && <p className="mt-1 text-xs text-danger-600">{fieldErrors.vendor_upi_id}</p>}
+              </Field>
             </div>
           )}
         </section>

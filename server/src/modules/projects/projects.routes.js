@@ -1,9 +1,10 @@
 const express = require('express');
+const { canMethod } = require('../../lib/permissions');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const env = require('../../config/env');
-const { authenticate, authorize, requireOrgMembership } = require('../../middleware/auth');
+const { authenticate, requireOrgMembership } = require('../../middleware/auth');
 const requireModule = require('../../middleware/requireModule');
 const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -21,7 +22,7 @@ const upload = multer({
 });
 
 const router = express.Router();
-router.use(authenticate, requireOrgMembership, requireModule('projects'), authorize('admin'));
+router.use(authenticate, requireOrgMembership, requireModule('projects'), canMethod('financials', 'admin'));
 
 const notFound = (res) => fail(res, 404, 'Project not found');
 

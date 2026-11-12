@@ -6,9 +6,11 @@ jest.setTimeout(120000);
 beforeAll(async () => {
   await cleanDatabase();
 }, 180000);
+// Leave the shared database empty: later suites in the same run may count global rows (users, orgs).
 afterAll(async () => {
+  await cleanDatabase();
   await prisma.$disconnect();
-});
+}, 180000);
 
 let orgSeq = 0;
 async function setup(label = 'co') {

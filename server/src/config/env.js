@@ -47,6 +47,9 @@ const env = {
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  // The address candidates see for the careers pages, e.g. https://delphic.in/career (no trailing slash). Leave it empty until
+  // the website's rewrite to /delphic/career is live; it only feeds the "Copy link" button and the canonical link.
+  publicCareersBase: String(process.env.PUBLIC_CAREERS_BASE || '').trim().replace(/\/+$/, ''),
   // Business timezone for human-readable dates in notifications / emails. The
   // server clock is UTC; without this, notification times render in UTC.
   timezone: process.env.APP_TIMEZONE || 'Asia/Kolkata',
@@ -57,18 +60,44 @@ const env = {
   jobs: {
     enabled: process.env.NODE_ENV !== 'test' && process.env.ENABLE_JOBS !== 'false',
   },
-  // Email: NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465) turns on
-  // real delivery from the email_outbox queue (lib/email/outbox.js); unset, queued mail is
-  // marked `skipped`. msGraph (Teams meeting creation) is still reserved: nothing reads it yet.
+  // Email: NOTIFICATIONS_SMTP_URL (e.g. smtps://user:pass@smtp.example.com:465), or NOTIFICATIONS_SMTP_HOST/_PORT/_SECURE/_USER/_PASS
+  // (lib/email/smtpConfig.js), turns on real delivery from the email_outbox queue (lib/email/outbox.js); unset, queued mail is
+  // marked `skipped`. docs/guides/EMAIL-SMTP-PRODUCTION.md lists what production needs. msGraph (Teams meeting creation) is still reserved: nothing reads it yet.
   notifications: {
     email: {
       from: process.env.NOTIFICATIONS_EMAIL_FROM || null,
       smtpUrl: process.env.NOTIFICATIONS_SMTP_URL || null,
+      // transport options built from the separate NOTIFICATIONS_SMTP_* values (null when none are set)
+      smtp: require('../lib/email/smtpConfig').smtpOptionsFromEnv(process.env),
+      // Microsoft Graph app-only send (lib/email/graphMail.js); wins over SMTP when set. null when the three app values are not all set.
+      graph: require('../lib/email/graphMail').graphOptionsFromEnv(process.env),
     },
     msGraph: {
       tenantId: process.env.MS_GRAPH_TENANT_ID || null,
       clientId: process.env.MS_GRAPH_CLIENT_ID || null,
       clientSecret: process.env.MS_GRAPH_CLIENT_SECRET || null,
+    },
+  },
+  // AI interview (modules/aiInterviews): the Anthropic API key stays in the server environment, never in code. Unset, a started
+  // interview cannot ask questions (the candidate sees "try again later"); answers already given are never lost.
+  aiInterview: {
+    apiKey: process.env.ANTHROPIC_API_KEY || null,
+    model: process.env.AI_INTERVIEW_MODEL || 'claude-sonnet-5-5',
+    // Only for a user-level key (sk-ant-usr-...), which Anthropic wants tied to a workspace; a workspace key does not need it.
+    workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || null,
+    maxOutputTokens: Number(process.env.AI_INTERVIEW_MAX_OUTPUT_TOKENS) || 1200,
+  },
+  // Marketing website control (modules/website). Each URL is one Apps Script
+  // web app (…/exec) the website already uses; the secret must equal the
+  // PLATFORM_SECRET script property on every one of them. Any value unset →
+  // the feature is off (routes answer 503, the sync job does nothing).
+  website: {
+    scriptSecret: process.env.WEBSITE_SCRIPT_SECRET || null,
+    scripts: {
+      jobs: process.env.WEBSITE_JOBS_SCRIPT_URL || null,
+      contact: process.env.WEBSITE_CONTACT_SCRIPT_URL || null,
+      career: process.env.WEBSITE_CAREER_SCRIPT_URL || null,
+      secure: process.env.WEBSITE_SECURE_SCRIPT_URL || null,
     },
   },
 };

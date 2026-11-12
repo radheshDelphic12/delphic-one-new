@@ -1,12 +1,15 @@
+import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, CalendarCheck, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
+import { Banknote, CalendarCheck, CalendarClock, DoorOpen, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
 import AttendanceSalaryTab, { EMPTY_PEOPLE_FILTERS, PeopleFilters, cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
 import SalaryAdjustmentsTab from './SalaryAdjustmentsTab.jsx';
 import SalaryPaymentsTab from './SalaryPaymentsTab.jsx';
 import RefreshRunModal from './RefreshRunModal.jsx';
+import { FnfTab, IncrementRemindersTab, PreviousDuesModal } from './PeopleExitTabs.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { hasNeed, isPermissionMode } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
@@ -73,6 +76,18 @@ const dash = (v) => (v === null || v === undefined || v === '' ? '—' : v);
 const titleCase = (v) => String(v || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 const LEAVE_ORDER = ['CL', 'SL', 'EL', 'CO'];
 
+// The earnings of the month as printed lines: monthly pay, overtime (hours x rate x multiplier), then the gross. Overtime is never hidden inside the gross.
+function earningLines(d) {
+  const ot = d.earnings?.overtime;
+  const lines = [['Monthly pay (CTC for the month)', d.earnings ? d.earnings.base_pay : null]];
+  if (ot && (ot.amount > 0 || ot.approved_hours > 0)) {
+    const how = ot.hourly_rate != null && ot.multiplier != null ? ` - ${ot.approved_hours}h x ${titleNum(ot.hourly_rate)} x ${ot.multiplier}` : ` - ${ot.approved_hours}h`;
+    lines.push([`Overtime (approved)${how}`, ot.amount]);
+  }
+  return lines;
+}
+const titleNum = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
 /**
  * The salary slip: Delphic logo header, employee + bank details, leaves taken
  * and balances, the salary breakup, and the month's calculation down to the
@@ -126,12 +141,15 @@ function payslipHtml(payslip, orgName) {
     </tbody></table>
     <h2>Calculation &amp; net pay — ${escapeHtml(period)}</h2>
     <table><tbody>
-      ${line('Gross salary', t.gross)}
+      ${d.earnings ? earningLines(d).map(([label, amount]) => line(label, amount)).join('') : ''}
+      <tr class="total"><td>Gross salary</td><td class="r">${escapeHtml(money(t.gross))}</td></tr>
       ${line('Less: loss of pay', t.loss_of_pay, '-')}
-      ${(d.additions || []).map((a) => line(`Add: ${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '+')).join('')}
-      ${(d.other_deductions || []).map((a) => line(`Less: ${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '-')).join('')}
+      ${(d.additions || []).length ? `<tr><th colspan="2">Add-ons (added to the pay)</th></tr>${d.additions.map((a) => line(`${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '+')).join('')}` : ''}
+      ${(d.other_deductions || []).length ? `<tr><th colspan="2">Other deductions</th></tr>${d.other_deductions.map((a) => line(`${a.label}${a.note ? ` (${a.note})` : ''}`, a.amount, '-')).join('')}` : ''}
       <tr class="net"><td>Final net paid amount</td><td class="r">${escapeHtml(money(t.net_paid))}</td></tr>
     </tbody></table>
+    ${d.needs_refresh ? `<p class="foot" style="color:#b45309">Note: an add-on or deduction was changed after this salary was processed (it comes to ${escapeHtml(money(t.expected_net))}); the payroll run has to be updated.</p>` : ''}
+    ${(() => { const rows = payslipFacts(payslip.breakdown || {}, money).filter(([, v]) => v !== undefined && v !== null && v !== ''); return rows.length ? `<h2>${payslip.breakdown?.source === 'approved_timesheets' ? 'Timesheet' : 'Attendance'} breakdown</h2><div class="grid"><table>${rows.slice(0, Math.ceil(rows.length / 2)).map(([k, v]) => pair(k, v)).join('')}</table><table>${rows.slice(Math.ceil(rows.length / 2)).map(([k, v]) => pair(k, v)).join('')}</table></div>` : ''; })()}
     <p class="foot">Generated ${escapeHtml(new Date(payslip.generated_at).toLocaleDateString())} · This is a computer-generated salary slip.</p>
   </body></html>`;
 }
@@ -225,12 +243,16 @@ function PayslipDrawer({ open, payslip, onClose }) {
           </SlipSection>
           <SlipSection title={`Calculation & net pay — ${period}`}>
             <dl className="space-y-1.5 text-sm">
-              <div className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Gross salary</dt><dd className="font-medium">{money(t.gross)}</dd></div>
+              {d.earnings && earningLines(d).map(([label, amount]) => <div key={label} className="flex justify-between border-b border-tertiary-50 pb-1" data-testid="slip-earning"><dt className="text-tertiary-500">{label}</dt><dd className="font-medium">{money(amount)}</dd></div>)}
+              <div className="flex justify-between border-b border-tertiary-100 pb-1 font-semibold"><dt>Gross salary</dt><dd>{money(t.gross)}</dd></div>
               <div className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Less: loss of pay</dt><dd className="font-medium text-danger-600">-{money(t.loss_of_pay)}</dd></div>
-              {(d.additions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Add: {a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-success-700">+{money(a.amount)}</dd></div>)}
-              {(d.other_deductions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">Less: {a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-danger-600">-{money(a.amount)}</dd></div>)}
+              {(d.additions || []).length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Add-ons (added to the pay)</p>}
+              {(d.additions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1" data-testid="slip-addon"><dt className="text-tertiary-500">{a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-success-700">+{money(a.amount)}</dd></div>)}
+              {(d.other_deductions || []).length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-tertiary-500">Other deductions</p>}
+              {(d.other_deductions || []).map((a) => <div key={a.id} className="flex justify-between border-b border-tertiary-50 pb-1"><dt className="text-tertiary-500">{a.label}{a.note ? ` (${a.note})` : ''}</dt><dd className="font-medium text-danger-600">-{money(a.amount)}</dd></div>)}
               <div className="flex justify-between rounded-xl bg-primary-50 px-3 py-2 text-base font-bold text-primary-800"><dt>Final net paid amount</dt><dd>{money(t.net_paid)}</dd></div>
             </dl>
+            {d.needs_refresh && <p className="mt-2 rounded-xl bg-warning-50 px-3 py-2 text-xs text-warning-800" data-testid="slip-needs-refresh">An add-on or deduction was changed after this salary was processed: the lines above come to {money(t.expected_net)}, but the net paid is {money(t.net_paid)}. Use &quot;Update payroll&quot; on the run to bring the payslip in line.</p>}
           </SlipSection>
           {facts.length > 0 && (
             <SlipSection title={payslip.breakdown?.source === 'approved_timesheets' ? 'Timesheet breakdown (older payslip)' : 'Attendance breakdown'}>
@@ -291,7 +313,7 @@ function emptyComponent(label = '') { return { label, amount: '' }; }
 // negative lines) and the effective date.
 function StructureDrawer({ open, structure, onClose, onSubmit }) {
   const isEditing = Boolean(structure);
-  const membershipOptions = useOrgMembershipOptions(open);
+  const membershipOptions = useOrgMembershipOptions(open, { includeExited: true }); // an admin can set a salary structure under any status
   const [orgMembershipId, setOrgMembershipId] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [ctc, setCtc] = useState('');
@@ -577,6 +599,7 @@ function PayrollRunsTab({ filters }) {
   const [processingId, setProcessingId] = useState(null);
   const [viewingRun, setViewingRun] = useState(null);
   const [refreshingRun, setRefreshingRun] = useState(null);
+  const [duesRun, setDuesRun] = useState(null);
   const [selectedPayslip, setSelectedPayslip] = useState(null);
 
   function load() {
@@ -637,6 +660,7 @@ function PayrollRunsTab({ filters }) {
           {row.status === 'processed' && (
             <button type="button" className="btn-ghost text-xs" onClick={() => setViewingRun(row)}>View payslips</button>
           )}
+          <button type="button" className="btn-ghost text-xs" onClick={() => setDuesRun(row)}>Previous dues</button>
           {row.status === 'processed' && (
             <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setRefreshingRun(row)}><Pencil className="h-3.5 w-3.5" /> Update payroll</button>
           )}
@@ -658,6 +682,7 @@ function PayrollRunsTab({ filters }) {
       <NewRunDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onSubmit={create} />
       <RunPayslipsDrawer open={Boolean(viewingRun)} run={viewingRun} filters={filters} onClose={() => setViewingRun(null)} onOpenPayslip={openPayslip} />
       <PayslipDrawer open={Boolean(selectedPayslip)} payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} />
+      <PreviousDuesModal run={duesRun} onClose={() => setDuesRun(null)} />
       <RefreshRunModal open={Boolean(refreshingRun)} run={refreshingRun} periodText={refreshingRun ? periodLabel(refreshingRun.period_month, refreshingRun.period_year) : ''} onClose={() => setRefreshingRun(null)} onDone={load} />
     </div>
   );
@@ -682,7 +707,10 @@ const ADMIN_TABS = [
   // TDS, OT adjustment, variable pay, reimbursements and the final payable salary.
   { key: 'adjustments', label: 'Adjustments', icon: SlidersHorizontal },
   { key: 'runs', label: 'Payroll Runs', icon: Play },
+  // Full and final settlement of everyone who has left.
+  { key: 'fnf', label: 'FnF', icon: DoorOpen },
 ];
+const INCREMENT_TAB = { key: 'increments', label: 'Increment Reminders', icon: CalendarClock };
 
 /**
  * Payroll hub — Phase 4 frontend. Self-service payslips for every role;
@@ -690,34 +718,24 @@ const ADMIN_TABS = [
  * the backend's own authorize('admin') gating on those endpoints.
  */
 export default function PayrollHubPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const { user, isGroupSuperadmin } = useAuth();
+  // everyone except the group superadmin gets the refreshed look; the superadmin keeps the original one
+  const modern = !isGroupSuperadmin;
+  // Salary amounts: a custom role (for example Admin) needs the financials permission even on the admin base role.
+  // A company on permissions: the admin tabs need Payroll View, the payslips tab needs the basic payslips item, increments need Increments.
+  const onPermissions = isPermissionMode(user);
+  const isAdmin = onPermissions ? hasNeed(user, 'payroll.view') : user?.role === 'admin' && (!user?.permissions || Boolean(user.permissions['financials.view']));
+  const showIncrements = onPermissions ? hasNeed(user, 'increments.receive') : Boolean(user?.is_superadmin);
+  const tabs = [...(onPermissions && !hasNeed(user, 'basic.payslips') ? [] : BASE_TABS), ...(isAdmin ? [...ADMIN_TABS, ...(showIncrements ? [INCREMENT_TAB] : [])] : [])];
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'my-payslips';
-  const section = tabs.some((t) => t.key === requested) ? requested : 'my-payslips';
+  const section = tabs.some((t) => t.key === requested) ? requested : (tabs[0]?.key || 'my-payslips');
   // Employee / Department / Team — one filter bar for every admin tab.
   const [people, setPeople] = useState(EMPTY_PEOPLE_FILTERS);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={section === key}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${
-              section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'
-            }`}
-            onClick={() => setParams({ section: key })}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
+      <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
       {isAdmin && section !== 'my-payslips' && (
         <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Payroll filters">
           <PeopleFilters value={people} onChange={setPeople} />
@@ -732,6 +750,8 @@ export default function PayrollHubPage() {
       {section === 'salary-structures' && isAdmin && <SalaryStructuresTab filters={people} />}
       {section === 'adjustments' && isAdmin && <SalaryAdjustmentsTab />}
       {section === 'runs' && isAdmin && <PayrollRunsTab filters={people} />}
+      {section === 'fnf' && isAdmin && <FnfTab />}
+      {section === 'increments' && isAdmin && <IncrementRemindersTab />}
     </div>
   );
 }
