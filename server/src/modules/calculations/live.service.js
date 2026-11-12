@@ -432,6 +432,81 @@ async function earningsProfit(orgId, { from, to } = {}, now = new Date()) {
   };
 }
 
+/**
+ * Earnings by team: the same months as the Earnings & profit table, the earnings (revenue), cost and margin of every person added up by the team the
+ * person was on at the end of the month (or today, for the running month). A locked month uses its locked resource figures. People with no team
+ * fall under "No team". The revenue is the resource-wise revenue (the work people did on client projects), so it can be less than the company's
+ * total earnings when part of the earnings is not tied to a person.
+ */
+async function earningsByTeam(orgId, { from, to } = {}, now = new Date()) {
+  const today = todayIst(now);
+  const current = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}`;
+  const first = from || to || current;
+  const last = to || from || current;
+  const [fy, fm] = first.split('-').map(Number);
+  const [ly, lm] = last.split('-').map(Number);
+  const months = [];
+  for (let y = fy, m = fm; (y < ly || (y === ly && m <= lm)) && months.length < 12; ) {
+    months.push({ period_year: y, period_month: m });
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  const [teams, periods, members] = await Promise.all([
+    prisma.team.findMany({ where: { org_id: orgId }, select: { id: true, name: true, lead: { select: { person: { select: { name: true } } } } }, orderBy: { name: 'asc' } }),
+    prisma.teamMembershipPeriod.findMany({ where: { org_id: orgId }, select: { org_membership_id: true, team_id: true, start_date: true, end_date: true } }),
+    prisma.orgMembership.findMany({ where: { org_id: orgId }, select: { id: true, team_id: true } }),
+  ]);
+  const teamName = new Map(teams.map((t) => [t.id, t.name]));
+  const currentTeam = new Map(members.map((m) => [m.id, m.team_id]));
+  // the team of a person on a day: the period that covers the day; else the current team
+  const teamOn = (membershipId, day) => {
+    const p = periods.find((x) => x.org_membership_id === membershipId && (!x.start_date || x.start_date <= day) && (!x.end_date || x.end_date >= day));
+    return p ? p.team_id : (currentTeam.get(membershipId) || null);
+  };
+  const byTeam = new Map();
+  const slot = (teamId) => {
+    const key = teamId || 'none';
+    if (!byTeam.has(key)) byTeam.set(key, { team_id: teamId, name: teamId ? teamName.get(teamId) || 'Unknown team' : 'No team', revenue: 0, cost: 0, margin: 0, people: new Map(), months: {} });
+    return byTeam.get(key);
+  };
+  const monthRows = [];
+  for (const p of months) {
+    const res = await resourceRevenueLive(orgId, p, now);
+    const lastDay = new Date(Date.UTC(p.period_year, p.period_month, 0));
+    const day = lastDay > today ? today : lastDay; // a running month counts the team as of today
+    const monthKey = `${p.period_year}-${String(p.period_month).padStart(2, '0')}`;
+    for (const r of res.resources || []) {
+      const t = slot(teamOn(r.org_membership_id, day));
+      t.revenue += Number(r.revenue || 0);
+      t.cost += Number(r.cost || 0);
+      t.margin += Number(r.margin || 0);
+      t.months[monthKey] = round2((t.months[monthKey] || 0) + Number(r.revenue || 0));
+      const person = t.people.get(r.org_membership_id) || { org_membership_id: r.org_membership_id, name: r.name, revenue: 0, cost: 0, margin: 0 };
+      person.revenue += Number(r.revenue || 0); person.cost += Number(r.cost || 0); person.margin += Number(r.margin || 0);
+      t.people.set(r.org_membership_id, person);
+    }
+    monthRows.push({ ...p, key: monthKey, source: res.source, revenue: round2(Number(res.totals?.revenue || 0)) });
+  }
+  const rows = [...byTeam.values()].map((t) => ({
+    team_id: t.team_id,
+    name: t.name,
+    lead: t.team_id ? teams.find((x) => x.id === t.team_id)?.lead?.person?.name || null : null,
+    people_count: t.people.size,
+    revenue: round2(t.revenue),
+    cost: round2(t.cost),
+    margin: round2(t.margin),
+    months: t.months,
+    people: [...t.people.values()].map((x) => ({ ...x, revenue: round2(x.revenue), cost: round2(x.cost), margin: round2(x.margin) })).sort((a, b) => b.revenue - a.revenue),
+  })).sort((a, b) => b.revenue - a.revenue);
+  const total = round2(rows.reduce((s, r) => s + r.revenue, 0));
+  return {
+    as_of: ymd(today), from: first, to: last,
+    months: monthRows,
+    teams: rows.map((r) => ({ ...r, share_percent: total ? round2((r.revenue / total) * 100) : 0 })),
+    totals: { revenue: total, cost: round2(rows.reduce((s, r) => s + r.cost, 0)), margin: round2(rows.reduce((s, r) => s + r.margin, 0)) },
+  };
+}
+
 const summaryQuerySchema = z.object({
   period_year: z.coerce.number().int().min(2000).max(2100),
   from_month: z.coerce.number().int().min(1).max(12).default(1),
@@ -563,4 +638,5 @@ module.exports = {
   financialMonthLive,
   earningsQuerySchema,
   earningsProfit,
+  earningsByTeam,
 };

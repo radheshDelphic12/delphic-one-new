@@ -47,6 +47,15 @@ describe('earnings and profit up to today', () => {
     expect((await get({ from: '2024-01', to: '2026-12' })).body.data.months).toHaveLength(12);
   });
 
+  test('earnings by team: the same months, an empty list when nobody earned, admin only', async () => {
+    const res = await authed(request(app).get('/api/v1/analytics/earnings-by-team'), adminToken).query({ from: '2026-07', to: '2026-08' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ from: '2026-07', to: '2026-08', teams: [], totals: { revenue: 0, cost: 0, margin: 0 } });
+    expect(res.body.data.months.map((m) => m.key)).toEqual(['2026-07', '2026-08']);
+    expect((await authed(request(app).get('/api/v1/analytics/earnings-by-team'), adminToken).query({ from: '2026/07' })).status).toBe(422);
+    expect((await authed(request(app).get('/api/v1/analytics/earnings-by-team'), recruiterToken)).status).toBe(403);
+  });
+
   test('a bad month is refused and only an admin can read it', async () => {
     expect((await get({ from: '2026/07' })).status).toBe(422);
     expect((await get({}, recruiterToken)).status).toBe(403);

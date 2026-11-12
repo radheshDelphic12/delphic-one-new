@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { IndianRupee, TrendingUp, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import useLiveData from '../../lib/useLiveData.js';
@@ -33,6 +33,42 @@ function Breakdown({ title, items, total }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** Earnings of each team over the chosen months: earnings, cost and margin, and the people behind each team. */
+function TeamEarnings({ params }) {
+  const { data, loading } = useLiveData(() => apiClient.get('/analytics/earnings-by-team', { params }).then((r) => r.data.data), { deps: [params.from, params.to], intervalMs: 60000 });
+  const [open, setOpen] = useState(null);
+  if (loading && !data) return <Skeleton className="h-32" />;
+  if (!data) return null;
+  return (
+    <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card" data-testid="earnings-by-team">
+      <div className="px-4 pt-4"><h3 className="font-heading text-sm font-semibold text-tertiary-900">Earnings by team</h3><p className="mt-0.5 text-xs text-tertiary-500">The work each team&apos;s people did on client projects in these months. A person counts for the team they were on at the end of the month. Click a team to see its people.</p></div>
+      {data.teams.length === 0 ? <p className="px-4 py-4 text-sm text-tertiary-500">No earnings by person in this period.</p> : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-canvas-muted"><tr><th className={th}>Team</th><th className={th}>Lead</th><th className={thr}>People</th><th className={thr}>Earnings</th><th className={thr}>Share</th><th className={thr}>Cost</th><th className={thr}>Margin</th></tr></thead>
+            <tbody className="divide-y divide-tertiary-100">
+              {data.teams.map((t) => {
+                const key = t.team_id || 'none';
+                return (
+                  <Fragment key={key}>
+                    <tr className="cursor-pointer hover:bg-canvas-muted/60" onClick={() => setOpen(open === key ? null : key)} data-testid="team-earnings-row">
+                      <td className={`${td} font-medium`}>{t.name}</td><td className={td}>{t.lead || '-'}</td><td className={tdr}>{t.people_count}</td><td className={`${tdr} font-semibold`}>{inr(t.revenue)}</td><td className={tdr}>{t.share_percent}%</td><td className={tdr}>{inr(t.cost)}</td><td className={`${tdr} ${tone(t.margin)}`}>{inr(t.margin)}</td>
+                    </tr>
+                    {open === key && t.people.map((m) => (
+                      <tr key={m.org_membership_id} className="bg-canvas-muted/40 text-xs"><td className={`${td} pl-8`} colSpan={3}>{m.name}</td><td className={tdr}>{inr(m.revenue)}</td><td className={td} /><td className={tdr}>{inr(m.cost)}</td><td className={`${tdr} ${tone(m.margin)}`}>{inr(m.margin)}</td></tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot className="bg-canvas-muted"><tr><td className={`${td} font-semibold`} colSpan={3}>Total</td><td className={`${tdr} font-semibold`}>{inr(data.totals.revenue)}</td><td className={td} /><td className={tdr}>{inr(data.totals.cost)}</td><td className={`${tdr} ${tone(data.totals.margin)}`}>{inr(data.totals.margin)}</td></tr></tfoot>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -98,6 +134,8 @@ export default function EarningsProfitTab() {
           </div>
 
           {data.months.some((m) => m.blockers.length > 0) && <p className="rounded-xl bg-warning-50 px-3 py-2 text-sm text-warning-800">{data.months.flatMap((m) => m.blockers).map((b) => b.message).join(' ')}</p>}
+
+          <TeamEarnings params={params} />
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Breakdown title="Where the earnings come from" items={data.revenue_breakdown} total={t.revenue} />
