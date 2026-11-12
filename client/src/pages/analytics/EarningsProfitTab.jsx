@@ -46,14 +46,14 @@ function TeamEarnings({ params }) {
   if (!data) return null;
   return (
     <div className="rounded-2xl border border-tertiary-100 bg-white shadow-card" data-testid="earnings-by-team">
-      <div className="px-4 pt-4"><h3 className="font-heading text-sm font-semibold text-tertiary-900">Earnings by team</h3><p className="mt-0.5 text-xs text-tertiary-500">The work each team&apos;s people did on client projects in these months. A person counts for the team they were on at the end of the month. Click a team to see its people.</p></div>
+      <div className="px-4 pt-4"><h3 className="font-heading text-sm font-semibold text-tertiary-900">Earnings by team</h3><p className="mt-0.5 text-xs text-tertiary-500">Each project&apos;s earnings are split across the people allocated to it, and each person&apos;s part goes to their team (the team they were on at the end of the month). Earnings of projects nobody is allocated to, and non-project earnings, are on their own row. Click a team to see its people.</p></div>
       {data.teams.length === 0 ? <p className="px-4 py-4 text-sm text-tertiary-500">No earnings by person in this period.</p> : (
         <div className="mt-2 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-canvas-muted"><tr><th className={th}>Team</th><th className={th}>Lead</th><th className={thr}>People</th><th className={thr}>Earnings</th><th className={thr}>Share</th><th className={thr}>Cost</th><th className={thr}>Margin</th></tr></thead>
             <tbody className="divide-y divide-tertiary-100">
               {data.teams.map((t) => {
-                const key = t.team_id || 'none';
+                const key = t.team_id || t.name;
                 return (
                   <Fragment key={key}>
                     <tr className="cursor-pointer hover:bg-canvas-muted/60" onClick={() => setOpen(open === key ? null : key)} data-testid="team-earnings-row">
