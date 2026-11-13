@@ -436,12 +436,13 @@ describe('Expenses → edit a submitted claim', () => {
   });
 });
 
-describe('A new joiner gets the standard quota pro-rata from the joining month', () => {
-  test('joined mid-year: quota / 12 per remaining month (to the half day); joined in January or before: the full quota; an admin-set figure is kept', async () => {
+describe('A new joiner gets one leave per remaining month, shared by Casual and Sick', () => {
+  test('joined mid-year: one leave per month left (joining month included) split equally between Casual and Sick; joined in January or before: the full quota; an admin-set figure is kept; Earned Leave takes no part in the sharing', async () => {
     const { org, token } = await seedOrgAdmin();
     const cl = await typeByName(org, 'Casual Leave');
-    const oct = await seedEmployee(org, { joined_at: d('2026-10-15') }); // Oct..Dec = 3 months -> 12 * 3 / 12
-    const nov = await seedEmployee(org, { joined_at: d('2026-11-03') }); // 2 months
+    const oct = await seedEmployee(org, { joined_at: d('2026-10-15') }); // Oct..Dec = 3 leaves -> 1.5 Casual + 1.5 Sick
+    const nov = await seedEmployee(org, { joined_at: d('2026-11-03') }); // 2 leaves -> 1 + 1
+    const dec = await seedEmployee(org, { joined_at: d('2026-12-10') }); // 1 leave -> 0.5 + 0.5
     const jan = await seedEmployee(org, { joined_at: d('2026-01-05') });
     const old = await seedEmployee(org, { joined_at: d('2025-06-01') });
     const set = await seedEmployee(org, { joined_at: d('2026-10-15') });
@@ -450,14 +451,19 @@ describe('A new joiner gets the standard quota pro-rata from the joining month',
     const res = await authed(request(app).get('/api/v1/leave/balances/overview').query({ year: 2026 }), token);
     expect(res.status).toBe(200);
     const casual = (e) => res.body.data.employees.find((x) => x.org_membership_id === e.membership.id).balances.find((b) => b.code === 'CL');
-    expect(casual(oct)).toMatchObject({ allocated: 3, customised: false });
-    expect(casual(nov)).toMatchObject({ allocated: 2 });
+    const sick = (e) => res.body.data.employees.find((x) => x.org_membership_id === e.membership.id).balances.find((b) => b.code === 'SL');
+    expect(casual(oct)).toMatchObject({ allocated: 1.5, customised: false });
+    expect(sick(oct)).toMatchObject({ allocated: 1.5 });
+    expect(casual(nov)).toMatchObject({ allocated: 1 });
+    expect(sick(nov)).toMatchObject({ allocated: 1 });
+    expect(casual(dec)).toMatchObject({ allocated: 0.5 });
+    expect(sick(dec)).toMatchObject({ allocated: 0.5 });
     expect(casual(jan)).toMatchObject({ allocated: 12 });
     expect(casual(old)).toMatchObject({ allocated: 12 });
     expect(casual(set)).toMatchObject({ allocated: 7, customised: true });
 
     // The employee's own screen agrees (Casual leave overflows to unpaid, so a request beyond the balance is accepted, not refused).
     const mine = await authed(request(app).get('/api/v1/leave/balances/me').query({ year: 2026 }), oct.token);
-    expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ allocated: 3, remaining: 3 });
+    expect(mine.body.data.find((b) => b.code === 'CL')).toMatchObject({ allocated: 1.5, remaining: 1.5 });
   });
 });
