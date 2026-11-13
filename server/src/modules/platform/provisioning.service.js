@@ -26,7 +26,13 @@ async function provision({ doxCustomerId, doxOrgId, actorId }) {
   if (await prisma.saasCustomer.findUnique({ where: { dox_customer_id: dox.id } })) return { error: 'already_provisioned' };
   const email = dox.contact_email.trim().toLowerCase();
   // A person already in the system (ours or another customer's) is not attached automatically: one person in two groups needs the checks of plan section 21 first.
-  if (await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } })) return { error: 'email_in_use' };
+  const holder = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true, active: true } });
+  if (holder) {
+    // a login that belongs to a deleted customer is kept reserved, never freed silently: restore that customer instead
+    const orgIds = (await prisma.orgMembership.findMany({ where: { person_id: holder.id }, select: { org_id: true } })).map((m) => m.org_id);
+    const gone = orgIds.length ? await prisma.saasCustomer.count({ where: { status: 'deleted', org_id: { in: orgIds } } }) : 0;
+    return { error: gone ? 'email_reserved_deleted' : 'email_in_use' };
+  }
 
   const trialDays = await platform.settingNumber('trial_days', 15);
   const trialUsers = await platform.settingNumber('trial_users', 2);

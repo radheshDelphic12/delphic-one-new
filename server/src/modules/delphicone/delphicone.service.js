@@ -55,10 +55,17 @@ const viewCustomer = (c, balance = 0) => ({
   id: c.id, name: c.name, contact_name: c.contact_name, contact_email: c.contact_email, contact_phone: c.contact_phone, gstin: c.gstin, address: c.address, status: c.status, plan_name: c.plan_name,
   users_count: c.users_count, monthly_value: num(c.monthly_value), trial_ends_on: ymd(c.trial_ends_on), started_on: ymd(c.started_on), owner_user_id: c.owner_user_id, notes: c.notes, lead_id: c.lead_id,
   outstanding: round2(balance), created_at: c.created_at,
+  ...(c.deleted_at ? { deleted_at: c.deleted_at, deleted_reason: c.deleted_reason || null } : {}),
 });
 
+// A soft-deleted customer is gone everywhere: its invoices stay in the database but are left out of every list, total and follow-up.
+async function deletedCustomerIds(orgId) {
+  return (await prisma.doxCustomer.findMany({ where: { org_id: orgId, deleted_at: { not: null } }, select: { id: true } })).map((r) => r.id);
+}
+const findLiveInvoice = async (orgId, id) => prisma.doxInvoice.findFirst({ where: { id, org_id: orgId, customer_id: { notIn: await deletedCustomerIds(orgId) } } });
+
 async function balancesByCustomer(orgId) {
-  const rows = await prisma.doxInvoice.findMany({ where: { org_id: orgId, status: 'sent' }, select: { id: true, customer_id: true, total: true } });
+  const rows = await prisma.doxInvoice.findMany({ where: { org_id: orgId, status: 'sent', customer_id: { notIn: await deletedCustomerIds(orgId) } }, select: { id: true, customer_id: true, total: true } });
   const paid = await prisma.doxInvoicePayment.groupBy({ by: ['invoice_id'], where: { org_id: orgId, deleted_at: null }, _sum: { amount: true } });
   const paidBy = new Map(paid.map((p) => [p.invoice_id, num(p._sum.amount)]));
   const by = new Map();
@@ -66,9 +73,9 @@ async function balancesByCustomer(orgId) {
   return by;
 }
 
-async function listCustomers(orgId, { status, q } = {}) {
+async function listCustomers(orgId, { status, q, deleted } = {}) {
   const rows = await prisma.doxCustomer.findMany({
-    where: { org_id: orgId, deleted_at: null, ...(status ? { status } : {}), ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { contact_name: { contains: q, mode: 'insensitive' } }, { contact_email: { contains: q, mode: 'insensitive' } }] } : {}) },
+    where: { org_id: orgId, deleted_at: deleted ? { not: null } : null, ...(status && !deleted ? { status } : {}), ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { contact_name: { contains: q, mode: 'insensitive' } }, { contact_email: { contains: q, mode: 'insensitive' } }] } : {}) },
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
   });
   const bal = await balancesByCustomer(orgId);
@@ -111,7 +118,8 @@ async function listLeads(orgId, { stage, q, followup } = {}) {
   const lastNotes = rows.length ? await prisma.doxLeadNote.findMany({ where: { org_id: orgId, lead_id: { in: rows.map((r) => r.id) } }, orderBy: { created_at: 'desc' }, select: { lead_id: true, note: true } }) : [];
   const last = new Map();
   for (const n of lastNotes) if (!last.has(n.lead_id)) last.set(n.lead_id, n.note);
-  return rows.map((l) => ({ ...viewLead(l), last_note: last.get(l.id) || null }));
+  const gone = new Set(await deletedCustomerIds(orgId));
+  return rows.map((l) => ({ ...viewLead(l), ...(l.customer_id && gone.has(l.customer_id) ? { customer_id: null, customer_deleted: true } : {}), last_note: last.get(l.id) || null }));
 }
 
 async function createLead(orgId, user, body) {
@@ -212,7 +220,7 @@ async function paidMap(orgId, ids) {
 
 async function listInvoices(orgId, { customer_id: customerId, filter, q } = {}) {
   const rows = await prisma.doxInvoice.findMany({
-    where: { org_id: orgId, ...(customerId ? { customer_id: customerId } : {}), ...(q ? { OR: [{ number: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {}) },
+    where: { org_id: orgId, customer_id: customerId ? { equals: customerId, notIn: await deletedCustomerIds(orgId) } : { notIn: await deletedCustomerIds(orgId) }, ...(q ? { OR: [{ number: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {}) },
     orderBy: [{ invoice_date: 'desc' }, { created_at: 'desc' }], take: 1000,
   });
   const [paid, chases, customers] = await Promise.all([
@@ -259,7 +267,7 @@ async function createInvoice(orgId, user, body) {
 }
 
 async function updateInvoice(orgId, id, body) {
-  const inv = await prisma.doxInvoice.findFirst({ where: { id, org_id: orgId } });
+  const inv = await findLiveInvoice(orgId, id);
   if (!inv) return { error: 'not_found' };
   if (inv.status === 'cancelled') return { error: 'cancelled' };
   const data = {};
@@ -279,7 +287,7 @@ async function updateInvoice(orgId, id, body) {
 }
 
 async function cancelInvoice(orgId, id, reason) {
-  const inv = await prisma.doxInvoice.findFirst({ where: { id, org_id: orgId } });
+  const inv = await findLiveInvoice(orgId, id);
   if (!inv) return { error: 'not_found' };
   if (inv.status === 'cancelled') return { error: 'cancelled' };
   if ((await paidMap(orgId, [id])).get(id)) return { error: 'has_payments' };
@@ -288,14 +296,14 @@ async function cancelInvoice(orgId, id, reason) {
 }
 
 async function listPayments(orgId, id) {
-  const inv = await prisma.doxInvoice.findFirst({ where: { id, org_id: orgId } });
+  const inv = await findLiveInvoice(orgId, id);
   if (!inv) return { error: 'not_found' };
   const rows = await prisma.doxInvoicePayment.findMany({ where: { org_id: orgId, invoice_id: id, deleted_at: null }, orderBy: [{ date: 'desc' }, { created_at: 'desc' }] });
   return { payments: rows.map((p) => ({ id: p.id, date: ymd(p.date), amount: num(p.amount), mode: p.mode, reference: p.reference, notes: p.notes })) };
 }
 
 async function addPayment(orgId, user, id, body) {
-  const inv = await prisma.doxInvoice.findFirst({ where: { id, org_id: orgId } });
+  const inv = await findLiveInvoice(orgId, id);
   if (!inv) return { error: 'not_found' };
   if (inv.status !== 'sent') return { error: 'not_open' };
   const balance = round2(num(inv.total) - ((await paidMap(orgId, [id])).get(id) || 0));

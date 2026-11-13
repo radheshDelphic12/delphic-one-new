@@ -18,7 +18,7 @@ const day = () => credits.dayStr();
 // input.lines = [{ slot_id, code, days? }]. Prerequisites the slot does not already hold are added as separate lines, and so is Basic View.
 async function quote(customerId, input) {
   const customer = await prisma.saasCustomer.findUnique({ where: { id: customerId }, include: { slots: { include: { credits: true } } } });
-  if (!customer) return { error: 'customer_not_found' };
+  if (!customer || customer.status === 'deleted') return { error: 'customer_not_found' };
   const book = await platform.bookFor(new Date(`${day()}T00:00:00Z`));
   if (!book) return { error: 'no_price_book' };
   const price = new Map(book.prices.map((p) => [p.module_code, Number(p.price_30d)]));
@@ -85,7 +85,7 @@ const view = (o) => ({
 });
 
 async function listOrders({ customerId } = {}) {
-  const rows = await prisma.saasOrder.findMany({ where: customerId ? { customer_id: customerId } : {}, orderBy: { created_at: 'desc' }, include: { lines: true, payments: true }, take: 200 });
+  const rows = await prisma.saasOrder.findMany({ where: { customer: { status: { not: 'deleted' } }, ...(customerId ? { customer_id: customerId } : {}) }, orderBy: { created_at: 'desc' }, include: { lines: true, payments: true }, take: 200 });
   return rows.map(view);
 }
 
@@ -116,6 +116,7 @@ async function applyPayment({ orderId, amount, method, providerRef = null, idemp
     const order = await tx.saasOrder.findUnique({ where: { id: orderId }, include: { lines: true, payments: true } });
     if (await tx.saasPayment.findUnique({ where: { idempotency_key: idempotencyKey } })) return { duplicate: true, order: view(order) };
     if (order.status === 'cancelled') return { error: 'cancelled' };
+    if ((await tx.saasCustomer.findUnique({ where: { id: order.customer_id }, select: { status: true } }))?.status === 'deleted') return { error: 'customer_deleted' };
     const paidBefore = round2(order.payments.reduce((a, p) => a + Number(p.amount), 0));
     if (order.status === 'paid' || paidBefore + amount > Number(order.total) + 0.005) return { error: 'over_payment', balance: round2(Number(order.total) - paidBefore) };
     await tx.saasPayment.create({ data: { order_id: orderId, amount, method, provider_ref: providerRef, idempotency_key: idempotencyKey, created_by: actorId } });

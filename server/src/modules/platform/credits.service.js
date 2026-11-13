@@ -16,7 +16,7 @@ const toDate = (s) => new Date(`${s}T00:00:00Z`);
 
 async function createSlot(customerId, { email, is_admin = false, label } = {}) {
   const customer = await prisma.saasCustomer.findUnique({ where: { id: customerId } });
-  if (!customer) return { error: 'customer_not_found' };
+  if (!customer || customer.status === 'deleted') return { error: 'customer_not_found' };
   const count = await prisma.saasSlot.count({ where: { customer_id: customerId } });
   if (customer.status === 'trial' && count >= customer.max_users) return { error: 'over_trial_users' };
   const slot = await prisma.saasSlot.create({ data: { customer_id: customerId, email: email ? email.toLowerCase() : null, is_admin, label: label || null } });
@@ -26,8 +26,8 @@ async function createSlot(customerId, { email, is_admin = false, label } = {}) {
 // Add (or remove, with a negative number) credit days. A balance can never go below 0 here either.
 async function addCredit({ slotId, code, days, reason = 'top-up', actorId = null, tx = null }) {
   if (!Number.isInteger(days) || days === 0) return { error: 'bad_days' };
-  const slot = await prisma.saasSlot.findUnique({ where: { id: slotId } });
-  if (!slot) return { error: 'slot_not_found' };
+  const slot = await prisma.saasSlot.findUnique({ where: { id: slotId }, include: { customer: { select: { status: true } } } });
+  if (!slot || slot.customer.status === 'deleted') return { error: 'slot_not_found' };
   const mod = await prisma.saasModule.findUnique({ where: { code } });
   if (!mod) return { error: 'module_not_found' };
   const alertAt = await platform.settingNumber('low_credit_alert_days', 5);

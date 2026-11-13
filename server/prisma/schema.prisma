@@ -9713,6 +9713,8 @@ model DoxCustomer {
   created_at    DateTime  @default(now())
   updated_at    DateTime  @default(now()) @updatedAt
   deleted_at    DateTime?
+  deleted_by    String?   @db.Uuid // soft delete: who, and why (nothing is ever removed; a super admin can restore)
+  deleted_reason String?
 
   @@index([org_id, status])
   @@map("dox_customers")
@@ -9916,6 +9918,10 @@ model SaasCustomer {
   created_by      String?   @db.Uuid
   created_at      DateTime  @default(now())
   updated_at      DateTime  @default(now()) @updatedAt
+  // soft delete (status 'deleted'): nothing is removed; see SaasCustomerDeletion for exactly what changed
+  deleted_at      DateTime?
+  deleted_by      String?   @db.Uuid
+  deleted_reason  String?
 
   slots  SaasSlot[]
   orders SaasOrder[]
@@ -10087,3 +10093,22 @@ model SaasWebhookEvent {
   @@map("saas_webhook_events")
 }
 
+// One row per soft delete of a customer: who, when, the counts that were shown, and EXACTLY what was changed (customer status, company status, users
+// deactivated), so a restore puts back the same state. Never deleted.
+model SaasCustomerDeletion {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  dox_customer_id  String?   @db.Uuid
+  saas_customer_id String?   @db.Uuid
+  deleted_by       String?   @db.Uuid
+  deleted_at       DateTime  @default(now())
+  reason           String?
+  counts           Json
+  changes          Json
+  restored_at      DateTime?
+  restored_by      String?   @db.Uuid
+
+  @@index([dox_customer_id])
+  @@index([saas_customer_id])
+  @@map("saas_customer_deletions")
+}

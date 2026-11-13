@@ -31,6 +31,8 @@ async function refresh(prisma) {
 // OrgMembership is identity-level (who belongs where): the company switcher and sign-in read it across companies on purpose, so it is not filtered.
 const NEVER = new Set(['OrgMembership']);
 const scoped = new Set(Prisma.dmmf.datamodel.models.filter((m) => !NEVER.has(m.name) && m.fields.some((f) => f.name === 'org_id')).map((m) => m.name));
+// A column that can never be empty cannot be compared with null (Prisma refuses the query), so those models get the plain not-in rule.
+const orgIdRequired = new Set(Prisma.dmmf.datamodel.models.filter((m) => m.fields.some((f) => f.name === 'org_id' && f.isRequired)).map((m) => m.name));
 const READS = new Set(['findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy']);
 const UNIQUE_READS = new Set(['findUnique', 'findUniqueOrThrow']);
 const MANY_WRITES = new Set(['updateMany', 'deleteMany']);
@@ -49,7 +51,8 @@ function install(prisma) {
     if (customerOrgs.size === 0) return next(params); // nobody is a customer: behave exactly as before
 
     const isCustomer = customerOrgs.has(orgId);
-    const rule = isCustomer ? { org_id: orgId } : { OR: [{ org_id: null }, { org_id: { notIn: [...customerOrgs] } }] };
+    const others = { org_id: { notIn: [...customerOrgs] } };
+    const rule = isCustomer ? { org_id: orgId } : (orgIdRequired.has(params.model) ? others : { OR: [{ org_id: null }, others] });
 
     if (READS.has(params.action) || MANY_WRITES.has(params.action)) {
       params.args = params.args || {};
