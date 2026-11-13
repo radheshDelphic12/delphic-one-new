@@ -125,6 +125,8 @@ async function refresh(refreshToken) {
 
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user || !user.active) return null;
+  // a password reset by an admin ended every earlier session, refresh tokens included
+  if (user.sessions_valid_after && payload.iat * 1000 < new Date(user.sessions_valid_after).getTime()) return null;
   if (await hasExited(user)) return null;
 
   // Re-verify the membership carried on the refresh token is still active
