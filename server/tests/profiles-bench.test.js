@@ -51,6 +51,16 @@ describe('candidate on_bench flag', () => {
     expect(res.body.data.some((p) => p.name === 'Not On Bench')).toBe(false);
   });
 
+  test('experience beyond 60 years is refused (it overflowed the database column and failed with a 500)', async () => {
+    const make = (extra) => authed(request(app).post('/api/v1/profiles'), recruiterToken).send({ name: 'Too Much', total_experience_years: 4, primary_skills: ['Java'], source: 'direct', ...extra });
+    expect((await make({ total_experience_years: 930000 })).status).toBe(422);
+    expect((await make({ relevant_experience_years: 1000 })).status).toBe(422);
+    expect((await make({ total_experience_years: -1 })).status).toBe(422);
+    expect((await make({ total_experience_years: 60 })).status).toBe(201);
+    const id = (await make({ name: 'Patch Me' })).body.data.id;
+    expect((await authed(request(app).patch(`/api/v1/profiles/${id}`), recruiterToken).send({ total_experience_years: 99999 })).status).toBe(422);
+  });
+
   test('on_bench defaults to false when not set', async () => {
     const res = await authed(request(app).post('/api/v1/profiles'), recruiterToken).send({
       name: 'Default Candidate',

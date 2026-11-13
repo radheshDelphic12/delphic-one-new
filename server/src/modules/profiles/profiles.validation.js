@@ -17,7 +17,7 @@ const baseFields = {
 
   current_company: z.string().optional(),
   current_designation: z.string().optional(),
-  relevant_experience_years: z.number().optional(),
+  relevant_experience_years: z.number().min(0, 'Experience cannot be negative').max(60, 'Experience can be at most 60 years').optional(),
 
   secondary_skills: z.array(z.string()).optional(),
   certifications: z.array(z.string()).optional(),
@@ -48,7 +48,7 @@ const baseFields = {
 const createSchema = z
   .object({
     name: z.string().min(1),
-    total_experience_years: z.number(),
+    total_experience_years: z.number().min(0, 'Experience cannot be negative').max(60, 'Experience can be at most 60 years'),
     primary_skills: z.array(z.string()).min(1),
     source: z.enum(['direct', 'vendor', 'linkedin']),
     vendor_account_id: z.string().uuid().optional(),
@@ -61,7 +61,7 @@ const createSchema = z
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
-  total_experience_years: z.number().optional(),
+  total_experience_years: z.number().min(0, 'Experience cannot be negative').max(60, 'Experience can be at most 60 years').optional(),
   primary_skills: z.array(z.string()).min(1).optional(),
   source: z.enum(['direct', 'vendor', 'linkedin']).optional(),
   vendor_account_id: z.string().uuid().optional(),
