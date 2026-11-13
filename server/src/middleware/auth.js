@@ -73,6 +73,7 @@ function authenticate(req, res, next) {
         }
         user.role = allowed.role;
         // SaaS module access: a no-op unless the "Module access checks" switch is on, and then only for customer companies.
+        if (user.org_id && (await saasGate.isDeletedOrg(user.org_id))) return fail(res, 403, 'This workspace has been deleted');
         const saasBlocked = await saasGate.check(req, user);
         if (saasBlocked) return fail(res, 403, saasBlocked);
         req.user = user;

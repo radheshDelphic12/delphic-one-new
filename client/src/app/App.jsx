@@ -151,6 +151,7 @@ import DelphicOneHomePage from '../pages/delphicone/DelphicOneHomePage.jsx';
 import DelphicOneCustomersPage from '../pages/delphicone/DelphicOneCustomersPage.jsx';
 import DelphicOneLeadsPage from '../pages/delphicone/DelphicOneLeadsPage.jsx';
 import DelphicOneInvoicesPage from '../pages/delphicone/DelphicOneInvoicesPage.jsx';
+import DelphicOneTeamPage from '../pages/delphicone/DelphicOneTeamPage.jsx';
 import PlatformPage from '../pages/platform/PlatformPage.jsx';
 import { isNovarexOrg } from '../lib/novarex/useNovarex.js';
 import { isAcconcyOrg } from '../lib/acconcy/useAcconcy.js';
@@ -526,6 +527,7 @@ export default function App() {
         <Route path="delphic-one/customers" element={<RequireDelphicOne><DelphicOneCustomersPage /></RequireDelphicOne>} />
         <Route path="delphic-one/leads" element={<RequireDelphicOne><DelphicOneLeadsPage /></RequireDelphicOne>} />
         <Route path="delphic-one/invoices" element={<RequireDelphicOne><DelphicOneInvoicesPage /></RequireDelphicOne>} />
+        <Route path="delphic-one/team" element={<RequireDelphicOne><DelphicOneTeamPage /></RequireDelphicOne>} />
         {/* SaaS platform administration: reached by address only; the page checks the platform-admin list itself */}
         <Route path="platform" element={<PlatformPage />} />
         <Route path="valterra" element={<RequireValterra><ValterraHomePage /></RequireValterra>} />

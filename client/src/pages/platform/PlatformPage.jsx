@@ -3,6 +3,7 @@ import apiClient from '../../lib/apiClient.js';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { inputCls, labelCls, th, td, useSave } from '../delphicone/ui.jsx';
+import CustomerDeleteDrawer from '../delphicone/CustomerDeleteDrawer.jsx';
 
 // SaaS platform administration (SaaS launch plan, phase 1.4). Only people on the platform-admin list get past the first call; everyone else sees a
 // short "not available" message. Everything on the product's catalogue is edited here: modules, what each needs, dated price books, the numbers
@@ -221,16 +222,19 @@ function Audit() {
   );
 }
 
-function Customers() {
-  const [rows] = useData('/customers');
+function Customers({ canDelete }) {
+  const [rows, reload] = useData('/customers');
+  const [removing, setRemoving] = useState(null);
   if (rows === null) return <Skeleton className="h-40" />;
   if (rows === false) return <p className="text-sm text-tertiary-500">The customers could not be loaded.</p>;
   if (!rows.length) return <p className="rounded-2xl border border-dashed border-tertiary-200 p-6 text-sm text-tertiary-500">No customer workspaces yet. They are created from Delphic One &gt; Customers once customer workspaces are switched on.</p>;
   return (
     <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">
-      <table className="min-w-full text-sm"><thead><tr><th className={th}>Customer</th><th className={th}>Status</th><th className={th}>Trial ends</th><th className={th}>Users</th></tr></thead>
-        <tbody>{rows.map((c) => <tr key={c.id} className="border-t border-tertiary-100"><td className={td}>{c.name}</td><td className={td}><Pill tone={c.status === 'active' ? 'green' : c.status === 'trial' ? 'blue' : 'gray'}>{c.status}</Pill></td><td className={td}>{c.trial_ends_on ? String(c.trial_ends_on).slice(0, 10) : '-'}</td><td className={td}>{c.slots} of {c.max_users}</td></tr>)}</tbody>
+      <table className="min-w-full text-sm"><thead><tr><th className={th}>Customer</th><th className={th}>Status</th><th className={th}>Trial ends</th><th className={th}>Users</th>{canDelete && <th className={th} />}</tr></thead>
+        <tbody>{rows.map((c) => <tr key={c.id} className="border-t border-tertiary-100"><td className={td}>{c.name}</td><td className={td}><Pill tone={c.status === 'active' ? 'green' : c.status === 'trial' ? 'blue' : 'gray'}>{c.status}</Pill></td><td className={td}>{c.trial_ends_on ? String(c.trial_ends_on).slice(0, 10) : '-'}</td><td className={td}>{c.slots} of {c.max_users}</td>{canDelete && <td className={td}><button type="button" className="btn-ghost text-xs text-danger-700" onClick={() => setRemoving(c)}>Delete</button></td>}</tr>)}</tbody>
       </table>
+      <CustomerDeleteDrawer customer={removing} mode="delete" onClose={() => setRemoving(null)} onDone={reload}
+        api={{ preview: () => apiClient.post(`/platform/customers/${removing.id}/delete-preview`, {}).then((r) => r.data.data), run: (b) => apiClient.post(`/platform/customers/${removing.id}/delete`, b) }} />
     </div>
   );
 }
@@ -326,8 +330,9 @@ function Admins() {
 
 export default function PlatformPage() {
   const [allowed, setAllowed] = useState(null);
+  const [canDelete, setCanDelete] = useState(false);
   const [tab, setTab] = useState('modules');
-  useEffect(() => { get('/me').then(() => setAllowed(true)).catch(() => setAllowed(false)); }, []);
+  useEffect(() => { get('/me').then(() => setAllowed(true)).catch(() => setAllowed(false)); get('/access').then((a) => setCanDelete(Boolean(a.can_delete_customers))).catch(() => {}); }, []);
   if (allowed === null) return <div className="p-6"><Skeleton className="h-40" /></div>;
   if (!allowed) return <div className="p-6 text-sm text-tertiary-500" data-testid="platform-denied">This area is only for the platform administrators.</div>;
   const Body = { modules: Modules, books: Books, settings: Settings, routes: RouteMap, switches: Switches, customers: Customers, orders: Orders, admins: Admins, audit: Audit }[tab];
@@ -340,7 +345,7 @@ export default function PlatformPage() {
       <div className="flex flex-wrap gap-2" role="tablist">
         {TABS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab(k)}>{label}</button>)}
       </div>
-      <Body />
+      <Body canDelete={canDelete} />
     </div>
   );
 }

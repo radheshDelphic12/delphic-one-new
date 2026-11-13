@@ -7,10 +7,12 @@ const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./delphicone.service');
 const followups = require('../billing/invoiceFollowups.service');
 const provisioning = require('../platform/provisioning.service');
+const deletion = require('../platform/customerDeletion.service');
+const team = require('./team.service');
 
 // The Delphic One workspace (module key `delphic_one`). Roles come from the org membership: admin does everything, sales / bda work customers and
 // leads and read the invoices; everyone else has no access here.
-const ALL = ['dashboard', 'customers', 'customersEdit', 'leads', 'leadsEdit', 'invoices', 'invoicesEdit', 'delete'];
+const ALL = ['dashboard', 'customers', 'customersEdit', 'leads', 'leadsEdit', 'invoices', 'invoicesEdit', 'delete', 'team'];
 const CAPS = {
   admin: ALL,
   sales: ['dashboard', 'customers', 'customersEdit', 'leads', 'leadsEdit', 'invoices'],
@@ -54,11 +56,74 @@ const problem = (res, r) => {
 };
 const uuid = z.string().uuid();
 
-router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, provisioning: req.dox.role === 'admin' && (await provisioning.enabled()), meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
+router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, provisioning: req.dox.role === 'admin' && (await provisioning.enabled()), can_delete_customers: await deletion.isOwnerSuperAdmin(req.user.id), meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
 router.get('/summary', need('dashboard'), asyncHandler(async (req, res) => ok(res, await service.summary(req.user.org_id))));
 
 // customers
-router.get('/customers', need('customers'), asyncHandler(async (req, res) => ok(res, await service.listCustomers(req.user.org_id, z.object({ status: z.enum(service.CUSTOMER_STATUS).optional(), q: z.string().max(100).optional() }).parse(req.query)))));
+router.get('/customers', need('customers'), asyncHandler(async (req, res) => {
+  const query = z.object({ status: z.enum([...service.CUSTOMER_STATUS, 'deleted']).optional(), q: z.string().max(100).optional() }).parse(req.query);
+  // the Deleted view (soft-deleted customers, to restore them) is for the owner group's super admins only
+  if (query.status === 'deleted') {
+    if (!(await deletion.isOwnerSuperAdmin(req.user.id))) return fail(res, 403, 'Only a super admin can see deleted customers');
+    return ok(res, await service.listCustomers(req.user.org_id, { q: query.q, deleted: true }));
+  }
+  return ok(res, await service.listCustomers(req.user.org_id, query));
+}));
+
+// Team: the people of the Delphic One company itself (admin only). Reuses the People > Users service; only members of this company are ever touched.
+const TEAM_ERRORS = {
+  email_taken: [409, 'That email already has a login (here or in another company). Existing people are not attached to another company: use another email'],
+  bad_role: [422, 'The role must be admin, sales or bda'],
+  not_found: [404, 'That person is not in the Delphic One team'],
+  protected_user: [409, 'A super admin is managed by a super admin elsewhere, not from here'],
+  shared_user: [409, 'This person also works in another company, so their login is shared and is not changed from here'],
+  self: [409, 'You cannot change your own role or switch yourself off'],
+  last_admin: [409, 'There must be at least one active admin in the Delphic One team'],
+  nothing_to_change: [422, 'Nothing to change'],
+  forbidden_edit_super_admin: [403, 'Only a super admin can change a super admin'],
+};
+const teamProblem = (res, r) => { const [status, message] = TEAM_ERRORS[r.error] || [400, 'Bad request']; return fail(res, status, message); };
+router.get('/team', need('team'), asyncHandler(async (req, res) => ok(res, { members: await team.list(req.user.org_id), roles: team.ROLES })));
+router.post('/team', need('team'), asyncHandler(async (req, res) => {
+  const body = z.object({ name: z.string().trim().min(1).max(120), email: z.string().email().max(150), role: z.enum(team.ROLES), phone: z.string().max(40).nullable().optional(), password: z.string().min(8).max(100).optional() }).parse(req.body);
+  const r = await team.add(req.user.org_id, req.user, body);
+  return r.error ? teamProblem(res, r) : created(res, { id: r.user.id, name: r.user.name, email: r.user.email, role: body.role, temp_password: r.temp_password });
+}));
+router.patch('/team/:personId', need('team'), asyncHandler(async (req, res) => {
+  const patch = z.object({ role: z.enum(team.ROLES).optional(), active: z.boolean().optional() }).parse(req.body);
+  const r = await team.update(req.user.org_id, req.user, uuid.parse(req.params.personId), patch);
+  return r.error ? teamProblem(res, r) : ok(res, { id: r.user.id, role: r.user.role, active: r.user.active });
+}));
+
+// Delete (soft: everything is kept) and restore, owner super admin only. Step 1 = preview (what will be hidden, which users are switched off, a token);
+// step 2 = the real thing, with the company name typed again and the token.
+const DELETE_ERRORS = {
+  not_allowed: [403, 'Only a super admin of our own group can delete or restore customers'],
+  customer_not_found: [404, 'That customer was not found'],
+  already_deleted: [409, 'This customer is already deleted'],
+  not_deleted: [409, 'This customer is not deleted'],
+  owner_group: [409, 'This belongs to our own group and can never be deleted here'],
+  no_company: [409, 'This customer has no company to switch off'],
+  wrong_confirmation: [422, 'Type the customer\'s exact company name to confirm'],
+  stale_token: [409, 'This preview is out of date: something changed. Run the preview again'],
+};
+const deleteProblem = (res, r) => {
+  if (r.error === 'shared_users') return res.status(409).json({ success: false, message: `Cannot delete: ${r.users.map((u) => `${u.name} (${u.email}) ${u.reasons.join(', ')}`).join('; ')}. Those users are never touched.`, data: { users: r.users } });
+  const [status, message] = DELETE_ERRORS[r.error] || [400, 'Bad request'];
+  return fail(res, status, message);
+};
+const confirmBody = z.object({ confirm_name: z.string().max(200), token: z.string().max(200), reason: z.string().max(300).optional() });
+for (const [path, action] of [['delete', 'delete'], ['restore', 'restore']]) {
+  router.post(`/customers/:id/${path}-preview`, asyncHandler(async (req, res) => {
+    const r = await deletion.preview(action, { doxCustomerId: uuid.parse(req.params.id), doxOrgId: req.user.org_id }, req.user.id);
+    return r.error ? deleteProblem(res, r) : ok(res, r);
+  }));
+  router.post(`/customers/:id/${path}`, asyncHandler(async (req, res) => {
+    const r = await deletion.execute(action, { doxCustomerId: uuid.parse(req.params.id), doxOrgId: req.user.org_id }, req.user.id, confirmBody.parse(req.body || {}));
+    return r.error ? deleteProblem(res, r) : ok(res, { done: true, soft: true });
+  }));
+}
+
 router.post('/customers', need('customersEdit'), asyncHandler(async (req, res) => created(res, (await service.createCustomer(req.user.org_id, req.user, service.customerSchema.parse(req.body || {}))).customer)));
 router.patch('/customers/:id', need('customersEdit'), asyncHandler(async (req, res) => {
   const r = await service.updateCustomer(req.user.org_id, uuid.parse(req.params.id), service.customerUpdateSchema.parse(req.body || {}));
@@ -74,6 +139,7 @@ router.post('/customers/:id/provision', need('delete'), asyncHandler(async (req,
       no_email: [422, 'Add the customer contact email first: it becomes the first admin login'],
       already_provisioned: [409, 'This customer already has a workspace'],
       email_in_use: [409, 'That email already has a login; use another contact email for the trial admin'],
+      email_reserved_deleted: [409, 'That email belongs to a deleted customer and stays reserved. Restore that customer (Customers > Deleted) or use another email'],
     }[r.error] || [400, 'Bad request'];
     return fail(res, status, message);
   }

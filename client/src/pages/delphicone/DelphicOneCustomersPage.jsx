@@ -6,9 +6,11 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import CustomerDeleteDrawer from './CustomerDeleteDrawer.jsx';
 import { inputCls, labelCls, th, thr, td, tdr, rupees, useLoad, useSave } from './ui.jsx';
 
 const STATUS = { trial: ['blue', 'Trial'], active: ['green', 'Active'], read_only: ['amber', 'Read-only'], churned: ['gray', 'Churned'] };
+const DELETED_STATUS = ['red', 'Deleted'];
 const EMPTY = { name: '', contact_name: '', contact_email: '', contact_phone: '', gstin: '', address: '', status: 'trial', plan_name: '', users_count: 0, monthly_value: 0, trial_ends_on: '', started_on: '', notes: '' };
 
 function CustomerDrawer({ customer, onClose, onSaved }) {
@@ -71,6 +73,8 @@ export default function DelphicOneCustomersPage() {
   const canEdit = doxCan(me, 'customersEdit');
   const save = useSave();
   const [workspace, setWorkspace] = useState(null);
+  const [removing, setRemoving] = useState(null); // { customer, mode: 'delete' | 'restore' }, super admins of our own group only
+  const canDelete = Boolean(me?.can_delete_customers);
   const createWorkspace = async (c) => {
     if (!window.confirm(`Create a separate workspace for ${c.name}? This creates their company and first admin login (${c.contact_email || 'no email yet'}).`)) return;
     const r = await save(() => doxApi.provisionCustomer(c.id), null, 'Could not create the workspace');
@@ -84,7 +88,7 @@ export default function DelphicOneCustomersPage() {
     <div className="space-y-3" data-testid="dox-customers">
       <div className="flex flex-wrap items-end gap-3">
         <label className={labelCls}>Search<input className={inputCls} placeholder="Company, person or email" value={filters.q} onChange={set('q')} /></label>
-        <label className={labelCls}>Status<select className={inputCls} value={filters.status} onChange={set('status')}><option value="">All</option>{Object.entries(STATUS).map(([k, [, l]]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className={labelCls}>Status<select className={inputCls} value={filters.status} onChange={set('status')}><option value="">All</option>{Object.entries(STATUS).map(([k, [, l]]) => <option key={k} value={k}>{l}</option>)}{canDelete && <option value="deleted">Deleted</option>}</select></label>
         {canEdit && <button type="button" className="btn-primary ml-auto inline-flex items-center gap-2" data-testid="new-customer" onClick={() => setEditing({})}><Plus className="h-4 w-4" />New customer</button>}
       </div>
       {!rows ? <Skeleton className="h-40" /> : rows.length === 0 ? <EmptyState title="No customers yet" description="A lead becomes a customer when you convert it, or add one here." /> : (
@@ -95,13 +99,13 @@ export default function DelphicOneCustomersPage() {
               {rows.map((c) => (
                 <tr key={c.id} className="border-t border-tertiary-100" data-testid="customer-row">
                   <td className={`${td} font-medium`}>{c.name}<span className="block text-[11px] font-normal text-tertiary-500">{[c.contact_name, c.contact_email].filter(Boolean).join(' · ')}</span></td>
-                  <td className={td}><Pill tone={STATUS[c.status][0]}>{STATUS[c.status][1]}</Pill></td>
+                  <td className={td}><Pill tone={c.deleted_at ? DELETED_STATUS[0] : STATUS[c.status][0]}>{c.deleted_at ? DELETED_STATUS[1] : STATUS[c.status][1]}</Pill></td>
                   <td className={td}>{c.plan_name || '—'}</td>
                   <td className={tdr}>{c.users_count}</td>
                   <td className={tdr}>{rupees(c.monthly_value)}</td>
                   <td className={`${tdr} ${c.outstanding > 0 ? 'font-semibold text-warning-700' : ''}`}>{c.outstanding > 0 ? rupees(c.outstanding) : '—'}</td>
                   <td className={td}>{c.trial_ends_on || '—'}</td>
-                  <td className={`${td} text-right`}>{me?.provisioning && c.status === 'trial' && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="create-workspace" onClick={() => createWorkspace(c)}>Create workspace</button>}{canEdit && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
+                  <td className={`${td} text-right`}>{canDelete && !c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs text-danger-700" data-testid="delete-customer" onClick={() => setRemoving({ customer: c, mode: 'delete' })}>Delete</button>}{canDelete && c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="restore-customer" onClick={() => setRemoving({ customer: c, mode: 'restore' })}>Restore</button>}{!c.deleted_at && me?.provisioning && c.status === 'trial' && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="create-workspace" onClick={() => createWorkspace(c)}>Create workspace</button>}{canEdit && !c.deleted_at && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -110,6 +114,8 @@ export default function DelphicOneCustomersPage() {
       )}
       <CustomerDrawer customer={editing} onClose={() => setEditing(null)} onSaved={reload} />
       <WorkspaceResult result={workspace} onClose={() => setWorkspace(null)} />
+      <CustomerDeleteDrawer customer={removing?.customer || null} mode={removing?.mode} onClose={() => setRemoving(null)} onDone={reload}
+        api={removing ? (removing.mode === 'restore' ? { preview: () => doxApi.restorePreview(removing.customer.id), run: (b) => doxApi.restoreCustomer(removing.customer.id, b) } : { preview: () => doxApi.deletePreview(removing.customer.id), run: (b) => doxApi.softDeleteCustomer(removing.customer.id, b) }) : { preview: () => Promise.reject(new Error('none')), run: () => Promise.reject(new Error('none')) }} />
     </div>
   );
 }

@@ -11,6 +11,7 @@ const audit = require('./audit.service');
 const saasGate = require('./saasGate');
 const billing = require('./billing.service');
 const setup = require('./setup.service');
+const deletion = require('./customerDeletion.service');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -27,7 +28,26 @@ async function requirePlatformAdmin(req, res, next) {
 const router = express.Router();
 router.use(authenticate);
 // Anyone signed in may ask whether they are a platform admin (the menu link appears only when yes); everything below needs to be one.
-router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin: await service.isPlatformAdmin(req.user) })));
+router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin: await service.isPlatformAdmin(req.user), can_delete_customers: await deletion.isOwnerSuperAdmin(req.user.id) })));
+// Soft delete of a customer's workspace from the Platform > Customers tab. The gate is NOT the platform-admin list: only a super admin of our own group
+// (checked again inside the service); everything is kept and can be restored. The Delphic One > Customers screen has the same actions.
+{
+  const confirmBody = z.object({ confirm_name: z.string().max(200), token: z.string().max(200), reason: z.string().max(300).optional() });
+  const msg = { not_allowed: [403, 'Only a super admin of our own group can delete or restore customers'], customer_not_found: [404, 'Customer not found'], already_deleted: [409, 'Already deleted'], not_deleted: [409, 'Not deleted'], owner_group: [409, 'This belongs to our own group and can never be deleted here'], no_company: [409, 'No company to switch off'], wrong_confirmation: [422, 'Type the exact company name to confirm'], stale_token: [409, 'This preview is out of date. Run the preview again'] };
+  const bad = (res, r) => (r.error === 'shared_users'
+    ? res.status(409).json({ success: false, message: `Cannot delete: ${r.users.map((u) => `${u.name} (${u.email}) ${u.reasons.join(', ')}`).join('; ')}. Those users are never touched.`, data: { users: r.users } })
+    : fail(res, (msg[r.error] || [400])[0], (msg[r.error] || [400, 'Bad request'])[1]));
+  for (const [path, action] of [['delete', 'delete'], ['restore', 'restore']]) {
+    router.post(`/customers/:id/${path}-preview`, asyncHandler(async (req, res) => {
+      const r = await deletion.preview(action, { saasCustomerId: z.string().uuid().parse(req.params.id) }, req.user.id);
+      return r.error ? bad(res, r) : ok(res, r);
+    }));
+    router.post(`/customers/:id/${path}`, asyncHandler(async (req, res) => {
+      const r = await deletion.execute(action, { saasCustomerId: z.string().uuid().parse(req.params.id) }, req.user.id, confirmBody.parse(req.body || {}));
+      return r.error ? bad(res, r) : ok(res, { done: true, soft: true });
+    }));
+  }
+}
 // The menu paths this person cannot use (only when module access checks are on and their company is a customer).
 router.get('/my-modules', asyncHandler(async (req, res) => ok(res, await saasGate.lockedMenu(req.user))));
 // First-steps checklist for a customer's own admin ({ applies: false } for every other company).
@@ -59,6 +79,7 @@ const ERRORS = {
   not_pending: [409, 'Only a pending order can be cancelled'],
   has_payments: [409, 'This order already has payments'],
   cancelled: [409, 'This order is cancelled'],
+  customer_deleted: [409, 'This customer is deleted; restore it first'],
   over_payment: [422, 'That is more than the order still owes'],
   bad_amount: [422, 'The amount must be more than 0'],
   not_paid: [409, 'The order is not fully paid yet'],
@@ -123,12 +144,12 @@ router.patch('/settings/:key', asyncHandler(async (req, res) => {
 
 // customers, slots and credit days
 router.get('/customers', asyncHandler(async (req, res) => {
-  const rows = await prisma.saasCustomer.findMany({ orderBy: { created_at: 'desc' }, include: { slots: { select: { id: true } } } });
+  const rows = await prisma.saasCustomer.findMany({ where: { status: { not: 'deleted' } }, orderBy: { created_at: 'desc' }, include: { slots: { select: { id: true } } } });
   return ok(res, rows.map((c) => ({ id: c.id, name: c.name, status: c.status, org_id: c.org_id, org_group_id: c.org_group_id, trial_ends_on: c.trial_ends_on, max_users: c.max_users, slots: c.slots.length })));
 }));
 router.get('/customers/:id', asyncHandler(async (req, res) => {
   const c = await prisma.saasCustomer.findUnique({ where: { id: z.string().uuid().parse(req.params.id) }, include: { slots: { include: { credits: true }, orderBy: { created_at: 'asc' } } } });
-  return c ? ok(res, c) : problem(res, { error: 'customer_not_found' });
+  return c && c.status !== 'deleted' ? ok(res, c) : problem(res, { error: 'customer_not_found' });
 }));
 router.post('/customers/:id/slots', asyncHandler(async (req, res) => {
   const body = z.object({ email: z.string().email().optional(), label: z.string().max(80).optional() }).parse(req.body || {});

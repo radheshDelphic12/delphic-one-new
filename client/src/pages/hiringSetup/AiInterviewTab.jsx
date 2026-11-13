@@ -14,8 +14,8 @@ const NUMBER_FIELDS = [
   { key: 'borderline_margin', label: 'Borderline range (points)', hint: 'Just under the pass mark within this many points = borderline, a person decides', min: 0, max: 50 },
   { key: 'link_valid_days', label: 'Link valid for (days)', hint: 'One attempt per link', min: 1, max: 60 },
   { key: 'answer_time_seconds', label: 'Time per question (seconds)', hint: 'A countdown on every question; when it ends the typed answer is sent. 0 = no limit', min: 0, max: 1800 },
-  { key: 'max_tab_switches', label: 'Leaves before the interview ends', hint: 'Leaving the interview page (or full screen) is warned about; the interview ends on this many. 3 = two warnings, then it ends on the third. 0 = only log', min: 0, max: 20 },
-  { key: 'max_proctor_warnings', label: 'Camera / microphone warnings before the interview ends', hint: 'Face not visible, eyes away, looking down, background noise or the screen share stopping: each is a warning. After this many warnings the next one ends the interview. 3 = three warnings, then it ends. 0 = only log', min: 0, max: 10 },
+  { key: 'max_tab_switches', label: 'Leaves before the interview ends', hint: 'Leaving the interview page (or full screen) is warned about; the interview ends on this many. 3 = two warnings, then it ends on the third. 0 (default) = never ends, only warns and logs; the team reviews the recording', min: 0, max: 20 },
+  { key: 'max_proctor_warnings', label: 'Camera / microphone warnings before the interview ends', hint: 'Face not visible, eyes away, looking down, background noise or the screen share stopping: each is a warning. After this many warnings the next one ends the interview. 3 = three warnings, then it ends. 0 (default) = never ends, only warns and logs; the team reviews the recording', min: 0, max: 10 },
 ];
 const WEIGHTS = [
   { key: 'weight_knowledge', label: 'Role knowledge' },
