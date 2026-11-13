@@ -12,6 +12,7 @@ const saasGate = require('./saasGate');
 const billing = require('./billing.service');
 const setup = require('./setup.service');
 const deletion = require('./customerDeletion.service');
+const passwordReset = require('./passwordReset.service');
 const prisma = require('../../config/db');
 
 // Platform administration for the SaaS product. Only people on the platform-admin list get in: a company admin or a group super admin is refused,
@@ -37,6 +38,12 @@ router.get('/access', asyncHandler(async (req, res) => ok(res, { platform_admin:
   const bad = (res, r) => (r.error === 'shared_users'
     ? res.status(409).json({ success: false, message: `Cannot delete: ${r.users.map((u) => `${u.name} (${u.email}) ${u.reasons.join(', ')}`).join('; ')}. Those users are never touched.`, data: { users: r.users } })
     : fail(res, (msg[r.error] || [400])[0], (msg[r.error] || [400, 'Bad request'])[1]));
+  router.post('/customers/:id/reset-admin-password', asyncHandler(async (req, res) => {
+    const body = z.object({ password: z.string().max(100).optional() }).parse(req.body || {});
+    const r = await passwordReset.resetCustomerAdmin({ saasCustomerId: z.string().uuid().parse(req.params.id) }, req.user.id, body);
+    const map = { not_allowed: [403, 'Only a super admin of our own group can reset a customer admin password'], customer_not_found: [404, 'Customer not found'], no_workspace: [409, 'No workspace'], customer_deleted: [409, 'This customer is deleted. Restore it first'], no_admin: [409, 'No admin login'], weak_password: [422, 'A password needs at least 8 characters'], shared_user: [409, 'This admin also works in another company, so their login is not reset from here'], protected_user: [409, 'This admin is a super admin or platform admin, so their login is not reset from here'] };
+    return r.error ? fail(res, (map[r.error] || [400])[0], (map[r.error] || [400, 'Bad request'])[1]) : ok(res, { email: r.email, password: r.password, customer: r.customer, shown_once: true });
+  }));
   for (const [path, action] of [['delete', 'delete'], ['restore', 'restore']]) {
     router.post(`/customers/:id/${path}-preview`, asyncHandler(async (req, res) => {
       const r = await deletion.preview(action, { saasCustomerId: z.string().uuid().parse(req.params.id) }, req.user.id);

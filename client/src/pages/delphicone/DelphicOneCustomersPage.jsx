@@ -7,6 +7,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import CustomerDeleteDrawer from './CustomerDeleteDrawer.jsx';
+import PasswordResultDrawer from './PasswordResultDrawer.jsx';
 import { inputCls, labelCls, th, thr, td, tdr, rupees, useLoad, useSave } from './ui.jsx';
 
 const STATUS = { trial: ['blue', 'Trial'], active: ['green', 'Active'], read_only: ['amber', 'Read-only'], churned: ['gray', 'Churned'] };
@@ -75,6 +76,12 @@ export default function DelphicOneCustomersPage() {
   const [workspace, setWorkspace] = useState(null);
   const [removing, setRemoving] = useState(null); // { customer, mode: 'delete' | 'restore' }, super admins of our own group only
   const canDelete = Boolean(me?.can_delete_customers);
+  const [shown, setShown] = useState(null);
+  const resetAdmin = async (c) => {
+    if (!window.confirm(`Reset the admin password of ${c.name}?\n\nA new strong password is generated and shown once. Their admin's earlier sign-ins end at once.`)) return;
+    const r = await save(() => doxApi.resetCustomerAdminPassword(c.id, {}), null, 'Could not reset the admin password');
+    if (r) setShown(r);
+  };
   const createWorkspace = async (c) => {
     if (!window.confirm(`Create a separate workspace for ${c.name}? This creates their company and first admin login (${c.contact_email || 'no email yet'}).`)) return;
     const r = await save(() => doxApi.provisionCustomer(c.id), null, 'Could not create the workspace');
@@ -105,7 +112,7 @@ export default function DelphicOneCustomersPage() {
                   <td className={tdr}>{rupees(c.monthly_value)}</td>
                   <td className={`${tdr} ${c.outstanding > 0 ? 'font-semibold text-warning-700' : ''}`}>{c.outstanding > 0 ? rupees(c.outstanding) : '—'}</td>
                   <td className={td}>{c.trial_ends_on || '—'}</td>
-                  <td className={`${td} text-right`}>{canDelete && !c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs text-danger-700" data-testid="delete-customer" onClick={() => setRemoving({ customer: c, mode: 'delete' })}>Delete</button>}{canDelete && c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="restore-customer" onClick={() => setRemoving({ customer: c, mode: 'restore' })}>Restore</button>}{!c.deleted_at && me?.provisioning && c.status === 'trial' && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="create-workspace" onClick={() => createWorkspace(c)}>Create workspace</button>}{canEdit && !c.deleted_at && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
+                  <td className={`${td} text-right`}>{canDelete && !c.deleted_at && c.has_workspace && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="reset-admin-password" onClick={() => resetAdmin(c)}>Reset admin password</button>}{canDelete && !c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs text-danger-700" data-testid="delete-customer" onClick={() => setRemoving({ customer: c, mode: 'delete' })}>Delete</button>}{canDelete && c.deleted_at && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="restore-customer" onClick={() => setRemoving({ customer: c, mode: 'restore' })}>Restore</button>}{!c.deleted_at && me?.provisioning && c.status === 'trial' && <button type="button" className="btn-ghost mr-1 text-xs" data-testid="create-workspace" onClick={() => createWorkspace(c)}>Create workspace</button>}{canEdit && !c.deleted_at && <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setEditing(c)}><Pencil className="h-3.5 w-3.5" />Edit</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -114,6 +121,7 @@ export default function DelphicOneCustomersPage() {
       )}
       <CustomerDrawer customer={editing} onClose={() => setEditing(null)} onSaved={reload} />
       <WorkspaceResult result={workspace} onClose={() => setWorkspace(null)} />
+      <PasswordResultDrawer result={shown} onClose={() => setShown(null)} />
       <CustomerDeleteDrawer customer={removing?.customer || null} mode={removing?.mode} onClose={() => setRemoving(null)} onDone={reload}
         api={removing ? (removing.mode === 'restore' ? { preview: () => doxApi.restorePreview(removing.customer.id), run: (b) => doxApi.restoreCustomer(removing.customer.id, b) } : { preview: () => doxApi.deletePreview(removing.customer.id), run: (b) => doxApi.softDeleteCustomer(removing.customer.id, b) }) : { preview: () => Promise.reject(new Error('none')), run: () => Promise.reject(new Error('none')) }} />
     </div>

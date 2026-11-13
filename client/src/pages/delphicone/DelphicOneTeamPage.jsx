@@ -4,6 +4,7 @@ import { doxApi } from '../../lib/delphicone/api.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import PasswordResultDrawer from './PasswordResultDrawer.jsx';
 import { inputCls, labelCls, th, td, useLoad, useSave } from './ui.jsx';
 
 // Delphic One > Team (admins only): the people of the Delphic One company itself. It uses the same user service as People > Users, so the same rules apply.
@@ -49,7 +50,14 @@ export default function DelphicOneTeamPage() {
   const save = useSave();
   const [data, reload] = useLoad(() => doxApi.team(), [], null);
   const [adding, setAdding] = useState(false);
+  const [shown, setShown] = useState(null); // the new password, shown once
   if (!data) return <Skeleton className="h-40" />;
+  const resetPassword = async (m) => {
+    const typed = window.prompt(`Reset the password of ${m.name}?\n\nLeave empty to generate a strong one, or type a new one (at least 8 characters). Their earlier sign-ins end at once.`, '');
+    if (typed === null) return;
+    const r = await save(() => doxApi.resetTeamPassword(m.id, typed.trim() ? { password: typed.trim() } : {}), null, 'Could not reset the password');
+    if (r) setShown(r);
+  };
   const change = async (m, patch, ok) => { const r = await save(() => doxApi.updateTeamMember(m.id, patch), ok, 'Could not change this person'); if (r) reload(); };
   return (
     <div className="space-y-3" data-testid="dox-team">
@@ -71,13 +79,14 @@ export default function DelphicOneTeamPage() {
                   ) : (ROLE_LABEL[m.role] || m.role)}
                 </td>
                 <td className={td}><Pill tone={m.active ? 'green' : 'gray'}>{m.active ? 'Active' : 'Inactive'}</Pill>{!m.can_edit && <span className="ml-2 text-[11px] text-tertiary-500">{m.protected ? 'super admin' : 'works in another company too'}</span>}</td>
-                <td className={`${td} text-right`}>{m.can_edit && <button type="button" className="btn-ghost text-xs" onClick={() => change(m, { active: !m.active }, m.active ? 'Switched off' : 'Switched on')}>{m.active ? 'Deactivate' : 'Reactivate'}</button>}</td>
+                <td className={`${td} text-right`}>{m.can_edit && m.id !== data.me_id && <button type="button" className="btn-ghost text-xs" data-testid="reset-password" onClick={() => resetPassword(m)}>Reset password</button>}{m.can_edit && <button type="button" className="btn-ghost text-xs" onClick={() => change(m, { active: !m.active }, m.active ? 'Switched off' : 'Switched on')}>{m.active ? 'Deactivate' : 'Reactivate'}</button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <AddDrawer open={adding} roles={data.roles} onClose={() => setAdding(false)} onAdded={reload} />
+      <PasswordResultDrawer result={shown} onClose={() => setShown(null)} />
     </div>
   );
 }

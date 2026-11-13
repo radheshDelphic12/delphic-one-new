@@ -443,6 +443,8 @@ model User {
   // cross-org super dashboard only — separate from any per-org admin power.
   // Unused until Phase 1's authorizeGroupSuperadmin lands.
   is_group_superadmin Boolean  @default(false)
+  // An admin password reset ends the person's existing sessions: tokens issued before this moment are refused (lib/sessionRevocation.js).
+  sessions_valid_after DateTime?
   department_id       String?  @db.Uuid
   created_at          DateTime @default(now())
   updated_at          DateTime @default(now()) @updatedAt

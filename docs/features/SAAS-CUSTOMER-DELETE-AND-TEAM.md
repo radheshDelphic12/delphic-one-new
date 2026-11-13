@@ -35,3 +35,15 @@ Platform > Customers has the same **Delete** for customers with a workspace.
 - An email that already has a login anywhere (this company or another) is refused, exactly like People > Users. Existing people are not attached to another company.
 - A person who also works in another company, and super admins, are shown but not edited from here.
 - You cannot change your own role or switch yourself off, and the last active admin cannot be demoted or switched off.
+
+## 3. Reset a password
+
+**Delphic One > Team > Reset password** (Delphic One admin role only, one button per member row).
+1. Click **Reset password**. Leave the box empty to generate a strong password, or type one (at least 8 characters, like the rest of the app).
+2. A panel shows the new password **once**, with a **Copy** button. It cannot be shown again: the server keeps only a hash. Give it to the person and ask them to change it in Settings after signing in.
+3. The person's earlier sign-ins end at once (they have to sign in again with the new password).
+
+**Delphic One > Customers > Reset admin password** (and Platform > Customers): for a customer that has a workspace, super admins of our own group only. It resets the customer's first admin login the same way and shows the password once. It is refused for a deleted customer (restore it first) and for a customer with no workspace.
+
+**Rules:** only members of the Delphic One company can be reset from the Team page; you cannot reset yourself there (use Settings, which asks for the current password); super admins, platform admins and people who also work in another company are never reset from here. The same hashing as creating or editing a user is used. The password is never logged and never written to the audit trail: the audit entry (Platform > Audit trail) holds who reset whom, when, and the person's email. The app has no "must change at next sign-in" setting today, so the screen asks the person to change it; adding one would be a separate change.
+
