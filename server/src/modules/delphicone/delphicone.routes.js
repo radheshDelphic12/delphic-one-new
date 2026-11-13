@@ -9,6 +9,7 @@ const followups = require('../billing/invoiceFollowups.service');
 const provisioning = require('../platform/provisioning.service');
 const deletion = require('../platform/customerDeletion.service');
 const team = require('./team.service');
+const passwordReset = require('../platform/passwordReset.service');
 
 // The Delphic One workspace (module key `delphic_one`). Roles come from the org membership: admin does everything, sales / bda work customers and
 // leads and read the invoices; everyone else has no access here.
@@ -81,13 +82,26 @@ const TEAM_ERRORS = {
   last_admin: [409, 'There must be at least one active admin in the Delphic One team'],
   nothing_to_change: [422, 'Nothing to change'],
   forbidden_edit_super_admin: [403, 'Only a super admin can change a super admin'],
+  weak_password: [422, 'A password needs at least 8 characters'],
+  not_allowed: [403, 'Only a super admin of our own group can reset a customer admin password'],
+  customer_not_found: [404, 'That customer was not found'],
+  no_workspace: [409, 'This customer has no workspace, so there is no admin login to reset'],
+  customer_deleted: [409, 'This customer is deleted. Restore it first'],
+  no_admin: [409, 'This workspace has no admin login'],
 };
 const teamProblem = (res, r) => { const [status, message] = TEAM_ERRORS[r.error] || [400, 'Bad request']; return fail(res, status, message); };
-router.get('/team', need('team'), asyncHandler(async (req, res) => ok(res, { members: await team.list(req.user.org_id), roles: team.ROLES })));
+router.get('/team', need('team'), asyncHandler(async (req, res) => ok(res, { members: await team.list(req.user.org_id), roles: team.ROLES, me_id: req.user.id })));
 router.post('/team', need('team'), asyncHandler(async (req, res) => {
   const body = z.object({ name: z.string().trim().min(1).max(120), email: z.string().email().max(150), role: z.enum(team.ROLES), phone: z.string().max(40).nullable().optional(), password: z.string().min(8).max(100).optional() }).parse(req.body);
   const r = await team.add(req.user.org_id, req.user, body);
   return r.error ? teamProblem(res, r) : created(res, { id: r.user.id, name: r.user.name, email: r.user.email, role: body.role, temp_password: r.temp_password });
+}));
+// Reset a member's password: generated (strong) unless one is typed. Shown once in the response, never stored readable or logged; their earlier sessions end.
+router.post('/team/:personId/reset-password', need('team'), asyncHandler(async (req, res) => {
+  const body = z.object({ password: z.string().max(100).optional() }).parse(req.body || {});
+  const r = await passwordReset.resetTeamMember(req.user.org_id, req.user, uuid.parse(req.params.personId), body);
+  if (r.error === 'self') return fail(res, 409, 'To change your own password use Settings, which asks for your current one');
+  return r.error ? teamProblem(res, r) : ok(res, { email: r.email, password: r.password, shown_once: true });
 }));
 router.patch('/team/:personId', need('team'), asyncHandler(async (req, res) => {
   const patch = z.object({ role: z.enum(team.ROLES).optional(), active: z.boolean().optional() }).parse(req.body);
@@ -112,6 +126,13 @@ const deleteProblem = (res, r) => {
   const [status, message] = DELETE_ERRORS[r.error] || [400, 'Bad request'];
   return fail(res, status, message);
 };
+// A customer's first admin login: new one-time password (owner super admin only; not for deleted customers).
+router.post('/customers/:id/reset-admin-password', asyncHandler(async (req, res) => {
+  const body = z.object({ password: z.string().max(100).optional() }).parse(req.body || {});
+  const r = await passwordReset.resetCustomerAdmin({ doxCustomerId: uuid.parse(req.params.id), doxOrgId: req.user.org_id }, req.user.id, body);
+  if (r.error === 'shared_user' || r.error === 'protected_user') return fail(res, 409, 'This admin also works in another company or is a super admin, so their login is not reset from here');
+  return r.error ? teamProblem(res, r) : ok(res, { email: r.email, password: r.password, customer: r.customer, shown_once: true });
+}));
 const confirmBody = z.object({ confirm_name: z.string().max(200), token: z.string().max(200), reason: z.string().max(300).optional() });
 for (const [path, action] of [['delete', 'delete'], ['restore', 'restore']]) {
   router.post(`/customers/:id/${path}-preview`, asyncHandler(async (req, res) => {

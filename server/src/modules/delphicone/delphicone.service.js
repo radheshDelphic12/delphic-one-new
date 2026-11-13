@@ -79,7 +79,8 @@ async function listCustomers(orgId, { status, q, deleted } = {}) {
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
   });
   const bal = await balancesByCustomer(orgId);
-  return rows.map((c) => viewCustomer(c, bal.get(c.id) || 0));
+  const withWorkspace = new Set((rows.length ? await prisma.saasCustomer.findMany({ where: { dox_customer_id: { in: rows.map((r) => r.id) } }, select: { dox_customer_id: true } }) : []).map((r) => r.dox_customer_id));
+  return rows.map((c) => ({ ...viewCustomer(c, bal.get(c.id) || 0), has_workspace: withWorkspace.has(c.id) }));
 }
 
 async function createCustomer(orgId, user, body) {

@@ -193,4 +193,4 @@ async function execute(action, input, actorId, { confirm_name: confirmName, toke
   return result;
 }
 
-module.exports = { isOwnerSuperAdmin, preview, execute };
+module.exports = { isOwnerSuperAdmin, preview, execute, resolve };
