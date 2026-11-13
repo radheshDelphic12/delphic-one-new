@@ -178,16 +178,30 @@ function proRataQuota(quota, joinedAt, year) {
   return Math.round(((quota * months) / 12) * 2) / 2;
 }
 
-function entitlementFor(leaveType, balance, credit = 0, { joinedAt = null, year = null } = {}) {
+// New joiners: someone who joined during the year gets ONE leave for every month left in the year (the joining month included),
+// shared equally by the paid leave types that count in the balance (Casual and Sick today). Joined in November = 2 leaves, so 1 Casual + 1 Sick;
+// joined in December = 1 leave, so 0.5 + 0.5. Earned Leave is switched off (not applicable), so it takes no part. Admin / HR can still set
+// any person's figure by hand (Leave > Balances); a figure set by hand always wins over this rule. Joined in January (or before): the full quota.
+const sharesNewJoinerLeave = (t) => Boolean(t.paid) && t.is_applicable !== false && t.counts_in_balance !== false && Number(t.annual_quota) > 0 && !isCompOff(t) && String(t.name).trim().toLowerCase() !== 'earned leave';
+const newJoinerShareCount = (leaveTypes) => leaveTypes.filter(sharesNewJoinerLeave).length;
+
+function joiningYearQuota(joinedAt, year, shareCount) {
+  const months = 12 - new Date(joinedAt).getUTCMonth();
+  return Math.round((months / shareCount) * 2) / 2;
+}
+
+function entitlementFor(leaveType, balance, credit = 0, { joinedAt = null, year = null, joinerShare = 0 } = {}) {
   let base;
   if (balance && balance.allocated !== null && balance.allocated !== undefined) base = Number(balance.allocated);
   else if (balance && Number(balance.accrued) > 0) base = Number(balance.accrued);
-  else base = leaveType.annual_quota === null || leaveType.annual_quota === undefined ? null : proRataQuota(Number(leaveType.annual_quota), joinedAt, year);
+  else if (leaveType.annual_quota === null || leaveType.annual_quota === undefined) base = null;
+  else if (joinedAt && joinerShare > 0 && new Date(joinedAt).getUTCFullYear() === year && new Date(joinedAt).getUTCMonth() > 0 && sharesNewJoinerLeave(leaveType)) base = joiningYearQuota(joinedAt, year, joinerShare);
+  else base = proRataQuota(Number(leaveType.annual_quota), joinedAt, year);
   return base === null ? null : base + credit;
 }
 
-function balanceRow(leaveType, balance, usage, { year, today, credit = 0, joinedAt = null }) {
-  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt, year });
+function balanceRow(leaveType, balance, usage, { year, today, credit = 0, joinedAt = null, joinerShare = 0 }) {
+  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt, year, joinerShare });
   // Unpaid leave, a type excluded from the balance, and any type with no quota are uncapped - there is no balance to run out of.
   const unlimited = !leaveType.paid || leaveType.counts_in_balance === false || entitlement === null;
   const allocated = unlimited ? 0 : entitlement;
@@ -251,7 +265,7 @@ async function listMyBalances(orgId, orgMembershipId, year, today = todayIst()) 
   const balanceByType = new Map(balances.map((b) => [b.leave_type_id, b]));
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   return leaveTypes.map((leaveType) =>
-    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today, joinedAt: membership?.joined_at, credit: isCompOff(leaveType) ? credits.get(orgMembershipId) || 0 : 0 })
+    balanceRow(leaveType, balanceByType.get(leaveType.id), summariseUsage(requests.filter((r) => r.leave_type_id === leaveType.id), { year, today, countDays }), { year, today, joinedAt: membership?.joined_at, joinerShare: newJoinerShareCount(leaveTypes), credit: isCompOff(leaveType) ? credits.get(orgMembershipId) || 0 : 0 })
   );
 }
 
@@ -297,7 +311,7 @@ async function balancesOverview(orgId, { year, department_id, search }, today = 
     department: m.department?.name || null,
     balances: leaveTypes.map((leaveType) => {
       const key = keyOf(m.id, leaveType.id);
-      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today, joinedAt: m.joined_at, credit: isCompOff(leaveType) ? credits.get(m.id) || 0 : 0 });
+      return balanceRow(leaveType, balanceByKey.get(key), summariseUsage(requestsByKey.get(key) || [], { year, today, countDays: counters.get(m.id) }), { year, today, joinedAt: m.joined_at, joinerShare: newJoinerShareCount(leaveTypes), credit: isCompOff(leaveType) ? credits.get(m.id) || 0 : 0 });
     }),
   }));
 
@@ -386,7 +400,7 @@ async function findOverlap(orgId, orgMembershipId, candidate) {
 async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, excludeRequestId = null) {
   if (leaveType.counts_in_balance === false) return Infinity;
   const range = yearRange(year);
-  const [balance, membership, requests] = await Promise.all([
+  const [balance, membership, requests, applicableTypes] = await Promise.all([
     prisma.leaveBalance.findUnique({
       where: { org_membership_id_leave_type_id_year: { org_membership_id: orgMembershipId, leave_type_id: leaveType.id, year } },
     }),
@@ -402,9 +416,10 @@ async function remainingPaidDays(orgId, orgMembershipId, leaveType, year, exclud
         ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
       },
     }),
+    prisma.leaveType.findMany({ where: { org_id: orgId, is_applicable: true } }),
   ]);
   const credit = isCompOff(leaveType) ? (await compOffCredits(orgId, [orgMembershipId], year)).get(orgMembershipId) || 0 : 0;
-  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt: membership?.joined_at, year });
+  const entitlement = entitlementFor(leaveType, balance, credit, { joinedAt: membership?.joined_at, year, joinerShare: newJoinerShareCount(applicableTypes) });
   if (entitlement === null) return Infinity;
   const countDays = await leaveDayCounter(orgId, orgMembershipId, range.gte, range.lte);
   const { used, upcoming, pending } = summariseUsage(requests, { year, today: todayIst(), countDays });
