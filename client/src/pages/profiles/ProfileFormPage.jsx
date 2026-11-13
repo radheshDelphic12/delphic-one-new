@@ -109,7 +109,8 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
     event.preventDefault();
     const validation = runValidations([
       ['name', required(form.name, 'Name')],
-      ['total_experience_years', required(form.total_experience_years, 'Experience years')],
+      ['total_experience_years', required(form.total_experience_years, 'Experience years') || (Number(form.total_experience_years) > 60 ? 'Total experience must be 60 years or less.' : null)],
+      ['relevant_experience_years', form.relevant_experience_years !== '' && Number(form.relevant_experience_years) > 60 ? 'Relevant experience must be 60 years or less.' : null],
       ['primary_skills', form.primary_skills.length === 0 ? 'Primary skills are required.' : null],
       ['vendor_account_id', form.source === 'vendor' && !form.vendor_account_id ? 'Select a vendor account when source is vendor.' : null],
     ]);
@@ -239,10 +240,10 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
               <input value={form.current_designation} onChange={(e) => updateField('current_designation', e.target.value)} className={INPUT_CLASS} />
             </Field>
             <Field label="Total experience (years)" required>
-              <input required type="number" min="0" step="0.1" value={form.total_experience_years} onChange={(e) => updateField('total_experience_years', e.target.value)} className={INPUT_CLASS} />
+              <input required type="number" min="0" max="60" step="0.1" value={form.total_experience_years} onChange={(e) => updateField('total_experience_years', e.target.value)} className={INPUT_CLASS} />
             </Field>
             <Field label="Relevant experience (years)">
-              <input type="number" min="0" step="0.1" value={form.relevant_experience_years} onChange={(e) => updateField('relevant_experience_years', e.target.value)} className={INPUT_CLASS} />
+              <input type="number" min="0" max="60" step="0.1" value={form.relevant_experience_years} onChange={(e) => updateField('relevant_experience_years', e.target.value)} className={INPUT_CLASS} />
             </Field>
             <div className="sm:col-span-2">
               <Field label="Primary skills" required>
