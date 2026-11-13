@@ -182,7 +182,7 @@ export default function AiInterviewPage() {
     if (!res || res.ended) return;
     const max = res.max_proctor_warnings;
     const n = res.proctor_warnings;
-    setWarning(max > 0 ? `${PROCTOR_TEXT[type]} Warning ${Math.min(n, max)} of ${max}${n >= max ? ' - this is the final warning: the next one ends the interview' : ''}.` : PROCTOR_TEXT[type]);
+    setWarning(max > 0 ? `${PROCTOR_TEXT[type]} Warning ${Math.min(n, max)} of ${max}${n >= max ? ' - this is the final warning: the next one ends the interview' : ''}.` : `${PROCTOR_TEXT[type]} Warning ${n}. This is recorded and the team will review the recording.`);
   }, [report]);
 
   const stopRecording = useCallback(async () => {

@@ -135,6 +135,13 @@ function Avatar({ org, color }) {
  * Every company, one card shape: a colour key, name and status; revenue / profit / margin; a thin revenue + profit
  * line when the series has several points; and the company's share of group revenue with its valuation.
  */
+// Says whose company this is: our own group, or a customer / trial / demo group (SaaS launch plan, section 21).
+const GROUP_KIND = { owner: ['Own group', 'bg-primary-50 text-primary-700'], customer: ['Customer', 'bg-amber-50 text-amber-800'], trial: ['Trial', 'bg-amber-50 text-amber-800'], demo: ['Demo', 'bg-tertiary-100 text-tertiary-600'] };
+export function GroupKindTag({ kind }) {
+  const [label, tone] = GROUP_KIND[kind] || GROUP_KIND.owner;
+  return <span className={`inline-block rounded-full px-1.5 py-px text-[10px] font-medium ${tone}`}>{label}</span>;
+}
+
 export function CompanyCard({ company, color, groupRevenue, onOpen, series: seriesOverride }) {
   const { org } = company;
   if (company.coming_soon) {
@@ -167,7 +174,7 @@ export function CompanyCard({ company, color, groupRevenue, onOpen, series: seri
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: color }} aria-hidden="true" />
             <span className="truncate">{org.name}</span>
           </p>
-          <p className="text-[11px] text-tertiary-500">{company.people.employees + company.people.contractors} people</p>
+          <p className="flex items-center gap-1.5 text-[11px] text-tertiary-500">{company.people.employees + company.people.contractors} people <GroupKindTag kind={org.group_kind} /></p>
         </div>
         <span className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${status[2]}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${status[1]}`} aria-hidden="true" />

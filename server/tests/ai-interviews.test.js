@@ -804,9 +804,9 @@ describe('resend, restart, timer and page integrity', () => {
 
   test('camera / microphone / screen warnings: three warnings come first, the fourth ends the interview for a person; the settings are admin editable', async () => {
     const S = '/api/v1/ai-interviews/settings';
-    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ proctoring_enabled: true, max_proctor_warnings: 3, require_screen_share: true }); // on by default: the screen is recorded and watched
+    expect((await authed(request(app).get(S), recruiterToken)).body.data).toMatchObject({ proctoring_enabled: true, max_proctor_warnings: 0, max_tab_switches: 0, require_screen_share: true }); // by default warnings never end the interview // on by default: the screen is recorded and watched
     expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: false })).body.data.require_screen_share).toBe(false); // an admin can switch it off
-    expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: true })).body.data.require_screen_share).toBe(true);
+    expect((await authed(request(app).put(S), adminToken).send({ require_screen_share: true, max_proctor_warnings: 3 })).body.data.require_screen_share).toBe(true); // an admin can still set a limit
     const token = tokenOf((await invite()).body.data.link);
     const started = await post(`${token}/start`, { consent: true });
     expect(started.body.data).toMatchObject({ proctoring: true, max_proctor_warnings: 3, require_screen_share: true, proctor_warnings: 0 });
@@ -823,6 +823,16 @@ describe('resend, restart, timer and page integrity', () => {
     expect(row.status).toBe('pending_review');
     expect(row.scores.red_flags[0]).toMatch(/ended automatically.*3 warnings/);
     expect((await pub(token)).status).toBe(410);
+  });
+
+  test('by default warnings never end the interview: ten camera warnings and five page leaves are logged and the interview carries on', async () => {
+    const token = tokenOf((await invite()).body.data.link);
+    await post(`${token}/start`, { consent: true });
+    for (let i = 0; i < 10; i += 1) expect((await event(token, 'no_face')).body.data).toMatchObject({ ended: false, proctor_warnings: i + 1 });
+    for (let i = 0; i < 5; i += 1) expect((await event(token, 'tab_hidden', { seconds_away: 5 })).body.data.ended).toBe(false);
+    const row = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(row.status).toBe('started');
+    expect((await pub(token)).status).toBe(200);
   });
 
   test('with the warnings at 0 (only log) or watching switched off, the interview is never ended by them', async () => {

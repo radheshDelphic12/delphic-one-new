@@ -11,6 +11,7 @@ const incrementReminders = require('./incrementReminders');
 const benchCountdown = require('./benchCountdown');
 const pmDueSoon = require('./pmDueSoon');
 const aiInterviewRecordings = require('./aiInterviewRecordings');
+const saasCounter = require('./saasCounter');
 
 /**
  * Start in-process background jobs. Called once from src/index.js after app.listen,
@@ -33,7 +34,8 @@ function startJobs() {
   tasks.push(benchCountdown.schedule());
   tasks.push(pmDueSoon.schedule());
   tasks.push(aiInterviewRecordings.schedule());
-  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance', 'websiteSync', 'lwdExit', 'incrementReminders', 'benchCountdown', 'pmDueSoon', 'aiInterviewRecordings'] });
+  tasks.push(saasCounter.schedule()); // inert unless SAAS_COUNTER_ENABLED=true
+  logger.info('jobs_started', { count: tasks.length, jobs: ['interviewReminders', 'profitabilityCompute', 'payrollDraft', 'emailOutbox', 'timesheetWeeklyLock', 'autoAttendance', 'websiteSync', 'lwdExit', 'incrementReminders', 'benchCountdown', 'pmDueSoon', 'aiInterviewRecordings', 'saasCounter'] });
   return tasks;
 }
 

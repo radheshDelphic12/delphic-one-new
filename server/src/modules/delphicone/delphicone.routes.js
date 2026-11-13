@@ -6,6 +6,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const service = require('./delphicone.service');
 const followups = require('../billing/invoiceFollowups.service');
+const provisioning = require('../platform/provisioning.service');
 
 // The Delphic One workspace (module key `delphic_one`). Roles come from the org membership: admin does everything, sales / bda work customers and
 // leads and read the invoices; everyone else has no access here.
@@ -53,7 +54,7 @@ const problem = (res, r) => {
 };
 const uuid = z.string().uuid();
 
-router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
+router.get('/me', asyncHandler(async (req, res) => ok(res, { role: req.dox.role, caps: req.dox.caps, provisioning: req.dox.role === 'admin' && (await provisioning.enabled()), meta: { customer_status: service.CUSTOMER_STATUS, lead_stages: service.LEAD_STAGES, lead_sources: service.LEAD_SOURCES, pay_modes: service.PAY_MODES } })));
 router.get('/summary', need('dashboard'), asyncHandler(async (req, res) => ok(res, await service.summary(req.user.org_id))));
 
 // customers
@@ -62,6 +63,21 @@ router.post('/customers', need('customersEdit'), asyncHandler(async (req, res) =
 router.patch('/customers/:id', need('customersEdit'), asyncHandler(async (req, res) => {
   const r = await service.updateCustomer(req.user.org_id, uuid.parse(req.params.id), service.customerUpdateSchema.parse(req.body || {}));
   return r.error ? problem(res, r) : ok(res, r.customer);
+}));
+// Create the customer's own workspace (a new trial group with one clean company, 15 days, 2 users). Off unless SAAS_CUSTOMER_PROVISIONING=true; Delphic One admins only.
+router.post('/customers/:id/provision', need('delete'), asyncHandler(async (req, res) => {
+  const r = await provisioning.provision({ doxCustomerId: uuid.parse(req.params.id), doxOrgId: req.user.org_id, actorId: req.user.id });
+  if (r.error) {
+    const [status, message] = {
+      disabled: [404, 'Customer workspaces are not switched on yet'],
+      customer_not_found: [404, 'That customer was not found'],
+      no_email: [422, 'Add the customer contact email first: it becomes the first admin login'],
+      already_provisioned: [409, 'This customer already has a workspace'],
+      email_in_use: [409, 'That email already has a login; use another contact email for the trial admin'],
+    }[r.error] || [400, 'Bad request'];
+    return fail(res, status, message);
+  }
+  return created(res, r);
 }));
 router.delete('/customers/:id', need('delete'), asyncHandler(async (req, res) => {
   const r = await service.removeCustomer(req.user.org_id, uuid.parse(req.params.id));

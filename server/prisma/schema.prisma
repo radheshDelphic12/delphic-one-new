@@ -476,6 +476,7 @@ model User {
   vt_people                       VtPerson[]
   nx_people                       NxPerson[]
   org_group_memberships           OrgGroupMembership[]            @relation("OrgGroupMembershipUser")
+  platform_admin                  PlatformAdmin?                  @relation("PlatformAdminUser")
   attendance_regularizations      AttendanceRecord[]              @relation("AttendanceRegularizedBy")
   hr_poc_for                      OrgMembership[]                 @relation("OrgMembershipHrPoc")
   sourcing_poc_for                OrgMembership[]                 @relation("OrgMembershipSourcingPoc")
@@ -2013,6 +2014,9 @@ model VendorCommission {
 model OrgGroup {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name       String
+  // What this group is: owner (our own group), customer, trial (a customer on trial) or demo. A database check keeps it to these four.
+  // Every group that existed before the SaaS launch work is ours, so the default is 'owner'.
+  kind       String   @default("owner")
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
@@ -8547,7 +8551,7 @@ model AiInterviewSettings {
   link_valid_days          Int      @default(7)
   // Time allowed per question (seconds, 0 = no limit) and how many tab switches end the interview (0 = never ends it, only logs).
   answer_time_seconds      Int      @default(180)
-  max_tab_switches         Int      @default(3)
+  max_tab_switches         Int      @default(0)
   // More rubric parameters, each with its own weight, and the reference sites the interviewer may read (through the AI web search) to ground its questions.
   weight_problem_solving   Int      @default(15)
   weight_experience_fit    Int      @default(10)
@@ -8564,7 +8568,7 @@ model AiInterviewSettings {
   // Camera and microphone watching: no face, a second face, eyes away from the screen, looking down (reading), background noise, the shared screen stopping.
   // Each is a warning; after max_proctor_warnings warnings the next one ends the interview. require_screen_share: the candidate shares the whole screen, recorded beside the face.
   proctoring_enabled       Boolean  @default(true)
-  max_proctor_warnings     Int      @default(3)
+  max_proctor_warnings     Int      @default(0)
   require_screen_share     Boolean  @default(true)
   updated_by               String?  @db.Uuid
   updated_at               DateTime @default(now()) @updatedAt
@@ -9793,3 +9797,293 @@ model DoxInvoicePayment {
   @@index([invoice_id])
   @@map("dox_invoice_payments")
 }
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS launch (docs/features/SAAS-LAUNCH-BUILD-PLAN.md), phase 1: the module catalogue, dated price books and the platform-admin list.
+// All of it is platform configuration edited by platform admins; nothing here changes how any existing company works.
+// ---------------------------------------------------------------------------------------------------------------------
+
+// The people allowed to run the platform (create customers, change prices, switch modules). Separate from every company role.
+model PlatformAdmin {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @unique @db.Uuid
+  user       User     @relation("PlatformAdminUser", fields: [user_id], references: [id], onDelete: Cascade)
+  added_by   String?  @db.Uuid
+  created_at DateTime @default(now())
+
+  @@map("platform_admins")
+}
+
+// One sellable module. The 4-letter code is issued once and never changes, even if the module is renamed.
+model SaasModule {
+  code        String   @id @db.VarChar(8)
+  name        String
+  description String?
+  // Basic View: every user needs it.
+  is_basic    Boolean  @default(false)
+  // Listed and priced but not sellable yet (for example GST/TDS and Banking until they work without the Group Dashboard).
+  coming_soon Boolean  @default(false)
+  active      Boolean  @default(true)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  needs     SaasModuleDependency[] @relation("DependencyModule")
+  needed_by SaasModuleDependency[] @relation("DependencyNeeds")
+  prices    SaasModulePrice[]
+  credits   SaasSlotCredit[]
+  routes    SaasRouteModule[]
+
+  @@map("saas_modules")
+}
+
+// "module_code needs needs_code". Rows of one module with the same requirement_group are alternatives (any one of them is enough);
+// rows in different groups must all be satisfied.
+model SaasModuleDependency {
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  module_code       String     @db.VarChar(8)
+  module            SaasModule @relation("DependencyModule", fields: [module_code], references: [code], onDelete: Cascade)
+  needs_code        String     @db.VarChar(8)
+  needs             SaasModule @relation("DependencyNeeds", fields: [needs_code], references: [code], onDelete: Cascade)
+  requirement_group Int        @default(1)
+  note              String?
+
+  @@unique([module_code, needs_code])
+  @@index([needs_code])
+  @@map("saas_module_dependencies")
+}
+
+// A dated price list. The book with the latest effective_from not after the subscription start applies to that subscription.
+model SaasPriceBook {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String
+  effective_from DateTime @db.Date
+  // The admin slot, per 30 days, before GST.
+  admin_price    Decimal  @db.Decimal(12, 2)
+  notes          String?
+  created_by     String?  @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  prices SaasModulePrice[]
+
+  @@index([effective_from])
+  @@map("saas_price_books")
+}
+
+// Price of one module per user per 30 days inside one price book, before GST.
+model SaasModulePrice {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  price_book_id String        @db.Uuid
+  price_book    SaasPriceBook @relation(fields: [price_book_id], references: [id], onDelete: Cascade)
+  module_code   String        @db.VarChar(8)
+  module        SaasModule    @relation(fields: [module_code], references: [code], onDelete: Cascade)
+  price_30d     Decimal       @db.Decimal(12, 2)
+
+  @@unique([price_book_id, module_code])
+  @@map("saas_module_prices")
+}
+
+// Platform settings that are numbers an admin may need to change: trial length, trial users, grace days, slot move interval, alert days, yearly discount.
+model SaasSetting {
+  key        String   @id
+  value      Json
+  note       String?
+  updated_by String?  @db.Uuid
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("saas_settings")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS launch, phases 1.5 and 2.1: customers, slots, credit days, ledger, counter runs. See docs/features/SAAS-LAUNCH-BUILD-PLAN.md.
+// org_group_id / org_id / dox_customer_id are plain ids (no foreign keys to existing tables) so no existing model changes.
+// ---------------------------------------------------------------------------------------------------------------------
+
+// One row per customer company on the platform; its group has kind trial or customer.
+model SaasCustomer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dox_customer_id String?   @unique @db.Uuid
+  org_group_id    String    @db.Uuid
+  org_id          String    @unique @db.Uuid
+  name            String
+  status          String    @default("trial") // trial | active | read_only | suspended | churned (database check)
+  plan_name       String?
+  trial_starts_on DateTime? @db.Date
+  trial_ends_on   DateTime? @db.Date
+  max_users       Int       @default(2)
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  slots  SaasSlot[]
+  orders SaasOrder[]
+
+  @@index([org_group_id])
+  @@index([status])
+  @@map("saas_customers")
+}
+
+// A seat. The admin slot always burns credit days; other slots burn only while someone is assigned (email set) and the slot is active.
+model SaasSlot {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customer_id   String       @db.Uuid
+  customer      SaasCustomer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  email         String?
+  user_id       String?      @db.Uuid
+  is_admin      Boolean      @default(false)
+  label         String?
+  status        String       @default("active") // active | paused (database check)
+  last_moved_at DateTime?
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
+
+  credits SaasSlotCredit[]
+  ledger  SaasCreditLedger[]
+
+  @@index([customer_id])
+  @@map("saas_slots")
+}
+
+// Days left of one module on one slot. Never below 0 (database check).
+model SaasSlotCredit {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slot_id     String     @db.Uuid
+  slot        SaasSlot   @relation(fields: [slot_id], references: [id], onDelete: Cascade)
+  module_code String     @db.VarChar(8)
+  module      SaasModule @relation(fields: [module_code], references: [code])
+  days_left   Int        @default(0)
+  alerted_at  DateTime?
+  updated_at  DateTime   @default(now()) @updatedAt
+
+  @@unique([slot_id, module_code])
+  @@index([module_code])
+  @@map("saas_slot_credits")
+}
+
+// Every change to a credit: top-up, daily burn, transfer, correction. The audit trail of what a customer has paid for and used.
+model SaasCreditLedger {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slot_id       String   @db.Uuid
+  slot          SaasSlot @relation(fields: [slot_id], references: [id], onDelete: Cascade)
+  module_code   String   @db.VarChar(8)
+  change_days   Int
+  balance_after Int
+  reason        String
+  actor_id      String?  @db.Uuid
+  created_at    DateTime @default(now())
+
+  @@index([slot_id, module_code])
+  @@map("saas_credit_ledger")
+}
+
+// One row per day the daily counter has run; the primary key makes a second run on the same day do nothing.
+model SaasCounterRun {
+  run_date        DateTime @id @db.Date
+  credits_touched Int      @default(0)
+  ran_at          DateTime @default(now())
+
+  @@map("saas_counter_runs")
+}
+
+// Audit trail of platform changes: who changed what, before and after.
+model SaasAudit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id   String?  @db.Uuid
+  action     String
+  entity     String
+  entity_id  String?
+  before     Json?
+  after      Json?
+  created_at DateTime @default(now())
+
+  @@index([entity, entity_id])
+  @@index([created_at])
+  @@map("saas_audit")
+}
+
+// Which module an API route belongs to (edited on the platform screen). The longest matching path_prefix decides; no row = not gated.
+model SaasRouteModule {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  path_prefix String     @unique
+  menu_prefix String?
+  module_code String     @db.VarChar(8)
+  module      SaasModule @relation(fields: [module_code], references: [code], onDelete: Cascade)
+  note        String?
+  active      Boolean    @default(true)
+
+  @@index([module_code])
+  @@map("saas_route_modules")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SaaS phase 4 foundations: orders, payments, webhook events. No gateway keys; amounts come from the dated price books and platform settings.
+// ---------------------------------------------------------------------------------------------------------------------
+model SaasOrder {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_no       String    @unique @default(dbgenerated("('SO-'::text || lpad((nextval('saas_order_no_seq'::regclass))::text, 5, '0'::text))"))
+  customer_id    String    @db.Uuid
+  customer       SaasCustomer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  status         String    @default("pending") // pending | paid | cancelled (database check)
+  price_book_id  String?   @db.Uuid
+  subtotal       Decimal   @db.Decimal(14, 2)
+  gst_rate       Decimal   @db.Decimal(5, 2)
+  gst_amount     Decimal   @db.Decimal(14, 2)
+  total          Decimal   @db.Decimal(14, 2)
+  note           String?
+  dox_invoice_id String?   @db.Uuid
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now())
+  paid_at        DateTime?
+
+  lines    SaasOrderLine[]
+  payments SaasPayment[]
+
+  @@index([customer_id])
+  @@map("saas_orders")
+}
+
+model SaasOrderLine {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id        String    @db.Uuid
+  order           SaasOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  slot_id         String    @db.Uuid
+  module_code     String    @db.VarChar(8)
+  days            Int
+  unit_price_30d  Decimal   @db.Decimal(12, 2)
+  line_amount     Decimal   @db.Decimal(14, 2)
+  is_prerequisite Boolean   @default(false)
+
+  @@index([order_id])
+  @@map("saas_order_lines")
+}
+
+model SaasPayment {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id        String    @db.Uuid
+  order           SaasOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  amount          Decimal   @db.Decimal(14, 2)
+  method          String
+  provider_ref    String?
+  idempotency_key String    @unique
+  created_by      String?   @db.Uuid
+  created_at      DateTime  @default(now())
+
+  @@index([order_id])
+  @@map("saas_payments")
+}
+
+model SaasWebhookEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider    String
+  event_id    String
+  type        String
+  payload     Json
+  result      String?
+  received_at DateTime @default(now())
+
+  @@unique([provider, event_id])
+  @@map("saas_webhook_events")
+}
+
