@@ -20,7 +20,8 @@ async function seed() {
   const adminMembership = await createOrgMembership(adminUser.id, org.id, { role: 'admin' });
   const adminToken = (await loginAs(adminUser)).access_token;
   const empUser = await createUser({ role: 'employee' });
-  const membership = await createOrgMembership(empUser.id, org.id, { role: 'employee' });
+  // An established employee: a new joiner only gets one leave per remaining month (see leave.service), too few for these two-day leaves.
+  const membership = await createOrgMembership(empUser.id, org.id, { role: 'employee', joined_at: d('2020-01-01') });
   const token = (await loginAs(empUser)).access_token;
   await prisma.calendar.create({ data: { org_id: org.id, name: 'Standard', kind: 'internal', is_default: true } });
   await leaveService.listTypes(org.id);
