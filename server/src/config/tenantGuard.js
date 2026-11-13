@@ -30,9 +30,10 @@ async function refresh(prisma) {
 
 // OrgMembership is identity-level (who belongs where): the company switcher and sign-in read it across companies on purpose, so it is not filtered.
 const NEVER = new Set(['OrgMembership']);
-const scoped = new Set(Prisma.dmmf.datamodel.models.filter((m) => !NEVER.has(m.name) && m.fields.some((f) => f.name === 'org_id')).map((m) => m.name));
-// A column that can never be empty cannot be compared with null (Prisma refuses the query), so those models get the plain not-in rule.
-const orgIdRequired = new Set(Prisma.dmmf.datamodel.models.filter((m) => m.fields.some((f) => f.name === 'org_id' && f.isRequired)).map((m) => m.name));
+const scopedModels = Prisma.dmmf.datamodel.models.filter((m) => !NEVER.has(m.name) && m.fields.some((f) => f.name === 'org_id'));
+const scoped = new Set(scopedModels.map((m) => m.name));
+// Most tables have a required org_id: Prisma rejects `org_id: null` on those ("Argument org_id is missing"), so only tables where org_id can be empty get that branch.
+const nullableOrg = new Set(scopedModels.filter((m) => !m.fields.find((f) => f.name === 'org_id').isRequired).map((m) => m.name));
 const READS = new Set(['findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy']);
 const UNIQUE_READS = new Set(['findUnique', 'findUniqueOrThrow']);
 const MANY_WRITES = new Set(['updateMany', 'deleteMany']);
@@ -51,8 +52,8 @@ function install(prisma) {
     if (customerOrgs.size === 0) return next(params); // nobody is a customer: behave exactly as before
 
     const isCustomer = customerOrgs.has(orgId);
-    const others = { org_id: { notIn: [...customerOrgs] } };
-    const rule = isCustomer ? { org_id: orgId } : (orgIdRequired.has(params.model) ? others : { OR: [{ org_id: null }, others] });
+    const notCustomer = { org_id: { notIn: [...customerOrgs] } };
+    const rule = isCustomer ? { org_id: orgId } : (nullableOrg.has(params.model) ? { OR: [{ org_id: null }, notCustomer] } : notCustomer);
 
     if (READS.has(params.action) || MANY_WRITES.has(params.action)) {
       params.args = params.args || {};
@@ -71,4 +72,4 @@ function install(prisma) {
   });
 }
 
-module.exports = { install, clearCache };
+module.exports = { install, clearCache, _rules: { scoped, nullableOrg } };
