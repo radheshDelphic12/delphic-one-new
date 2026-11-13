@@ -87,6 +87,10 @@ jobs:
 
       - name: Run server tests
         working-directory: server
+        env:
+          # One Jest process runs a whole shard (--runInBand) and every suite loads the app and a Prisma client, so memory grows
+          # with the number of suites; the default heap (about 2 GB) ran out on shard 1. The runner has 16 GB.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npx jest --runInBand --ci --shard=${{ matrix.shard }}/4
 
   dbviewer:
