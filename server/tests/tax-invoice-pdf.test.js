@@ -60,10 +60,10 @@ describe('GST / USD invoice model', () => {
     expect(plain).toMatchObject({ title: 'Invoice', showTax: false, showHsn: false, tax_summary: null });
   });
 
-  test('a GST tax invoice renders two pages: the original for the recipient and the duplicate for the transporter', async () => {
+  test('a GST tax invoice renders ONE page: the original for the recipient (no duplicate for the transporter)', async () => {
     const buf = await taxInvoicePdf(invoiceModel(base));
     expect(buf.slice(0, 4).toString()).toBe('%PDF');
-    expect((buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(2);
+    expect((buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(1);
   });
 
   test('a long invoice continues on more pages', async () => {
@@ -107,6 +107,66 @@ describe('client and vendor invoices', () => {
     expect(m.subtotal).toBe('100000.00'); // the lines above stay as they were
     expect(m.taxes.map((t) => [t.label, t.amount])).toEqual(expect.arrayContaining([['IGST', '16200.00'], ['Adjustment', '-10000.00']]));
     expect(m.total).toBe('97200.00');
+  });
+
+  test('adjustments are listed one by one on an annexure page after the invoice, and the invoice points to it', async () => {
+    const pdfText = (buf) => [...buf.toString('latin1').matchAll(/<([0-9a-fA-F]{2,})>/g)].map((x) => Buffer.from(x[1], 'hex').toString('latin1')).join('');
+    const pages = (buf) => (buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length;
+    const gstCharges = [{ label: 'GST 18%', mode: 'percent', value: 18, effect: 'add', amount: 16200 }, { label: 'TDS 10%', mode: 'percent', value: 10, effect: 'deduct', amount: -9000 }];
+    const adjusted = { ...client, amount: 100000, total_amount: 97200, details: { ...client.details, charges: gstCharges, adjustments: [{ amount: -4000, reason: 'Absent days not billed' }, { amount: -6000, reason: 'Credit for the delayed delivery' }] } };
+
+    // GST invoice: one row per adjustment, then how the amount is made up (taxable value after the adjustments, the tax, TDS, the total)
+    const m = await clientInvoiceModel('org1', adjusted);
+    expect(m.title).toBe('Tax Invoice');
+    expect(m.annexure.rows).toEqual([
+      { ref: 'Website (WEB)', reason: 'Absent days not billed', amount: '-4000.00' },
+      { ref: 'Website (WEB)', reason: 'Credit for the delayed delivery', amount: '-6000.00' },
+    ]);
+    expect(m.annexure.rows_total).toBe('-10000.00');
+    expect(m.annexure.summary.map((s) => [s.label, s.amount])).toEqual([
+      ['Total of the entries on the invoice', '100000.00'], ['Adjustments (listed above)', '-10000.00'], ['Taxable value (entries + adjustments)', '90000.00'],
+      ['IGST @ 18%', '16200.00'], ['TDS 10% @ 10%', '-9000.00'], ['Invoice total', '97200.00'],
+    ]);
+    const pdf = await taxInvoicePdf(m, { compress: false });
+    const t = pdfText(pdf);
+    for (const word of ['Annexure to Tax Invoice', 'Absent days not billed', 'Credit for the delayed delivery', 'Total adjustments', 'How the invoice amount is made up', 'Adjustment details: see the annexure page']) expect(t).toContain(word);
+    expect(pages(pdf)).toBe(2); // the invoice, then the annexure
+
+    // a plain (no GST) invoice gets the same page
+    const plain = await clientInvoiceModel('org1', { ...client, amount: 100000, total_amount: 93000, details: { ...client.details, adjustments: [{ amount: -2000, reason: 'Credit note' }] } });
+    expect(plain.title).toBe('Invoice');
+    expect(plain.annexure.rows).toEqual([{ ref: 'Website (WEB)', reason: 'Credit note', amount: '-2000.00' }]);
+    expect(plain.annexure.summary.map((s) => [s.label, s.amount])).toEqual([['Total of the entries on the invoice', '100000.00'], ['Adjustments (listed above)', '-2000.00'], ['TDS', '-5000.00'], ['Invoice total', '93000.00']]);
+    expect(pages(await taxInvoicePdf(plain))).toBe(2);
+
+    // no adjustment: no annexure and no extra page
+    const none = await clientInvoiceModel('org1', client);
+    expect(none.annexure).toBeNull();
+    expect(pages(await taxInvoicePdf(none))).toBe(1);
+  });
+
+  test('an invoice amount changed by hand shows the difference on the annexure; a combined invoice names each contract', async () => {
+    // total 97,200 but the entries and GST add up to 116,200: the 19,000 difference is a manual change with no listed reason
+    const byHand = await clientInvoiceModel('org1', {
+      ...client, amount: 100000, total_amount: 97200,
+      details: { ...client.details, charges: [{ label: 'GST 18%', mode: 'percent', value: 18, effect: 'add', amount: 16200 }] },
+    });
+    expect(byHand.annexure.rows).toEqual([expect.objectContaining({ ref: 'Whole invoice', amount: '-19000.00' })]);
+
+    const item = (name, code, adj) => ({ account_id: name, project: { name, code }, details: { ...client.details, charges: [], adjustments: adj }, lines: [] });
+    const combined = await clientInvoiceModel('org1', {
+      ...client, amount: 200000, total_amount: 195000,
+      line_items: { consolidated: true, items: [item('Alpha', 'A1', [{ amount: -3000, reason: 'Leave without pay' }]), item('Beta', 'B1', [{ amount: -2000, reason: 'Rate correction' }])] },
+      details: { ...client.details, charges: [] },
+    });
+    expect(combined.annexure.rows.map((r) => [r.ref, r.reason, r.amount])).toEqual([['Alpha (A1)', 'Leave without pay', '-3000.00'], ['Beta (B1)', 'Rate correction', '-2000.00']]);
+  });
+
+  test('a long list of adjustments continues on more annexure pages', async () => {
+    const adjustments = Array.from({ length: 70 }, (_, i) => ({ amount: -10, reason: `Adjustment number ${i + 1} for a leave day` }));
+    const m = await clientInvoiceModel('org1', { ...client, amount: 100000, total_amount: 99300, details: { ...client.details, charges: [], adjustments } });
+    const pdf = await taxInvoicePdf(m, { compress: false });
+    expect((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBeGreaterThan(2);
   });
 
   test('the project face resource is printed with the project details; absent when not set', async () => {
@@ -240,9 +300,10 @@ describe('client invoice with GST prints as the Tally tax invoice', () => {
 
     const pdf = await taxInvoicePdf(m, { compress: false });
     const t = text(pdf);
-    for (const word of ['Tax Invoice', 'ORIGINAL FOR RECIPIENT', 'DUPLICATE FOR TRANSPORTER', 'HSN/SAC', '998519', 'Manpower Services', 'Price Per Month 100,000.00', 'IGST', 'Round Off', 'INR One Lakh Seven Thousand Seven Hundred Thirty Nine Only', 'INR Sixteen Thousand Four Hundred Thirty Four and Seventy Eight paise Only', 'Taxable', 'This is a Computer Generated Invoice']) expect(t).toContain(word);
-    // original for the recipient and duplicate for the transporter: two pages
-    expect((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(2);
+    for (const word of ['Tax Invoice', 'ORIGINAL FOR RECIPIENT', 'HSN/SAC', '998519', 'Manpower Services', 'Price Per Month 100,000.00', 'IGST', 'Round Off', 'INR One Lakh Seven Thousand Seven Hundred Thirty Nine Only', 'INR Sixteen Thousand Four Hundred Thirty Four and Seventy Eight paise Only', 'Taxable', 'This is a Computer Generated Invoice']) expect(t).toContain(word);
+    // the original for the recipient only: one page, no copy for the transporter
+    expect(t).not.toContain('DUPLICATE FOR TRANSPORTER');
+    expect((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length).toBe(1);
   });
 
   test('inside the sellers state it is CGST + SGST at half the rate each, and the projects own HSN / SAC is used', async () => {
