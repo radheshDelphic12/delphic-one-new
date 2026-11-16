@@ -39,6 +39,7 @@ const ENTITY_LABEL = {
   project_finance_entry: 'Project finance entry',
   project_document: 'Project document',
   project_vendor_invoice: 'Project vendor invoice',
+  vendor_purchase: 'Vendor purchase',
   billing_rate: 'Billing rate',
   vendor_payment: 'Vendor payment',
   self_project: 'Own project',

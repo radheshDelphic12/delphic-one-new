@@ -28,6 +28,7 @@ const TRACKED = {
   ProjectFinanceEntry: 'project_finance_entry',
   ProjectDocument: 'project_document',
   ProjectVendorInvoice: 'project_vendor_invoice',
+  VendorPurchase: 'vendor_purchase', // a normal purchase bill (Finance > Vendor Invoices)
   BillingRate: 'billing_rate',
   VendorPayment: 'vendor_payment',
   Team: 'team',
