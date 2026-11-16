@@ -11,6 +11,7 @@ const {
   decideClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
+  listApprovalsQuerySchema,
   claimsPayoutQuerySchema,
   claimsProcessedQuerySchema,
   createVendorPaymentSchema,
@@ -144,7 +145,7 @@ router.get(
 router.get(
   '/claims/approvals',
   asyncHandler(async (req, res) => {
-    const { data, scope } = await service.listApprovals(req.user.org_id, req.user);
+    const { data, scope } = await service.listApprovals(req.user.org_id, req.user, listApprovalsQuerySchema.parse(req.query));
     return ok(res, data, { scope });
   })
 );

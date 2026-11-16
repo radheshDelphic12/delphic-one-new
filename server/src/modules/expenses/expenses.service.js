@@ -147,12 +147,14 @@ async function listClaims(orgId, { status, page, limit, ...filters }) {
 // Pending claims waiting on this user's step (their reports' claims at the
 // manager step; every claim at HR / Finance for those departments; all
 // pending claims for an admin).
-async function listApprovals(orgId, user) {
+async function listApprovals(orgId, user, filters = {}) {
   const scope = await approverScope(user);
   const where = actionableWhere(scope);
   if (!where) return { data: [], scope };
+  const narrowed = await claimFilterWhere(orgId, filters);
   const data = await prisma.expenseClaim.findMany({
-    where: { org_id: orgId, ...where },
+    // the queue is what is waiting on this person; the filters only narrow it (month, category, office, employee)
+    where: { AND: [{ org_id: orgId, ...where }, narrowed] },
     orderBy: { created_at: 'asc' },
     include: { ...CLAIM_INCLUDE, org_membership: { select: { id: true, person: { select: { id: true, name: true } } } } },
   });
