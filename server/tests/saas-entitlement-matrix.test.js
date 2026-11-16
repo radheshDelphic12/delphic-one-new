@@ -125,6 +125,7 @@ describe('switch ON, customer company', () => {
     for (const r of rows) {
       const res = await hit(ours.token, r.path_prefix);
       expect({ path: r.path_prefix, gated: /module is not active|read-only/.test(res.body.message || '') }).toMatchObject({ gated: false });
+      expect({ path: r.path_prefix, status: res.status < 500 }).toEqual({ path: r.path_prefix, status: true }); // the tenant read guard must never break our own queries
     }
   });
 

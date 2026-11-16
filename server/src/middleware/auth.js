@@ -10,6 +10,7 @@ const { teamUserIds } = require('../lib/permissions');
 const { loadAccess } = require('../lib/access/load');
 const accessGuard = require('../lib/access/guard');
 const saasGate = require('../modules/platform/saasGate');
+const sessionRevocation = require('../lib/sessionRevocation');
 
 // Multi-company ERP (Phase 1): the JWT carries an `org_id` for users who have
 // an OrgMembership (everyone, post Phase-0 backfill). Tokens issued before
@@ -61,6 +62,8 @@ function authenticate(req, res, next) {
     const base = { id: payload.sub, role: payload.role, name: payload.name, email: payload.email };
     resolveOrgContext(base, payload.org_id)
       .then(async (user) => {
+        // a password reset by an admin ended this person's earlier sessions
+        if (await sessionRevocation.isRevoked(payload.sub, payload.iat)) return fail(res, 401, 'Your session has ended. Please sign in again');
         if (!user) return fail(res, 403, 'Active organization membership required');
         if (user.worker_type === 'contractor' && !contractorMayAccess(req.method, req.originalUrl)) {
           return fail(res, 403, 'Not available in the contractor portal');
@@ -73,6 +76,7 @@ function authenticate(req, res, next) {
         }
         user.role = allowed.role;
         // SaaS module access: a no-op unless the "Module access checks" switch is on, and then only for customer companies.
+        if (user.org_id && (await saasGate.isDeletedOrg(user.org_id))) return fail(res, 403, 'This workspace has been deleted');
         const saasBlocked = await saasGate.check(req, user);
         if (saasBlocked) return fail(res, 403, saasBlocked);
         req.user = user;

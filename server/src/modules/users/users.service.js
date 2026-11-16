@@ -238,4 +238,11 @@ async function listActivity(userId, orgId, { limit = 50 } = {}) {
   }));
 }
 
-module.exports = { getById, list, listDirectory, create, update, countActiveSuperadmins, listActivity };
+// Admin password reset: the same bcrypt hashing as create/update above, plus ending the person's existing sessions. Never logs or returns the password.
+async function setPassword(id, password) {
+  const password_hash = await bcrypt.hash(password, 10);
+  await prisma.user.update({ where: { id }, data: { password_hash, sessions_valid_after: require('../../lib/sessionRevocation').cutoffNow() } });
+  require('../../lib/sessionRevocation').clearCache();
+}
+
+module.exports = { getById, list, listDirectory, create, update, countActiveSuperadmins, listActivity, setPassword };

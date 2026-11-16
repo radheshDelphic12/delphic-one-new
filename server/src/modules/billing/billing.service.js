@@ -334,6 +334,8 @@ async function listMyGroupCharges(orgId, { period_month, period_year, date, date
     and.push({ OR: [{ category_id }, ...(category ? [{ category_id: null, kind: { equals: category.name, mode: 'insensitive' } }] : [])] });
   }
   if (location_id) and.push({ location_id });
+  // Expense rows posted by a normal purchase (Finance > Vendor Invoices) are managed there, not in Group Charges.
+  and.push({ vendor_purchase: { is: null } });
   return prisma.groupBillingCharge.findMany({
     where: { org_id: orgId, ...(and.length ? { AND: and } : {}) },
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { payment_date: 'desc' }, { created_at: 'desc' }],
@@ -343,7 +345,7 @@ async function listMyGroupCharges(orgId, { period_month, period_year, date, date
 
 async function listAllGroupCharges({ org_id }) {
   return prisma.groupBillingCharge.findMany({
-    where: { ...(org_id ? { org_id } : {}) },
+    where: { ...(org_id ? { org_id } : {}), vendor_purchase: { is: null } },
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
     include: { org: { select: { id: true, name: true } } },
   });

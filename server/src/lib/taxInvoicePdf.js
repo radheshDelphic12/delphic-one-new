@@ -22,7 +22,8 @@ const { D } = require('../modules/cashPosition/cash.calc');
 //   taxes: [{ label, amount }], round_off,
 //   subtotal, total,
 //   tax_summary: [{ rate, taxable, parts: [{ label, amount }] }],     // GST invoices only
-//   bank: { holder, lines: [text] }, remarks, declaration, notes, jurisdiction, cancelled
+//   bank: { holder, lines: [text] }, remarks, declaration, notes, jurisdiction, cancelled,
+//   annexure: { heading, rows: [{ ref, reason, amount }], rows_total, summary: [{ label, amount, strong }], note }  // optional extra page after the invoice
 // }
 
 const M = 28;
@@ -31,8 +32,8 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const W = PAGE_W - 2 * M;
 const COPIES = ['ORIGINAL FOR RECIPIENT'];
-// A GST tax invoice is printed twice, like the Tally original: one page for the recipient and one for the transporter.
-const TAX_COPIES = ['ORIGINAL FOR RECIPIENT', 'DUPLICATE FOR TRANSPORTER'];
+// Every invoice - GST tax invoices too - prints ONE copy, the original for the recipient (the "duplicate for transporter" copy is no longer printed).
+const TAX_COPIES = COPIES;
 // The PDF standard fonts have no rupee sign: this font draws only that one glyph.
 const RUPEE_FONT = path.join(__dirname, '..', 'assets', 'fonts', 'NotoSans-Bold.ttf');
 const INK = '#000';
@@ -198,7 +199,7 @@ function drawCopy(doc, model, copyLabel, cols) {
   const bankLines = [model.bank?.holder ? `A/c Holder's Name : ${model.bank.holder}` : null, ...(model.bank?.lines || [])].filter(Boolean);
   setFont(doc, 'Helvetica', 8);
   const bankH = bankLines.length ? heightOf(doc, bankLines.join('\n'), rightW - 12) + 18 : 18;
-  const remarksText = [model.remarks, model.notes].filter(Boolean).join('\n');
+  const remarksText = [model.remarks, model.notes, (model.annexure?.rows || []).length ? 'Adjustment details: see the annexure page after this invoice.' : null].filter(Boolean).join('\n');
   const leftBottomH = (remarksText ? heightOf(doc, remarksText, leftW - 12) + 12 : 12) + heightOf(doc, model.declaration || DECLARATION, leftW - 12) + 24;
   const sumH = taxWords ? taxSummary(doc, model, 0, 0, 380, false) : 0;
   const signature = signatureBuffer(model.seller?.signature_image);
@@ -405,6 +406,115 @@ function drawCopy(doc, model, copyLabel, cols) {
   doc.text('This is a Computer Generated Invoice', M, footerY + 14, { width: W, align: 'center' });
 }
 
+/**
+ * The annexure: an extra page (more when the list is long) after the invoice. It lists every adjustment on its own line - which project it
+ * belongs to, why, and the amount - and how the invoice amount is made up, so the single "Adjustment" row of the invoice can be explained.
+ */
+function drawAnnexure(doc, model) {
+  const a = model.annexure;
+  const m = model.meta || {};
+  const footerY = PAGE_H - M - 22;
+  const cur = model.currency;
+  const slW = 28;
+  const amtW = 100;
+  const refW = 150;
+  const reasonW = W - slW - refW - amtW;
+  let y = 0;
+
+  const pageHead = (continued) => {
+    doc.addPage({ size: 'A4', margins: MARGINS });
+    setFont(doc, 'Helvetica-Bold', 11);
+    doc.text(`Annexure to ${model.title}`, M, M, { width: W, align: 'center' });
+    setFont(doc, 'Helvetica-Oblique', 7.5);
+    doc.text(`Invoice ${m.number || ''}${m.date ? `  |  ${m.date}` : ''}${continued ? '  -  continued' : ''}`, M, M + 2, { width: W, align: 'right' });
+    y = M + 22;
+    setFont(doc, 'Helvetica', 7.5, '#444');
+    setFont(doc, 'Helvetica-Oblique', 7.5, MUTED);
+    doc.text(model.jurisdiction || 'SUBJECT TO JURISDICTION', M, footerY + 2, { width: W, align: 'center' });
+    doc.text('This is a Computer Generated Invoice', M, footerY + 14, { width: W, align: 'center' });
+  };
+  const room = (h) => { if (y + h > footerY - 10) pageHead(true); };
+
+  pageHead(false);
+  // parties
+  const half = W / 2;
+  const sellerH = party(doc, 0, 0, half - 12, [{ text: model.seller?.name, font: 'Helvetica-Bold', size: 9 }, { text: model.seller?.gstin ? `GSTIN/UIN : ${model.seller.gstin}` : null }], false) + 8;
+  const buyerItems = [{ text: 'Buyer (Bill to)', size: 7.5, color: MUTED }, { text: model.buyer?.name, font: 'Helvetica-Bold', size: 9 }, { text: model.buyer?.gstin ? `GSTIN/UIN : ${model.buyer.gstin}` : null }];
+  const buyerH = party(doc, 0, 0, half - 12, buyerItems, false) + 8;
+  const partyH = Math.max(sellerH, buyerH);
+  box(doc, M, y, W, partyH);
+  rule(doc, M + half, y, M + half, y + partyH);
+  party(doc, M + 6, y + 4, half - 12, [{ text: model.seller?.name, font: 'Helvetica-Bold', size: 9 }, { text: model.seller?.gstin ? `GSTIN/UIN : ${model.seller.gstin}` : null }], true);
+  party(doc, M + half + 6, y + 4, half - 12, buyerItems, true);
+  y += partyH + 14;
+
+  setFont(doc, 'Helvetica-Bold', 10);
+  doc.text(a.heading || 'Adjustment details', M, y, { width: W });
+  y += 16;
+
+  const tableHead = () => {
+    box(doc, M, y, W, 18);
+    rule(doc, M + slW, y, M + slW, y + 18);
+    rule(doc, M + slW + refW, y, M + slW + refW, y + 18);
+    rule(doc, M + W - amtW, y, M + W - amtW, y + 18);
+    setFont(doc, 'Helvetica-Bold', 8);
+    doc.text('SI No.', M, y + 5, { width: slW, align: 'center' });
+    doc.text('Project / entry', M + slW + 4, y + 5, { width: refW - 8 });
+    doc.text('Reason for the adjustment', M + slW + refW + 4, y + 5, { width: reasonW - 8 });
+    doc.text(`Amount (${cur})`, M + W - amtW + 2, y + 5, { width: amtW - 6, align: 'right' });
+    y += 18;
+  };
+  const rows = a.rows || [];
+  if (rows.length) {
+    tableHead();
+    rows.forEach((r, i) => {
+      setFont(doc, 'Helvetica', 8.5);
+      const h = Math.max(heightOf(doc, r.ref || '', refW - 8), heightOf(doc, r.reason || '', reasonW - 8), 10) + 8;
+      if (y + h > footerY - 30) { pageHead(true); tableHead(); }
+      box(doc, M, y, W, h);
+      rule(doc, M + slW, y, M + slW, y + h);
+      rule(doc, M + slW + refW, y, M + slW + refW, y + h);
+      rule(doc, M + W - amtW, y, M + W - amtW, y + h);
+      setFont(doc, 'Helvetica', 8.5);
+      doc.text(String(i + 1), M, y + 4, { width: slW, align: 'center' });
+      doc.text(r.ref || '', M + slW + 4, y + 4, { width: refW - 8 });
+      doc.text(r.reason || '', M + slW + refW + 4, y + 4, { width: reasonW - 8 });
+      setFont(doc, 'Helvetica-Bold', 8.5);
+      doc.text(fmt(r.amount, cur), M + W - amtW + 2, y + 4, { width: amtW - 6, align: 'right' });
+      y += h;
+    });
+    room(20);
+    box(doc, M, y, W, 18);
+    rule(doc, M + W - amtW, y, M + W - amtW, y + 18);
+    setFont(doc, 'Helvetica-Bold', 8.5);
+    doc.text('Total adjustments', M + 4, y + 5, { width: W - amtW - 10, align: 'right' });
+    doc.text(fmt(a.rows_total ?? rows.reduce((s, r) => s.plus(D(r.amount)), D(0)), cur), M + W - amtW + 2, y + 5, { width: amtW - 6, align: 'right' });
+    y += 18 + 18;
+  }
+
+  if ((a.summary || []).length) {
+    room(40);
+    setFont(doc, 'Helvetica-Bold', 10);
+    doc.text('How the invoice amount is made up', M, y, { width: W });
+    y += 16;
+    a.summary.forEach((s) => {
+      room(20);
+      box(doc, M, y, W, 17);
+      rule(doc, M + W - amtW, y, M + W - amtW, y + 17);
+      setFont(doc, s.strong ? 'Helvetica-Bold' : 'Helvetica', 8.5);
+      doc.text(s.label, M + 6, y + 4.5, { width: W - amtW - 14 });
+      doc.text(fmt(s.amount, cur), M + W - amtW + 2, y + 4.5, { width: amtW - 6, align: 'right' });
+      y += 17;
+    });
+    y += 12;
+  }
+  if (a.note) {
+    room(30);
+    setFont(doc, 'Helvetica-Oblique', 8, MUTED);
+    doc.text(a.note, M, y, { width: W });
+  }
+}
+
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** 2026-08-13 -> 13-Aug-26 */
@@ -427,6 +537,7 @@ function taxInvoicePdf(input, { compress = true } = {}) {
       doc.addPage({ size: 'A4', margins: MARGINS });
       drawCopy(doc, model, label, cols);
     });
+    if (model.annexure && ((model.annexure.rows || []).length || (model.annexure.summary || []).length)) drawAnnexure(doc, model);
   }
   doc.end();
   return done;

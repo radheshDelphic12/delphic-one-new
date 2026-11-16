@@ -11,7 +11,23 @@ const entitlements = require('./entitlements.service');
 const TTL_MS = 30000;
 let table = null;
 let loadedAt = 0;
-const clearCache = () => { table = null; loadedAt = 0; };
+let deleted = new Set();
+let deletedAt = 0;
+const clearCache = () => { table = null; loadedAt = 0; deletedAt = 0; };
+
+// Companies of soft-deleted customers. A signed-in session of one of their users is refused at once (the users are also deactivated, which stops sign-in and
+// refresh; this stops the access token that is still valid). Empty today, so it costs one cached read and changes nothing for anyone else.
+async function isDeletedOrg(orgId) {
+  if (!orgId) return false;
+  if (Date.now() - deletedAt > TTL_MS) {
+    try {
+      const rows = await prisma.$queryRawUnsafe("SELECT org_id::text AS org_id FROM saas_customers WHERE status = 'deleted'");
+      deleted = new Set(rows.map((r) => r.org_id));
+    } catch (_err) { deleted = new Set(); }
+    deletedAt = Date.now();
+  }
+  return deleted.has(orgId);
+}
 
 async function rules() {
   if (table && Date.now() - loadedAt < TTL_MS) return table;
@@ -58,4 +74,4 @@ async function lockedMenu(user) {
   return { applies: true, status: ent.status, modules: ent.modules, locked: [...new Set(rows.map((r) => r.menu_prefix))] };
 }
 
-module.exports = { check, moduleFor, lockedMenu, clearCache, rules };
+module.exports = { check, moduleFor, lockedMenu, clearCache, rules, isDeletedOrg };

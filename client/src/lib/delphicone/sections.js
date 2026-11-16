@@ -1,10 +1,11 @@
-import { Building2, FileText, LayoutDashboard, Target } from 'lucide-react';
+import { Building2, FileText, LayoutDashboard, Target, Users } from 'lucide-react';
 
 /** The Delphic One workspace. `cap` is the capability (server delphicone.routes.js) needed to see a section. */
 export const DELPHIC_ONE_SECTIONS = [
   { key: 'customers', to: '/delphic-one/customers', label: 'Customers', icon: Building2, cap: 'customers' },
   { key: 'leads', to: '/delphic-one/leads', label: 'Leads', icon: Target, cap: 'leads' },
   { key: 'invoices', to: '/delphic-one/invoices', label: 'Invoices', icon: FileText, cap: 'invoices' },
+  { key: 'team', to: '/delphic-one/team', label: 'Team', icon: Users, cap: 'team' },
 ];
 export const DELPHIC_ONE_HOME = { to: '/delphic-one', label: 'Overview', icon: LayoutDashboard, end: true };
 
@@ -22,4 +23,5 @@ export const DELPHIC_ONE_TITLES = {
   '/delphic-one/customers': ['Customers', 'Companies using Delphic One: plan, users, recurring revenue and what they owe.'],
   '/delphic-one/leads': ['Leads', 'Early-access requests and prospects, from first call to customer.'],
   '/delphic-one/invoices': ['Invoices', 'Subscription invoices, payments received and overdue follow-ups.'],
+  '/delphic-one/team': ['Team', 'The people who work in the Delphic One company: add them, change their role, switch them off.'],
 };

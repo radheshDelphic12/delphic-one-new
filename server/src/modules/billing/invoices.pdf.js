@@ -6,7 +6,7 @@ const { D } = require('../cashPosition/cash.calc');
 // Client invoices (what a company bills its clients) and vendor invoices (what a vendor bills the company) printed in the same
 // tax-invoice layout as the GST / USD invoices. A client invoice whose contract carries a GST charge prints as a full GST TAX INVOICE
 // (the Tally layout): an HSN / SAC column, the GST rate, the tax split IGST or CGST + SGST by place of supply, a tax summary, the tax
-// in words and a Round Off line, once for the recipient and once for the transporter. Everything else prints without tax columns.
+// in words and a Round Off line (one copy, the original for the recipient). An invoice with adjustments gets an extra annexure page listing each one. Everything else prints without tax columns.
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, currency) => `${currency} ${Number(n || 0).toLocaleString(currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -156,6 +156,44 @@ function gstSplit(sourceCharges, taxable, sellerState, buyerState, consolidated 
   return { charges: gstCharges, parts: [{ label: 'IGST', amount: D(total).toFixed(2) }], total, rate: gstRate, gst_rate: gstRate };
 }
 
+/** The adjustments of a client invoice, one entry each (project, reason, amount); a combined invoice lists every contract's own. */
+function adjustmentItems(inv) {
+  const label = (p) => `${p?.name || 'Project'}${p?.code ? ` (${p.code})` : ''}`;
+  const take = (details, project) => (details?.adjustments || []).map((a) => ({ ref: label(project), reason: String(a.reason || 'Adjustment'), amount: num2(a.amount) }));
+  if (inv.line_items?.consolidated) return (inv.line_items.items || []).flatMap((it) => take(it.details, it.project));
+  return take(inv.details, inv.project);
+}
+
+/**
+ * The annexure page of a client invoice: every adjustment on its own line (project, reason, amount) and how the invoice amount is made up,
+ * so the one "Adjustment" row printed on the invoice can be explained. null when the invoice has no adjustment.
+ * An invoice amount that was changed by hand (so the rows no longer add up to it) shows the rest as its own line.
+ */
+function adjustmentAnnexure(inv, { charges, split, subtotal, gstBase, roundOff, total }) {
+  const printed = charges.filter((c) => c.label === 'Adjustment').reduce((a, c) => a.plus(D(c.amount)), D(0));
+  const rows = adjustmentItems(inv);
+  if (!rows.length && printed.abs().lt(0.005)) return null;
+  const diff = printed.minus(rows.reduce((a, r) => a.plus(D(r.amount)), D(0)));
+  if (diff.abs().gt(0.005)) {
+    rows.push({ ref: 'Whole invoice', reason: rows.length ? 'Other change to the invoice amount (made when the invoice was edited)' : 'Adjustment on this invoice (the amount was changed when the invoice was edited)', amount: diff.toFixed(2) });
+  }
+  const summary = [{ label: 'Total of the entries on the invoice', amount: subtotal.toFixed(2) }, { label: 'Adjustments (listed above)', amount: printed.toFixed(2) }];
+  if (split) {
+    summary.push({ label: 'Taxable value (entries + adjustments)', amount: gstBase.toFixed(2) });
+    split.parts.forEach((p) => summary.push({ label: `${p.label} @ ${split.rate}%`, amount: p.amount }));
+  }
+  charges.filter((c) => c.label !== 'Adjustment').forEach((c) => summary.push({ label: c.label, amount: c.amount }));
+  if (roundOff && !D(roundOff).isZero()) summary.push({ label: 'Round off', amount: roundOff });
+  summary.push({ label: 'Invoice total', amount: total, strong: true });
+  return {
+    heading: 'Adjustment details',
+    rows,
+    rows_total: printed.toFixed(2),
+    summary,
+    note: 'Adjustments are added to (+) or taken off (-) the amount of the entries before GST is worked out; a minus sign means the amount was reduced.',
+  };
+}
+
 async function clientInvoiceModel(orgId, inv) {
   const cur = inv.currency;
   const { party, bankLines } = await companyParty(orgId, cur);
@@ -199,6 +237,7 @@ async function clientInvoiceModel(orgId, inv) {
       meta: { number: inv.invoice_number, date: dateText(inv.invoice_date) },
       lines,
       taxes: charges,
+      annexure: adjustmentAnnexure(inv, { charges, split: null, subtotal, gstBase: null, roundOff: null, total: total.toFixed(2) }),
       subtotal: subtotal.toFixed(2),
       total: total.toFixed(2),
       notes: inv.notes,
@@ -213,6 +252,7 @@ async function clientInvoiceModel(orgId, inv) {
   // GST is charged on the base AFTER the adjustment, so the taxable value is the lines plus the adjustment row (the lines above stay as they were)
   const adjustments = charges.filter((c) => c.label === 'Adjustment').reduce((a, c) => a.plus(D(c.amount)), D(0));
   const gstBase = subtotal.plus(adjustments);
+  const annexure = adjustmentAnnexure(inv, { charges, split, subtotal, gstBase, roundOff: printed.minus(exact).toFixed(2), total: printed.toFixed(2) });
   return {
     ...common(party, bankLines),
     showHsn: true,
@@ -229,6 +269,7 @@ async function clientInvoiceModel(orgId, inv) {
     subtotal: subtotal.toFixed(2),
     total: printed.toFixed(2),
     tax_summary: [{ rate: split.rate, taxable: gstBase.toFixed(2), parts: split.parts }],
+    annexure,
     remarks: null,
     notes: inv.notes,
     cancelled: false,

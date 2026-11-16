@@ -13,6 +13,7 @@ const adjustments = require('./adjustments.service');
 const vendorAdjustments = require('./vendorAdjustments.service');
 const resourceBilling = require('./resourceBilling.service');
 const vendorTracking = require('./vendorTracking.service');
+const vendorPurchases = require('./vendorPurchases.service');
 const charges = require('./charges.service');
 const vendorCharges = require('./vendorCharges.service');
 const exchangeRates = require('./exchangeRates.service');
@@ -62,6 +63,11 @@ const {
   pnlListQuerySchema,
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
+  vendorPurchaseSchema,
+  updateVendorPurchaseSchema,
+  listVendorPurchasesQuerySchema,
+  purchasePaySchema,
+  purchaseCancelSchema,
 } = require('./billing.validation');
 
 const vendorPayoutQuerySchema = z.object({
@@ -118,6 +124,9 @@ const ERRORS = {
   catalogue_account_read_only: [409, 'This is a client account from the Accounts catalogue, so Finance can’t edit it. Add a project for this client (People → Calendars → Add Project) and set its billing there.'],
   vendor_not_found: WORKER_ERRORS.vendor_not_found,
   vendor_line_not_found: [404, 'This vendor has no contractor work on that project for the month'],
+  purchase_number_taken: [409, 'This vendor already has a purchase with that bill number'],
+  purchase_cancelled: [409, 'This purchase has been cancelled'],
+  purchase_paid: [409, 'This purchase is marked paid - mark it unpaid first, then cancel it'],
 };
 
 function failFor(res, error, result) {
@@ -305,6 +314,63 @@ router.get(
     const result = await vendorTracking.trace(req.user.org_id, req.params.id);
     if (result.error === 'not_found') return fail(res, 404, 'Vendor invoice not found');
     return ok(res, result);
+  })
+);
+
+// Normal purchases: a vendor bill that is not tied to a client project (office, software, equipment ...). It is booked as a company expense
+// (a linked expense row) and tracked paid / unpaid here; see vendorPurchases.service.
+router.get(
+  '/vendor-purchases',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await vendorPurchases.list(req.user.org_id, listVendorPurchasesQuerySchema.parse(req.query))))
+);
+router.post(
+  '/vendor-purchases',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorPurchases.create(req.user.org_id, req.user, vendorPurchaseSchema.parse(req.body));
+    if (result.error) return failFor(res, result.error);
+    return created(res, result.purchase);
+  })
+);
+router.patch(
+  '/vendor-purchases/:id',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorPurchases.update(req.user.org_id, req.user, req.params.id, updateVendorPurchaseSchema.parse(req.body));
+    if (result.error === 'not_found') return fail(res, 404, 'Purchase not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.purchase);
+  })
+);
+router.post(
+  '/vendor-purchases/:id/cancel',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorPurchases.cancel(req.user.org_id, req.user, req.params.id, purchaseCancelSchema.parse(req.body || {}).reason);
+    if (result.error === 'not_found') return fail(res, 404, 'Purchase not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.purchase);
+  })
+);
+router.post(
+  '/vendor-purchases/:id/pay',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorPurchases.markPaid(req.user.org_id, req.params.id, purchasePaySchema.parse(req.body || {}));
+    if (result.error === 'not_found') return fail(res, 404, 'Purchase not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.purchase);
+  })
+);
+router.post(
+  '/vendor-purchases/:id/unpay',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorPurchases.markUnpaid(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Purchase not found');
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.purchase);
   })
 );
 
