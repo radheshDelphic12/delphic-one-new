@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Filter, MoreVertical, Plus, X } from 'lucide-react';
+import { Filter, MoreVertical, Plus, Sparkles, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -119,6 +119,7 @@ export default function AccountsListPage() {
   const { user } = useAuth();
   const { pushError } = useAlerts();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -372,13 +373,16 @@ export default function AccountsListPage() {
 
   return (
     <div className="space-y-2">
-      {canCreateAccount(user) && (
-        <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="btn-secondary inline-flex shrink-0 items-center gap-1.5" data-testid="ai-suggestions-link" onClick={() => navigate('/accounts/suggestions')}>
+          <Sparkles className="h-4 w-4" /> AI suggestions
+        </button>
+        {canCreateAccount(user) && (
           <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Create client / vendor account
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
         <div className="border-b border-tertiary-100 px-4 py-2.5">

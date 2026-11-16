@@ -171,6 +171,8 @@ const RULES = [
   [/^\/pipeline(\/|$)/, 'pipeline.view'],
   [/^\/accounts(\/|$)/, { GET: 'accounts.view', '*': ['accounts.create', 'accounts.update', 'meetings.schedule', 'vendors.onboard'] }],
   [/^\/leads(\/|$)/, { GET: 'accounts.view', '*': ['accounts.create', 'accounts.update'] }],
+  // AI client suggestions (Accounts > AI suggestions): seeing them is Accounts > View; asking the AI and adding one as a lead is Accounts > Create.
+  [/^\/lead-suggestions(\/|$)/, { GET: 'accounts.view', '*': 'accounts.create' }],
   [/^\/requirements(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.create', 'requirements.update', 'requirements.delete'] }],
   [/^\/seats(\/|$)/, ['submissions.update', 'requirements.update']],
   [/^\/assessments(\/|$)/, { GET: ['requirements.view', 'pipeline.view', 'submissions.create'], '*': ['requirements.update', 'submissions.create'] }],
