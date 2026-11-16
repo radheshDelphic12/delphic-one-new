@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, Plus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { downloadFile } from '../../lib/downloadFile.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -9,6 +9,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import VendorPayoutPanel from './VendorPayoutPanel.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
+import { PurchaseDrawer, PayPurchaseDrawer } from './VendorPurchaseDrawers.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -98,15 +99,62 @@ export default function VendorInvoicesTab() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [rows, setRows] = useState(null);
+  const [purchases, setPurchases] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [purchaseDrawer, setPurchaseDrawer] = useState({ open: false, purchase: null }); // Add / edit a normal purchase
+  const [payFor, setPayFor] = useState(null);
   const [traceId, setTraceId] = useState(null);
   const [filesFor, setFilesFor] = useState(null); // the invoice whose files are open
   const [view, setView] = useState('invoices');
 
   const load = useCallback(() => {
     setRows(null);
-    apiClient.get('/billing/vendor-invoices', { params: { period_month: month, period_year: year } }).then(({ data }) => setRows(data.data || [])).catch(() => setRows([]));
+    // Project invoices (generated from Live Analytics > Vendors) and normal purchases (a vendor bill with no project) of the month, side by side.
+    const params = { period_month: month, period_year: year };
+    Promise.all([
+      apiClient.get('/billing/vendor-invoices', { params }).then(({ data }) => data.data || []).catch(() => []),
+      apiClient.get('/billing/vendor-purchases', { params }).then(({ data }) => data.data || []).catch(() => []),
+    ]).then(([invoices, bought]) => { setPurchases(bought); setRows(invoices); });
   }, [month, year]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { apiClient.get('/billing/vendors').then(({ data }) => setVendors(data.data || [])).catch(() => setVendors([])); }, []);
+
+  async function savePurchase(payload) {
+    const editing = purchaseDrawer.purchase;
+    try {
+      if (editing) await apiClient.patch(`/billing/vendor-purchases/${editing.id}`, payload);
+      else await apiClient.post('/billing/vendor-purchases', payload);
+      pushSuccess(editing ? 'Purchase updated' : 'Purchase added');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to save the purchase'), 'Something went wrong');
+      throw err; // keeps the drawer open
+    }
+  }
+  async function payPurchase(payload) {
+    try {
+      await apiClient.post(`/billing/vendor-purchases/${payFor.id}/pay`, payload);
+      pushSuccess('Marked paid');
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to mark the purchase paid'), 'Something went wrong');
+      throw err;
+    }
+  }
+  async function purchaseAction(purchase, action, done) {
+    try {
+      await apiClient.post(`/billing/vendor-purchases/${purchase.id}/${action.name}`, action.body || {});
+      pushSuccess(done);
+      load();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to update the purchase'), 'Something went wrong');
+    }
+  }
+  function cancelPurchase(purchase) {
+    const reason = window.prompt(`Cancel purchase ${purchase.bill_number}? Its expense is removed. Reason (optional):`, '');
+    if (reason === null) return;
+    purchaseAction(purchase, { name: 'cancel', body: { reason: reason.trim() || undefined } }, 'Purchase cancelled');
+  }
 
   async function track(row, change, done) {
     try {
@@ -137,28 +185,41 @@ export default function VendorInvoicesTab() {
     }
   }
 
+  // One list: the month's project invoices, then its normal purchases (a vendor bill with no project).
+  const tableRows = [...(rows || []).map((r) => ({ ...r, kind: 'invoice' })), ...purchases];
+
   const columns = [
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor_account?.name || '—' },
-    { key: 'project', header: 'Project', render: (r) => r.project?.name || '—' },
-    { key: 'number', header: 'Invoice', render: (r) => r.invoice_number || '—' },
+    { key: 'type', header: 'Type', render: (r) => (r.kind === 'purchase' ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">Purchase</span> : <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800">Project invoice</span>) },
+    { key: 'project', header: 'Project', render: (r) => (r.kind === 'purchase' ? <span className="text-tertiary-500">{r.category_name || 'No project'}{r.description ? ` - ${r.description}` : ''}</span> : r.project?.name || '—') },
+    { key: 'number', header: 'Invoice', render: (r) => (r.kind === 'purchase' ? r.bill_number : r.invoice_number) || '—' },
     { key: 'amount', header: 'Amount', render: (r) => money(r.amount, r.currency) },
     { key: 'gst', header: 'GST', render: (r) => `+${money(r.gst_amount, r.currency)}` },
     { key: 'tds', header: 'TDS', render: (r) => `-${money(r.tds_amount, r.currency)}` },
     { key: 'adjustment', header: 'Adjustment', render: (r) => money(r.adjustment_amount, r.currency) },
     { key: 'net', header: 'Net payable', render: (r) => <span className="font-semibold">{money(r.net_payable, r.currency)}</span> },
-    { key: 'sent', header: 'Sent', render: (r) => (r.sent ? 'Sent' : 'Unsent') },
-    { key: 'paid', header: 'Payment', render: (r) => (r.paid ? 'Paid' : 'Unpaid') },
+    { key: 'sent', header: 'Sent', render: (r) => (r.kind === 'purchase' ? '—' : r.sent ? 'Sent' : 'Unsent') },
+    { key: 'paid', header: 'Payment', render: (r) => (r.kind === 'purchase' && r.status === 'cancelled' ? <span className="text-danger-600">Cancelled</span> : r.paid ? `Paid${r.paid_on ? ` ${r.paid_on}` : ''}` : 'Unpaid') },
     {
       key: 'actions',
       header: '',
-      render: (r) => (
+      render: (r) => (r.kind === 'purchase' ? (
+        <span className="flex flex-wrap gap-1">
+          {r.status === 'active' && <button type="button" className="btn-ghost text-xs" data-testid="vendor-purchase-edit" onClick={() => setPurchaseDrawer({ open: true, purchase: r })}>Edit</button>}
+          {r.status === 'active' && (r.paid
+            ? <button type="button" className="btn-ghost text-xs" onClick={() => purchaseAction(r, { name: 'unpay' }, 'Marked unpaid')}>Mark unpaid</button>
+            : <button type="button" className="btn-ghost text-xs" data-testid="vendor-purchase-pay" onClick={() => setPayFor(r)}>Mark paid</button>)}
+          <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-files" onClick={() => setFilesFor(r)}>Files{r.file_count ? ` (${r.file_count})` : ''}</button>
+          {r.status === 'active' && !r.paid && <button type="button" className="btn-ghost text-xs text-danger-600" data-testid="vendor-purchase-cancel" onClick={() => cancelPurchase(r)}>Cancel</button>}
+        </span>
+      ) : (
         <span className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost text-xs" onClick={() => track(r, { sent: !r.sent }, r.sent ? 'Marked unsent' : 'Marked sent')}>{r.sent ? 'Mark unsent' : 'Mark sent'}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>GST / TDS / adjustment</button>
           <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-files" onClick={() => setFilesFor(r)}>Files{r.file_count ? ` (${r.file_count})` : ''}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => setTraceId(r.id)}>Trace</button>
         </span>
-      ),
+      )),
     },
   ];
 
@@ -181,7 +242,7 @@ export default function VendorInvoicesTab() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Finance</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Vendor invoices</h2>
-          <p className="mt-1 text-sm text-tertiary-500">Vendor billing -&gt; invoice -&gt; GST / TDS / adjustments -&gt; sent -&gt; payment. Invoices are generated from Live Analytics &gt; Vendors.</p>
+          <p className="mt-1 text-sm text-tertiary-500">Vendor billing -&gt; invoice -&gt; GST / TDS / adjustments -&gt; sent -&gt; payment. Project invoices are generated from Live Analytics &gt; Vendors. For a vendor bill that is not tied to a client project (office, software, equipment), use Add purchase: it is booked as a company expense.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-medium text-tertiary-600">Month
@@ -191,12 +252,15 @@ export default function VendorInvoicesTab() {
             <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{[now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
           </label>
           <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportVendor}><Download className="h-4 w-4" /> Vendor Excel</button>
+          <button type="button" className="btn-primary inline-flex items-center gap-1.5" data-testid="vendor-purchase-add" onClick={() => setPurchaseDrawer({ open: true, purchase: null })}><Plus className="h-4 w-4" /> Add purchase</button>
         </div>
       </div>
-      <DataTable columns={columns} rows={rows || []} loading={!rows} emptyLabel="No vendor invoices for this month" maxHeight="calc(100dvh - 22rem)" />
+      <DataTable columns={columns} rows={tableRows} loading={!rows} emptyLabel="No vendor invoices or purchases for this month" maxHeight="calc(100dvh - 22rem)" />
       <TraceDrawer invoiceId={traceId} onClose={() => setTraceId(null)} />
-      <Drawer open={Boolean(filesFor)} title={filesFor ? `Files: ${filesFor.vendor_account?.name || 'Vendor'} ${filesFor.invoice_number || ''}`.trim() : 'Files'} onClose={() => { setFilesFor(null); load(); }}>
-        {filesFor && <FilesPanel entityType="project_vendor_invoice" entityId={filesFor.id} title="Vendor invoice files" defaultLabel={filesFor.invoice_number || 'Vendor invoice'} multiple />}
+      <PurchaseDrawer open={purchaseDrawer.open} purchase={purchaseDrawer.purchase} vendors={vendors} onClose={() => setPurchaseDrawer({ open: false, purchase: null })} onSubmit={savePurchase} />
+      <PayPurchaseDrawer purchase={payFor} onClose={() => setPayFor(null)} onSubmit={payPurchase} />
+      <Drawer open={Boolean(filesFor)} title={filesFor ? `Files: ${filesFor.vendor_account?.name || 'Vendor'} ${filesFor.invoice_number || filesFor.bill_number || ''}`.trim() : 'Files'} onClose={() => { setFilesFor(null); load(); }}>
+        {filesFor && <FilesPanel entityType={filesFor.kind === 'purchase' ? 'vendor_purchase' : 'project_vendor_invoice'} entityId={filesFor.id} title={filesFor.kind === 'purchase' ? 'Purchase bill files' : 'Vendor invoice files'} defaultLabel={filesFor.bill_number || filesFor.invoice_number || 'Vendor invoice'} multiple />}
       </Drawer>
     </div>
   );

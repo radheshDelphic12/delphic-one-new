@@ -419,6 +419,8 @@ enum DocumentEntityType {
   vendor_payment
   // Finance → Project P&L: a vendor's invoice file for the month.
   project_vendor_invoice
+  // Finance: a normal purchase bill (a vendor bill not tied to a client project).
+  vendor_purchase
   // People: an employee's own documents (ID proofs, letters …).
   org_membership
 }
@@ -494,6 +496,7 @@ model User {
   payroll_runs_processed          PayrollRun[]                    @relation("PayrollRunProcessedBy")
   billing_rates_created           BillingRate[]                   @relation("BillingRateCreatedBy")
   project_vendor_invoices_created ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceCreatedBy")
+  vendor_purchases_created        VendorPurchase[]                @relation("VendorPurchaseCreatedBy")
   client_invoices_created         ClientInvoice[]                 @relation("ClientInvoiceCreatedBy")
   billing_adjustments_created     BillingAdjustment[]             @relation("BillingAdjustmentCreatedBy")
   vendor_adjustments_created      VendorAdjustment[]              @relation("VendorAdjustmentCreatedBy")
@@ -1572,6 +1575,53 @@ model ProjectVendorInvoice {
   @@map("project_vendor_invoices")
 }
 
+// A normal purchase: a bill from a vendor that is not tied to a client project (office, software, equipment ...). Recorded in Finance > Vendor
+// Invoices next to the project invoices. It is a company expense: the amount (before GST) is posted as a linked expense row (charge_id, a
+// GroupBillingCharge) in the bill date's month, so Live Analytics > Expenses, the lock and Financials read it like any other expense.
+// payable = amount + GST - TDS + adjustment. A cancelled purchase keeps its history and has no expense row. The bill file attaches via
+// Document (entity_type 'vendor_purchase').
+model VendorPurchase {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String              @db.Uuid
+  org               Org                 @relation(fields: [org_id], references: [id])
+  vendor_account_id String              @db.Uuid
+  vendor_account    Account             @relation("VendorPurchaseVendor", fields: [vendor_account_id], references: [id])
+  bill_number       String
+  bill_date         DateTime            @db.Date
+  due_date          DateTime?           @db.Date
+  period_month      Int
+  period_year       Int
+  description       String?
+  // The Finance > Categories (group charge) category; the name is kept as text so a renamed category still reads correctly.
+  category_id       String?             @db.Uuid
+  category_name     String?
+  location_id       String?             @db.Uuid
+  amount            Decimal             @db.Decimal(14, 2)
+  currency          Currency            @default(INR)
+  gst_amount        Decimal             @default(0) @db.Decimal(14, 2)
+  tds_amount        Decimal             @default(0) @db.Decimal(14, 2)
+  adjustment_amount Decimal             @default(0) @db.Decimal(14, 2)
+  adjustment_note   String?
+  status            String              @default("active") // active | cancelled
+  cancelled_at      DateTime?
+  cancelled_by      String?             @db.Uuid
+  cancel_reason     String?
+  paid_on           DateTime?           @db.Date
+  paid_amount       Decimal?            @db.Decimal(14, 2)
+  payment_mode      String?
+  payment_reference String?
+  charge_id         String?             @unique @db.Uuid
+  charge            GroupBillingCharge? @relation(fields: [charge_id], references: [id], onDelete: SetNull)
+  created_by        String              @db.Uuid
+  creator           User                @relation("VendorPurchaseCreatedBy", fields: [created_by], references: [id])
+  created_at        DateTime            @default(now())
+  updated_at        DateTime            @default(now()) @updatedAt
+
+  @@index([org_id, period_year, period_month])
+  @@index([vendor_account_id])
+  @@map("vendor_purchases")
+}
+
 // One row per (project, day) — the client brief's real-time revenue metric.
 // Computed from that day's APPROVED TimesheetEntry hours only (never
 // draft/rejected) × the applicable BillingRate. Idempotent by design:
@@ -1740,6 +1790,8 @@ model GroupBillingCharge {
   raised_by    String           @db.Uuid
   raiser       User             @relation("GroupBillingChargeRaisedBy", fields: [raised_by], references: [id])
   created_at   DateTime         @default(now())
+  // Set when this expense row was posted by a normal purchase (Finance > Vendor Invoices): the Group Charges lists leave those out.
+  vendor_purchase VendorPurchase?
 
   @@index([org_id, payment_date])
   @@index([org_group_id])
@@ -2349,6 +2401,7 @@ model Org {
   assigned_tasks          AssignedTask[]
   project_cost_rates      ProjectMemberAssignment[]
   project_vendor_invoices ProjectVendorInvoice[]
+  vendor_purchases        VendorPurchase[]
   assets                  Asset[]
   policies                Policy[]
   financial_asset_values  FinancialAssetValue[]
@@ -2757,6 +2810,7 @@ model Account {
   contractor_memberships     OrgMembership[]                 @relation("MembershipVendorAccount")
   project_vendor_invoices    ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceProject")
   vendor_invoices_raised     ProjectVendorInvoice[]          @relation("ProjectVendorInvoiceVendor")
+  vendor_purchases           VendorPurchase[]                @relation("VendorPurchaseVendor")
   assets_supplied            Asset[]                         @relation("AssetVendor")
   assets_at_client           Asset[]                         @relation("AssetClient")
 

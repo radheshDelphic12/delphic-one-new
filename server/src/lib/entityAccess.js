@@ -110,6 +110,15 @@ async function canAccessProjectVendorInvoice(user, invoiceId) {
   return { ok: true };
 }
 
+// A normal purchase bill file (Finance > Vendor Invoices) - admins of the same org only.
+async function canAccessVendorPurchase(user, purchaseId) {
+  const purchase = await prisma.vendorPurchase.findUnique({ where: { id: purchaseId }, select: { org_id: true } });
+  if (!purchase) return { error: 'not_found' };
+  if (!user.org_id || !user.org_membership_id) return { error: 'membership_required' };
+  if (purchase.org_id !== user.org_id || user.role !== 'admin') return { error: 'not_found' };
+  return { ok: true };
+}
+
 // An employee's own documents (ID proofs, letters …): an admin of the same
 // org, or the employee themselves — for reading and uploading alike.
 async function canAccessOrgMembership(user, membershipId) {
@@ -129,6 +138,7 @@ const CHECKERS = {
   submission: canAccessSubmission,
   expense_claim: canAccessExpenseClaim,
   project_vendor_invoice: canAccessProjectVendorInvoice,
+  vendor_purchase: canAccessVendorPurchase,
 };
 
 /**

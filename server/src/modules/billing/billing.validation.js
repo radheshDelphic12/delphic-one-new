@@ -321,6 +321,48 @@ const updateVendorInvoiceSchema = vendorInvoiceSchema
   .extend({ invoice_date: invoiceDate })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
+// Normal purchases (Finance > Vendor Invoices): a vendor bill that is not tied to a client project.
+// An empty or null date clears it, a missing one leaves it alone (update).
+const clearableDate = z.string().nullish().transform((v, ctx) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) { ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid date' }); return z.NEVER; }
+  return d;
+});
+const purchaseMoney = z.coerce.number().min(0).max(1e12);
+
+const vendorPurchaseSchema = z.object({
+  vendor_account_id: z.string().uuid(),
+  bill_number: z.string().trim().min(1, "Enter the vendor bill number").max(100),
+  bill_date: requiredDate,
+  due_date: clearableDate,
+  description: z.string().trim().max(1000).nullish(),
+  category_id: z.string().uuid().nullish(),
+  location_id: z.string().uuid().nullish(),
+  amount: z.coerce.number().positive().max(1e12),
+  currency: CURRENCY.default('INR'),
+  gst_amount: purchaseMoney.default(0),
+  tds_amount: purchaseMoney.default(0),
+  adjustment_amount: z.coerce.number().min(-1e12).max(1e12).default(0),
+  adjustment_note: z.string().trim().max(500).nullish(),
+});
+const updateVendorPurchaseSchema = vendorPurchaseSchema
+  .partial()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+const listVendorPurchasesQuerySchema = z.object({
+  period_month: z.coerce.number().int().min(1).max(12).optional(),
+  period_year: z.coerce.number().int().min(2000).max(2100).optional(),
+  vendor_account_id: z.string().uuid().optional(),
+});
+const purchasePaySchema = z.object({
+  paid_on: optionalDate,
+  paid_amount: z.coerce.number().positive().max(1e12).optional(),
+  payment_mode: z.string().trim().max(40).optional(),
+  payment_reference: z.string().trim().max(120).optional(),
+});
+const purchaseCancelSchema = z.object({ reason: z.string().trim().max(500).optional() });
+
 const listCostAssignmentsQuerySchema = z.object({
   account_id: z.string().uuid(),
   // Ended allocations are history — listed unless include_ended=false.
@@ -424,6 +466,11 @@ module.exports = {
   pnlListQuerySchema,
   vendorInvoiceSchema,
   updateVendorInvoiceSchema,
+  vendorPurchaseSchema,
+  updateVendorPurchaseSchema,
+  listVendorPurchasesQuerySchema,
+  purchasePaySchema,
+  purchaseCancelSchema,
   resourceRateSchema,
   resourceRateQuerySchema,
   applyProjectRateSchema,
