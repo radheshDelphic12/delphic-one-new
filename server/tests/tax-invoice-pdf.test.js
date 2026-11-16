@@ -97,6 +97,18 @@ describe('client and vendor invoices', () => {
     expect((await clientInvoicePdf('org1', client)).slice(0, 4).toString()).toBe('%PDF');
   });
 
+  test('the taxable value of a GST invoice is the base after the adjustment, the one GST was charged on', async () => {
+    // 1,00,000 - 10,000 adjustment = 90,000; GST 18% = 16,200; TDS 10% of 90,000 = 9,000; the client pays 97,200
+    const m = await clientInvoiceModel('org1', {
+      ...client, amount: 100000, total_amount: 97200,
+      details: { ...client.details, charges: [{ label: 'GST 18%', mode: 'percent', value: 18, effect: 'add', amount: 16200 }, { label: 'TDS 10%', mode: 'percent', value: 10, effect: 'deduct', amount: -9000 }] },
+    });
+    expect(m.tax_summary[0]).toMatchObject({ rate: 18, taxable: '90000.00' }); // not 100000.00
+    expect(m.subtotal).toBe('100000.00'); // the lines above stay as they were
+    expect(m.taxes.map((t) => [t.label, t.amount])).toEqual(expect.arrayContaining([['IGST', '16200.00'], ['Adjustment', '-10000.00']]));
+    expect(m.total).toBe('97200.00');
+  });
+
   test('the project face resource is printed with the project details; absent when not set', async () => {
     const withFace = await clientInvoiceModel('org1', { ...client, project: { ...client.project, face_resource: 'Asha Rao' } });
     expect(withFace.lines[0].details).toContain('Resource: Asha Rao');
