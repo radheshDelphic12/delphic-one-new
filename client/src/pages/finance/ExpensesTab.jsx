@@ -223,7 +223,7 @@ export default function ExpensesTab() {
 
   const params = useMemo(() => {
     const base = chargeQuery({ month: filters.month, date: '', category_id: filters.category_id, location_id: filters.location_id });
-    if (view === 'team' && filters.org_membership_id) base.org_membership_id = filters.org_membership_id;
+    if ((view === 'team' || view === 'approvals') && filters.org_membership_id) base.org_membership_id = filters.org_membership_id;
     // Group charges have no claim status.
     if ((view === 'mine' || view === 'team') && filters.status) base.status = filters.status;
     return base;
@@ -237,9 +237,10 @@ export default function ExpensesTab() {
         const { data } = await apiClient.get('/billing/group-charges', { params });
         setRows(data.data || []);
       } else if (view === 'approvals') {
-        const { data } = await apiClient.get('/expenses/claims/approvals');
+        const { data } = await apiClient.get('/expenses/claims/approvals', { params });
         setRows(data.data || []);
-        setApprovalCount((data.data || []).length);
+        // the badge is the whole queue: only an unfiltered list may set it (a filtered list is part of it)
+        if (Object.keys(params).length === 0) setApprovalCount((data.data || []).length);
       } else {
         const endpoint = view === 'team' ? '/expenses/claims' : '/expenses/claims/me';
         const { data } = await apiClient.get(endpoint, { params: { limit: 100, ...params } });
@@ -410,7 +411,10 @@ export default function ExpensesTab() {
     },
   ];
 
-  const filtered = Object.values(filters).some(Boolean);
+  // only the filters this view shows count (a status picked in My claims is not shown in Approvals)
+  const filtered = Boolean(filters.month || filters.category_id || filters.location_id
+    || ((view === 'team' || view === 'approvals') && filters.org_membership_id)
+    || ((view === 'mine' || view === 'team') && filters.status));
   const total = useMemo(() => {
     const byCurrency = new Map();
     for (const row of rows) byCurrency.set(row.currency, (byCurrency.get(row.currency) || 0) + Number(row.amount));
@@ -460,7 +464,7 @@ export default function ExpensesTab() {
 
       {view !== 'payout' && view !== 'processed' && (<>
       <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-6">
-        {view === 'team' && (
+        {(view === 'team' || view === 'approvals') && (
           <label className="block text-xs font-medium text-tertiary-600">Employee<div className="mt-1"><SearchableSelect value={filters.org_membership_id} onChange={(v) => setFilter('org_membership_id', v)} options={memberOptions} placeholder="All employees" allowClear /></div></label>
         )}
         <label className="block text-xs font-medium text-tertiary-600">Month<input type="month" value={filters.month} onChange={(e) => setFilter('month', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-1.5 text-sm" /></label>
@@ -492,6 +496,8 @@ export default function ExpensesTab() {
 
       {view === 'group' ? (
         <DataTable columns={chargeColumns} rows={rows} loading={loading} emptyLabel="No group expenses match these filters. Add them under Finance → Group Charges." />
+      ) : !loading && rows.length === 0 && !filtered && view === 'approvals' ? (
+        <EmptyState icon={Receipt} title="Nothing is waiting for your approval" description="Claims that need your decision appear here." />
       ) : !loading && rows.length === 0 && !filtered ? (
         <EmptyState icon={Receipt} title="No expense claims yet" description="Submit a claim for reimbursement." action={<button type="button" className="btn-secondary" onClick={() => setDrawerOpen(true)}>Submit claim</button>} />
       ) : (

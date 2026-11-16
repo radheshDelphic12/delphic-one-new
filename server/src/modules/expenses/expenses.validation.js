@@ -51,6 +51,9 @@ const listClaimsQuerySchema = listMyClaimsQuerySchema.extend({
   org_membership_id: z.string().uuid().optional(),
 });
 
+// The approval queue narrowed by month, category, office and employee (the same filters as the other lists; no paging, it is one person's queue).
+const listApprovalsQuerySchema = listClaimsQuerySchema.omit({ status: true, page: true, limit: true });
+
 // Bank payout of reimbursements: one month (by expense date) and one status (approved = still to be paid out); json previews, xlsx downloads.
 const claimsPayoutQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'reimbursed']).default('approved'),
@@ -95,6 +98,7 @@ module.exports = {
   decideClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
+  listApprovalsQuerySchema,
   claimsPayoutQuerySchema,
   claimsProcessedQuerySchema,
   createVendorPaymentSchema,
