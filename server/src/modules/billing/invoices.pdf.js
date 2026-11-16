@@ -210,6 +210,9 @@ async function clientInvoiceModel(orgId, inv) {
   const exact = subtotal.plus(gstTotal).plus(charges.reduce((a, c) => a.plus(D(c.amount)), D(0)));
   const printed = exact.toDecimalPlaces(0, 4);
   const placeOfSupply = buyer.state_name || null;
+  // GST is charged on the base AFTER the adjustment, so the taxable value is the lines plus the adjustment row (the lines above stay as they were)
+  const adjustments = charges.filter((c) => c.label === 'Adjustment').reduce((a, c) => a.plus(D(c.amount)), D(0));
+  const gstBase = subtotal.plus(adjustments);
   return {
     ...common(party, bankLines),
     showHsn: true,
@@ -225,7 +228,7 @@ async function clientInvoiceModel(orgId, inv) {
     round_off: printed.minus(exact).toFixed(2),
     subtotal: subtotal.toFixed(2),
     total: printed.toFixed(2),
-    tax_summary: [{ rate: split.rate, taxable: subtotal.toFixed(2), parts: split.parts }],
+    tax_summary: [{ rate: split.rate, taxable: gstBase.toFixed(2), parts: split.parts }],
     remarks: null,
     notes: inv.notes,
     cancelled: false,
