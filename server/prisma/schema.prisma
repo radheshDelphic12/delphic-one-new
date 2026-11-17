@@ -10168,3 +10168,29 @@ model SaasCustomerDeletion {
   @@index([saas_customer_id])
   @@map("saas_customer_deletions")
 }
+
+// AI client suggestions (Accounts > AI suggestions): companies the AI thinks could become clients of the company, with the service each could take, the
+// roles to approach and how. Made from the company's own accounts and requirements each time; no phone numbers or emails (the AI would invent them).
+// status: new | added (turned into a lead account, account_id) | dismissed.
+model AiClientSuggestion {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String   @db.Uuid
+  batch_id        String   @db.Uuid
+  name            String
+  industry        String?
+  company_size    String?
+  location        String?
+  why_fit         String
+  services        Json     @default("[]") // [{ key, service, pitch }]
+  decision_makers Json     @default("[]") // role titles to approach, never names
+  approach        String?
+  status          String   @default("new")
+  account_id      String?  @db.Uuid
+  created_by      String?  @db.Uuid
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([org_id, batch_id])
+  @@map("ai_client_suggestions")
+}

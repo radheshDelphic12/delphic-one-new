@@ -9,6 +9,7 @@ import LoginPage from '../pages/auth/LoginPage.jsx';
 import DashboardPage from '../pages/dashboard/DashboardPage.jsx';
 import ContractorPortalPage from '../pages/contractor/ContractorPortalPage.jsx';
 import AccountsListPage from '../pages/accounts/AccountsListPage.jsx';
+import AiClientSuggestionsPage from '../pages/accounts/AiClientSuggestionsPage.jsx';
 import AccountDetailPage from '../pages/accounts/AccountDetailPage.jsx';
 import PipelineShell from '../pages/pipeline/PipelineShell.jsx';
 import AccountPipelineBoardPage from '../pages/accounts/AccountPipelineBoardPage.jsx';
@@ -396,6 +397,7 @@ export default function App() {
             for roles with pipeline access (RequirePermission) — keeps a self-service-only
             role (e.g. employee/IT) off these pages even via a typed URL, not just the sidebar. */}
         <Route path="accounts" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountsListPage /></RequirePermission></RequireMasterWorkspace>} />
+        <Route path="accounts/suggestions" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AiClientSuggestionsPage /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="accounts/new" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><Navigate to="/accounts?create=1" replace /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="accounts/:id/board" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountBoardRedirect /></RequirePermission></RequireMasterWorkspace>} />
         <Route path="accounts/:id" element={<RequireMasterWorkspace><RequirePermission capability="viewPipeline" need="accounts.view"><AccountDetailPage /></RequirePermission></RequireMasterWorkspace>} />
