@@ -14,6 +14,27 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : 'Not set';
 }
 
+const money = (value, currency) => `${currency || 'INR'} ${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
+/** What the contractors (vendor resources) in this list cost per month: their vendor rate, added up per currency and in rupees where a rate is set. */
+function vendorCostSummary(rows, rates) {
+  const contractors = rows.filter((r) => r.worker_type === 'contractor');
+  const byCurrency = {};
+  let withoutRate = 0;
+  for (const r of contractors) {
+    if (r.vendor_rate === null || r.vendor_rate === undefined) { withoutRate += 1; continue; }
+    const cur = r.vendor_rate_currency || 'INR';
+    byCurrency[cur] = (byCurrency[cur] || 0) + Number(r.vendor_rate);
+  }
+  let inr = 0;
+  let unconverted = [];
+  for (const [cur, amount] of Object.entries(byCurrency)) {
+    const rate = cur === 'INR' ? 1 : Number(rates[cur]);
+    if (rate) inr += amount * rate; else unconverted.push(cur);
+  }
+  return { count: contractors.length, withoutRate, byCurrency, inr, unconverted };
+}
+
 function EmployeePeek({ row, onClose }) {
   return (
     <div className="space-y-4">
@@ -114,6 +135,14 @@ export default function PeopleListPage() {
   const withTerminated = includeTerminated || exitedChosen;
   const [loading, setLoading] = useState(true);
   const [peek, setPeek] = useState(null);
+  const [rates, setRates] = useState({});
+
+  // Finance exchange rates (to INR), only used to turn a USD/AED... vendor rate into rupees for the total.
+  useEffect(() => {
+    apiClient.get('/billing/exchange-rates')
+      .then(({ data }) => setRates(Object.fromEntries((data.data || []).map((x) => [x.currency, x.rate_to_inr ?? x.rate]))))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +184,7 @@ export default function PeopleListPage() {
   }, [rows]);
 
   const filteredRows = useMemo(() => rows.filter((row) => matchesFilters(row, filters)), [rows, filters]);
+  const vendorCost = useMemo(() => vendorCostSummary(filteredRows, rates), [filteredRows, rates]);
   const activeCount = Object.values(filters).filter(Boolean).length;
   const setFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -173,6 +203,13 @@ export default function PeopleListPage() {
     { key: 'role', header: 'Role', render: (row) => <RoleCell row={row} /> },
     { key: 'department', header: 'Department', render: (row) => row.department?.name || 'Not assigned' },
     { key: 'userType', header: 'User type', render: (row) => workerTypeLabel(row.worker_type) },
+    {
+      key: 'vendorCost',
+      header: 'Vendor cost / month',
+      render: (row) => (row.worker_type === 'contractor'
+        ? (row.vendor_rate === null || row.vendor_rate === undefined ? <span className="text-warning-700">Not set</span> : money(row.vendor_rate, row.vendor_rate_currency))
+        : <span className="text-tertiary-400">—</span>),
+    },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
     {
       key: 'status',
@@ -261,6 +298,26 @@ export default function PeopleListPage() {
           )}
         </div>
       </div>
+      {vendorCost.count > 0 && (
+        <div className="rounded-2xl border border-tertiary-200 bg-white px-4 py-3 text-sm" data-testid="vendor-cost-summary">
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+            <div>
+              <span className="text-xs uppercase tracking-wide text-tertiary-500">Vendor (contractor) cost per month</span>
+              <div className="text-lg font-semibold text-tertiary-900">
+                {money(vendorCost.inr, 'INR')}
+                {vendorCost.unconverted.length > 0 && <span className="ml-2 text-xs font-normal text-warning-700">+ {vendorCost.unconverted.join(', ')} not converted (set Finance exchange rates)</span>}
+              </div>
+            </div>
+            <div className="text-xs text-tertiary-600">
+              {vendorCost.count} contractor{vendorCost.count === 1 ? '' : 's'} in this list
+              {vendorCost.withoutRate > 0 && <span className="text-warning-700"> · {vendorCost.withoutRate} with no vendor rate set</span>}
+              {Object.keys(vendorCost.byCurrency).some((c) => c !== 'INR') && (
+                <span> · {Object.entries(vendorCost.byCurrency).map(([c, a]) => money(a, c)).join(' + ')}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <DataTable
         columns={columns}
         rows={filteredRows}
