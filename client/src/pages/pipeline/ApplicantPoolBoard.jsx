@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Ban, Eye, FilePlus, Pencil, Plus, SlidersHorizontal, Trash2, Undo2, Unlink, UserCheck, UserPlus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { allowed, isAdminUser } from '../../lib/access.js';
 import useLiveData from '../../lib/useLiveData.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -194,7 +195,11 @@ export default function ApplicantPoolBoard() {
   const [rejectReason, setRejectReason] = useState('');
   const [filters, setFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
-  const canClaim = ['recruiter', 'admin'].includes(user?.role);
+  // In a company on permissions the screen follows the permission (Applicants > Update), not the plain role: a person whose set spans several
+  // modules (an HR lead) is derived as 'admin' on the server and shown as 'employee' here, and used to lose Assign to me / Create profile.
+  const adminLike = isAdminUser(user); // Super Admin / Admin, or the old admin role in a company that has not moved
+  const canClaim = allowed(user, 'applicants.update', ['recruiter', 'admin'].includes(user?.role)); // assign, release, create profile, unlink
+  const canWork = allowed(user, 'applicants.update', ['admin', 'sales', 'recruiter'].includes(user?.role)); // edit, delete, reject, restore
   const recruiterOptions = useUserOptions('recruiter');
   const referrers = useLiveData(() => apiClient.get('/applicants/referrers').then((r) => r.data.data), { deps: [] });
   const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v !== undefined));
@@ -231,8 +236,8 @@ export default function ApplicantPoolBoard() {
       setRejectReason('');
     } catch (e) { pushError(apiErrorMessage(e, 'Could not reject'), 'Not saved'); } finally { setBusy(''); refresh(); }
   }
-  const canReject = (a) => ['new', 'assigned'].includes(a.status) && (a.status === 'new' ? ['admin', 'sales', 'recruiter'].includes(user?.role) : (user?.role === 'admin' || a.assigned_to?.id === user?.id));
-  const canRestore = (a) => a.status === 'rejected' && (user?.role === 'admin' || a.rejected_by?.id === user?.id);
+  const canReject = (a) => ['new', 'assigned'].includes(a.status) && (a.status === 'new' ? canWork : (adminLike || a.assigned_to?.id === user?.id));
+  const canRestore = (a) => a.status === 'rejected' && (adminLike || (canWork && a.rejected_by?.id === user?.id));
   async function deleteApplicant(a) {
     if (!window.confirm(`Delete ${a.name} from "${a.requirement_title}"? They disappear from the lists. A group super admin can restore them from Group Dashboard > Logs.`)) return;
     setBusy(a.id);
@@ -365,10 +370,10 @@ export default function ApplicantPoolBoard() {
                     <div className="flex items-center justify-end gap-3">
                       <div className="flex items-center gap-0.5 border-r border-tertiary-100 pr-3" role="group" aria-label="Applicant tools">
                           <button type="button" title="View application" aria-label={`View application of ${a.name}`} data-testid="view-applicant" className="rounded-lg p-2 text-tertiary-400 hover:bg-tertiary-100 hover:text-primary-700" onClick={() => setViewing(a)}><Eye className="h-4 w-4" /></button>
-                          {(user?.role === 'admin' || user?.role === 'sales' || a.assigned_to?.id === user?.id) && (
+                          {(adminLike || user?.role === 'sales' || (canWork && a.assigned_to?.id === user?.id)) && (
                             <button type="button" title="Edit applicant" className="rounded-lg p-2 text-tertiary-400 hover:bg-tertiary-100 hover:text-primary-700" onClick={() => setEditing(a)}><Pencil className="h-4 w-4" /></button>
                           )}
-                          {(a.status === 'new' ? ['admin', 'sales', 'recruiter'].includes(user?.role) : (user?.role === 'admin' || a.assigned_to?.id === user?.id)) && (
+                          {(a.status === 'new' ? canWork : (adminLike || a.assigned_to?.id === user?.id)) && (
                             <button type="button" title="Delete applicant" className="rounded-lg p-2 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" disabled={busy === a.id} onClick={() => deleteApplicant(a)}><Trash2 className="h-4 w-4" /></button>
                           )}
                       </div>
@@ -376,13 +381,13 @@ export default function ApplicantPoolBoard() {
                           {a.status === 'new' && canClaim && (
                             <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'assign', `${a.name} is now yours`)}><UserCheck className="h-3.5 w-3.5" />Assign to me</button>
                           )}
-                          {a.status === 'assigned' && !a.profile_id && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
+                          {a.status === 'assigned' && !a.profile_id && ((canClaim && a.assigned_to?.id === user?.id) || adminLike) && (
                             <button type="button" className="btn-primary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'create-profile', `Profile created for ${a.name}`)}><FilePlus className="h-3.5 w-3.5" />Create profile</button>
                           )}
-                          {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
+                          {a.status === 'assigned' && ((canClaim && a.assigned_to?.id === user?.id) || adminLike) && (
                             <button type="button" title="Unlink from this job (the Profile is kept)" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => unlinkFromJob(a)}><Unlink className="h-3.5 w-3.5" />Unlink from job</button>
                           )}
-                          {a.status === 'assigned' && (a.assigned_to?.id === user?.id || user?.role === 'admin') && (
+                          {a.status === 'assigned' && ((canClaim && a.assigned_to?.id === user?.id) || adminLike) && (
                             <button type="button" className="btn-secondary inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs" disabled={busy === a.id} onClick={() => act(a.id, 'release', `${a.name} is back in the pool`)}><Undo2 className="h-3.5 w-3.5" />Release</button>
                           )}
                           {canReject(a) && (
