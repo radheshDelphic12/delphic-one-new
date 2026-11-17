@@ -18,6 +18,7 @@ const SERVICES = [
 ];
 const SERVICE_KEYS = SERVICES.map((s) => s.key);
 const MAX_COUNT = 15;
+const BATCH = 5; // companies asked per AI call
 
 const clean = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const key = (name) => String(name || '').toLowerCase().replace(/&/g, ' and ').replace(/\b(pvt|private|ltd|limited|llp|inc|llc|technologies|technology|solutions|services|india)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -103,9 +104,14 @@ async function generate(orgId, user, { count = 10, focus } = {}) {
   const known = new Set([...ctx.existingNames, ...before.map((b) => b.name)].map(key));
   ctx.existingNames = [...ctx.existingNames, ...before.map((b) => b.name)];
 
+  // Small batches asked in parallel: one big answer (10+ companies) can be cut off at the token limit or run past the proxy timeout,
+  // which the user saw as a bare "could not suggest". Each batch asks for a couple extra because duplicates across batches are dropped.
   let data;
   try {
-    ({ data } = await askJson({ system: SYSTEM, user: prompt(ctx, n, clean(focus, 300)), maxTokens: 4000 }));
+    const sizes = [];
+    for (let left = n; left > 0; left -= BATCH) sizes.push(Math.min(BATCH, left) + (n > BATCH ? 2 : 0));
+    const answers = await Promise.all(sizes.map((size) => askJson({ system: SYSTEM, user: prompt(ctx, size, clean(focus, 300)), maxTokens: 3000 })));
+    data = { companies: answers.flatMap((a) => (Array.isArray(a.data?.companies) ? a.data.companies : [])) };
   } catch (err) {
     if (err instanceof AiUnavailableError) { logger.warn({ err: err.message }, 'ai client suggestions unavailable'); return { error: 'ai_unavailable' }; }
     throw err;
