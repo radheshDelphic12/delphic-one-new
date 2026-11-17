@@ -295,9 +295,10 @@ async function findOrCreateProfile(tx, applicant, addedBy) {
 }
 
 /**
- * What a person is in THIS company: the plain role their access resolves to and whether they are an employee-level person. In a company on
- * the permission model the role is derived from their permission set (an HR lead is 'admin' there while the global users.role says 'employee'),
- * so the global users.role must not decide who may take an applicant.
+ * May this person take applicants, going by what they are in THIS company rather than the global users.role? True for an HR-type person: in a
+ * company on the permission model, a set whose base role is recruiter (e.g. HR) that holds Applicants > Update, or an Admin / Super Admin; in a
+ * company that has not moved, a recruiter / admin membership. Sales and every other set stay out, as before. Used only IN ADDITION to the old
+ * global-role rule, so nobody who could take an applicant before loses it.
  */
 async function roleInCompany(orgId, userId) {
   const m = await prisma.orgMembership.findUnique({
@@ -312,9 +313,11 @@ async function roleInCompany(orgId, userId) {
   if (!m || m.worker_type === 'contractor' || !['active', 'notice_period'].includes(m.employment_status)) return null;
   if (m.org?.access_mode === 'permissions') {
     const a = await loadAccess(orgId, m);
-    return { role: a.role, employeeLevel: a.access?.level === 'employee' };
+    const employeeLevel = a.access?.level === 'employee';
+    const base = m.custom_role ? m.custom_role.base_role : m.role;
+    return { eligible: !employeeLevel || (base === 'recruiter' && Boolean(a.access?.permissions?.['applicants.update'])), employeeLevel };
   }
-  return { role: m.custom_role ? m.custom_role.base_role : m.role, employeeLevel: false };
+  return { eligible: ['recruiter', 'admin'].includes(m.custom_role ? m.custom_role.base_role : m.role), employeeLevel: false };
 }
 
 /**
@@ -330,18 +333,17 @@ async function assign(user, id, rawBody = {}) {
   if (!LIVE_STATUSES.includes(applicant.requirement.status)) return { error: 'requirement_not_in_progress' };
   if (applicant.status !== 'new') return { error: 'already_assigned' };
   const who = await prisma.user.findUnique({ where: { id: target }, select: { id: true, role: true, active: true } });
-  // Who may take an applicant is decided by the role in this company (derived from the permission set in a company on permissions), with the
-  // old global role still accepted, so an HR lead holding Applicants > Update is no longer refused for having 'employee' as the global role.
-  const inCompany = target === user.id ? { role: user.role, employeeLevel: user.access?.level === 'employee' } : await roleInCompany(user.org_id, target);
-  const eligible = (r) => ['recruiter', 'admin'].includes(r);
-  if (!who || who.active === false || !(eligible(inCompany?.role) || eligible(who.role))) return { error: 'not_a_recruiter' };
+  // The old global-role rule stays; an HR-type person (see roleInCompany) is accepted in addition, so an HR lead is not refused for having
+  // 'employee' as the global role while Sales and other sets are unchanged.
+  const inCompany = await roleInCompany(user.org_id, target);
+  if (!who || who.active === false || !(['recruiter', 'admin'].includes(who.role) || inCompany?.eligible)) return { error: 'not_a_recruiter' };
 
   const result = await prisma.$transaction(async (tx) => {
     // the conditional update is what makes it first come, first served even when two recruiters click together
     const claimed = await tx.jobApplicant.updateMany({ where: { id, status: 'new', assigned_to: null }, data: { status: 'assigned', assigned_to: target, assigned_at: new Date() } });
     if (claimed.count !== 1) return { error: 'already_assigned' };
     // Claiming only moves the person from the Pool to the recruiter's candidates; the Profile is created by "Create profile".
-    if (who.role === 'recruiter' || inCompany?.role === 'recruiter' || inCompany?.employeeLevel) {
+    if (who.role === 'recruiter' || (inCompany?.eligible && inCompany.employeeLevel)) {
       const on = await tx.requirementAssignment.findFirst({ where: { requirement_id: applicant.requirement_id, user_id: target, role_on_req: 'recruiter', unassigned_at: null } });
       if (!on) await tx.requirementAssignment.create({ data: { requirement_id: applicant.requirement_id, user_id: target, role_on_req: 'recruiter', assigned_by: user.id } });
     }

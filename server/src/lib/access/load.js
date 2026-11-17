@@ -25,7 +25,7 @@ async function loadAccess(orgId, membership) {
   const { permissions, basic } = effectivePermissions({ level, setPermissions: set?.permissions, grants, isLeaveManager: membership.is_leave_manager });
   const out = {
     role: deriveLegacyRole({ level, setBaseRole: set?.base_role, permissions }),
-    access: { mode: 'permissions', level, permissions, basic, set: set ? { id: set.id, name: set.name } : null },
+    access: { mode: 'permissions', level, permissions, basic, set: set ? { id: set.id, name: set.name, base_role: set.base_role || null } : null },
     custom_permissions: legacyPermissions(permissions),
   };
   if (set) out.custom_role = { id: set.id, name: set.name };
