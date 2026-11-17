@@ -18,13 +18,13 @@ const { D, money } = calc;
 const TRACK_KINDS = {
   rent_payment: 'in', ledger_income: 'in', ledger_expense: 'out', group_expense: 'out', salary: 'out',
   deal_client_payment: 'in', deal_vendor_payment: 'out', investee_funding: 'out', investment: 'out', invoice_payment: 'in',
-  franchise_settlement: 'in', debt_emi: 'out', debt_repayment: 'out', debt_received: 'in', other_in: 'in', other_out: 'out',
+  franchise_settlement: 'in', vendor_purchase: 'out', debt_emi: 'out', debt_repayment: 'out', debt_received: 'in', other_in: 'in', other_out: 'out',
 };
 const KIND_DIRECTION = { client_invoice: 'in', expense: 'out', vendor_payment: 'out', ...TRACK_KINDS };
 const KIND_LABEL = {
   client_invoice: 'Client invoice', expense: 'Expense reimbursement', vendor_payment: 'Vendor payment', rent_payment: 'Rent received', ledger_income: 'Income', ledger_expense: 'Expense',
   group_expense: 'Group expense', salary: 'Salary', deal_client_payment: 'Deal payment received', deal_vendor_payment: 'Deal vendor payment', investee_funding: 'Investee funding',
-  investment: 'Investment', invoice_payment: 'Invoice payment received', franchise_settlement: 'Franchise settlement', debt_emi: 'Debt EMI', debt_repayment: 'Debt repayment',
+  investment: 'Investment', vendor_purchase: 'Vendor purchase payment', invoice_payment: 'Invoice payment received', franchise_settlement: 'Franchise settlement', debt_emi: 'Debt EMI', debt_repayment: 'Debt repayment',
   debt_received: 'Debt received', other_in: 'Money in', other_out: 'Money out',
 };
 

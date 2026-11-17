@@ -485,17 +485,28 @@ async function vendorGstIn(groupIds, { orgId, from, to, basis = 'invoice' } = {}
     include: { vendor_account: { select: { name: true } }, account: { select: { name: true, project_name: true } } },
     orderBy: [{ invoice_date: 'desc' }, { created_at: 'desc' }],
   });
+  inv.push(...await vendorPurchasesAsInvoices(orgIds, { gst_amount: { gt: 0 }, currency: 'INR' }));
   const rows = inv.filter((r) => {
     const m = vendorMonth(r, basis);
     return (!start || key(m.year, m.month) >= key(start.getUTCFullYear(), start.getUTCMonth() + 1)) && (!end || key(m.year, m.month) <= key(end.getUTCFullYear(), end.getUTCMonth() + 1));
   }).map((r) => ({
-    id: r.id, company: orgName.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.account?.project_name || r.account?.name || null, number: r.invoice_number,
+    id: r.id, company: orgName.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.is_purchase ? 'Purchase (no project)' : r.account?.project_name || r.account?.name || null, number: r.invoice_number,
     invoice_date: ymd(r.invoice_date), period: `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`, base: num(r.amount), gst: num(r.gst_amount),
   }));
   return { total: round2(rows.reduce((s, r) => s + r.gst, 0)), rows };
 }
 
 // ---- TDS withheld (employees' salary TDS, vendors) and deposited ------------------------------------------------------
+
+/** Normal vendor purchases (a vendor bill with no client project): shaped like a project vendor invoice so the GST / TDS views list them together. */
+async function vendorPurchasesAsInvoices(orgIds, where) {
+  const rows = await prisma.vendorPurchase.findMany({
+    where: { org_id: { in: orgIds }, status: 'active', ...where },
+    include: { vendor_account: { select: { name: true } } },
+    orderBy: [{ bill_date: 'desc' }, { created_at: 'desc' }],
+  });
+  return rows.map((r) => ({ ...r, invoice_number: r.bill_number, invoice_date: r.bill_date, other_amount: 0, account: null, is_purchase: true }));
+}
 
 /** The month a vendor invoice counts in: its invoice date (when the tax is withheld / charged), or the billing month it is for. */
 function vendorMonth(r, basis) {
@@ -517,8 +528,10 @@ async function tdsPayable(groupIds, { orgId, from, to, currency, basis = 'invoic
     include: { vendor_account: { select: { name: true } }, account: { select: { name: true, project_name: true, project_code: true } } },
     orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }],
   });
+  // Normal vendor purchases (no project) withhold TDS too.
+  inv.push(...await vendorPurchasesAsInvoices(orgIds, { tds_amount: { gt: 0 }, ...(currency ? { currency } : {}) }));
   const vendorRows = inv.filter((r) => { const m = vendorMonth(r, basis); return inRange({ period_year: m.year, period_month: m.month }); }).map((r) => ({
-    id: r.id, company: orgs.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.account?.project_name || r.account?.name || null, number: r.invoice_number,
+    id: r.id, company: orgs.get(r.org_id) || '', vendor: r.vendor_account?.name || '', project: r.is_purchase ? 'Purchase (no project)' : r.account?.project_name || r.account?.name || null, number: r.invoice_number,
     period: `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`, period_month: r.period_month, period_year: r.period_year, currency: r.currency,
     base: num(r.amount), gst: num(r.gst_amount), tds: num(r.tds_amount), adjustment: num(r.adjustment_amount), net_payable: round2(num(r.amount) + num(r.gst_amount) + num(r.other_amount) - num(r.tds_amount) + num(r.adjustment_amount)), invoice_date: ymd(r.invoice_date),
   }));

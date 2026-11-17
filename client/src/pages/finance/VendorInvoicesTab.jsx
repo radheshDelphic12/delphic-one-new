@@ -4,6 +4,7 @@ import apiClient from '../../lib/apiClient.js';
 import { downloadFile } from '../../lib/downloadFile.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { trackInWallet } from '../../lib/payments/trackInWallet.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import VendorPayoutPanel from './VendorPayoutPanel.jsx';
@@ -133,9 +134,12 @@ export default function VendorInvoicesTab() {
   }
   async function payPurchase(payload) {
     try {
-      await apiClient.post(`/billing/vendor-purchases/${payFor.id}/pay`, payload);
+      const purchase = payFor;
+      await apiClient.post(`/billing/vendor-purchases/${purchase.id}/pay`, payload);
       pushSuccess('Marked paid');
       load();
+      // Same "take this payment out of a wallet?" popup as every other payment (the amount actually paid, in the bill's currency).
+      void trackInWallet({ kind: 'vendor_purchase', reference_id: purchase.id, amount: payload.paid_amount ?? purchase.net_payable, currency: purchase.currency, title: `Vendor payment - ${purchase.bill_number}`, party: purchase.vendor_account?.name, category: purchase.category_name || 'Vendor payment' });
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to mark the purchase paid'), 'Something went wrong');
       throw err;

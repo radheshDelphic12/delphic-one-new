@@ -214,6 +214,17 @@ describe('GST & TDS tracking', () => {
     expect((await get('/tds-payable', RANGE)).body.data.inr.to_deposit).toBe(20000);
   });
 
+  test('a normal vendor purchase (a vendor bill with no project) shows in TDS payable and in the vendor GST, and a cancelled one does not', async () => {
+    const bill = { org_id: alpha.id, vendor_account_id: vendor.id, bill_date: new Date('2026-10-12'), period_month: 10, period_year: 2026, currency: 'INR', created_by: superUser.id };
+    await prisma.vendorPurchase.create({ data: { ...bill, bill_number: 'PUR-1', amount: 50000, gst_amount: 9000, tds_amount: 5000 } });
+    await prisma.vendorPurchase.create({ data: { ...bill, bill_number: 'PUR-GONE', amount: 10000, tds_amount: 1000, status: 'cancelled' } });
+    const tds = (await get('/tds-payable', RANGE)).body.data;
+    expect(tds.rows).toEqual([expect.objectContaining({ vendor: 'EkamNext', number: 'PUR-1', project: 'Purchase (no project)', base: 50000, gst: 9000, tds: 5000, net_payable: 54000, company: 'Delphic Global' })]);
+    expect(tds.inr).toMatchObject({ withheld: 5000, to_deposit: 5000 });
+    const gst = (await get('/gst', RANGE)).body.data;
+    expect(gst.vendor_gst.rows).toEqual([expect.objectContaining({ number: 'PUR-1', gst: 9000, base: 50000 })]);
+  });
+
   test('challans: number, bank, period, covered employees / vendors, the uploaded challan, edit, remove, filters and the audit trail', async () => {
     const emp = await createUser({ role: 'employee', name: 'Covered Employee', withOrg: false });
     const membership = await createOrgMembership(emp.id, alpha.id, { role: 'employee' });

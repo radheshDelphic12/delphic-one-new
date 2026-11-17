@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { can } from '../../lib/permissions.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { trackInWallet } from '../../lib/payments/trackInWallet.js';
 import { useFinanceCategories, useLocationOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
@@ -210,9 +211,12 @@ export default function GroupChargesTab() {
 
   async function create(payload) {
     try {
-      await apiClient.post('/billing/group-charges/mine', payload);
+      const { data } = await apiClient.post('/billing/group-charges/mine', payload);
       pushInfo('Group expense added');
       load();
+      // Same "take this payment out of a wallet?" popup as every other payment (a wallet by default; No skips it).
+      const category = categories.find((c) => c.id === payload.category_id)?.name || 'Group expense';
+      void trackInWallet({ kind: 'group_expense', reference_id: data?.data?.id, amount: payload.amount, currency: payload.currency, title: 'Group expense paid', party: category, category });
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to add the group expense'), 'Something went wrong');
       throw err;
