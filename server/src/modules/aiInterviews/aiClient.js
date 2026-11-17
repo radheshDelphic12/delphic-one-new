@@ -23,22 +23,22 @@ function withDocuments(messages, documents) {
 
 // `webSearchDomains`: the AI may search ONLY these sites (the Anthropic web search tool with allowed_domains). If the account or
 // model does not allow the tool, the same request is sent again without it, so the interview never depends on it.
-async function anthropicProvider({ system, messages, maxTokens, documents = [], webSearchDomains = [] }) {
+async function anthropicProvider({ system, messages, maxTokens, documents = [], webSearchDomains = [], timeoutMs }) {
   if (webSearchDomains.length) {
     try {
-      return await callAnthropic({ system, messages, maxTokens, documents, webSearchDomains });
+      return await callAnthropic({ system, messages, maxTokens, documents, webSearchDomains, timeoutMs });
     } catch (err) {
       if (!(err instanceof AiUnavailableError)) throw err; // fall through: ask again without the search tool
     }
   }
-  return callAnthropic({ system, messages, maxTokens, documents, webSearchDomains: [] });
+  return callAnthropic({ system, messages, maxTokens, documents, webSearchDomains: [], timeoutMs });
 }
 
-async function callAnthropic({ system, messages, maxTokens, documents, webSearchDomains }) {
+async function callAnthropic({ system, messages, maxTokens, documents, webSearchDomains, timeoutMs }) {
   const { apiKey, model, workspaceId } = env.aiInterview;
   if (!apiKey) throw new AiUnavailableError('ANTHROPIC_API_KEY is not set');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), webSearchDomains.length ? SEARCH_TIMEOUT_MS : TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs || (webSearchDomains.length ? SEARCH_TIMEOUT_MS : TIMEOUT_MS));
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -80,8 +80,8 @@ async function askJson(args) {
   }
 }
 
-async function askJsonOnce({ system, user, maxTokens, documents, webSearchDomains }) {
-  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents, webSearchDomains: webSearchDomains || [] });
+async function askJsonOnce({ system, user, maxTokens, documents, webSearchDomains, timeoutMs }) {
+  const { text, usage } = await provider({ system, messages: [{ role: 'user', content: user }], maxTokens, documents, webSearchDomains: webSearchDomains || [], timeoutMs });
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
