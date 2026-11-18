@@ -6,7 +6,7 @@ Requested 2026-11-18 ("team-wide attendance visibility"): every employee should 
 - New tab **Team availability** in Time & Attendance, for every employee (`basic.attendance`, same as the Attendance tab). No new permission.
 - One day at a time (today by default; previous / next day, a date picker, a Today button) with the **week around it** as seven dots per person; clicking a day jumps to it.
 - Status per person: **Present**, **Working remotely**, **At a work site**, **Half day**, **On leave** (or Half-day leave), **Unavailable** (a past working day with nothing recorded), **Not in yet** (today, nothing recorded yet), **Day off** (holiday / weekly off). Summary chips above the list count each status and filter the list when clicked.
-- Who is shown (changed 2026-11-18, owner: "manager sees only their team and the person they report to, nobody else"): you, your manager and your direct reports. NOT peers (same manager), NOT an HR-Settings team, NOT another team or their people. Sorted you, manager, reports. Contractors, vendor resources and exited people are left out; a person serving notice is marked.
+- Who is shown (changed 2026-11-18, owner: "manager sees only their team and the person they report to, nobody else"): you, your manager, your direct reports and your teammates (people with the same manager - the org chart siblings). NOT an HR-Settings team that spans managers, NOT another team or their people, NOT the manager's manager. Sorted you, manager, reports, teammates. Reads OrgMembership.manager_id, the same data as the Org chart. Contractors, vendor resources and exited people are left out; a person serving notice is marked.
 - An **admin** also gets an "Everyone" toggle (the whole company). Anyone else asking for `scope=all` is silently kept on their own team.
 - Someone with no manager and no reports sees only themselves plus a hint to ask HR to set their manager.
 
@@ -23,5 +23,5 @@ Colleagues see a status only: no hours, no projects, no reporting office and no 
 `server/tests/attendance-dashboard.test.js` > "team availability" (4 tests: an employee sees manager / peers / self with statuses and no outsiders or contractors; a manager sees reports and `scope=all` is admin-only; a person with no team sees only themselves and a bad date is refused).
 
 ## Open / decisions taken without an answer
-- "Team" = the reporting line only (manager + direct reports); peers and HR Settings teams were removed on the owner's request. The manager's manager is NOT shown (it was added and then removed on the owner's request, 2026-11-18).
+- "Team" = the reporting line only (manager + direct reports + teammates under the same manager); HR Settings teams were removed on the owner's request. Peers were briefly removed too, then restored the same day when the owner expected a teammate (Chirag) to show. The manager's manager is NOT shown (it was added and then removed on the owner's request, 2026-11-18).
 - Work-site days show as "At a work site" without the place or project.
