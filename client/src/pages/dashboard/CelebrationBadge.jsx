@@ -10,8 +10,7 @@ import { useAuth } from '../../lib/authContext.jsx';
  */
 export default function CelebrationBadge({ className = '' }) {
   const { user } = useAuth();
-  const [mine, setMine] = useState({ birthday: false, anniversary: false, birthdayWishes: [], anniversaryWishes: [] });
-  const [openKey, setOpenKey] = useState(null);
+  const [mine, setMine] = useState({ birthday: false, anniversary: false });
 
   useEffect(() => {
     let live = true;
@@ -21,7 +20,7 @@ export default function CelebrationBadge({ className = '' }) {
         const row = (rows) => (rows || []).find((r) => r.is_me && r.days_away === 0);
         const b = row(body.data?.birthdays);
         const a = row(body.data?.anniversaries);
-        setMine({ birthday: !!b, anniversary: !!a, birthdayWishes: b?.wishes || [], anniversaryWishes: a?.wishes || [] });
+        setMine({ birthday: !!b, anniversary: !!a });
       })
       .catch(() => {});
     return () => { live = false; };
@@ -34,14 +33,12 @@ export default function CelebrationBadge({ className = '' }) {
     mine.birthday && {
       key: 'birthday',
       icon: '🎂',
-      wishes: mine.birthdayWishes,
       title: `Happy Birthday, ${first || 'friend'}!`,
       body: `Wishing you a wonderful year ahead filled with good health, happiness and success. Thank you for being a valued part of ${company}.`,
     },
     mine.anniversary && {
       key: 'anniversary',
       icon: '🎉',
-      wishes: mine.anniversaryWishes,
       title: `Happy Work Anniversary, ${first || 'friend'}!`,
       body: `Thank you for your dedication and contribution. We are proud to have you on the team and look forward to achieving more together.`,
     },
@@ -55,23 +52,10 @@ export default function CelebrationBadge({ className = '' }) {
           <button
             type="button"
             className="mt-2 inline-flex items-center gap-1 rounded-full border border-primary-200 bg-white px-3 py-1 text-xs font-semibold text-primary-700 transition hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
-            onClick={() => setOpenKey(openKey === n.key ? null : n.key)}
-            aria-expanded={openKey === n.key}
+            onClick={() => document.getElementById('announcements')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
           >
-            {openKey === n.key ? 'Hide comments' : 'View comments'}
+            View comments
           </button>
-          {openKey === n.key && (
-            <ul className="mt-2 space-y-2 border-t border-amber-100 pt-2">
-              {n.wishes.length === 0 && <li className="text-xs text-tertiary-500">No comments yet.</li>}
-              {n.wishes.map((w, i) => (
-                <li key={`${w.from_name}-${i}`} className="text-xs text-tertiary-700">
-                  <span className="font-semibold text-tertiary-900">{w.from_name}</span>
-                  {w.message && <span className="block text-tertiary-600">{w.message}</span>}
-                  {w.gif_url && <img src={w.gif_url} alt="" className="mt-1 max-h-24 rounded-md" loading="lazy" />}
-                </li>
-              ))}
-            </ul>
-          )}
           <p className="mt-1 text-xs font-medium text-tertiary-500">- Warm regards, Team {company}</p>
         </div>
       ))}

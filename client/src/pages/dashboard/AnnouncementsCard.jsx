@@ -198,7 +198,7 @@ export default function AnnouncementsCard({ days = 14, showEmpty = false }) {
     return showEmpty ? <p className="rounded-2xl border border-tertiary-100 bg-white px-4 py-6 text-center text-sm text-tertiary-500 shadow-card">No birthdays or work anniversaries in the next {data.days} days.</p> : null;
   }
   return (
-    <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
+    <section id="announcements" className="scroll-mt-4 overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
       <h2 className="border-b border-tertiary-100 px-4 py-3 font-heading text-sm font-semibold text-tertiary-900">
         Announcements <span className="ml-2 font-normal text-tertiary-400">next {data.days} days</span>
       </h2>
