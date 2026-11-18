@@ -354,7 +354,7 @@ describe('team availability', () => {
     expect((await get('/team-status?date=not-a-date', solo.token)).status).toBe(422);
   });
 
-  test("the manager's manager is shown, and the leave type is shown only to the person, their own manager and an admin", async () => {
+  test('the leave type is shown only to the person, their own manager and an admin', async () => {
     const ctx = await seed();
     const ceo = await ctx.person('Chief Person');
     const boss = await ctx.person('Boss Person', { managerId: ceo.membership.id });
@@ -365,8 +365,7 @@ describe('team availability', () => {
     const on = (res, name) => res.body.data.people.find((p) => p.name === name).days.find((d) => d.date === DAY);
 
     const asBela = await get(`/team-status?date=${DAY}`, bela.token); // a peer: sees On leave, not the type
-    expect(asBela.body.data.people.map((p) => p.name).sort()).toEqual(['Anna Peer', 'Bela Peer', 'Boss Person', 'Chief Person']);
-    expect(asBela.body.data.people.find((p) => p.name === 'Chief Person').relation).toBe('senior');
+    expect(asBela.body.data.people.map((p) => p.name).sort()).toEqual(['Anna Peer', 'Bela Peer', 'Boss Person']); // the manager's manager is not part of the circle
     expect(on(asBela, 'Anna Peer')).toMatchObject({ key: 'leave', label: 'On leave' });
     expect(on(asBela, 'Anna Peer').detail).toBeUndefined();
     expect(JSON.stringify(asBela.body.data)).not.toMatch(/Sick/);
@@ -375,9 +374,8 @@ describe('team availability', () => {
     expect(on(asBoss, 'Anna Peer')).toMatchObject({ key: 'leave', label: 'On leave', detail: 'Sick Leave' });
     const asAnna = await get(`/team-status?date=${DAY}`, anna.token); // herself
     expect(on(asAnna, 'Anna Peer').detail).toBe('Sick Leave');
-    const asCeo = await get(`/team-status?date=${DAY}`, ceo.token); // the manager's manager is not Anna's manager: no type
-    expect(asCeo.body.data.people.map((p) => p.name)).toEqual(expect.arrayContaining(['Chief Person', 'Boss Person']));
-    expect((asCeo.body.data.people.find((p) => p.name === 'Anna Peer') || { days: [] }).days.find((d) => d.date === DAY)?.detail).toBeUndefined();
+    const asCeo = await get(`/team-status?date=${DAY}`, ceo.token); // two levels up: sees only their own circle (the boss), never Anna
+    expect(asCeo.body.data.people.map((p) => p.name).sort()).toEqual(['Boss Person', 'Chief Person']);
     const asAdmin = await get(`/team-status?date=${DAY}&scope=all`, ctx.admin);
     expect(on(asAdmin, 'Anna Peer').detail).toBe('Sick Leave');
   });

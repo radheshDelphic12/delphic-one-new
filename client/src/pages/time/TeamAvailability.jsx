@@ -22,7 +22,7 @@ const STATUS = {
   none: { label: '-', badge: 'bg-tertiary-50 text-tertiary-400 ring-tertiary-100', dot: 'bg-tertiary-200' },
 };
 const SUMMARY_ORDER = ['present', 'remote', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'];
-const RELATION = { you: 'You', manager: 'Manager', senior: "Manager's manager", report: 'Reports to you', peer: 'Teammate', team: 'Teammate', colleague: 'Colleague' };
+const RELATION = { you: 'You', manager: 'Manager', report: 'Reports to you', peer: 'Teammate', team: 'Teammate', colleague: 'Colleague' };
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const shiftDay = (ymd, delta) => new Date(new Date(`${ymd}T00:00:00Z`).getTime() + delta * 86400000).toISOString().slice(0, 10);
