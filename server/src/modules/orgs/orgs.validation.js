@@ -16,6 +16,13 @@ const updateOrgSettingsSchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one setting' });
 
+// A wish on today's birthday / work anniversary of a colleague; the message is optional (a default is used).
+const wishSchema = z.object({
+  org_membership_id: z.string().uuid(),
+  kind: z.enum(['birthday', 'anniversary']),
+  message: z.string().trim().max(300).optional(),
+});
+
 const updateLocationSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
@@ -120,6 +127,7 @@ const personalDetailsSchema = z
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
 
 module.exports = {
+  wishSchema,
   personalDetailsSchema,
   MODULES,
   updateOrgSettingsSchema,

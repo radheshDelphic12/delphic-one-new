@@ -54,6 +54,8 @@ const ROLE_EVENT_MATRIX = {
   increment_review_due: { roles: ['admin'], defaultInApp: true },
   // To the person on the bench and the admins: days left on the bench.
   bench_countdown: { roles: ['admin', 'employee'], defaultInApp: true },
+  // To the colleague whose birthday / work anniversary it is (never copied to the admins).
+  celebration_wish: { roles: TIMESHEET_ROLES, defaultInApp: true },
   // Resignations also go by email (HR and the Admin act on them, so the Admin is mailed too, unlike the copy-everything events).
   resignation_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
   resignation_manager_updated: { roles: TIMESHEET_ROLES, defaultInApp: true, defaultEmail: true, defaultEmailAdmins: true },
@@ -104,6 +106,7 @@ const NOTIFICATION_LABELS = {
   resignation_submitted: ['Resignation submitted', 'An employee submits a resignation (to their reporting manager, HR and admins).'],
   resignation_manager_updated: ['Resignation: manager update', 'A manager records the retention call on a resignation (to HR and admins).'],
   resignation_decided: ['Resignation decision', 'Your resignation is approved, rejected or closed as retained, or the F&F is started.'],
+  celebration_wish: ['Birthday / anniversary wish', 'A colleague wishes you on your birthday or work anniversary.'],
   bench_countdown: ['Bench countdown', "Days left of an employee's bench period."],
   increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
@@ -170,6 +173,12 @@ function renderNotification(type, ctx = {}) {
       return envelope(
         'Bench period ending',
         `${ctx.employeeName || 'An employee'} has ${Number(ctx.daysLeft) === 0 ? 'their last day' : `${ctx.daysLeft} day${Number(ctx.daysLeft) === 1 ? '' : 's'} left`} on the bench (ends ${ctx.endDate || 'soon'}).`,
+        null, null, ctx
+      );
+    case 'celebration_wish':
+      return envelope(
+        ctx.kind === 'anniversary' ? 'Work anniversary wish' : 'Birthday wish',
+        `${actorPrefix(ctx)}wished you: ${truncate(ctx.message || '')}`,
         null, null, ctx
       );
     case 'increment_review_due':
