@@ -96,9 +96,10 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
                     <span key={`${w.from_name}-${i}`} className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ring-2 ring-white ${AVATAR_TONES[avatarIndex(w.from_name)]}`}>{initials(w.from_name)}</span>
                   ))}
                 </span>
-                <span className="ml-1.5 text-xs font-medium text-tertiary-600">{wishes.length > 3 ? `+${wishes.length - 3}` : wishes.length === 1 ? '1 comment' : `${wishes.length} comments`}</span>
+                <span className="ml-1.5 text-xs font-medium text-tertiary-600">{wishes.length === 1 ? '1 comment' : `${wishes.length} comments`}</span>
               </button>
             )}
+            {item.is_me && wishes.length === 0 && <span className="text-xs text-tertiary-500">No comments yet</span>}
             {!item.is_me && !item.wished_by_me && (
               <button
                 type="button"
