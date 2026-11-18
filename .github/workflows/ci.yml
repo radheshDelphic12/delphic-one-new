@@ -43,7 +43,8 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Shard 4 alone ran ~17-20 min once the suite count grew, so 20 cancelled it mid-run (no test failed).
+    timeout-minutes: 35
     # Each shard has its own Postgres service container, so suites that TRUNCATE
     # shared tables can't collide across shards. Within a shard Jest still runs
     # --runInBand (suites share one DB).
