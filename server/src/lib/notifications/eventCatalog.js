@@ -106,7 +106,7 @@ const NOTIFICATION_LABELS = {
   resignation_submitted: ['Resignation submitted', 'An employee submits a resignation (to their reporting manager, HR and admins).'],
   resignation_manager_updated: ['Resignation: manager update', 'A manager records the retention call on a resignation (to HR and admins).'],
   resignation_decided: ['Resignation decision', 'Your resignation is approved, rejected or closed as retained, or the F&F is started.'],
-  celebration_wish: ['Birthday / anniversary celebration', 'A colleague celebrates your birthday or work anniversary with a message.'],
+  celebration_wish: ['Comments on your announcement', 'A colleague comments on your birthday or work anniversary announcement.'],
   bench_countdown: ['Bench countdown', "Days left of an employee's bench period."],
   increment_review_due: ['Increment review due', 'An employee completes another year with the company (an increment review is due).'],
 };
@@ -177,8 +177,8 @@ function renderNotification(type, ctx = {}) {
       );
     case 'celebration_wish':
       return envelope(
-        ctx.kind === 'anniversary' ? 'Celebrating your work anniversary 🎉' : 'Celebrating your birthday 🎂',
-        `${actorPrefix(ctx)}sent you a message${ctx.message ? `: ${truncate(ctx.message)}` : ' with a GIF'}.`,
+        ctx.kind === 'anniversary' ? 'New comment on your work anniversary' : 'New comment on your birthday',
+        `${actorPrefix(ctx)}commented${ctx.message ? `: ${truncate(ctx.message)}` : ' with a GIF'}.`,
         null, null, ctx
       );
     case 'increment_review_due':
