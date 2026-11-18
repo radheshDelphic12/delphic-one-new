@@ -56,4 +56,45 @@ describe('celebration wishes', () => {
     expect(await announcements.purgeOldWishes()).toEqual({ deleted: 2 });
     expect(await prisma.celebrationWish.count()).toBe(0);
   });
+
+  test('a GIF can go with (or instead of) the text, only from Giphy; the GIF search is off without a key and returns G-rated results with one', async () => {
+    const org = await createOrg({ name: 'Delphic', slug: 'delphic' });
+    const today = todayIst();
+    const mk = async (name, extra = {}) => {
+      const user = await createUser({ role: 'employee', name, withOrg: false });
+      const membership = await createOrgMembership(user.id, org.id, { role: 'employee' });
+      if (Object.keys(extra).length) await prisma.orgMembership.update({ where: { id: membership.id }, data: extra });
+      return { user, membership, token: (await loginAs(user)).access_token };
+    };
+    const celebrant = await mk('Mamoon Jan', { date_of_birth: new Date(Date.UTC(1990, today.getUTCMonth(), today.getUTCDate())) });
+    const ankit = await mk('Ankit Gupta');
+    const send = (body) => authed(request(app).post('/api/v1/orgs/announcements/wishes'), ankit.token).send({ org_membership_id: celebrant.membership.id, kind: 'birthday', ...body });
+
+    expect((await send({ gif_url: 'https://evil.example.com/x.gif' })).status).toBe(422); // not a Giphy host
+    expect((await send({ gif_url: 'http://media.giphy.com/x.gif' })).status).toBe(422); // not https
+    const ok = await send({ gif_url: 'https://media2.giphy.com/media/abc/200.gif' }); // GIF only, no text
+    expect(ok.status).toBe(201);
+    const row = (await authed(request(app).get('/api/v1/orgs/announcements').query({ days: 14 }), celebrant.token)).body.data.birthdays.find((b) => b.is_me);
+    expect(row.wishes[0]).toMatchObject({ gif_url: 'https://media2.giphy.com/media/abc/200.gif', message: '' });
+    const bell = await prisma.notification.findFirst({ where: { user_id: celebrant.user.id, type: 'celebration_wish' } });
+    expect(bell.body).toMatch(/with a GIF/);
+
+    const env = require('../src/config/env');
+    const search = (q) => authed(request(app).get('/api/v1/orgs/announcements/gifs').query({ q }), ankit.token);
+    env.gifs.apiKey = null;
+    expect((await search('happy birthday')).body.data).toEqual({ enabled: false, results: [] });
+    env.gifs.apiKey = 'test-key';
+    const realFetch = global.fetch;
+    let asked;
+    global.fetch = async (url) => { asked = String(url); return { ok: true, json: async () => ({ data: [{ id: 'g1', title: 'cake', images: { fixed_height: { url: 'https://media1.giphy.com/a.gif' }, fixed_height_small: { url: 'https://media1.giphy.com/a_s.gif' } } }] }) }; };
+    try {
+      const res = await search('happy birthday');
+      expect(res.body.data).toEqual({ enabled: true, results: [{ id: 'g1', title: 'cake', url: 'https://media1.giphy.com/a.gif', preview: 'https://media1.giphy.com/a_s.gif' }] });
+      expect(asked).toMatch(/rating=g/);
+      expect((await search('')).status).toBe(422);
+    } finally {
+      global.fetch = realFetch;
+      env.gifs.apiKey = null;
+    }
+  });
 });
