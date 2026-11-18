@@ -481,4 +481,120 @@ async function memberMonth(orgId, m, { year, month }) {
   return { ...t, no_data: noData, days };
 }
 
-module.exports = { memberMonth, employmentState, people, calendar, register, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };
+// ---- Team availability: who is in, working remotely, on leave or unavailable (everyone sees their own team) ---------------------------------
+
+const TEAM_STATUS_MAX_PEOPLE = 300;
+const RELATION_ORDER = { you: 0, manager: 1, report: 2, peer: 3, team: 4, colleague: 5 };
+
+// One day's status in plain words, from the register code. Only a status is shown to colleagues: never the leave type, hours or where
+// someone checked in. Past days with nothing recorded read as Unavailable; today with nothing yet as "Not in yet".
+function availabilityOf(c, { isToday, workedAtSite }) {
+  if (c.kind === 'present') return c.code === 'WFH' ? { key: 'remote', label: 'Working remotely' } : { key: workedAtSite ? 'site' : 'present', label: workedAtSite ? 'At a work site' : 'Present' };
+  if (c.kind === 'planned') return { key: 'remote', label: 'Working remotely' };
+  if (c.kind === 'half_day') return { key: 'half_day', label: 'Half day' };
+  if (c.kind === 'leave') return { key: 'leave', label: c.days === 0.5 ? 'Half-day leave' : 'On leave' };
+  if (c.kind === 'holiday') return { key: 'off', label: c.label ? `Holiday - ${c.label}` : 'Holiday' };
+  if (c.kind === 'weekly_off') return { key: 'off', label: 'Weekly off' };
+  if (c.kind === 'absent') return { key: 'unavailable', label: 'Unavailable' };
+  return isToday ? { key: 'pending', label: 'Not in yet' } : { key: 'none', label: '-' };
+}
+
+/**
+ * Daily availability of the caller's team: themselves, their manager, their direct reports, the people with the same manager and the people
+ * in their team (HR Settings > Teams). `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
+ * An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
+ */
+async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
+  const todayDate = todayIst();
+  const today = ymd(todayDate);
+  const selected = date || today;
+  const dt = dateOnly(selected);
+  const monday = new Date(dt.getTime() - ((dt.getUTCDay() + 6) % 7) * 86400000);
+  const week = [...Array(7)].map((_, i) => ymd(new Date(monday.getTime() + i * 86400000)));
+
+  const me = await prisma.orgMembership.findFirst({ where: { id: user.org_membership_id, org_id: orgId }, select: { id: true, manager_id: true, team_id: true } });
+  if (!me) return { error: 'member_not_found' };
+  const isAdmin = user.role === 'admin' && (!user.access || user.access.level !== 'employee');
+  const everyone = scope === 'all' && isAdmin;
+  const circle = [{ id: me.id }, { manager_id: me.id }];
+  if (me.manager_id) circle.push({ id: me.manager_id }, { manager_id: me.manager_id });
+  if (me.team_id) circle.push({ team_id: me.team_id });
+
+  const rows = await prisma.orgMembership.findMany({
+    where: { org_id: orgId, employment_status: { not: 'terminated' }, worker_type: { not: 'contractor' }, vendor_account_id: null, ...(everyone ? {} : { OR: circle }) },
+    select: {
+      id: true, manager_id: true, team_id: true, work_mode: true, joined_at: true, left_at: true, employment_status: true, notice_end_date: true,
+      designation: { select: { name: true } }, department: { select: { name: true } }, team: { select: { name: true } },
+      person: { select: { name: true } },
+    },
+    take: TEAM_STATUS_MAX_PEOPLE,
+  });
+  const members = rows.filter((m) => employmentState(m, todayDate) !== 'exited');
+  const ids = members.map((m) => m.id);
+  const from = dateOnly(week[0]);
+  const to = dateOnly(week[6]);
+
+  const monthsNeeded = [...new Set(week.map((d) => d.slice(0, 7)))].map((k) => ({ year: Number(k.slice(0, 4)), month: Number(k.slice(5, 7)) }));
+  const [homeRows, awayBy] = await Promise.all([
+    prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
+    workLocation.awayByPerson(orgId, ids, from, to),
+  ]);
+  const homeBy = new Map();
+  for (const r of homeRows) {
+    if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
+    homeBy.get(r.org_membership_id).add(ymd(r.date));
+  }
+
+  const relationOf = (m) => {
+    if (m.id === me.id) return 'you';
+    if (m.id === me.manager_id) return 'manager';
+    if (m.manager_id === me.id) return 'report';
+    if (me.manager_id && m.manager_id === me.manager_id) return 'peer';
+    if (me.team_id && m.team_id === me.team_id) return 'team';
+    return 'colleague';
+  };
+
+  const build = async (m) => {
+    const byDate = new Map();
+    for (const mo of monthsNeeded) {
+      const cal = await dashboard.monthCalendar(orgId, m.id, mo);
+      for (const d of cal.days) byDate.set(d.date, d);
+    }
+    const start = m.joined_at ? ymd(m.joined_at) : null;
+    const lastDay = m.left_at || (['terminated', 'notice_period'].includes(m.employment_status) ? m.notice_end_date : null);
+    const end = lastDay ? ymd(lastDay) : null;
+    const workType = workTypeOf(m);
+    const homeByDay = homeBy.get(m.id) || new Set();
+    const away = awayBy.get(m.id) || new Map();
+    const days = week.map((day) => {
+      const d = byDate.get(day);
+      if (!d) return { date: day, key: 'none', label: '-' };
+      const inEmployment = (!start || day >= start) && (!end || day <= end);
+      const c = registerCode(d, { today, inEmployment, workType, homeByDay });
+      return { date: day, ...availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' }) };
+    });
+    return {
+      org_membership_id: m.id,
+      name: m.person?.name || 'Unknown',
+      designation: m.designation?.name || null,
+      department: m.department?.name || null,
+      team: m.team?.name || null,
+      relation: relationOf(m),
+      is_me: m.id === me.id,
+      on_notice: m.employment_status === 'notice_period',
+      days,
+    };
+  };
+  const people = [];
+  for (let i = 0; i < members.length; i += REGISTER_CONCURRENCY) people.push(...(await Promise.all(members.slice(i, i + REGISTER_CONCURRENCY).map(build))));
+  people.sort((a, b) => (RELATION_ORDER[a.relation] - RELATION_ORDER[b.relation]) || a.name.localeCompare(b.name));
+
+  const summary = {};
+  for (const p of people) {
+    const k = (p.days.find((d) => d.date === selected) || { key: 'none' }).key;
+    summary[k] = (summary[k] || 0) + 1;
+  }
+  return { date: selected, today, week, scope: everyone ? 'all' : 'team', can_see_all: isAdmin, team_name: members.find((m) => m.id === me.id)?.team?.name || null, summary, people };
+}
+
+module.exports = { memberMonth, employmentState, people, calendar, register, teamStatus, setOffice, officeHistory, requestPlace, pendingPlaces, decidePlace };

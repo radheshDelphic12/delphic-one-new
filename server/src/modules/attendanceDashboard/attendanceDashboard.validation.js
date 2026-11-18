@@ -12,6 +12,8 @@ const peopleQuery = monthQuery.extend({ status: z.enum(['current', 'active', 'no
 });
 const calendarQuery = monthQuery.extend({ org_membership_id: z.string().uuid().optional() });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+// Team availability: one day (default today) and the week around it; an admin may ask for everyone instead of their own team.
+const teamStatusQuery = z.object({ date: day.optional(), scope: z.enum(['team', 'all']).default('team') });
 
 const setOfficeSchema = z.object({
   org_membership_id: z.string().uuid(),
@@ -58,4 +60,4 @@ const workSiteSchema = z.object({
 const workSitePatchSchema = workSiteSchema.partial();
 const decidePlaceSchema = z.object({ approve: z.boolean(), reason: z.string().trim().max(500).optional() });
 
-module.exports = { monthQuery, peopleQuery, calendarQuery, setOfficeSchema, requestPlaceSchema, decidePlaceSchema, workLocationSchema, cancelWorkLocationSchema, workSiteSchema, workSitePatchSchema };
+module.exports = { monthQuery, peopleQuery, calendarQuery, teamStatusQuery, setOfficeSchema, requestPlaceSchema, decidePlaceSchema, workLocationSchema, cancelWorkLocationSchema, workSiteSchema, workSitePatchSchema };

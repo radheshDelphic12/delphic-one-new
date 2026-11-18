@@ -57,6 +57,11 @@ router.get('/register', asyncHandler(async (req, res) => {
   }
   return ok(res, data);
 }));
+// Team availability: every employee sees whether their manager, their reports and their teammates are in, remote or on leave (status only).
+router.get('/team-status', asyncHandler(async (req, res) => {
+  const result = await service.teamStatus(req.user.org_id, req.user, v.teamStatusQuery.parse(req.query));
+  return result.error ? failFor(res, result.error) : ok(res, result);
+}));
 router.get('/people', asyncHandler(async (req, res) => ok(res, await service.people(req.user.org_id, req.user, v.peopleQuery.parse(req.query)))));
 
 router.get(

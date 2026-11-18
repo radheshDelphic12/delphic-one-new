@@ -285,3 +285,72 @@ describe('monthly register', () => {
     expect(future.body.data.people[0].totals.absent).toBe(0);
   });
 });
+
+// Team availability: everyone sees the daily status of their manager, their reports, their teammates and themselves - status only.
+describe('team availability', () => {
+  const DAY = '2026-11-03'; // a Tuesday in the past
+  const mark = (ctx, member, status) => prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: member.membership.id, date: new Date(`${DAY}T00:00:00Z`), status } });
+
+  test('a plain employee sees their manager, their peers and themselves with a status each; outsiders and contractors stay out', async () => {
+    const ctx = await seed();
+    const boss = await ctx.person('Boss Person');
+    const a = await ctx.person('Anna Peer', { managerId: boss.membership.id });
+    const b = await ctx.person('Bela Peer', { managerId: boss.membership.id });
+    await ctx.person('Chitra Unrecorded', { managerId: boss.membership.id });
+    const outsider = await ctx.person('Outside Person');
+    await ctx.person('Vendor Resource', { workerType: 'contractor', managerId: boss.membership.id });
+    await mark(ctx, a, 'present');
+    await mark(ctx, b, 'present');
+    await mark(ctx, boss, 'wfh');
+
+    const res = await get(`/team-status?date=${DAY}`, a.token);
+    expect(res.status).toBe(200);
+    const by = Object.fromEntries(res.body.data.people.map((p) => [p.name, p]));
+    expect(Object.keys(by).sort()).toEqual(['Anna Peer', 'Bela Peer', 'Boss Person', 'Chitra Unrecorded']);
+    expect(by['Anna Peer']).toMatchObject({ relation: 'you', is_me: true });
+    expect(by['Boss Person'].relation).toBe('manager');
+    expect(by['Bela Peer'].relation).toBe('peer');
+    const on = (p) => p.days.find((d) => d.date === DAY);
+    expect(on(by['Anna Peer'])).toMatchObject({ key: 'present', label: 'Present' });
+    expect(on(by['Bela Peer']).key).toBe('present');
+    expect(on(by['Boss Person'])).toMatchObject({ key: 'remote', label: 'Working remotely' });
+    expect(on(by['Chitra Unrecorded']).key).toBe('unavailable'); // a past working day with nothing recorded
+    expect(res.body.data.week).toHaveLength(7);
+    expect(res.body.data.summary).toMatchObject({ present: 2, remote: 1, unavailable: 1 });
+    expect(res.body.data.people[0].name).toBe('Anna Peer'); // you first, then your manager
+    expect(res.body.data.people[1].name).toBe('Boss Person');
+    expect(JSON.stringify(res.body.data)).not.toMatch(/hours|projects|leave_balance|reporting_office/); // a status only
+    expect(outsider.membership.id).toBeTruthy();
+  });
+
+  test('a manager sees their direct reports; everyone-scope is for admins only', async () => {
+    const ctx = await seed();
+    const boss = await ctx.person('Boss Person');
+    const r1 = await ctx.person('Report One', { managerId: boss.membership.id });
+    const outsider = await ctx.person('Outside Person');
+    await mark(ctx, r1, 'present');
+
+    const mine = await get(`/team-status?date=${DAY}`, boss.token);
+    expect(mine.body.data.people.map((p) => p.name).sort()).toEqual(['Boss Person', 'Report One']);
+    expect(mine.body.data.people.find((p) => p.name === 'Report One').relation).toBe('report');
+
+    const asked = await get(`/team-status?date=${DAY}&scope=all`, boss.token); // not an admin: the scope is ignored
+    expect(asked.body.data.scope).toBe('team');
+    expect(asked.body.data.people.map((p) => p.name)).not.toContain('Outside Person');
+
+    const all = await get(`/team-status?date=${DAY}&scope=all`, ctx.admin);
+    expect(all.body.data.scope).toBe('all');
+    expect(all.body.data.people.map((p) => p.name)).toEqual(expect.arrayContaining(['Boss Person', 'Report One', 'Outside Person']));
+    expect(outsider.membership.id).toBeTruthy();
+  });
+
+  test('someone with no manager and no team sees only themselves; a bad date is refused', async () => {
+    const ctx = await seed();
+    const solo = await ctx.person('Solo Person');
+    const res = await get('/team-status', solo.token);
+    expect(res.status).toBe(200);
+    expect(res.body.data.people.map((p) => p.name)).toEqual(['Solo Person']);
+    expect(res.body.data.date).toBe(res.body.data.today);
+    expect((await get('/team-status?date=not-a-date', solo.token)).status).toBe(422);
+  });
+});

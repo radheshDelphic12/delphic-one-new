@@ -8,6 +8,7 @@ import AttendancePage from '../attendance/AttendancePage.jsx';
 import LeavePage from '../leave/LeavePage.jsx';
 import ApprovalsTab from './ApprovalsTab.jsx';
 import AttendanceDashboard from './AttendanceDashboard.jsx';
+import TeamAvailability from './TeamAvailability.jsx';
 import LocationCheckinTab from './LocationCheckinTab.jsx';
 import ContractorCheckinTab from './ContractorCheckinTab.jsx';
 import ItTimesheetAdminView from './ItTimesheetAdminView.jsx';
@@ -29,6 +30,8 @@ const BASE_TABS = [
   // { key: 'dashboard', label: 'Timesheet Dashboard', icon: LayoutDashboard },
   // Attendance only (no project hours): status, reporting office and office / home per day, plus leave balance.
   { key: 'attendance-dashboard', label: 'Attendance Dashboard', icon: UserCheck, need: ['basic.attendance', 'attendance_dashboard.view'] },
+  // Everyone sees whether their manager, reports and teammates are in, remote or on leave today (status only).
+  { key: 'team-availability', label: 'Team availability', icon: Users, need: 'basic.attendance' },
   // Every project as a month calendar: hours, tasks, leave, holidays.
   { key: 'project-calendar', label: 'Project Calendar', icon: CalendarRange, need: ['basic.timesheet', 'project_calendar.view'] },
   // Hours logged by everyone on a project you are assigned to (visibility only, no cap).
@@ -115,6 +118,7 @@ export default function TimeAttendanceHubPage() {
       {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
       {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}
+      {section === 'team-availability' && <TeamAvailability />}
       {section === 'location-checkin' && has('location-checkin') && <LocationCheckinTab />}
       {section === 'contractor-checkin' && has('contractor-checkin') && <ContractorCheckinTab canEdit={allowed(user, 'hr_settings.update', isAdmin)} />}
       {section === 'project-calendar' && <ProjectCalendarDashboard />}
