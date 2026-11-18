@@ -376,6 +376,7 @@ enum NotificationType {
   timesheet_regularization_decided
   increment_review_due
   bench_countdown
+  celebration_wish
   resignation_submitted
   resignation_manager_updated
   resignation_decided
@@ -2114,6 +2115,7 @@ model OrgGroupMembership {
 
 model Org {
   id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  celebration_wishes           CelebrationWish[]
   org_group_id                 String    @db.Uuid
   org_group                    OrgGroup  @relation(fields: [org_group_id], references: [id])
   name                         String
@@ -2566,6 +2568,8 @@ model OrgMembership {
   @@index([person_id])
   @@index([manager_id])
   @@index([custom_role_id])
+  celebration_wishes_received CelebrationWish[] @relation("CelebrationWishCelebrant")
+  celebration_wishes_sent     CelebrationWish[] @relation("CelebrationWishSender")
   @@map("org_memberships")
 }
 
@@ -10199,4 +10203,23 @@ model AiClientSuggestion {
   @@index([org_id, status])
   @@index([org_id, batch_id])
   @@map("ai_client_suggestions")
+}
+
+// A wish on a colleague's birthday / work anniversary (Announcements card). Only meaningful on `on_date`: it is read for today only and deleted by the nightly job.
+model CelebrationWish {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id             String        @db.Uuid
+  org                Org           @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  org_membership_id  String        @db.Uuid
+  celebrant          OrgMembership @relation("CelebrationWishCelebrant", fields: [org_membership_id], references: [id], onDelete: Cascade)
+  kind               String
+  on_date            DateTime      @db.Date
+  from_membership_id String        @db.Uuid
+  sender             OrgMembership @relation("CelebrationWishSender", fields: [from_membership_id], references: [id], onDelete: Cascade)
+  message            String
+  created_at         DateTime      @default(now())
+
+  @@unique([org_membership_id, kind, on_date, from_membership_id], map: "celebration_wishes_once_per_sender")
+  @@index([org_id, on_date])
+  @@map("celebration_wishes")
 }

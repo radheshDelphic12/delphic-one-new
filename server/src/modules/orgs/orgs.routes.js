@@ -12,6 +12,7 @@ const accessService = require('../access/access.service');
 const {
   createOrgSchema,
   createLocationSchema,
+  wishSchema,
   updateLocationSchema,
   membershipListQuerySchema,
   personalDetailsSchema,
@@ -124,7 +125,21 @@ router.get(
   requireOrgMembership,
   asyncHandler(async (req, res) => {
     const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
-    return ok(res, await require('./announcements.service').upcoming(req.user.org_id, { days }));
+    return ok(res, await require('./announcements.service').upcoming(req.user.org_id, { days, viewerMembershipId: req.user.org_membership_id }));
+  })
+);
+
+// Wish a colleague on their birthday / work anniversary (today only; one wish per person per celebration; never yourself).
+router.post(
+  '/announcements/wishes',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const body = wishSchema.parse(req.body);
+    const result = await require('./announcements.service').sendWish(req.user.org_id, req.user, body);
+    if (result.error === 'self') return fail(res, 422, 'You cannot wish yourself');
+    if (result.error === 'not_today') return fail(res, 422, 'You can only wish someone on the day of their birthday or work anniversary');
+    if (result.error === 'already_wished') return fail(res, 409, 'You have already wished them');
+    return created(res, { ok: true });
   })
 );
 
