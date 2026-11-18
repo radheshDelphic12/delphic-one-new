@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Cake, ChevronDown, ChevronUp, Gift, PartyPopper, Send } from 'lucide-react';
+import { Cake, ChevronDown, ChevronUp, MessageCircleHeart, PartyPopper, Send, Sparkles, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -7,9 +7,22 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 const when = (days) => (days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`);
 const dayMonth = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
+// One generic label for the action, so other kinds of announcements can reuse the same card without "wish" wording.
+const ACTION = 'Send a note';
+
+const EMOJI = ['🎂', '🎉', '🥳', '👏', '❤️', '🙌', '😊', '😍', '🔥', '👍', '🎁', '🍰', '🎈', '✨', '💐', '🤝', '😄', '🌟', '💯', '🙏', '😎', '🥂', '💪', '🌈'];
+const EMOJI_FIRST = 8;
+const AVATAR_TONES = ['bg-pink-100 text-pink-700', 'bg-primary-100 text-primary-700', 'bg-amber-100 text-amber-700', 'bg-emerald-100 text-emerald-700', 'bg-violet-100 text-violet-700', 'bg-sky-100 text-sky-700'];
+const avatarIndex = (name) => [...String(name || '?')].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AVATAR_TONES.length;
+const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('');
+
+// The words being typed, without emoji, used to look up matching GIFs.
+const gifQuery = (text) => text.replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(-6).join(' ');
+
 /**
- * One birthday / anniversary row. Today's rows can be wished (colleagues only, once each) and show who wished when the row is opened;
- * wishes only exist for that day, so tomorrow the row has none.
+ * One birthday / anniversary row. Today's rows can get a note (colleagues only, once each) and show the notes when the row is opened;
+ * the notes only exist for that day, so tomorrow the row has none. While writing, emoji can be added and GIFs matching the words typed
+ * are suggested (only when the server has a GIF key; otherwise the GIF strip simply does not appear).
  */
 function Row({ icon: Icon, tone, item, text, kind, onWished }) {
   const { pushError, pushInfo } = useAlerts();
@@ -19,18 +32,41 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
   const [composing, setComposing] = useState(false);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [moreEmoji, setMoreEmoji] = useState(false);
+  const [gifs, setGifs] = useState([]);
+  const [gifsOn, setGifsOn] = useState(true); // flips to false once the server says there is no GIF key
+  const [gif, setGif] = useState(null);
+
+  const query = gifQuery(message);
+  useEffect(() => {
+    if (!composing || !gifsOn || query.length < 3) { setGifs([]); return undefined; }
+    let live = true;
+    const timer = setTimeout(() => {
+      apiClient.get('/orgs/announcements/gifs', { params: { q: query } })
+        .then(({ data: body }) => { if (!live) return; if (body.data?.enabled === false) setGifsOn(false); setGifs(body.data?.results || []); })
+        .catch(() => { if (live) setGifs([]); });
+    }, 600);
+    return () => { live = false; clearTimeout(timer); };
+  }, [composing, gifsOn, query]);
+
+  function close() {
+    setComposing(false);
+    setMessage('');
+    setGif(null);
+    setGifs([]);
+    setMoreEmoji(false);
+  }
 
   async function send() {
     setSending(true);
     try {
-      await apiClient.post('/orgs/announcements/wishes', { org_membership_id: item.org_membership_id, kind, message: message.trim() || undefined });
-      pushInfo(`Wished ${item.name || 'your colleague'}`);
-      setComposing(false);
-      setMessage('');
+      await apiClient.post('/orgs/announcements/wishes', { org_membership_id: item.org_membership_id, kind, message: message.trim() || undefined, gif_url: gif?.url });
+      pushInfo(`Note sent to ${item.name || 'your colleague'}`);
+      close();
       setOpen(true);
       onWished();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Could not send the wish'), 'Something went wrong');
+      pushError(apiErrorMessage(err, 'Could not send the note'), 'Something went wrong');
       if (err?.response?.status === 409) onWished();
     } finally {
       setSending(false);
@@ -49,41 +85,86 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
           <span className="flex shrink-0 items-center gap-1">
             {wishes.length > 0 && (
               <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-                {wishes.length} wish{wishes.length === 1 ? '' : 'es'} {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {wishes.length} note{wishes.length === 1 ? '' : 's'} {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
               </button>
             )}
             {!item.is_me && !item.wished_by_me && (
-              <button type="button" className="btn-secondary inline-flex items-center gap-1 px-2.5 py-1 text-xs" onClick={() => setComposing((v) => !v)}>
-                <Gift className="h-3.5 w-3.5" /> Wish
+              <button type="button" className="btn-secondary inline-flex items-center gap-1 px-2.5 py-1 text-xs" onClick={() => (composing ? close() : setComposing(true))}>
+                <MessageCircleHeart className="h-3.5 w-3.5" /> {ACTION}
               </button>
             )}
-            {!item.is_me && item.wished_by_me && <span className="text-xs text-success-700">You wished</span>}
+            {!item.is_me && item.wished_by_me && <span className="text-xs text-success-700">You sent a note</span>}
           </span>
         )}
         <span className="shrink-0 text-xs text-tertiary-500">{when(item.days_away)} · {dayMonth(item.date)}</span>
       </div>
       {composing && (
-        <div className="flex items-center gap-2 px-4 pb-3 pl-[3.75rem]">
-          <input
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            maxLength={300}
-            placeholder={kind === 'birthday' ? 'Happy birthday! 🎂 (add your own message)' : 'Happy work anniversary! 🎉 (add your own message)'}
-            className="min-w-0 flex-1 rounded-xl border px-3 py-1.5 text-sm"
-          />
-          <button type="button" className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs" onClick={send} disabled={sending}>
-            <Send className="h-3.5 w-3.5" /> {sending ? 'Sending…' : 'Send'}
-          </button>
+        <div className="mx-4 mb-3 ml-[3.75rem] space-y-2.5 rounded-2xl border border-primary-100 bg-primary-50/40 p-3">
+          <div className="flex items-center gap-2">
+            <input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              maxLength={300}
+              placeholder={kind === 'birthday' ? 'Happy birthday! 🎂 (or write your own message)' : 'Happy work anniversary! 🎉 (or write your own message)'}
+              className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-1.5 text-sm"
+              aria-label="Your note"
+            />
+            <button type="button" className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs" onClick={send} disabled={sending}>
+              <Send className="h-3.5 w-3.5" /> {sending ? 'Sending…' : 'Send'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5" aria-label="Add an emoji">
+            {(moreEmoji ? EMOJI : EMOJI.slice(0, EMOJI_FIRST)).map((e) => (
+              <button key={e} type="button" className="rounded-full bg-white px-2 py-0.5 text-base shadow-sm ring-1 ring-tertiary-100 hover:bg-tertiary-50" onClick={() => setMessage((m) => `${m}${e}`.slice(0, 300))}>{e}</button>
+            ))}
+            <button type="button" className="rounded-full px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-50" onClick={() => setMoreEmoji((v) => !v)}>{moreEmoji ? 'Fewer' : 'More emoji'}</button>
+          </div>
+
+          {gif && (
+            <div className="relative inline-block">
+              <img src={gif.url} alt={gif.title || 'Selected GIF'} className="max-h-32 rounded-xl ring-1 ring-tertiary-100" />
+              <button type="button" aria-label="Remove the GIF" className="absolute -right-2 -top-2 rounded-full bg-white p-1 shadow ring-1 ring-tertiary-200 hover:bg-tertiary-50" onClick={() => setGif(null)}><X className="h-3 w-3" /></button>
+            </div>
+          )}
+          {gifsOn && gifs.length > 0 && (
+            <div>
+              <p className="mb-1 text-[11px] font-medium text-tertiary-500">GIFs for “{query}” — tap one to add it</p>
+              <div className="flex gap-2 overflow-x-auto pb-1" aria-label="GIF suggestions">
+                {gifs.map((g) => (
+                  <button key={g.id} type="button" onClick={() => setGif(g)} className={`shrink-0 overflow-hidden rounded-xl ring-2 ${gif?.id === g.id ? 'ring-primary-500' : 'ring-transparent hover:ring-tertiary-200'}`}>
+                    <img src={g.preview} alt={g.title || 'GIF suggestion'} loading="lazy" className="h-20 w-auto" />
+                  </button>
+                ))}
+              </div>
+              <p className="mt-0.5 text-[10px] text-tertiary-400">Powered by GIPHY</p>
+            </div>
+          )}
         </div>
       )}
       {open && wishes.length > 0 && (
-        <ul className="space-y-1 px-4 pb-3 pl-[3.75rem] text-xs text-tertiary-700" aria-label="Wishes">
-          {wishes.map((w, i) => (
-            <li key={`${w.from_name}-${i}`} className="rounded-lg bg-tertiary-50 px-2.5 py-1.5">
-              <span className="font-medium text-tertiary-900">{w.is_mine ? 'You' : w.from_name}</span>: {w.message}
-            </li>
-          ))}
-        </ul>
+        <div className="mx-4 mb-3 ml-[3.75rem] overflow-hidden rounded-2xl border border-pink-100 bg-gradient-to-br from-pink-50 via-white to-amber-50 p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-tertiary-700">
+            <Sparkles className="h-3.5 w-3.5 text-amber-500" /> {wishes.length} note{wishes.length === 1 ? '' : 's'} for {String(item.name || 'them').split(' ')[0]}
+          </p>
+          <ul className="space-y-2" aria-label="Notes">
+            {wishes.map((w, i) => (
+              <li key={`${w.from_name}-${i}`} className="flex items-start gap-2.5">
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${AVATAR_TONES[avatarIndex(w.from_name)]}`} aria-hidden="true">
+                  {initials(w.from_name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-baseline gap-2 text-xs">
+                    <span className="font-semibold text-tertiary-900">{w.is_mine ? 'You' : w.from_name}</span>
+                    {w.at && <span className="text-[11px] text-tertiary-400">{new Date(w.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span>}
+                  </p>
+                  {w.message && <p className="mt-0.5 inline-block max-w-full break-words rounded-2xl rounded-tl-sm bg-white px-3 py-1.5 text-sm text-tertiary-800 shadow-sm ring-1 ring-tertiary-100">{w.message}</p>}
+                  {w.gif_url && <img src={w.gif_url} alt="GIF" loading="lazy" className="mt-1.5 block max-h-40 rounded-xl ring-1 ring-tertiary-100" />}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </li>
   );

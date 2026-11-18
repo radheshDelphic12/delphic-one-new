@@ -87,6 +87,10 @@ const env = {
     workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || null,
     maxOutputTokens: Number(process.env.AI_INTERVIEW_MAX_OUTPUT_TOKENS) || 1200,
   },
+  // GIF suggestions while writing a birthday / anniversary message (Announcements card). The Giphy API key stays on the server; unset = no GIF picker, messages still work.
+  gifs: {
+    apiKey: process.env.GIPHY_API_KEY || null,
+  },
   // Marketing website control (modules/website). Each URL is one Apps Script
   // web app (…/exec) the website already uses; the secret must equal the
   // PLATFORM_SECRET script property on every one of them. Any value unset →

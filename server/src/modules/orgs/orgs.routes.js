@@ -13,6 +13,7 @@ const {
   createOrgSchema,
   createLocationSchema,
   wishSchema,
+  gifSearchSchema,
   updateLocationSchema,
   membershipListQuerySchema,
   personalDetailsSchema,
@@ -126,6 +127,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
     return ok(res, await require('./announcements.service').upcoming(req.user.org_id, { days, viewerMembershipId: req.user.org_membership_id }));
+  })
+);
+
+// GIF suggestions for the message being typed (Giphy via the server; {enabled:false} when no key is configured).
+router.get(
+  '/announcements/gifs',
+  requireOrgMembership,
+  asyncHandler(async (req, res) => {
+    const { q } = gifSearchSchema.parse(req.query);
+    return ok(res, await require('./announcements.service').searchGifs(q));
   })
 );
 

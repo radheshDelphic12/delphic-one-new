@@ -5,6 +5,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
+import CelebrationBadge from './CelebrationBadge.jsx';
 import BenchCard from './BenchCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
 import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
@@ -43,7 +44,8 @@ function ModernDashboard() {
   const first = String(user?.name || '').split(' ')[0];
   return (
     <div className="space-y-5">
-      <div className="overflow-hidden rounded-2xl border border-tertiary-100 bg-gradient-to-r from-primary-50 via-white to-white p-6 shadow-card">
+      <div className="relative overflow-hidden rounded-2xl border border-tertiary-100 bg-gradient-to-r from-primary-50 via-white to-white p-6 shadow-card">
+        <CelebrationBadge className="mb-3 sm:absolute sm:right-6 sm:top-6 sm:mb-0 sm:text-right" />
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">{user?.active_org?.name || 'Dashboard'}</p>
         <h1 className="mt-1 font-heading text-2xl font-semibold text-tertiary-900">{greeting()}{first ? `, ${first}` : ''}</h1>
         <p className="mt-1 text-sm text-tertiary-500">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>

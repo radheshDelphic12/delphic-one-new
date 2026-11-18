@@ -51,6 +51,8 @@ services:
       WEBSITE_CONTACT_SCRIPT_URL: ${WEBSITE_CONTACT_SCRIPT_URL:-}
       WEBSITE_CAREER_SCRIPT_URL: ${WEBSITE_CAREER_SCRIPT_URL:-}
       WEBSITE_SECURE_SCRIPT_URL: ${WEBSITE_SECURE_SCRIPT_URL:-}
+      # GIF suggestions on the Announcements card: unset = no GIF picker, nothing else is affected.
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       # AI interview (modules/aiInterviews): unset = the feature cannot ask questions; nothing else is affected.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_INTERVIEW_MODEL: ${AI_INTERVIEW_MODEL:-}

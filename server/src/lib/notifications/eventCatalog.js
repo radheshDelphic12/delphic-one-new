@@ -177,8 +177,8 @@ function renderNotification(type, ctx = {}) {
       );
     case 'celebration_wish':
       return envelope(
-        ctx.kind === 'anniversary' ? 'Work anniversary wish' : 'Birthday wish',
-        `${actorPrefix(ctx)}wished you: ${truncate(ctx.message || '')}`,
+        ctx.kind === 'anniversary' ? 'Note on your work anniversary' : 'Note on your birthday',
+        `${actorPrefix(ctx)}sent you a note${ctx.message ? `: ${truncate(ctx.message)}` : ' with a GIF'}.`,
         null, null, ctx
       );
     case 'increment_review_due':
