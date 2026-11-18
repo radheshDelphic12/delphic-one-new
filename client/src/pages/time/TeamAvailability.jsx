@@ -60,7 +60,7 @@ export default function TeamAvailability() {
         <div>
           <h2 className="flex items-center gap-2 font-heading text-lg font-semibold text-tertiary-900"><Users className="h-5 w-5 text-primary-600" /> Team availability</h2>
           <p className="mt-0.5 text-sm text-tertiary-500">
-            {data?.scope === 'all' ? 'Everyone in the company' : data?.team_name ? `Your team (${data.team_name}): your manager, your reports and your teammates` : 'Your manager, your reports and your teammates'}
+            {data?.scope === 'all' ? 'Everyone in the company' : 'You, your manager and the people who report to you'}
             {' '}- {selected ? longDate(selected) : 'today'}
           </p>
         </div>
@@ -167,7 +167,7 @@ export default function TeamAvailability() {
         )}
       </div>
 
-      {onlyMe && <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">You are not part of a team yet. Once HR sets your manager or team (People &gt; HR Settings), your team shows up here.</p>}
+      {onlyMe && <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">Nobody reports to you and no manager is set yet. Once HR sets your manager (People &gt; HR Settings), they show up here.</p>}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-tertiary-500" aria-label="Legend">
         {['present', 'remote', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'].map((k) => (
           <span key={k} className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${STATUS[k].dot}`} />{STATUS[k].label}</span>

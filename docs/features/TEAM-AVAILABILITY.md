@@ -1,14 +1,14 @@
 # Team availability (Time & Attendance > Team availability)
 
-Requested 2026-11-18 ("team-wide attendance visibility"): every employee should see the daily working status of their manager, their direct reports and their teammates, so nobody has to assume or ask whether someone is in.
+Requested 2026-11-18 ("team-wide attendance visibility"): every employee should see the daily working status of their manager and their direct reports, so nobody has to assume or ask whether someone is in.
 
 ## What people see
 - New tab **Team availability** in Time & Attendance, for every employee (`basic.attendance`, same as the Attendance tab). No new permission.
 - One day at a time (today by default; previous / next day, a date picker, a Today button) with the **week around it** as seven dots per person; clicking a day jumps to it.
 - Status per person: **Present**, **Working remotely**, **At a work site**, **Half day**, **On leave** (or Half-day leave), **Unavailable** (a past working day with nothing recorded), **Not in yet** (today, nothing recorded yet), **Day off** (holiday / weekly off). Summary chips above the list count each status and filter the list when clicked.
-- Who is shown: you, your manager, your direct reports, people with the same manager (peers) and people in your team (HR Settings > Teams). Sorted you, manager, reports, peers / team. Contractors, vendor resources and exited people are left out; a person serving notice is marked.
+- Who is shown (changed 2026-11-18, owner: "manager sees only their team and the person they report to, nobody else"): you, your manager and your direct reports. NOT peers (same manager), NOT an HR-Settings team, NOT another team or their people. Sorted you, manager, reports. Contractors, vendor resources and exited people are left out; a person serving notice is marked.
 - An **admin** also gets an "Everyone" toggle (the whole company). Anyone else asking for `scope=all` is silently kept on their own team.
-- Someone with no manager and no team sees only themselves plus a hint to ask HR to set their manager / team.
+- Someone with no manager and no reports sees only themselves plus a hint to ask HR to set their manager.
 
 ## Privacy (on purpose)
 Colleagues see a status only: no hours, no projects, no reporting office and no check-in place or time. The **leave type** (Sick, Casual, Maternity ...) is added (`detail` on the day, shown when you **hover** the day dot or the status badge) only for the person themselves, their own direct manager and an admin; everyone else sees just "On leave" (decided 2026-11-18). The existing Attendance Dashboard (admin everyone, manager their reports, employee themselves) is unchanged.
@@ -23,5 +23,5 @@ Colleagues see a status only: no hours, no projects, no reporting office and no 
 `server/tests/attendance-dashboard.test.js` > "team availability" (4 tests: an employee sees manager / peers / self with statuses and no outsiders or contractors; a manager sees reports and `scope=all` is admin-only; a person with no team sees only themselves and a bad date is refused).
 
 ## Open / decisions taken without an answer
-- "Team" = manager circle + HR Settings team. The manager's manager is NOT shown (it was added and then removed on the owner's request, 2026-11-18).
+- "Team" = the reporting line only (manager + direct reports); peers and HR Settings teams were removed on the owner's request. The manager's manager is NOT shown (it was added and then removed on the owner's request, 2026-11-18).
 - Work-site days show as "At a work site" without the place or project.

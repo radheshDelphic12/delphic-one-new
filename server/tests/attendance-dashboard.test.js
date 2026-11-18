@@ -291,7 +291,7 @@ describe('team availability', () => {
   const DAY = '2026-11-03'; // a Tuesday in the past
   const mark = (ctx, member, status) => prisma.attendanceRecord.create({ data: { org_id: ctx.org.id, org_membership_id: member.membership.id, date: new Date(`${DAY}T00:00:00Z`), status } });
 
-  test('a plain employee sees their manager, their peers and themselves with a status each; outsiders and contractors stay out', async () => {
+  test('a plain employee sees only their manager and themselves (no peers, no other team, no contractors)', async () => {
     const ctx = await seed();
     const boss = await ctx.person('Boss Person');
     const a = await ctx.person('Anna Peer', { managerId: boss.membership.id });
@@ -306,17 +306,14 @@ describe('team availability', () => {
     const res = await get(`/team-status?date=${DAY}`, a.token);
     expect(res.status).toBe(200);
     const by = Object.fromEntries(res.body.data.people.map((p) => [p.name, p]));
-    expect(Object.keys(by).sort()).toEqual(['Anna Peer', 'Bela Peer', 'Boss Person', 'Chitra Unrecorded']);
+    expect(Object.keys(by).sort()).toEqual(['Anna Peer', 'Boss Person']); // teammates under the same manager are NOT shown
     expect(by['Anna Peer']).toMatchObject({ relation: 'you', is_me: true });
     expect(by['Boss Person'].relation).toBe('manager');
-    expect(by['Bela Peer'].relation).toBe('peer');
     const on = (p) => p.days.find((d) => d.date === DAY);
     expect(on(by['Anna Peer'])).toMatchObject({ key: 'present', label: 'Present' });
-    expect(on(by['Bela Peer']).key).toBe('present');
     expect(on(by['Boss Person'])).toMatchObject({ key: 'remote', label: 'Working remotely' });
-    expect(on(by['Chitra Unrecorded']).key).toBe('unavailable'); // a past working day with nothing recorded
     expect(res.body.data.week).toHaveLength(7);
-    expect(res.body.data.summary).toMatchObject({ present: 2, remote: 1, unavailable: 1 });
+    expect(res.body.data.summary).toMatchObject({ present: 1, remote: 1 });
     expect(res.body.data.people[0].name).toBe('Anna Peer'); // you first, then your manager
     expect(res.body.data.people[1].name).toBe('Boss Person');
     expect(JSON.stringify(res.body.data)).not.toMatch(/hours|projects|leave_balance|reporting_office/); // a status only
@@ -364,10 +361,8 @@ describe('team availability', () => {
     await prisma.leaveRequest.create({ data: { org_id: ctx.org.id, org_membership_id: anna.membership.id, leave_type_id: sick.id, from_date: new Date(`${DAY}T00:00:00Z`), to_date: new Date(`${DAY}T00:00:00Z`), status: 'approved' } });
     const on = (res, name) => res.body.data.people.find((p) => p.name === name).days.find((d) => d.date === DAY);
 
-    const asBela = await get(`/team-status?date=${DAY}`, bela.token); // a peer: sees On leave, not the type
-    expect(asBela.body.data.people.map((p) => p.name).sort()).toEqual(['Anna Peer', 'Bela Peer', 'Boss Person']); // the manager's manager is not part of the circle
-    expect(on(asBela, 'Anna Peer')).toMatchObject({ key: 'leave', label: 'On leave' });
-    expect(on(asBela, 'Anna Peer').detail).toBeUndefined();
+    const asBela = await get(`/team-status?date=${DAY}`, bela.token); // a peer no longer sees Anna at all
+    expect(asBela.body.data.people.map((p) => p.name).sort()).toEqual(['Bela Peer', 'Boss Person']);
     expect(JSON.stringify(asBela.body.data)).not.toMatch(/Sick/);
 
     const asBoss = await get(`/team-status?date=${DAY}`, boss.token); // her own manager: sees the type

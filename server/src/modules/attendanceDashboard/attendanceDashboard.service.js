@@ -501,8 +501,7 @@ function availabilityOf(c, { isToday, workedAtSite }) {
 }
 
 /**
- * Daily availability of the caller's team: themselves, their manager, their direct reports, the people with the same manager and the people
- * in their team (HR Settings > Teams). The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
+ * Daily availability of the caller's team: themselves, their manager, their direct reports (no peers, no other team). The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
  * the person themselves and an admin; everyone else sees just "On leave". `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
  * An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
  */
@@ -518,9 +517,9 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   if (!me) return { error: 'member_not_found' };
   const isAdmin = user.role === 'admin' && (!user.access || user.access.level !== 'employee');
   const everyone = scope === 'all' && isAdmin;
+  // Only the reporting line: me, the person I report to, and the people who report to me. Not peers, not an HR-Settings team, not another team.
   const circle = [{ id: me.id }, { manager_id: me.id }];
-  if (me.manager_id) circle.push({ id: me.manager_id }, { manager_id: me.manager_id });
-  if (me.team_id) circle.push({ team_id: me.team_id });
+  if (me.manager_id) circle.push({ id: me.manager_id });
 
   const rows = await prisma.orgMembership.findMany({
     where: { org_id: orgId, employment_status: { not: 'terminated' }, worker_type: { not: 'contractor' }, vendor_account_id: null, ...(everyone ? {} : { OR: circle }) },
@@ -562,8 +561,6 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
     if (m.id === me.id) return 'you';
     if (m.id === me.manager_id) return 'manager';
     if (m.manager_id === me.id) return 'report';
-    if (me.manager_id && m.manager_id === me.manager_id) return 'peer';
-    if (me.team_id && m.team_id === me.team_id) return 'team';
     return 'colleague';
   };
 
