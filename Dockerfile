@@ -4,10 +4,11 @@ WORKDIR /app
 # Prisma 5's engines need openssl on Alpine (same as server/Dockerfile).
 RUN apk add --no-cache openssl libc6-compat
 
-COPY package.json ./package.json
+COPY package.json package-lock.json ./
 COPY server/package.json ./server/package.json
 COPY client/package.json ./client/package.json
-RUN npm install --workspace server --workspace client --include-workspace-root
+# Install exactly what package-lock.json pins (npm ci): a fresh `npm install` picked up rollup 4.68.6 (released 2026-11-18) and broke `vite build` on Alpine.
+RUN npm ci --workspace server --workspace client --include-workspace-root --no-audit --no-fund
 
 COPY server ./server
 COPY client ./client

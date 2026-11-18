@@ -3,10 +3,11 @@ WORKDIR /app
 
 RUN apk add --no-cache openssl libc6-compat
 
-COPY package.json ./package.json
+COPY package.json package-lock.json ./
 COPY server/package.json ./server/package.json
 COPY client/package.json ./client/package.json
-RUN npm install --workspace server
+# Install exactly what package-lock.json pins (npm ci): a fresh `npm install` picked up rollup 4.68.6 (released 2026-11-18) and broke `vite build` on Alpine.
+RUN npm ci --workspace server --no-audit --no-fund
 
 COPY server ./server
 RUN npm run generate --workspace server

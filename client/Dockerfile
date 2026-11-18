@@ -1,10 +1,11 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-COPY package.json ./package.json
+COPY package.json package-lock.json ./
 COPY client/package.json ./client/package.json
 COPY server/package.json ./server/package.json
-RUN npm install --workspace client
+# Install exactly what package-lock.json pins (npm ci): a fresh `npm install` picked up rollup 4.68.6 (released 2026-11-18) and broke `vite build` on Alpine.
+RUN npm ci --workspace client --no-audit --no-fund
 
 COPY client ./client
 ARG VITE_DISABLE_QUICK_LOGIN=true
