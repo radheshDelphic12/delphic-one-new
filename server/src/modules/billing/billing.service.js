@@ -227,7 +227,7 @@ const GROUP_CHARGE_INCLUDE = {
   raiser: { select: { is_group_superadmin: true } },
 };
 
-async function createGroupCharge(raisedByUserId, { org_id, period_month, period_year, payment_date, kind, category_id, location_id, notes, amount, currency }) {
+async function createGroupCharge(raisedByUserId, { org_id, period_month, period_year, payment_date, duration_start, duration_end, kind, category_id, location_id, notes, amount, currency }) {
   const org = await prisma.org.findUnique({ where: { id: org_id } });
   if (!org) return { error: 'org_not_found' };
 
@@ -249,6 +249,8 @@ async function createGroupCharge(raisedByUserId, { org_id, period_month, period_
       period_month,
       period_year,
       payment_date: payment_date || null,
+      duration_start: duration_start || null,
+      duration_end: duration_end || null,
       kind: categoryName,
       category_id: category_id || null,
       location_id: location_id || null,
@@ -266,7 +268,7 @@ async function createGroupCharge(raisedByUserId, { org_id, period_month, period_
 // group raised against the company (raised by a group superadmin) can only be
 // changed by a group superadmin. Keeping the charge's current category is
 // allowed even if it has since been deactivated.
-async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, category_id, location_id, notes, amount, currency }) {
+async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, duration_start, duration_end, category_id, location_id, notes, amount, currency }) {
   const charge = await prisma.groupBillingCharge.findFirst({
     where: { id: chargeId, org_id: orgId },
     include: { raiser: { select: { is_group_superadmin: true } } },
@@ -279,6 +281,11 @@ async function updateGroupCharge(orgId, editorUserId, chargeId, { payment_date, 
   }
 
   const data = {};
+  const start = duration_start !== undefined ? duration_start : charge.duration_start;
+  const end = duration_end !== undefined ? duration_end : charge.duration_end;
+  if (start && end && end < start) return { error: 'duration_invalid' };
+  if (duration_start !== undefined) data.duration_start = duration_start;
+  if (duration_end !== undefined) data.duration_end = duration_end;
   if (category_id !== undefined && category_id !== charge.category_id) {
     const category = await prisma.financeCategory.findFirst({ where: { id: category_id, org_id: orgId, kind: 'group_charge', is_active: true }, select: { id: true, name: true } });
     if (!category) return { error: 'category_not_found' };

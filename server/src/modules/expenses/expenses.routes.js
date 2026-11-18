@@ -39,6 +39,7 @@ const ERRORS = {
   category_not_found: [404, 'Expense category not found (or deactivated)'],
   membership_not_found: [404, 'Employee not found in this company'],
   description_required: [422, 'Describe the expense when the category is Other'],
+  duration_invalid: [422, 'The end date cannot be before the start date'],
   not_deletable: [409, 'Only a pending claim can be deleted — this one has already been decided'],
   not_your_step: [403, 'This claim is waiting on another approver'],
   own_claim: [403, "You can't approve your own claim"],

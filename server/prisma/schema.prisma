@@ -1780,6 +1780,9 @@ model GroupBillingCharge {
   // The day the charge was paid (e.g. Ahmedabad office rent paid 25 Sep) —
   // what the date filter reads. Null on charges raised before this existed.
   payment_date DateTime?        @db.Date
+  // Optional period the expense covers (start to end).
+  duration_start DateTime?      @db.Date
+  duration_end   DateTime?      @db.Date
   // Admin-managed category (Finance → Categories). `kind` keeps the name as
   // text so older charges and renamed categories still read correctly.
   category_id  String?          @db.Uuid
@@ -1846,6 +1849,9 @@ model ExpenseClaim {
   // When the money was spent. Null on older claims — their month is the
   // submission date (created_at).
   expense_date      DateTime?             @db.Date
+  // Optional period the reimbursement covers (e.g. a subscription month, a trip).
+  duration_start    DateTime?             @db.Date
+  duration_end      DateTime?             @db.Date
   amount            Decimal               @db.Decimal(12, 2)
   currency          Currency              @default(INR)
   status            ExpenseClaimStatus    @default(pending)

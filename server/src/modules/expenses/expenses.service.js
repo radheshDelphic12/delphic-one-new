@@ -22,7 +22,7 @@ async function resolveCategory(orgId, category_id) {
 // `actor` files the claim for `orgMembershipId`: themselves, or — an admin —
 // any employee (recorded in submitted_by). It starts with the employee's
 // manager, or with HR when they have none (Manager -> HR -> Finance).
-async function createClaim(orgId, orgMembershipId, { location_id, category, category_id, expense_date, amount, currency, description }, actor = null) {
+async function createClaim(orgId, orgMembershipId, { location_id, category, category_id, expense_date, duration_start, duration_end, amount, currency, description }, actor = null) {
   const [location, member] = await Promise.all([
     prisma.location.findFirst({ where: { id: location_id, org_id: orgId } }),
     prisma.orgMembership.findFirst({ where: { id: orgMembershipId, org_id: orgId }, select: { id: true, manager_id: true } }),
@@ -46,6 +46,8 @@ async function createClaim(orgId, orgMembershipId, { location_id, category, cate
       category: name,
       category_id: category_id || null,
       expense_date: expense_date || null,
+      duration_start: duration_start || null,
+      duration_end: duration_end || null,
       amount,
       currency,
       description: description?.trim() || null,
@@ -90,6 +92,9 @@ async function updateClaim(orgId, claimId, actor, patch) {
     if (!location) return { error: 'location_not_found' };
   }
   const data = { ...patch };
+  const start = patch.duration_start !== undefined ? patch.duration_start : claim.duration_start;
+  const end = patch.duration_end !== undefined ? patch.duration_end : claim.duration_end;
+  if (start && end && end < start) return { error: 'duration_invalid' };
   if (patch.category_id) {
     const picked = await resolveCategory(orgId, patch.category_id);
     if (!picked) return { error: 'category_not_found' };

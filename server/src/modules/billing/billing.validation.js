@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { requiredDate, optionalDate } = require('../../lib/zodDate');
+const { requiredDate, optionalDate, nullableDate } = require('../../lib/zodDate');
 
 const CURRENCY = z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']);
 
@@ -214,6 +214,8 @@ const groupChargeFields = {
   period_month: z.coerce.number().int().min(1).max(12).optional(),
   period_year: z.coerce.number().int().min(2000).max(2100).optional(),
   payment_date: optionalDate,
+  duration_start: nullableDate,
+  duration_end: nullableDate,
   kind: z.string().trim().min(1).max(200).optional(),
   category_id: z.string().uuid().optional(),
   location_id: z.string().uuid().nullable().optional(),
@@ -222,8 +224,12 @@ const groupChargeFields = {
   currency: CURRENCY.default('INR'),
 };
 
+const durationOk = (v) => !v.duration_start || !v.duration_end || v.duration_end >= v.duration_start;
+const DURATION_ERR = { message: 'End date cannot be before the start date', path: ['duration_end'] };
+
 function withGroupChargeRules(schema) {
   return schema
+    .refine(durationOk, DURATION_ERR)
     .refine((v) => v.kind || v.category_id, { message: 'Pick a category', path: ['category_id'] })
     .refine((v) => v.payment_date || (v.period_month && v.period_year), { message: 'Give the payment date or the month', path: ['payment_date'] })
     .transform((v) => ({
@@ -245,13 +251,16 @@ const createOwnGroupChargeSchema = withGroupChargeRules(z.object(ownFields));
 const updateGroupChargeSchema = z
   .object({
     payment_date: optionalDate,
+    duration_start: nullableDate,
+    duration_end: nullableDate,
     category_id: z.string().uuid().optional(),
     location_id: z.string().uuid().nullable().optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
     amount: z.coerce.number().positive().optional(),
     currency: CURRENCY.optional(),
   })
-  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' })
+  .refine(durationOk, DURATION_ERR);
 
 // Filters: a month (period_month + period_year — matches the payment date
 // when there is one, else the charge's month), an exact payment date, a

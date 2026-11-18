@@ -30,7 +30,7 @@ function totalsLabel(rows) {
 const today = () => new Date().toISOString().slice(0, 10);
 
 function emptyFields() {
-  return { payment_date: today(), category_id: '', location_id: '', amount: '', currency: 'INR', notes: '' };
+  return { payment_date: today(), category_id: '', location_id: '', duration_start: '', duration_end: '', amount: '', currency: 'INR', notes: '' };
 }
 
 function fieldsFromCharge(charge) {
@@ -38,6 +38,8 @@ function fieldsFromCharge(charge) {
     payment_date: charge.payment_date ? String(charge.payment_date).slice(0, 10) : '',
     category_id: charge.category_id || '',
     location_id: charge.location_id || '',
+    duration_start: charge.duration_start ? String(charge.duration_start).slice(0, 10) : '',
+    duration_end: charge.duration_end ? String(charge.duration_end).slice(0, 10) : '',
     amount: String(charge.amount ?? ''),
     currency: charge.currency || 'INR',
     notes: charge.notes || '',
@@ -55,6 +57,7 @@ function GroupExpenseDrawer({ open, charge, onClose, onSubmit, categories, locat
   useEffect(() => { if (open) setFields(charge ? fieldsFromCharge(charge) : emptyFields()); }, [open, charge]);
 
   const set = (key, value) => setFields((current) => ({ ...current, [key]: value }));
+  const durationBad = Boolean(fields.duration_start && fields.duration_end && fields.duration_end < fields.duration_start);
 
   async function submit(event) {
     event.preventDefault();
@@ -64,6 +67,8 @@ function GroupExpenseDrawer({ open, charge, onClose, onSubmit, categories, locat
         payment_date: fields.payment_date,
         category_id: fields.category_id,
         location_id: fields.location_id || null,
+        duration_start: fields.duration_start || null,
+        duration_end: fields.duration_end || null,
         amount: Number(fields.amount),
         currency: fields.currency,
         notes: fields.notes.trim() || (isEditing ? null : undefined),
@@ -80,7 +85,7 @@ function GroupExpenseDrawer({ open, charge, onClose, onSubmit, categories, locat
     <Drawer open={open} title={isEditing ? 'Edit group charge' : 'Add group expense'} onClose={onClose} size="sm" tone={isEditing ? 'edit' : 'create'} footer={
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-        <button type="submit" form="group-expense-form" className="btn-primary" disabled={saving || !fields.category_id || !fields.amount || !fields.payment_date}>
+        <button type="submit" form="group-expense-form" className="btn-primary" disabled={saving || durationBad || !fields.category_id || !fields.amount || !fields.payment_date}>
           {saving ? 'Saving…' : isEditing ? 'Save changes' : 'Add expense'}
         </button>
       </>
@@ -119,6 +124,20 @@ function GroupExpenseDrawer({ open, charge, onClose, onSubmit, categories, locat
               {locations.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
           </label>
+        </div>
+        <div>
+          <p className="text-xs font-medium text-tertiary-600">Reimbursement duration <span className="font-normal text-tertiary-400">(optional)</span></p>
+          <div className="mt-1 grid grid-cols-2 gap-3">
+            <label className="block text-xs text-tertiary-500">
+              Start date
+              <input type="date" value={fields.duration_start} max={fields.duration_end || undefined} onChange={(e) => set('duration_start', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-xs text-tertiary-500">
+              End date
+              <input type="date" value={fields.duration_end} min={fields.duration_start || undefined} onChange={(e) => set('duration_end', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+          </div>
+          {durationBad && <p className="mt-1 text-xs text-danger-600">End date cannot be before the start date.</p>}
         </div>
         <label className="block text-xs font-medium text-tertiary-600">
           Notes <span className="font-normal text-tertiary-400">(optional)</span>
@@ -177,6 +196,13 @@ export const chargeColumns = [
   { key: 'period', header: 'Month', render: (row) => `${MONTHS[row.period_month - 1] || row.period_month} ${row.period_year}` },
   { key: 'kind', header: 'Category', render: (row) => row.category?.name || row.kind },
   { key: 'location', header: 'Office', render: (row) => row.location?.name || 'Company-wide' },
+  { key: 'duration', header: 'Duration', render: (row) => {
+    const fmt = (d) => new Date(d).toLocaleDateString(undefined, { timeZone: 'UTC' });
+    if (row.duration_start && row.duration_end) return `${fmt(row.duration_start)} – ${fmt(row.duration_end)}`;
+    if (row.duration_start) return `From ${fmt(row.duration_start)}`;
+    if (row.duration_end) return `Until ${fmt(row.duration_end)}`;
+    return '—';
+  } },
   { key: 'amount', header: 'Amount', render: (row) => `${row.currency} ${money(row.amount)}` },
   { key: 'notes', header: 'Notes', render: (row) => row.notes || '—' },
 ];

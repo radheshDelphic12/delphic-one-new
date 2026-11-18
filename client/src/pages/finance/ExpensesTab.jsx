@@ -52,7 +52,7 @@ function ReceiptsDrawer({ claim, onClose }) {
 // or "Other" with a description. An admin can submit for any employee.
 function ClaimDrawer({ open, claim, locations, categories, members = null, onClose, onSubmit }) {
   const isEditing = Boolean(claim);
-  const [fields, setFields] = useState({ org_membership_id: '', location_id: '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR', description: '' });
+  const [fields, setFields] = useState({ org_membership_id: '', location_id: '', category_id: '', expense_date: todayIso(), duration_start: '', duration_end: '', amount: '', currency: 'INR', description: '' });
   const [receipts, setReceipts] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -67,11 +67,13 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
         location_id: claim.location_id,
         category_id: claim.category_id || byName(claim.category),
         expense_date: claim.expense_date ? String(claim.expense_date).slice(0, 10) : '',
+        duration_start: claim.duration_start ? String(claim.duration_start).slice(0, 10) : '',
+        duration_end: claim.duration_end ? String(claim.duration_end).slice(0, 10) : '',
         amount: String(Number(claim.amount)),
         currency: claim.currency,
         description: claim.description || '',
       }
-      : { org_membership_id: '', location_id: locations[0]?.id || '', category_id: '', expense_date: todayIso(), amount: '', currency: 'INR', description: '' });
+      : { org_membership_id: '', location_id: locations[0]?.id || '', category_id: '', expense_date: todayIso(), duration_start: '', duration_end: '', amount: '', currency: 'INR', description: '' });
   }, [open, claim, locations, categories]);
 
   function set(key, value) {
@@ -90,6 +92,9 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
         ...(isOther ? { category: 'Other' } : { category_id }),
         description: description.trim() || null,
         expense_date: fields.expense_date || undefined,
+        // Optional; '' clears it on an edit.
+        duration_start: fields.duration_start || null,
+        duration_end: fields.duration_end || null,
         amount: Number(fields.amount),
         ...(!isEditing && org_membership_id ? { org_membership_id } : {}),
       };
@@ -100,7 +105,8 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
     }
   }
 
-  const ready = fields.location_id && fields.category_id && fields.amount && (!isOther || fields.description.trim());
+  const durationBad = Boolean(fields.duration_start && fields.duration_end && fields.duration_end < fields.duration_start);
+  const ready = fields.location_id && fields.category_id && fields.amount && !durationBad && (!isOther || fields.description.trim());
   return (
     <Drawer open={open} title={isEditing ? 'Edit expense claim' : 'Submit expense claim'} onClose={onClose} size={isEditing ? 'md' : 'sm'} tone={isEditing ? 'edit' : 'create'} footer={
       <>
@@ -159,6 +165,20 @@ function ClaimDrawer({ open, claim, locations, categories, members = null, onClo
           Expense date
           <input type="date" max={todayIso()} value={fields.expense_date} onChange={(e) => set('expense_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
+        <div>
+          <p className="text-xs font-medium text-tertiary-600">Reimbursement duration <span className="font-normal text-tertiary-400">(optional)</span></p>
+          <div className="mt-1 grid grid-cols-2 gap-3">
+            <label className="block text-xs text-tertiary-500">
+              Start date
+              <input type="date" value={fields.duration_start} max={fields.duration_end || undefined} onChange={(e) => set('duration_start', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-xs text-tertiary-500">
+              End date
+              <input type="date" value={fields.duration_end} min={fields.duration_start || undefined} onChange={(e) => set('duration_end', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+            </label>
+          </div>
+          {durationBad && <p className="mt-1 text-xs text-danger-600">End date cannot be before the start date.</p>}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-xs font-medium text-tertiary-600">
             Amount
@@ -369,6 +389,13 @@ export default function ExpensesTab() {
 
   const columns = [
     { key: 'date', header: 'Expense date', render: (row) => (row.expense_date ? new Date(row.expense_date).toLocaleDateString(undefined, { timeZone: 'UTC' }) : <span title="Submission date (no expense date recorded)">{new Date(row.created_at).toLocaleDateString()}</span>) },
+    { key: 'duration', header: 'Duration', render: (row) => {
+      const fmt = (d) => new Date(d).toLocaleDateString(undefined, { timeZone: 'UTC' });
+      if (row.duration_start && row.duration_end) return `${fmt(row.duration_start)} – ${fmt(row.duration_end)}`;
+      if (row.duration_start) return `From ${fmt(row.duration_start)}`;
+      if (row.duration_end) return `Until ${fmt(row.duration_end)}`;
+      return '—';
+    } },
     ...(view === 'team' || view === 'approvals' ? [{ key: 'person', header: 'Employee', render: (row) => row.org_membership?.person?.name || '—' }] : []),
     { key: 'location', header: 'Office', render: (row) => row.location?.name || '—' },
     {

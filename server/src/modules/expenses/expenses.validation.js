@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { optionalDate } = require('../../lib/zodDate');
+const { optionalDate, nullableDate } = require('../../lib/zodDate');
 
 const CURRENCY = z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']);
 
@@ -10,11 +10,17 @@ const claimFields = {
   category: z.string().trim().min(1).max(200).optional(),
   category_id: z.string().uuid().optional(),
   expense_date: optionalDate,
+  // Optional reimbursement duration (start to end); an edit can clear either.
+  duration_start: nullableDate,
+  duration_end: nullableDate,
   amount: z.coerce.number().positive(),
   currency: CURRENCY.default('INR'),
   // What it was for; required when the category is "Other".
   description: z.string().trim().max(2000).nullable().optional(),
 };
+
+const durationOk = (v) => !v.duration_start || !v.duration_end || v.duration_end >= v.duration_start;
+const DURATION_ERR = { message: 'End date cannot be before the start date', path: ['duration_end'] };
 
 const isOther = (v) => !v.category_id && String(v.category || '').trim().toLowerCase() === 'other';
 
@@ -22,13 +28,15 @@ const isOther = (v) => !v.category_id && String(v.category || '').trim().toLower
 const createClaimSchema = z
   .object({ ...claimFields, org_membership_id: z.string().uuid().optional() })
   .refine((v) => v.category || v.category_id, { message: 'Pick a category', path: ['category_id'] })
-  .refine((v) => !isOther(v) || Boolean(v.description), { message: 'Describe the expense when the category is Other', path: ['description'] });
+  .refine((v) => !isOther(v) || Boolean(v.description), { message: 'Describe the expense when the category is Other', path: ['description'] })
+  .refine(durationOk, DURATION_ERR);
 
 // Edit a pending claim — any subset of the submitted fields, at least one.
 const updateClaimSchema = z
   .object(claimFields)
   .partial()
-  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' });
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' })
+  .refine(durationOk, DURATION_ERR);
 
 const decideClaimSchema = z.object({
   status: z.enum(['approved', 'rejected']),
