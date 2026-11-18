@@ -485,7 +485,7 @@ async function memberMonth(orgId, m, { year, month }) {
 // ---- Team availability: who is in, working remotely, on leave or unavailable (everyone sees their own team) ---------------------------------
 
 const TEAM_STATUS_MAX_PEOPLE = 300;
-const RELATION_ORDER = { you: 0, manager: 1, report: 2, peer: 3, team: 4, colleague: 5 };
+const RELATION_ORDER = { you: 0, manager: 1, senior: 2, report: 3, peer: 4, team: 5, colleague: 6 };
 
 // One day's status in plain words, from the register code. Only a status is shown to colleagues: never the leave type, hours or where
 // someone checked in. Past days with nothing recorded read as Unavailable; today with nothing yet as "Not in yet".
@@ -501,8 +501,9 @@ function availabilityOf(c, { isToday, workedAtSite }) {
 }
 
 /**
- * Daily availability of the caller's team: themselves, their manager, their direct reports, the people with the same manager and the people
- * in their team (HR Settings > Teams). `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
+ * Daily availability of the caller's team: themselves, their manager, their manager's manager, their direct reports, the people with the same
+ * manager and the people in their team (HR Settings > Teams). The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
+ * the person themselves and an admin; everyone else sees just "On leave". `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
  * An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
  */
 async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
@@ -517,8 +518,11 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   if (!me) return { error: 'member_not_found' };
   const isAdmin = user.role === 'admin' && (!user.access || user.access.level !== 'employee');
   const everyone = scope === 'all' && isAdmin;
+  const boss = me.manager_id ? await prisma.orgMembership.findFirst({ where: { id: me.manager_id, org_id: orgId }, select: { manager_id: true } }) : null;
+  const seniorId = boss?.manager_id || null; // the manager's manager
   const circle = [{ id: me.id }, { manager_id: me.id }];
   if (me.manager_id) circle.push({ id: me.manager_id }, { manager_id: me.manager_id });
+  if (seniorId) circle.push({ id: seniorId });
   if (me.team_id) circle.push({ team_id: me.team_id });
 
   const rows = await prisma.orgMembership.findMany({
@@ -560,6 +564,7 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   const relationOf = (m) => {
     if (m.id === me.id) return 'you';
     if (m.id === me.manager_id) return 'manager';
+    if (m.id === seniorId) return 'senior';
     if (m.manager_id === me.id) return 'report';
     if (me.manager_id && m.manager_id === me.manager_id) return 'peer';
     if (me.team_id && m.team_id === me.team_id) return 'team';
@@ -575,6 +580,7 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
     const workType = workTypeOf(m);
     const homeByDay = homeBy.get(m.id) || new Set();
     const away = awayBy.get(m.id) || new Map();
+    const seesLeaveType = isAdmin || m.id === me.id || m.manager_id === me.id; // the person, their own manager, an admin
     const days = week.map((day) => {
       const at = dateOnly(day);
       const info = workHours.dayInfo(at, cal, 8);
@@ -583,7 +589,9 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
       const d = { date: day, day_type: info.day_type, day_label: info.label, leaves: onDay.map((l) => ({ name: l.leave_type.name, is_half_day: l.is_half_day })), attendance_status: attBy.get(`${m.id}|${day}`) || null };
       const inEmployment = (!start || day >= start) && (!end || day <= end);
       const c = registerCode(d, { today, inEmployment, workType, homeByDay });
-      return { date: day, ...availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' }) };
+      const a = availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' });
+      if (a.key === 'leave' && seesLeaveType && c.label && !/not set/i.test(c.label)) a.detail = c.label; // e.g. Sick Leave, Casual Leave (half day)
+      return { date: day, ...a };
     });
     return {
       org_membership_id: m.id,

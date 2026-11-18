@@ -7,7 +7,8 @@ import Avatar from '../../components/ui/Avatar.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 
 // Time & Attendance > Team availability: whether your manager, your reports and your teammates are in, working remotely or on leave, today
-// or any other day, with the week around it. A status only: no leave type, hours or check-in place is shown to colleagues.
+// or any other day, with the week around it. A status only: hours and check-in places are never shown, and the leave type (Sick, Casual ...)
+// appears on hover only for the person's own manager, the person themselves and an admin.
 
 const STATUS = {
   present: { label: 'Present', badge: 'bg-green-50 text-green-700 ring-green-200', dot: 'bg-green-500' },
@@ -21,7 +22,7 @@ const STATUS = {
   none: { label: '-', badge: 'bg-tertiary-50 text-tertiary-400 ring-tertiary-100', dot: 'bg-tertiary-200' },
 };
 const SUMMARY_ORDER = ['present', 'remote', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'];
-const RELATION = { you: 'You', manager: 'Manager', report: 'Reports to you', peer: 'Teammate', team: 'Teammate', colleague: 'Colleague' };
+const RELATION = { you: 'You', manager: 'Manager', senior: "Manager's manager", report: 'Reports to you', peer: 'Teammate', team: 'Teammate', colleague: 'Colleague' };
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const shiftDay = (ymd, delta) => new Date(new Date(`${ymd}T00:00:00Z`).getTime() + delta * 86400000).toISOString().slice(0, 10);
@@ -132,7 +133,7 @@ export default function TeamAvailability() {
                       </td>
                       <td className="px-4 py-3 text-tertiary-700">{RELATION[p.relation] || ''}{p.on_notice && <span className="ml-1.5 text-xs text-amber-700">Serving notice</span>}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tone.badge}`} data-testid="team-status">
+                        <span title={today.detail ? `${today.label} - ${today.detail}` : today.label} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tone.badge}`} data-testid="team-status">
                           <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />{today.label}
                         </span>
                       </td>
@@ -145,8 +146,8 @@ export default function TeamAvailability() {
                               <button
                                 key={d.date}
                                 type="button"
-                                title={`${longDate(d.date)}: ${d.label}`}
-                                aria-label={`${p.name}, ${longDate(d.date)}: ${d.label}`}
+                                title={`${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
+                                aria-label={`${p.name}, ${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
                                 onClick={() => setDate(d.date === data?.today ? null : d.date)}
                                 className={`flex w-9 flex-col items-center rounded-md border px-1 py-1 text-[10px] leading-tight ${d.date === selected ? 'border-primary-400 bg-primary-50' : 'border-tertiary-100 hover:bg-tertiary-50'}`}
                               >
