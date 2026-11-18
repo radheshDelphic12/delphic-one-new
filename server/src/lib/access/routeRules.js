@@ -36,7 +36,7 @@ const RULES = [
 
   // ---- People
   [/^\/orgs\/me(\/|$)/, 'open'],
-  [/^\/orgs\/announcements(\/wishes)?$/, 'basic.home'],
+  [/^\/orgs\/announcements(\/wishes|\/gifs)?$/, 'basic.home'],
   [/^\/orgs\/locations(\/|$)/, { GET: 'basic.offices', '*': 'hr_settings.update' }],
   [/^\/orgs\/memberships\/[^/]+\/details$/, { GET: 'people.view', '*': 'people.update' }],
   [/^\/orgs\/memberships\/[^/]+\/reporting$/, 'open'],

@@ -10217,6 +10217,8 @@ model CelebrationWish {
   from_membership_id String        @db.Uuid
   sender             OrgMembership @relation("CelebrationWishSender", fields: [from_membership_id], references: [id], onDelete: Cascade)
   message            String
+  // Optional GIF picked while writing (a Giphy media URL, checked against an allowlist).
+  gif_url            String?
   created_at         DateTime      @default(now())
 
   @@unique([org_membership_id, kind, on_date, from_membership_id], map: "celebration_wishes_once_per_sender")

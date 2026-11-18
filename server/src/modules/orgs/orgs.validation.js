@@ -17,11 +17,23 @@ const updateOrgSettingsSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one setting' });
 
 // A wish on today's birthday / work anniversary of a colleague; the message is optional (a default is used).
+// Only Giphy's own media hosts are accepted for a GIF, over https (nobody can plant an arbitrary image URL in a colleague's feed).
+const GIF_HOST = /^(media\d*|i)\.giphy\.com$/;
+const gifUrl = z.string().max(500).refine((v) => {
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' && GIF_HOST.test(u.hostname);
+  } catch { return false; }
+}, 'Pick a GIF from the suggestions');
+
 const wishSchema = z.object({
   org_membership_id: z.string().uuid(),
   kind: z.enum(['birthday', 'anniversary']),
   message: z.string().trim().max(300).optional(),
+  gif_url: gifUrl.optional(),
 });
+
+const gifSearchSchema = z.object({ q: z.string().trim().min(1).max(100) });
 
 const updateLocationSchema = z
   .object({
@@ -128,6 +140,7 @@ const personalDetailsSchema = z
 
 module.exports = {
   wishSchema,
+  gifSearchSchema,
   personalDetailsSchema,
   MODULES,
   updateOrgSettingsSchema,
