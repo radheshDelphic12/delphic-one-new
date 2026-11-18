@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Cake, ChevronDown, ChevronUp, MessageCircleHeart, PartyPopper, Send, Sparkles, X } from 'lucide-react';
+import { Cake, PartyPopper, Send, Sparkles, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
@@ -8,7 +8,7 @@ const when = (days) => (days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${d
 const dayMonth = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 // One generic label for the action, so other kinds of announcements can reuse the same card without "wish" wording.
-const ACTION = 'Send a note';
+const ACTION = 'Celebrate';
 
 const EMOJI = ['🎂', '🎉', '🥳', '👏', '❤️', '🙌', '😊', '😍', '🔥', '👍', '🎁', '🍰', '🎈', '✨', '💐', '🤝', '😄', '🌟', '💯', '🙏', '😎', '🥂', '💪', '🌈'];
 const EMOJI_FIRST = 8;
@@ -20,8 +20,8 @@ const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slic
 const gifQuery = (text) => text.replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(-6).join(' ');
 
 /**
- * One birthday / anniversary row. Today's rows can get a note (colleagues only, once each) and show the notes when the row is opened;
- * the notes only exist for that day, so tomorrow the row has none. While writing, emoji can be added and GIFs matching the words typed
+ * One birthday / anniversary row. Today's rows can be celebrated (colleagues only, once each) and show who celebrated when the avatars are clicked;
+ * the messages only exist for that day, so tomorrow the row has none. While writing, emoji can be added and GIFs matching the words typed
  * are suggested (only when the server has a GIF key; otherwise the GIF strip simply does not appear).
  */
 function Row({ icon: Icon, tone, item, text, kind, onWished }) {
@@ -61,12 +61,12 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
     setSending(true);
     try {
       await apiClient.post('/orgs/announcements/wishes', { org_membership_id: item.org_membership_id, kind, message: message.trim() || undefined, gif_url: gif?.url });
-      pushInfo(`Note sent to ${item.name || 'your colleague'}`);
+      pushInfo(`Your celebration is on its way to ${item.name || 'your colleague'} 🎉`);
       close();
       setOpen(true);
       onWished();
     } catch (err) {
-      pushError(apiErrorMessage(err, 'Could not send the note'), 'Something went wrong');
+      pushError(apiErrorMessage(err, 'Could not send your message'), 'Something went wrong');
       if (err?.response?.status === 409) onWished();
     } finally {
       setSending(false);
@@ -84,16 +84,31 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
         {isToday && (
           <span className="flex shrink-0 items-center gap-1">
             {wishes.length > 0 && (
-              <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-                {wishes.length} note{wishes.length === 1 ? '' : 's'} {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              <button
+                type="button"
+                className={`group flex items-center rounded-full py-0.5 pl-0.5 pr-2 transition-colors hover:bg-tertiary-100 ${open ? 'bg-tertiary-100' : ''}`}
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                title={open ? 'Hide the messages' : 'See who celebrated'}
+              >
+                <span className="flex -space-x-2">
+                  {wishes.slice(0, 3).map((w, i) => (
+                    <span key={`${w.from_name}-${i}`} className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ring-2 ring-white ${AVATAR_TONES[avatarIndex(w.from_name)]}`}>{initials(w.from_name)}</span>
+                  ))}
+                </span>
+                <span className="ml-1.5 text-xs font-medium text-tertiary-600">{wishes.length > 3 ? `+${wishes.length - 3}` : wishes.length === 1 ? '1 message' : `${wishes.length} messages`}</span>
               </button>
             )}
             {!item.is_me && !item.wished_by_me && (
-              <button type="button" className="btn-secondary inline-flex items-center gap-1 px-2.5 py-1 text-xs" onClick={() => (composing ? close() : setComposing(true))}>
-                <MessageCircleHeart className="h-3.5 w-3.5" /> {ACTION}
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-pink-500 to-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:shadow-md hover:brightness-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
+                onClick={() => (composing ? close() : setComposing(true))}
+              >
+                <span aria-hidden="true">🎉</span> {ACTION}
               </button>
             )}
-            {!item.is_me && item.wished_by_me && <span className="text-xs text-success-700">You sent a note</span>}
+            {!item.is_me && item.wished_by_me && <span className="inline-flex items-center gap-1 rounded-full bg-success-50 px-2.5 py-0.5 text-xs font-medium text-success-700">You celebrated ✓</span>}
           </span>
         )}
         <span className="shrink-0 text-xs text-tertiary-500">{when(item.days_away)} · {dayMonth(item.date)}</span>
@@ -107,7 +122,7 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
               maxLength={300}
               placeholder={kind === 'birthday' ? 'Happy birthday! 🎂 (or write your own message)' : 'Happy work anniversary! 🎉 (or write your own message)'}
               className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-1.5 text-sm"
-              aria-label="Your note"
+              aria-label="Your message"
             />
             <button type="button" className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs" onClick={send} disabled={sending}>
               <Send className="h-3.5 w-3.5" /> {sending ? 'Sending…' : 'Send'}
@@ -145,9 +160,9 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
       {open && wishes.length > 0 && (
         <div className="mx-4 mb-3 ml-[3.75rem] overflow-hidden rounded-2xl border border-pink-100 bg-gradient-to-br from-pink-50 via-white to-amber-50 p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-tertiary-700">
-            <Sparkles className="h-3.5 w-3.5 text-amber-500" /> {wishes.length} note{wishes.length === 1 ? '' : 's'} for {String(item.name || 'them').split(' ')[0]}
+            <Sparkles className="h-3.5 w-3.5 text-amber-500" /> {wishes.length === 1 ? '1 person is' : `${wishes.length} people are`} celebrating {String(item.name || 'them').split(' ')[0]}
           </p>
-          <ul className="space-y-2" aria-label="Notes">
+          <ul className="space-y-2" aria-label="Messages">
             {wishes.map((w, i) => (
               <li key={`${w.from_name}-${i}`} className="flex items-start gap-2.5">
                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${AVATAR_TONES[avatarIndex(w.from_name)]}`} aria-hidden="true">
