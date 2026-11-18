@@ -11,6 +11,7 @@ const leave = require('../leave/leave.service');
 const { todayIst } = require('../../lib/istDate');
 const { projectListWhere } = require('../../lib/projectScope');
 const workLocation = require('./workLocation.service');
+const workHours = require('../timesheets/workHours.service');
 
 const ymd = (date) => date.toISOString().slice(0, 10);
 const monthBounds = (year, month) => ({ from: new Date(Date.UTC(year, month - 1, 1)), to: new Date(Date.UTC(year, month, 0)) });
@@ -534,15 +535,26 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   const from = dateOnly(week[0]);
   const to = dateOnly(week[6]);
 
-  const monthsNeeded = [...new Set(week.map((d) => d.slice(0, 7)))].map((k) => ({ year: Number(k.slice(0, 4)), month: Number(k.slice(5, 7)) }));
-  const [homeRows, awayBy] = await Promise.all([
+  // Only what a status needs, in one query each for the whole circle (the full month calendar also loads hours, overtime and project data).
+  const [homeRows, awayBy, attRows, leaveRows] = await Promise.all([
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
     workLocation.awayByPerson(orgId, ids, from, to),
+    prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, select: { org_membership_id: true, date: true, status: true } }),
+    prisma.leaveRequest.findMany({
+      where: { org_membership_id: { in: ids }, status: 'approved', from_date: { lte: to }, to_date: { gte: from } },
+      select: { org_membership_id: true, from_date: true, to_date: true, is_half_day: true, leave_type: { select: { name: true } } },
+    }),
   ]);
   const homeBy = new Map();
   for (const r of homeRows) {
     if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
     homeBy.get(r.org_membership_id).add(ymd(r.date));
+  }
+  const attBy = new Map(attRows.map((r) => [`${r.org_membership_id}|${ymd(r.date)}`, r.status]));
+  const leavesBy = new Map();
+  for (const l of leaveRows) {
+    if (!leavesBy.has(l.org_membership_id)) leavesBy.set(l.org_membership_id, []);
+    leavesBy.get(l.org_membership_id).push(l);
   }
 
   const relationOf = (m) => {
@@ -555,11 +567,8 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   };
 
   const build = async (m) => {
-    const byDate = new Map();
-    for (const mo of monthsNeeded) {
-      const cal = await dashboard.monthCalendar(orgId, m.id, mo);
-      for (const d of cal.days) byDate.set(d.date, d);
-    }
+    const cal = await workHours.companyCalendarDays(orgId, m.id, from, to); // this person's holiday calendar for the week
+    const myLeaves = leavesBy.get(m.id) || [];
     const start = m.joined_at ? ymd(m.joined_at) : null;
     const lastDay = m.left_at || (['terminated', 'notice_period'].includes(m.employment_status) ? m.notice_end_date : null);
     const end = lastDay ? ymd(lastDay) : null;
@@ -567,8 +576,11 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
     const homeByDay = homeBy.get(m.id) || new Set();
     const away = awayBy.get(m.id) || new Map();
     const days = week.map((day) => {
-      const d = byDate.get(day);
-      if (!d) return { date: day, key: 'none', label: '-' };
+      const at = dateOnly(day);
+      const info = workHours.dayInfo(at, cal, 8);
+      // approved leave only means something on a working day (as in the month calendar)
+      const onDay = info.day_type === 'working' ? myLeaves.filter((l) => at >= l.from_date && at <= l.to_date) : [];
+      const d = { date: day, day_type: info.day_type, day_label: info.label, leaves: onDay.map((l) => ({ name: l.leave_type.name, is_half_day: l.is_half_day })), attendance_status: attBy.get(`${m.id}|${day}`) || null };
       const inEmployment = (!start || day >= start) && (!end || day <= end);
       const c = registerCode(d, { today, inEmployment, workType, homeByDay });
       return { date: day, ...availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' }) };
