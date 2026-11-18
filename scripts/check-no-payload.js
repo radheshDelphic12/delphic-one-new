@@ -12,6 +12,7 @@ const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8', maxBuf
 const problems = [];
 
 for (const f of files) {
+  if (f === 'scripts/check-no-payload.js') continue; // this file names the patterns it looks for
   if (/(^|\/)init$/.test(f)) problems.push(`${f}: a file named "init" (not part of this repo)`);
   if (!fs.existsSync(f) || !/\.(js|cjs|mjs|json|ts|jsx|sh)$/.test(f) && !/(^|\/)init$/.test(f)) continue;
   const text = fs.readFileSync(f, 'utf8');
