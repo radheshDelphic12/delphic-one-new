@@ -45,7 +45,8 @@ function ModernDashboard() {
   return (
     <div className="space-y-5">
       <div className="relative overflow-hidden rounded-2xl border border-tertiary-100 bg-gradient-to-r from-primary-50 via-white to-white p-6 shadow-card">
-        <CelebrationBadge className="mb-3 sm:absolute sm:right-6 sm:top-6 sm:mb-0 sm:text-right" />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">{user?.active_org?.name || 'Dashboard'}</p>
         <h1 className="mt-1 font-heading text-2xl font-semibold text-tertiary-900">{greeting()}{first ? `, ${first}` : ''}</h1>
         <p className="mt-1 text-sm text-tertiary-500">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
@@ -56,6 +57,9 @@ function ModernDashboard() {
             {today ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${TODAY_TONE[today] || 'bg-tertiary-100 text-tertiary-700'}`}>{TODAY_LABEL[today] || today}</span> : <span className="rounded-full bg-tertiary-100 px-2 py-0.5 text-xs font-semibold text-tertiary-600">Not marked yet</span>}
           </div>
           <Link to="/attendance" className="text-sm font-medium text-primary-700 hover:underline">View my attendance</Link>
+        </div>
+        </div>
+        <CelebrationBadge className="sm:w-80 sm:shrink-0" />
         </div>
       </div>
       <DashboardCheckinCard />
