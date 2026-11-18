@@ -344,6 +344,21 @@ describe('team availability', () => {
     expect(outsider.membership.id).toBeTruthy();
   });
 
+  test('a manager sees their own team and their manager, not the other reports of that manager; a report sees teammates', async () => {
+    const ctx = await seed();
+    const cto = await ctx.person('Cto Person');
+    const mid = await ctx.person('Mid Manager', { managerId: cto.membership.id });
+    await ctx.person('Mid Peer', { managerId: cto.membership.id });
+    await ctx.person('Mid Report A', { managerId: mid.membership.id });
+    const reportB = await ctx.person('Mid Report B', { managerId: mid.membership.id });
+
+    const asMid = await get(`/team-status?date=${DAY}`, mid.token);
+    expect(asMid.body.data.people.map((p) => p.name).sort()).toEqual(['Cto Person', 'Mid Manager', 'Mid Report A', 'Mid Report B']); // no 'Mid Peer'
+
+    const asReport = await get(`/team-status?date=${DAY}`, reportB.token); // no reports of their own: manager + teammate + self
+    expect(asReport.body.data.people.map((p) => p.name).sort()).toEqual(['Mid Manager', 'Mid Report A', 'Mid Report B']);
+  });
+
   test('someone with no manager and no team sees only themselves; a bad date is refused', async () => {
     const ctx = await seed();
     const solo = await ctx.person('Solo Person');
