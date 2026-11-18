@@ -501,7 +501,7 @@ function availabilityOf(c, { isToday, workedAtSite }) {
 }
 
 /**
- * Daily availability of the caller's team: themselves, their manager, their direct reports and their teammates (people with the same manager) - no other team. The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
+ * Daily availability of the caller's team: themselves, their manager, their direct reports and, only when they have no reports of their own, their teammates (people with the same manager) - no other team. The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
  * the person themselves and an admin; everyone else sees just "On leave". `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
  * An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
  */
@@ -517,9 +517,13 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   if (!me) return { error: 'member_not_found' };
   const isAdmin = user.role === 'admin' && (!user.access || user.access.level !== 'employee');
   const everyone = scope === 'all' && isAdmin;
-  // My team = the reporting line: me, the person I report to, the people who report to me and my teammates (same manager). Not an HR-Settings team that spans managers, not another team, not my manager's manager, not my reports' reports.
+  // My team = the reporting line. A MANAGER (someone with direct reports) sees themselves, their reports and the person they report to - not their own
+  // manager's other reports. Someone with no reports sees themselves, their manager and their teammates (same manager). Never an HR-Settings team that
+  // spans managers, another team, the manager's manager or the reports' reports.
+  const hasReports = (await prisma.orgMembership.count({ where: { org_id: orgId, manager_id: me.id, employment_status: { not: 'terminated' }, left_at: null } })) > 0;
   const circle = [{ id: me.id }, { manager_id: me.id }];
-  if (me.manager_id) circle.push({ id: me.manager_id }, { manager_id: me.manager_id });
+  if (me.manager_id) circle.push({ id: me.manager_id });
+  if (me.manager_id && !hasReports) circle.push({ manager_id: me.manager_id });
 
   const rows = await prisma.orgMembership.findMany({
     where: { org_id: orgId, employment_status: { not: 'terminated' }, worker_type: { not: 'contractor' }, vendor_account_id: null, ...(everyone ? {} : { OR: circle }) },
