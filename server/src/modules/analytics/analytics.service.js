@@ -2,6 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 const { num, round2, monthKey } = require('../../lib/vertical');
 const exchangeRates = require('../billing/exchangeRates.service');
+const ownerHistory = require('../accounts/ownerHistory');
 
 const rangeSchema = z
   .object({ from: z.coerce.date().optional(), to: z.coerce.date().optional() })
@@ -57,24 +58,51 @@ async function liveSales(orgId, { days }, now = new Date()) {
   };
 }
 
-// Revenue per client with who brought it (immutable origin owner) and who
-// owns it now. Every row carries account_id so the UI can open the record.
+// Revenue per client with who brought it (immutable origin owner) and who owned it. Every row carries account_id so the UI can open
+// the record. Revenue is credited to the owner (POC) the account HAD on each day (account_owner_history), so changing a POC never
+// moves earlier revenue to the new person; the row's owner is the one at the end of the period.
 async function revenueByClient(orgId, { from, to }) {
   const rows = await prisma.dailyProjectRevenue.groupBy({
-    by: ['account_id'],
+    by: ['account_id', 'date'],
     where: { org_id: orgId, date: { gte: from, lte: to } },
     _sum: { revenue: true, billable_hours: true },
   });
+  const accountIds = [...new Set(rows.map((r) => r.account_id))];
   const accounts = await prisma.account.findMany({
-    where: { id: { in: rows.map((r) => r.account_id) }, org_id: orgId },
+    where: { id: { in: accountIds }, org_id: orgId },
     select: {
       id: true,
       name: true,
-      owner: { select: { id: true, name: true } },
+      owner_id: true,
       origin_owner: { select: { id: true, name: true } },
     },
   });
   const byId = new Map(accounts.map((a) => [a.id, a]));
+  const timelines = await ownerHistory.loadTimelines(accountIds);
+  const toDay = new Date(to).toISOString().slice(0, 10);
+  const ownerAt = (accountId, day) => ownerHistory.ownerOn(timelines.get(accountId), day, byId.get(accountId)?.owner_id || null);
+
+  // totals per client, and revenue per owner day by day
+  const perAccount = new Map();
+  const perOwner = new Map();
+  for (const r of rows) {
+    const revenue = num(r._sum.revenue) || 0;
+    const tot = perAccount.get(r.account_id) || { revenue: 0, hours: 0 };
+    tot.revenue += revenue;
+    tot.hours += num(r._sum.billable_hours) || 0;
+    perAccount.set(r.account_id, tot);
+    const ownerId = ownerAt(r.account_id, new Date(r.date).toISOString().slice(0, 10));
+    const key = ownerId || 'none';
+    const entry = perOwner.get(key) || { ownerId, revenue: 0, accounts: new Set() };
+    entry.revenue += revenue;
+    entry.accounts.add(r.account_id);
+    perOwner.set(key, entry);
+  }
+  const ownerIds = new Set([...perOwner.values()].map((e) => e.ownerId).filter(Boolean));
+  for (const accountId of perAccount.keys()) { const o = ownerAt(accountId, toDay); if (o) ownerIds.add(o); }
+  const users = ownerIds.size ? await prisma.user.findMany({ where: { id: { in: [...ownerIds] } }, select: { id: true, name: true } }) : [];
+  const userById = new Map(users.map((u) => [u.id, u]));
+
   const invoiced = await prisma.clientInvoice.groupBy({
     by: ['client_account_id'],
     where: { org_id: orgId, status: { in: ['sent', 'paid'] }, created_at: { gte: from, lte: new Date(to.getTime() + 86400000) } },
@@ -82,40 +110,37 @@ async function revenueByClient(orgId, { from, to }) {
   });
   const invoicedBy = new Map(invoiced.map((i) => [i.client_account_id, num(i._sum.amount) || 0]));
 
-  const data = rows
-    .map((r) => {
-      const account = byId.get(r.account_id);
+  const data = [...perAccount.entries()]
+    .map(([accountId, tot]) => {
+      const account = byId.get(accountId);
       return {
-        account_id: r.account_id,
+        account_id: accountId,
         client_name: account?.name || 'Unknown client',
         brought_by: account?.origin_owner || null,
-        owner: account?.owner || null,
-        billable_hours: round2(num(r._sum.billable_hours) || 0),
-        revenue: round2(num(r._sum.revenue) || 0),
-        invoiced: round2(invoicedBy.get(r.account_id) || 0),
+        owner: userById.get(ownerAt(accountId, toDay)) || null,
+        billable_hours: round2(tot.hours),
+        revenue: round2(tot.revenue),
+        invoiced: round2(invoicedBy.get(accountId) || 0),
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
 
-  const rollup = (pick) => {
-    const map = new Map();
-    for (const row of data) {
-      const person = pick(row);
-      const key = person?.id || 'none';
-      const entry = map.get(key) || { user: person, revenue: 0, clients: 0 };
-      entry.revenue = round2(entry.revenue + row.revenue);
-      entry.clients += 1;
-      map.set(key, entry);
-    }
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
-  };
+  const byBroughtBy = new Map();
+  for (const row of data) {
+    const key = row.brought_by?.id || 'none';
+    const entry = byBroughtBy.get(key) || { user: row.brought_by, revenue: 0, clients: 0 };
+    entry.revenue = round2(entry.revenue + row.revenue);
+    entry.clients += 1;
+    byBroughtBy.set(key, entry);
+  }
+  const byOwner = [...perOwner.values()].map((e) => ({ user: userById.get(e.ownerId) || null, revenue: round2(e.revenue), clients: e.accounts.size })).sort((x, y) => y.revenue - x.revenue);
   return {
     from,
     to,
-    total_revenue: round2(data.reduce((s, r) => s + r.revenue, 0)),
+    total_revenue: round2(data.reduce((sum, r) => sum + r.revenue, 0)),
     clients: data,
-    by_brought_by: rollup((r) => r.brought_by),
-    by_owner: rollup((r) => r.owner),
+    by_brought_by: Array.from(byBroughtBy.values()).sort((x, y) => y.revenue - x.revenue),
+    by_owner: byOwner,
   };
 }
 

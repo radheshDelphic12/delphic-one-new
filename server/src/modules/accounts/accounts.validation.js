@@ -69,6 +69,8 @@ const createSchema = z.object({
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   owner_id: z.string().uuid().optional(),
+  // The day a new owner takes over (YYYY-MM-DD, default today). Earlier days keep the previous owner in reports.
+  owner_effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'owner_effective_from must be YYYY-MM-DD').optional(),
   // "Brought by" — normally immutable; honoured for admin/BDA/superadmin (enforced in the service).
   origin_owner_id: z.string().uuid().optional(),
   type: z.enum(['client', 'vendor']).optional(),

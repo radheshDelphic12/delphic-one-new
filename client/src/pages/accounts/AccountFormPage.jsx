@@ -48,6 +48,10 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [loadFailed, setLoadFailed] = useState(false);
+  // The day a new owner (POC) takes over. Reports keep the previous owner for earlier days, so a change never rewrites old records.
+  const istDay = (value) => new Date(new Date(value).getTime() + 330 * 60000).toISOString().slice(0, 10);
+  const [today] = useState(() => istDay(Date.now()));
+  const [ownerEffective, setOwnerEffective] = useState('');
   const [ownerOptions, setOwnerOptions] = useState([]);
   // Anyone who can edit the account can also reassign its owner/POC to any active user.
   const canEditOwner = isEditing && canEditAccountDetails(account, user);
@@ -144,6 +148,7 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
     setFieldErrors({});
     try {
       const body = buildAccountBody(form, isEditing, canEditType, canEditOriginOwner);
+      if (isEditing && account?.owner?.id && form.owner_id && form.owner_id !== account.owner.id) body.owner_effective_from = ownerEffective || today;
       const { data } = isEditing ? await apiClient.patch(`/accounts/${id}`, body) : await apiClient.post('/accounts', body);
       if (asPanel && onDone) onDone(data.data.id);
       else navigate(`/accounts/${data.data.id}`, { replace: true });
@@ -249,6 +254,24 @@ export default function AccountFormPage({ asPanel = false, onDone, onCancel, acc
                       : []),
                   ]}
                 />
+                {isEditing && account?.owner?.id && form.owner_id && form.owner_id !== account.owner.id && (
+                  <div className="mt-2 rounded-xl border border-primary-100 bg-primary-50/60 p-3">
+                    <label className="block text-xs font-medium text-tertiary-700">
+                      New owner takes over from
+                      <input
+                        type="date"
+                        className="mt-1 block rounded-xl border border-tertiary-200 bg-white px-3 py-1.5 text-sm"
+                        value={ownerEffective || today}
+                        min={account.created_at ? istDay(account.created_at) : undefined}
+                        max={today}
+                        onChange={(e) => setOwnerEffective(e.target.value)}
+                      />
+                    </label>
+                    <span className="mt-1 block text-xs text-tertiary-500">
+                      Records and reports before this date stay with {account.owner.name}; from this date they go to the new owner.
+                    </span>
+                  </div>
+                )}
               </Field>
             )}
             {canEditOriginOwner && (

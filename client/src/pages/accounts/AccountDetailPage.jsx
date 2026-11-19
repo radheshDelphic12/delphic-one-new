@@ -100,6 +100,8 @@ export default function AccountDetailPage() {
   const [meetingEditOpen, setMeetingEditOpen] = useState(false);
   const [savingMeeting, setSavingMeeting] = useState(false);
   const [activity, setActivity] = useState([]);
+  // who the owner (POC) was, and from which day: reports use the owner of the day, not only the current one
+  const [ownerHistory, setOwnerHistory] = useState([]);
 
   async function loadAccount() {
     setLoading(true);
@@ -111,6 +113,7 @@ export default function AccountDetailPage() {
       setAccount(accountResponse.data.data);
       setHistory(historyResponse.data.data || []);
       apiClient.get(`/accounts/${id}/activity`).then((r) => setActivity(r.data.data || [])).catch(() => setActivity([]));
+      apiClient.get(`/accounts/${id}/owner-history`).then((r) => setOwnerHistory(r.data.data || [])).catch(() => setOwnerHistory([]));
     } catch (requestError) {
       pushError(apiErrorMessage(requestError, 'Failed to load account'), 'Something went wrong');
     } finally {
@@ -297,6 +300,15 @@ export default function AccountDetailPage() {
             <DetailField label="Source" value={account.source} />
             <DetailField label="Premium" value={account.is_premium ? 'Yes' : 'No'} />
             <DetailField label="Owner (POC)" value={account.owner?.name} />
+            {ownerHistory.length > 1 && (
+              <DetailField label="Earlier owners">
+                <ul className="space-y-0.5 text-sm text-tertiary-700">
+                  {ownerHistory.map((h, i) => (
+                    <li key={`${h.effective_from}-${h.owner.id}`}>{h.owner.name} <span className="text-xs text-tertiary-500">from {h.effective_from}{i === 0 ? ' (now)' : ''}</span></li>
+                  ))}
+                </ul>
+              </DetailField>
+            )}
             <DetailField label="Brought by" value={account.origin_owner?.name} />
             <DetailField label="Lead location" value={account.location} />
             <DetailField label="LinkedIn">
