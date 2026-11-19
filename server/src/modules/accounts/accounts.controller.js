@@ -26,6 +26,7 @@ const ERROR_STATUS = {
   forbidden_type_change: [403, 'Only an admin can change the account type'],
   forbidden_brought_by: [403, 'Only an admin can change "Brought by"'],
   user_not_found: [400, 'Selected owner was not found or is inactive'],
+  bad_effective_date: [422, 'The effective date cannot be in the future or before this account was created'],
   not_active: [409, 'Meetings cannot be scheduled on a project; schedule them on its client'],
   location_required: [400, 'location is required for offline meetings'],
   is_project: [409, 'This is a project, not a client account — manage it under Finance → Projects'],
@@ -40,6 +41,12 @@ const list = asyncHandler(async (req, res) => {
 const listSpecializations = asyncHandler(async (req, res) => {
   const tags = await accountsService.listSpecializations();
   return ok(res, tags);
+});
+
+const ownerHistory = asyncHandler(async (req, res) => {
+  const rows = await accountsService.ownerHistoryOf(req.params.id);
+  if (!rows) return fail(res, 404, 'Not found');
+  return ok(res, rows);
 });
 
 const getOne = asyncHandler(async (req, res) => {
@@ -160,6 +167,7 @@ module.exports = {
   list,
   listSpecializations,
   getOne,
+  ownerHistory,
   create,
   update,
   changeStage,

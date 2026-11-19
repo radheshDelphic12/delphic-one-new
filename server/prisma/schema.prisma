@@ -2830,9 +2830,27 @@ model Account {
   @@index([owner_id])
   @@index([origin_owner_id])
   @@index([deleted_at])
+  owner_history AccountOwnerHistory[]
+
   @@index([org_id])
   @@index([client_account_id])
   @@map("accounts")
+}
+
+// Who the owner (POC from our end) of a client / vendor account was on each date. accounts.owner_id stays the CURRENT owner (the latest
+// row here); anything about a past date reads this history, so changing a POC never rewrites the past.
+model AccountOwnerHistory {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  account_id     String   @db.Uuid
+  account        Account  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  owner_id       String   @db.Uuid
+  effective_from DateTime @db.Date
+  created_by     String?  @db.Uuid
+  created_at     DateTime @default(now())
+
+  @@unique([account_id, effective_from])
+  @@index([account_id])
+  @@map("account_owner_history")
 }
 
 model AccountMeetingAttendee {
