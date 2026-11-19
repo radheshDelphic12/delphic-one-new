@@ -8,6 +8,7 @@ import { DEFAULT_THRESHOLDS, loadThresholds, resetThresholds, saveThresholds } f
 import ChangePasswordForm from '../../components/ChangePasswordForm.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import StorageCard from './StorageCard.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const THRESHOLD_FIELDS = [
   ['revenue_drop_pct', 'Revenue drop (%)', 'Alert when a company revenue falls by at least this much against the previous period'],
@@ -53,7 +54,7 @@ export default function GroupSettingsTab() {
       <Card icon={UserRound} title="Group administrator" hint="You manage every company of the group from this account">
         <dl className="grid grid-cols-[110px_1fr] gap-y-2 text-sm">
           <dt className="text-tertiary-500">Name</dt><dd className="font-medium text-tertiary-900">{user?.name}</dd>
-          <dt className="text-tertiary-500">Email</dt><dd className="font-medium text-tertiary-900">{user?.email}</dd>
+          <dt className="text-tertiary-500">Email</dt><dd className="font-medium text-tertiary-900"><EmailLink email={user?.email} /></dd>
           <dt className="text-tertiary-500">Access</dt><dd className="font-medium text-tertiary-900">Group superadmin - all companies of the group, admin in each</dd>
         </dl>
       </Card>

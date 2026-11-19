@@ -9,6 +9,7 @@ import Pill from '../ui/Pill.jsx';
 import PermissionGrid, { rankOf } from './PermissionGrid.jsx';
 import AccessMigrationPanel from './AccessMigrationPanel.jsx';
 import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../ui/EmailLink.jsx';
 
 const inputCls = 'mt-1 block w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -117,7 +118,7 @@ function PersonEditor({ membershipId, catalog, sets, onSaved }) {
     <div className="space-y-4">
       <div className={box}>
         <h3 className="font-heading text-sm font-semibold text-tertiary-900">{detail.person.name} <Pill tone="gray">Employee</Pill></h3>
-        <p className="text-xs text-tertiary-500">{detail.person.employee_code || 'no code'} · {detail.person.email}{detail.person.department ? ` · ${detail.person.department}` : ''}</p>
+        <p className="text-xs text-tertiary-500">{detail.person.employee_code || 'no code'} · <EmailLink email={detail.person.email} />{detail.person.department ? ` · ${detail.person.department}` : ''}</p>
         <label className={`${labelCls} mt-3 max-w-sm`}>Permission set
           <select className={inputCls} value={setId} onChange={(e) => { setSetId(e.target.value); setReview(null); }}>
             <option value="">None (default basic access only)</option>

@@ -7,6 +7,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 function defaultExpiry() {
   const d = new Date();
@@ -69,7 +70,7 @@ export default function ExternalAccessTab() {
   }
 
   const columns = [
-    { key: 'email', header: 'Email' },
+    { key: 'email', header: 'Email', render: (row) => <EmailLink email={row.email} fallback="—" /> },
     { key: 'resources', header: 'Scope', render: (row) => (row.scope?.resources || []).join(', ') },
     { key: 'expires', header: 'Expires', render: (row) => new Date(row.expires_at).toLocaleDateString() },
     { key: 'used', header: 'Last used', render: (row) => (row.last_used_at ? new Date(row.last_used_at).toLocaleString() : 'Never') },

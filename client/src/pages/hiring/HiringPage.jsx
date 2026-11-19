@@ -8,6 +8,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { confirmAction } from '../../lib/confirmAction.js';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -176,7 +177,7 @@ function ApplicationsTab({ initialJob }) {
             <tbody>
               {res.rows.map((r) => (
                 <tr key={r.id} className="cursor-pointer border-t border-tertiary-100 hover:bg-primary-50/40" data-testid="application-row" onClick={() => { setOpen(r); setNotes(r.notes || ''); }}>
-                  <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{r.name}</span><span className="block text-xs text-tertiary-500">{r.email} · {r.phone || '-'}</span></td>
+                  <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{r.name}</span><span className="block text-xs text-tertiary-500"><EmailLink email={r.email} fallback="-" /> · {r.phone || '-'}</span></td>
                   <td className="px-3">{r.job?.title}<span className="block text-xs text-tertiary-500">{r.job?.job_code}</span></td>
                   <td className="px-3">{r.experience_years != null ? `${r.experience_years} yrs` : '-'}</td>
                   <td className="px-3 text-xs text-tertiary-600">{dateText(r.created_at)}</td>
@@ -200,7 +201,7 @@ function ApplicationsTab({ initialJob }) {
         {a && (
           <div className="space-y-4" data-testid="application-detail">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {[['Job', `${a.job?.job_code} · ${a.job?.title}`], ['Applied', dateText(a.created_at)], ['Email', a.email], ['Phone', a.phone || '-'], ['Experience', a.experience_years != null ? `${a.experience_years} yrs` : '-'], ['Source', a.channel || '-'],
+              {[['Job', `${a.job?.job_code} · ${a.job?.title}`], ['Applied', dateText(a.created_at)], ['Email', <EmailLink key="email" email={a.email} fallback="-" />], ['Phone', a.phone || '-'], ['Experience', a.experience_years != null ? `${a.experience_years} yrs` : '-'], ['Source', a.channel || '-'],
                 ['Joiner status', a.answers.joiner_status || '-'], ['Notice (days)', a.answers.notice_period_days ?? '-'], ['Current CTC (LPA)', a.answers.current_ctc_lpa ?? '-'], ['Expected CTC (LPA)', a.answers.expected_ctc_lpa ?? '-'], ['Work mode', a.answers.work_mode || '-'], ['Referred by', a.referred_by || '-']].map(([k, x]) => (
                 <div key={k}><dt className="text-xs text-tertiary-500">{k}</dt><dd className="break-words font-medium text-tertiary-900">{x}</dd></div>
               ))}
