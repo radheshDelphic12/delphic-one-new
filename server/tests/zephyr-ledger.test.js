@@ -59,7 +59,7 @@ describe('zephyr ledger entries', () => {
 
     const all = await a.get('/ledger');
     expect(all.body.data).toHaveLength(3);
-    expect(all.body.totals).toEqual({ revenue: 250000, expense: 80000, planned_revenue: 0, planned_expense: 60000 });
+    expect(all.body.totals).toEqual({ revenue: 250000, expense: 80000, planned_revenue: 0, planned_expense: 60000, invested: 0 });
     expect((await a.get('/ledger?type=revenue')).body.data).toHaveLength(1);
     expect((await a.get('/ledger?status=planned')).body.data).toHaveLength(1);
     expect((await a.get(`/ledger?party_id=${w.vendor.id}`)).body.data).toHaveLength(1);

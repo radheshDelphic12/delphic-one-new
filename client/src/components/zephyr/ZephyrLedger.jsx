@@ -11,6 +11,7 @@ import Drawer from '../ui/Drawer.jsx';
 import Modal from '../ui/Modal.jsx';
 import Pill from '../ui/Pill.jsx';
 import ZephyrDocuments from './ZephyrDocuments.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -322,7 +323,7 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
     }
   }
   async function removeGroup(entry) {
-    if (!window.confirm('Delete the whole shared expense, every share of it?')) return;
+    if (!await confirmAction('Delete the whole shared expense, every share of it?')) return;
     try {
       await zephyrApi.deleteGroupExpense(entry.source_id);
       pushSuccess('Shared expense deleted');
@@ -334,7 +335,7 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
     }
   }
   async function remove(entry) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try {
       await zephyrApi.deleteEntry(entry.id);
       pushSuccess('Entry deleted');
@@ -349,7 +350,7 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
   const t = data.totals;
   const columns = [
     { key: 'date', header: 'Date', render: (r) => dateLabel(r.entry_date) },
-    { key: 'type', header: 'Type', render: (r) => <Pill tone={r.type === 'revenue' ? 'green' : 'amber'}>{r.type === 'revenue' ? 'Revenue' : 'Expense'}</Pill> },
+    { key: 'type', header: 'Type', render: (r) => (r.source_type === 'property_acquisition' ? <span title="Money put into a property: tracked as an investment, not part of profit"><Pill tone="blue">Investment</Pill></span> : <Pill tone={r.type === 'revenue' ? 'green' : 'amber'}>{r.type === 'revenue' ? 'Revenue' : 'Expense'}</Pill>) },
     { key: 'category', header: 'Category', render: (r) => r.category?.name },
     { key: 'project', header: 'Project / property', render: (r) => (r.project ? <span title={r.project.name}>{r.project.code}</span> : r.property_id ? 'Property' : '—') },
     ...(isAdmin ? [{ key: 'service', header: 'Service', render: (r) => (r.service_type ? serviceLabel(r.service_type) : '—') }] : []),
@@ -362,8 +363,8 @@ export default function ZephyrLedger({ projectId, isAdmin, canDelete, onChanged 
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[['Revenue (actual)', t?.revenue], ['Expense (actual)', t?.expense], ['Revenue expected', t?.planned_revenue], ['Expense expected', t?.planned_expense]].map(([label, value]) => (
+      <div className={`grid grid-cols-2 gap-3 ${t?.invested > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+        {[['Revenue (actual)', t?.revenue], ['Expense (actual)', t?.expense], ['Revenue expected', t?.planned_revenue], ['Expense expected', t?.planned_expense], ...(t?.invested > 0 ? [['Invested (not in profit)', t.invested]] : [])].map(([label, value]) => (
           <div key={label} className="rounded-2xl border bg-white p-3 shadow-soft"><div className="text-xs text-tertiary-500">{label}</div><div className="mt-1 text-lg font-semibold tabular-nums text-tertiary-900">{rupees(value)}</div></div>
         ))}
       </div>

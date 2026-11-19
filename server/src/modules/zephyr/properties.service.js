@@ -233,7 +233,8 @@ async function cashFlowFor(orgId, propertyId, from, to) {
   ]);
   const months = Math.max(1, (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1);
   const income = entries.filter((e) => e.type === 'revenue' && e.source_type === 'rent_payment').reduce((a, e) => a + num(e.amount), 0);
-  const expenses = entries.filter((e) => e.type === 'expense').reduce((a, e) => a + num(e.amount), 0);
+  // operating expenses only: the money spent to acquire the property is an investment, not a running cost
+  const expenses = entries.filter((e) => e.type === 'expense' && e.source_type !== 'property_acquisition').reduce((a, e) => a + num(e.amount), 0);
   const monthly = loans.reduce((a, l) => a + calc.monthlyFinancing(l), 0) + (linked.get(propertyId) || []).reduce((a, l) => a + (l.monthly_emi || 0), 0);
   const financing = calc.round2(monthly * months);
   return { from, to, months, ...calc.cashFlow({ income, expenses, financing }) };

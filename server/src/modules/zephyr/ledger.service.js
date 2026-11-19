@@ -164,14 +164,16 @@ async function list(orgId, ctx, query) {
   const [rows, total, sums] = await Promise.all([
     prisma.zxLedgerEntry.findMany({ where, include: INCLUDE, orderBy: [{ entry_date: 'desc' }, { created_at: 'desc' }], ...pageArgs(query) }),
     prisma.zxLedgerEntry.count({ where }),
-    prisma.zxLedgerEntry.groupBy({ by: ['type', 'status'], where, _sum: { amount: true, tax: true } }),
+    // Revenue / expense totals leave out money put into properties; that is an investment, shown as its own total.
+    prisma.zxLedgerEntry.groupBy({ by: ['type', 'status'], where: { AND: [where, money.notInvestment] }, _sum: { amount: true, tax: true } }),
   ]);
+  const investedAgg = await prisma.zxLedgerEntry.aggregate({ where: { AND: [where, { source_type: money.INVESTMENT_SOURCE, status: 'actual' }] }, _sum: { amount: true } });
   const totals = { revenue: 0, expense: 0, planned_revenue: 0, planned_expense: 0 };
   for (const s of sums) {
     const key = s.status === 'actual' ? s.type : `planned_${s.type}`;
     totals[key] += num(s._sum.amount);
   }
-  return { data: rows.map(out), pagination: pagination(query.page, query.limit, total), totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, money.round2(v)])) };
+  return { data: rows.map(out), pagination: pagination(query.page, query.limit, total), totals: { ...Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, money.round2(v)])), invested: money.round2(money.num(investedAgg._sum.amount)) } };
 }
 
 async function get(orgId, ctx, id) {

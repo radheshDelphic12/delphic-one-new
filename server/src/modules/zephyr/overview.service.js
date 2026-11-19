@@ -68,6 +68,8 @@ async function overview(orgId, ctx, query) {
     ctx.canFinance ? prisma.zxProperty.findMany({ where: { org_id: orgId }, select: { id: true, name: true, code: true } }) : [],
     prisma.zxParty.findMany({ where: { org_id: orgId }, select: { id: true, name: true } }),
   ]);
+  // Money put into properties is finance data: only people who may see property finance get the invested figure.
+  if (!ctx.canFinance) current.invested = null;
   const propName = new Map(props.map((p) => [p.id, `${p.code} ${p.name}`]));
   const partyName = new Map(parties.map((p) => [p.id, p.name]));
   const named = (rows, nameOf, none) => rows.map((r) => ({ ...r, name: r.key ? nameOf(r.key) : none })).sort((x, y) => y.revenue + y.expense - (x.revenue + x.expense));

@@ -69,9 +69,16 @@ function entryWhere(f = {}) {
   return and.length ? { AND: and } : {};
 }
 
+// Money put into a property (purchase, registration, construction ...) is an INVESTMENT, tracked on its own. It is neither revenue nor
+// expense, so it never adds to or deducts from profit. Those ledger rows are kept (for the trace and the property's total invested) and
+// are left out here. (A plain NOT would also drop rows whose source_type is NULL, hence the OR.)
+const INVESTMENT_SOURCE = 'property_acquisition';
+const notInvestment = { OR: [{ source_type: null }, { source_type: { not: INVESTMENT_SOURCE } }] };
+
 async function actualEntries(orgId, from, to, extra = {}, filters = {}) {
+  const fw = entryWhere(filters);
   const rows = await prisma.zxLedgerEntry.findMany({
-    where: { org_id: orgId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) }, ...extra, ...entryWhere(filters) },
+    where: { org_id: orgId, deleted_at: null, status: 'actual', entry_date: { gte: toDate(from), lte: toDate(to) }, ...extra, AND: [notInvestment, ...(fw.AND || [])] },
     select: { entry_date: true, type: true, amount: true, tax: true, project_id: true, party_id: true, category_id: true, service_type: true, property_id: true, unit_id: true, source_type: true, project: { select: { service_type: true } } },
   });
   return rows.map(({ project, ...e }) => ({ ...e, service: e.service_type || project?.service_type || null }));
@@ -110,6 +117,17 @@ async function wageCosts(orgId, from, to, scope) {
   return scope.mode === 'all' ? rows : rows.filter((r) => scope.ids.has(r.project_id));
 }
 
+// Sum of property acquisition costs booked in [from, to] (follows the property / unit / service filters).
+async function investedInPeriod(orgId, from, to, filters = {}) {
+  if (filters.project_id || filters.party_id) return 0;
+  const fw = entryWhere(filters);
+  const agg = await prisma.zxLedgerEntry.aggregate({
+    where: { org_id: orgId, deleted_at: null, status: 'actual', source_type: INVESTMENT_SOURCE, entry_date: { gte: toDate(from), lte: toDate(to) }, ...(fw.AND ? { AND: fw.AND } : {}) },
+    _sum: { amount: true },
+  });
+  return num(agg._sum.amount);
+}
+
 async function summary(orgId, from, to, { includeSalaries = true, filters = {} } = {}) {
   const scope = await salaryScope(orgId, filters);
   if (scope.mode === 'none') includeSalaries = false;
@@ -129,10 +147,13 @@ async function summary(orgId, from, to, { includeSalaries = true, filters = {} }
   }
   const salaries = slipRows.reduce((a, s) => a + slipPortion(s, scope), 0) + wageRows.reduce((a, w) => a + w.amount, 0);
   const profit = revenue - expense - salaries;
+  const invested = await investedInPeriod(orgId, from, to, filters);
   return {
     from,
     to,
     revenue: round2(revenue),
+    // money put into properties in the period: shown beside the P&L, never inside it
+    invested: round2(invested),
     expense: round2(expense),
     salaries: includeSalaries ? round2(salaries) : null,
     profit: round2(profit),
@@ -414,6 +435,6 @@ async function deleteAssetValue(orgId, actorId, month) {
 
 module.exports = {
   round2, num, dayOf, monthOf, toDate, addMonths, monthsBetween, monthStart, monthEnd, currentMonth, resolveRange,
-  actualEntries, entryWhere, slips, summary, monthly, byProject, byDimension, byProjectMonthly, valuation,
+  actualEntries, entryWhere, INVESTMENT_SOURCE, notInvestment, investedInPeriod, slips, summary, monthly, byProject, byDimension, byProjectMonthly, valuation,
   OWNED_STATUSES, propertyValueByMonth, propertyBreakdown, assetSchema, trendSchema, valuationTrend, setAssetValue, deleteAssetValue,
 };
