@@ -14,6 +14,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import LeaveBalancesPanel from './LeaveBalancesPanel.jsx';
 import LeaveTypesAdmin from './LeaveTypesAdmin.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const STANDARD_LEAVE_TYPES = [
   { id: '00000000-0000-4000-8000-000000000001', name: 'Casual Leave', paid: true, annual_quota: 12 },
@@ -297,7 +298,7 @@ export default function LeavePage() {
   const pendingRows = tab === 'team' ? shownRows.filter((row) => row.status === 'pending') : [];
   const [bulkBusy, setBulkBusy] = useState(false);
   async function approveAllPending() {
-    if (!pendingRows.length || !window.confirm(`Approve all ${pendingRows.length} pending leave request${pendingRows.length === 1 ? '' : 's'}?`)) return;
+    if (!pendingRows.length || !await confirmAction(`Approve all ${pendingRows.length} pending leave request${pendingRows.length === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     let failed = 0;
     for (const row of pendingRows) {

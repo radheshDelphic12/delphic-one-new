@@ -16,6 +16,7 @@ import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import TrackedPaymentsPanel from '../../components/payments/TrackedPaymentsPanel.jsx';
 import { DateInput, Detail, Empty, Kpi, Money, Select, Text, card, today, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -129,7 +130,7 @@ export default function AcconcyDealDetailPage() {
     }
   }
   async function removeDeal() {
-    if (!window.confirm(`Delete ${deal.name}? Its entries are removed from the deal reports.`)) return;
+    if (!await confirmAction(`Delete ${deal.name}? Its entries are removed from the deal reports.`)) return;
     try {
       await acconcyApi.deleteDeal(deal.id);
       navigate('/acconcy/deals');
@@ -138,7 +139,7 @@ export default function AcconcyDealDetailPage() {
     }
   }
   const delEntry = (e) => async () => {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await withReason((reason) => acconcyApi.deleteEntry(e.id, reason)); load(); } catch (err) { pushError(acconcyError(err, 'Could not delete'), 'Delete failed'); }
   };
 

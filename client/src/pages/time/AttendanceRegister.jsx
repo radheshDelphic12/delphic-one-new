@@ -7,6 +7,7 @@ import { downloadCsv } from '../../lib/groupExport.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { AddTimesheetEntryDrawer } from './TimesheetBackfill.jsx';
 import { CHECKIN_RESULT_LABEL, CHECKIN_COMPARISON_LABEL, CHECKIN_PLACE_LABEL, hoursMinutes, clock } from './checkinLabels.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -424,7 +425,7 @@ function DayEditor({ editing, onClose, onSaved }) {
       const span = err?.response?.data?.errors?.[0];
       if (span?.code === 'leave_spans_days' && !confirmSpan) {
         // A several-day leave: name every day it covers before withdrawing it whole.
-        if (window.confirm(`This leave covers ${span.from} to ${span.to}. Saving withdraws the whole leave and puts back the other days with the same leave type. Continue?`)) { setBusy(false); return save(null, true); }
+        if (await confirmAction(`This leave covers ${span.from} to ${span.to}. Saving withdraws the whole leave and puts back the other days with the same leave type. Continue?`)) { setBusy(false); return save(null, true); }
       } else pushError(apiErrorMessage(err, 'Could not save the attendance'), 'Not saved');
     } finally { setBusy(false); }
   }

@@ -9,6 +9,7 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import { Empty, Select, Text, card, dayOf } from '../../components/gulati/ui.jsx';
 import { titleCase } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'general', label: 'Company and valuation' },
@@ -16,7 +17,7 @@ const TABS = [
   { key: 'units', label: 'Units' },
   { key: 'categories', label: 'Categories' },
   { key: 'teams', label: 'Teams & reporting' },
-  { key: 'audit', label: 'Audit log' },
+  { key: 'audit', label: 'Audit log', description: 'A record of who changed what, and when.' },
 ];
 
 /** Rename / switch off / add rows of one admin-editable master list. */
@@ -138,8 +139,8 @@ export default function GulatiSettingsPage() {
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} className="min-w-0" />
       {tab === 'general' && <General />}
       {tab === 'types' && <MasterEditor title="Trading types" hint="Copper Cathode and Trading of Deals are built in; add more, rename or switch any off. A switched-off type stays on old records." rows={types} labelKey="label" onAdd={attempt((label) => gulatiApi.createTradingType({ label }))} onUpdate={attempt((r, body) => gulatiApi.updateTradingType(r.key, body))} />}
-      {tab === 'units' && <MasterEditor title="Quantity units" hint="Shown in the unit pickers on leads and deals." rows={units} labelKey="name" onAdd={attempt((name) => gulatiApi.createUnit({ name }))} onUpdate={attempt((r, body) => gulatiApi.updateUnit(r.id, body))} onDelete={attempt(async (r) => { if (window.confirm(`Delete ${r.name}? Existing records keep it.`)) await gulatiApi.deleteUnit(r.id); })} />}
-      {tab === 'categories' && <MasterEditor title="Revenue and expense categories" hint="Deal expenses (transportation, brokerage...) and company entries use these." rows={cats} labelKey="name" extraAdd={{ label: 'Kind', initial: 'expense', options: [{ value: 'expense', label: 'Expense' }, { value: 'revenue', label: 'Income' }] }} onAdd={attempt((name, kind) => gulatiApi.createCategory({ name, kind }))} onUpdate={attempt((r, body) => gulatiApi.updateCategory(r.id, body))} onDelete={attempt(async (r) => { if (window.confirm(`Delete ${r.name}?`)) await gulatiApi.deleteCategory(r.id); })} />}
+      {tab === 'units' && <MasterEditor title="Quantity units" hint="Shown in the unit pickers on leads and deals." rows={units} labelKey="name" onAdd={attempt((name) => gulatiApi.createUnit({ name }))} onUpdate={attempt((r, body) => gulatiApi.updateUnit(r.id, body))} onDelete={attempt(async (r) => { if (await confirmAction(`Delete ${r.name}? Existing records keep it.`)) await gulatiApi.deleteUnit(r.id); })} />}
+      {tab === 'categories' && <MasterEditor title="Revenue and expense categories" hint="Deal expenses (transportation, brokerage...) and company entries use these." rows={cats} labelKey="name" extraAdd={{ label: 'Kind', initial: 'expense', options: [{ value: 'expense', label: 'Expense' }, { value: 'revenue', label: 'Income' }] }} onAdd={attempt((name, kind) => gulatiApi.createCategory({ name, kind }))} onUpdate={attempt((r, body) => gulatiApi.updateCategory(r.id, body))} onDelete={attempt(async (r) => { if (await confirmAction(`Delete ${r.name}?`)) await gulatiApi.deleteCategory(r.id); })} />}
       {tab === 'teams' && <CompanyStructure />}
       {tab === 'audit' && <Audit />}
     </div>

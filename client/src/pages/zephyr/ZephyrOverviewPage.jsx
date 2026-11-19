@@ -188,6 +188,11 @@ function OverviewTab({ isAdmin, canFinance }) {
               <Tile label="Valuation" value={v?.value == null ? '—' : rupees(v.value)} sub={v ? '(profit x 240) + (assets x 3)' : ''} />
             )}
           </div>
+          {s.invested != null && (
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+              <Tile label="Invested in properties" value={rupees(s.invested)} sub="tracked separately; not part of revenue, expense or profit" />
+            </div>
+          )}
 
           <section className={card}>
             <h3 className="mb-3 font-heading text-sm font-semibold text-tertiary-900">Last 12 months</h3>
@@ -321,7 +326,7 @@ export default function ZephyrOverviewPage() {
   const isAdmin = zxCan(me, 'overviewValuation');
   const canFinance = zxCan(me, 'propertyFinance');
   const fullLedger = zxCan(me, 'ledgerSalaries');
-  const tabs = [{ key: 'overview', label: 'Overview', icon: LayoutDashboard }, { key: 'services', label: 'By service', icon: Layers }, { key: 'ledger', label: 'Ledger', icon: BookOpenText }];
+  const tabs = [{ key: 'overview', label: 'Overview', icon: LayoutDashboard }, { key: 'services', label: 'By service', icon: Layers }, { key: 'ledger', label: 'Ledger', icon: BookOpenText, description: 'Every revenue and expense posting for the company.' }];
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />

@@ -10,6 +10,8 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, DateInput, Detail, Section, Select, Text, dayOf, toBody } from '../../components/gulati/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const KIND_OPTIONS = [{ value: 'employee', label: 'Employee' }, { value: 'contractor', label: 'Contractor' }];
 const ACCESS = [
@@ -140,7 +142,7 @@ export default function GulatiPeoplePage() {
     }
   }
   async function removePerson(p) {
-    if (!window.confirm(`Remove ${p.name} from the roster?`)) return;
+    if (!await confirmAction(`Remove ${p.name} from the roster?`)) return;
     try { await gulatiApi.deletePerson(p.id); loadPeople(); } catch (e) { pushError(gulatiError(e, 'Could not delete'), 'Delete failed'); }
   }
   async function toggleUser(u) {
@@ -163,7 +165,7 @@ export default function GulatiPeoplePage() {
     ) },
   ];
   const userCols = [
-    { key: 'name', header: 'Name', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span><span className="block text-xs text-tertiary-500">{r.email}</span></span> },
+    { key: 'name', header: 'Name', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span><span className="block text-xs text-tertiary-500"><EmailLink email={r.email} /></span></span> },
     { key: 'role', header: 'Role', render: (r) => <Pill tone="green">{r.role === 'admin' ? 'Admin' : ACCESS_LABEL[r.gulati_person?.access_role] || 'No access'}</Pill> },
     { key: 'status', header: 'Status', render: (r) => <Pill value={r.active ? 'active' : 'inactive'} /> },
     { key: 'actions', header: '', render: (r) => (
@@ -174,7 +176,7 @@ export default function GulatiPeoplePage() {
     ) },
   ];
 
-  const tabs = [{ key: 'roster', label: 'Roster', icon: Users }, ...(isAdmin ? [{ key: 'logins', label: 'Logins', icon: UserCog }] : [])];
+  const tabs = [{ key: 'roster', label: 'Roster', icon: Users, description: 'Team members of this company, with their roles.' }, ...(isAdmin ? [{ key: 'logins', label: 'Logins', icon: UserCog, description: 'Sign-in accounts for this company and what each can do.' }] : [])];
   const person = drawer?.person;
   return (
     <div className="mt-4 space-y-4">

@@ -9,6 +9,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -201,7 +202,7 @@ export default function GroupTasksTab() {
     } catch (e) { setError(apiErrorMessage(e, 'Could not save the task')); } finally { setSaving(false); }
   }
   async function deleteTask(id) {
-    if (!window.confirm('Delete this task? A recurring task is removed for every date.')) return;
+    if (!await confirmAction('Delete this task? A recurring task is removed for every date.')) return;
     try { await apiClient.delete(`/super-dashboard/group/tasks/${id}`); refresh(); } catch (e) { pushError(apiErrorMessage(e, 'Could not delete'), 'Not deleted'); }
   }
   async function savePlan(assignments) {

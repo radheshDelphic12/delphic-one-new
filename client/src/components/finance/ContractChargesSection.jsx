@@ -4,6 +4,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { amountText } from './financePrint.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const PRESETS = [
   { label: 'GST', mode: 'percent', value: 18, effect: 'add' },
@@ -62,7 +63,7 @@ export default function ContractChargesSection({ accountId, currency = 'INR', ve
   }
 
   async function remove(charge) {
-    if (!window.confirm(`Delete "${charge.label}" from this ${vendor ? 'vendor' : 'contract'}? Invoices already generated keep it.`)) return;
+    if (!await confirmAction(`Delete "${charge.label}" from this ${vendor ? 'vendor' : 'contract'}? Invoices already generated keep it.`)) return;
     try {
       await apiClient.delete(itemPath(charge.id));
       if (editingId === charge.id) reset();

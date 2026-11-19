@@ -1,4 +1,5 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
+import HubHeading from '../../components/layout/HubHeading.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Banknote, CalendarCheck, CalendarClock, DoorOpen, FileText, Pencil, Play, Plus, Printer, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
@@ -18,6 +19,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -430,7 +432,7 @@ function SalaryStructuresTab({ filters }) {
 
   async function remove(row) {
     const who = row.org_membership?.person?.name || 'this employee';
-    if (!window.confirm(`Delete ${who}'s salary structure from ${new Date(row.effective_from).toLocaleDateString()} (${money(row.ctc)})? Payroll falls back to their previous structure. This can't be undone.`)) return;
+    if (!await confirmAction(`Delete ${who}'s salary structure from ${new Date(row.effective_from).toLocaleDateString()} (${money(row.ctc)})? Payroll falls back to their previous structure. This can't be undone.`)) return;
     try {
       const { data } = await apiClient.delete(`/payroll/salary-structures/${row.id}`);
       const flagged = data.data?.flagged || 0;
@@ -620,7 +622,7 @@ function PayrollRunsTab({ filters }) {
   }
 
   async function process(row) {
-    if (!window.confirm(`Process payroll for ${periodLabel(row.period_month, row.period_year)}? This generates payslips for every eligible employee. It can't be re-run, but later salary changes can be applied with "Update payroll".`)) return;
+    if (!await confirmAction(`Process payroll for ${periodLabel(row.period_month, row.period_year)}? This generates payslips for every eligible employee. It can't be re-run, but later salary changes can be applied with "Update payroll".`)) return;
     setProcessingId(row.id);
     try {
       const { data } = await apiClient.post(`/payroll/runs/${row.id}/process`);
@@ -710,6 +712,17 @@ const ADMIN_TABS = [
   // Full and final settlement of everyone who has left.
   { key: 'fnf', label: 'FnF', icon: DoorOpen },
 ];
+// One line under the tab bar for the open tab. Salary Adjustments already draws its own heading.
+const TAB_HELP = {
+  'my-payslips': 'Your salary slips, month by month.',
+  'salary-payments': 'Paid and unpaid salaries by month, with transaction details.',
+  'attendance-salary': 'Salary worked out from attendance for the month.',
+  'salary-structures': 'Monthly CTC and salary components for each employee.',
+  runs: 'Process payroll for a month and generate payslips.',
+  fnf: 'Full and final settlement for employees who are leaving.',
+  increments: 'Employees whose salary increment is due.',
+};
+const SELF_HEADED = new Set(['adjustments']);
 const INCREMENT_TAB = { key: 'increments', label: 'Increment Reminders', icon: CalendarClock };
 
 /**
@@ -736,6 +749,7 @@ export default function PayrollHubPage() {
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
       <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
+      <HubHeading tabs={tabs} section={section} help={TAB_HELP} skip={SELF_HEADED} />
       {isAdmin && section !== 'my-payslips' && (
         <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Payroll filters">
           <PeopleFilters value={people} onChange={setPeople} />

@@ -13,6 +13,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
 import ProfileFormPage from './ProfileFormPage.jsx';
 import { apiErrorMessage, canCreateProfile, canEditProfile, profileKey } from './profileUtils.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const SORT_OPTIONS = [
   { value: 'created_at', label: 'Newest' },
@@ -73,7 +74,7 @@ function ProfilePeek({ row, onClose }) {
         <PeekField label="Expected CTC">
           {detail.expected_ctc != null ? `${detail.expected_ctc_currency} ${detail.expected_ctc}` : '—'}
         </PeekField>
-        <PeekField label="Email">{detail.email || '—'}</PeekField>
+        <PeekField label="Email"><EmailLink email={detail.email} fallback="—" /></PeekField>
         <PeekField label="Phone">{detail.phone || '—'}</PeekField>
         <PeekField label="Added by">{detail.added_by?.name || '—'}</PeekField>
         <div className="sm:col-span-2">

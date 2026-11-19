@@ -8,6 +8,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { CalendarDrawer, HolidaysDrawer } from '../people/HrSettingsPage.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const SOURCE_LABEL = {
   assigned: 'Assigned directly',
@@ -204,7 +205,7 @@ export default function HolidayCalendarAdmin({ onChanged }) {
 
   // The org has ONE standard calendar; this moves the flag here.
   async function makeStandard(calendar) {
-    if (!window.confirm(`Make ${calendar.name} the standard holiday calendar? Everyone without a department, office or personal calendar will follow it.`)) return;
+    if (!await confirmAction(`Make ${calendar.name} the standard holiday calendar? Everyone without a department, office or personal calendar will follow it.`)) return;
     try {
       await apiClient.patch(`/calendars/${calendar.id}`, { is_default: true });
       pushInfo(`${calendar.name} is now the standard calendar`);
@@ -215,7 +216,7 @@ export default function HolidayCalendarAdmin({ onChanged }) {
   }
 
   async function deleteCalendar(calendar) {
-    if (!window.confirm(`Delete ${calendar.name}? Its holidays are deleted too.`)) return;
+    if (!await confirmAction(`Delete ${calendar.name}? Its holidays are deleted too.`)) return;
     try {
       await apiClient.delete(`/calendars/${calendar.id}`);
       pushInfo(`${calendar.name} deleted`);

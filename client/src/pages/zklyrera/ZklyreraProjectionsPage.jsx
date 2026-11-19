@@ -14,6 +14,7 @@ import ZkFilterBar, { useZkFilters } from '../../components/zklyrera/ZkFilters.j
 import ProjectionDrawer from '../../components/zklyrera/ProjectionDrawer.jsx';
 import { ProjectedActualChart } from '../../components/zklyrera/ZkCharts.jsx';
 import { Empty, Kpi, Money, card } from '../../components/zklyrera/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TONE = { on_track: 'green', off_track: 'red', unplanned: 'amber', none: 'gray' };
 const LABEL = { on_track: 'On track', off_track: 'Off track', unplanned: 'Not planned', none: '-' };
@@ -38,7 +39,7 @@ export default function ZklyreraProjectionsPage() {
   const refresh = () => { list.refresh(); cmp.refresh(); dash.refresh(); };
   const close = () => setDrawer({ open: false, projection: null });
   async function remove(p) {
-    if (!window.confirm(`Delete the projection "${p.name}"?`)) return;
+    if (!await confirmAction(`Delete the projection "${p.name}"?`)) return;
     try { await zkApi.deleteProjection(p.id); pushSuccess('Projection deleted'); refresh(); } catch (e) { pushError(zklyreraError(e, 'Could not delete'), 'Not deleted'); }
   }
   const t = cmp.data?.projected_totals;

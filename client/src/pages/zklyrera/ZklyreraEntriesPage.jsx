@@ -15,6 +15,7 @@ import ZkFilterBar, { useZkFilters } from '../../components/zklyrera/ZkFilters.j
 import EntryDrawer from '../../components/zklyrera/EntryDrawer.jsx';
 import { CategoryChart, ExpenseTrendChart, IncomeChart, ZK_PIE } from '../../components/zklyrera/ZkCharts.jsx';
 import { Kpi, Money, card, withReason } from '../../components/zklyrera/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const PAGES = {
   income: { kind: 'income', cap: 'entries', title: 'Income', add: 'Record income', searchPlaceholder: 'Search payer, reference, notes...', filter: 'income_category_id', empty: 'No other income recorded for these filters.' },
@@ -47,7 +48,7 @@ export default function ZklyreraEntriesPage({ type }) {
   const close = () => { setDrawer({ open: false, entry: null }); if (params.get('new')) { params.delete('new'); setParams(params, { replace: true }); } };
   const refresh = () => { load(); dash.refresh(); returns.refresh(); pickers.refresh(); };
   async function remove(entry) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await withReason((reason) => zkApi.deleteEntry(entry.id, reason)); refresh(); } catch (e) { pushError(zklyreraError(e, 'Could not delete'), 'Not deleted'); }
   }
   const s = data?.summary;

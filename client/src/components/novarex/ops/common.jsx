@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAlerts } from '../../../lib/alerts/alertContext.jsx';
 import { novarexError } from '../../../lib/novarex/api.js';
 import { withReason } from '../ui.jsx';
+import { confirmAction } from '../../../lib/confirmAction.js';
 
 export { Money, Kpi, card, today, dayOf } from '../ui.jsx';
 
@@ -25,7 +26,7 @@ export function useRows(fetcher, deps) {
 export function useAction(reload) {
   const { pushError, pushSuccess } = useAlerts();
   return useCallback(async (run, { confirm, done = 'Done', after } = {}) => {
-    if (confirm && !window.confirm(confirm)) return null;
+    if (confirm && !await confirmAction(confirm)) return null;
     try {
       const res = await withReason(run);
       pushSuccess(done);

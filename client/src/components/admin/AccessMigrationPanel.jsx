@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../ui/Pill.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const box = 'rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card';
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : 'never');
@@ -179,7 +180,7 @@ export default function AccessMigrationPanel() {
           <h3 className="font-heading text-sm font-semibold text-tertiary-900">{user?.active_org?.name} uses permissions</h3>
           <p className="text-sm text-tertiary-600">{cleanup.window_open ? 'The old role fields are kept read-only for 30 days from the move. If something was missed, restore puts everything back exactly as the backup recorded it.' : cleanup.ready ? 'The 30 days are over. Clean up to end the restore window and drop the Admin role value from everyone who is not the Admin.' : 'Nothing left to clean up.'}</p>
           <div className="flex gap-2">
-            {cleanup.window_open && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-danger-600" disabled={busy} onClick={() => window.confirm('Put this company back on the old roles, exactly as the backup recorded them?') && run('Restored to the old roles', async () => { await apiClient.post('/access/migration/restore'); window.location.reload(); })}><RotateCcw className="h-4 w-4" />Restore the old roles</button>}
+            {cleanup.window_open && <button type="button" className="btn-secondary inline-flex items-center gap-1 text-danger-600" disabled={busy} onClick={async () => await confirmAction('Put this company back on the old roles, exactly as the backup recorded them?') && run('Restored to the old roles', async () => { await apiClient.post('/access/migration/restore'); window.location.reload(); })}><RotateCcw className="h-4 w-4" />Restore the old roles</button>}
             {cleanup.ready && <button type="button" className="btn-primary inline-flex items-center gap-1" disabled={busy} onClick={() => run('Clean-up done', () => apiClient.post('/access/migration/cleanup'))}><ArchiveRestore className="h-4 w-4" />Clean up</button>}
           </div>
         </div>

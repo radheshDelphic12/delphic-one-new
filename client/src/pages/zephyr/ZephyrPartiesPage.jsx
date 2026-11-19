@@ -15,6 +15,8 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import { rupees } from '../../lib/zephyr/projectMeta.js';
 import { useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const TABS = [
   { key: 'all', label: 'All', icon: Users },
@@ -262,7 +264,7 @@ export default function ZephyrPartiesPage() {
   }
 
   async function remove(party) {
-    if (!window.confirm(`Delete ${party.name}? It will be removed from the directory.`)) return;
+    if (!await confirmAction(`Delete ${party.name}? It will be removed from the directory.`)) return;
     try {
       await zephyrApi.deleteParty(party.id);
       pushSuccess('Deleted');
@@ -370,7 +372,7 @@ export default function ZephyrPartiesPage() {
               <Detail label="Company">{party.company_name}</Detail>
               <Detail label="Contact person">{party.contact_name}</Detail>
               <Detail label="Phone">{party.phone}</Detail>
-              <Detail label="Email">{party.email}</Detail>
+              <Detail label="Email"><EmailLink email={party.email} fallback="—" /></Detail>
               <Detail label="City">{[party.city, party.state, party.country].filter(Boolean).join(', ')}</Detail>
               {party.kind !== 'vendor' && <Detail label="Interested services">{party.interested_services?.length ? party.interested_services.map(serviceLabel).join(', ') : null}</Detail>}
               {party.kind !== 'client' && <Detail label="Vendor category">{party.vendor_category}</Detail>}

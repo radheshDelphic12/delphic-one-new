@@ -22,6 +22,8 @@ import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
 import MyDeployments, { useDeploymentAccess } from './MyDeployments.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 import RegularizationAdminTab from './RegularizationAdminTab.jsx';
+import HubTabs from '../../components/layout/HubTabs.jsx';
+import HubHeading from '../../components/layout/HubHeading.jsx';
 
 const BASE_TABS = [
   { key: 'attendance', label: 'Attendance', icon: CalendarClock, need: 'basic.attendance' },
@@ -42,6 +44,10 @@ const BASE_TABS = [
   { key: 'overtime', label: 'OT Tickets', icon: AlarmClockPlus, need: ['basic.timesheet', 'overtime.view'] },
 ];
 // Where people check in from (office, home, away) and who is late: a separate record, never feeds attendance or pay. Delphic Global only.
+// One line under the tab bar for tabs whose page draws no heading of its own.
+const TAB_HELP = {
+  'contractor-checkin': 'In and out times of contractors. Separate from attendance and pay.',
+};
 const LOCATION_CHECKIN_TAB = { key: 'location-checkin', label: 'Workplace Check-in', icon: MapPin, need: 'basic.attendance' };
 // Contractors' plain check-in / check-out (no location): report for HR / admin. Delphic Global only.
 const CONTRACTOR_CHECKIN_TAB = { key: 'contractor-checkin', label: 'Contractor Check-in', icon: LogIn, need: 'basic.attendance' };
@@ -88,23 +94,8 @@ export default function TimeAttendanceHubPage() {
 
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
-      <div className={modern ? 'flex flex-wrap gap-1 rounded-2xl border border-tertiary-100 bg-white p-1.5 shadow-card' : 'flex flex-wrap gap-1 border-b border-tertiary-200'}>
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={section === key}
-            className={modern
-              ? `inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${section === key ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100' : 'text-tertiary-500 hover:bg-tertiary-50 hover:text-tertiary-800'}`
-              : `inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${section === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`}
-            onClick={() => setParams({ section: key })}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
+      <HubTabs tabs={TABS} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
+      <HubHeading tabs={TABS} section={section} help={TAB_HELP} />
       {section === 'attendance' && <AttendancePage />}
       {section === 'leave' && <LeavePage />}
       {section === 'deployments' && has('deployments') && <MyDeployments />}

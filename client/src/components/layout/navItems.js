@@ -82,3 +82,17 @@ export const NAV_ITEMS = [
  * `external` items are plain links (not router routes) and open in a new tab; AppLayout adds this one for is_superadmin.
  */
 export const DB_SNAPSHOTS_NAV_ITEM = { to: '/dbviewer/', label: 'Database snapshots', icon: DatabaseBackup, external: true };
+
+// Sidebar section headings. Items keep their existing order; a heading is drawn when the section changes.
+// Headings only show when the signed-in user sees items from two or more sections.
+const NAV_SECTION_BY_PATH = {
+  '/accounts': 'Recruitment', '/pipeline': 'Recruitment', '/requirements': 'Recruitment', '/hiring-setup': 'Recruitment',
+  '/profiles': 'Recruitment', '/submissions': 'Recruitment', '/rejected-candidates': 'Recruitment',
+  '/calendar': 'Workspace', '/offices': 'Workspace', '/internal-jobs': 'Workspace', '/speak-up': 'Workspace',
+  '/interview-feedback': 'Workspace', '/employee-feedback': 'Workspace',
+  '/people': 'People & Finance', '/attendance': 'People & Finance', '/finance': 'People & Finance', '/payroll': 'People & Finance',
+  '/analytics': 'People & Finance', '/financials': 'People & Finance',
+  '/trading': 'Business', '/leads': 'Business', '/contracts': 'Business', '/projects': 'Business', '/pm': 'Business',
+  '/reports': 'Admin', '/website': 'Admin', '/settings': 'Admin',
+};
+export const navSectionOf = (to) => NAV_SECTION_BY_PATH[to] || null;

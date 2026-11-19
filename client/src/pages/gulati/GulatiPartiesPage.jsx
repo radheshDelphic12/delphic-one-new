@@ -14,6 +14,8 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import GulatiDocuments from '../../components/gulati/GulatiDocuments.jsx';
 import { Area, Detail, Money, Select, Text, inputCls } from '../../components/gulati/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const TABS = [
   { key: 'all', label: 'All', icon: Users },
@@ -209,7 +211,7 @@ export default function GulatiPartiesPage() {
     }
   }
   async function remove(party) {
-    if (!window.confirm(`Delete ${party.name}? It will be removed from the directory.`)) return;
+    if (!await confirmAction(`Delete ${party.name}? It will be removed from the directory.`)) return;
     try {
       await gulatiApi.deleteParty(party.id);
       pushSuccess('Deleted');
@@ -283,7 +285,7 @@ export default function GulatiPartiesPage() {
               <Detail label="Company">{party.company_name}</Detail>
               <Detail label="Contact person">{party.contact_name}</Detail>
               <Detail label="Phone">{party.phone}</Detail>
-              <Detail label="Email">{party.email}</Detail>
+              <Detail label="Email"><EmailLink email={party.email} fallback="—" /></Detail>
               <Detail label="Location">{[party.city, party.state, party.country].filter(Boolean).join(', ')}</Detail>
               {party.kind !== 'client' && <Detail label="Vendor category">{party.vendor_category}</Detail>}
               {party.kind !== 'client' && <div className="sm:col-span-2"><Detail label="Material / product supplied">{party.materials_services}</Detail></div>}

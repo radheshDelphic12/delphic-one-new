@@ -10,6 +10,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { KpiTile, SectionHeading } from './groupUi.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 // Group Dashboard > GST & TDS (docs/features/GROUP-TAX-TRACKING.md): invoice-wise base / GST / TDS, TDS receivable, GST payable, vendor TDS.
 
@@ -165,7 +166,7 @@ function TdsView({ params }) {
     } catch (err) { pushError(apiErrorMessage(err, 'Failed to record the refund'), 'Could not save'); } finally { setBusy(false); }
   }
   async function removeReceipt(id) {
-    if (!window.confirm('Remove this refund entry? The TDS goes back to receivable.')) return;
+    if (!await confirmAction('Remove this refund entry? The TDS goes back to receivable.')) return;
     try { await apiClient.delete(`/group-tax/tds-receipts/${id}`, { data: {} }); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Failed to remove'), 'Something went wrong'); }
   }
 

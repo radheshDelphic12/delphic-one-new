@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Download, Plus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { downloadFile } from '../../lib/downloadFile.js';
@@ -106,7 +107,11 @@ export default function VendorInvoicesTab() {
   const [payFor, setPayFor] = useState(null);
   const [traceId, setTraceId] = useState(null);
   const [filesFor, setFilesFor] = useState(null); // the invoice whose files are open
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState('invoices');
+  // the hub's hover menu links straight to a view: ?section=vendor-invoices&view=payout
+  const urlView = searchParams.get('view');
+  useEffect(() => { setView(['invoices', 'charges', 'payout'].includes(urlView) ? urlView : 'invoices'); }, [urlView]);
 
   const load = useCallback(() => {
     setRows(null);
@@ -227,15 +232,8 @@ export default function VendorInvoicesTab() {
     },
   ];
 
-  const tabs = (
-    <div className="flex gap-2" role="tablist" aria-label="Vendor invoices views">
-      {[['invoices', 'Invoices'], ['charges', 'GST & TDS setup'], ['payout', 'Bank payout']].map(([key, label]) => (
-        <button key={key} type="button" role="tab" aria-selected={view === key} data-testid={`vendor-view-${key}`} onClick={() => setView(key)}
-          className={`rounded-xl px-4 py-2 text-sm font-medium ${view === key ? 'bg-primary-600 text-white' : 'border bg-white text-tertiary-700 hover:bg-primary-50'}`}>{label}</button>
-      ))}
-    </div>
-  );
-
+  // The Invoices / GST & TDS setup / Bank payout switch now lives in the Finance hub's hover menu on the Vendor Invoices tab.
+  const tabs = null;
   if (view === 'charges') return <div className="space-y-4">{tabs}<VendorChargesPanel /></div>;
   if (view === 'payout') return <div className="space-y-4">{tabs}<VendorPayoutPanel /></div>;
 

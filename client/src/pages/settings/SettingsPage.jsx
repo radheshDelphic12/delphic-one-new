@@ -19,6 +19,7 @@ import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx'
 import ReportingSection from '../../components/ReportingSection.jsx';
 import ResignationCard from '../../components/resignation/ResignationCard.jsx';
 import ResignationsTab from './ResignationsTab.jsx';
+import SectionTabs from '../../components/ui/SectionTabs.jsx';
 
 const BASE_TABS = [
   { key: 'account', label: 'Account', icon: UserRound },
@@ -333,32 +334,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 py-2">
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="flex gap-1 overflow-x-auto border-b border-tertiary-100"
-      >
-        {TABS.map(({ key, label, icon: Icon }) => {
-          const selected = active === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => selectTab(key)}
-              className={`-mb-px flex flex-1 items-center justify-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                selected
-                  ? 'border-primary-600 text-primary-700'
-                  : 'border-transparent text-tertiary-500 hover:border-tertiary-200 hover:text-tertiary-800'
-              }`}
-            >
-              <Icon className="h-4 w-4" aria-hidden />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      <SectionTabs tabs={TABS} value={active} onChange={selectTab} />
 
       {active === 'account' && <AccountTab user={user} onLogout={logout} />}
       {active === 'details' && <div className="space-y-4"><ReportingSection self /><PersonalDetailsSection self /></div>}

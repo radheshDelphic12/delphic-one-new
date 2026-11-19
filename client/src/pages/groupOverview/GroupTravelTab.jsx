@@ -8,6 +8,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -318,7 +319,7 @@ export default function GroupTravelTab() {
     } catch (e) { setError(apiErrorMessage(e, 'Could not save the trip')); } finally { setSaving(false); }
   }
   async function remove(trip) {
-    if (!window.confirm(`Delete the trip "${trip.title}"? Its meetings stay on the calendar.`)) return;
+    if (!await confirmAction(`Delete the trip "${trip.title}"? Its meetings stay on the calendar.`)) return;
     try { await apiClient.delete(`/super-dashboard/group/travel/${trip.id}`); refresh(); } catch (e) { pushError(apiErrorMessage(e, 'Could not delete'), 'Not deleted'); }
   }
 

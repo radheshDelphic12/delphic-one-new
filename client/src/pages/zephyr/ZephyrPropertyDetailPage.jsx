@@ -18,6 +18,7 @@ import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import { LeaseForm, PaymentForm, TenantForm } from '../../components/zephyr/ZephyrRentForms.jsx';
 import { Detail, Empty, Section, card, dayOf, inputCls, labelCls, toBody, today } from '../../components/zephyr/formKit.jsx';
 import { PropertyForm } from './ZephyrPropertiesPage.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const Actions = ({ saving, onCancel, label = 'Save' }) => (
   <div className="flex justify-end gap-2">
@@ -312,7 +313,7 @@ export default function ZephyrPropertyDetailPage() {
     if (await run(() => (edit ? zephyrApi.updateUnit(p.id, edit.id, values) : zephyrApi.addUnit(p.id, values)), edit ? 'Unit saved' : 'Unit added')) close();
   }
   async function removeUnit(u) {
-    if (window.confirm(`Remove ${u.name}?`)) await run(() => zephyrApi.deleteUnit(p.id, u.id), 'Unit removed', 'Could not remove');
+    if (await confirmAction(`Remove ${u.name}?`)) await run(() => zephyrApi.deleteUnit(p.id, u.id), 'Unit removed', 'Could not remove');
   }
   async function saveLease(values) {
     const edit = drawer.lease;
@@ -344,20 +345,20 @@ export default function ZephyrPropertyDetailPage() {
     if (await run(() => (edit ? zephyrApi.updateLoan(p.id, edit.id, values) : zephyrApi.addLoan(p.id, values)), edit ? 'Loan saved' : 'Loan added')) close();
   }
   async function removeLoan(l) {
-    if (window.confirm('Remove this loan?')) await run(() => zephyrApi.deleteLoan(p.id, l.id), 'Loan removed', 'Could not remove');
+    if (await confirmAction('Remove this loan?')) await run(() => zephyrApi.deleteLoan(p.id, l.id), 'Loan removed', 'Could not remove');
   }
   async function saveAcquisition(values) {
     if (await run(() => zephyrApi.addAcquisitionCost(p.id, values), 'Acquisition cost added')) close();
   }
   async function removeAcquisition(c) {
-    if (window.confirm('Remove this acquisition cost? It is also removed from the books.')) await run(() => zephyrApi.deleteAcquisitionCost(p.id, c.id), 'Cost removed', 'Could not remove');
+    if (await confirmAction('Remove this acquisition cost? It is also removed from the books.')) await run(() => zephyrApi.deleteAcquisitionCost(p.id, c.id), 'Cost removed', 'Could not remove');
   }
   async function saveValuation(values) {
     const edit = drawer.valuation;
     if (await run(() => (edit ? zephyrApi.updateValuation(p.id, edit.id, values) : zephyrApi.addValuation(p.id, values)), 'Valuation saved')) close();
   }
   async function removeValuation(v) {
-    if (window.confirm('Remove this valuation entry?')) await run(() => zephyrApi.deleteValuation(p.id, v.id), 'Valuation removed', 'Could not remove');
+    if (await confirmAction('Remove this valuation entry?')) await run(() => zephyrApi.deleteValuation(p.id, v.id), 'Valuation removed', 'Could not remove');
   }
   async function saveSale(values) {
     const edit = drawer.sale;
@@ -372,14 +373,14 @@ export default function ZephyrPropertyDetailPage() {
     if (await run(() => zephyrApi.reverseSale(p.id, s.id, reason.trim()).then(() => load()), 'Sale reversed', 'Could not reverse')) await loadSales();
   }
   async function removeEvent(e) {
-    if (window.confirm('Remove this timeline entry?')) await run(() => zephyrApi.deletePropertyEvent(p.id, e.id), 'Entry removed', 'Could not remove');
+    if (await confirmAction('Remove this timeline entry?')) await run(() => zephyrApi.deletePropertyEvent(p.id, e.id), 'Entry removed', 'Could not remove');
   }
   async function saveEvent(values) {
     const edit = drawer.event;
     if (await run(() => (edit ? zephyrApi.updatePropertyEvent(p.id, edit.id, values) : zephyrApi.addPropertyEvent(p.id, values)), edit ? 'Entry saved' : 'Added to the timeline')) close();
   }
   async function removeProperty() {
-    if (!window.confirm(`Delete ${p.code} ${p.name}?`)) return;
+    if (!await confirmAction(`Delete ${p.code} ${p.name}?`)) return;
     try {
       await zephyrApi.deleteProperty(p.id);
       pushSuccess('Property deleted');

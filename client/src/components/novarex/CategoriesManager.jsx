@@ -7,6 +7,7 @@ import Drawer from '../ui/Drawer.jsx';
 import Pill from '../ui/Pill.jsx';
 import SectionTabs from '../ui/SectionTabs.jsx';
 import { Area, Num, Select, Text } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const SCOPES = [
   { key: 'ownership_type', label: 'Ownership types', blurb: 'How an outlet is owned and run (company-owned, franchise, third-party ...). The kind decides how its sales are recognised. Chosen on each outlet.', addLabel: 'Add ownership type' },
@@ -63,7 +64,7 @@ export default function CategoriesManager({ canEdit }) {
     } catch (e) { setError(novarexError(e, 'Could not save')); } finally { setSaving(false); }
   }
   async function remove(r) {
-    if (!window.confirm(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
+    if (!await confirmAction(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
     try { await nxApi.deleteCategory(r.id); load(); } catch (e) { pushError(novarexError(e, 'Could not remove'), 'Not removed'); }
   }
   const columns = [

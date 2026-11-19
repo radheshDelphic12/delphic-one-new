@@ -12,6 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const KINDS = [
   { value: 'call', label: 'Call' },
@@ -196,7 +197,7 @@ function ActivityPanel({ lead, canEdit, onChanged }) {
   }
 
   async function removeRow(a) {
-    if (!window.confirm('Remove this entry from the activity log?')) return;
+    if (!await confirmAction('Remove this entry from the activity log?')) return;
     try {
       await zephyrApi.deleteLeadActivity(lead.id, a.id);
       await load();
@@ -402,7 +403,7 @@ export default function ZephyrLeadsPage() {
   }
 
   async function convert() {
-    if (!window.confirm('Create a project from this won lead? The lead stays on record.')) return;
+    if (!await confirmAction('Create a project from this won lead? The lead stays on record.')) return;
     const project = await run(() => zephyrApi.projectFromLead(lead.id), 'Project created', 'Could not create the project');
     if (project) {
       const fresh = await zephyrApi.lead(lead.id).catch(() => null);
@@ -411,7 +412,7 @@ export default function ZephyrLeadsPage() {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete ${lead.name}?`)) return;
+    if (!await confirmAction(`Delete ${lead.name}?`)) return;
     const done = await run(() => zephyrApi.deleteLead(lead.id), 'Deleted', 'Could not delete');
     if (done) setDrawer(null);
   }

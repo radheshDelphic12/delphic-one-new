@@ -7,6 +7,7 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { KpiTile } from './groupUi.jsx';
 import { Building2, Layers, Network, PieChart } from 'lucide-react';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 // Business classification UI (Companies & Stakes): the picker that places a business in the group's sector > industry > sub-industry list, the editor of
 // that list (everything can be added, renamed and removed) and the Business map that shows which sectors / industries / sub-industries the group's
@@ -145,7 +146,7 @@ export function TaxonomyEditor({ tree, reload, onChanged }) {
     if (ok) setEdit(null);
   }
   async function remove(level, id, name, info) {
-    if (!window.confirm(`Remove ${name}${info}? Businesses mapped to it are taken out of it.`)) return;
+    if (!await confirmAction(`Remove ${name}${info}? Businesses mapped to it are taken out of it.`)) return;
     await run(() => apiClient.delete(`/group-companies/taxonomy/${PATH[level]}/${id}`), 'Removed.');
   }
   async function add() {

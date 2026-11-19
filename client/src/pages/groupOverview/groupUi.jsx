@@ -2,6 +2,7 @@ import { ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis, CartesianGrid, 
 import { useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Building2, ChevronDown, Minus } from 'lucide-react';
 import { orgLogo } from '../../lib/orgLogo.js';
+import SectionTabs from '../../components/ui/SectionTabs.jsx';
 
 /**
  * Presentation-only building blocks for the Group Dashboard (hero, tab bar, stat tiles, company cards, donut,
@@ -38,24 +39,9 @@ export function GroupHero({ title = 'Gulati Industries', logo = '/group-logo.svg
 }
 
 /** Section tabs: kept exactly as the original underline bar. */
+/** Group dashboard tab strip: the shared SectionTabs look (soft oval on the open tab, gliding hover oval). */
 export function GroupTabs({ tabs, value, onChange }) {
-  return (
-    <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-      {tabs.map(({ key, label, icon: Icon }) => (
-        <button
-          key={key}
-          type="button"
-          role="tab"
-          aria-selected={value === key}
-          className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium ${value === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`}
-          onClick={() => onChange(key)}
-        >
-          <Icon className="h-4 w-4" />
-          {label}
-        </button>
-      ))}
-    </div>
-  );
+  return <SectionTabs tabs={tabs} value={value} onChange={onChange} />;
 }
 
 /** Section heading: title on the left, a muted hint on the right, a hairline underneath. */

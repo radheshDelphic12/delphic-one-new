@@ -7,6 +7,7 @@ import { zkApi, zklyreraError } from '../../lib/zklyrera/api.js';
 import { zkCan } from '../../lib/zklyrera/useZklyrera.js';
 import { INVESTMENT_STATUS_META, PAYMENT_METHODS, STORED_STATUSES, inr } from '../../lib/zklyrera/meta.js';
 import { Area, DateInput, Money, Num, Select, Text, dayOf, toBody, today, withReason } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 function InvestmentForm({ initial, categories, onSaved, onCancel, me }) {
   const editing = Boolean(initial);
@@ -83,7 +84,7 @@ function ReturnsPanel({ investment, onChanged, canEdit }) {
     try { onChanged(await withReason((x) => zkApi.updateReturn(r.id, { status: 'reversed', reason: x || reason.trim() }))); pushSuccess('Return reversed'); } catch (err) { pushError(zklyreraError(err, 'Could not reverse'), 'Not changed'); }
   }
   async function remove(r) {
-    if (!window.confirm('Delete this return record?')) return;
+    if (!await confirmAction('Delete this return record?')) return;
     try { await withReason((reason) => zkApi.deleteReturn(r.id, reason)); onChanged(await zkApi.investment(investment.id)); } catch (err) { pushError(zklyreraError(err, 'Could not delete'), 'Not deleted'); }
   }
   return (

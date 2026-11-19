@@ -6,6 +6,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import FormActionsBar from '../../components/ui/FormActionsBar.jsx';
 import AccountAttendeesPicker from './AccountAttendeesPicker.jsx';
 import { apiErrorMessage } from './accountUtils.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-md border border-tertiary-200 px-2.5 py-1.5 text-sm focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -157,7 +158,7 @@ export default function AccountClientMeetings({ account, canMutate }) {
   }
 
   async function remove(meeting) {
-    if (!window.confirm(`Delete the meeting "${meeting.title}"?`)) return;
+    if (!await confirmAction(`Delete the meeting "${meeting.title}"?`)) return;
     try {
       await apiClient.delete(`/accounts/${account.id}/meetings/${meeting.id}`);
       await load();

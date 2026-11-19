@@ -12,6 +12,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { Detail, Section, dayOf, inputCls, labelCls, toBody, today, useDebounced } from '../../components/zephyr/formKit.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const VIEWS = [
   { key: 'open', label: 'Open' },
@@ -162,14 +163,14 @@ export default function ZephyrTasksPage() {
   const start = async () => keep(await run(() => zephyrApi.setTaskStatus(current.id, { status: 'in_progress' }), 'Task started'));
   const complete = async (body) => keep(await run(() => zephyrApi.completeTask(current.id, body), body.payment ? 'Completed and rent recorded' : 'Task completed'));
   async function cancel() {
-    if (window.confirm('Cancel this task?')) keep(await run(() => zephyrApi.setTaskStatus(current.id, { status: 'cancelled' }), 'Task cancelled'));
+    if (await confirmAction('Cancel this task?')) keep(await run(() => zephyrApi.setTaskStatus(current.id, { status: 'cancelled' }), 'Task cancelled'));
   }
   async function reopen() {
     const reason = window.prompt('Why is this task being reopened?');
     if (reason?.trim()) keep(await run(() => zephyrApi.reopenTask(current.id, reason.trim()), 'Task reopened'));
   }
   async function remove() {
-    if (window.confirm(`Delete ${current.code}?`) && (await run(() => zephyrApi.deleteTask(current.id), 'Task deleted'))) close();
+    if (await confirmAction(`Delete ${current.code}?`) && (await run(() => zephyrApi.deleteTask(current.id), 'Task deleted'))) close();
   }
 
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));

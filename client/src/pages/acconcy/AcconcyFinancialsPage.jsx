@@ -227,10 +227,10 @@ export default function AcconcyFinancialsPage() {
     if (me && axCan(me, 'overview')) acconcyApi.deals({ status: 'all' }).then((rows) => setDeals(rows.map((d) => ({ value: d.id, label: `${d.code} ${d.name}` }))), () => {});
   }, [me]);
   const tabs = useMemo(() => (me ? [
-    ...(axCan(me, 'valuation') ? [{ key: 'trends', label: 'Financial trends' }] : []),
-    ...(axCan(me, 'overview') ? [{ key: 'service', label: 'Service-wise' }] : []),
-    ...(axCan(me, 'valuation') ? [{ key: 'valuation', label: 'Valuation' }] : []),
-    ...(axCan(me, 'financials') ? [{ key: 'periods', label: 'Month close' }] : []),
+    ...(axCan(me, 'valuation') ? [{ key: 'trends', label: 'Financial trends', description: 'Revenue, expenses and profit over time.' }] : []),
+    ...(axCan(me, 'overview') ? [{ key: 'service', label: 'Service-wise', description: 'Revenue and expenses broken down by service type.' }] : []),
+    ...(axCan(me, 'valuation') ? [{ key: 'valuation', label: 'Valuation', description: 'What the company is worth, from its profit and assets.' }] : []),
+    ...(axCan(me, 'financials') ? [{ key: 'periods', label: 'Month close', description: 'Lock a month so its figures stay frozen; an admin can reopen it with a reason.' }] : []),
   ] : []), [me]);
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (!tabs.length) return <Navigate to="/acconcy" replace />;

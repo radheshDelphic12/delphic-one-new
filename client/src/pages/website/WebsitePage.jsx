@@ -9,6 +9,7 @@ import { dateLabel, titleCase } from '../../lib/format.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { PostingStatus } from './WebsitePublishPanel.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const TABS = [
   { key: 'submissions', label: 'Form submissions' },
@@ -109,7 +110,7 @@ function SubmissionsTab() {
                 <td className="whitespace-nowrap px-3 py-2">{row.submitted_at ? dateLabel(row.submitted_at) : '-'}</td>
                 <td className="px-3 py-2">{FORM_LABEL[row.form_type]}</td>
                 <td className="px-3 py-2 font-medium text-tertiary-900">{row.name || '-'}</td>
-                <td className="px-3 py-2">{row.email || '-'}</td>
+                <td className="px-3 py-2"><EmailLink email={row.email} fallback="-" /></td>
                 <td className="max-w-xs truncate px-3 py-2 text-tertiary-500">{row.payload?.Role || row.payload?.Company || row.payload?.Message || ''}</td>
                 <td className="px-3 py-2"><Pill value={row.status} /></td>
               </tr>

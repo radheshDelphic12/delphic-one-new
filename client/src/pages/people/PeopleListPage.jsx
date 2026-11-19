@@ -9,6 +9,7 @@ import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, empl
 import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleDateString() : 'Not set';
@@ -44,7 +45,7 @@ function EmployeePeek({ row, onClose }) {
         </div>
         <div className="min-w-0">
           <h2 className="truncate font-heading text-base font-semibold text-tertiary-900">{row.person.name}</h2>
-          <p className="truncate text-xs text-tertiary-500">{row.person.email}</p>
+          <p className="truncate text-xs text-tertiary-500"><EmailLink email={row.person.email} /></p>
         </div>
       </div>
       <dl className="grid gap-4 sm:grid-cols-2">
@@ -195,7 +196,7 @@ export default function PeopleListPage() {
       render: (row) => (
         <div className="min-w-48">
           <div className="font-medium text-tertiary-900">{row.person.name}</div>
-          <div className="text-xs text-tertiary-500">{row.person.email}</div>
+          <div className="text-xs text-tertiary-500"><EmailLink email={row.person.email} /></div>
         </div>
       ),
     },
@@ -208,7 +209,7 @@ export default function PeopleListPage() {
       header: 'Vendor cost / month',
       render: (row) => (row.worker_type === 'contractor'
         ? (row.vendor_rate === null || row.vendor_rate === undefined ? <span className="text-warning-700">Not set</span> : money(row.vendor_rate, row.vendor_rate_currency))
-        : <span className="text-tertiary-400">—</span>),
+        : <span className="text-tertiary-400">ï¿½</span>),
     },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
     {
@@ -310,9 +311,9 @@ export default function PeopleListPage() {
             </div>
             <div className="text-xs text-tertiary-600">
               {vendorCost.count} contractor{vendorCost.count === 1 ? '' : 's'} in this list
-              {vendorCost.withoutRate > 0 && <span className="text-warning-700"> · {vendorCost.withoutRate} with no vendor rate set</span>}
+              {vendorCost.withoutRate > 0 && <span className="text-warning-700"> ï¿½ {vendorCost.withoutRate} with no vendor rate set</span>}
               {Object.keys(vendorCost.byCurrency).some((c) => c !== 'INR') && (
-                <span> · {Object.entries(vendorCost.byCurrency).map(([c, a]) => money(a, c)).join(' + ')}</span>
+                <span> ï¿½ {Object.entries(vendorCost.byCurrency).map(([c, a]) => money(a, c)).join(' + ')}</span>
               )}
             </div>
           </div>

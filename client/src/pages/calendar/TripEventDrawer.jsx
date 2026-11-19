@@ -8,6 +8,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { MeetingsPanel, STATE, TripForm, dayText, inr } from '../groupOverview/GroupTravelTab.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const BASE = '/super-dashboard/group/travel';
 
@@ -64,7 +65,7 @@ export default function TripEventDrawer({ tripId, open, onClose, onChanged }) {
     } catch (e) { pushError(apiErrorMessage(e, 'Could not update the trip'), 'Not saved'); } finally { setBusy(false); }
   }
   async function remove() {
-    if (!window.confirm(`Delete the trip "${trip.title}"? Its meetings stay on the calendar.`)) return;
+    if (!await confirmAction(`Delete the trip "${trip.title}"? Its meetings stay on the calendar.`)) return;
     setBusy(true);
     try {
       await apiClient.delete(`${BASE}/${trip.id}`);

@@ -12,6 +12,7 @@ import { compact, shortMonth } from '../../lib/format.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { ZX_CHART } from '../../components/zephyr/ZephyrTrendChart.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
 const monthValue = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -75,7 +76,7 @@ function AssetValueForm({ rows, onSaved }) {
     }
   }
   async function remove() {
-    if (!window.confirm(`Remove the asset value recorded for ${shortMonth(month)}? Later months will carry forward the earlier figure.`)) return;
+    if (!await confirmAction(`Remove the asset value recorded for ${shortMonth(month)}? Later months will carry forward the earlier figure.`)) return;
     try {
       await zephyrApi.deleteAssetValue(month);
       pushSuccess('Asset value removed');
@@ -127,7 +128,7 @@ function FinancialTrends() {
       reason = window.prompt(`Reopen ${r.label}? Give a reason (required):`);
       if (reason === null) return;
       if (!reason.trim()) { pushError('A reason is required to reopen a month', 'Not reopened'); return; }
-    } else if (!window.confirm(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;
+    } else if (!await confirmAction(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;
     setLockBusy(r.month);
     try {
       if (r.closed) await zephyrApi.reopenMonth(r.month, reason.trim());

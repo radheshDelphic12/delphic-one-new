@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { ListChecks, Paperclip, Pencil, Plus, Receipt, Trash2, X } from 'lucide-react';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
 import apiClient from '../../lib/apiClient.js';
@@ -17,6 +18,8 @@ import FilesPanel from '../../components/FilesPanel.jsx';
 import { chargeColumns, chargeQuery } from './GroupChargesTab.jsx';
 import ReimbursementPayoutPanel from './ReimbursementPayoutPanel.jsx';
 import ReimbursementProcessedPanel from './ReimbursementProcessedPanel.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import SectionHeading from '../../components/ui/SectionHeading.jsx';
 
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
 
@@ -210,6 +213,7 @@ const CLAIM_STATUS_OPTIONS = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
+const VIEW_HELP = { mine: 'Expenses you have submitted and where each one stands.', approvals: 'Claims waiting for your decision.', team: "Every employee's claims, to approve and reimburse.", group: 'Company-wide costs paid by the company, such as office rent.' };
 const VIEW_LABEL = { mine: 'My claims', approvals: 'Approvals', team: 'Reimbursements', payout: 'Bank payout', processed: 'Processed', group: 'Group expenses' };
 
 /**
@@ -224,7 +228,13 @@ export default function ExpensesTab() {
   // A superadmin may correct or remove a claim in any status (approved, reimbursed…).
   const isSuperadmin = Boolean(user?.is_superadmin);
   const { pushError, pushInfo } = useAlerts();
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState('mine');
+  // the hub's hover menu links straight to a view: ?section=expenses&view=group
+  const urlView = searchParams.get('view');
+  useEffect(() => {
+    setView(urlView && Object.keys(VIEW_LABEL).includes(urlView) && (isAdmin || urlView === 'mine' || urlView === 'approvals') ? urlView : 'mine');
+  }, [urlView, isAdmin]);
   const [rows, setRows] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -233,7 +243,7 @@ export default function ExpensesTab() {
   const [receiptsOf, setReceiptsOf] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   // Managers, HR and Finance see the claims waiting on their step.
-  const [approvalCount, setApprovalCount] = useState(0);
+  const [, setApprovalCount] = useState(0);
   const expenseCategories = useFinanceCategories('expense', { includeInactive: true });
   const chargeCategories = useFinanceCategories('group_charge', { includeInactive: true, enabled: isAdmin });
   const locationOptions = useLocationOptions(true);
@@ -321,7 +331,7 @@ export default function ExpensesTab() {
   }
 
   async function removeClaim(row) {
-    if (!window.confirm(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category_ref?.name || row.category || ''} claim? This can't be undone.`)) return;
+    if (!await confirmAction(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category_ref?.name || row.category || ''} claim? This can't be undone.`)) return;
     try {
       await apiClient.delete(`/expenses/claims/${row.id}`);
       pushInfo('Expense claim deleted');
@@ -356,7 +366,7 @@ export default function ExpensesTab() {
     if (status === 'rejected') {
       reason = window.prompt(`Reject ${pending.length} claim${pending.length === 1 ? '' : 's'}? Give a reason (shown to the employee):`);
       if (reason === null) return;
-    } else if (!window.confirm(`Approve ${pending.length} claim${pending.length === 1 ? '' : 's'}?`)) return;
+    } else if (!await confirmAction(`Approve ${pending.length} claim${pending.length === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     let failed = 0;
     for (const row of pending) {
@@ -464,14 +474,7 @@ export default function ExpensesTab() {
         }}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1 border-b border-tertiary-200">
-          {['mine', ...(isAdmin || approvalCount > 0 ? ['approvals'] : []), ...(isAdmin ? ['team', 'payout', 'processed', 'group'] : [])].map((key) => (
-            <button key={key} type="button" role="tab" aria-selected={view === key} className={`border-b-2 px-3 py-2 text-sm font-medium ${view === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500'}`} onClick={() => setView(key)}>
-              {VIEW_LABEL[key]}
-              {key === 'approvals' && approvalCount > 0 && <span className="ml-1.5 rounded-full bg-primary-100 px-1.5 text-[11px] font-semibold text-primary-700">{approvalCount}</span>}
-            </button>
-          ))}
-        </div>
+        {VIEW_HELP[view] ? <SectionHeading size="sm" icon={ListChecks} title={VIEW_LABEL[view]} description={VIEW_HELP[view]} /> : <span />}
         <div className="flex flex-wrap gap-2">
         {canDecide && rows.filter((row) => row.status === 'pending').length > 1 && (
           <button type="button" className="btn-secondary inline-flex items-center gap-2" disabled={bulkBusy} onClick={() => decideSelected('approved', rows.map((r) => r.id))}>

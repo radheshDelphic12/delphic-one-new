@@ -10,6 +10,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { ConfirmDialog } from '../../components/resignation/resignationShared.jsx';
 import { KpiTile, SectionHeading } from './groupUi.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const STATUS_OPTIONS = [
   { value: 'working', label: 'Working now (incl. notice, on leave)' },
@@ -230,7 +231,7 @@ export default function GroupOfficesTab() {
                     const editing = assign?.membershipId === p.membership_id;
                     return (
                     <tr key={p.membership_id} className="border-t border-tertiary-100" data-testid="office-person-row">
-                      <td className={`${td} font-medium text-tertiary-900`}>{p.name}<span className="block text-[11px] font-normal text-tertiary-500">{p.email}</span></td>
+                      <td className={`${td} font-medium text-tertiary-900`}>{p.name}<span className="block text-[11px] font-normal text-tertiary-500"><EmailLink email={p.email} /></span></td>
                       <td className={td}>{p.employee_code || '—'}</td><td className={td}>{p.company}</td><td className={td}>{p.office || '—'}</td>
                       <td className={td}>{p.designation || '—'}</td><td className={td}>{p.department || '—'}</td>
                       <td className={td}>{STATUS_TEXT[p.employment_status] || p.employment_status}{p.worker_type === 'contractor' && <span className="ml-1 text-[11px] text-tertiary-500">(contractor)</span>}</td>

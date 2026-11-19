@@ -11,6 +11,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, Empty, Kpi, Money, Num, withReason, labelCls, inputCls } from '../../components/acconcy/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -148,7 +149,7 @@ export default function AcconcySalariesPage() {
                     {r.status === 'draft' && <button type="button" title="Approve" className="mr-1 rounded p-1 text-primary-700 hover:bg-primary-50" onClick={() => act(() => acconcyApi.approveSalary(r.id), 'Approved')}><CheckCircle2 className="h-4 w-4" /></button>}
                     {r.status === 'approved' && <button type="button" title="Mark paid" className="mr-1 rounded p-1 text-green-700 hover:bg-green-50" onClick={() => pay(r)}><BadgeCheck className="h-4 w-4" /></button>}
                     {r.status !== 'draft' && isAdmin && <button type="button" title="Back to draft" className="mr-1 rounded p-1 text-tertiary-500 hover:bg-primary-50" onClick={() => unapprove(r)}><Undo2 className="h-4 w-4" /></button>}
-                    {(r.status === 'draft' || isAdmin) && <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => window.confirm('Delete this salary row?') && act((reason) => acconcyApi.deleteSalary(r.id, reason))}><Trash2 className="h-4 w-4" /></button>}
+                    {(r.status === 'draft' || isAdmin) && <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={async () => await confirmAction('Delete this salary row?') && act((reason) => acconcyApi.deleteSalary(r.id, reason))}><Trash2 className="h-4 w-4" /></button>}
                   </td>
                 </tr>
               ))}

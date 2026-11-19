@@ -7,6 +7,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import RichTextEditor from '../../components/ui/RichTextEditor.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const INPUT = 'w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm outline-none focus:border-primary-400';
 const NEW = 'new';
@@ -84,7 +85,7 @@ export default function PoliciesPage() {
   }
 
   async function remove() {
-    if (!current || !window.confirm(`Delete "${current.title}"? This cannot be undone.`)) return;
+    if (!current || !await confirmAction(`Delete "${current.title}"? This cannot be undone.`)) return;
     try {
       await apiClient.delete(`/policies/${current.id}`);
       pushInfo('Policy deleted');

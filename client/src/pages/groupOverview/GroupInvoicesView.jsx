@@ -12,6 +12,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -252,7 +253,7 @@ function InvoiceDrawer({ id, onClose, onChanged }) {
               {inv.payments.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 px-3 py-2"><span className="flex-1">{p.date} · {p.mode.toUpperCase()}{p.notes ? ` · ${p.notes}` : ''}</span><span className="tabular-nums">{formatMoney(p.amount, cur)}</span>
                   <button type="button" title="Edit this payment" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => setEditPay({ id: p.id, date: p.date, amount: p.amount, mode: p.mode, notes: p.notes || '' })}><Pencil className="h-4 w-4" /></button>
-                  <button type="button" title="Remove this payment (the wallet entry goes too)" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={() => window.confirm('Remove this payment? The receipt is taken out of the wallet too.') && run(() => apiClient.delete(`/group-cash/invoices/${id}/payments/${p.id}`), 'Payment removed', 'Could not remove')}><Trash2 className="h-4 w-4" /></button></li>
+                  <button type="button" title="Remove this payment (the wallet entry goes too)" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={async () => await confirmAction('Remove this payment? The receipt is taken out of the wallet too.') && run(() => apiClient.delete(`/group-cash/invoices/${id}/payments/${p.id}`), 'Payment removed', 'Could not remove')}><Trash2 className="h-4 w-4" /></button></li>
               ))}
               {!inv.payments.length && <li className="px-3 py-3 text-tertiary-500">Nothing received yet.</li>}
             </ul>

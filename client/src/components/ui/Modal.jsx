@@ -1,13 +1,21 @@
+import { useEffect } from 'react';
 import { X } from 'lucide-react';
 
 /**
  * Centered overlay dialog. Layout via Tailwind; colors/hover via tokens.
  */
 export default function Modal({ open, title, onClose, children, footer, wide = false, layer = 'z-50' }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
-    <div className={`fixed inset-0 ${layer} flex items-center justify-center p-4`}>
+    <div className={`fixed inset-0 ${layer} flex items-center justify-center p-4`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}>
       <button type="button" className="absolute inset-0 bg-black/40" aria-label="Close dialog" onClick={onClose} />
       <div
         className={`relative z-10 w-full rounded-2xl border bg-white shadow-soft ${wide ? 'max-w-xl' : 'max-w-md'}`}

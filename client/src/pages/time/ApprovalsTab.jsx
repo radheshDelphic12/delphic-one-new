@@ -7,6 +7,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
 import NoteText from '../../components/NoteText.jsx';
 import Pill from '../../components/ui/Pill.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 /**
  * Approval inbox for a reporting manager: timesheet entries and
@@ -77,7 +78,7 @@ export default function ApprovalsTab() {
   async function decideMany(body, status = 'approved', reason) {
     const count = body.entries.length + body.overtime.length + body.regularizations.length;
     if (!count) return;
-    if (status === 'approved' && !window.confirm(`Approve ${count} item${count === 1 ? '' : 's'}?`)) return;
+    if (status === 'approved' && !await confirmAction(`Approve ${count} item${count === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     try {
       const { data: res } = await apiClient.post('/timesheets/approvals/bulk', { ...body, status, reason });

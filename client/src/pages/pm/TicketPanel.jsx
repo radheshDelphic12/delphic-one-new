@@ -6,6 +6,7 @@ import { pmApi, pmError, PRIORITY_OPTIONS, PRIORITY_TONE, TYPE_OPTIONS, CATEGORY
 import { dateLabel } from '../../lib/format.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const INPUT = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm';
 const ACTION_LABEL = {
@@ -75,11 +76,11 @@ export default function TicketPanel({ open, ticketId, presetStatus, project, met
     } catch (e) { pushError(pmError(e, 'Could not download the file'), 'Failed'); }
   }
   async function dropFile(a) {
-    if (!window.confirm(`Remove ${a.filename}?`)) return;
+    if (!await confirmAction(`Remove ${a.filename}?`)) return;
     try { await pmApi.deleteAttachment(a.id); setT(await pmApi.ticket(ticketId)); } catch (e) { pushError(pmError(e, 'Could not remove the file'), 'Failed'); }
   }
   async function remove() {
-    if (!window.confirm('Delete this ticket? Its comments and history go with it.')) return;
+    if (!await confirmAction('Delete this ticket? Its comments and history go with it.')) return;
     try { await pmApi.deleteTicket(ticketId); pushSuccess('Ticket deleted'); onChanged(); onClose(); } catch (e) { pushError(pmError(e, 'Could not delete'), 'Failed'); }
   }
 

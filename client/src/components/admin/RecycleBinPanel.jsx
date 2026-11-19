@@ -3,6 +3,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import DataTable from '../ui/DataTable.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const when = (value) => (value ? new Date(value).toLocaleString() : '—');
 
@@ -33,7 +34,7 @@ export default function RecycleBinPanel() {
   useEffect(() => { load(); }, [load]);
 
   async function restore(row) {
-    if (!window.confirm(`Restore ${row.type_label}${row.label ? ` "${row.label}"` : ''}?`)) return;
+    if (!await confirmAction(`Restore ${row.type_label}${row.label ? ` "${row.label}"` : ''}?`)) return;
     setBusyId(row.id);
     try {
       await apiClient.post(`/admin/recycle-bin/${row.id}/restore`);

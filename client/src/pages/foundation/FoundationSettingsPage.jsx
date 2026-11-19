@@ -10,7 +10,7 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import { Empty, Num, Select, Text, card } from '../../components/foundation/ui.jsx';
 
-const TABS = [{ key: 'general', label: 'Rules and projections' }, { key: 'teams', label: 'Teams & reporting' }, { key: 'audit', label: 'Audit log' }];
+const TABS = [{ key: 'general', label: 'Rules and projections' }, { key: 'teams', label: 'Teams & reporting' }, { key: 'audit', label: 'Audit log', description: 'A record of who changed what, and when.' }];
 
 function General() {
   const { pushError, pushSuccess } = useAlerts();

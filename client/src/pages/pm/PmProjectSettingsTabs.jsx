@@ -4,6 +4,8 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { pmApi, pmError } from '../../lib/pm/api.js';
 import { dateLabel } from '../../lib/format.js';
 import Pill from '../../components/ui/Pill.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const Empty = ({ children }) => <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-tertiary-500">{children}</p>;
@@ -74,7 +76,7 @@ export function SharingTab({ project }) {
     } catch (err) { pushError(pmError(err, 'Could not create the link'), 'Failed'); }
   }
   async function revoke(s) {
-    if (!window.confirm(`Revoke the link for ${s.label}? They lose access immediately.`)) return;
+    if (!await confirmAction(`Revoke the link for ${s.label}? They lose access immediately.`)) return;
     try { await pmApi.revokeShare(project.id, s.id); pushSuccess('Link revoked'); await load(); } catch (err) { pushError(pmError(err, 'Could not revoke'), 'Failed'); }
   }
 
@@ -99,7 +101,7 @@ export function SharingTab({ project }) {
         <ul className="divide-y rounded-xl border bg-white" data-testid="pm-shares">
           {shares.map((s) => (
             <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-              <span><span className="font-medium">{s.label}</span> <span className="text-xs text-tertiary-500">{s.email}</span> {s.can_comment ? <Pill tone="blue">Can comment</Pill> : <Pill tone="gray">View only</Pill>} {s.active ? <Pill tone="green">Active</Pill> : <Pill tone="red">{s.revoked_at ? 'Revoked' : 'Expired'}</Pill>}</span>
+              <span><span className="font-medium">{s.label}</span> <span className="text-xs text-tertiary-500"><EmailLink email={s.email} /></span> {s.can_comment ? <Pill tone="blue">Can comment</Pill> : <Pill tone="gray">View only</Pill>} {s.active ? <Pill tone="green">Active</Pill> : <Pill tone="red">{s.revoked_at ? 'Revoked' : 'Expired'}</Pill>}</span>
               <span className="flex items-center gap-3 text-xs text-tertiary-500">{s.active ? `expires ${dateLabel(s.expires_at)}` : ''}{s.use_count ? ` · opened ${s.use_count}×` : ' · not opened yet'}{s.active && <button type="button" className="inline-flex items-center gap-1 text-danger-600 hover:underline" onClick={() => revoke(s)}><ShieldOff className="h-3.5 w-3.5" />Revoke</button>}</span>
             </li>
           ))}

@@ -14,6 +14,7 @@ import ZkFilterBar, { useZkFilters } from '../../components/zklyrera/ZkFilters.j
 import InvestmentDrawer from '../../components/zklyrera/InvestmentDrawer.jsx';
 import { InvestmentReturnsChart } from '../../components/zklyrera/ZkCharts.jsx';
 import { Kpi, Money } from '../../components/zklyrera/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 export default function ZklyreraInvestmentsPage() {
   const { me, loading } = useZklyrera();
@@ -36,7 +37,7 @@ export default function ZklyreraInvestmentsPage() {
   const t = data?.totals;
 
   async function remove(r) {
-    if (!window.confirm(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
+    if (!await confirmAction(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
     try { await zkApi.deleteInvestment(r.id); load(); pickers.refresh(); } catch (e) { pushError(zklyreraError(e, 'Could not delete'), 'Not deleted'); }
   }
   const columns = [

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, UserPlus, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, MoreVertical, Network, Settings, UserPlus, X } from 'lucide-react';
+import RouteFallback from '../ui/RouteFallback.jsx';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import WorkspaceLogo from '../ui/WorkspaceLogo.jsx';
@@ -13,7 +14,7 @@ import { usePlatformAccess, useLockedMenu } from '../../lib/platform/usePlatform
 import Avatar from '../ui/Avatar.jsx';
 import NotificationBell from '../notifications/NotificationBell.jsx';
 import { headerSubtitleForPath, headerTitleForPath } from './headerTitle.js';
-import { DB_SNAPSHOTS_NAV_ITEM, NAV_ITEMS } from './navItems.js';
+import { DB_SNAPSHOTS_NAV_ITEM, NAV_ITEMS, navSectionOf } from './navItems.js';
 import { useSpeakUpSummary } from '../../pages/speakup/speakUp.js';
 import Drawer from '../ui/Drawer.jsx';
 import WorkspaceSwitcher from './WorkspaceSwitcher.jsx';
@@ -38,6 +39,7 @@ import { isValterraOrg, useValterra, vtCan } from '../../lib/valterra/useValterr
 import { isNovarexOrg, useNovarex, nxCan } from '../../lib/novarex/useNovarex.js';
 
 const SIDEBAR_KEY = 'delphic_sidebar_collapsed';
+const NAV_FOLD_KEY = 'delphic_sidebar_folded_sections';
 
 function OrgCreateDrawer({ open, onClose }) {
   const { createOrganization } = useAuth();
@@ -211,6 +213,8 @@ export default function AppLayout() {
     [navBase, isGroupSuperadmin, isContractor, isGroupPath, user?.is_superadmin, platformAdmin, lockedMenu]
   );
 
+  const showNavSections = !isGroupPath && new Set(navItems.map((item) => navSectionOf(item.to)).filter(Boolean)).size > 1;
+
   // Re-skin the whole app (drawers and modals included) with the Zephyr palette.
   useEffect(() => {
     if (!isZephyr || isGroupPath) return undefined;
@@ -268,6 +272,9 @@ export default function AppLayout() {
   }, [isGulati, isGroupPath]);
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
+  // Sidebar sections the user has folded away (remembered per browser). The section holding the current page is never hidden.
+  const [foldedSections, setFoldedSections] = useState(() => { try { return JSON.parse(localStorage.getItem(NAV_FOLD_KEY) || "[]"); } catch { return []; } });
+  const toggleSection = (name) => setFoldedSections((cur) => { const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name]; try { localStorage.setItem(NAV_FOLD_KEY, JSON.stringify(next)); } catch { /* storage blocked */ } return next; });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
   const [orgCreateOpen, setOrgCreateOpen] = useState(false);
@@ -414,7 +421,12 @@ export default function AppLayout() {
         </Link>
       )}
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">
-        {navItems.map((item) => {
+        {navItems.map((item, navIndex) => {
+          const section = showNavSections ? navSectionOf(item.to) : null;
+          const showHeading = Boolean(section) && section !== navSectionOf(navItems[navIndex - 1]?.to);
+          const sectionFolded = !collapsed && Boolean(section) && foldedSections.includes(section) && !navItems.some((x) => navSectionOf(x.to) === section && (x.to !== "/" && (pathname === x.to || pathname.startsWith(x.to + "/"))));
+          const heading = showHeading ? (collapsed ? <div key={`h-${item.to}`} className="mx-3 my-2 border-t border-tertiary-100" aria-hidden /> : <button key={`h-${item.to}`} type="button" onClick={() => toggleSection(section)} aria-expanded={!sectionFolded} className="flex w-full items-center justify-between rounded-md px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-tertiary-400 transition-colors hover:text-tertiary-700">{section}<ChevronDown className={`h-3.5 w-3.5 transition-transform ${sectionFolded ? "-rotate-90" : ""}`} aria-hidden /></button>) : null;
+          const renderItem = () => {
           const Icon = item.icon;
           const showInterviewDot = item.to === '/calendar' && interviewUnread > 0;
           if (item.external) {
@@ -465,6 +477,8 @@ export default function AppLayout() {
               )}
             </NavLink>
           );
+          };
+          return (<Fragment key={item.to}>{heading}{sectionFolded ? null : renderItem()}</Fragment>);
         })}
       </nav>
       {isGroupSuperadmin && isGroupPath && !collapsed && memberships?.length > 0 && (
@@ -652,7 +666,7 @@ export default function AppLayout() {
             )}
             {/* A crash in one page shows an error card here instead of blanking the app; a new route resets it. */}
             <ErrorBoundary resetKey={`${pathname}${search}`}>
-              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : isDelphicOne && !isDelphicOnePath(pathname) && !isGroupPath ? <Navigate to="/delphic-one" replace /> : <Outlet />}
+              {isContractor && !CONTRACTOR_PATHS.includes(pathname) ? <Navigate to="/" replace /> : isZephyr && !isZephyrPath(pathname) && !isGroupPath ? <Navigate to="/zephyr" replace /> : isGulati && !isGulatiPath(pathname) && !isGroupPath ? <Navigate to="/gulati" replace /> : isAcconcy && !isAcconcyPath(pathname) && !isGroupPath ? <Navigate to="/acconcy" replace /> : isFoundation && !isFoundationPath(pathname) && !isGroupPath ? <Navigate to="/foundation" replace /> : isZklyrera && !isZklyreraPath(pathname) && !isGroupPath ? <Navigate to="/zklyrera" replace /> : isValterra && !isValterraPath(pathname) && !isGroupPath ? <Navigate to="/valterra" replace /> : isNovarex && !isNovarexPath(pathname) && !isGroupPath ? <Navigate to="/novarex" replace /> : isDelphicOne && !isDelphicOnePath(pathname) && !isGroupPath ? <Navigate to="/delphic-one" replace /> : <Suspense fallback={<RouteFallback />}><Outlet /></Suspense>}
             </ErrorBoundary>
           </div>
         </main>

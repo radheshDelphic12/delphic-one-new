@@ -9,6 +9,7 @@ import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { canManageInterviewRound } from '../../lib/submissionStages.js';
 import { isAdminUser } from '../../lib/access.js';
 import { SKILLS_CATALOG } from '../../lib/skillsCatalog.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const STATE_STYLE = {
   not_scheduled: 'border-tertiary-200 bg-white text-tertiary-700',
@@ -208,7 +209,7 @@ export default function InterviewPlanPanel({ submissionId, submission, plan, rou
       const message = apiErrorMessage(err, 'Failed to send the test');
       if (err.response?.status === 409 && /allowed tests/i.test(message) && isAdmin && !overrideLimit) {
         // an admin may go past the limit on purpose
-        if (window.confirm(`${message}.\n\nSend one anyway?`)) { setBusy(false); return sendTest(testId, true); }
+        if (await confirmAction(`${message}.\n\nSend one anyway?`)) { setBusy(false); return sendTest(testId, true); }
       } else {
         pushError(message, 'Something went wrong');
       }

@@ -9,6 +9,7 @@ import { canMoveSubmissionStage } from '../../lib/submissionStages.js';
 import Pill from '../../components/ui/Pill.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const STATUS = {
   not_opened: { label: 'Not opened', tone: 'gray' },
@@ -222,7 +223,7 @@ export default function AiInterviewReport() {
           <tbody>
             {(data?.rows || []).map((r) => (
               <tr key={r.id} className="border-t hover:bg-primary-50/40">
-                <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{r.candidate_name}</span>{r.candidate_email && <span className="block text-xs text-tertiary-500">{r.candidate_email}</span>}</td>
+                <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{r.candidate_name}</span>{r.candidate_email && <span className="block text-xs text-tertiary-500"><EmailLink email={r.candidate_email} /></span>}</td>
                 <td className="px-3 py-2"><span className="text-tertiary-800">{r.requirement_title || '—'}</span>{r.client_name && <span className="block text-xs text-tertiary-500">{r.client_name}</span>}</td>
                 <td className="px-3 py-2"><Pill tone={STATUS[r.view_status]?.tone}>{STATUS[r.view_status]?.label}</Pill></td>
                 <td className="px-3 py-2" data-testid="submission-status">{r.submission_stage ? <Badge value={r.submission_stage} /> : '—'}</td>

@@ -11,6 +11,7 @@ import FormDrawer from '../../components/ui/FormDrawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { POSTING_FIELDS, PostingStatus } from '../website/WebsitePublishPanel.jsx';
 import { AddApplicantDrawer } from './ApplicantPoolBoard.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const SOURCES = [['linkedin', 'LinkedIn'], ['website', 'Website'], ['whatsapp', 'WhatsApp'], ['naukri', 'Naukri'], ['referral', 'Referral'], ['other', 'Other']];
 const CHANNEL_LABEL = { ...Object.fromEntries(SOURCES), internal: 'Internal' };
@@ -84,7 +85,7 @@ export default function WebsiteJobsBoard() {
 
   // Unpublish takes the job off the public website but keeps the requirement and its applicants; Republish puts it back.
   async function setLive(posting, live, title) {
-    if (!live && !window.confirm(`Unpublish "${title}" from the website? The job disappears from the public page. The requirement and its applicants stay, and you can publish it again later.`)) return;
+    if (!live && !await confirmAction(`Unpublish "${title}" from the website? The job disappears from the public page. The requirement and its applicants stay, and you can publish it again later.`)) return;
     try {
       await apiClient.post(`/website/postings/${posting.id}/${live ? 'reopen' : 'unpublish'}`, {});
       pushSuccess(live ? 'Published on the website again' : 'Removed from the website');

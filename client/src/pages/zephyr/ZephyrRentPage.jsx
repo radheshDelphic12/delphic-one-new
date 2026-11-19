@@ -15,13 +15,14 @@ import StatCard from '../../components/ui/StatCard.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import { LeaseForm, PaymentForm, TenantForm } from '../../components/zephyr/ZephyrRentForms.jsx';
 import { Empty, card, useDebounced } from '../../components/zephyr/formKit.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
-  { key: 'dues', label: 'Rent due' },
-  { key: 'overdue', label: 'Overdue' },
-  { key: 'payments', label: 'Payments received' },
-  { key: 'leases', label: 'Leases' },
-  { key: 'tenants', label: 'Tenants' },
+  { key: 'dues', label: 'Rent due', description: 'Rent that is due to be collected.' },
+  { key: 'overdue', label: 'Overdue', description: 'Rent not received by its due date.' },
+  { key: 'payments', label: 'Payments received', description: 'Rent payments received.' },
+  { key: 'leases', label: 'Leases', description: 'Lease agreements for your properties.' },
+  { key: 'tenants', label: 'Tenants', description: 'Tenants and their details.' },
 ];
 
 function StatusPill({ due }) {
@@ -160,7 +161,7 @@ export default function ZephyrRentPage() {
     await run(() => zephyrApi.updateRentDue(due.id, { amount }), 'Rent amount updated');
   }
   async function removePayment(p) {
-    if (window.confirm(`Reverse the ${rupees(p.amount)} payment from ${p.tenant?.name}? The rental income entry is removed too.`)) await run(() => zephyrApi.deleteRentPayment(p.id), 'Payment reversed', 'Could not reverse');
+    if (await confirmAction(`Reverse the ${rupees(p.amount)} payment from ${p.tenant?.name}? The rental income entry is removed too.`)) await run(() => zephyrApi.deleteRentPayment(p.id), 'Payment reversed', 'Could not reverse');
   }
   async function saveLease(values) {
     const edit = drawer.lease;
@@ -176,7 +177,7 @@ export default function ZephyrRentPage() {
     if (saved) setDrawer(drawer.back ? { kind: drawer.back } : null);
   }
   async function removeTenant(t) {
-    if (window.confirm(`Delete ${t.name}?`)) await run(() => zephyrApi.deleteTenant(t.id), 'Tenant deleted', 'Could not delete');
+    if (await confirmAction(`Delete ${t.name}?`)) await run(() => zephyrApi.deleteTenant(t.id), 'Tenant deleted', 'Could not delete');
   }
 
   const rentSummary = summary;

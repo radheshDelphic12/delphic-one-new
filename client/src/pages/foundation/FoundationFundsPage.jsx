@@ -12,6 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import EntryDrawer from '../../components/foundation/EntryDrawer.jsx';
 import { Kpi, Money } from '../../components/foundation/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const BLANK = { q: '', campaign_id: '', kind: '', status: '', expense_class: '', category_id: '', from: '', to: '', amount_min: '', amount_max: '' };
 const ALL_STATUS = Object.values(ALL_ENTRY_STATUSES).filter((s, i, a) => a.findIndex((x) => x.value === s.value) === i).map((s) => ({ value: s.value, label: s.label }));
@@ -53,7 +54,7 @@ export default function FoundationFundsPage() {
     }
   }
   async function remove(entry) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await fxApi.deleteEntry(entry.id); load(); } catch (e) { pushError(foundationError(e, 'Could not delete'), 'Not deleted'); }
   }
 

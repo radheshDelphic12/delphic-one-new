@@ -13,12 +13,13 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { Detail, Section, dayOf, inputCls, labelCls, today } from '../../components/zephyr/formKit.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
-  { key: 'attendance', label: 'Attendance' },
-  { key: 'payouts', label: 'Payouts & advances' },
-  { key: 'report', label: 'Project report' },
-  { key: 'workers', label: 'Workers' },
+  { key: 'attendance', label: 'Attendance', description: 'Daily attendance of site workers.' },
+  { key: 'payouts', label: 'Payouts & advances', description: 'Wage payouts and advances given to workers.' },
+  { key: 'report', label: 'Project report', description: 'Wages and attendance per project.' },
+  { key: 'workers', label: 'Workers', description: 'Site workers and their wage rates.' },
 ];
 const MARKS = [
   { value: 'present', label: 'Present', on: 'bg-green-600 text-white' },
@@ -214,7 +215,7 @@ function WorkersTab({ canMark, canDelete, run, saving, reloadKey }) {
     }
   }
   async function remove(w) {
-    if (window.confirm(`Delete ${w.name}? A worker with attendance on record cannot be deleted; mark them inactive instead.`) && (await run(() => zephyrApi.deleteWageWorker(w.id), 'Worker deleted'))) load();
+    if (await confirmAction(`Delete ${w.name}? A worker with attendance on record cannot be deleted; mark them inactive instead.`) && (await run(() => zephyrApi.deleteWageWorker(w.id), 'Worker deleted'))) load();
   }
   const columns = [
     { key: 'name', header: 'Worker', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span><span className="block text-xs text-tertiary-500">{[r.trade, r.phone].filter(Boolean).join(' · ') || '—'}</span></span> },
@@ -378,7 +379,7 @@ function PayoutsTab({ canPay, run, saving, onChanged, reloadKey }) {
     }
   }
   async function removeAdvance(a) {
-    if (window.confirm(`Delete the ${rupees(a.amount)} advance to ${name(a.worker_id)}?`) && (await run(() => zephyrApi.deleteWageAdvance(a.id), 'Advance deleted'))) {
+    if (await confirmAction(`Delete the ${rupees(a.amount)} advance to ${name(a.worker_id)}?`) && (await run(() => zephyrApi.deleteWageAdvance(a.id), 'Advance deleted'))) {
       await load();
       onChanged();
     }

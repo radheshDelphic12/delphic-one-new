@@ -11,6 +11,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { AXIS_TICK, ChartFrame, GRID_PROPS, KpiTile, SectionHeading, compact, lineProps, money } from './groupUi.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -218,7 +219,7 @@ export default function GroupDebtTab() {
     } catch (err) { pushError(apiErrorMessage(err, 'Could not save the loan'), 'Could not save'); } finally { setSaving(false); }
   }
   async function remove() {
-    if (!window.confirm(`Delete ${drawer.loan.name}?`)) return;
+    if (!await confirmAction(`Delete ${drawer.loan.name}?`)) return;
     try { await apiClient.delete(`/super-dashboard/group/debt/loans/${drawer.loan.id}`); setDrawer(null); data.refresh(); } catch (err) { pushError(apiErrorMessage(err, 'Could not delete'), 'Something went wrong'); }
   }
   async function saveLimit(e) {

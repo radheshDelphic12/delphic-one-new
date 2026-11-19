@@ -13,6 +13,7 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import GulatiTrendChart from '../../components/gulati/GulatiTrendChart.jsx';
 import { Area, DateInput, Empty, Kpi, Money, Num, Select, Text, card, dayOf, inputCls, labelCls, today, toBody, withReason } from '../../components/gulati/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -92,7 +93,7 @@ function ExpensesTab({ me, dealOptions, partyOptions }) {
     } catch (e) { pushError(gulatiError(e, 'Could not save'), 'Could not save'); } finally { setSaving(false); }
   }
   async function del(row) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await withReason((reason) => gulatiApi.deleteEntry(row.id, reason)); load(); } catch (e) { pushError(gulatiError(e, 'Could not delete'), 'Delete failed'); }
   }
   const set = (k) => (v) => setF((c) => ({ ...c, [k]: v }));
@@ -143,7 +144,7 @@ function PeriodsTab({ canClose }) {
   const load = useCallback(() => gulatiApi.periods().then(setRows, (e) => pushError(gulatiError(e), 'Load failed')), [pushError]);
   useEffect(() => { load(); }, [load]);
   async function close(p) {
-    if (!window.confirm(`Close ${shortMonth(p.month)}? Sales, purchases and expenses dated in it will be locked.`)) return;
+    if (!await confirmAction(`Close ${shortMonth(p.month)}? Sales, purchases and expenses dated in it will be locked.`)) return;
     try { await gulatiApi.closeMonth(p.month, {}); pushSuccess('Month closed'); load(); } catch (e) { pushError(gulatiError(e, 'Could not close'), 'Could not close'); }
   }
   async function reopen(p) {
@@ -208,11 +209,11 @@ export default function GulatiFinancePage() {
   if (!gxCan(me, 'overview')) return <Navigate to="/gulati" replace />;
 
   const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'pnl', label: 'P&L' },
-    { key: 'types', label: 'By trading type' },
-    ...(gxCan(me, 'ledger') ? [{ key: 'expenses', label: 'Expenses' }] : []),
-    ...(gxCan(me, 'financials') ? [{ key: 'close', label: 'Month close' }] : []),
+    { key: 'overview', label: 'Overview', description: 'Revenue, expenses and profit at a glance.' },
+    { key: 'pnl', label: 'P&L', description: 'Profit and loss for the period.' },
+    { key: 'types', label: 'By trading type', description: 'Results split by trading type.' },
+    ...(gxCan(me, 'ledger') ? [{ key: 'expenses', label: 'Expenses', description: 'Expense entries and where the money went.' }] : []),
+    ...(gxCan(me, 'financials') ? [{ key: 'close', label: 'Month close', description: 'Lock a month so its figures stay frozen; an admin can reopen it with a reason.' }] : []),
   ];
   const set = (k, v) => setF((c) => ({ ...c, [k]: v, ...(k === 'month' && v ? { from: '', to: '' } : {}) }));
   const partyOptions = [...new Map([...pickers.clients, ...pickers.vendors].map((o) => [o.value, o])).values()];

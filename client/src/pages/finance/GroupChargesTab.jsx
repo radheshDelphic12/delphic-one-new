@@ -11,6 +11,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -262,7 +263,7 @@ export default function GroupChargesTab() {
 
   const isSuperadmin = Boolean(user?.is_superadmin);
   async function remove(row) {
-    if (!window.confirm(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category?.name || row.kind || ''} group expense? This can't be undone.`)) return;
+    if (!await confirmAction(`Delete this ${row.currency} ${Number(row.amount).toLocaleString()} ${row.category?.name || row.kind || ''} group expense? This can't be undone.`)) return;
     try {
       await apiClient.delete(`/billing/group-charges/${row.id}`);
       pushInfo('Group expense deleted');

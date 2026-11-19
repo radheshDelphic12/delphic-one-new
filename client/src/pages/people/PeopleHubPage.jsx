@@ -1,4 +1,5 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
+import HubHeading from '../../components/layout/HubHeading.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
 import { FilePenLine, FileText, Gauge, Laptop, Megaphone, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
@@ -28,6 +29,17 @@ const ADMIN_TABS = [
 ];
 
 // Birthdays and work anniversaries: for everyone, last tab (next to HR Settings).
+// One line under the tab bar for the open tab. Tabs that already draw their own heading are listed in SELF_HEADED.
+const TAB_HELP = {
+  directory: 'Everyone in the company: search, filter and open a profile.',
+  'org-chart': 'Reporting lines and team structure.',
+  capacity: 'Who is allocated to which project, and how much capacity is free.',
+  users: 'Sign-in accounts, roles and access.',
+  assets: 'Laptops and other company assets issued to employees.',
+  letters: 'Offer, appointment and other HR letters.',
+  'hr-settings': 'Holiday calendars and other HR configuration.',
+};
+const SELF_HEADED = new Set(['policies', 'announcements']);
 const ANNOUNCEMENTS_TAB = { key: 'announcements', label: 'Announcements', icon: Megaphone, need: 'basic.home' };
 
 function AnnouncementsSection() {
@@ -63,6 +75,7 @@ export default function PeopleHubPage() {
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
       <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
+      <HubHeading tabs={tabs} section={section} help={TAB_HELP} skip={SELF_HEADED} />
       {section === 'directory' && <PeopleListPage />}
       {section === 'org-chart' && <OrgChartPage />}
       {section === 'policies' && <PoliciesPage />}

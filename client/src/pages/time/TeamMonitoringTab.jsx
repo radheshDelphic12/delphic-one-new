@@ -11,6 +11,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import RejectReasonModal from './RejectReasonModal.jsx';
 import NoteText from '../../components/NoteText.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const TASK_STATUSES = ['pending', 'in_progress', 'completed'];
@@ -277,7 +278,7 @@ export default function TeamMonitoringTab() {
   // Unlock a day so its entries can be logged / changed normally again.
   async function unlock(lock) {
     const day = lock.date?.slice(0, 10);
-    if (!window.confirm(`Unlock ${day}? Employees can then log and edit entries for that day again.`)) return;
+    if (!await confirmAction(`Unlock ${day}? Employees can then log and edit entries for that day again.`)) return;
     try {
       await apiClient.delete(`/timesheets/locks/${day}`);
       pushSuccess(`Unlocked ${day}`);

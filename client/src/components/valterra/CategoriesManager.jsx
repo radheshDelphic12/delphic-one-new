@@ -7,6 +7,7 @@ import Drawer from '../ui/Drawer.jsx';
 import Pill from '../ui/Pill.jsx';
 import SectionTabs from '../ui/SectionTabs.jsx';
 import { Area, Num, Text } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const SCOPES = [
   { key: 'mining_type', label: 'Mining types', blurb: 'The kinds of mining (stone / quarry, gold, iron ore, coal ...). Chosen on each mining site.', addLabel: 'Add mining type' },
@@ -58,7 +59,7 @@ export default function CategoriesManager({ canEdit }) {
     } catch (e) { setError(valterraError(e, 'Could not save')); } finally { setSaving(false); }
   }
   async function remove(r) {
-    if (!window.confirm(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
+    if (!await confirmAction(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
     try { await vtApi.deleteCategory(r.id); load(); } catch (e) { pushError(valterraError(e, 'Could not remove'), 'Not removed'); }
   }
   const columns = [

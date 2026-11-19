@@ -8,15 +8,16 @@ import { SERVICE_META, useServiceTypes } from '../../lib/zephyr/serviceMeta.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const TABS = [
   { key: 'company', label: 'Company', icon: Building2 },
   { key: 'services', label: 'Services', icon: Briefcase },
-  { key: 'valuation', label: 'Valuation', icon: Landmark },
+  { key: 'valuation', label: 'Valuation', icon: Landmark, description: 'How the company is valued.' },
   { key: 'categories', label: 'Categories', icon: Tags },
-  { key: 'users', label: 'Users', icon: Users },
+  { key: 'users', label: 'Users', icon: Users, description: 'Sign-in accounts for this company and what each can do.' },
   { key: 'teams', label: 'Teams & reporting', icon: Users },
-  { key: 'audit', label: 'Audit log', icon: History },
+  { key: 'audit', label: 'Audit log', icon: History, description: 'A record of who changed what, and when.' },
 ];
 
 const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
@@ -365,7 +366,7 @@ Reason (optional):`);
               {rows.map((u) => (
                 <tr key={u.id}>
                   <td className="px-4 py-2.5 font-medium">{u.name}</td>
-                  <td className="px-4 py-2.5 text-tertiary-600">{u.email}</td>
+                  <td className="px-4 py-2.5 text-tertiary-600"><EmailLink email={u.email} /></td>
                   <td className="px-4 py-2.5 text-tertiary-600">{u.phone || '—'}</td>
                   <td className="px-4 py-2.5 capitalize">{u.role === 'admin' ? 'admin' : u.zephyr_person?.access_role || 'none'}</td>
                   <td className="px-4 py-2.5">{u.active ? 'Active' : <span className="text-red-600">Deactivated</span>}</td>

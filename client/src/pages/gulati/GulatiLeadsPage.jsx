@@ -13,6 +13,7 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import GulatiDocuments from '../../components/gulati/GulatiDocuments.jsx';
 import { Area, DateInput, Detail, Money, Num, Section, Select, Text, card, dayOf, today, toBody } from '../../components/gulati/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const KINDS = [{ value: 'call', label: 'Call' }, { value: 'visit', label: 'Visit' }, { value: 'meeting', label: 'Meeting' }, { value: 'note', label: 'Note' }];
 const NUMS = ['quantity', 'expected_purchase_amount', 'expected_sale_amount', 'expected_margin'];
@@ -244,7 +245,7 @@ export default function GulatiLeadsPage() {
     }
   }
   async function remove() {
-    if (!window.confirm(`Delete ${lead.name}?`)) return;
+    if (!await confirmAction(`Delete ${lead.name}?`)) return;
     try {
       await gulatiApi.deleteLead(lead.id);
       setDrawer(null);

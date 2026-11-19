@@ -6,6 +6,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import PasswordResultDrawer from './PasswordResultDrawer.jsx';
 import { inputCls, labelCls, th, td, useLoad, useSave } from './ui.jsx';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 // Delphic One > Team (admins only): the people of the Delphic One company itself. It uses the same user service as People > Users, so the same rules apply.
 const ROLE_LABEL = { admin: 'Admin', sales: 'Sales', bda: 'BDA' };
@@ -72,7 +73,7 @@ export default function DelphicOneTeamPage() {
             {data.members.map((m) => (
               <tr key={m.id} className="border-t border-tertiary-100" data-testid="team-row">
                 <td className={`${td} font-medium`}>{m.name}</td>
-                <td className={td}>{m.email}</td>
+                <td className={td}><EmailLink email={m.email} /></td>
                 <td className={td}>
                   {m.can_edit ? (
                     <select className={inputCls} aria-label={`Role of ${m.name}`} value={m.role} onChange={(e) => change(m, { role: e.target.value }, 'Role changed')}>{data.roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}{!data.roles.includes(m.role) && <option value={m.role}>{m.role}</option>}</select>

@@ -14,6 +14,7 @@ import DealForm from '../../components/gulati/DealForm.jsx';
 import GulatiDocuments from '../../components/gulati/GulatiDocuments.jsx';
 import { Area, DateInput, Detail, Empty, Kpi, Money, Num, Select, Text, card, dayOf, today, toBody, withReason } from '../../components/gulati/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -227,7 +228,7 @@ export default function GulatiDealDetailPage() {
     }
   }
   async function removeDeal() {
-    if (!window.confirm(`Delete ${deal.name}? Its purchases, sales and payments are removed from reports.`)) return;
+    if (!await confirmAction(`Delete ${deal.name}? Its purchases, sales and payments are removed from reports.`)) return;
     try {
       await gulatiApi.deleteDeal(deal.id);
       navigate('/gulati/deals');
@@ -236,7 +237,7 @@ export default function GulatiDealDetailPage() {
     }
   }
   const del = (fn, label) => async () => {
-    if (!window.confirm(`Delete this ${label}?`)) return;
+    if (!await confirmAction(`Delete this ${label}?`)) return;
     try { await withReason(fn); load(); } catch (e) { pushError(gulatiError(e, 'Could not delete'), 'Delete failed'); }
   };
 

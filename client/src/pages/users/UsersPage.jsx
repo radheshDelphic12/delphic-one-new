@@ -9,6 +9,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { adminFor } from '../../lib/access.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const CREATABLE_ROLES = [
   { value: 'bda', label: 'BDA' },
@@ -331,7 +332,7 @@ export default function UsersPage() {
   const columns = useMemo(
     () => [
       { key: 'name', header: 'Name', render: (row) => <span className="font-semibold text-tertiary-900">{row.name}</span> },
-      { key: 'email', header: 'Email', render: (row) => <span className="text-tertiary-500">{row.email}</span> },
+      { key: 'email', header: 'Email', render: (row) => <span className="text-tertiary-500"><EmailLink email={row.email} /></span> },
       {
         key: 'role',
         header: 'Role',

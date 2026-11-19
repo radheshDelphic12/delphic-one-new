@@ -13,6 +13,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import ZephyrSalaries from '../../components/zephyr/ZephyrSalaries.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -195,7 +196,7 @@ export default function ZephyrPeoplePage() {
   const canDelete = zxCan(me, 'delete');
   const person = drawer?.person;
   const takenUsers = new Set(rows.map((r) => r.user_id).filter(Boolean));
-  const tabs = [{ key: 'roster', label: 'Roster', icon: Users }, ...(zxCan(me, 'salaries') ? [{ key: 'salaries', label: 'Salaries', icon: Banknote }] : [])];
+  const tabs = [{ key: 'roster', label: 'Roster', icon: Users, description: 'Team members of this company, with their roles.' }, ...(zxCan(me, 'salaries') ? [{ key: 'salaries', label: 'Salaries', icon: Banknote, description: 'Monthly salaries paid to the team.' }] : [])];
 
   async function openPerson(row) {
     try {
@@ -223,7 +224,7 @@ export default function ZephyrPeoplePage() {
     }
   }
   async function remove() {
-    if (!window.confirm(`Delete ${person.name} from the roster?`)) return;
+    if (!await confirmAction(`Delete ${person.name} from the roster?`)) return;
     try {
       await zephyrApi.deletePerson(person.id);
       pushSuccess('Removed');

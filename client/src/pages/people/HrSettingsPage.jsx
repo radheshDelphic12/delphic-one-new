@@ -10,6 +10,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import ProjectCalendarPanel, { AddProjectModal } from './ProjectCalendarPanel.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'departments', label: 'Departments', icon: UsersRound },
@@ -365,7 +366,7 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
     }
   }
   async function deleteLocation(location) {
-    if (!window.confirm(`Delete ${location.name}?`)) return;
+    if (!await confirmAction(`Delete ${location.name}?`)) return;
     try {
       await apiClient.delete(`/orgs/locations/${location.id}`);
       pushInfo(`${location.name} deleted`);

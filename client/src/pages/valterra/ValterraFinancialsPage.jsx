@@ -12,6 +12,7 @@ import ChartCard from '../../components/ui/ChartCard.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { VT_COLORS } from '../../lib/valterra/meta.js';
 import { Kpi } from '../../components/valterra/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
 const rupees = (n) => `${Number(n) < 0 ? '-' : ''}₹${Math.abs(Number(n || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -73,7 +74,7 @@ export default function ValterraFinancialsPage() {
       reason = window.prompt(`Reopen ${r.label}? Give a reason (required):`);
       if (reason === null) return;
       if (!reason.trim()) { pushError('A reason is required to reopen a month', 'Not reopened'); return; }
-    } else if (!window.confirm(`Lock ${r.label}? Its figures are frozen as they are now. Money dated in it then needs an admin reason to change.`)) return;
+    } else if (!await confirmAction(`Lock ${r.label}? Its figures are frozen as they are now. Money dated in it then needs an admin reason to change.`)) return;
     setBusy(r.month);
     try {
       if (r.closed) await vtApi.reopenMonth(r.month, { reason: reason.trim() });

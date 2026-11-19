@@ -16,6 +16,7 @@ import EntryForm from '../../components/acconcy/EntryForm.jsx';
 import FinanceFilters, { BLANK_FILTERS, financeQuery } from '../../components/acconcy/FinanceFilters.jsx';
 import { Empty, Kpi, Money, card, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 function Th({ children, right }) {
   return <th className={`px-3 py-2 font-medium ${right ? 'text-right' : 'text-left'}`}>{children}</th>;
@@ -149,7 +150,7 @@ function EntriesTab({ me, pickers, deals, categories }) {
     }
   }
   async function remove(e) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await withReason((reason) => acconcyApi.deleteEntry(e.id, reason)); load(); } catch (err) { pushError(acconcyError(err, 'Could not delete'), 'Delete failed'); }
   }
 

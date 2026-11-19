@@ -14,6 +14,7 @@ import CalendarMappingSection from './CalendarMappingSection.jsx';
 import PersonalDetailsSection from '../../components/PersonalDetailsSection.jsx';
 import ReportingSection from '../../components/ReportingSection.jsx';
 import { EMPLOYMENT_STATUS_OPTIONS, WORKER_TYPE_OPTIONS, WORK_MODE_OPTIONS, employmentStatusLabel } from '../../lib/employeeOptions.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const EMPTY_OPTIONS = {
   departments: [],
@@ -403,7 +404,7 @@ export default function EmployeeProfilePage() {
             </div>
             <div>
               <h2 className="font-heading text-2xl font-semibold text-tertiary-900">{row.person.name}</h2>
-              <p className="text-sm text-tertiary-500">{row.person.email}</p>
+              <p className="text-sm text-tertiary-500"><EmailLink email={row.person.email} /></p>
             </div>
           </div>
           {canEdit && (

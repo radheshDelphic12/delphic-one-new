@@ -7,6 +7,7 @@ import { nxApi, novarexError } from '../../lib/novarex/api.js';
 import { nxCan } from '../../lib/novarex/useNovarex.js';
 import { INVESTMENT_STATUS_META, PAYMENT_METHODS, STORED_STATUSES, inr } from '../../lib/novarex/meta.js';
 import { Area, DateInput, Money, Num, Select, Text, dayOf, toBody, today, withReason } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 function InvestmentForm({ initial, categories, outlets = [], onSaved, onCancel, me }) {
   const editing = Boolean(initial);
@@ -84,7 +85,7 @@ function ReturnsPanel({ investment, onChanged, canEdit }) {
     try { onChanged(await withReason((x) => nxApi.updateReturn(r.id, { status: 'reversed', reason: x || reason.trim() }))); pushSuccess('Return reversed'); } catch (err) { pushError(novarexError(err, 'Could not reverse'), 'Not changed'); }
   }
   async function remove(r) {
-    if (!window.confirm('Delete this return record?')) return;
+    if (!await confirmAction('Delete this return record?')) return;
     try { await withReason((reason) => nxApi.deleteReturn(r.id, reason)); onChanged(await nxApi.investment(investment.id)); } catch (err) { pushError(novarexError(err, 'Could not delete'), 'Not deleted'); }
   }
   return (

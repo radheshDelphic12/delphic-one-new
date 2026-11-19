@@ -16,6 +16,7 @@ import EntryDrawer from '../../components/foundation/EntryDrawer.jsx';
 import { BudgetForm, PlanEditor } from '../../components/foundation/BudgetAndPlan.jsx';
 import { MonthlyChart } from '../../components/foundation/FxCharts.jsx';
 import { Detail, Empty, Kpi, Money, card } from '../../components/foundation/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const STATUS_ACTION = { planned: 'Mark as planned', active: 'Start / resume', on_hold: 'Put on hold', completed: 'Mark completed', cancelled: 'Cancel campaign', draft: 'Back to draft' };
 const REASON_FOR = { cancelled: 'Why is the campaign being cancelled?' };
@@ -67,7 +68,7 @@ export default function FoundationCampaignDetailPage() {
     try { await fxApi.setCampaignStatus(id, { to, ...(reason ? { reason: reason.trim() } : {}) }); pushSuccess(`Campaign is now ${STATUS_META[to].label}`); load(); } catch (e) { pushError(foundationError(e, 'Could not change the status'), 'Not changed'); }
   }
   async function removeCampaign() {
-    if (!window.confirm('Delete this campaign? This only works while it has no transactions.')) return;
+    if (!await confirmAction('Delete this campaign? This only works while it has no transactions.')) return;
     try { await fxApi.deleteCampaign(id); pushSuccess('Campaign deleted'); navigate('/foundation/campaigns'); } catch (e) { pushError(foundationError(e, 'Could not delete'), 'Not deleted'); }
   }
   async function entryAction(entry, to) {

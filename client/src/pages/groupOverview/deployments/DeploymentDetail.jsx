@@ -11,6 +11,7 @@ import {
   ARRANGEMENT_LABEL, BudgetBar, CATEGORY_LABEL, EVENT_LABEL, EXPENSE_STATUS, FUNDING_LABEL, FREQ_LABEL, KIND_LABEL, MODE_LABEL, RECOVERY, REQUEST_LABEL, ROLE_LABEL, ReasonModal,
   STATE_EXTRA, STATUS, dayText, inputCls, inr, labelCls, requestSummary, today, whenText,
 } from './deploymentsUi.jsx';
+import { confirmAction } from '../../../lib/confirmAction.js';
 
 const BASE = '/super-dashboard/group/deployments';
 const TABS = [['overview', 'Overview'], ['people', 'People'], ['budget', 'Budget'], ['travel', 'Travel'], ['expenses', 'Expenses'], ['onsite', 'Onsite work'], ['history', 'History']];
@@ -88,7 +89,7 @@ function Overview({ dep, call, onEdit, onDelete }) {
           {dep.status === 'active' && <button type="button" className="btn-secondary text-xs" onClick={() => { setNewEnd(dep.expected_end_date); setAsk('extend'); }}>Extend</button>}
           {dep.status === 'active' && <button type="button" className="btn-secondary text-xs" onClick={() => setAsk('close')}>Close deployment</button>}
           {['draft', 'pending_approval', 'approved', 'active'].includes(dep.status) && <button type="button" className="btn-secondary text-xs text-danger-700" onClick={() => setAsk('cancel')}>Cancel</button>}
-          {dep.status === 'draft' && <button type="button" className="btn-secondary text-xs text-danger-700" onClick={() => { if (window.confirm('Delete this draft?')) onDelete(dep); }}>Delete draft</button>}
+          {dep.status === 'draft' && <button type="button" className="btn-secondary text-xs text-danger-700" onClick={async () => { if (await confirmAction('Delete this draft?')) onDelete(dep); }}>Delete draft</button>}
         </div>
       </div>
 

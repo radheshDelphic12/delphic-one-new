@@ -24,6 +24,7 @@ import {
   VENDOR_TYPES,
   vendorTypeLabel,
 } from './accountUtils.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestStageOverride }) {
   const { user } = useAuth();
@@ -75,7 +76,7 @@ function AccountPeek({ row, onClose, onChanged, onRequestStageMove, onRequestSta
         <PeekField label="Owner">{detail.owner?.name || '—'}</PeekField>
         <PeekField label="Brought by">{detail.origin_owner?.name || '—'}</PeekField>
         <PeekField label="POC">{detail.poc_name || '—'}</PeekField>
-        <PeekField label="POC email">{detail.poc_email || '—'}</PeekField>
+        <PeekField label="POC email"><EmailLink email={detail.poc_email} fallback="—" /></PeekField>
         <PeekField label="City">{detail.location_city || '—'}</PeekField>
         <PeekField label="Created">
           {detail.created_at ? new Date(detail.created_at).toLocaleDateString() : '—'}

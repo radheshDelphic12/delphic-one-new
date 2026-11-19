@@ -21,9 +21,9 @@ import ItemsRatesTab, { useTradeLookups } from './ItemsRatesTab.jsx';
 const POLL_MS = 60000;
 const TABS = [
   { key: 'overview', label: 'Overview', icon: LayoutGrid },
-  { key: 'partners', label: 'Suppliers & consumers', icon: Users2 },
-  { key: 'rates', label: 'Items & rate cards', icon: Tags },
-  { key: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
+  { key: 'partners', label: 'Suppliers & consumers', icon: Users2, description: 'The parties you buy from and sell to.' },
+  { key: 'rates', label: 'Items & rate cards', icon: Tags, description: 'Items traded and their rate cards.' },
+  { key: 'transactions', label: 'Transactions', icon: ArrowLeftRight, description: 'Purchases and sales recorded.' },
 ];
 
 function OverviewTab() {

@@ -6,6 +6,8 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import SectionTabs from '../../components/ui/SectionTabs.jsx';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -65,7 +67,7 @@ function JobsTab({ onOpenApplications }) {
     try { await apiClient.patch(`/hiring/jobs/${job.id}`, { status }); load(); } catch (err) { pushError(apiErrorMessage(err, 'Could not update the job'), 'Something went wrong'); }
   }
   async function remove(job) {
-    if (!window.confirm(`Delete ${job.title}? Its applications are kept but the job leaves the career page.`)) return;
+    if (!await confirmAction(`Delete ${job.title}? Its applications are kept but the job leaves the career page.`)) return;
     try { await apiClient.delete(`/hiring/jobs/${job.id}`); load(); } catch (err) { pushError(apiErrorMessage(err, 'Could not delete'), 'Something went wrong'); }
   }
 
@@ -227,11 +229,7 @@ export default function HiringPage() {
   return (
     <div className="space-y-4">
       <div><h1 className="font-heading text-xl font-semibold text-tertiary-900">Hiring</h1><p className="text-sm text-tertiary-500">Post jobs on your company&apos;s career page and manage the applications.</p></div>
-      <div className="flex gap-1 border-b border-tertiary-200" role="tablist">
-        {[['jobs', 'Jobs'], ['applications', 'Applications']].map(([k, l]) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k} className={`border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? 'border-primary-600 text-primary-700' : 'border-transparent text-tertiary-500 hover:text-tertiary-800'}`} onClick={() => setTab(k)}>{l}</button>
-        ))}
-      </div>
+      <SectionTabs tabs={[{ key: 'jobs', label: 'Jobs' }, { key: 'applications', label: 'Applications' }]} value={tab} onChange={setTab} />
       {tab === 'jobs' ? <JobsTab onOpenApplications={(id) => { setJobId(id); setTab('applications'); }} /> : <ApplicationsTab key={jobId} initialJob={jobId} />}
     </div>
   );

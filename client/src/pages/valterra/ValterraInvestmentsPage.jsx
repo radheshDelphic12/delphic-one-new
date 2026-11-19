@@ -14,6 +14,7 @@ import VtFilterBar, { useVtFilters } from '../../components/valterra/VtFilters.j
 import InvestmentDrawer from '../../components/valterra/InvestmentDrawer.jsx';
 import { InvestmentReturnsChart } from '../../components/valterra/VtCharts.jsx';
 import { Kpi, Money } from '../../components/valterra/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 export default function ValterraInvestmentsPage() {
   const { me, loading } = useValterra();
@@ -36,7 +37,7 @@ export default function ValterraInvestmentsPage() {
   const t = data?.totals;
 
   async function remove(r) {
-    if (!window.confirm(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
+    if (!await confirmAction(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
     try { await vtApi.deleteInvestment(r.id); load(); pickers.refresh(); } catch (e) { pushError(valterraError(e, 'Could not delete'), 'Not deleted'); }
   }
   const columns = [

@@ -6,6 +6,7 @@ import DataTable from '../../ui/DataTable.jsx';
 import Drawer from '../../ui/Drawer.jsx';
 import Pill from '../../ui/Pill.jsx';
 import { Area, Num, Select, Text, DateInput } from '../ui.jsx';
+import { confirmAction } from '../../../lib/confirmAction.js';
 
 const inputCls = 'rounded-xl border px-3 py-2 text-sm';
 
@@ -62,7 +63,7 @@ export default function MasterPage({ resource, singular, columns, fields, canEdi
     } catch (err) { setError(err.response ? novarexError(err, 'Could not save') : err.message); } finally { setSaving(false); }
   }
   async function archive(r) {
-    if (!window.confirm(`Archive ${r.name || r.reg_no}? History stays; it disappears from new forms.`)) return;
+    if (!await confirmAction(`Archive ${r.name || r.reg_no}? History stays; it disappears from new forms.`)) return;
     try { await api.archive(r.id); load(); onChanged?.(); } catch (err) { pushError(novarexError(err, 'Could not archive'), 'Not archived'); }
   }
   async function restore(r) {

@@ -10,6 +10,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 // People > Letters: HR issues offer, appointment, appraisal, relieving ... letters to employees, past employees, candidates, vendors and anyone else.
 // Every letter has a unique serial number; the templates and the serial number format are edited here by whoever may manage them.
@@ -328,7 +329,7 @@ function Templates({ canManage, catalog }) {
   const [rows, reload] = useApi('/letters/templates', [], { all: 1 });
   const [editing, setEditing] = useState(null);
   async function remove(t) {
-    if (!window.confirm(`Delete the template "${t.name}"? Letters already issued from it are kept.`)) return;
+    if (!await confirmAction(`Delete the template "${t.name}"? Letters already issued from it are kept.`)) return;
     try { await apiClient.delete(`/letters/templates/${t.id}`); pushSuccess('Template deleted'); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Could not delete'), 'Not deleted'); }
   }
   return (

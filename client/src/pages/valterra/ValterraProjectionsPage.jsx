@@ -14,6 +14,7 @@ import VtFilterBar, { useVtFilters } from '../../components/valterra/VtFilters.j
 import ProjectionDrawer from '../../components/valterra/ProjectionDrawer.jsx';
 import { ProjectedActualChart } from '../../components/valterra/VtCharts.jsx';
 import { Empty, Kpi, Money, card } from '../../components/valterra/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TONE = { on_track: 'green', off_track: 'red', unplanned: 'amber', none: 'gray' };
 const LABEL = { on_track: 'On track', off_track: 'Off track', unplanned: 'Not planned', none: '-' };
@@ -38,7 +39,7 @@ export default function ValterraProjectionsPage() {
   const refresh = () => { list.refresh(); cmp.refresh(); dash.refresh(); };
   const close = () => setDrawer({ open: false, projection: null });
   async function remove(p) {
-    if (!window.confirm(`Delete the projection "${p.name}"?`)) return;
+    if (!await confirmAction(`Delete the projection "${p.name}"?`)) return;
     try { await vtApi.deleteProjection(p.id); pushSuccess('Projection deleted'); refresh(); } catch (e) { pushError(valterraError(e, 'Could not delete'), 'Not deleted'); }
   }
   const t = cmp.data?.projected_totals;

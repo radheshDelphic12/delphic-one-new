@@ -9,6 +9,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 // Suggestions only — the type is free text, so a new kind of device needs no code change.
 const ASSET_TYPES = ['Windows Laptop', 'Mac Book', 'Cube', 'Monitor', 'Mobile', 'Accessory'];
@@ -120,7 +121,7 @@ function AssetDrawer({ open, asset, onClose, onSaved }) {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete ${asset.asset_type}${asset.serial_number ? ` ${asset.serial_number}` : ''} from the register? This can't be undone.`)) return;
+    if (!await confirmAction(`Delete ${asset.asset_type}${asset.serial_number ? ` ${asset.serial_number}` : ''} from the register? This can't be undone.`)) return;
     setSaving(true);
     try {
       await apiClient.delete(`/assets/${asset.id}`);

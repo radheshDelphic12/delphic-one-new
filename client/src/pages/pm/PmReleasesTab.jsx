@@ -5,6 +5,7 @@ import { pmApi, pmError } from '../../lib/pm/api.js';
 import { dateLabel } from '../../lib/format.js';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const Empty = ({ children }) => <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-tertiary-500">{children}</p>;
@@ -71,8 +72,8 @@ function ReleaseDetail({ project, releaseId, canManage, onChanged }) {
   const copyNotes = async () => {
     try { const { markdown } = await pmApi.releaseNotes(r.id); await navigator.clipboard.writeText(markdown); pushSuccess('Release notes copied'); } catch (e) { pushError(pmError(e, 'Could not copy the notes'), 'Failed'); }
   };
-  const setStatus = (status) => {
-    if (status === 'released' && !window.confirm(`Release ${r.version}? It closes the version: tickets and commits cannot be changed afterwards and the status cannot go back.`)) return;
+  const setStatus = async (status) => {
+    if (status === 'released' && !await confirmAction(`Release ${r.version}? It closes the version: tickets and commits cannot be changed afterwards and the status cannot go back.`)) return;
     run(() => pmApi.updateRelease(r.id, { status, ...(status === 'released' ? { git_tag: form.git_tag || null, commit_sha: form.commit_sha || null } : {}) }), `Marked ${STATUS_LABEL[status].toLowerCase()}`);
   };
 
@@ -83,7 +84,7 @@ function ReleaseDetail({ project, releaseId, canManage, onChanged }) {
         {open && <button type="button" className="btn-primary px-3 py-1 text-xs" disabled={busy} data-testid="pm-release-publish" onClick={() => setStatus('released')}>Mark released</button>}
         {open && <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={busy} onClick={() => setStatus('cancelled')}>Cancel release</button>}
         <button type="button" className="btn-secondary inline-flex items-center gap-1 px-3 py-1 text-xs" onClick={copyNotes}><Copy className="h-3 w-3" />Copy release notes</button>
-        {open && <button type="button" className="inline-flex items-center gap-1 rounded-xl border border-danger-200 px-3 py-1 text-xs text-danger-600" disabled={busy} onClick={() => window.confirm(`Delete release ${r.version}?`) && run(() => pmApi.deleteRelease(r.id), 'Release deleted')}><Trash2 className="h-3 w-3" />Delete</button>}
+        {open && <button type="button" className="inline-flex items-center gap-1 rounded-xl border border-danger-200 px-3 py-1 text-xs text-danger-600" disabled={busy} onClick={async () => await confirmAction(`Delete release ${r.version}?`) && run(() => pmApi.deleteRelease(r.id), 'Release deleted')}><Trash2 className="h-3 w-3" />Delete</button>}
         {r.released_at && <span className="text-xs text-tertiary-500">Released {when(r.released_at)}</span>}
       </div>
 

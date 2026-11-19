@@ -8,6 +8,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import { useAuth } from '../../lib/authContext.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
@@ -213,7 +214,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
       reason = window.prompt(`Reject ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}? Give the reason (required, kept on each ticket):`);
       if (reason === null) return;
       if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return; }
-    } else if (!window.confirm(`Approve ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}?`)) return;
+    } else if (!await confirmAction(`Approve ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     const failed = [];
     for (const t of pickedTickets) {

@@ -65,6 +65,7 @@ function SubmissionPeek({ row, onClose }) {
           </Link>
         </PeekField>
         <PeekField label="Candidate">{detail.profile?.name || '—'}</PeekField>
+        {detail.profile?.vendor_account?.name && <PeekField label="Vendor">{detail.profile.vendor_account.name}</PeekField>}
         <PeekField label="Job">{detail.requirement?.title || '—'}</PeekField>
         <PeekField label="Stage"><Badge value={detail.stage} /></PeekField>
         <PeekField label="Closure probability">
@@ -274,6 +275,7 @@ export default function SubmissionsListPage() {
         render: (row) => (row.proposed_rate ? `${row.proposed_rate_currency} ${row.proposed_rate}` : '—'),
       },
       { key: 'margin', header: 'Margin', render: (row) => (row.margin != null ? row.margin : '—') },
+      { key: 'vendor', header: 'Vendor', render: (row) => row.profile?.vendor_account?.name || '—' },
       { key: 'recruiter', header: 'Recruiter', render: (row) => row.submitted_by?.name || '—' },
       {
         key: 'actions',

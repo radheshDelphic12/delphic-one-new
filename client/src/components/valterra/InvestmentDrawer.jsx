@@ -7,6 +7,7 @@ import { vtApi, valterraError } from '../../lib/valterra/api.js';
 import { vtCan } from '../../lib/valterra/useValterra.js';
 import { INVESTMENT_STATUS_META, PAYMENT_METHODS, STORED_STATUSES, inr } from '../../lib/valterra/meta.js';
 import { Area, DateInput, Money, Num, Select, Text, dayOf, toBody, today, withReason } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 function InvestmentForm({ initial, categories, sites = [], onSaved, onCancel, me }) {
   const editing = Boolean(initial);
@@ -84,7 +85,7 @@ function ReturnsPanel({ investment, onChanged, canEdit }) {
     try { onChanged(await withReason((x) => vtApi.updateReturn(r.id, { status: 'reversed', reason: x || reason.trim() }))); pushSuccess('Return reversed'); } catch (err) { pushError(valterraError(err, 'Could not reverse'), 'Not changed'); }
   }
   async function remove(r) {
-    if (!window.confirm('Delete this return record?')) return;
+    if (!await confirmAction('Delete this return record?')) return;
     try { await withReason((reason) => vtApi.deleteReturn(r.id, reason)); onChanged(await vtApi.investment(investment.id)); } catch (err) { pushError(valterraError(err, 'Could not delete'), 'Not deleted'); }
   }
   return (

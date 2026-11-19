@@ -8,6 +8,7 @@ import { isPermissionMode, isSuperAdminLevel, LEVEL_LABEL } from '../../lib/acce
 import Pill from '../ui/Pill.jsx';
 import PermissionGrid, { rankOf } from './PermissionGrid.jsx';
 import AccessMigrationPanel from './AccessMigrationPanel.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 block w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -183,7 +184,7 @@ function SetEditor({ set, catalog, onSaved, onDeleted }) {
     }
   }
   async function remove() {
-    if (!window.confirm(`Delete the permission set "${set.name}"?`)) return;
+    if (!await confirmAction(`Delete the permission set "${set.name}"?`)) return;
     try {
       await apiClient.delete(`/roles/${set.id}`);
       pushSuccess('Permission set deleted');

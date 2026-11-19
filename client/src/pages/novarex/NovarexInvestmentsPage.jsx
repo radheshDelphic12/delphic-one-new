@@ -14,6 +14,7 @@ import NxFilterBar, { useNxFilters } from '../../components/novarex/NxFilters.js
 import InvestmentDrawer from '../../components/novarex/InvestmentDrawer.jsx';
 import { InvestmentReturnsChart } from '../../components/novarex/NxCharts.jsx';
 import { Kpi, Money } from '../../components/novarex/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 export default function NovarexInvestmentsPage() {
   const { me, loading } = useNovarex();
@@ -36,7 +37,7 @@ export default function NovarexInvestmentsPage() {
   const t = data?.totals;
 
   async function remove(r) {
-    if (!window.confirm(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
+    if (!await confirmAction(`Delete ${r.code}? This is only possible while no return is recorded.`)) return;
     try { await nxApi.deleteInvestment(r.id); load(); pickers.refresh(); } catch (e) { pushError(novarexError(e, 'Could not delete'), 'Not deleted'); }
   }
   const columns = [

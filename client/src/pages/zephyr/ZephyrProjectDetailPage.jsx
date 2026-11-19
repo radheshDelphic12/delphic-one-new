@@ -15,6 +15,7 @@ import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import ZephyrProjectMoney from '../../components/zephyr/ZephyrProjectMoney.jsx';
 import { SECTION_TITLES, ServiceSectionView } from '../../components/zephyr/ZephyrServiceSection.jsx';
 import { ProgressBar, ProjectForm, ServiceBadge, cleanProjectBody } from './ZephyrProjectsPage.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: Layers },
@@ -293,7 +294,7 @@ export default function ZephyrProjectDetailPage() {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete ${project.code} ${project.name}?`)) return;
+    if (!await confirmAction(`Delete ${project.code} ${project.name}?`)) return;
     try {
       await zephyrApi.deleteProject(project.id);
       pushSuccess('Project deleted');

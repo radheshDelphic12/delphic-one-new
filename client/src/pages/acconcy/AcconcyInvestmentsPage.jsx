@@ -14,6 +14,7 @@ import AcconcyInvesteesTab from './AcconcyInvesteesTab.jsx';
 import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import { Area, DateInput, Detail, Empty, Kpi, Money, Num, Section, Select, Text, dayOf, today, toBody, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const NUMS = ['amount', 'current_value', 'quantity', 'purchase_price', 'current_price', 'equity_pct'];
 const FIELDS = ['name', 'type', 'deal_id', 'service_type', 'investment_date', 'amount', 'current_value', 'quantity', 'unit', 'purchase_price', 'current_price', 'purity', 'storage_location', 'startup_name', 'equity_pct', 'description', 'notes'];
@@ -169,7 +170,7 @@ function AssetsTab({ me }) {
     }
   }
   async function remove(a) {
-    if (!window.confirm(`Delete ${a.name}?`)) return;
+    if (!await confirmAction(`Delete ${a.name}?`)) return;
     try { await withReason((reason) => acconcyApi.deleteAsset(a.id, reason)); load(); } catch (e) { pushError(acconcyError(e, 'Could not delete'), 'Delete failed'); }
   }
   return (
@@ -286,11 +287,11 @@ function InvestmentsTab({ me }) {
     }
   }
   async function undo(r) {
-    if (!window.confirm('Undo this realisation? The revenue / expense posted from it is removed.')) return;
+    if (!await confirmAction('Undo this realisation? The revenue / expense posted from it is removed.')) return;
     try { await withReason((reason) => acconcyApi.deleteRealisation(inv.id, r.id, reason)); await refresh(inv.id); } catch (e) { pushError(acconcyError(e, 'Could not undo'), 'Could not undo'); }
   }
   async function remove() {
-    if (!window.confirm(`Delete ${inv.name}?`)) return;
+    if (!await confirmAction(`Delete ${inv.name}?`)) return;
     try { await withReason((reason) => acconcyApi.deleteInvestment(inv.id, reason)); setDrawer(null); load(); } catch (e) { pushError(acconcyError(e, 'Could not delete'), 'Delete failed'); }
   }
 
@@ -410,7 +411,7 @@ export default function AcconcyInvestmentsPage() {
   if (!axCan(me, 'investments')) return <Navigate to="/acconcy" replace />;
   return (
     <div className="mt-4 space-y-4">
-      <SectionTabs tabs={[{ key: 'investments', label: 'Investments' }, { key: 'companies', label: 'Portfolio companies' }, { key: 'assets', label: 'Assets' }]} value={tab} onChange={setTab} />
+      <SectionTabs tabs={[{ key: 'investments', label: 'Investments', description: 'Investments the company has made.' }, { key: 'companies', label: 'Portfolio companies', description: 'Companies the firm holds a stake in.' }, { key: 'assets', label: 'Assets', description: 'Assets the company owns.' }]} value={tab} onChange={setTab} />
       {tab === 'investments' ? <InvestmentsTab me={me} /> : tab === 'companies' ? <AcconcyInvesteesTab me={me} /> : <AssetsTab me={me} />}
     </div>
   );

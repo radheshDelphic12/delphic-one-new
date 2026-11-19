@@ -9,6 +9,7 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import CustomerDeleteDrawer from './CustomerDeleteDrawer.jsx';
 import PasswordResultDrawer from './PasswordResultDrawer.jsx';
 import { inputCls, labelCls, th, thr, td, tdr, rupees, useLoad, useSave } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const STATUS = { trial: ['blue', 'Trial'], active: ['green', 'Active'], read_only: ['amber', 'Read-only'], churned: ['gray', 'Churned'] };
 const DELETED_STATUS = ['red', 'Deleted'];
@@ -78,12 +79,12 @@ export default function DelphicOneCustomersPage() {
   const canDelete = Boolean(me?.can_delete_customers);
   const [shown, setShown] = useState(null);
   const resetAdmin = async (c) => {
-    if (!window.confirm(`Reset the admin password of ${c.name}?\n\nA new strong password is generated and shown once. Their admin's earlier sign-ins end at once.`)) return;
+    if (!await confirmAction(`Reset the admin password of ${c.name}?\n\nA new strong password is generated and shown once. Their admin's earlier sign-ins end at once.`)) return;
     const r = await save(() => doxApi.resetCustomerAdminPassword(c.id, {}), null, 'Could not reset the admin password');
     if (r) setShown(r);
   };
   const createWorkspace = async (c) => {
-    if (!window.confirm(`Create a separate workspace for ${c.name}? This creates their company and first admin login (${c.contact_email || 'no email yet'}).`)) return;
+    if (!await confirmAction(`Create a separate workspace for ${c.name}? This creates their company and first admin login (${c.contact_email || 'no email yet'}).`)) return;
     const r = await save(() => doxApi.provisionCustomer(c.id), null, 'Could not create the workspace');
     if (r) { setWorkspace(r); reload(); }
   };

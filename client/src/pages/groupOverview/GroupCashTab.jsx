@@ -16,6 +16,7 @@ import { AccountEditDrawer, EntityEditDrawer } from './EntityAccountEditors.jsx'
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -170,7 +171,7 @@ function WalletDrawer({ walletId, accountId, options, onClose, onChanged }) {
   const d = data.data;
   const cur = d?.wallet.currency;
   async function remove(row) {
-    if (!window.confirm(row.transfer_id ? 'This entry is one side of a transfer. Deleting it removes the whole transfer. Continue?' : 'Delete this entry?')) return;
+    if (!await confirmAction(row.transfer_id ? 'This entry is one side of a transfer. Deleting it removes the whole transfer. Continue?' : 'Delete this entry?')) return;
     try { await apiClient.delete(`/group-cash/transactions/${row.id}`); saved.done('Entry deleted'); data.refresh(); onChanged(); } catch (err) { saved.fail(err, 'Could not delete'); }
   }
   const file = (format) => downloadFile(`/group-cash/${target}/entries`, { ...params, format }, `${d.wallet.name}.${format}`).catch((err) => saved.fail(err, 'Could not download'));
@@ -423,7 +424,7 @@ function ReconcileView({ position, onSaved, onOpenStatement }) {
             <li key={r.id} className="py-2">
               <div className="flex items-center gap-1"><p className="flex-1 font-medium text-tertiary-900">{r.bank_account_name} · {r.statement_date}</p>
                 <button type="button" title="Edit" className="rounded p-1 text-tertiary-400 hover:text-primary-600" onClick={() => setEditRec({ ...r })}><Pencil className="h-4 w-4" /></button>
-                <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={async () => { if (!window.confirm('Delete this reconciliation?')) return; try { await apiClient.delete(`/group-cash/reconciliations/${r.id}`); saved.done('Reconciliation deleted'); history.refresh(); onSaved(); } catch (err) { saved.fail(err, 'Could not delete'); } }}><Trash2 className="h-4 w-4" /></button></div>
+                <button type="button" title="Delete" className="rounded p-1 text-tertiary-400 hover:text-danger-600" onClick={async () => { if (!await confirmAction('Delete this reconciliation?')) return; try { await apiClient.delete(`/group-cash/reconciliations/${r.id}`); saved.done('Reconciliation deleted'); history.refresh(); onSaved(); } catch (err) { saved.fail(err, 'Could not delete'); } }}><Trash2 className="h-4 w-4" /></button></div>
               <p className="text-xs text-tertiary-500">statement {formatMoney(r.statement_balance, r.currency)} · system {formatMoney(r.system_balance, r.currency)} · difference <Money value={r.difference} currency={r.currency} />{r.notes ? ` · ${r.notes}` : ''}</p>
             </li>
           ))}
@@ -673,7 +674,7 @@ function SetupView({ options, position, onChanged }) {
   const accountMap = new Map((position?.entities || []).flatMap((e) => e.accounts || []).map((a) => [a.id, a]));
   const none = !(options?.entities || []).length;
   // delete asks first; the server refuses (and says why) while anything still hangs on the record
-  const remove = (path, label) => { if (window.confirm(`Delete ${label}? This cannot be undone.`)) run(() => apiClient.delete(`/group-cash/${path}`), `${label} deleted`, 'Could not delete'); };
+  const remove = async (path, label) => { if (await confirmAction(`Delete ${label}? This cannot be undone.`)) run(() => apiClient.delete(`/group-cash/${path}`), `${label} deleted`, 'Could not delete'); };
   return (
     <div className="space-y-5">
       {none && (

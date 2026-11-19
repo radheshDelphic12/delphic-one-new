@@ -5,6 +5,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { isAdminUser } from '../../lib/access.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const STATUS_LABEL = { not_opened: 'Not opened', in_progress: 'In progress', scored: 'Scored', pending_review: 'Needs a person to review', expired: 'Expired', superseded: 'Replaced' };
 const STATUS_TONE = {
@@ -139,8 +140,8 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   }, 'Could not send the link again');
 
   // A candidate in the middle of the interview keeps it; a new link starts it again from the first question.
-  const restart = () => {
-    if (!window.confirm('The candidate has already started. A new link starts the interview again from the first question and the current link stops working. Continue?')) return;
+  const restart = async () => {
+    if (!await confirmAction('The candidate has already started. A new link starts the interview again from the first question and the current link stops working. Continue?')) return;
     run(async () => {
       const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId, restart: true });
       await load();
@@ -149,8 +150,8 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
   };
 
   // A finished interview can be sent again (a re-take). The first result stays in the list as "Replaced"; nothing is deleted.
-  const retake = () => {
-    if (!window.confirm('This candidate has already finished the AI interview. A new link lets them take it again. The first result stays in the history as "Replaced". Send a new link?')) return;
+  const retake = async () => {
+    if (!await confirmAction('This candidate has already finished the AI interview. A new link lets them take it again. The first result stays in the history as "Replaced". Send a new link?')) return;
     run(async () => {
       const { data } = await apiClient.post('/ai-interviews', { submission_id: submissionId, retake: true });
       await load();

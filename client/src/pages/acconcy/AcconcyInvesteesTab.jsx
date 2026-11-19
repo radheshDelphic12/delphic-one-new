@@ -9,6 +9,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, DateInput, Detail, Empty, Kpi, Money, Num, Section, Select, Text, dayOf, today, toBody, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const NUMS = ['proposed_amount', 'proposed_stake_pct', 'expected_return_pct', 'stake_pct', 'valuation'];
 const FIELDS = ['name', 'sector', 'stage', 'website', 'contact_name', 'contact_email', 'proposed_amount', 'proposed_stake_pct', 'expected_return_pct', 'stake_pct', 'valuation', 'discussion_notes', 'notes'];
@@ -188,7 +189,7 @@ export default function AcconcyInvesteesTab({ me }) {
   const fund = (body) => run(async () => { const out = await withReason((reason) => acconcyApi.fundInvestee(company.id, { ...body, ...(reason ? { reason } : {}) })); setDrawer({ mode: 'view', company: out }); load(); }, 'Funding recorded');
   const giveReturn = (body) => run(async () => { await withReason((reason) => acconcyApi.realiseInvestment(drawer.round.id, { ...body, ...(reason ? { reason } : {}) })); await reload(company.id); }, 'Return recorded');
   async function remove() {
-    if (!window.confirm(`Delete ${company.name}?`)) return;
+    if (!await confirmAction(`Delete ${company.name}?`)) return;
     try { await withReason((reason) => acconcyApi.deleteInvestee(company.id, reason)); setDrawer(null); load(); } catch (e) { pushError(acconcyError(e, 'Could not delete'), 'Delete failed'); }
   }
 

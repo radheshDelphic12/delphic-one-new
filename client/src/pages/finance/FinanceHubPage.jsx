@@ -1,6 +1,8 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarRange, FileCheck, FileText, FolderKanban, Receipt, SlidersHorizontal, Tags, Truck, Users2 } from 'lucide-react';
+import { Banknote, CalendarRange, CheckCircle2, ClipboardCheck, FileCheck, FileText, FolderKanban, Percent, Receipt, SlidersHorizontal, Tags, Truck, Users2, Wallet } from 'lucide-react';
+import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
 import ExpensesTab from './ExpensesTab.jsx';
@@ -16,7 +18,11 @@ import TaxInvoicesTab from './TaxInvoicesTab.jsx';
 // settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
 // and add { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp }.
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
+import SectionHeading from '../../components/ui/SectionHeading.jsx';
 
+// Tabs that already draw their own heading (or, for Expenses, per-view headings) get no extra one from the hub.
+const SELF_HEADED = new Set(['expenses', 'projects', 'month-view', 'billing-setup', 'vendor-invoices']);
+const TAB_HELP = {expenses:'Submit, approve and reimburse business expense claims.',projects:'Running projects and contracts: billing terms, client agreements, project team and invoicing.','month-view':'Month by month: running projects, timesheets, billing, invoices, payments and financial status.',invoicing:'Every client invoice by month: paid, part-paid and unpaid, with payments and totals.','billing-setup':'Per-resource billing rates and the client billing status rules.','vendor-invoices':'Vendor invoices with TDS and adjustments, sent and paid status, and bank payout.','group-charges':'Charges raised between the companies of the group.',categories:'Expense and group-charge categories used across Finance.','tax-invoices':"GST (INR) and USD export invoices of this company's legal entity."};
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt, need: ['basic.expenses', 'finance.view'] }];
 // GST (INR) and USD export invoices of the company's legal entity: the group admin issues them (their own tab, next to Invoicing).
 const TAX_INVOICES_TAB = { key: 'tax-invoices', label: 'GST / USD invoices', icon: FileCheck };
@@ -56,10 +62,38 @@ export default function FinanceHubPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get('section') || 'expenses';
   const section = tabs.some((t) => t.key === requested) ? requested : (tabs[0]?.key || 'expenses');
+  const activeTab = tabs.find((t) => t.key === section);
+  // Claims waiting for this person's decision: shown as a badge in the Expenses menu, and decides whether a non-admin approver sees Approvals.
+  const [approvalCount, setApprovalCount] = useState(0);
+  const view = params.get('view');
+  useEffect(() => {
+    let live = true;
+    apiClient.get('/expenses/claims/approvals').then(({ data }) => { if (live) setApprovalCount((data.data || []).length); }).catch(() => { if (live) setApprovalCount(0); });
+    return () => { live = false; };
+  }, [section, view]);
+  // Hover menu on the tabs that have sub-pages. These replace the in-page sub-tab strips, so every sub-page stays reachable.
+  const expenseViews = [
+    { key: 'mine', label: 'My claims', icon: Receipt, description: 'Expenses you have submitted and where each one stands' },
+    ...(isAdmin || approvalCount > 0 ? [{ key: 'approvals', label: 'Approvals', icon: CheckCircle2, badge: approvalCount || null, description: 'Claims waiting for your decision' }] : []),
+    ...(isAdmin ? [
+      { key: 'team', label: 'Reimbursements', icon: Wallet, description: "Approve and reimburse every employee's claims" },
+      { key: 'payout', label: 'Bank payout', icon: Banknote, description: 'Monthly payout sheet per employee, ready for the bank' },
+      { key: 'processed', label: 'Processed', icon: ClipboardCheck, description: 'Claims that have already been processed' },
+      { key: 'group', label: 'Group expenses', icon: Users2, description: 'Company-wide costs paid by the company, such as office rent' },
+    ] : []),
+  ];
+  const vendorViews = [
+    { key: 'invoices', label: 'Invoices', icon: FileText, description: 'Vendor bills with TDS, adjustments, sent and paid status' },
+    { key: 'charges', label: 'GST & TDS setup', icon: Percent, description: 'GST and TDS rules applied to each vendor' },
+    { key: 'payout', label: 'Bank payout', icon: Banknote, description: 'Unpaid vendor invoices per vendor, ready for the bank' },
+  ];
+  const tabsWithMenu = tabs.map((t) => (t.key === 'expenses' ? { ...t, blurb: TAB_HELP.expenses, children: expenseViews } : t.key === 'vendor-invoices' ? { ...t, blurb: TAB_HELP['vendor-invoices'], children: vendorViews } : t));
+  const activeChildKey = section === 'expenses' ? (expenseViews.some((c) => c.key === view) ? view : 'mine') : section === 'vendor-invoices' ? (vendorViews.some((c) => c.key === view) ? view : 'invoices') : null;
 
   return (
     <div className={`space-y-4 ${modern ? 'ta-modern' : ''}`}>
-      <HubTabs tabs={tabs} value={section} onSelect={(key) => setParams({ section: key })} modern={modern} />
+      <HubTabs tabs={tabsWithMenu} value={section} onSelect={(key) => setParams({ section: key })} activeChild={activeChildKey} onSelectChild={(key, child) => setParams({ section: key, view: child })} modern={modern} />
+      {tabs.length > 1 && activeTab && TAB_HELP[section] && !SELF_HEADED.has(section) && <SectionHeading icon={activeTab.icon} title={activeTab.label} description={TAB_HELP[section]} />}
       {section === 'expenses' && has('expenses') && <ExpensesTab />}
       {section === 'projects' && has('projects') && <ProjectsTab />}
       {section === 'month-view' && has('month-view') && <MonthProjectsTab />}

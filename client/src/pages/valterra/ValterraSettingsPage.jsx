@@ -86,7 +86,7 @@ export default function ValterraSettingsPage() {
   const [tab, setTab] = useState('general');
   if (loading) return <div className="py-10 text-center text-sm text-tertiary-500">Loading...</div>;
   if (me && !vtCan(me, 'settings')) return <Navigate to="/valterra" replace />;
-  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, { key: 'teams', label: 'Teams & reporting' }, ...(vtCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log' }] : [])];
+  const tabs = [{ key: 'general', label: 'Settings' }, { key: 'categories', label: 'Categories' }, { key: 'teams', label: 'Teams & reporting' }, ...(vtCan(me, 'audit') ? [{ key: 'audit', label: 'Audit log', description: 'A record of who changed what, and when.' }] : [])];
   return (
     <div className="mt-4 space-y-4">
       <SectionTabs tabs={tabs} value={tab} onChange={setTab} />

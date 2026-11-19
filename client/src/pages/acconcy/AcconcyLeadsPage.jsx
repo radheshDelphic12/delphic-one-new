@@ -13,6 +13,7 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import { Area, DateInput, Detail, Money, Num, Section, Select, Text, card, dayOf, today, toBody } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const KINDS = [{ value: 'call', label: 'Call' }, { value: 'meeting', label: 'Meeting' }, { value: 'visit', label: 'Visit' }, { value: 'note', label: 'Note' }];
 const NUMS = ['expected_amount', 'expected_revenue', 'expected_profit'];
@@ -242,7 +243,7 @@ export default function AcconcyLeadsPage() {
     }
   }
   async function remove() {
-    if (!window.confirm(`Delete ${lead.name}?`)) return;
+    if (!await confirmAction(`Delete ${lead.name}?`)) return;
     try {
       await acconcyApi.deleteLead(lead.id);
       setDrawer(null);

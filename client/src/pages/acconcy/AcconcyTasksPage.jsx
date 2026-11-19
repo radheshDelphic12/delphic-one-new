@@ -12,6 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, DateInput, Section, Select, Text, toBody } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const FIELDS = ['title', 'task_type', 'deal_id', 'party_id', 'assignee_id', 'contractor_id', 'due_date', 'priority', 'status', 'description', 'notes'];
 
@@ -96,7 +97,7 @@ export default function AcconcyTasksPage() {
     try { await acconcyApi.updateTask(t.id, { status }); load(); } catch (e) { pushError(acconcyError(e, 'Could not update'), 'Could not update'); }
   }
   async function remove(t) {
-    if (!window.confirm(`Delete task ${t.code}?`)) return;
+    if (!await confirmAction(`Delete task ${t.code}?`)) return;
     try { await acconcyApi.deleteTask(t.id); load(); } catch (e) { pushError(acconcyError(e, 'Could not delete'), 'Delete failed'); }
   }
 

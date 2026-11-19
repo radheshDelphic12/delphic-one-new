@@ -5,6 +5,8 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import { inputCls, labelCls, th, td, useSave } from '../delphicone/ui.jsx';
 import CustomerDeleteDrawer from '../delphicone/CustomerDeleteDrawer.jsx';
 import PasswordResultDrawer from '../delphicone/PasswordResultDrawer.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../../components/ui/EmailLink.jsx';
 
 // SaaS platform administration (SaaS launch plan, phase 1.4). Only people on the platform-admin list get past the first call; everyone else sees a
 // short "not available" message. Everything on the product's catalogue is edited here: modules, what each needs, dated price books, the numbers
@@ -171,7 +173,7 @@ function RouteMap() {
               <td className={td}><select className={inputCls} aria-label={`Module of ${r.path_prefix}`} value={r.module_code} onChange={(e) => put({ path_prefix: r.path_prefix, module_code: e.target.value, menu_prefix: r.menu_prefix, active: r.active }, 'Saved')}>{mods.modules.map((m) => <option key={m.code} value={m.code}>{m.code}</option>)}</select></td>
               <td className={`${td} font-mono text-xs`}>{r.menu_prefix || '-'}</td>
               <td className={td}><input type="checkbox" checked={r.active} aria-label={`On ${r.path_prefix}`} onChange={(e) => put({ path_prefix: r.path_prefix, module_code: r.module_code, menu_prefix: r.menu_prefix, active: e.target.checked }, 'Saved')} /></td>
-              <td className={td}><button type="button" className="btn-secondary text-xs" onClick={async () => { if (window.confirm(`Remove ${r.path_prefix} from the mapping? It will then be open to everyone.`) && await save(() => apiClient.delete(`/platform/route-modules/${r.id}`), 'Removed', 'Could not remove')) reload(); }}>Remove</button></td>
+              <td className={td}><button type="button" className="btn-secondary text-xs" onClick={async () => { if (await confirmAction(`Remove ${r.path_prefix} from the mapping? It will then be open to everyone.`) && await save(() => apiClient.delete(`/platform/route-modules/${r.id}`), 'Removed', 'Could not remove')) reload(); }}>Remove</button></td>
             </tr>
           ))}</tbody>
         </table>
@@ -187,7 +189,7 @@ function Switches() {
   if (rows === false) return <p className="text-sm text-tertiary-500">The switches could not be loaded.</p>;
   const flip = async (s) => {
     const next = !s.on;
-    if (!window.confirm(`Turn "${s.label}" ${next ? 'ON' : 'OFF'}?\n\n${s.help}\n\nThis is recorded in the audit trail.`)) return;
+    if (!await confirmAction(`Turn "${s.label}" ${next ? 'ON' : 'OFF'}?\n\n${s.help}\n\nThis is recorded in the audit trail.`)) return;
     const r = await save(() => apiClient.put(`/platform/switches/${s.name}`, { on: next, confirm: true }), `${s.label} is now ${next ? 'on' : 'off'}`, 'Could not change the switch');
     if (r) reload();
   };
@@ -229,7 +231,7 @@ function Customers({ canDelete }) {
   const [shown, setShown] = useState(null);
   const save = useSave();
   const resetAdmin = async (c) => {
-    if (!window.confirm(`Reset the admin password of ${c.name}? A new password is shown once and their earlier sign-ins end.`)) return;
+    if (!await confirmAction(`Reset the admin password of ${c.name}? A new password is shown once and their earlier sign-ins end.`)) return;
     const r = await save(() => apiClient.post(`/platform/customers/${c.id}/reset-admin-password`, {}), null, 'Could not reset the admin password');
     if (r) setShown(r.data.data);
   };
@@ -267,7 +269,7 @@ function Orders() {
   const record = async (o) => {
     const p = pay[o.id] || {};
     const amount = Number(p.amount || o.total);
-    if (!window.confirm(`Record a payment of Rs ${amount.toLocaleString('en-IN')} against ${o.order_no}? When the order is fully paid the credit days are added and the GST invoice is raised.`)) return;
+    if (!await confirmAction(`Record a payment of Rs ${amount.toLocaleString('en-IN')} against ${o.order_no}? When the order is fully paid the credit days are added and the GST invoice is raised.`)) return;
     const r = await save(() => apiClient.post(`/platform/orders/${o.id}/payments`, { amount, method: 'bank_transfer', reference: p.reference || undefined, idempotency_key: `ui-${o.id}-${Date.now()}` }), 'Payment recorded', 'Could not record the payment');
     if (r) { setPay((x) => ({ ...x, [o.id]: undefined })); reload(); }
   };
@@ -300,7 +302,7 @@ function Orders() {
                 <span className="flex items-center gap-2">
                   <input type="number" min="1" className={inputCls} aria-label={`Amount for ${o.order_no}`} placeholder={String(o.total)} value={pay[o.id]?.amount || ''} onChange={(e) => setPay((x) => ({ ...x, [o.id]: { ...x[o.id], amount: e.target.value } }))} />
                   <button type="button" className="btn-primary text-xs" onClick={() => record(o)}>Record payment</button>
-                  <button type="button" className="btn-secondary text-xs" onClick={async () => { if (window.confirm(`Cancel ${o.order_no}?`) && await save(() => apiClient.post(`/platform/orders/${o.id}/cancel`), 'Cancelled', 'Could not cancel')) reload(); }}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={async () => { if (await confirmAction(`Cancel ${o.order_no}?`) && await save(() => apiClient.post(`/platform/orders/${o.id}/cancel`), 'Cancelled', 'Could not cancel')) reload(); }}>Cancel</button>
                 </span>
               )}</td>
             </tr>
@@ -328,7 +330,7 @@ function Admins() {
       <form onSubmit={add} className="flex items-end gap-3"><label className={labelCls}>Add by email<input required type="email" className={inputCls} aria-label="Admin email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><button type="submit" className="btn-primary">Add</button></form>
       <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100 bg-white">
         {data.admins.map((a) => (
-          <li key={a.id} className="flex items-center justify-between px-4 py-2 text-sm"><span>{a.name} <span className="text-tertiary-500">{a.email}</span></span>
+          <li key={a.id} className="flex items-center justify-between px-4 py-2 text-sm"><span>{a.name} <span className="text-tertiary-500"><EmailLink email={a.email} /></span></span>
             <button type="button" className="btn-secondary text-xs" onClick={async () => { if (await save(() => apiClient.delete(`/platform/admins/${a.id}`), 'Removed', 'Could not remove')) reload(); }}>Remove</button></li>
         ))}
         {data.env_emails.map((e) => <li key={e} className="px-4 py-2 text-sm text-tertiary-500">{e} <span className="text-xs">(named in the server settings)</span></li>)}

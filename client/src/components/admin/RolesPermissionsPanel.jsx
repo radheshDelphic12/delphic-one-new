@@ -4,6 +4,8 @@ import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Pill from '../ui/Pill.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
+import EmailLink from '../ui/EmailLink.jsx';
 
 const inputCls = 'mt-1 block w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -57,7 +59,7 @@ function Editor({ role, catalog, onSaved, onDeleted }) {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete the role "${role.name}"?`)) return;
+    if (!await confirmAction(`Delete the role "${role.name}"?`)) return;
     try {
       await apiClient.delete(`/roles/${role.id}`);
       pushSuccess('Role deleted');
@@ -120,7 +122,7 @@ function People({ role, people, onChanged }) {
       <ul className="divide-y divide-tertiary-100 text-sm">
         {members.map((m) => (
           <li key={m.org_membership_id} className="flex items-center justify-between py-1.5">
-            <span>{m.name} <span className="text-xs text-tertiary-500">{m.email}</span></span>
+            <span>{m.name} <span className="text-xs text-tertiary-500"><EmailLink email={m.email} /></span></span>
             <button type="button" className="text-xs text-danger-600 hover:underline" onClick={() => assign(m.org_membership_id, null)}>Remove</button>
           </li>
         ))}
@@ -166,7 +168,7 @@ function Mapping({ onApplied }) {
   const toggle = (id, role) => setTicked((t) => { const n = { ...t }; if (n[id]) delete n[id]; else n[id] = role; return n; });
   const assignments = Object.entries(ticked).map(([org_membership_id, role_name]) => ({ org_membership_id, role_name }));
   async function apply() {
-    if (!window.confirm(`Give ${assignments.length} people their new role? Everyone else keeps their current access.`)) return;
+    if (!await confirmAction(`Give ${assignments.length} people their new role? Everyone else keeps their current access.`)) return;
     try {
       await apiClient.post('/roles/mapping-apply', { assignments });
       pushSuccess('Roles applied');

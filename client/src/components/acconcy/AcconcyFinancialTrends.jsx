@@ -8,6 +8,7 @@ import { acconcyApi, acconcyError } from '../../lib/acconcy/api.js';
 import { chartTooltipStyle } from '../../lib/chartTheme.js';
 import { compact, shortMonth } from '../../lib/format.js';
 import ChartCard from '../ui/ChartCard.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 export const AX_CHART = { revenue: '#4F8A6B', profit: '#3F4B52', valuation: '#B08D3C', grid: '#E5E0D2' };
 
@@ -75,7 +76,7 @@ export default function AcconcyFinancialTrends({ canClose }) {
       reason = window.prompt(`Reopen ${r.label}? Give a reason (required):`);
       if (reason === null) return;
       if (!reason.trim()) { pushError('A reason is required to reopen a month', 'Not reopened'); return; }
-    } else if (!window.confirm(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;
+    } else if (!await confirmAction(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;
     setLockBusy(r.month);
     try {
       if (r.closed) await acconcyApi.reopenMonth(r.month, { reason: reason.trim() });

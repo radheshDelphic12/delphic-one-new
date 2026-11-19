@@ -11,6 +11,7 @@ import { useUserOptions } from '../../lib/lookups.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import ScreeningFields, { emptyScreening, screeningPayload, NOTICE_CHOICES, JOINER_LABEL, WORK_MODE_LABEL } from '../../components/applicants/ScreeningFields.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -116,14 +117,14 @@ async function downloadCv(a) {
   URL.revokeObjectURL(url);
 }
 
-const dash = (v) => (v == null || v === '' ? '—' : v);
+const dash = (v) => (v == null || v === '' ? 'ï¿½' : v);
 
 /** A read-only look at everything the candidate told us, so a recruiter can judge the application before creating a Profile. */
 function ApplicantDetailsDrawer({ applicant: a, onClose }) {
   const rows = a ? [
     ['Email', a.email], ['Phone', a.phone], ['Experience', a.experience_years != null ? `${a.experience_years} yrs` : null],
-    ['Applied for', [a.job_code, a.requirement_title, a.client].filter(Boolean).join(' · ')],
-    ['Applied', `${ago(a.applied_at)} · ${a.channel || a.source || ''}`],
+    ['Applied for', [a.job_code, a.requirement_title, a.client].filter(Boolean).join(' ï¿½ ')],
+    ['Applied', `${ago(a.applied_at)} ï¿½ ${a.channel || a.source || ''}`],
     ['Joiner status', a.joiner_status ? JOINER_LABEL[a.joiner_status] : null],
     ['Notice period', a.notice_period_days == null ? null : a.notice_period_days === 0 ? 'No notice' : `${a.notice_period_days} days`],
     ['Last working day', a.last_working_day ? String(a.last_working_day).slice(0, 10) : null],
@@ -222,8 +223,8 @@ export default function ApplicantPoolBoard() {
   }
 
   // "Unlink from job" keeps the Profile; Delete is a soft delete (a group super admin can restore it from Logs).
-  function unlinkFromJob(a) {
-    if (!window.confirm(`Unlink ${a.name} from "${a.requirement_title}"? They leave your candidates for this job; their Profile is kept.`)) return;
+  async function unlinkFromJob(a) {
+    if (!await confirmAction(`Unlink ${a.name} from "${a.requirement_title}"? They leave your candidates for this job; their Profile is kept.`)) return;
     act(a.id, 'unlink', `${a.name} is unlinked from the job`);
   }
   // "Reject" only categorises: the person leaves Pool / My candidates / All and is listed under Rejected (nothing else is touched).
@@ -241,7 +242,7 @@ export default function ApplicantPoolBoard() {
   const canReject = (a) => ['new', 'assigned'].includes(a.status) && (a.status === 'new' ? canWork : (adminLike || a.assigned_to?.id === user?.id));
   const canRestore = (a) => a.status === 'rejected' && (adminLike || a.rejected_by?.id === user?.id);
   async function deleteApplicant(a) {
-    if (!window.confirm(`Delete ${a.name} from "${a.requirement_title}"? They disappear from the lists. A group super admin can restore them from Group Dashboard > Logs.`)) return;
+    if (!await confirmAction(`Delete ${a.name} from "${a.requirement_title}"? They disappear from the lists. A group super admin can restore them from Group Dashboard > Logs.`)) return;
     setBusy(a.id);
     try { await apiClient.delete(`/applicants/${a.id}`); pushSuccess(`${a.name} was deleted`); } catch (e) { pushError(apiErrorMessage(e, 'Could not delete'), 'Not deleted'); } finally { setBusy(''); refresh(); }
   }

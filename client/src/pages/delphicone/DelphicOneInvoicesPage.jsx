@@ -9,6 +9,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 import { inputCls, labelCls, th, thr, td, tdr, rupees, today, Tile, useLoad, useSave } from './ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const FILTERS = [['', 'All'], ['open', 'Unpaid'], ['overdue', 'Overdue'], ['followup_due', 'Follow-up due'], ['no_due_date', 'No due date'], ['paid', 'Paid']];
 const STATUS = { unpaid: ['amber', 'Unpaid'], part_paid: ['blue', 'Part paid'], paid: ['green', 'Paid'], draft: ['gray', 'Draft'], cancelled: ['gray', 'Cancelled'] };
@@ -60,7 +61,7 @@ function PaymentDrawer({ invoice, onClose, onChanged }) {
     if (r) { reload(); onChanged(); onClose(); }
   }
   async function remove(p) {
-    if (!window.confirm('Remove this payment?')) return;
+    if (!await confirmAction('Remove this payment?')) return;
     const r = await save(() => doxApi.removePayment(invoice.id, p.id), 'Payment removed', 'Could not remove the payment');
     if (r) { reload(); onChanged(); }
   }

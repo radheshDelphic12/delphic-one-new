@@ -13,6 +13,7 @@ import { ProgressBar } from './PmProjectsPage.jsx';
 import TicketPanel from './TicketPanel.jsx';
 import { FieldsTab, SharingTab } from './PmProjectSettingsTabs.jsx';
 import PmReleasesTab from './PmReleasesTab.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const INPUT = 'rounded-xl border px-3 py-2 text-sm';
 const CONTRACT_STATE_LABEL = { running: 'Running', not_started: 'Not started', about_to_end: 'About to end', on_hold: 'On hold', completed: 'Completed' };
@@ -177,7 +178,7 @@ function ContractsTab({ project, isManager, reload }) {
                 {project.can_manage && (
                   <div className="flex gap-1">
                     {!c.is_primary && <button type="button" title="Make primary" className="rounded p-1 text-tertiary-500 hover:bg-primary-50" onClick={() => act(() => pmApi.makePrimary(project.id, c.contract_id), 'Primary contract changed')}><Star className="h-4 w-4" /></button>}
-                    <button type="button" title="Unlink" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => window.confirm('Unlink this contract? Its tickets stay, just untagged.') && act(() => pmApi.unlinkContract(project.id, c.contract_id), 'Contract unlinked')}><Unlink className="h-4 w-4" /></button>
+                    <button type="button" title="Unlink" className="rounded p-1 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={async () => await confirmAction('Unlink this contract? Its tickets stay, just untagged.') && act(() => pmApi.unlinkContract(project.id, c.contract_id), 'Contract unlinked')}><Unlink className="h-4 w-4" /></button>
                   </div>
                 )}
               </div>
@@ -186,7 +187,7 @@ function ContractsTab({ project, isManager, reload }) {
                 <div><div className="mb-1 text-xs text-tertiary-500">From tickets ({c.ticket_progress.done} of {c.ticket_progress.total} done{c.ticket_progress.overdue ? `, ${c.ticket_progress.overdue} overdue` : ''})</div><ProgressBar percent={c.ticket_progress.percent} /><div className="mt-1 text-xs">{c.ticket_progress.percent}%</div></div>
               </div>
               {isManager && c.manual_progress_percent !== null && c.ticket_progress.percent !== c.manual_progress_percent && (
-                <button type="button" className="mt-3 text-xs text-primary-700 hover:underline" onClick={() => window.confirm(`Set the contract's own progress to ${c.ticket_progress.percent}%?`) && act(() => pmApi.copyProgress(project.id, c.contract_id), 'Contract progress updated')}>Use the ticket figure ({c.ticket_progress.percent}%) as the contract&apos;s progress</button>
+                <button type="button" className="mt-3 text-xs text-primary-700 hover:underline" onClick={async () => await confirmAction(`Set the contract's own progress to ${c.ticket_progress.percent}%?`) && act(() => pmApi.copyProgress(project.id, c.contract_id), 'Contract progress updated')}>Use the ticket figure ({c.ticket_progress.percent}%) as the contract&apos;s progress</button>
               )}
             </section>
           ))}
@@ -249,7 +250,7 @@ export default function PmProjectDetailPage() {
         </div>
         <div className="flex gap-2">
           {project.can_manage && <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm" onClick={() => setEdit(true)}><Pencil className="h-4 w-4" />Edit project</button>}
-          {meta.is_manager && <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border border-danger-200 px-3 py-2 text-sm text-danger-600 hover:bg-danger-50" onClick={async () => { if (!window.confirm('Delete this project with all its tickets? This cannot be undone.')) return; try { await pmApi.deleteProject(id); pushSuccess('Project deleted'); navigate('/pm'); } catch (e) { pushError(pmError(e, 'Could not delete'), 'Failed'); } }}><Trash2 className="h-4 w-4" />Delete</button>}
+          {meta.is_manager && <button type="button" className="inline-flex items-center gap-1.5 rounded-xl border border-danger-200 px-3 py-2 text-sm text-danger-600 hover:bg-danger-50" onClick={async () => { if (!await confirmAction('Delete this project with all its tickets? This cannot be undone.')) return; try { await pmApi.deleteProject(id); pushSuccess('Project deleted'); navigate('/pm'); } catch (e) { pushError(pmError(e, 'Could not delete'), 'Failed'); } }}><Trash2 className="h-4 w-4" />Delete</button>}
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-4">

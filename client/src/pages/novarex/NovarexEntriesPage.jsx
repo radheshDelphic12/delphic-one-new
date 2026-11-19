@@ -15,6 +15,7 @@ import NxFilterBar, { useNxFilters } from '../../components/novarex/NxFilters.js
 import EntryDrawer from '../../components/novarex/EntryDrawer.jsx';
 import { CategoryChart, ExpenseTrendChart, IncomeChart, VT_PIE } from '../../components/novarex/NxCharts.jsx';
 import { Kpi, Money, card, withReason } from '../../components/novarex/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const PAGES = {
   income: { kind: 'income', cap: 'entries', title: 'Revenue & Returns', add: 'Record revenue', searchPlaceholder: 'Search buyer, reference, notes...', filter: 'income_category_id', empty: 'No revenue recorded for these filters.' },
@@ -47,7 +48,7 @@ export default function NovarexEntriesPage({ type }) {
   const close = () => { setDrawer({ open: false, entry: null }); if (params.get('new')) { params.delete('new'); setParams(params, { replace: true }); } };
   const refresh = () => { load(); dash.refresh(); returns.refresh(); pickers.refresh(); };
   async function remove(entry) {
-    if (!window.confirm('Delete this entry?')) return;
+    if (!await confirmAction('Delete this entry?')) return;
     try { await withReason((reason) => nxApi.deleteEntry(entry.id, reason)); refresh(); } catch (e) { pushError(novarexError(e, 'Could not delete'), 'Not deleted'); }
   }
   const s = data?.summary;
