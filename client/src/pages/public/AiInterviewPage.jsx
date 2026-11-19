@@ -79,6 +79,10 @@ export default function AiInterviewPage() {
   const timedOutForRef = useRef(null); // the question turn already auto-submitted by the timer
   const textRef = useRef('');
   useEffect(() => { textRef.current = text; }, [text]);
+  // What the answer box holds right now while the candidate is speaking. Speech results write it at once, because the state above is
+  // a render behind: a session that ends right after a result would otherwise restart from stale text and drop the last words.
+  const liveTextRef = useRef('');
+  useEffect(() => { if (!wantListenRef.current) liveTextRef.current = text; }, [text]);
   const viewRef = useRef(null); // the latest view, for code that runs later (timers, retries)
   const busyRef = useRef(false);
   const questionRef = useRef(null);
@@ -425,10 +429,14 @@ export default function AiInterviewPage() {
     rec.lang = 'en-IN';
     rec.continuous = true;
     rec.interimResults = true;
+    rec.maxAlternatives = 1;
     rec.onresult = (e) => {
+      if (recRef.current !== rec) return; // a finished session's late result must not overwrite the current one
       let spoken = '';
       for (let i = 0; i < e.results.length; i += 1) spoken += e.results[i][0].transcript;
-      setText(baseTextRef.current + spoken);
+      const next = baseTextRef.current + spoken;
+      liveTextRef.current = next;
+      setText(next);
       setSpeechNote('');
     };
     rec.onerror = (e) => {
@@ -439,14 +447,33 @@ export default function AiInterviewPage() {
       setSpeechNote(SPEECH_PROBLEMS[code] || 'Speech to text stopped working. Press Speak again.');
     };
     rec.onend = () => {
+      if (recRef.current !== rec) return; // an old session ending after a newer one has started
       if (wantListenRef.current && !busyRef.current) {
-        baseTextRef.current = `${(textRef.current || '').trim()} `.trimStart();
-        try { startRecognition(); return; } catch { /* fall through to stopped */ }
+        // The browser ends a session after a pause (or a long silence). Carry on from everything said so far, and start listening again
+        // straight away; if the browser is not ready yet, try again a moment later instead of giving up and losing the rest of the answer.
+        baseTextRef.current = `${(liveTextRef.current || '').trim()} `.trimStart();
+        restartRecognition(0);
+        return;
       }
       setListening(false);
     };
     recRef.current = rec;
     rec.start();
+  }
+
+  function restartRecognition(attempt) {
+    if (!wantListenRef.current || busyRef.current) { setListening(false); return; }
+    try {
+      startRecognition();
+    } catch {
+      if (attempt < 6) {
+        setTimeout(() => restartRecognition(attempt + 1), 120 * (attempt + 1));
+        return;
+      }
+      wantListenRef.current = false;
+      setListening(false);
+      setSpeechNote('Speech to text stopped. Your answer so far is kept. Press Speak again to continue.');
+    }
   }
 
   function toggleListening() {
