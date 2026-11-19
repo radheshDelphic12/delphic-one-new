@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { requirementScopeWhere } = require('../access/requirementScope');
+const ownerHistory = require('../accounts/ownerHistory');
 
 const REQUIREMENT_STATUSES = ['open', 'in_progress', 'on_hold', 'closed', 'dropped'];
 const SUBMISSION_STAGES = [
@@ -84,7 +85,7 @@ function buildRequirementWhere(scopeWhere, filters) {
 
   if (filters.account_id) where.account_id = filters.account_id;
   if (filters.sales_id) where.sales_owner_id = filters.sales_id;
-  if (filters.bda_id) where.account = { ...(where.account || {}), owner_id: filters.bda_id };
+  // (the BDA / client POC filter is applied by the pipeline explorer after the rows are read: it needs the owner on the requirement's date)
   if (filters.department_id) {
     where.sales_owner = { ...(where.sales_owner || {}), department_id: filters.department_id };
   }
@@ -213,7 +214,7 @@ async function pipelineExplorer(user, filters = {}) {
   const scopeWhere = await requirementScopeWhere(user);
   const where = buildRequirementWhere(scopeWhere, filters);
 
-  const requirementRows = await prisma.requirement.findMany({
+  const fetchedRequirements = await prisma.requirement.findMany({
     where,
     include: {
       account: {
@@ -221,6 +222,7 @@ async function pipelineExplorer(user, filters = {}) {
           id: true,
           name: true,
           stage: true,
+          owner_id: true,
           owner: { select: { id: true, name: true } },
         },
       },
@@ -233,6 +235,17 @@ async function pipelineExplorer(user, filters = {}) {
     },
     orderBy: { created_at: 'desc' },
   });
+
+  // The BDA / client POC of a row is the owner the client had on the day the requirement was raised, so a later change of POC does
+  // not rewrite earlier rows (and filtering by a person finds the rows they actually held).
+  const timelines = await ownerHistory.loadTimelines(fetchedRequirements.map((row) => row.account_id));
+  const ownerIdOf = (row) => ownerHistory.ownerOn(timelines.get(row.account_id), ownerHistory.istDay(row.created_at), row.account?.owner_id || null);
+  const ownerNameIds = [...new Set(fetchedRequirements.map(ownerIdOf).filter(Boolean))];
+  const ownerUsers = ownerNameIds.length ? await prisma.user.findMany({ where: { id: { in: ownerNameIds } }, select: { id: true, name: true } }) : [];
+  const ownerById = new Map(ownerUsers.map((u) => [u.id, u]));
+  const requirementRows = fetchedRequirements
+    .map((row) => (row.account ? { ...row, account: { ...row.account, owner: ownerById.get(ownerIdOf(row)) || row.account.owner } } : row))
+    .filter((row) => !filters.bda_id || ownerIdOf(row) === filters.bda_id);
 
   const seatIds = requirementRows.flatMap((row) => row.seats.map((seat) => seat.id));
   const submissionRows = seatIds.length

@@ -3,6 +3,7 @@ const { decide } = require('../../lib/permissions');
 const { notify, accountParticipants, admins } = require('../../lib/notifications');
 const { STUCK_THRESHOLD_DAYS } = require('../../config/constants');
 const { projectListWhere } = require('../../lib/projectScope');
+const ownerHistory = require('./ownerHistory');
 
 const STUCK_LEAD_STAGES = ['lead', 'meeting_scheduled', 'rescheduled'];
 const stuckLeadCutoff = () => new Date(Date.now() - STUCK_THRESHOLD_DAYS * 86400000);
@@ -192,27 +193,49 @@ async function logActivity(userId, accountId, action, reason, snapshot = {}) {
   await prisma.auditLog.create({ data: { actor_id: userId, action, entity_type: 'account', entity_id: accountId, reason, snapshot } });
 }
 
+// Who the owner (POC) was, newest first: who, and from which day.
+async function ownerHistoryOf(accountId) {
+  const account = await prisma.account.findUnique({ where: { id: accountId }, select: { id: true } });
+  if (!account) return null;
+  const rows = await prisma.accountOwnerHistory.findMany({ where: { account_id: accountId }, orderBy: { effective_from: 'desc' } });
+  const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.owner_id))] } }, select: { id: true, name: true } });
+  const name = new Map(users.map((u) => [u.id, u.name]));
+  return rows.map((r) => ({ owner: { id: r.owner_id, name: name.get(r.owner_id) || 'Unknown' }, effective_from: r.effective_from.toISOString().slice(0, 10) }));
+}
+
 async function create(data, ownerId) {
-  const row = await prisma.account.create({
-    // origin_owner_id is the immutable "brought by" — same as the first owner, never updated after.
-    data: { ...data, owner_id: ownerId, origin_owner_id: ownerId },
-    include: ACCOUNT_INCLUDE,
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.account.create({
+      // origin_owner_id is the immutable "brought by" — same as the first owner, never updated after.
+      data: { ...data, owner_id: ownerId, origin_owner_id: ownerId },
+      include: ACCOUNT_INCLUDE,
+    });
+    await ownerHistory.recordFirstOwner(tx, { accountId: created.id, ownerId, actorId: ownerId });
+    return created;
   });
   await logActivity(ownerId, row.id, 'create', 'Added this account', { name: row.name, stage: row.stage });
   return serialize(row);
 }
 
-async function update(id, patch, user) {
+async function update(id, rawPatch, user) {
+  // owner_effective_from is not a column: it only dates an owner change
+  const { owner_effective_from: ownerEffectiveFrom, ...patch } = rawPatch;
   const existing = await prisma.account.findUnique({ where: { id } });
   if (!existing) return { error: 'not_found' };
   if (existing.is_project) return { error: 'is_project' };
   if (!canMutateAccount(existing, user)) return { error: 'forbidden' };
 
-  if (patch.owner_id && patch.owner_id !== existing.owner_id) {
+  const ownerChanging = Boolean(patch.owner_id && patch.owner_id !== existing.owner_id);
+  let ownerEffective = null;
+  if (ownerChanging) {
     // Anyone who can edit the account may reassign the owner. The owner is just the
     // current POC from our end — any active user of any role is a valid target.
     const target = await prisma.user.findUnique({ where: { id: patch.owner_id } });
     if (!target || !target.active) return { error: 'user_not_found' };
+    // The new owner holds the account from this day: reports keep the previous owner for earlier days. Not before the account existed,
+    // and not in the future (the current owner is always the latest one on record).
+    ownerEffective = ownerEffectiveFrom || ownerHistory.istToday();
+    if (!ownerHistory.isDay(ownerEffective) || ownerEffective > ownerHistory.istToday() || ownerEffective < ownerHistory.istDay(existing.created_at)) return { error: 'bad_effective_date' };
   }
 
   if ('origin_owner_id' in patch) {
@@ -236,12 +259,19 @@ async function update(id, patch, user) {
     delete data.type;
   }
 
-  const row = await prisma.account.update({
-    where: { id },
-    data,
-    include: ACCOUNT_INCLUDE,
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.account.update({
+      where: { id },
+      data,
+      include: ACCOUNT_INCLUDE,
+    });
+    if (ownerChanging) {
+      await ownerHistory.setOwnerFrom(tx, { accountId: id, ownerId: patch.owner_id, effectiveFrom: ownerEffective, previousOwnerId: existing.owner_id, createdAt: existing.created_at, actorId: user.id });
+    }
+    return updated;
   });
   const changes = changedFields(existing, row, data);
+  if (ownerChanging) changes['owner effective from'] = { from: null, to: ownerEffective };
   if (Object.keys(changes).length) await logActivity(user.id, id, 'update', `Edited ${Object.keys(changes).join(', ')}`, { changes });
   return { account: serialize(row) };
 }
@@ -496,6 +526,7 @@ module.exports = {
   list,
   listSpecializations,
   getById,
+  ownerHistoryOf,
   liveProjects,
   getBankDetails,
   create,
