@@ -19,6 +19,7 @@ import Skeleton from './Skeleton.jsx';
  *   selectedIds: Controlled selected id set (array).
  *   onSelectionChange: Called with next selected id array.
  *   actions: [{ key, label, onClick, danger? }] for the floating bar.
+ *   rowSelectable: (row) => boolean. Rows it refuses get a greyed-out checkbox and are left out of "select all" (default: every row).
  */
 export default function DataTable({
   columns,
@@ -27,6 +28,7 @@ export default function DataTable({
   emptyLabel = 'No records found',
   onRowClick,
   selectable = false,
+  rowSelectable = () => true,
   selectedIds = [],
   onSelectionChange,
   actions = [],
@@ -38,7 +40,7 @@ export default function DataTable({
   maxHeight,
 }) {
   const selected = new Set(selectedIds);
-  const allIds = rows.map((r) => r.id);
+  const allIds = rows.filter((r) => rowSelectable(r)).map((r) => r.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   function toggleAll() {
@@ -129,6 +131,7 @@ export default function DataTable({
                         type="checkbox"
                         checked={selected.has(row.id)}
                         onChange={() => toggleOne(row.id)}
+                        disabled={!rowSelectable(row)}
                         aria-label={`Select row ${row.id}`}
                         className="rounded border-tertiary-300 text-primary-600"
                       />
@@ -183,6 +186,7 @@ export default function DataTable({
                       type="checkbox"
                       checked={selected.has(row.id)}
                       onChange={() => toggleOne(row.id)}
+                      disabled={!rowSelectable(row)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`Select row ${row.id}`}
                       className="mt-1 h-4 w-4 shrink-0 rounded border-tertiary-300 text-primary-600"

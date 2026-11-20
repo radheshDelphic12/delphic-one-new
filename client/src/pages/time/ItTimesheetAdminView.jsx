@@ -14,6 +14,7 @@ import { AddTimesheetEntryDrawer, BulkTimesheetDrawer } from './TimesheetBackfil
 import AffectedCalculationsBanner from '../../components/finance/AffectedCalculationsBanner.jsx';
 import ProjectTimesheetDownload from './ProjectTimesheetDownload.jsx';
 import { useProjectOptions } from '../../lib/lookups.js';
+import { confirmAction } from '../../lib/confirmAction.js';
 import { monthWeeks } from '../../lib/timesheetWeeks.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -69,6 +70,9 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
   const range = weeks.find((w) => w.key === weekFilter) || monthRange(period);
   const [drillMember, setDrillMember] = useState(null);
   const [rejecting, setRejecting] = useState(null);
+  // Entries ticked for "Approve selected" / "Reject selected" (only entries still waiting for a decision can be ticked).
+  const [picked, setPicked] = useState([]);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
 
   useEffect(() => {
     apiClient
@@ -149,6 +153,8 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       })
       .then(({ data }) => {
         setEntries(data.data || []);
+        // keep only ticks that are still on screen and still waiting for a decision
+        setPicked((current) => current.filter((id) => (data.data || []).some((e) => e.id === id && e.status === 'submitted')));
         setTotal(data.pagination?.total ?? 0);
         setFilteredTotals(data.totals || null);
       })
@@ -169,6 +175,26 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
       loadOverview();
     } catch (err) {
       pushError(apiErrorMessage(err, 'Failed to record the decision'), 'Something went wrong');
+      throw err;
+    }
+  }
+
+  // Approve or reject every ticked entry in one go (the same rules as one by one: a reject needs a reason; the server skips what is already decided).
+  async function decideMany(status, reason) {
+    const ids = picked.filter((id) => entries.some((e) => e.id === id && e.status === 'submitted'));
+    if (!ids.length) return;
+    if (status === 'approved' && !(await confirmAction(`Approve ${ids.length} timesheet entr${ids.length === 1 ? 'y' : 'ies'}?`, { confirmLabel: 'Approve' }))) return;
+    try {
+      const { data } = await apiClient.post('/timesheets/approvals/bulk', { entries: ids, status, ...(reason ? { reason } : {}) });
+      const { approved, failed } = data.data;
+      const verb = status === 'approved' ? 'approved' : 'rejected';
+      if (failed.length) pushError(`${approved} ${verb}; ${failed.length} could not be ${verb} (already decided, a locked day, or not allowed).`, 'Some entries were skipped');
+      else pushSuccess(`${approved} entr${approved === 1 ? 'y' : 'ies'} ${verb}`);
+      setPicked([]);
+      loadEntries();
+      loadOverview();
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to record the decisions'), 'Something went wrong');
       throw err;
     }
   }
@@ -331,7 +357,20 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         {!entriesLoading && entries.length === 0 ? (
           <EmptyState icon={ClipboardList} title="No entries for this period" description="Nothing matches these filters yet." />
         ) : (
-          <DataTable columns={entryColumns} rows={entries} loading={entriesLoading} emptyLabel="No entries." />
+          <DataTable
+            columns={entryColumns}
+            rows={entries}
+            loading={entriesLoading}
+            emptyLabel="No entries."
+            selectable
+            rowSelectable={(row) => row.status === 'submitted'}
+            selectedIds={picked}
+            onSelectionChange={setPicked}
+            actions={[
+              { key: 'approve', label: 'Approve selected', onClick: () => decideMany('approved') },
+              { key: 'reject', label: 'Reject selected', danger: true, onClick: () => setBulkRejecting(true) },
+            ]}
+          />
         )}
         {totalPages > 1 && (
           <div className="mt-2 flex items-center justify-end gap-2 text-xs text-tertiary-600">
@@ -348,6 +387,13 @@ export default function ItTimesheetAdminView({ scope = 'it' }) {
         subject={rejecting?.org_membership?.person?.name || ''}
         onClose={() => setRejecting(null)}
         onConfirm={(reason) => decideEntry(rejecting.id, 'rejected', reason)}
+      />
+      <RejectReasonModal
+        open={bulkRejecting}
+        title={`Reject ${picked.length} selected entr${picked.length === 1 ? 'y' : 'ies'}`}
+        subject="The same reason is shown to each employee"
+        onClose={() => setBulkRejecting(false)}
+        onConfirm={(reason) => decideMany('rejected', reason)}
       />
       <DrillDownDrawer member={drillMember} period={period} onClose={() => setDrillMember(null)} />
       <AdminEntryDrawer entry={correcting} onClose={() => setCorrecting(null)} onSaved={() => { loadEntries(); loadOverview(); }} />
