@@ -56,7 +56,10 @@ async function orgRowCounts(orgIds) {
   const tables = await prisma.$queryRawUnsafe("SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'org_id' AND table_name NOT LIKE 'saas\\_%' ORDER BY table_name");
   const sql = tables.map((t) => `SELECT '${t.table_name}' AS t, count(*)::int AS n FROM "${t.table_name}" WHERE org_id::text = ANY($1::text[])`).join(' UNION ALL ');
   const rows = await prisma.$queryRawUnsafe(sql, orgIds);
-  return Object.fromEntries(rows.filter((r) => r.n > 0).map((r) => [r.t, r.n]));
+  // A UNION ALL has no guaranteed row order (a parallel plan may return the branches in any order), and these counts go into the hash of the
+  // preview token: the same data must always give the same object, so the rows are put in table-name order. (Without this the token could go
+  // "out of date" between a preview and the delete although nothing had changed.)
+  return Object.fromEntries(rows.filter((r) => r.n > 0).sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)).map((r) => [r.t, r.n]));
 }
 
 // ---- the plan (what a delete or restore would touch) ---------------------------------------------------------------------------
@@ -193,4 +196,4 @@ async function execute(action, input, actorId, { confirm_name: confirmName, toke
   return result;
 }
 
-module.exports = { isOwnerSuperAdmin, preview, execute, resolve };
+module.exports = { isOwnerSuperAdmin, preview, execute, resolve, orgRowCounts };
