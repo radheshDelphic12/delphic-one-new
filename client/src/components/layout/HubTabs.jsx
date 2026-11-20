@@ -30,6 +30,7 @@ export default function HubTabs({ tabs, value, onSelect, onSelectChild, activeCh
   const [topPill, setTopPill] = useState({ left: 0, top: 0, width: 0, height: 0, on: false });
   const moveTop = (el) => setTopPill({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight, on: true });
   const closeTimer = useRef(null);
+  const listRef = useRef(null);
 
   const movePill = (el) => setPill({ left: el.offsetLeft, width: el.offsetWidth, on: true });
   // Left / Right / Home / End move between the sub-pages; Down from the tab itself enters the row
@@ -45,6 +46,12 @@ export default function HubTabs({ tabs, value, onSelect, onSelectChild, activeCh
   };
 
   useEffect(() => () => clearTimeout(closeTimer.current), []);
+  // On a phone the tab bar is a swipe strip: keep the open tab in view.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth >= 640) return;
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [value]);
+
 
   const open = (key, el, rem) => {
     clearTimeout(closeTimer.current);
@@ -72,8 +79,9 @@ export default function HubTabs({ tabs, value, onSelect, onSelectChild, activeCh
   if (modern && tabs.length < 2) return <div aria-hidden="true" className="h-2" />;
   return (
     <div
-      className={modern ? 'relative flex flex-wrap gap-1 rounded-2xl border border-tertiary-100 bg-white p-1.5 shadow-card' : 'relative flex flex-wrap gap-1 border-b border-tertiary-200 pb-2'}
+      className={modern ? 'relative flex flex-wrap gap-1 max-sm:w-0 max-sm:min-w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none] rounded-2xl border border-tertiary-100 bg-white p-1.5 shadow-card' : 'relative flex flex-wrap gap-1 max-sm:w-0 max-sm:min-w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none] border-b border-tertiary-200 pb-2'}
       role="tablist"
+      ref={listRef}
       onMouseLeave={() => setTopPill((p) => ({ ...p, on: false }))}
     >
       <span
@@ -89,7 +97,7 @@ export default function HubTabs({ tabs, value, onSelect, onSelectChild, activeCh
         return (
           <div
             key={key}
-            className={`relative ${isOpen ? 'z-30' : 'z-10'}`}
+            className={`relative max-sm:shrink-0 ${isOpen ? 'z-30' : 'z-10'}`}
             onMouseEnter={(e) => { moveTop(e.currentTarget); if (hasChildren) open(key, e.currentTarget, cardRem(children.length)); }}
             onMouseLeave={hasChildren ? closeSoon : undefined}
             onFocus={(e) => { moveTop(e.currentTarget); if (hasChildren) open(key, e.currentTarget, cardRem(children.length)); }}
@@ -108,7 +116,7 @@ export default function HubTabs({ tabs, value, onSelect, onSelectChild, activeCh
               aria-selected={value === key}
               aria-haspopup={hasChildren ? 'menu' : undefined}
               aria-expanded={hasChildren ? isOpen : undefined}
-              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${value === key ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100' : 'text-tertiary-500 hover:text-primary-700 focus-visible:text-primary-700'}`}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors max-sm:whitespace-nowrap ${value === key ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100' : 'text-tertiary-500 hover:text-primary-700 focus-visible:text-primary-700'}`}
               onClick={(e) => {
                 if (hasChildren && noHover() && !isOpen) { open(key, e.currentTarget.parentElement, cardRem(children.length)); return; }
                 setOpenKey(null);

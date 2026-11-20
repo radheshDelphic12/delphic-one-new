@@ -359,6 +359,36 @@ describe('team availability', () => {
     expect(asReport.body.data.people.map((p) => p.name).sort()).toEqual(['Mid Manager', 'Mid Report A', 'Mid Report B']);
   });
 
+  test('a pending work-from-home request shows as "Applied for WFH", approved turns into Working remotely, rejected disappears', async () => {
+    const ctx = await seed();
+    const boss = await ctx.person('Boss Person');
+    const emp = await ctx.person('Wfh Person', { managerId: boss.membership.id });
+    // a working day in the near future (Tue-Thu, a week or more ahead), so it is never in the past whenever the suite runs
+    const { todayIst } = require('../src/lib/istDate');
+    let probe = new Date(todayIst().getTime() + 7 * 86400000);
+    while (![2, 3, 4].includes(probe.getUTCDay())) probe = new Date(probe.getTime() + 86400000);
+    const day = probe.toISOString().slice(0, 10);
+    const row = await prisma.workPlaceDay.create({ data: { org_id: ctx.org.id, org_membership_id: emp.membership.id, date: new Date(`${day}T00:00:00Z`), work_place: 'home', status: 'pending', reason: 'Plumber visiting' } });
+    const statusOf = async (token = boss.token) => {
+      const res = await get(`/team-status?date=${day}`, token);
+      expect(res.status).toBe(200);
+      return res.body.data.people.find((p) => p.name === 'Wfh Person').days.find((d) => d.date === day);
+    };
+
+    expect(await statusOf()).toMatchObject({ key: 'wfh_pending', label: 'Applied for WFH' }); // the manager sees the request while it waits
+    expect(await statusOf(emp.token)).toMatchObject({ key: 'wfh_pending' }); // and so does the person
+    const res = await get(`/team-status?date=${day}`, boss.token);
+    expect(res.body.data.summary).toMatchObject({ wfh_pending: 1 });
+    expect(JSON.stringify(res.body.data)).not.toMatch(/Plumber/); // the reason is never shown
+
+    await prisma.workPlaceDay.update({ where: { id: row.id }, data: { status: 'approved' } });
+    expect(await statusOf()).toMatchObject({ key: 'remote', label: 'Working remotely' });
+
+    await prisma.workPlaceDay.update({ where: { id: row.id }, data: { status: 'rejected' } });
+    expect((await statusOf()).key).not.toBe('wfh_pending');
+    expect((await statusOf()).key).not.toBe('remote');
+  });
+
   test('someone with no manager and no team sees only themselves; a bad date is refused', async () => {
     const ctx = await seed();
     const solo = await ctx.person('Solo Person');

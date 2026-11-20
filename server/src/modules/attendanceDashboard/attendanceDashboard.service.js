@@ -503,7 +503,7 @@ function availabilityOf(c, { isToday, workedAtSite }) {
 /**
  * Daily availability of the caller's team: themselves, their manager, their direct reports and, only when they have no reports of their own, their teammates (people with the same manager) - no other team. The leave TYPE (Sick, Casual ...) is added only for the person's own manager,
  * the person themselves and an admin; everyone else sees just "On leave". `date` picks the day (default today); the week around it comes along so a week strip can be drawn.
- * An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
+ * A pending work-from-home request shows as "Applied for WFH" (approved: "Working remotely"). An admin may ask for `scope: 'all'` (everyone in the company). Contractors, vendor resources and exited people are left out.
  */
 async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   const todayDate = todayIst();
@@ -540,8 +540,10 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
   const to = dateOnly(week[6]);
 
   // Only what a status needs, in one query each for the whole circle (the full month calendar also loads hours, overtime and project data).
-  const [homeRows, awayBy, attRows, leaveRows] = await Promise.all([
+  const [homeRows, pendingHomeRows, awayBy, attRows, leaveRows] = await Promise.all([
     prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'approved', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
+    // work-from-home requests still waiting for a decision (shown as "Applied for WFH"; the reason is never shown)
+    prisma.workPlaceDay.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to }, status: 'pending', work_place: 'home' }, select: { org_membership_id: true, date: true } }),
     workLocation.awayByPerson(orgId, ids, from, to),
     prisma.attendanceRecord.findMany({ where: { org_id: orgId, org_membership_id: { in: ids }, date: { gte: from, lte: to } }, select: { org_membership_id: true, date: true, status: true } }),
     prisma.leaveRequest.findMany({
@@ -549,6 +551,11 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
       select: { org_membership_id: true, from_date: true, to_date: true, is_half_day: true, leave_type: { select: { name: true } } },
     }),
   ]);
+  const pendingHomeBy = new Map();
+  for (const r of pendingHomeRows) {
+    if (!pendingHomeBy.has(r.org_membership_id)) pendingHomeBy.set(r.org_membership_id, new Set());
+    pendingHomeBy.get(r.org_membership_id).add(ymd(r.date));
+  }
   const homeBy = new Map();
   for (const r of homeRows) {
     if (!homeBy.has(r.org_membership_id)) homeBy.set(r.org_membership_id, new Set());
@@ -577,6 +584,7 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
     const end = lastDay ? ymd(lastDay) : null;
     const workType = workTypeOf(m);
     const homeByDay = homeBy.get(m.id) || new Set();
+    const pendingHomeDays = pendingHomeBy.get(m.id) || new Set();
     const away = awayBy.get(m.id) || new Map();
     const seesLeaveType = isAdmin || m.id === me.id || m.manager_id === me.id; // the person, their own manager, an admin
     const days = week.map((day) => {
@@ -587,7 +595,10 @@ async function teamStatus(orgId, user, { date, scope = 'team' } = {}) {
       const d = { date: day, day_type: info.day_type, day_label: info.label, leaves: onDay.map((l) => ({ name: l.leave_type.name, is_half_day: l.is_half_day })), attendance_status: attBy.get(`${m.id}|${day}`) || null };
       const inEmployment = (!start || day >= start) && (!end || day <= end);
       const c = registerCode(d, { today, inEmployment, workType, homeByDay });
-      const a = availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' });
+      let a = availabilityOf(c, { isToday: day === today, workedAtSite: away.has(day) && c.kind === 'present' });
+      // A work-from-home request that is still pending shows as "Applied for WFH" on today and the days ahead (until it is decided: approved turns into "Working remotely",
+      // which the register already does; a rejected one disappears). Leave, holidays, weekly offs and a day already worked keep their own status.
+      if (pendingHomeDays.has(day) && day >= today && c.kind === 'none' && inEmployment) a = { key: 'wfh_pending', label: 'Applied for WFH' };
       if (a.key === 'leave' && seesLeaveType && c.label && !/not set/i.test(c.label)) a.detail = c.label; // e.g. Sick Leave, Casual Leave (half day)
       return { date: day, ...a };
     });

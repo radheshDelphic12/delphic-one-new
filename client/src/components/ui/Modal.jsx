@@ -31,8 +31,8 @@ export default function Modal({ open, title, onClose, children, footer, wide = f
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4 text-sm">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t px-5 py-3">{footer}</div>}
+        <div className="max-h-[min(70vh,calc(100dvh-11rem))] overflow-y-auto px-5 py-4 text-sm">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t px-5 py-3">{footer}</div>}
       </div>
     </div>
   );

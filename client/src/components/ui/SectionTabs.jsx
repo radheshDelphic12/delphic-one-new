@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SectionHeading from './SectionHeading.jsx';
 
 /**
@@ -12,12 +12,20 @@ export default function SectionTabs({ tabs, value, onChange, className = '' }) {
   const [pill, setPill] = useState({ left: 0, top: 0, width: 0, height: 0, on: false });
   const move = (el) => setPill({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight, on: true });
   const active = tabs.find((t) => t.key === value);
+  const listRef = useRef(null);
+  // On a phone the tab bar is a swipe strip: keep the open tab in view.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth >= 640) return;
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [value]);
+
 
   return (
     <div className="min-w-0">
       <div
-        className={`relative flex flex-wrap gap-1 border-b border-tertiary-200 pb-2 ${className}`}
+        className={`relative flex flex-wrap gap-1 max-sm:w-0 max-sm:min-w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none] border-b border-tertiary-200 pb-2 ${className}`}
         role="tablist"
+        ref={listRef}
         onMouseLeave={() => setPill((p) => ({ ...p, on: false }))}
       >
         <span
@@ -34,7 +42,7 @@ export default function SectionTabs({ tabs, value, onChange, className = '' }) {
             onClick={() => onChange(key)}
             onMouseEnter={(e) => move(e.currentTarget)}
             onFocus={(e) => move(e.currentTarget)}
-            className={`relative z-10 inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${
+            className={`relative z-10 inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors max-sm:shrink-0 max-sm:whitespace-nowrap ${
               value === key ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-100' : 'text-tertiary-500 hover:text-primary-700 focus-visible:text-primary-700'
             }`}
           >

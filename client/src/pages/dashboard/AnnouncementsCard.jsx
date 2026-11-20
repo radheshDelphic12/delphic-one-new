@@ -75,12 +75,14 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
 
   return (
     <li className={item.days_away === 0 ? 'bg-amber-50/60' : ''}>
-      <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
+      <div className="flex items-center gap-3 px-4 py-2.5 text-sm max-sm:flex-wrap max-sm:gap-y-2">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${tone}`}><Icon className="h-4 w-4" /></span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-tertiary-900">{item.name}{item.is_me && <span className="ml-1.5 text-xs font-normal text-tertiary-500">(you)</span>}</span>
           <span className="block truncate text-xs text-tertiary-500">{text}{item.department ? ` · ${item.department}` : ''}</span>
         </span>
+        {/* On phones the name gets the whole first line; the comments, button and date sit together on the second. */}
+        <div className={`ml-auto flex shrink-0 items-center gap-2 ${isToday ? 'max-sm:w-full max-sm:justify-between max-sm:pl-11' : ''}`}>
         {isToday && (
           <span className="flex shrink-0 items-center gap-1">
             {wishes.length > 0 && (
@@ -113,6 +115,7 @@ function Row({ icon: Icon, tone, item, text, kind, onWished }) {
           </span>
         )}
         <span className="shrink-0 text-xs text-tertiary-500">{when(item.days_away)} · {dayMonth(item.date)}</span>
+        </div>
       </div>
       {composing && (
         <div className="mx-4 mb-3 ml-[3.75rem] space-y-2.5 rounded-2xl border border-primary-100 bg-primary-50/40 p-3">

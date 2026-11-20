@@ -4,6 +4,11 @@ import Skeleton from './Skeleton.jsx';
 /**
  * Harmonious data table with optional row click, selection, and floating action bar.
  *
+ * On screens narrower than 1024px (phones and tablets with the side menu open) the table is shown as one card per row instead:
+ * the first column is the card's title, every other column becomes a "label / value" pair, and a column with no header (usually
+ * the row's action buttons) sits at the bottom of the card. The same columns, render functions, row click and selection are used,
+ * so a page needs no change.
+ *
  * Args:
  *   columns: Column defs { key, header, render? }.
  *   rows: Row objects with id.
@@ -53,12 +58,18 @@ export default function DataTable({
     ? [{ key: '_select', header: '', render: null }, ...columns]
     : columns;
 
+  // Phone cards: the first column is the title, columns with a header are label/value pairs, header-less ones are the action row.
+  const hasHeader = (col) => col.header !== undefined && col.header !== null && col.header !== '';
+  const [titleCol, ...restCols] = columns;
+  const fieldCols = restCols.filter(hasHeader);
+  const actionCols = restCols.filter((col) => !hasHeader(col));
+  const cell = (col, row) => (col.render ? col.render(row) : row[col.key]);
+  const frame = embedded ? '' : 'rounded-2xl border border-tertiary-100 shadow-card';
+
   return (
     <>
       <div
-        className={`overflow-x-auto bg-white ${maxHeight ? 'overflow-y-auto overscroll-contain' : ''} ${
-          embedded ? '' : 'rounded-2xl border border-tertiary-100 shadow-card'
-        }`}
+        className={`hidden overflow-x-auto bg-white lg:block ${maxHeight ? 'overflow-y-auto overscroll-contain' : ''} ${frame}`}
         style={maxHeight ? { maxHeight } : undefined}
       >
         <table className="min-w-full divide-y divide-tertiary-100">
@@ -134,10 +145,76 @@ export default function DataTable({
         </table>
       </div>
 
+      {/* Phones and tablets: one card per row. */}
+      <div className="lg:hidden" data-testid="data-cards">
+        {loading && (
+          <ul className={`divide-y divide-tertiary-100 bg-white ${frame}`}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <li key={`card-skeleton-${i}`} className="space-y-2 px-4 py-4">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-1/2" />
+              </li>
+            ))}
+          </ul>
+        )}
+        {!loading && rows.length === 0 && (
+          <p className={`bg-white px-4 py-8 text-center text-sm text-tertiary-400 ${frame}`}>{emptyLabel}</p>
+        )}
+        {!loading && rows.length > 0 && (
+          <ul className={`divide-y divide-tertiary-100 overflow-hidden bg-white ${frame}`}>
+            {selectable && (
+              <li className="flex items-center gap-2 bg-canvas-muted px-4 py-2 text-xs font-medium text-tertiary-600">
+                <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all rows" className="h-4 w-4 rounded border-tertiary-300 text-primary-600" />
+                Select all
+              </li>
+            )}
+            {rows.map((row, rowIndex) => (
+              <li
+                key={row.id}
+                className={`space-y-3 px-4 py-4 ${onRowClick ? 'cursor-pointer active:bg-tertiary-50' : ''} ${
+                  selected.has(row.id) ? 'bg-primary-50/40' : striped && rowIndex % 2 === 1 ? 'bg-canvas-muted/60' : 'bg-white'
+                }`}
+                onClick={() => onRowClick?.(row)}
+              >
+                <div className="flex items-start gap-3">
+                  {selectable && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggleOne(row.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select row ${row.id}`}
+                      className="mt-1 h-4 w-4 shrink-0 rounded border-tertiary-300 text-primary-600"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1 break-words text-sm font-medium text-tertiary-900">{titleCol ? cell(titleCol, row) : null}</div>
+                </div>
+                {fieldCols.length > 0 && (
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
+                    {fieldCols.map((col) => (
+                      <div key={col.key} className="min-w-0">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-tertiary-500">{col.header}</dt>
+                        <dd className="mt-0.5 break-words text-tertiary-800">{cell(col, row) ?? '—'}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {actionCols.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-tertiary-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                    {actionCols.map((col) => <span key={col.key} className="contents">{cell(col, row)}</span>)}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <AnimatePresence>
         {selectable && selected.size > 0 && actions.length > 0 && (
           <motion.div
-            className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-2xl border bg-tertiary-900 px-4 py-2.5 text-sm text-white shadow-drawer"
+            className="fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-2xl border bg-tertiary-900 px-4 py-2.5 text-sm text-white shadow-drawer"
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 24 }}

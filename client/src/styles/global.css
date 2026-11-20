@@ -396,3 +396,56 @@ h3,
 .policy-content table { border-collapse: collapse; margin: 0.5rem 0; }
 .policy-content th, .policy-content td { border: 1px solid #cbd5e1; padding: 0.25rem 0.5rem; }
 .policy-editor:empty::before { content: attr(data-placeholder); color: #94a3b8; }
+
+
+/* ---- Phones (touch screens under 768px): comfortable tap targets and no zoom-on-focus ----
+   Only touch phones are affected; desktop and mouse-driven layouts are unchanged. */
+@media (max-width: 767px) and (pointer: coarse) {
+  /* iOS Safari zooms the whole page when a field smaller than 16px gets focus. */
+  main input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  main select,
+  main textarea,
+  [role='dialog'] input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  [role='dialog'] select,
+  [role='dialog'] textarea {
+    font-size: 16px;
+  }
+
+  /* A finger needs about 40px: raise the small buttons (Edit, Deactivate, Search, filter pills) without touching tabs or icon-only toolbars. */
+  .btn,
+  main button.border:not([role='tab']):not([data-it-act]),
+  main button[class*='rounded-lg']:not([role='tab']):not(.min-h-0),
+  main button[class*='rounded-full']:not([role='tab']):not(.min-h-0),
+  [role='dialog'] button[class*='rounded-lg']:not([role='tab']),
+  main input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  main select {
+    min-height: 2.5rem;
+  }
+
+  /* Tick boxes and radios are a little bigger too. */
+  main input[type='checkbox'],
+  main input[type='radio'] {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+
+  /* Pop-ups and drawers keep a margin from the screen edge. */
+  [role='dialog'] {
+    max-width: 100vw;
+  }
+}
+
+/* Plain tables that are not the shared DataTable: on a phone keep each header on one line so the columns stay readable and the table scrolls sideways
+   inside its box instead of squeezing every column. */
+@media (max-width: 767px) {
+  main table th {
+    white-space: nowrap;
+    /* a hidden "Actions" label (sr-only is position:absolute) must stay inside its header cell, or it widens the whole page */
+    position: relative;
+  }
+
+  /* A rounded card that clips a wide table: let it scroll sideways instead of hiding the columns that do not fit. */
+  main .overflow-hidden:has(> table) {
+    overflow-x: auto;
+  }
+}

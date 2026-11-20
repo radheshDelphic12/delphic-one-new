@@ -13,6 +13,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 const STATUS = {
   present: { label: 'Present', badge: 'bg-green-50 text-green-700 ring-green-200', dot: 'bg-green-500' },
   remote: { label: 'Working remotely', badge: 'bg-sky-50 text-sky-800 ring-sky-200', dot: 'bg-sky-500' },
+  wfh_pending: { label: 'Applied for WFH', badge: 'bg-violet-50 text-violet-800 ring-violet-200', dot: 'bg-violet-400' },
   site: { label: 'At a work site', badge: 'bg-violet-50 text-violet-800 ring-violet-200', dot: 'bg-violet-500' },
   half_day: { label: 'Half day', badge: 'bg-amber-50 text-amber-800 ring-amber-200', dot: 'bg-amber-500' },
   leave: { label: 'On leave', badge: 'bg-blue-50 text-blue-800 ring-blue-200', dot: 'bg-blue-500' },
@@ -21,12 +22,37 @@ const STATUS = {
   off: { label: 'Day off', badge: 'bg-tertiary-100 text-tertiary-600 ring-tertiary-200', dot: 'bg-tertiary-400' },
   none: { label: '-', badge: 'bg-tertiary-50 text-tertiary-400 ring-tertiary-100', dot: 'bg-tertiary-200' },
 };
-const SUMMARY_ORDER = ['present', 'remote', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'];
+const SUMMARY_ORDER = ['present', 'remote', 'wfh_pending', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'];
 const RELATION = { you: 'You', manager: 'Manager', report: 'Reports to you', peer: 'Teammate', team: 'Teammate', colleague: 'Colleague' };
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const shiftDay = (ymd, delta) => new Date(new Date(`${ymd}T00:00:00Z`).getTime() + delta * 86400000).toISOString().slice(0, 10);
 const longDate = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/** The seven days of the week as small status dots; tapping one jumps the page to that day. `wide` = the full-width, bigger tap targets used on phones. */
+function WeekStrip({ person, selected, todayIso, onPick, wide = false }) {
+  return (
+    <div className={wide ? 'grid grid-cols-7 gap-1.5' : 'flex gap-1'}>
+      {person.days.map((d) => {
+        const t = STATUS[d.key] || STATUS.none;
+        const dt = new Date(`${d.date}T00:00:00Z`);
+        return (
+          <button
+            key={d.date}
+            type="button"
+            title={`${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
+            aria-label={`${person.name}, ${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
+            onClick={() => onPick(d.date === todayIso ? null : d.date)}
+            className={`flex flex-col items-center rounded-md border py-1 text-[10px] leading-tight ${wide ? 'min-h-[44px] justify-center' : 'w-9 px-1'} ${d.date === selected ? 'border-primary-400 bg-primary-50' : 'border-tertiary-100 hover:bg-tertiary-50'}`}
+          >
+            <span className="text-tertiary-500">{WEEKDAY[dt.getUTCDay()]}</span>
+            <span className={`mt-0.5 h-2 w-2 rounded-full ${t.dot}`} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function TeamAvailability() {
   const { pushError } = useAlerts();
@@ -106,7 +132,8 @@ export default function TeamAvailability() {
         ) : !people.length ? (
           <EmptyState title="Nobody to show" description={only ? 'Nobody has that status on this day.' : 'No team members found.'} />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="hidden overflow-x-auto xl:block">
             <table className="min-w-full text-sm">
               <thead className="bg-canvas-muted text-left text-xs uppercase tracking-wide text-tertiary-500">
                 <tr>
@@ -138,25 +165,7 @@ export default function TeamAvailability() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          {p.days.map((d) => {
-                            const t = STATUS[d.key] || STATUS.none;
-                            const dt = new Date(`${d.date}T00:00:00Z`);
-                            return (
-                              <button
-                                key={d.date}
-                                type="button"
-                                title={`${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
-                                aria-label={`${p.name}, ${longDate(d.date)}: ${d.label}${d.detail ? ` - ${d.detail}` : ''}`}
-                                onClick={() => setDate(d.date === data?.today ? null : d.date)}
-                                className={`flex w-9 flex-col items-center rounded-md border px-1 py-1 text-[10px] leading-tight ${d.date === selected ? 'border-primary-400 bg-primary-50' : 'border-tertiary-100 hover:bg-tertiary-50'}`}
-                              >
-                                <span className="text-tertiary-500">{WEEKDAY[dt.getUTCDay()]}</span>
-                                <span className={`mt-0.5 h-2 w-2 rounded-full ${t.dot}`} />
-                              </button>
-                            );
-                          })}
-                        </div>
+                        <WeekStrip person={p} selected={selected} todayIso={data?.today} onPick={setDate} />
                       </td>
                     </tr>
                   );
@@ -164,12 +173,35 @@ export default function TeamAvailability() {
               </tbody>
             </table>
           </div>
+          <ul className="divide-y divide-tertiary-100 xl:hidden" aria-label="Team availability">
+            {people.map((p) => {
+              const today = p.days.find((d) => d.date === selected) || { key: 'none', label: '-' };
+              const tone = STATUS[today.key] || STATUS.none;
+              return (
+                <li key={p.org_membership_id} className="space-y-3 px-4 py-4" data-testid="team-person-card">
+                  <div className="flex items-start gap-3">
+                    <Avatar name={p.name} />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-tertiary-900">{p.name}{p.is_me && <span className="ml-1.5 text-xs font-normal text-tertiary-400">(you)</span>}</p>
+                      <p className="text-xs text-tertiary-500">{[p.designation, p.team || p.department].filter(Boolean).join(' - ') || ' '}</p>
+                      <p className="mt-0.5 text-xs text-tertiary-600">{RELATION[p.relation] || ''}{p.on_notice && <span className="ml-1.5 text-amber-700">Serving notice</span>}</p>
+                    </div>
+                    <span title={today.detail ? `${today.label} - ${today.detail}` : today.label} className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tone.badge}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />{today.label}
+                    </span>
+                  </div>
+                  <WeekStrip person={p} selected={selected} todayIso={data?.today} onPick={setDate} wide />
+                </li>
+              );
+            })}
+          </ul>
+          </>
         )}
       </div>
 
       {onlyMe && <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800">No manager is set for you yet and nobody reports to you. Once HR sets your manager (People &gt; HR Settings), your team shows up here.</p>}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-tertiary-500" aria-label="Legend">
-        {['present', 'remote', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'].map((k) => (
+        {['present', 'remote', 'wfh_pending', 'site', 'half_day', 'leave', 'unavailable', 'pending', 'off'].map((k) => (
           <span key={k} className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${STATUS[k].dot}`} />{STATUS[k].label}</span>
         ))}
       </div>
