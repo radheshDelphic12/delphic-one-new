@@ -33,6 +33,7 @@ const ERRORS = {
   bad_event: [400, 'Unknown event'],
   bad_recording: [400, 'That recording part could not be accepted'],
   recording_gap: [409, 'A recording part is missing; send them in order'],
+  stale_question: [409, 'This question was already answered, for example in another window. The page now shows the current question'],
   recording_too_big: [413, 'The recording is too large'],
   recording_expired: [410, 'The recording was deleted after its retention period'],
   no_recording: [404, 'There is no recording for this interview'],
@@ -195,8 +196,9 @@ publicRouter.post('/ai-interviews/:token/recording', express.raw({ type: () => t
   return r.error ? mapError(res, r.error) : ok(res, { saved: true });
 }));
 publicRouter.post('/ai-interviews/:token/answer', asyncHandler(async (req, res) => {
-  const body = z.object({ text: z.string().max(20000), timed_out: z.boolean().optional() }).parse(req.body);
-  const r = await service.answerForCandidate(req.params.token, body.text, { timedOut: Boolean(body.timed_out) });
+  // `turn` = how many answers the page had seen when it showed the question: an answer from a window that is behind is refused
+  const body = z.object({ text: z.string().max(20000), timed_out: z.boolean().optional(), turn: z.number().int().min(0).optional() }).parse(req.body);
+  const r = await service.answerForCandidate(req.params.token, body.text, { timedOut: Boolean(body.timed_out), turn: body.turn });
   return r.error ? mapError(res, r.error) : ok(res, { ...r.view, done: Boolean(r.done) });
 }));
 

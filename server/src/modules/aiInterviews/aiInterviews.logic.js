@@ -64,7 +64,9 @@ function cleanAnswer(raw) {
 // and they cap the communication score, so one-line or skipped answers cannot earn a high communication mark.
 const wordCount = (t) => String(t || '').trim().split(/\s+/).filter(Boolean).length;
 function answerStats(transcript) {
-  const answers = (Array.isArray(transcript) ? transcript : []).filter((t) => t.role === 'candidate');
+  // Communication is judged on what the candidate SPOKE. The typed aptitude answers are short by nature ("19"), so they are left out here;
+  // counted, they would drag the average length and the "very short" share down for every candidate and cap the communication score.
+  const answers = (Array.isArray(transcript) ? transcript : []).filter((t) => t.role === 'candidate' && t.section !== 'aptitude');
   const skipped = answers.filter((t) => t.timed_out).length;
   const real = answers.filter((t) => !t.timed_out);
   const words = real.map((t) => wordCount(t.text));

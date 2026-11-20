@@ -155,3 +155,32 @@ display**, on by default, migration `20261118110000_ai_interview_fullscreen`):
 - A recording split into parts is not merged; each part plays on its own.
 - The e-mail to the candidate with the link follows the existing "e-mail the test link" company setting.
 - Public rate limits: 240 interview calls per hour per IP, and a separate 2500 per hour for recording chunks (one every 5 seconds).
+
+## Full browser check 2026-11-20 and fixes
+A candidate and a team member were driven end to end in a real browser (Chromium with a fake camera / microphone / screen picker, the speech-to-text
+stood in for by a controllable stub, the Anthropic call replaced by a fake that can be switched to "down" or "slow"), on an isolated database. About 125
+checks across: the default flow (full screen + screen share + camera watching), speech pauses, the per-question timer, wrong / expired / replaced /
+finished links, closing the browser and coming back, two tabs, AI failures (down at start, at the follow-up, at scoring, slow), page rules (copy / paste,
+leaving the page, leaving full screen, screen share stopped, the limit that ends the interview), recording (consent, first chunk, a 15 s and a 110 s
+network drop, a reload), phones and browsers without speech-to-text or screen sharing, a refused microphone or camera, the team card (send, resend,
+restart, re-take, result drawer, decision, delete), the admin settings tab and the AI interviews report. Server suite: 83 tests.
+
+Found and fixed:
+- **Speech**: when the browser ended a listening session at a pause, the answer box restarted from text that was one render behind (the last words were
+  overwritten) and a refused restart stopped the microphone silently. It now keeps the live text in a ref, restarts at once, retries a refused restart, joins
+  two phrases with a space, and sends the freshest words when Send is pressed (or the timer runs out) while still listening.
+- **Aptitude answers**: a one-digit answer ("4") could not be sent (page and server wanted 2 characters). One character is now enough for aptitude; spoken
+  answers still need two.
+- **Communication score**: the typed aptitude answers were counted in "average words" and "very short answers", which cap the communication score for
+  every candidate. They are now left out; communication is judged on the spoken answers.
+- **Recording after a network drop**: a chunk that could not be uploaded was given up after about a minute and every later chunk of that part was then
+  refused, so the rest of the interview was silently not recorded while the page said "Recording". A chunk is now kept and retried for about 15 minutes
+  (nothing is lost); if one is still lost the recording carries on as the next part.
+- **Two windows**: an answer from a window that was behind was accepted as the answer to the NEXT question. The page now sends `turn` (how many answers
+  it had seen) and the server refuses an old one with 409 `stale_question`; the page then shows the current question.
+- **Wrong link** showed "Not found"; it now says the link is not valid and what to do.
+- **Phones**: a phone cannot share its screen, which is required by default, so the candidate could never start and was only told to "allow" it. The page now
+  says plainly that a laptop or desktop computer is needed.
+
+Not covered (needs the real services): the real Anthropic reply (credits), the real browser speech-to-text, a real face on the camera (the fake camera
+shows no face, so the "face not visible" warning appears), a real "Entire screen" pick, SharePoint upload of recordings, the e-mail to the candidate.

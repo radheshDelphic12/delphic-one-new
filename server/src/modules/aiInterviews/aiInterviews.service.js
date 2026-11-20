@@ -506,16 +506,20 @@ async function finish(a, settings, ctx, transcript, tokens) {
 
 const FINISH_WAIT_MS = 15000;
 
-async function answerForCandidate(token, rawText, { timedOut = false } = {}) {
+async function answerForCandidate(token, rawText, { timedOut = false, turn = null } = {}) {
   const r = await load(token);
   if (r.error) return r;
   const a = r.a;
   if (a.status !== 'started') return { error: 'not_started' };
   const text = logic.cleanAnswer(rawText);
-  if (text.length < 2) return { error: 'empty_answer' };
   const transcript = Array.isArray(a.transcript) ? [...a.transcript] : [];
   const last = transcript[transcript.length - 1];
   if (!last || last.role !== 'ai') return { error: 'not_waiting' };
+  // an aptitude answer is short by nature (a single digit: "4"), so one character is enough there; a spoken answer needs two
+  if (text.length < (last.section === 'aptitude' ? 1 : 2)) return { error: 'empty_answer' };
+  // The answer belongs to the question the candidate was looking at. If another window already answered it, this one is behind: refuse,
+  // or the text would be taken as the answer to the NEXT question.
+  if (turn != null && turn !== transcript.filter((t) => t.role === 'candidate').length) return { error: 'stale_question' };
   // a recorded interview must actually be recording: the first chunk reaches the server a few seconds after the start
   if (a.recording_on && !filesOf(a).length) return { error: 'recording_missing' };
   if (busy.has(a.id)) return { error: 'busy' };

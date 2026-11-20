@@ -1319,3 +1319,64 @@ describe('12 role and 12 aptitude questions in every interview', () => {
     expect(k.filter((x) => x === 'aptitude')).toHaveLength(8);
   });
 });
+
+// 2026-11-20 browser test of the candidate flow found these: single-digit aptitude answers were refused, an answer from a window that
+// is behind was taken for the NEXT question, and the typed aptitude answers dragged every candidate's communication facts down.
+describe('answers: aptitude length, stale windows, communication facts', () => {
+  const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+  const answerPath = (token) => `${token}/answer`;
+  async function untilAptitude(token) {
+    let view = (await post(`${token}/start`, { consent: true })).body.data;
+    while (view.waiting_for_answer && view.section !== 'aptitude') {
+      view = (await post(answerPath(token), { text: FULL_ANSWER })).body.data;
+    }
+    return view;
+  }
+
+  test('an aptitude answer can be a single digit; a spoken answer still needs two characters', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_followups: 0 });
+    const token = tokenOf((await invite()).body.data.link);
+    const view = await untilAptitude(token);
+    expect(view.section).toBe('aptitude');
+    const ok = await post(answerPath(token), { text: '4' });
+    expect(ok.status).toBe(200);
+    // the next one is aptitude too: an empty answer is still refused there
+    expect((await post(answerPath(token), { text: ' ' })).status).toBe(400);
+  });
+
+  test('a one-character SPOKEN (role) answer is refused', async () => {
+    const token = tokenOf((await invite()).body.data.link);
+    await post(`${token}/start`, { consent: true });
+    const res = await post(answerPath(token), { text: 'a' });
+    expect(res.status).toBe(400);
+  });
+
+  test('an answer sent with an old turn count is refused (another window already answered) and changes nothing', async () => {
+    await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_followups: 0 });
+    const token = tokenOf((await invite()).body.data.link);
+    const started = (await post(`${token}/start`, { consent: true })).body.data;
+    expect(started.answered).toBe(0);
+    const first = await post(answerPath(token), { text: FULL_ANSWER, turn: 0 });
+    expect(first.status).toBe(200);
+    const before = await prisma.aiInterview.findUnique({ where: { token } });
+    const stale = await post(answerPath(token), { text: 'a stale answer from the other window that must not count', turn: 0 });
+    expect(stale.status).toBe(409);
+    expect(stale.body.message).toMatch(/already answered/i);
+    const after = await prisma.aiInterview.findUnique({ where: { token } });
+    expect(after.transcript).toHaveLength(before.transcript.length);
+    // the current turn is accepted
+    const current = await post(answerPath(token), { text: FULL_ANSWER, turn: 1 });
+    expect(current.status).toBe(200);
+    // an answer without the turn (an older page) still works
+    expect((await post(answerPath(token), { text: FULL_ANSWER })).status).toBe(200);
+  });
+
+  test('communication facts count the spoken answers only: short typed aptitude answers do not lower them', () => {
+    const spoken = (n) => ({ role: 'candidate', section: 'role', text: Array.from({ length: n }, () => 'word').join(' ') });
+    const typed = { role: 'candidate', section: 'aptitude', text: '19' };
+    const transcript = [spoken(30), spoken(30), spoken(30), typed, typed, typed, typed, typed, typed];
+    const facts = logic.answerStats(transcript);
+    expect(facts).toMatchObject({ answers: 3, skipped: 0, average_words: 30, very_short: 0 });
+    expect(logic.communicationCap(facts)).toBeNull(); // used to be capped at 6 by the six one-word answers
+  });
+});

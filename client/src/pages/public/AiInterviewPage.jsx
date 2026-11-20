@@ -6,6 +6,8 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { PROCTOR_TEXT, createCompositeStream, createFaceMonitor, createNoiseMonitor, requestScreenShare } from '../../lib/aiProctor.js';
 
 const SpeechRecognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+// Phones and tablets cannot share their screen; an interview that requires it can only be taken on a laptop or desktop computer.
+const CAN_SHARE_SCREEN = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getDisplayMedia);
 const RECORDER_TYPES = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 const SECTION_LABEL = { role: 'Role questions', aptitude: 'Aptitude' };
 const NO_ANSWER_TEXT = '[No answer - time ran out]';
@@ -92,7 +94,7 @@ export default function AiInterviewPage() {
   useEffect(() => {
     apiClient.get(`/public/ai-interviews/${token}`)
       .then(({ data }) => setView(data.data))
-      .catch((err) => setError(apiErrorMessage(err, 'This link is not valid.')));
+      .catch((err) => setError(err?.response?.status === 404 ? 'This link is not valid. Please check that you opened the whole link, or ask the recruiter for a new one.' : apiErrorMessage(err, 'This link is not valid.')));
   }, [token]);
 
   // ---- integrity events (tab switch, copy / paste attempts, camera off) ----
@@ -117,11 +119,14 @@ export default function AiInterviewPage() {
   }, [token]);
 
   // ---- recording: parts are uploaded one after another so the server can append them in order ----
-  // A chunk that did not get through (a slow or dropped connection, a busy server) is tried again with a growing pause instead of being
-  // thrown away: a lost chunk would leave a gap and stop the rest of the recording from being accepted.
+  // A chunk is kept and tried again for as long as it takes (about 15 minutes, with a growing pause): a dropped connection must not leave a
+  // hole in the recording, because the server refuses every later chunk of that part once one is missing. If a chunk is still lost
+  // (given up, or the server reports a missing one) the recording carries on as the next part, so the rest of the interview is never
+  // left unrecorded while the page says "Recording".
+  const chunkLostRef = useRef(null);
   const uploadPart = useCallback((blob, part, seq, type) => {
     queueRef.current = queueRef.current.then(async () => {
-      for (let attempt = 0; attempt < 8; attempt += 1) {
+      for (let attempt = 0; attempt < 70; attempt += 1) {
         try {
           await apiClient.post(`/public/ai-interviews/${token}/recording?part=${part}&seq=${seq}`, blob, { headers: { 'Content-Type': type } });
           if (partRef.current.part === part) partRef.current.stored = true;
@@ -129,10 +134,14 @@ export default function AiInterviewPage() {
           return;
         } catch (err) {
           const status = err?.response?.status;
-          if ([400, 404, 409, 410, 413].includes(status)) return; // retrying cannot help (refused, gone, out of order, too big)
+          const message = String(err?.response?.data?.message || '');
+          if (status === 409 && /part is missing/i.test(message)) { chunkLostRef.current?.(part); return; } // an earlier chunk never arrived
+          if (status === 409) { await new Promise((resolve) => { setTimeout(resolve, 1000); }); continue; } // the server is still writing the last one
+          if ([400, 404, 410, 413].includes(status)) return; // retrying cannot help (refused, gone, too big)
           await new Promise((resolve) => { setTimeout(resolve, Math.min(15000, 1000 * 2 ** attempt)); });
         }
       }
+      chunkLostRef.current?.(part);
     });
   }, [token]);
 
@@ -272,6 +281,14 @@ export default function AiInterviewPage() {
   // ---- sharing the entire screen (recorded beside the face) ----
   const activeRef = useRef(false);
   useEffect(() => { activeRef.current = active; }, [active]);
+  // a chunk was lost: carry the recording on as the next part (the same part again if nothing of it reached the server)
+  useEffect(() => {
+    chunkLostRef.current = (part) => {
+      if (partRef.current.part !== part || !activeRef.current || !viewRef.current?.recording_on) return; // already moved on, or the interview is over
+      const p = partRef.current;
+      startRecording(p.stored ? p.part + 1 : p.part);
+    };
+  }, [startRecording]);
   const shareScreen = useCallback(async () => {
     setScreenError('');
     graceUntilRef.current = Date.now() + GRACE_MS;
@@ -433,7 +450,11 @@ export default function AiInterviewPage() {
     rec.onresult = (e) => {
       if (recRef.current !== rec) return; // a finished session's late result must not overwrite the current one
       let spoken = '';
-      for (let i = 0; i < e.results.length; i += 1) spoken += e.results[i][0].transcript;
+      // Chrome starts later phrases with a space, other browsers do not: make sure two phrases never run together ("PriyaI")
+      for (let i = 0; i < e.results.length; i += 1) {
+        const part = e.results[i][0].transcript;
+        spoken += spoken && !/\s$/.test(spoken) && !/^\s/.test(part) ? ` ${part}` : part;
+      }
       const next = baseTextRef.current + spoken;
       liveTextRef.current = next;
       setText(next);
@@ -492,16 +513,20 @@ export default function AiInterviewPage() {
 
   const send = useCallback(async ({ timedOut = false } = {}) => {
     if (busyRef.current) return; // one send at a time: a double click, or the timer firing while an answer is on its way
+    // Sent while still speaking (Send pressed, or the timer ran out): the live text has the last words; the state is a render behind.
+    const wasListening = wantListenRef.current;
     stopListening();
     const answeredBefore = viewRef.current?.answered ?? 0;
     busyRef.current = true;
     setBusy(true);
     setError('');
-    const sentText = textRef.current;
+    const sentText = wasListening ? (liveTextRef.current || textRef.current) : textRef.current;
     try {
       const typed = sentText.trim();
-      const out = typed.length >= 2 ? typed : NO_ANSWER_TEXT;
-      const { data } = await apiClient.post(`/public/ai-interviews/${token}/answer`, { text: out, ...(timedOut && typed.length < 2 ? { timed_out: true } : {}) });
+      // an aptitude answer can be a single digit ("4"); a spoken answer needs a couple of characters
+      const minLength = viewRef.current?.section === 'aptitude' ? 1 : 2;
+      const out = typed.length >= minLength ? typed : NO_ANSWER_TEXT;
+      const { data } = await apiClient.post(`/public/ai-interviews/${token}/answer`, { text: out, turn: viewRef.current?.answered, ...(timedOut && typed.length < minLength ? { timed_out: true } : {}) });
       setText('');
       setView((v) => ({ ...v, ...data.data }));
       if (data.data.done) {
@@ -597,7 +622,7 @@ export default function AiInterviewPage() {
         <h1 className="font-heading text-lg font-semibold text-tertiary-900">Interview for {view.role_title || 'the role'}</h1>
         <p className="mt-1 text-sm text-tertiary-600">Hello {view.candidate_name}. An AI interviewer will ask you questions one at a time. It takes about 15 to 20 minutes. You answer the interview questions by speaking; typing is not possible. Only the aptitude / numerical questions are typed.</p>
         <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-tertiary-700">
-          <li>Use a quiet place and a recent Chrome or Edge browser. Speaking is required, so a browser that cannot turn speech into text cannot be used.</li>
+          <li>Use a quiet place and a recent Chrome or Edge browser{view.require_screen_share ? ' on a laptop or desktop computer' : ''}. Speaking is required, so a browser that cannot turn speech into text cannot be used.</li>
           <li>You can use this link once. If you close the page, open the same link to carry on where you stopped.</li>
           <li>There are a few short aptitude questions too. Work them out in your head and type the answer.</li>
           {view.answer_seconds > 0 && <li>Each question has a timer of {clock(view.answer_seconds)} minutes. When it ends, what you have answered so far is sent and the next question comes.</li>}
@@ -618,11 +643,14 @@ export default function AiInterviewPage() {
           {mic === 'failed' && <p className="mt-2 text-xs text-warning-700">The microphone is not available. Speaking is required, so please allow it.</p>}
           {!SpeechRecognition && <p className="mt-2 text-xs text-tertiary-500">This browser cannot turn speech into text. Please open this link in a recent Chrome or Edge on a computer or an Android phone.</p>}
         </div>
+        {view.require_screen_share && !CAN_SHARE_SCREEN && (
+          <p data-testid="needs-computer" className="mt-3 rounded-xl border border-warning-300 bg-warning-50 p-3 text-sm text-warning-900">This interview needs you to share your entire screen, which phones and tablets cannot do. Please open this link on a laptop or desktop computer, in a recent Chrome or Edge.</p>
+        )}
         {view.require_screen_share && (
           <div className="mt-3 rounded-xl border border-tertiary-100 p-3" data-testid="screen-share-step">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-medium text-tertiary-800">Share your screen</p>
-              <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={screenOn} onClick={shareScreen}><MonitorUp className="h-4 w-4" />{screenOn ? 'Screen shared' : 'Share entire screen'}</button>
+              <button type="button" className="btn-secondary inline-flex items-center gap-1 text-xs" disabled={screenOn || !CAN_SHARE_SCREEN} onClick={shareScreen}><MonitorUp className="h-4 w-4" />{screenOn ? 'Screen shared' : 'Share entire screen'}</button>
             </div>
             {screenOn && <p className="mt-2 text-xs text-success-700">Your entire screen is shared. Keep it shared until the interview ends.</p>}
             {screenError && <p className="mt-2 text-xs text-warning-700">{screenError}</p>}
@@ -644,7 +672,7 @@ export default function AiInterviewPage() {
         {!view.ai_enabled && <p className="mt-3 text-xs text-warning-700">The interviewer is not switched on yet. Please try again later.</p>}
         {error && <p className="mt-3 text-sm text-danger-700">{error}</p>}
         {view.require_fullscreen && multiDisplay && <p className="mt-3 text-sm text-danger-700" data-testid="multi-display-note">A second display is connected. Please use one screen only (disconnect or switch off the other) to start.</p>}
-        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok' || (view.require_screen_share && !screenOn) || (view.require_fullscreen && multiDisplay)} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
+        <button type="button" className="btn-primary mt-5" disabled={!consent || (mustRecord && !recordConsent) || busy || !view.ai_enabled || !SpeechRecognition || mic !== 'ok' || (view.require_screen_share && (!screenOn || !CAN_SHARE_SCREEN)) || (view.require_fullscreen && multiDisplay)} onClick={start}>{busy ? 'Preparing your questions...' : 'Start interview'}</button>
         {busy && <p data-testid="start-working" className="mt-2 flex items-center gap-2 text-xs text-tertiary-600"><Loader2 className="h-3.5 w-3.5 animate-spin" />The interviewer is writing your questions. This can take up to a minute - please keep this page open.</p>}
       </Shell>
     );
@@ -766,7 +794,7 @@ export default function AiInterviewPage() {
                 </button>
                 {text && !listening && <button type="button" className="text-xs text-tertiary-600 underline" disabled={busy || blocked} onClick={() => setText('')}>Clear and speak again</button>}
               </div>}
-              <button type="button" className="btn-primary" disabled={busy || blocked || waitingForCamera || text.trim().length < 2} onClick={() => send()}>{busy ? 'Please wait...' : 'Send answer'}</button>
+              <button type="button" className="btn-primary" disabled={busy || blocked || waitingForCamera || text.trim().length < (typedAnswer ? 1 : 2)} onClick={() => send()}>{busy ? 'Please wait...' : 'Send answer'}</button>
             </div>
           </div>
         )}
