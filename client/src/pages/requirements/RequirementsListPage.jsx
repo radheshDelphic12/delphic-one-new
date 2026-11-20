@@ -1,6 +1,7 @@
+import FilterPill from '../../components/ui/FilterPill.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Filter, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { canCreateRequirement, canMutateRequirement } from '../../lib/requirementStages.js';
@@ -410,13 +411,10 @@ export default function RequirementsListPage() {
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-tertiary-100 bg-white shadow-card">
-        <div className="space-y-2 border-b border-tertiary-100 px-4 py-2.5">
+        <div data-filter-root className="space-y-2 border-b border-tertiary-100 px-4 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-tertiary-100 bg-canvas-muted px-3 py-1.5 text-xs font-medium text-tertiary-700">
-              <Filter className="h-3.5 w-3.5" />
-              Filters
-            </span>
-            <form
+            <FilterPill />
+            <form data-filter-keep
               onSubmit={(event) => {
                 event.preventDefault();
                 setPage(1);

@@ -134,6 +134,17 @@ describe('referral tracking', () => {
     expect(await row(emp.email)).toMatchObject({ referrer_id: null });
   });
 
+  test('a typed colleague name or code is credited to that employee; "Na" / "N/A" counts as nobody', async () => {
+    const slug = slugs['Data Engineer'];
+    const row = (email) => prisma.jobApplicant.findFirst({ where: { email } });
+    expect((await apply(slug, { name: 'Named Nina', email: 'nina@example.com', referred_by: ` ${emp.name.toUpperCase()} ` })).status).toBe(201);
+    expect((await apply(slug, { name: 'Na Nick', email: 'nick@example.com', referred_by: 'Na' })).status).toBe(201);
+    expect((await apply(slug, { name: 'Slash Sam', email: 'sam@example.com', referred_by: 'N/A' })).status).toBe(201);
+    expect(await row('nina@example.com')).toMatchObject({ referrer_id: emp.id, referrer_name: emp.name, source: 'referral' });
+    expect(await row('nick@example.com')).toMatchObject({ referrer_id: null, referrer_text: null, source: 'website' });
+    expect(await row('sam@example.com')).toMatchObject({ referrer_id: null, referrer_text: null, source: 'website' });
+  });
+
   test('the Drive link stays mandatory on the apply form and on Refer someone', async () => {
     const slug = slugs['Data Engineer'];
     expect((await apply(slug, { email: 'nocv@example.com', cv_url: '' })).status).toBe(422);
@@ -152,7 +163,7 @@ describe('referral tracking', () => {
     expect(lena).toMatchObject({ job_code: codes['Data Engineer'], origin: 'referral', referred_by: { id: emp.id, name: emp.name } });
     expect(all.body.data.find((a) => a.name === 'Direct Dan')).toMatchObject({ origin: 'direct', referred_by: null });
     const byRef = await authed(request(app).get(`/api/v1/applicants?view=all&referrer_id=${emp.id}`), adminToken);
-    expect(byRef.body.data.map((a) => a.name).sort()).toEqual(['Linked Lena', 'Ravi', 'Typed Tom']);
+    expect(byRef.body.data.map((a) => a.name).sort()).toEqual(['Linked Lena', 'Named Nina', 'Ravi', 'Typed Tom']);
     const byCode = await authed(request(app).get(`/api/v1/applicants?view=all&job_code=${codes['Data Engineer'].toLowerCase()}`), adminToken);
     expect(byCode.body.pagination.total).toBeGreaterThan(5);
     expect((await authed(request(app).get(`/api/v1/applicants?view=all&job_code=${codes['HR Executive']}`), adminToken)).body.pagination.total).toBe(0);
@@ -161,16 +172,16 @@ describe('referral tracking', () => {
     const bySearch = await authed(request(app).get(`/api/v1/applicants?view=all&search=${codes['Data Engineer']}`), adminToken);
     expect(bySearch.body.pagination.total).toBeGreaterThan(5);
     const referrers = await authed(request(app).get('/api/v1/applicants/referrers'), adminToken);
-    expect(referrers.body.data).toEqual([{ id: emp.id, name: emp.name, count: 3 }]);
+    expect(referrers.body.data).toEqual([{ id: emp.id, name: emp.name, count: 4 }]);
   });
 
   test('"My referrals" lists what the employee referred with its progress', async () => {
     const mine = await authed(request(app).get('/api/v1/internal-jobs/my-referrals'), empToken);
     expect(mine.status).toBe(200);
-    expect(mine.body.data.map((r) => r.candidate).sort()).toEqual(['Linked Lena', 'Ravi', 'Typed Tom']);
+    expect(mine.body.data.map((r) => r.candidate).sort()).toEqual(['Linked Lena', 'Named Nina', 'Ravi', 'Typed Tom']);
     expect(mine.body.data[0]).toMatchObject({ job_code: codes['Data Engineer'], job_title: 'Data Engineer', status: 'Received' });
     const list = await authed(request(app).get('/api/v1/internal-jobs?q=data%20engineer'), empToken);
-    expect(list.body.data.find((j) => j.title === 'Data Engineer').referrals).toBe(3);
+    expect(list.body.data.find((j) => j.title === 'Data Engineer').referrals).toBe(4);
   });
 });
 

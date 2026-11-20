@@ -12,6 +12,25 @@ async function snapshot(user, orgId) {
   return { referrer_id: user.id, referrer_name: user.name || user.email, referrer_code: m?.employee_code || null, referrer_text: null };
 }
 
+const NOBODY = /^(n\/?a|na|nil|none|no|not applicable|nobody|no one|null|-+|\.+)$/i;
+
+/** One active employee of the company whose employee code or full name equals what was typed (a unique first-name-first match also counts); else null. */
+async function employeeByNameOrCode(typed, orgId) {
+  const text = typed.replace(/\s+/g, ' ').trim();
+  if (text.length < 2) return null;
+  const pick = (rows) => rows.filter((m) => m.person?.active).map((m) => m.person);
+  const select = { person: { select: { id: true, name: true, email: true, active: true } } };
+  const byCode = pick(await prisma.orgMembership.findMany({ where: { org_id: orgId, employee_code: { equals: text, mode: 'insensitive' } }, select, take: 3 }));
+  if (byCode.length === 1) return byCode[0];
+  const exact = pick(await prisma.orgMembership.findMany({ where: { org_id: orgId, person: { name: { equals: text, mode: 'insensitive' }, active: true } }, select, take: 3 }));
+  if (exact.length === 1) return exact[0];
+  if (exact.length === 0 && text.length >= 4) {
+    const part = pick(await prisma.orgMembership.findMany({ where: { org_id: orgId, person: { name: { contains: text, mode: 'insensitive' }, active: true } }, select, take: 3 }));
+    if (part.length === 1) return part[0];
+  }
+  return null;
+}
+
 /** The employee behind a ref value (user id or employee code) and a typed "Referred by"; null fields = direct application. */
 async function resolve({ ref, referredBy, orgId, applicantEmail }) {
   const none = { referrer_id: null, referrer_name: null, referrer_code: null, referrer_text: null };
@@ -24,8 +43,12 @@ async function resolve({ ref, referredBy, orgId, applicantEmail }) {
       if (m?.person?.active) user = m.person;
     }
   }
-  const typed = String(referredBy || '').trim().slice(0, 200);
+  let typed = String(referredBy || '').trim().slice(0, 200);
+  // "Na", "N/A", "none", "-" ... is a candidate saying nobody referred them
+  if (NOBODY.test(typed)) typed = '';
   if (!user && typed.includes('@')) user = await prisma.user.findFirst({ where: { email: { equals: typed, mode: 'insensitive' }, active: true }, select: { id: true, name: true, email: true } });
+  // a typed name or employee code of a colleague in this company: attributed when exactly one active person matches
+  if (!user && typed && !typed.includes('@') && orgId) user = await employeeByNameOrCode(typed, orgId);
   // nobody refers themselves
   if (user && norm(user.email) === norm(applicantEmail)) user = null;
   if (user) return snapshot(user, orgId);

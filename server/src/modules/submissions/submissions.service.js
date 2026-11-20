@@ -131,6 +131,8 @@ async function list(filters) {
           OR: [
             { profile: { name: { contains: search, mode: 'insensitive' } } },
             { seat: { requirement: { title: { contains: search, mode: 'insensitive' } } } },
+            { seat: { requirement: { account: { name: { contains: search, mode: 'insensitive' } } } } },
+            { profile: { vendor_account: { name: { contains: search, mode: 'insensitive' } } } },
           ],
         }
       : {}),

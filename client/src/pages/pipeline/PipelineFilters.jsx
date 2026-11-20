@@ -1,6 +1,7 @@
+import FilterPill from '../../components/ui/FilterPill.jsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Filter, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { fetchAllPages } from '../../lib/fetchAllPages.js';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
@@ -171,14 +172,11 @@ export default function PipelineFilters({
   const hasActiveFilters = Object.keys(apiParams).length > 0 || Boolean(draftSearch.trim());
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-tertiary-100 bg-canvas-muted px-3 py-1.5 text-xs font-medium text-tertiary-700">
-        <Filter className="h-3.5 w-3.5" />
-        Filters
-      </span>
+    <div data-filter-root className="flex flex-wrap items-center gap-2">
+      <FilterPill />
 
       {fieldSet.has('search') && (
-        <form
+        <form data-filter-keep
           onSubmit={(event) => {
             event.preventDefault();
             patchFilters({ search: draftSearch.trim() });

@@ -123,7 +123,6 @@ async function list(filters) {
 
   const where = {
     ...(status ? { status } : {}),
-    ...(stuck === 'stuck' ? { AND: [stuckClause] } : {}),
     ...(stuck === 'not_stuck' ? { NOT: [stuckClause] } : {}),
     ...(tat === 'active' ? { status: { in: TAT_OPEN_STATUSES }, tat_ends_at: { gt: new Date() } } : {}),
     ...(Object.keys(closedRange).length ? { closed_at: closedRange } : {}),
@@ -133,23 +132,29 @@ async function list(filters) {
     ...(sales_owner_id ? { sales_owner_id } : {}),
     ...(priority ? { priority } : {}),
     ...(work_mode ? { work_mode } : {}),
-    ...(search
-      ? {
-          OR: [
-            { title: { contains: search, mode: 'insensitive' } },
-            { designation: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
-    ...(tech_stack
-      ? {
-          OR: [
-            { primary_tech_stack: { hasSome: tech_stack.split(',').map((s) => s.trim()) } },
-            { secondary_tech_stack: { hasSome: tech_stack.split(',').map((s) => s.trim()) } },
-          ],
-        }
-      : {}),
+    // search (title / designation / description / client name) and the tech-stack filter are both "any of" lists: they must be ANDed together,
+    // not spread as two OR keys, or the second silently replaces the first.
+    AND: [
+      ...(stuck === 'stuck' ? [stuckClause] : []),
+      ...(search
+        ? [{
+            OR: [
+              { title: { contains: search.trim(), mode: 'insensitive' } },
+              { designation: { contains: search.trim(), mode: 'insensitive' } },
+              { description: { contains: search.trim(), mode: 'insensitive' } },
+              { account: { is: { name: { contains: search.trim(), mode: 'insensitive' } } } },
+            ],
+          }]
+        : []),
+      ...(tech_stack
+        ? [{
+            OR: [
+              { primary_tech_stack: { hasSome: tech_stack.split(',').map((s) => s.trim()) } },
+              { secondary_tech_stack: { hasSome: tech_stack.split(',').map((s) => s.trim()) } },
+            ],
+          }]
+        : []),
+    ],
     ...(recruiter_id
       ? { assignments: { some: { user_id: recruiter_id, role_on_req: 'recruiter', unassigned_at: null } } }
       : {}),

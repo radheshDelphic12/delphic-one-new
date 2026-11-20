@@ -271,7 +271,7 @@ export default function AppLayout() {
     return () => document.documentElement.classList.remove('theme-gulati');
   }, [isGulati, isGroupPath]);
 
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
+  const [collapsedPref, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   // Sidebar sections the user has folded away (remembered per browser). The section holding the current page is never hidden.
   const [foldedSections, setFoldedSections] = useState(() => { try { return JSON.parse(localStorage.getItem(NAV_FOLD_KEY) || "[]"); } catch { return []; } });
   const toggleSection = (name) => setFoldedSections((cur) => { const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name]; try { localStorage.setItem(NAV_FOLD_KEY, JSON.stringify(next)); } catch { /* storage blocked */ } return next; });
@@ -281,8 +281,8 @@ export default function AppLayout() {
   const sidebarMenuRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
-  }, [collapsed]);
+    localStorage.setItem(SIDEBAR_KEY, collapsedPref ? '1' : '0');
+  }, [collapsedPref]);
 
   useEffect(() => {
     function onDocClick(event) {
@@ -296,7 +296,7 @@ export default function AppLayout() {
     setCollapsed((v) => !v);
   }
 
-  const sidebarWidth = collapsed ? 64 : 224;
+  const sidebarWidth = collapsedPref ? 64 : 224;
   const headerTitle = headerTitleForPath(pathname, user);
   const headerSubtitle = headerSubtitleForPath(pathname, user);
   const role = user?.role;
@@ -310,7 +310,8 @@ export default function AppLayout() {
     (role === 'recruiter' &&
       (pathname === '/' || pathname.startsWith('/accounts') || pathname.startsWith('/requirements')));
 
-  const navContent = (
+  // The phone drawer is always the full menu (labels shown); only the desktop sidebar can be folded to icons.
+  const renderNav = (collapsed, inDrawer = false) => (
     <>
       <div className="px-2 py-3">
         <WorkspaceSwitcher collapsed={collapsed} onCreate={() => setOrgCreateOpen(true)} />
@@ -510,6 +511,7 @@ export default function AppLayout() {
         </div>
       )}
       <div className="mt-auto space-y-2 border-t border-tertiary-100 p-2">
+        {!inDrawer && (
         <button
           type="button"
           className="btn-ghost hidden w-full items-center justify-center gap-2 px-3 py-2 md:flex"
@@ -519,6 +521,7 @@ export default function AppLayout() {
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           {!collapsed && <span className="text-xs">Collapse</span>}
         </button>
+        )}
         {user && !collapsed && (
           <div className="relative" ref={sidebarMenuRef}>
             <div className="flex items-center gap-2 rounded-xl border border-tertiary-100 bg-white/70 px-2.5 py-2 shadow-soft">
@@ -579,7 +582,7 @@ export default function AppLayout() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas">
+    <div className="flex h-screen h-[100dvh] overflow-hidden bg-canvas">
       {/* Desktop sidebar */}
       <motion.aside
         className="relative z-20 hidden shrink-0 flex-col border-r border-tertiary-100 bg-canvas-sidebar md:flex"
@@ -587,7 +590,7 @@ export default function AppLayout() {
         transition={{ type: 'tween', duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         initial={false}
       >
-        {navContent}
+        {renderNav(collapsedPref)}
       </motion.aside>
 
       {/* Mobile overlay sidebar */}
@@ -604,10 +607,10 @@ export default function AppLayout() {
               onClick={() => setMobileOpen(false)}
             />
             <motion.aside
-              className="relative z-10 flex h-full w-56 flex-col border-r border-tertiary-100 bg-canvas-sidebar shadow-drawer"
-              initial={{ x: -224 }}
+              className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col border-r border-tertiary-100 bg-canvas-sidebar shadow-drawer"
+              initial={{ x: '-100%' }}
               animate={{ x: 0 }}
-              exit={{ x: -224 }}
+              exit={{ x: '-100%' }}
               transition={{ type: 'tween', duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <button
@@ -618,7 +621,7 @@ export default function AppLayout() {
               >
                 <X className="h-4 w-4" />
               </button>
-              {navContent}
+              {renderNav(false, true)}
             </motion.aside>
           </div>
         )}
@@ -626,7 +629,7 @@ export default function AppLayout() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <main className="dashboard-canvas-glow flex-1 overflow-auto bg-canvas">
-          <header className={`px-4 pt-4 md:px-6 md:pt-5 ${needsExtraSubtitleGap ? 'pb-3' : 'pb-0'}`}>
+          <header className={`sticky top-0 z-30 bg-canvas/95 px-4 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm md:static md:bg-transparent md:px-6 md:pt-5 md:backdrop-blur-none ${needsExtraSubtitleGap ? 'pb-3' : 'pb-2 md:pb-0'}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
                 <button

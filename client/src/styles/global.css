@@ -400,7 +400,7 @@ h3,
 
 /* ---- Phones (touch screens under 768px): comfortable tap targets and no zoom-on-focus ----
    Only touch phones are affected; desktop and mouse-driven layouts are unchanged. */
-@media (max-width: 767px) and (pointer: coarse) {
+@media (max-width: 767px) {
   /* iOS Safari zooms the whole page when a field smaller than 16px gets focus. */
   main input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
   main select,
@@ -449,3 +449,32 @@ h3,
     overflow-x: auto;
   }
 }
+
+/* List filters on a phone: only the "Filters" button and the search box show; the rest of the controls open from the button (FilterPill). */
+@media (max-width: 767px) {
+  [data-filter-root]:not([data-filters-open]) :is(div, select, button, label, span, input, form, a):not(:has([data-filter-keep])):not([data-filter-keep]):not([data-filter-keep] *) {
+    display: none;
+  }
+  [data-filter-root] [data-filter-keep] input { min-width: 0; }
+  [data-filter-root] form[data-filter-keep] { flex: 1 1 12rem; min-width: 0; }
+  [data-filter-root] form[data-filter-keep] input { width: 100%; }
+}
+
+/* Phones: icon-only buttons (edit / delete / close) and the rounded link-buttons get a finger-sized hit area. Plain text links keep their size. */
+@media (max-width: 767px) {
+  main button:has(> svg:only-child):not([role='tab']):not(.min-h-0),
+  [role='dialog'] button:has(> svg:only-child):not([role='tab']):not(.min-h-0) {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  main a[class*='rounded-lg'][class*='inline-flex'] {
+    min-height: 2.5rem;
+  }
+}
+
+/* Table rows shown as cards on a phone: a row of action buttons wraps instead of running over its neighbours. */
+[data-testid='data-cards'] .contents > .flex,
+[data-testid='data-cards'] dd > .flex { flex-wrap: wrap; }
